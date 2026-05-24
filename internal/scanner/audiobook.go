@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,10 +31,10 @@ type parsedAudiobookFile struct {
 
 // parseAudiobookFolder reads a single audiobook folder and returns its
 // structured representation. Recognized layouts:
-//   - one .m4b (or other audio file) in the folder, optionally with
-//     embedded chapters
-//   - multiple audio files in the folder (Task 7 — currently returns an
-//     error for this case)
+//   - one audio file in the folder, optionally with embedded chapters
+//   - multiple audio files in the folder; each becomes its own
+//     parsedAudiobookFile with a single synthesized chapter (title =
+//     filename stem); metadata comes from the first file's tags
 //
 // Returns an error wrapping os.ErrNotExist when the folder contains zero
 // audio files, so the caller can skip it.
@@ -74,34 +73,43 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 		return book, nil
 	}
 
-	// Multi-file case is Task 7.
-	return nil, errors.New("multi-file audiobook folders not yet supported")
+	// Multi-file case: read header from the first file, synthesize one
+	// chapter per file with title = filename stem.
+	probedFirst, err := ProbeFile(ctx, ffprobePath, audioFiles[0])
+	if err != nil {
+		return nil, fmt.Errorf("probe first audiobook file %s: %w", audioFiles[0], err)
+	}
+	book.populateFromTags(probedFirst.FormatTags)
+
+	book.Files = make([]parsedAudiobookFile, 0, len(audioFiles))
+	for i, path := range audioFiles {
+		stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		book.Files = append(book.Files, parsedAudiobookFile{
+			Path: path,
+			Chapters: []ChapterInfo{{
+				Index:        i,
+				Title:        stem,
+				StartSeconds: 0,
+				EndSeconds:   0,
+			}},
+		})
+	}
+	return book, nil
 }
 
 // populateFromTags fills the audiobook's header fields (Title, Author,
 // Narrator, Series, Year) from the ffprobe format tags. Tags are
 // lower-cased by normalizeFormatTags upstream.
 func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
-	b.Title = pickFirstNonEmpty(tags["title"], tags["album"])
-	b.Author = pickFirstNonEmpty(tags["artist"], tags["album_artist"], tags["composer"])
-	b.Narrator = pickFirstNonEmpty(tags["narrator"], tags["performer"])
-	b.Series = pickFirstNonEmpty(tags["album"], tags["series"], tags["mvnm"])
-	if year := pickFirstNonEmpty(tags["date"], tags["year"]); year != "" {
+	b.Title = firstNonEmpty(tags["title"], tags["album"])
+	b.Author = firstNonEmpty(tags["artist"], tags["album_artist"], tags["composer"])
+	b.Narrator = firstNonEmpty(tags["narrator"], tags["performer"])
+	b.Series = firstNonEmpty(tags["album"], tags["series"], tags["mvnm"])
+	if year := firstNonEmpty(tags["date"], tags["year"]); year != "" {
 		if y := parseTagYear(year); y > 0 {
 			b.Year = y
 		}
 	}
-}
-
-// pickFirstNonEmpty returns the first non-empty trimmed value from the
-// supplied candidates.
-func pickFirstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if trimmed := strings.TrimSpace(v); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 // parseTagYear extracts a 4-digit year (e.g. 1900-9999) from a tag value
