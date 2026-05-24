@@ -10,6 +10,7 @@ import {
   SkipBack,
   SkipForward,
 } from "lucide-react";
+import { CircleButton } from "./CircleButton";
 import { SeekBar, formatTime } from "./SeekBar";
 import { VolumeControl } from "./VolumeControl";
 import { QualityMenu } from "./QualityMenu";
@@ -360,52 +361,6 @@ export function PlayerControls({
 /* ─────────────────────────────────────────────────────────────────────
    Internal building blocks
    ───────────────────────────────────────────────────────────────────── */
-
-type CircleButtonProps = {
-  size: "sm" | "md" | "lg";
-  variant: "primary" | "secondary";
-  ariaLabel: string;
-  onClick?: () => void;
-  children: React.ReactNode;
-  "data-paused"?: boolean;
-};
-
-/**
- * Pill-circle button used in the centered playback cluster.
- * - `primary` = glossy white disc (play/pause).
- * - `secondary` = subtle glass disc (skip, prev/next episode).
- * Sizes: `sm` 40–44px for in-bar secondaries, `md` 52–56px for in-bar
- * play button, `lg` 80px reserved for a future floating variant.
- */
-function CircleButton({
-  size,
-  variant,
-  ariaLabel,
-  onClick,
-  children,
-  "data-paused": dataPaused,
-}: CircleButtonProps) {
-  const base =
-    "flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/75";
-  const sizing =
-    size === "lg"
-      ? "h-20 w-20"
-      : size === "md"
-        ? "h-12 w-12 sm:h-14 sm:w-14"
-        : "h-10 w-10 sm:h-11 sm:w-11";
-  const skin = variant === "primary" ? "player-disc-primary" : "player-disc-secondary";
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      onClick={onClick}
-      className={`${base} ${sizing} ${skin}`}
-      data-paused={dataPaused ? "true" : undefined}
-    >
-      {children}
-    </button>
-  );
-}
 
 /** Invisible placeholder that reserves the exact footprint of a CircleButton
  *  so the playback cluster stays symmetric when a neighboring episode isn't
