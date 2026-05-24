@@ -233,6 +233,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	}
 
 	pd.Chapters = normalizeChapters(raw.Chapters, pd.Duration)
+	pd.FormatTags = normalizeFormatTags(raw.Format.Tags)
 
 	return pd
 }
@@ -450,6 +451,20 @@ func mapResolution(width, height int) string {
 func isHDR(colorTransfer string) bool {
 	ct := strings.ToLower(colorTransfer)
 	return strings.Contains(ct, "smpte2084") || strings.Contains(ct, "arib-std-b67")
+}
+
+// normalizeFormatTags lowercases tag keys so callers can look up
+// "title", "artist", "album" without worrying about ffprobe's mixed-case
+// output. Trims whitespace from values.
+func normalizeFormatTags(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		out[strings.ToLower(strings.TrimSpace(k))] = strings.TrimSpace(v)
+	}
+	return out
 }
 
 // detectContainer maps ffprobe format names to common container names.
