@@ -1234,6 +1234,7 @@ export interface ImportMDBListCollectionRequest {
   url: string;
   limit?: number;
   featured?: boolean;
+  poster_url?: string;
   poster_source_url?: string;
   backdrop_source_url?: string;
   sync_schedule?: string;
@@ -1264,6 +1265,7 @@ export interface ImportTMDBCollectionRequest {
   media_type: "movie" | "tv" | "all";
   limit?: number;
   featured?: boolean;
+  poster_url?: string;
   poster_source_url?: string;
   backdrop_source_url?: string;
   sync_schedule?: string;
@@ -1287,6 +1289,7 @@ export interface ImportTraktCollectionRequest {
   profile_id?: string;
   limit?: number;
   featured?: boolean;
+  poster_url?: string;
   poster_source_url?: string;
   backdrop_source_url?: string;
   sync_schedule?: string;
@@ -1311,6 +1314,7 @@ export interface UserImportSharedFields {
   limit?: number;
   sync_schedule?: UserCollectionSyncSchedule;
   is_shared?: boolean;
+  poster_url?: string;
   /** Restrict resolution to these libraries; omitted/empty = entire catalog the user can see. */
   library_ids?: number[];
 }

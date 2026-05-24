@@ -793,6 +793,7 @@ func toCollectionResponse(c userstore.Collection) collectionResponse {
 		LastSyncMessage:            c.LastSyncMessage,
 		ItemCount:                  c.ItemCount,
 		IncludeInServerCollections: c.IncludeInServerCollections,
+		PosterURL:                  c.PosterURL,
 		PosterThumbhash:            c.PosterThumbhash,
 		CreatedAt:                  c.CreatedAt,
 		UpdatedAt:                  c.UpdatedAt,
@@ -984,6 +985,9 @@ func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, pat
 		return ""
 	}
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	if strings.HasPrefix(path, "/") {
 		return path
 	}
 	if h.S3GP == nil {

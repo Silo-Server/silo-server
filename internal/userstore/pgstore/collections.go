@@ -69,18 +69,18 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 		`INSERT INTO user_personal_collections (
 			id, user_id, profile_id, creator_profile_id, name, description, collection_type, is_shared,
 			query_definition, sort_config, source_url, source_config, sync_schedule, next_sync_at,
-			sort_order, include_in_server_collections, created_at, updated_at
+			sort_order, include_in_server_collections, poster_url, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			COALESCE((
 				SELECT MAX(sort_order) + 1
 				FROM user_personal_collections
 				WHERE user_id = $2 AND group_id IS NULL
-			), 0), $15, $16, $17)
+			), 0), $15, $16, $17, $18)
 		RETURNING sort_order`,
 		id, s.userID, input.CreatorProfileID, input.CreatorProfileID, input.Name, input.Description,
 		input.CollectionType, input.IsShared, input.QueryDefinition, input.SortConfig,
 		input.SourceURL, input.SourceConfig, input.SyncSchedule, input.NextSyncAt,
-		input.IncludeInServerCollections, now, now,
+		input.IncludeInServerCollections, input.PosterURL, now, now,
 	).Scan(&sortOrder)
 	if err != nil {
 		return nil, fmt.Errorf("creating collection: %w", err)
@@ -113,6 +113,7 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 		SyncSchedule:               input.SyncSchedule,
 		NextSyncAt:                 input.NextSyncAt,
 		IncludeInServerCollections: input.IncludeInServerCollections,
+		PosterURL:                  input.PosterURL,
 		SortOrder:                  sortOrder,
 		CreatedAt:                  now,
 		UpdatedAt:                  now,

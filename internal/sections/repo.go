@@ -199,7 +199,9 @@ func (r *Repository) GetGeneratedTemplateBundleFeaturedSection(ctx context.Conte
 
 // DeleteGeneratedTemplateBundleFeaturedSections removes generated featured
 // sections tied to selected libraries so bundle collection replacement is not
-// blocked by stale generated section references.
+// blocked by stale generated section references. Scoped to a specific
+// bundleID — featured sections produced by sibling bundles in the same
+// libraries are left intact so multi-bundle setups coexist cleanly.
 func (r *Repository) DeleteGeneratedTemplateBundleFeaturedSections(ctx context.Context, bundleID string, libraryIDs []int) error {
 	if len(libraryIDs) == 0 {
 		return nil

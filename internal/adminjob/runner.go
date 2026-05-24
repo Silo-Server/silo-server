@@ -35,28 +35,30 @@ const remoteCatalogImportTimeout = 10 * time.Minute
 // indefinitely, while still giving large jobs a budget that matches their
 // actual scope.
 const (
-	deleteLibraryTimeout     = 2 * time.Hour
-	imageCacheCleanupTimeout = 2 * time.Hour
-	libraryRefreshTimeout    = 6 * time.Hour
-	jobTimeoutLong           = 2 * time.Hour // catalog_export, catalog_import
+	deleteLibraryTimeout       = 2 * time.Hour
+	imageCacheCleanupTimeout   = 2 * time.Hour
+	libraryRefreshTimeout      = 6 * time.Hour
+	templateBundleApplyTimeout = 2 * time.Hour
+	jobTimeoutLong             = 2 * time.Hour // catalog_export, catalog_import
 )
 
 type Runner struct {
-	repo              *Repository
-	exporter          *catalogseed.Service
-	store             ArtifactStore
-	itemRefresh       itemRefreshExecutor
-	libraryRefresh    libraryRefreshExecutor
-	libraryDelete     deleteLibraryExecutor
-	imageCacheCleanup imageCacheCleanupExecutor
-	realtimeHub       *notifications.Hub
-	pollInterval      time.Duration
-	cleanupInterval   time.Duration
-	heartbeatInterval time.Duration
-	staleAfter        time.Duration
-	retention         time.Duration
-	stop              chan struct{}
-	stopOnce          sync.Once
+	repo                *Repository
+	exporter            *catalogseed.Service
+	store               ArtifactStore
+	itemRefresh         itemRefreshExecutor
+	libraryRefresh      libraryRefreshExecutor
+	libraryDelete       deleteLibraryExecutor
+	imageCacheCleanup   imageCacheCleanupExecutor
+	templateBundleApply templateBundleApplyExecutor
+	realtimeHub         *notifications.Hub
+	pollInterval        time.Duration
+	cleanupInterval     time.Duration
+	heartbeatInterval   time.Duration
+	staleAfter          time.Duration
+	retention           time.Duration
+	stop                chan struct{}
+	stopOnce            sync.Once
 }
 
 type itemRefreshExecutor interface {
@@ -67,6 +69,10 @@ type libraryRefreshExecutor interface {
 	Execute(ctx context.Context, req LibraryRefreshRequest, progress func(current, total int, message string)) (*LibraryRefreshResult, error)
 }
 
+type templateBundleApplyExecutor interface {
+	ExecuteTemplateBundleApply(ctx context.Context, req TemplateBundleApplyRequest, progress func(current, total int, message string)) (any, error)
+}
+
 func NewRunner(
 	repo *Repository,
 	exporter *catalogseed.Service,
@@ -75,23 +81,25 @@ func NewRunner(
 	libraryRefresh libraryRefreshExecutor,
 	libraryDelete deleteLibraryExecutor,
 	imageCacheCleanup imageCacheCleanupExecutor,
+	templateBundleApply templateBundleApplyExecutor,
 	realtimeHub *notifications.Hub,
 ) *Runner {
 	return &Runner{
-		repo:              repo,
-		exporter:          exporter,
-		store:             store,
-		itemRefresh:       itemRefresh,
-		libraryRefresh:    libraryRefresh,
-		libraryDelete:     libraryDelete,
-		imageCacheCleanup: imageCacheCleanup,
-		realtimeHub:       realtimeHub,
-		pollInterval:      5 * time.Second,
-		cleanupInterval:   time.Hour,
-		heartbeatInterval: 10 * time.Second,
-		staleAfter:        2 * time.Minute,
-		retention:         7 * 24 * time.Hour,
-		stop:              make(chan struct{}),
+		repo:                repo,
+		exporter:            exporter,
+		store:               store,
+		itemRefresh:         itemRefresh,
+		libraryRefresh:      libraryRefresh,
+		libraryDelete:       libraryDelete,
+		imageCacheCleanup:   imageCacheCleanup,
+		templateBundleApply: templateBundleApply,
+		realtimeHub:         realtimeHub,
+		pollInterval:        5 * time.Second,
+		cleanupInterval:     time.Hour,
+		heartbeatInterval:   10 * time.Second,
+		staleAfter:          2 * time.Minute,
+		retention:           7 * 24 * time.Hour,
+		stop:                make(chan struct{}),
 	}
 }
 
@@ -133,6 +141,7 @@ func (r *Runner) runNext() {
 		JobTypeItemRefresh,
 		JobTypeLibraryRefresh,
 		JobTypeDeleteLibrary,
+		JobTypeTemplateBundleApply,
 	})
 	cancel()
 	if err != nil {
@@ -164,6 +173,8 @@ func (r *Runner) runNext() {
 		r.executeLibraryRefresh(job)
 	case JobTypeDeleteLibrary:
 		r.executeDeleteLibrary(job)
+	case JobTypeTemplateBundleApply:
+		r.executeTemplateBundleApply(job)
 	case JobTypeImageCacheCleanup:
 		r.executeImageCacheCleanup(job)
 	default:
@@ -362,6 +373,69 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		ExpiresAt:       time.Now().UTC().Add(r.retention),
 	}); err != nil {
 		slog.Warn("admin jobs: failed to complete library refresh", "job_id", job.ID, "error", err)
+		return
+	}
+	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+}
+
+func (r *Runner) executeTemplateBundleApply(job *models.AdminJob) {
+	if r.templateBundleApply == nil {
+		r.failJob(job.ID, 0, 0, "Collection defaults apply failed", "template bundle apply executor is not configured")
+		return
+	}
+
+	req, err := decodeTemplateBundleApplyRequest(job.RequestPayload)
+	if err != nil {
+		r.failJob(job.ID, 0, 0, "Collection defaults apply failed", err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), templateBundleApplyTimeout)
+	defer cancel()
+
+	heartbeatStop := make(chan struct{})
+	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
+	defer close(heartbeatStop)
+
+	if err := r.repo.UpdateProgress(ctx, job.ID, 0, 0, "Loading selected libraries"); err != nil {
+		slog.Warn("admin jobs: failed to set initial template bundle apply progress", "job_id", job.ID, "error", err)
+	} else {
+		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
+	}
+
+	lastCurrent := job.ProgressCurrent
+	lastTotal := job.ProgressTotal
+	result, err := r.templateBundleApply.ExecuteTemplateBundleApply(ctx, req, func(current, total int, message string) {
+		lastCurrent = current
+		lastTotal = total
+		if updateErr := r.repo.UpdateProgress(ctx, job.ID, current, total, message); updateErr != nil {
+			slog.Warn("admin jobs: failed to update template bundle apply progress",
+				"job_id", job.ID,
+				"current", current,
+				"total", total,
+				"error", updateErr,
+			)
+			return
+		}
+		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
+	})
+	if err != nil {
+		msg := err.Error()
+		if ctx.Err() != nil {
+			msg = fmt.Sprintf("timed out after %s: %s", templateBundleApplyTimeout, msg)
+		}
+		r.failJob(job.ID, lastCurrent, lastTotal, "Collection defaults apply failed", msg)
+		return
+	}
+
+	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+		ResultPayload:   result,
+		Message:         "Collection defaults applied",
+		ProgressCurrent: lastCurrent,
+		ProgressTotal:   lastTotal,
+		ExpiresAt:       time.Now().UTC().Add(r.retention),
+	}); err != nil {
+		slog.Warn("admin jobs: failed to complete template bundle apply", "job_id", job.ID, "error", err)
 		return
 	}
 	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)

@@ -18,7 +18,7 @@ const (
 	defaultBaseURL             = "https://api.trakt.tv"
 	maxRetries                 = 3
 	maxResponseBody            = 2 << 20
-	maxCollectionPresetResults = 100
+	maxCollectionPresetResults = 500
 	defaultCollectionPageLimit = 20
 	defaultCollectionRateLimit = 5
 	traktAPIVersion            = "2"

@@ -95,6 +95,27 @@ The poster style is intentionally close to Kometa/Plex collection posters:
   black lower-third text box. Use a subtle vignette and shadow/stroke for
   readability instead.
 
+### Poster generation workflow
+
+Generate the raw plate with Codex's `imagegen` skill / built-in image tool,
+then add deterministic typography locally:
+
+1. Prompt for a 2:3 vertical, full-bleed cinematic collection poster plate.
+   Include the template title and context, and explicitly require generic
+   original art with no readable text, logos, watermarks, real posters,
+   recognizable actors, franchise characters, or provider branding.
+2. Copy the generated PNG into
+   `web/public/images/collection-templates/raw/{template_id}.png`, resizing and
+   center-cropping to `1024x1536`.
+3. Create the final poster at
+   `web/public/images/collection-templates/{template_id}.jpg`, resizing and
+   center-cropping to `1000x1500`.
+4. Add typography outside image generation: media type in gold at top-left,
+   collection title at bottom-left, and the source label beneath it. Use a
+   subtle dark vignette/overlay and text shadow or stroke for contrast.
+5. Verify every built-in template has both files. The
+   `internal/collections/templates` tests check this.
+
 ### Trakt "Recommended" templates
 
 The two Trakt Recommended templates require a profile that already has a

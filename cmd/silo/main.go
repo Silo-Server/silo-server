@@ -1357,15 +1357,16 @@ func main() {
 			compatServer.SessionStore().DeleteByUserID(userID)
 		}
 	}
-	router := api.NewRouter(deps)
 
-	// Step 8: Expose Prometheus metrics endpoint (not behind auth).
 	distFS, fsErr := fs.Sub(siloweb.DistFS, "dist")
 	if fsErr != nil {
 		log.Fatalf("failed to create frontend FS: %v", fsErr)
 	}
+	deps.FrontendFS = distFS
 	server.WebDistFS = distFS
+	router := api.NewRouter(deps)
 
+	// Step 8: Expose Prometheus metrics endpoint (not behind auth).
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	metricsMux.Handle("/api/", router)
@@ -1401,6 +1402,29 @@ func main() {
 		sessionCleaner.Start()
 		defer sessionCleaner.Stop()
 
+		var templateBundleApplyExecutor interface {
+			ExecuteTemplateBundleApply(context.Context, adminjob.TemplateBundleApplyRequest, func(int, int, string)) (any, error)
+		}
+		if deps.CollectionService != nil {
+			collectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
+			itemRepo := catalog.NewItemRepository(deps.DB)
+			collectionHandler := handlers.NewLibraryCollectionHandler(
+				collectionRepo,
+				deps.CollectionService,
+				itemRepo,
+				4*time.Hour,
+				nil,
+				deps.S3Public,
+			)
+			collectionHandler.FrontendFS = deps.FrontendFS
+			collectionHandler.SectionRepo = sectionRepo
+			collectionHandler.FolderRepo = deps.FolderRepo
+			if collectionHandler.FolderRepo == nil {
+				collectionHandler.FolderRepo = catalog.NewFolderRepository(deps.DB)
+			}
+			templateBundleApplyExecutor = collectionHandler
+		}
+
 		adminJobRunner = adminjob.NewRunner(
 			adminjob.NewRepository(deps.DB),
 			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)),
@@ -1409,6 +1433,7 @@ func main() {
 			libraryRefreshExecutor,
 			adminjob.NewLibraryDeleteExecutor(deps.FolderRepo, sectionRepo),
 			adminjob.NewImageCacheCleanupExecutor(deps.S3Public),
+			templateBundleApplyExecutor,
 			deps.RealtimeHub,
 		)
 		adminJobRunner.Start()

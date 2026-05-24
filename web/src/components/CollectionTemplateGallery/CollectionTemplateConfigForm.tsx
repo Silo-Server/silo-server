@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { SyncScheduleField } from "@/components/collections/SyncScheduleField";
 
 import { MDBListBrowser } from "./MDBListBrowser";
+import { TemplatePosterField, type TemplatePosterMode } from "./TemplatePosterField";
 
 interface Props {
   template: CollectionTemplate;
@@ -94,6 +95,10 @@ export function CollectionTemplateConfigForm({
   const defaultProfileId = template.requires_profile ? (profiles[0]?.id ?? "") : "";
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
+  const [posterMode, setPosterMode] = useState<TemplatePosterMode>(() =>
+    template.poster_path ? "default" : "custom",
+  );
+  const [customPosterUrl, setCustomPosterUrl] = useState("");
 
   // Discover- and Collection-source templates are bundle-only: the spec is
   // backend-driven and can't be edited inline. Render a read-only summary so
@@ -135,6 +140,9 @@ export function CollectionTemplateConfigForm({
       featured,
       sync_schedule: syncSchedule.trim() || undefined,
       limit: parsedLimit,
+      ...(posterMode === "custom"
+        ? { poster_source_url: customPosterUrl.trim() || undefined }
+        : { poster_url: template.poster_path || undefined }),
     };
 
     if (template.source === "tmdb" && template.tmdb) {
@@ -284,6 +292,15 @@ export function CollectionTemplateConfigForm({
         </div>
       ) : null}
 
+      <TemplatePosterField
+        template={template}
+        mode={posterMode}
+        onModeChange={setPosterMode}
+        customUrl={customPosterUrl}
+        onCustomUrlChange={setCustomPosterUrl}
+        inputId="template-poster-url"
+      />
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="template-limit">Max Items</Label>
@@ -291,7 +308,7 @@ export function CollectionTemplateConfigForm({
             id="template-limit"
             type="number"
             min={1}
-            max={100}
+            max={200}
             step={1}
             inputMode="numeric"
             value={limit}

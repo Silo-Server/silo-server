@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,9 +19,40 @@ import (
 const (
 	adminCollectionImagePrefix = "collection-images"
 	userCollectionImagePrefix  = "user-collection-images"
+	collectionTemplateImageDir = "/images/collection-templates/"
 
 	collectionImageMaxBytes = 10 << 20 // 10 MB
 )
+
+// storeBundledCollectionPosterIfS3Configured stores a built-in collection
+// template poster in S3 when public asset storage is configured. Non-S3
+// installs and non-template paths keep the original persisted path.
+func storeBundledCollectionPosterIfS3Configured(
+	ctx context.Context,
+	s3GP *s3client.Client,
+	frontendFS fs.FS,
+	collectionID, prefix, posterPath string,
+) (storedPath, thumbhashStr string, stored bool, err error) {
+	posterPath = strings.TrimSpace(posterPath)
+	if s3GP == nil || !strings.HasPrefix(posterPath, collectionTemplateImageDir) {
+		return posterPath, "", false, nil
+	}
+	if frontendFS == nil {
+		return "", "", false, fmt.Errorf("frontend assets are not available")
+	}
+
+	assetPath := strings.TrimPrefix(posterPath, "/")
+	data, err := fs.ReadFile(frontendFS, assetPath)
+	if err != nil {
+		return "", "", false, fmt.Errorf("reading bundled poster %q: %w", posterPath, err)
+	}
+
+	storedPath, thumbhashStr, err = uploadCollectionImageVariants(ctx, s3GP, prefix, collectionID, "poster", data)
+	if err != nil {
+		return "", "", false, err
+	}
+	return storedPath, thumbhashStr, true, nil
+}
 
 // readCollectionImageMultipart reads a single image file from a multipart
 // request, validating MIME type and size.

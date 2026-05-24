@@ -816,7 +816,7 @@ export function TMDBPresetForm({
             id="tmdb-limit"
             type="number"
             min={1}
-            max={100}
+            max={200}
             step={1}
             inputMode="numeric"
             value={limit}
@@ -1041,7 +1041,7 @@ export function TraktPresetForm({
             id="trakt-limit"
             type="number"
             min={1}
-            max={100}
+            max={200}
             step={1}
             inputMode="numeric"
             value={limit}
@@ -1589,7 +1589,7 @@ export function CollectionEditForm({
                 id="collection-tmdb-limit"
                 type="number"
                 min={1}
-                max={100}
+                max={200}
                 step={1}
                 inputMode="numeric"
                 value={tmdbLimit}
@@ -1653,7 +1653,7 @@ export function CollectionEditForm({
                 id="collection-trakt-limit"
                 type="number"
                 min={1}
-                max={100}
+                max={200}
                 step={1}
                 inputMode="numeric"
                 value={traktLimit}

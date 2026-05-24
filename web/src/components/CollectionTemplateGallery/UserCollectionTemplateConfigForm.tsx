@@ -34,6 +34,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 
 import { MDBListBrowser } from "./MDBListBrowser";
+import { TemplatePosterField, type TemplatePosterMode } from "./TemplatePosterField";
 
 interface Props {
   template: CollectionTemplate;
@@ -89,6 +90,10 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const [isShared, setIsShared] = useState(false);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
   const [libraryIds, setLibraryIds] = useState<number[]>([]);
+  const [posterMode, setPosterMode] = useState<TemplatePosterMode>(() =>
+    template.poster_path ? "default" : "custom",
+  );
+  const [customPosterUrl, setCustomPosterUrl] = useState("");
 
   const eligibility = libraryEligibilityForMediaKind(template.media_kind);
   const pickerLibraries = libraries.map((lib) => ({
@@ -113,6 +118,10 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
       sync_schedule: scheduleChoiceToRequest(schedule),
       limit: parsedLimit,
       is_shared: isShared,
+      poster_url:
+        posterMode === "custom"
+          ? customPosterUrl.trim() || undefined
+          : template.poster_path || undefined,
       library_ids: libraryIds.length > 0 ? libraryIds : undefined,
     };
 
@@ -235,6 +244,15 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           This template uses your active profile&rsquo;s connected Trakt account.
         </p>
       ) : null}
+
+      <TemplatePosterField
+        template={template}
+        mode={posterMode}
+        onModeChange={setPosterMode}
+        customUrl={customPosterUrl}
+        onCustomUrlChange={setCustomPosterUrl}
+        inputId="user-template-poster-url"
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">

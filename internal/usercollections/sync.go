@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -122,8 +123,8 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.Limit != nil && *cfg.Limit > 0 && len(entries) > *cfg.Limit {
-		entries = entries[:*cfg.Limit]
+	if fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit); fetchLimit > 0 && len(entries) > fetchLimit {
+		entries = entries[:fetchLimit]
 	}
 
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
@@ -152,7 +153,8 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 		return nil, nil, err
 	}
 
-	matched, unmatched := resolveMatched(len(entries), func(i int) string {
+	resolveLimit := collectionResolveLimit(cfg)
+	matched, unmatched, scanned := resolveMatchedWithLimit(len(entries), resolveLimit, func(i int) string {
 		entry := entries[i]
 		itemType := mdbListItemType(entry)
 		lookup := movieLookup
@@ -173,7 +175,8 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.applyResult(ctx, store, collection, startedAt, matched, len(entries), unmatched+droppedByLib)
+	matched = limitCollectionItems(matched, cfg.Limit)
+	return s.applyResult(ctx, store, collection, startedAt, matched, len(entries), scanned, unmatched+droppedByLib)
 }
 
 func mdbListItemType(entry mdblistEntry) string {
@@ -239,11 +242,17 @@ func (s *Service) filterByLibraries(ctx context.Context, matched []userstore.Col
 // resolveMatched walks `total` entries, calls `resolve` to get the candidate
 // content_id for each, and produces deduped, position-numbered replacements
 // plus an unmatched count. Shared by all three source backends.
-func resolveMatched(total int, resolve func(i int) string) ([]userstore.CollectionItemReplacement, int) {
-	matched := make([]userstore.CollectionItemReplacement, 0, total)
-	seen := make(map[string]struct{}, total)
+func resolveMatchedWithLimit(total int, limit *int, resolve func(i int) string) ([]userstore.CollectionItemReplacement, int, int) {
+	capacity := total
+	if limit != nil && *limit > 0 && *limit < total {
+		capacity = *limit
+	}
+	matched := make([]userstore.CollectionItemReplacement, 0, capacity)
+	seen := make(map[string]struct{}, capacity)
 	unmatched := 0
+	scanned := 0
 	for i := 0; i < total; i++ {
+		scanned = i + 1
 		contentID := resolve(i)
 		if contentID == "" {
 			unmatched++
@@ -257,8 +266,38 @@ func resolveMatched(total int, resolve func(i int) string) ([]userstore.Collecti
 			MediaItemID: contentID,
 			Position:    len(matched),
 		})
+		if collectionutil.ItemLimitReached(len(matched), limit) {
+			break
+		}
 	}
-	return matched, unmatched
+	return matched, unmatched, scanned
+}
+
+// collectionResolveLimit returns the limit to pass into resolveMatchedWithLimit.
+//
+// When LibraryIDs is set we cannot break early on cfg.Limit during the resolve
+// pass: filterByLibraries runs after resolve and may drop most items, so an
+// early break would leave us short of cfg.Limit final items. Returning nil
+// disables the inline break; limitCollectionItems then truncates to cfg.Limit
+// after filtering. This trades a wider GetItemsInFolders IN-array (bounded by
+// the source-fetch cap) for a correct result count when the library filter is
+// selective.
+func collectionResolveLimit(cfg SourceConfig) *int {
+	if len(cfg.LibraryIDs) > 0 {
+		return nil
+	}
+	return cfg.Limit
+}
+
+func limitCollectionItems(items []userstore.CollectionItemReplacement, limit *int) []userstore.CollectionItemReplacement {
+	if limit == nil || *limit <= 0 || len(items) <= *limit {
+		return items
+	}
+	items = items[:*limit]
+	for i := range items {
+		items[i].Position = i
+	}
+	return items
 }
 
 func (s *Service) fetchMDBListEntries(ctx context.Context, url string) ([]mdblistEntry, error) {
@@ -298,16 +337,10 @@ func (s *Service) syncTMDB(ctx context.Context, store userstore.UserStore, colle
 	if timeWindow == "" && preset == "trending" {
 		timeWindow = "day"
 	}
-	limit := 0
-	if cfg.Limit != nil {
-		limit = *cfg.Limit
-	}
+	limit := collectionutil.SourceFetchLimit(cfg.Limit)
 	results, err := s.TMDBCollections.GetCollectionPreset(ctx, preset, mediaType, timeWindow, limit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetching TMDB preset: %w", err)
-	}
-	if cfg.Limit != nil && *cfg.Limit > 0 && len(results) > *cfg.Limit {
-		results = results[:*cfg.Limit]
 	}
 
 	// TMDB returns mixed-media-type results (the "trending all" preset can
@@ -338,7 +371,8 @@ func (s *Service) syncTMDB(ctx context.Context, store userstore.UserStore, colle
 		return nil, nil, err
 	}
 
-	matched, unmatched := resolveMatched(len(results), func(i int) string {
+	resolveLimit := collectionResolveLimit(cfg)
+	matched, unmatched, scanned := resolveMatchedWithLimit(len(results), resolveLimit, func(i int) string {
 		entry := results[i]
 		itemType := "movie"
 		lookup := movieLookup
@@ -360,7 +394,8 @@ func (s *Service) syncTMDB(ctx context.Context, store userstore.UserStore, colle
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.applyResult(ctx, store, collection, startedAt, matched, len(results), unmatched+droppedByLib)
+	matched = limitCollectionItems(matched, cfg.Limit)
+	return s.applyResult(ctx, store, collection, startedAt, matched, len(results), scanned, unmatched+droppedByLib)
 }
 
 // ── Trakt presets ────────────────────────────────────────────────────────────
@@ -394,16 +429,10 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 		accessToken = token
 	}
 
-	limit := 0
-	if cfg.Limit != nil {
-		limit = *cfg.Limit
-	}
+	limit := collectionutil.SourceFetchLimit(cfg.Limit)
 	results, err := s.TraktCollections.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetching Trakt preset: %w", err)
-	}
-	if cfg.Limit != nil && *cfg.Limit > 0 && len(results) > *cfg.Limit {
-		results = results[:*cfg.Limit]
 	}
 
 	itemType := "movie"
@@ -427,7 +456,8 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 		return nil, nil, err
 	}
 
-	matched, unmatched := resolveMatched(len(results), func(i int) string {
+	resolveLimit := collectionResolveLimit(cfg)
+	matched, unmatched, scanned := resolveMatchedWithLimit(len(results), resolveLimit, func(i int) string {
 		entry := results[i]
 		var tmdb, tvdb string
 		if entry.TMDBID > 0 {
@@ -442,7 +472,8 @@ func (s *Service) syncTrakt(ctx context.Context, store userstore.UserStore, coll
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.applyResult(ctx, store, collection, startedAt, matched, len(results), unmatched+droppedByLib)
+	matched = limitCollectionItems(matched, cfg.Limit)
+	return s.applyResult(ctx, store, collection, startedAt, matched, len(results), scanned, unmatched+droppedByLib)
 }
 
 // ── Result application ───────────────────────────────────────────────────────
@@ -453,7 +484,8 @@ func (s *Service) applyResult(
 	collection *userstore.Collection,
 	startedAt time.Time,
 	matched []userstore.CollectionItemReplacement,
-	totalEntries int,
+	sourceTotal int,
+	scanned int,
 	unmatched int,
 ) (*SyncResult, *userstore.Collection, error) {
 	if err := store.ReplaceCollectionItems(ctx, collection.ID, matched); err != nil {
@@ -465,7 +497,13 @@ func (s *Service) applyResult(
 	if unmatched > 0 {
 		status = "warning"
 	}
-	message := fmt.Sprintf("Matched %d of %d entries", len(matched), totalEntries)
+	// Report the full source size as the denominator so users see
+	// "Matched 10 of 200" rather than "Matched 10 of 10" when the limit
+	// truncated mid-source; the trailing clause exposes the actual scan depth.
+	message := fmt.Sprintf("Matched %d of %d entries", len(matched), sourceTotal)
+	if scanned < sourceTotal {
+		message = fmt.Sprintf("%s (item limit reached after %d scanned)", message, scanned)
+	}
 
 	var nextSyncAt *time.Time
 	if collection.SyncSchedule != nil && *collection.SyncSchedule != "" {
@@ -495,7 +533,8 @@ func (s *Service) applyResult(
 		"status", status,
 		"matched", len(matched),
 		"unmatched", unmatched,
-		"total", totalEntries,
+		"scanned", scanned,
+		"total", sourceTotal,
 		"duration", completedAt.Sub(startedAt).Round(time.Millisecond),
 	)
 

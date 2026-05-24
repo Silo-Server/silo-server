@@ -18,7 +18,23 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
 
-This repository is part of a broader multi-repo Silo workspace. Do not assume all plugin-related code lives in this repo.
+This repository is part of a broader multi-repo Silo workspace. The sibling
+repositories are usually checked out under `/Users/nathangray/dev/github/SiloServer`.
+
+- `silo-server` owns the Go backend, web admin UI, API contracts, auth/session
+  behavior, catalog/scanner/playback services, database migrations, Jellyfin
+  compatibility, and host-side plugin runtime.
+- `silo-android` owns the Android phone and TV clients. Client-visible API,
+  auth, playback, session, library, and metadata changes may require Android
+  follow-up.
+- `silo-apple` owns the iOS, tvOS, and macOS clients. Client-visible API, auth,
+  playback, session, library, and metadata changes may require Apple follow-up.
+
+When changing server behavior consumed by clients, check whether both client
+repos need model, routing, playback, or UX updates. Prefer coordinated
+multi-repo changes over leaving one platform behind.
+
+Do not assume all plugin-related code lives in this repo.
 
 - `silo-plugin-sdk` owns the public plugin SDK, protobuf contracts, generated plugin API code, manifest helpers, and runtime bootstrap.
 - `silo-plugins` owns the central plugin catalog / repository manifest.

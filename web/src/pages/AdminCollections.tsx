@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import type { Library, LibraryCollection, LibraryCollectionGroup } from "@/api/types";
+import { useQueryClient } from "@tanstack/react-query";
+import type { AdminJob, Library, LibraryCollection, LibraryCollectionGroup } from "@/api/types";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import {
   useAdminCollectionsBoard,
@@ -12,7 +13,11 @@ import {
   useAdminCollections,
   useDeleteAdminCollection,
   useSyncAdminCollection,
+  useTemplateBundleApplyJobs,
 } from "@/hooks/queries/admin/collections";
+import { invalidateAdminCollectionQueries } from "@/hooks/queries/collectionSurfaceRefresh";
+import { sectionKeys } from "@/hooks/queries/keys";
+import { useEventChannel } from "@/components/realtimeEventsContext";
 import { GroupsBoard } from "@/components/collections/admin/GroupsBoard";
 import { GroupEditDialog } from "@/components/collections/admin/GroupEditDialog";
 import { Button } from "@/components/ui/button";
@@ -26,11 +31,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Library as LibraryIcon, Pencil, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Library as LibraryIcon,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { CollectionTemplateGallery } from "@/components/CollectionTemplateGallery";
 import { buildAdminCollectionEditorPath } from "./adminCollectionsShared";
 
 export default function AdminCollections() {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries = [] } = useAdminLibraries();
@@ -72,6 +88,20 @@ export default function AdminCollections() {
   const deleteCollection = useDeleteAdminCollection();
   const syncCollection = useSyncAdminCollection();
   const isAllLibraries = selectedLibraryId === null;
+  const applyJobs = useTemplateBundleApplyJobs();
+  useEventChannel("jobs");
+  const latestApplyJob = applyJobs.data?.[0] ?? null;
+  const activeApplyJob = latestApplyJob ? isActiveTemplateBundleApplyJob(latestApplyJob) : false;
+  const lastInvalidatedJobID = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!latestApplyJob || activeApplyJob || lastInvalidatedJobID.current === latestApplyJob.id) {
+      return;
+    }
+    lastInvalidatedJobID.current = latestApplyJob.id;
+    void invalidateAdminCollectionQueries(queryClient);
+    void queryClient.invalidateQueries({ queryKey: sectionKeys.all });
+  }, [activeApplyJob, latestApplyJob, queryClient]);
 
   if (allCollections.isLoading && libraries.length === 0) {
     return (
@@ -122,6 +152,8 @@ export default function AdminCollections() {
           setConfirmDeleteCollection(null);
         }}
       />
+
+      <CollectionApplyJobBanner job={latestApplyJob} />
 
       <div className="page-header gap-5">
         <div className="space-y-3">
@@ -270,6 +302,98 @@ export default function AdminCollections() {
       )}
     </div>
   );
+}
+
+function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
+  if (!job || job.job_type !== "template_bundle_apply") {
+    return null;
+  }
+
+  const active = isActiveTemplateBundleApplyJob(job);
+  const recent = active || isRecentTemplateBundleApplyJob(job);
+  if (!recent) {
+    return null;
+  }
+
+  if (job.status === "failed") {
+    return (
+      <div className="border-destructive/30 bg-destructive/5 text-destructive rounded-lg border px-4 py-3">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 space-y-1">
+            <p className="text-sm font-medium">Collection defaults apply failed</p>
+            <p className="text-xs">{job.error_message || job.message || "The job failed."}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (job.status === "completed") {
+    return (
+      <div className="border-border bg-muted/30 rounded-lg border px-4 py-3">
+        <div className="flex items-start gap-3">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+          <div className="min-w-0 space-y-1">
+            <p className="text-sm font-medium">Collection defaults applied</p>
+            <p className="text-muted-foreground text-xs">{templateBundleApplySummary(job)}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-border bg-muted/30 rounded-lg border px-4 py-3">
+      <div className="flex items-start gap-3">
+        <Loader2 className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">Applying collection defaults</p>
+            <p className="text-muted-foreground text-xs">{job.message || "Working..."}</p>
+          </div>
+          <div className="progress-bar">
+            <div className="progress-fill animate-pulse" style={{ width: "40%" }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isActiveTemplateBundleApplyJob(job: AdminJob) {
+  return job.status === "queued" || job.status === "running";
+}
+
+function isRecentTemplateBundleApplyJob(job: AdminJob) {
+  const timestamp = job.completed_at ?? job.requested_at;
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+  return Date.now() - parsed < 10 * 60_000;
+}
+
+function templateBundleApplySummary(job: AdminJob) {
+  const payload = job.result_payload as Record<string, unknown> | undefined;
+  const created = resultArrayLength(payload, "created");
+  const skipped = resultArrayLength(payload, "skipped");
+  const failed = resultArrayLength(payload, "failed");
+  const syncQueued = resultArrayLength(payload, "sync_queued");
+  const featured = resultArrayLength(payload, "featured");
+  const parts = [
+    `Created ${created}`,
+    `skipped ${skipped}`,
+    failed > 0 ? `failed ${failed}` : "",
+    syncQueued > 0 ? `queued ${syncQueued} initial syncs` : "",
+    featured > 0 ? `featured ${featured}` : "",
+  ].filter(Boolean);
+  return parts.join("; ");
+}
+
+function resultArrayLength(payload: Record<string, unknown> | undefined, key: string) {
+  const value = payload?.[key];
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function AdminCollectionsLibrarySelect({

@@ -116,6 +116,12 @@ export interface ApplyCollectionTemplateBundleRequest {
   featured?: ApplyCollectionTemplateBundleFeaturedRequest;
 }
 
+export interface ApplyCollectionTemplateBundleJobRequest {
+  library_ids: number[];
+  delete_existing?: boolean;
+  featured?: ApplyCollectionTemplateBundleFeaturedRequest;
+}
+
 export interface ApplyCollectionTemplateBundleFeaturedRequest {
   home?: {
     library_id: number;
@@ -162,6 +168,7 @@ export interface ApplyCollectionTemplateBundleResponse {
   created: CollectionTemplateBundleApplyEntry[];
   skipped: CollectionTemplateBundleApplyEntry[];
   failed: CollectionTemplateBundleApplyEntry[];
+  sync_queued?: CollectionTemplateBundleApplyEntry[];
   featured: CollectionTemplateBundleFeaturedEntry[];
   featured_failed: CollectionTemplateBundleFeaturedEntry[];
 }

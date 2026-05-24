@@ -19,34 +19,20 @@ export function CollectionTemplateCard({ template, onPick }: Props) {
     <button
       type="button"
       onClick={() => onPick(template)}
-      className="border-border hover:border-primary hover:bg-accent group bg-card flex h-full flex-col overflow-hidden rounded-md border text-left transition-colors"
+      className="border-border hover:border-primary hover:bg-accent bg-card flex h-full flex-col rounded-md border p-4 text-left transition-colors"
     >
-      {template.poster_path ? (
-        <div className="bg-muted relative aspect-[2/3] w-full overflow-hidden">
-          <img
-            src={template.poster_path}
-            alt=""
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-          />
-          <div className="absolute top-2 right-2 flex flex-wrap justify-end gap-1">
-            <TemplateBadges template={template} />
-          </div>
+      <div className="flex items-start justify-between gap-3">
+        <div
+          className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-xl"
+          aria-hidden
+        >
+          {template.icon}
         </div>
-      ) : (
-        <div className="flex items-start justify-between gap-2 p-4 pb-0">
-          <div
-            className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-md text-xl"
-            aria-hidden
-          >
-            {template.icon}
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-1">
-            <TemplateBadges template={template} />
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          <TemplateBadges template={template} />
         </div>
-      )}
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      </div>
+      <div className="mt-3 flex flex-1 flex-col gap-3">
         <div>
           <p className="text-sm leading-tight font-medium">{template.title}</p>
           <p className="text-muted-foreground mt-1 line-clamp-3 text-xs">{template.description}</p>

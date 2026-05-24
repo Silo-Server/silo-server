@@ -19,7 +19,7 @@ const (
 	defaultAPIKey              = "4ef0d7355d9ffb5151e987764708ce96"
 	maxRetries                 = 3
 	maxResponseBody            = 1 << 20 // 1 MB
-	maxCollectionPresetResults = 100
+	maxCollectionPresetResults = 500
 )
 
 // Client is an HTTP client for the TMDB collection preset API surface.

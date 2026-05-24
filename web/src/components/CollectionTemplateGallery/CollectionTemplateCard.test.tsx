@@ -21,7 +21,10 @@ const baseTemplate: CollectionTemplate = {
 describe("CollectionTemplateCard", () => {
   it("shows the template title, description, source badge, and media kind", () => {
     const markup = renderToStaticMarkup(
-      <CollectionTemplateCard template={baseTemplate} onPick={() => {}} />,
+      <CollectionTemplateCard
+        template={{ ...baseTemplate, poster_path: "/images/collection-templates/trending.jpg" }}
+        onPick={() => {}}
+      />,
     );
 
     expect(markup).toContain("Trending Movies This Week");
@@ -29,6 +32,7 @@ describe("CollectionTemplateCard", () => {
     expect(markup).toContain("TMDB");
     expect(markup).toContain("Movies");
     expect(markup).toContain("syncs daily");
+    expect(markup).not.toContain("<img");
   });
 
   it("badges templates that require a profile", () => {

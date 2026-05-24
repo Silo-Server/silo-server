@@ -7,6 +7,30 @@ import (
 
 var ErrOrderedIDsMismatch = errors.New("ordered_ids does not match the current set")
 
+const (
+	collectionSourceFetchMultiplier = 4
+	collectionSourceFetchMin        = 100
+	collectionSourceFetchMax        = 500
+)
+
+func SourceFetchLimit(itemLimit *int) int {
+	if itemLimit == nil || *itemLimit <= 0 {
+		return 0
+	}
+	limit := *itemLimit * collectionSourceFetchMultiplier
+	if limit < collectionSourceFetchMin {
+		limit = collectionSourceFetchMin
+	}
+	if limit > collectionSourceFetchMax {
+		limit = collectionSourceFetchMax
+	}
+	return limit
+}
+
+func ItemLimitReached(itemCount int, itemLimit *int) bool {
+	return itemLimit != nil && *itemLimit > 0 && itemCount >= *itemLimit
+}
+
 func HasDuplicateOrderedIDs(ids []string) bool {
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {

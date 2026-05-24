@@ -1,6 +1,8 @@
 package templates
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,8 +28,27 @@ func TestBuiltinCatalog(t *testing.T) {
 			if strings.TrimSpace(tmpl.PosterPath) == "" {
 				t.Errorf("template %q has empty poster path", tmpl.ID)
 			}
+			if tmpl.PosterPath != "" && !strings.HasPrefix(tmpl.PosterPath, "/images/collection-templates/") {
+				t.Errorf("template %q has invalid poster path %q", tmpl.ID, tmpl.PosterPath)
+			}
 			seenIDs[tmpl.ID] = true
 		}
+	}
+}
+
+func TestBuiltinTemplatePosterAssetsExist(t *testing.T) {
+	assetRoot := filepath.Join("..", "..", "..", "web", "public", "images", "collection-templates")
+	rawRoot := filepath.Join(assetRoot, "raw")
+
+	for _, tmpl := range List() {
+		t.Run(tmpl.ID, func(t *testing.T) {
+			if _, err := os.Stat(filepath.Join(assetRoot, tmpl.ID+".jpg")); err != nil {
+				t.Fatalf("final poster asset missing: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(rawRoot, tmpl.ID+".png")); err != nil {
+				t.Fatalf("raw poster plate missing: %v", err)
+			}
+		})
 	}
 }
 
@@ -84,6 +105,54 @@ func TestCoreDefaultsBundleReferencesValidProfileFreeTemplates(t *testing.T) {
 		}
 		if tmpl.RequiresProfile {
 			t.Fatalf("template %q requires profile and must not be in core defaults", id)
+		}
+	}
+}
+
+func TestBundleOnlyTemplatesAreReachableFromBundles(t *testing.T) {
+	bundled := make(map[string]bool)
+	for _, bundle := range ListBundles() {
+		for _, id := range bundle.TemplateIDs {
+			bundled[id] = true
+		}
+	}
+
+	for _, tmpl := range List() {
+		switch tmpl.Source {
+		case SourceTMDBDiscover, SourceTMDBCollection:
+			if !bundled[tmpl.ID] {
+				t.Errorf("bundle-only template %q is not referenced by any bundle", tmpl.ID)
+			}
+		}
+	}
+}
+
+func TestAllDefaultsBundleIncludesEveryOtherDefaultBundle(t *testing.T) {
+	allDefaults, ok := GetBundle("all_defaults")
+	if !ok {
+		t.Fatal("all_defaults bundle is not registered")
+	}
+	bundles := ListBundles()
+	if len(bundles) == 0 || bundles[0].ID != allDefaults.ID {
+		t.Fatal("all_defaults should be the first displayed bundle")
+	}
+
+	seen := make(map[string]struct{}, len(allDefaults.TemplateIDs))
+	for _, id := range allDefaults.TemplateIDs {
+		if _, exists := seen[id]; exists {
+			t.Fatalf("all_defaults contains duplicate template %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+
+	for _, bundle := range bundles {
+		if bundle.ID == allDefaults.ID {
+			continue
+		}
+		for _, id := range bundle.TemplateIDs {
+			if _, ok := seen[id]; !ok {
+				t.Fatalf("all_defaults is missing %q from bundle %q", id, bundle.ID)
+			}
 		}
 	}
 }
@@ -452,6 +521,145 @@ func TestCategoryLabelKnowsAllBuiltinCategories(t *testing.T) {
 		if strings.TrimSpace(CategoryLabel(group.Category)) == "" {
 			t.Errorf("missing label for category %q", group.Category)
 		}
+	}
+}
+
+// TestPhase2DiscoverTemplatesUseExpectedBands pins the Phase-2 TMDB Discover
+// genre matrix to its documented sort-order bands and TMDB query parameters.
+// Drift here would either reorder the gallery in surprising ways (band
+// regressions) or change what a "Popular Action" / "Top Rated Action" template
+// actually returns from TMDB (filter regressions) — both silent failures from
+// the operator's perspective, so make them loud.
+func TestPhase2DiscoverTemplatesUseExpectedBands(t *testing.T) {
+	const (
+		popularPrefix  = "tmdb_discover_popular_"
+		topRatedPrefix = "tmdb_discover_top_rated_"
+		kidsPrefix     = "tmdb_discover_kids_"
+	)
+	var popularCount, topRatedCount, kidsCount int
+	for _, tmpl := range List() {
+		switch {
+		case strings.HasPrefix(tmpl.ID, popularPrefix):
+			popularCount++
+			if tmpl.Source != SourceTMDBDiscover {
+				t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBDiscover)
+			}
+			if tmpl.TMDBDiscover == nil {
+				t.Fatalf("%s: TMDBDiscover spec is nil", tmpl.ID)
+			}
+			if tmpl.DefaultSortOrder < 5000 || tmpl.DefaultSortOrder > 5999 {
+				t.Errorf("%s: DefaultSortOrder %d outside Popular band [5000, 5999]", tmpl.ID, tmpl.DefaultSortOrder)
+			}
+			if tmpl.TMDBDiscover.SortBy != "popularity.desc" {
+				t.Errorf("%s: SortBy = %q, want popularity.desc", tmpl.ID, tmpl.TMDBDiscover.SortBy)
+			}
+			if tmpl.TMDBDiscover.VoteCountGte != 300 {
+				t.Errorf("%s: VoteCountGte = %d, want 300", tmpl.ID, tmpl.TMDBDiscover.VoteCountGte)
+			}
+		case strings.HasPrefix(tmpl.ID, topRatedPrefix):
+			topRatedCount++
+			if tmpl.Source != SourceTMDBDiscover {
+				t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBDiscover)
+			}
+			if tmpl.TMDBDiscover == nil {
+				t.Fatalf("%s: TMDBDiscover spec is nil", tmpl.ID)
+			}
+			if tmpl.DefaultSortOrder < 6000 || tmpl.DefaultSortOrder > 6999 {
+				t.Errorf("%s: DefaultSortOrder %d outside Top Rated band [6000, 6999]", tmpl.ID, tmpl.DefaultSortOrder)
+			}
+			if tmpl.TMDBDiscover.SortBy != "vote_average.desc" {
+				t.Errorf("%s: SortBy = %q, want vote_average.desc", tmpl.ID, tmpl.TMDBDiscover.SortBy)
+			}
+			if tmpl.TMDBDiscover.VoteCountGte != 1000 {
+				t.Errorf("%s: VoteCountGte = %d, want 1000", tmpl.ID, tmpl.TMDBDiscover.VoteCountGte)
+			}
+		case strings.HasPrefix(tmpl.ID, kidsPrefix):
+			kidsCount++
+			if tmpl.Source != SourceTMDBDiscover {
+				t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBDiscover)
+			}
+			if tmpl.TMDBDiscover == nil {
+				t.Fatalf("%s: TMDBDiscover spec is nil", tmpl.ID)
+			}
+			if tmpl.DefaultSortOrder < 9000 || tmpl.DefaultSortOrder > 9999 {
+				t.Errorf("%s: DefaultSortOrder %d outside Misc/Kids band [9000, 9999]", tmpl.ID, tmpl.DefaultSortOrder)
+			}
+			if tmpl.TMDBDiscover.CertificationLte != "PG" {
+				t.Errorf("%s: CertificationLte = %q, want PG", tmpl.ID, tmpl.TMDBDiscover.CertificationLte)
+			}
+		}
+	}
+	if popularCount != 18 {
+		t.Errorf("Popular by Genre count = %d, want 18", popularCount)
+	}
+	if topRatedCount != 18 {
+		t.Errorf("Top Rated by Genre count = %d, want 18", topRatedCount)
+	}
+	if kidsCount != 1 {
+		t.Errorf("Kids count = %d, want 1", kidsCount)
+	}
+}
+
+// TestPhase3FranchiseTemplatesUseExpectedBands pins the Phase-3 TMDB Collection
+// franchise templates to their documented sort-order band, source, and spec
+// shape. The placeholder template is allowed to ship with CollectionID == 0 (a
+// permitted sentinel — see validateTMDBCollection); every other franchise must
+// resolve to a real TMDB collection ID. Drift here would either silently
+// reorder the gallery or, worse, swap a curated franchise for the placeholder.
+func TestPhase3FranchiseTemplatesUseExpectedBands(t *testing.T) {
+	const (
+		franchisePrefix = "tmdb_franchise_"
+		placeholderID   = "tmdb_franchise_placeholder"
+	)
+
+	// Keep in lockstep with the entries added to builtin.go. If a franchise
+	// is added or skipped, update this number — the count assertion is the
+	// canary that catches accidental deletions.
+	const wantFranchiseTemplateCount = 11
+
+	var (
+		matched          int
+		sawPlaceholder   bool
+		curatedFranchise int
+	)
+	for _, tmpl := range List() {
+		if !strings.HasPrefix(tmpl.ID, franchisePrefix) {
+			continue
+		}
+		matched++
+
+		if tmpl.Source != SourceTMDBCollection {
+			t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBCollection)
+		}
+		if tmpl.MediaKind != MediaMovie {
+			t.Errorf("%s: MediaKind = %q, want %q", tmpl.ID, tmpl.MediaKind, MediaMovie)
+		}
+		if tmpl.DefaultSortOrder < 7000 || tmpl.DefaultSortOrder > 7999 {
+			t.Errorf("%s: DefaultSortOrder %d outside Franchises band [7000, 7999]", tmpl.ID, tmpl.DefaultSortOrder)
+		}
+		if tmpl.TMDBCollection == nil {
+			t.Fatalf("%s: TMDBCollection spec is nil", tmpl.ID)
+		}
+
+		if tmpl.ID == placeholderID {
+			sawPlaceholder = true
+			if tmpl.TMDBCollection.CollectionID != 0 {
+				t.Errorf("%s: placeholder CollectionID = %d, want 0", tmpl.ID, tmpl.TMDBCollection.CollectionID)
+			}
+		} else {
+			curatedFranchise++
+			if tmpl.TMDBCollection.CollectionID <= 0 {
+				t.Errorf("%s: CollectionID = %d, want > 0", tmpl.ID, tmpl.TMDBCollection.CollectionID)
+			}
+		}
+	}
+
+	if !sawPlaceholder {
+		t.Error("placeholder template tmdb_franchise_placeholder is missing")
+	}
+	if matched != wantFranchiseTemplateCount {
+		t.Errorf("franchise template count = %d, want %d (curated=%d + placeholder=1)",
+			matched, wantFranchiseTemplateCount, curatedFranchise)
 	}
 }
 

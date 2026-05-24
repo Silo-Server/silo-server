@@ -219,6 +219,7 @@ type CreateCollectionInput struct {
 	SyncSchedule               *string
 	NextSyncAt                 *time.Time
 	IncludeInServerCollections bool
+	PosterURL                  string
 }
 
 type UpdateCollectionInput struct {
