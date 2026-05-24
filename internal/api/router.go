@@ -131,6 +131,7 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	OnServerSettingUpdated func(ctx context.Context, key, value string)
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
@@ -627,6 +628,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
+		}
+		if deps.OnServerSettingUpdated != nil {
+			adminHandler.OnServerSettingUpdated = deps.OnServerSettingUpdated
 		}
 	}
 	if deps.DB != nil {

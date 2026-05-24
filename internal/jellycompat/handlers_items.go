@@ -593,10 +593,12 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	contentID, err := h.codec.DecodeStringID(EncodedIDItem, raw)
+	var requestedFileID int
 	if err != nil {
 		if fileID, fileErr := h.codec.DecodeIntID(EncodedIDMediaSource, raw); fileErr == nil {
 			if owner, ok := h.codec.LookupMediaSourceOwner(fileID); ok {
 				contentID = owner
+				requestedFileID = int(fileID)
 			}
 		}
 	}
@@ -621,9 +623,19 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 	// Versions carry the same Intro/Credits/Recap/Preview that the native API
 	// surfaces; the default-playback version owns the segments shown to clients.
 	var version *catalog.FileVersion
-	for i := range detail.Versions {
-		if version == nil || (detail.Versions[i].FileID != 0 && version.FileID == 0) {
-			version = &detail.Versions[i]
+	if requestedFileID > 0 {
+		for i := range detail.Versions {
+			if detail.Versions[i].FileID == requestedFileID {
+				version = &detail.Versions[i]
+				break
+			}
+		}
+	}
+	if requestedFileID == 0 {
+		for i := range detail.Versions {
+			if version == nil || (detail.Versions[i].FileID != 0 && version.FileID == 0) {
+				version = &detail.Versions[i]
+			}
 		}
 	}
 	if version == nil {

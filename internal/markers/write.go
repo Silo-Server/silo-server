@@ -27,7 +27,7 @@ func CanWriteMarker(existingSource *string, existingConfidence *float64, newSour
 	if existingConfidence != nil && newConfidence != nil {
 		return *newConfidence > *existingConfidence
 	}
-	return true
+	return false
 }
 
 // MarkerUpdatePayload is the storage-agnostic shape produced from a provider

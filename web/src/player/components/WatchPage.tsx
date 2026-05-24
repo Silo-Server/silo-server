@@ -77,6 +77,8 @@ export function WatchPage({
   showForcedSubtitles,
   profileLanguage,
   autoSkipIntro,
+  autoSkipRecap,
+  autoPlayNextPreview,
   seriesContext,
   onNavigateEpisode,
   onEnded,
@@ -411,6 +413,10 @@ export function WatchPage({
       intro={activeMarkers.intro}
       autoSkipIntro={autoSkipIntro}
       credits={activeMarkers.credits}
+      recap={activeMarkers.recap}
+      autoSkipRecap={autoSkipRecap}
+      preview={activeMarkers.preview}
+      autoPlayNextPreview={autoPlayNextPreview}
       duration={selectedDuration}
       qualityPreference={qualityPreference}
       seriesContext={seriesContext}

@@ -10,11 +10,11 @@ interface NextEpisodeState {
 }
 
 /**
- * Detects when the current playback position enters the credits region,
+ * Detects when the current playback position enters the configured trigger region,
  * starts a 10-second countdown, and provides the next episode reference.
  */
 export function useNextEpisode(
-  credits: PlayerTimeRange | null,
+  triggerRegion: PlayerTimeRange | null,
   seriesContext: SeriesContext | undefined,
   currentTime: number,
   onNavigate: (contentId: string) => void,
@@ -41,11 +41,11 @@ export function useNextEpisode(
     }
   }, [currentEpisodeKey]);
 
-  // Detect entry into credits region.
+  // Detect entry into the configured trigger region.
   useEffect(() => {
-    if (!credits || !nextEpisode || cancelledRef.current) return;
+    if (!triggerRegion || !nextEpisode || cancelledRef.current) return;
 
-    if (currentTime >= credits.start && !showCountdown) {
+    if (currentTime >= triggerRegion.start && !showCountdown) {
       setShowCountdown(true);
       setSecondsRemaining(10);
 
@@ -60,7 +60,7 @@ export function useNextEpisode(
         });
       }, 1000);
     }
-  }, [currentTime, credits, nextEpisode, showCountdown, onNavigate]);
+  }, [currentTime, triggerRegion, nextEpisode, showCountdown, onNavigate]);
 
   // Clean up interval on unmount.
   useEffect(() => {

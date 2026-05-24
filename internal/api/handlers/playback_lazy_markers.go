@@ -38,9 +38,6 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	if h == nil || session == nil || file == nil || file.ID <= 0 {
 		return
 	}
-	if hasOnlineSourcedMarkers(file) {
-		return
-	}
 	if file.MediaFolderID <= 0 {
 		return
 	}
@@ -87,6 +84,9 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	hasOnline := h.hasOnlineMarkerProviders()
 	shouldRunLocal := markers.ShouldRunLocal(mode)
 	shouldRunOnline := (mode == markers.ModeOnline || mode == markers.ModeBoth) && hasOnline
+	if shouldRunOnline && hasOnlineSourcedMarkers(file) {
+		shouldRunOnline = false
+	}
 
 	if shouldRunOnline {
 		// Online providers work for any enabled library (movies and series alike).
@@ -184,7 +184,9 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		if wrote {
 			if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
 				h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
-				return
+				if !runLocal || hasLocalDetectionMarkers(refreshed) {
+					return
+				}
 			}
 		}
 	}
@@ -193,7 +195,9 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 	// before falling through to the (expensive) local analyzer.
 	if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
 		h.notifyPlaybackMarkers(ctx, sessionID, refreshed, mode)
-		return
+		if !runLocal || hasLocalDetectionMarkers(refreshed) {
+			return
+		}
 	}
 
 	if runLocal {
@@ -353,6 +357,14 @@ func hasAnyMarker(file *models.MediaFile) bool {
 		(file.CreditsStart != nil && file.CreditsEnd != nil) ||
 		(file.RecapStart != nil && file.RecapEnd != nil) ||
 		(file.PreviewStart != nil && file.PreviewEnd != nil)
+}
+
+func hasLocalDetectionMarkers(file *models.MediaFile) bool {
+	if file == nil {
+		return false
+	}
+	return (file.IntroStart != nil && file.IntroEnd != nil) ||
+		(file.CreditsStart != nil && file.CreditsEnd != nil)
 }
 
 // markerUpdateFromPayload adapts the generic markers.MarkerUpdatePayload to

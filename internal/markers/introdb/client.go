@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -27,6 +28,7 @@ const (
 // for the same lookup key collapse to a single HTTP round trip via the cache.
 type Client struct {
 	httpClient *http.Client
+	mu         sync.RWMutex
 	apiKey     string
 	baseURL    string
 	limiter    *rate.Limiter
@@ -51,11 +53,19 @@ func NewClient(apiKey string) *Client {
 }
 
 // SetBaseURL overrides the API base URL (used by tests).
-func (c *Client) SetBaseURL(u string) { c.baseURL = u }
+func (c *Client) SetBaseURL(u string) {
+	c.mu.Lock()
+	c.baseURL = u
+	c.mu.Unlock()
+}
 
 // SetAPIKey rotates the bearer token in-place. Safe to call concurrently
 // with in-flight requests; subsequent requests use the new key.
-func (c *Client) SetAPIKey(apiKey string) { c.apiKey = strings.TrimSpace(apiKey) }
+func (c *Client) SetAPIKey(apiKey string) {
+	c.mu.Lock()
+	c.apiKey = strings.TrimSpace(apiKey)
+	c.mu.Unlock()
+}
 
 // Close releases the background sweeper goroutine inside the response cache.
 func (c *Client) Close() {
@@ -84,7 +94,7 @@ func (c *Client) FetchEpisode(ctx context.Context, tmdbID, imdbID string, season
 	if durationMS > 0 {
 		q.Set("duration_ms", strconv.FormatInt(durationMS, 10))
 	}
-	return c.fetch(ctx, q, cacheKeyEpisode(tmdbID, imdbID, season, episode))
+	return c.fetch(ctx, q, cacheKeyEpisode(tmdbID, imdbID, season, episode, durationMS))
 }
 
 // FetchMovie looks up segment timestamps for a movie.
@@ -102,7 +112,7 @@ func (c *Client) FetchMovie(ctx context.Context, tmdbID, imdbID string, duration
 	if durationMS > 0 {
 		q.Set("duration_ms", strconv.FormatInt(durationMS, 10))
 	}
-	return c.fetch(ctx, q, cacheKeyMovie(tmdbID, imdbID))
+	return c.fetch(ctx, q, cacheKeyMovie(tmdbID, imdbID, durationMS))
 }
 
 func (c *Client) fetch(ctx context.Context, q url.Values, key string) (*mediaResponse, error) {
@@ -114,7 +124,12 @@ func (c *Client) fetch(ctx context.Context, q url.Values, key string) (*mediaRes
 		return nil, err
 	}
 
-	reqURL := c.baseURL + "/media?" + q.Encode()
+	c.mu.RLock()
+	baseURL := c.baseURL
+	apiKey := c.apiKey
+	c.mu.RUnlock()
+
+	reqURL := baseURL + "/media?" + q.Encode()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
@@ -123,8 +138,8 @@ func (c *Client) fetch(ctx context.Context, q url.Values, key string) (*mediaRes
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", "Silo-Server/markers")
-		if c.apiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		if apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
 		}
 
 		resp, err := c.httpClient.Do(req)
@@ -195,16 +210,16 @@ func retryAfterOrDefault(resp *http.Response, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second
 }
 
-func cacheKeyEpisode(tmdbID, imdbID string, season, episode int) string {
+func cacheKeyEpisode(tmdbID, imdbID string, season, episode int, durationMS int64) string {
 	if tmdbID != "" {
-		return fmt.Sprintf("tmdb:%s:s%de%d", tmdbID, season, episode)
+		return fmt.Sprintf("tmdb:%s:s%de%d:d%d", tmdbID, season, episode, durationMS)
 	}
-	return fmt.Sprintf("imdb:%s:s%de%d", imdbID, season, episode)
+	return fmt.Sprintf("imdb:%s:s%de%d:d%d", imdbID, season, episode, durationMS)
 }
 
-func cacheKeyMovie(tmdbID, imdbID string) string {
+func cacheKeyMovie(tmdbID, imdbID string, durationMS int64) string {
 	if tmdbID != "" {
-		return "tmdb:movie:" + tmdbID
+		return fmt.Sprintf("tmdb:movie:%s:d%d", tmdbID, durationMS)
 	}
-	return "imdb:movie:" + imdbID
+	return fmt.Sprintf("imdb:movie:%s:d%d", imdbID, durationMS)
 }

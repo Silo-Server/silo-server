@@ -90,6 +90,7 @@ type AdminHandler struct {
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
+	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 }
 
 // NewAdminHandler creates a new AdminHandler backed by the given
@@ -1022,6 +1023,7 @@ var sensitiveSettingKeys = map[string]bool{
 	"recommendations.openai_api_key":       true,
 	"recommendations.embedding_auth_token": true,
 	"tmdb.api_key":                         true,
+	"introdb.api_key":                      true,
 	"mdblist.api_key":                      true,
 	"watchsync.trakt.client_id":            true,
 	"watchsync.trakt.client_secret":        true,
@@ -1890,7 +1892,10 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 
 	if h.EventBus != nil {
 		_ = h.EventBus.Publish(r.Context(), cache.ChannelAdmin,
-			cache.Event{Type: cache.EventSettingsChanged})
+			cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+	}
+	if h.OnServerSettingUpdated != nil {
+		h.OnServerSettingUpdated(r.Context(), key, req.Value)
 	}
 
 	if sensitiveSettingKeys[key] {

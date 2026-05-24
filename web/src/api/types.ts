@@ -128,8 +128,8 @@ export interface Profile {
   show_forced_subtitles?: boolean;
   auto_skip_intro: boolean;
   auto_skip_credits: boolean;
-  auto_skip_recap: boolean;
-  auto_play_next_preview: boolean;
+  auto_skip_recap?: boolean;
+  auto_play_next_preview?: boolean;
   library_restrictions_enabled: boolean;
   allowed_library_ids: number[] | null;
   max_playback_quality: string;
