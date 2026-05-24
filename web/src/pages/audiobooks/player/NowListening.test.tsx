@@ -20,6 +20,8 @@ function makePlayback(over: Partial<AudiobookPlayback> = {}): AudiobookPlayback 
     seekTo: vi.fn(),
     skip: vi.fn(),
     setRate: vi.fn(),
+    sleep: { setting: { kind: "off" as const }, remainingMs: null },
+    setSleep: vi.fn(),
     ...over,
   };
 }

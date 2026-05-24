@@ -3,6 +3,7 @@ import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
 import { SpeedMenu } from "@/player/components/SpeedMenu";
+import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";
 import { CoverExpandTile } from "./CoverExpandTile";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
 
@@ -113,6 +114,11 @@ export function MiniBar({
         </div>
 
         <div className="flex items-center justify-end gap-2">
+          <SleepTimerMenu
+            setting={playback.sleep.setting}
+            remainingMs={playback.sleep.remainingMs}
+            onChange={playback.setSleep}
+          />
           {playback.chapters.length > 0 && (
             <ChaptersMenu
               chapters={playback.chapters}

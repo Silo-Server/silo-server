@@ -87,4 +87,31 @@ describe("useAudiobookPlayback", () => {
     );
     expect(result.current.currentChapter?.title).toBe("One");
   });
+
+  it("setSleep arms a duration timer that fires after the configured seconds", () => {
+    const { result } = renderHook(() =>
+      useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds: 0 }),
+    );
+    const audio = makeAudio();
+    Object.defineProperty(audio, "paused", { value: false, writable: true });
+    act(() => {
+      (result.current.audioRef as React.MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    act(() => result.current.setSleep({ kind: "duration", seconds: 1 }));
+    expect(result.current.sleep.remainingMs).toBeGreaterThan(0);
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(audio.pause).toHaveBeenCalled();
+  });
+
+  it("setSleep with off clears any armed timer", () => {
+    const { result } = renderHook(() =>
+      useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds: 0 }),
+    );
+    act(() => result.current.setSleep({ kind: "duration", seconds: 5 }));
+    expect(result.current.sleep.remainingMs).toBeGreaterThan(0);
+    act(() => result.current.setSleep({ kind: "off" }));
+    expect(result.current.sleep.remainingMs).toBeNull();
+  });
 });

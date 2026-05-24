@@ -3,6 +3,7 @@ import { buildDirectDownloadUrl } from "@/hooks/queries/downloads";
 import { useReportAudiobookProgress } from "@/hooks/audiobooks/useReportAudiobookProgress";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlayerChapter } from "@/player/types";
+import type { SleepSetting } from "@/player/components/SleepTimerMenu";
 
 const REPORT_INTERVAL_MS = 10_000;
 
@@ -28,6 +29,8 @@ export interface AudiobookPlayback {
   seekTo: (seconds: number) => void;
   skip: (delta: number) => void;
   setRate: (r: number) => void;
+  sleep: { setting: SleepSetting; remainingMs: number | null };
+  setSleep: (next: SleepSetting) => void;
 }
 
 function safeNumber(value: number): number {
@@ -210,6 +213,44 @@ export function useAudiobookPlayback({
     );
   }, [chapters, currentTime]);
 
+  const [sleepSetting, setSleepSetting] = useState<SleepSetting>({ kind: "off" });
+  const [sleepTargetMs, setSleepTargetMs] = useState<number | null>(null);
+  const [sleepNowMs, setSleepNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (sleepSetting.kind !== "duration") {
+      setSleepTargetMs(null);
+      return;
+    }
+    setSleepTargetMs(Date.now() + sleepSetting.seconds * 1000);
+  }, [sleepSetting]);
+
+  useEffect(() => {
+    if (sleepTargetMs == null) return;
+    const id = window.setInterval(() => setSleepNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [sleepTargetMs]);
+
+  useEffect(() => {
+    if (sleepTargetMs == null) return;
+    if (sleepNowMs < sleepTargetMs) return;
+    const audio = audioRef.current;
+    if (audio && !audio.paused) audio.pause();
+    setSleepSetting({ kind: "off" });
+    setSleepTargetMs(null);
+  }, [sleepNowMs, sleepTargetMs]);
+
+  useEffect(() => {
+    if (sleepSetting.kind !== "end-of-chapter" || !currentChapter) return;
+    if (currentTime < currentChapter.end_seconds) return;
+    const audio = audioRef.current;
+    if (audio && !audio.paused) audio.pause();
+    setSleepSetting({ kind: "off" });
+  }, [sleepSetting, currentChapter, currentTime]);
+
+  const setSleep = useCallback((next: SleepSetting) => setSleepSetting(next), []);
+  const sleepRemainingMs = sleepTargetMs == null ? null : Math.max(0, sleepTargetMs - sleepNowMs);
+
   return {
     audioRef,
     streamUrl,
@@ -225,5 +266,7 @@ export function useAudiobookPlayback({
     seekTo,
     skip,
     setRate,
+    sleep: { setting: sleepSetting, remainingMs: sleepRemainingMs },
+    setSleep,
   };
 }

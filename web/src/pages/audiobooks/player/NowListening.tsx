@@ -4,6 +4,7 @@ import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
 import { SpeedMenu } from "@/player/components/SpeedMenu";
+import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
 
 const SKIP_BACK_SECONDS = 30;
@@ -148,6 +149,11 @@ export function NowListening({
           </div>
 
           <div className="text-muted-foreground flex items-center justify-center gap-6 text-sm">
+            <SleepTimerMenu
+              setting={playback.sleep.setting}
+              remainingMs={playback.sleep.remainingMs}
+              onChange={playback.setSleep}
+            />
             {playback.chapters.length > 0 && (
               <ChaptersMenu
                 chapters={playback.chapters}
