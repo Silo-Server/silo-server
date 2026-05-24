@@ -215,6 +215,22 @@ func isMovieLibraryType(libraryType string) bool {
 		return false
 	}
 }
+func isAudiobookLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "audiobook", "audiobooks":
+		return true
+	default:
+		return false
+	}
+}
+func isPodcastLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "podcast", "podcasts":
+		return true
+	default:
+		return false
+	}
+}
 
 func canonicalWalkPath(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
