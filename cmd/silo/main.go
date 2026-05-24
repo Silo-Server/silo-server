@@ -1287,11 +1287,47 @@ func main() {
 		slog.Info("task manager started")
 	}
 
-	// Scaffold audiobooks service (sub-plan 1: kill-switch reader only).
+	// Scaffold audiobooks service and ABS-compat handler.
 	// audiobooksSettingsAdapter (defined at package level below) bridges
 	// catalog.ServerSettingsRepo.Get to audiobooks.SettingsReader.GetString.
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
-	_ = audiobooksService // sub-plan 2+ will register routes / scheduled tasks
+
+	// Build the ABS-compatible REST + Socket.io handler when a DB pool is
+	// available. Routes are mounted at the root level by NewRouter (not under
+	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
+	// /abs/socket.io/* without path prefix hacks.
+	if deps.DB != nil {
+		absUserRepo := auth.NewUserRepository(deps.DB)
+		absSessionRepo := auth.NewSessionRepository(deps.DB)
+		absJWTService := auth.NewJWTService(
+			cfg.Auth.JWTSecret,
+			cfg.Auth.AccessTokenExpiry,
+			cfg.Auth.RefreshTokenExpiry,
+		)
+		absAuthSvc := auth.NewService(
+			auth.NewLocalProvider(absUserRepo, absSessionRepo),
+			absJWTService,
+			absSessionRepo,
+			absUserRepo,
+			nil, // invite codes: not needed for ABS compat
+			nil, // settings: not needed here
+			nil, // user store: not needed here
+		)
+		absItemRepo := catalog.NewItemRepository(deps.DB)
+		absHDeps := audiobooks.ABSHandlerDeps{
+			Pool:     deps.DB,
+			Items:    absItemRepo,
+			Files:    deps.FileRepo,
+			Settings: settingsRepo,
+			Auth: &audiobooks.SiloCredValidator{
+				Auth: absAuthSvc,
+				Pool: deps.DB,
+			},
+		}
+		absH := audiobooksService.BuildABSHandler(absHDeps)
+		deps.ABSHandler = absH
+	}
+	_ = audiobooksService
 
 	if deps.DB != nil && pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && deps.PluginService != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
@@ -1414,6 +1450,14 @@ func main() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	metricsMux.Handle("/api/", router)
+	// ABS-compat routes live outside /api/ — register them explicitly so they
+	// don't fall through to the SPA fallback handler. The chi router handles
+	// them internally via absHandler.Mount(r).
+	if deps.ABSHandler != nil {
+		metricsMux.Handle("/abs/", router)
+		metricsMux.Handle("/login", router)
+		metricsMux.Handle("/socket.io/", router)
+	}
 	metricsMux.Handle("/", server.FrontendHandler())
 
 	// Step 9: Start background workers (if needed).

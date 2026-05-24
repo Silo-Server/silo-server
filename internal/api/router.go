@@ -142,10 +142,23 @@ type Dependencies struct {
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
 	MDBListClient *mdblist.Client
+
+	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
+	// it is mounted at the root router level (not under /api/v1/) so that ABS
+	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
+	// resolve correctly. May be nil; no ABS routes are registered in that case.
+	ABSHandler absHandler
+}
+
+// absHandler is the narrow interface the router needs from the ABS handler.
+// Using an interface avoids a direct import of the abs sub-package from router.go.
+type absHandler interface {
+	Mount(r chi.Router)
 }
 
 // NewRouter creates a chi.Router with all middleware and routes mounted
-// under /api/v1/.
+// under /api/v1/. ABS-compat routes (/abs/*, /login, /socket.io/*) are
+// mounted at the root level when deps.ABSHandler is non-nil.
 func NewRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
@@ -990,6 +1003,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			webhookSyncSvc.SetStableIdentityResolver(historyIdentity)
 			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc)
 		}
+	}
+
+	// ABS-compat routes live at the root, outside the /api/v1 prefix.
+	// Mount after middleware so r.Use() calls have all been registered first
+	// (chi panics if routes are registered before Use() calls on the same mux).
+	if deps.ABSHandler != nil {
+		deps.ABSHandler.Mount(r)
 	}
 
 	r.Route("/api/v1", func(r chi.Router) {
