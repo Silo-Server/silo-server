@@ -3,6 +3,7 @@ import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
 import { SpeedMenu } from "@/player/components/SpeedMenu";
+import { CoverExpandTile } from "./CoverExpandTile";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
 
 const SKIP_BACK_SECONDS = 30;
@@ -10,12 +11,22 @@ const SKIP_FORWARD_SECONDS = 30;
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
 
 interface MiniBarProps {
+  contentId: string;
   title?: string;
+  posterUrl?: string;
   playback: AudiobookPlayback;
   onClose?: () => void;
+  onExpand?: () => void;
 }
 
-export function MiniBar({ title, playback, onClose }: MiniBarProps) {
+export function MiniBar({
+  contentId,
+  title,
+  posterUrl,
+  playback,
+  onClose,
+  onExpand,
+}: MiniBarProps) {
   return (
     <div className="bg-background border-b px-3 pt-2 pb-2 sm:px-6">
       <SeekBar
@@ -29,30 +40,38 @@ export function MiniBar({ title, playback, onClose }: MiniBarProps) {
       />
 
       <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-5">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          {title ? (
-            <div
-              className="truncate text-[14px] leading-tight font-semibold tracking-tight sm:text-[15px]"
-              title={title}
-            >
-              {title}
+        <div className="flex min-w-0 items-center gap-3">
+          <CoverExpandTile
+            contentId={contentId}
+            posterUrl={posterUrl}
+            title={title}
+            onExpand={onExpand}
+          />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            {title ? (
+              <div
+                className="truncate text-[14px] leading-tight font-semibold tracking-tight sm:text-[15px]"
+                title={title}
+              >
+                {title}
+              </div>
+            ) : null}
+            {playback.currentChapter ? (
+              <div
+                data-testid="minibar-chapter-title"
+                className="text-muted-foreground truncate text-[11px] leading-tight"
+                title={playback.currentChapter.title}
+              >
+                {playback.currentChapter.title}
+              </div>
+            ) : null}
+            <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
+              <span className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums">
+                {formatTime(playback.currentTime)}
+                <span className="mx-1 opacity-50">/</span>
+                {formatTime(playback.duration)}
+              </span>
             </div>
-          ) : null}
-          {playback.currentChapter ? (
-            <div
-              data-testid="minibar-chapter-title"
-              className="text-muted-foreground truncate text-[11px] leading-tight"
-              title={playback.currentChapter.title}
-            >
-              {playback.currentChapter.title}
-            </div>
-          ) : null}
-          <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
-            <span className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums">
-              {formatTime(playback.currentTime)}
-              <span className="mx-1 opacity-50">/</span>
-              {formatTime(playback.duration)}
-            </span>
           </div>
         </div>
 

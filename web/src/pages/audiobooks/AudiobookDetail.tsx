@@ -194,6 +194,7 @@ export default function AudiobookDetail() {
             key={`${contentId}-${startSeconds}`}
             contentId={contentId ?? ""}
             title={audiobook.title}
+            posterUrl={audiobook.poster_url}
             files={files}
             initialPositionSeconds={startSeconds}
             onClose={() => setPlayerOpen(false)}
