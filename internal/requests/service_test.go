@@ -497,6 +497,111 @@ func (f *fakeStore) UpsertIntegration(context.Context, Integration) (*Integratio
 	return nil, nil
 }
 
+func TestListStudiosReturnsBundleWithLogos(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{
+		companies: map[int]*tmdb.Company{
+			420: {ID: 420, Name: "Marvel Studios", LogoPath: "/hUze.png"},
+		},
+	}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	studios, err := service.ListStudios(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatalf("ListStudios: %v", err)
+	}
+	if len(studios) != len(BundledStudios) {
+		t.Fatalf("len = %d, want %d", len(studios), len(BundledStudios))
+	}
+
+	var marvel *DiscoverBrandCard
+	for i := range studios {
+		if studios[i].Slug == "marvel-studios" {
+			marvel = &studios[i]
+			break
+		}
+	}
+	if marvel == nil {
+		t.Fatal("marvel-studios missing from response")
+	}
+	if marvel.LogoURL == nil || *marvel.LogoURL == "" {
+		t.Errorf("expected non-nil logo URL for marvel, got %v", marvel.LogoURL)
+	}
+}
+
+func TestListStudiosToleratesLogoLookupFailure(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{
+		companies: map[int]*tmdb.Company{},
+		companyErr: map[int]error{
+			420: errors.New("tmdb down"),
+		},
+	}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	studios, err := service.ListStudios(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatalf("ListStudios should not fail wholesale: %v", err)
+	}
+	if len(studios) != len(BundledStudios) {
+		t.Fatalf("len = %d, want %d", len(studios), len(BundledStudios))
+	}
+	for _, s := range studios {
+		if s.Slug == "marvel-studios" {
+			if s.LogoURL != nil {
+				t.Errorf("expected nil logo URL on failure, got %v", *s.LogoURL)
+			}
+			return
+		}
+	}
+	t.Error("marvel-studios missing")
+}
+
+func TestListNetworksReturnsBundle(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{
+		networks: map[int]*tmdb.Network{
+			213: {ID: 213, Name: "Netflix", LogoPath: "/wuU9.png"},
+		},
+	}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	networks, err := service.ListNetworks(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatalf("ListNetworks: %v", err)
+	}
+	if len(networks) != len(BundledNetworks) {
+		t.Fatalf("len = %d, want %d", len(networks), len(BundledNetworks))
+	}
+}
+
+func TestListGenresReturnsBundleWithSeriesSupportFlag(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
+
+	genres, err := service.ListGenres(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatalf("ListGenres: %v", err)
+	}
+	if len(genres) != len(BundledGenres) {
+		t.Fatalf("len = %d, want %d", len(genres), len(BundledGenres))
+	}
+	for _, g := range genres {
+		switch g.Slug {
+		case "action", "comedy", "drama", "sci-fi", "animation", "documentary":
+			if !g.SeriesSupported {
+				t.Errorf("%s should support series", g.Slug)
+			}
+		case "horror", "romance":
+			if g.SeriesSupported {
+				t.Errorf("%s should not support series", g.Slug)
+			}
+		}
+		if g.GradientFrom == "" || g.GradientTo == "" {
+			t.Errorf("%s missing gradient", g.Slug)
+		}
+		if g.LogoURL != nil {
+			t.Errorf("%s should not have a logo URL", g.Slug)
+		}
+	}
+}
+
 type fakePresence struct {
 	available map[MediaType]map[int]bool
 }
@@ -515,9 +620,15 @@ func (f *fakePresence) LookupTMDB(_ context.Context, mediaType MediaType, ids []
 }
 
 type fakeTMDBClient struct {
-	page        *tmdb.MediaPage
-	externalIDs *tmdb.ExternalIDs
-	detail      *tmdb.MediaDetail
+	page         *tmdb.MediaPage
+	externalIDs  *tmdb.ExternalIDs
+	detail       *tmdb.MediaDetail
+	companies    map[int]*tmdb.Company
+	companyErr   map[int]error
+	networks     map[int]*tmdb.Network
+	networkErr   map[int]error
+	discoverPage *tmdb.MediaPage
+	discoverErr  error
 }
 
 func (f *fakeTMDBClient) SearchMedia(context.Context, string, string, int) (*tmdb.MediaPage, error) {
@@ -528,12 +639,42 @@ func (f *fakeTMDBClient) DiscoverSection(context.Context, string, int) (*tmdb.Me
 	return f.page, nil
 }
 
+func (f *fakeTMDBClient) DiscoverPage(context.Context, string, tmdb.DiscoverParams, int) (*tmdb.MediaPage, error) {
+	if f.discoverErr != nil {
+		return nil, f.discoverErr
+	}
+	if f.discoverPage != nil {
+		return f.discoverPage, nil
+	}
+	return &tmdb.MediaPage{Results: []tmdb.MediaResult{}}, nil
+}
+
 func (f *fakeTMDBClient) GetExternalIDs(context.Context, string, int) (*tmdb.ExternalIDs, error) {
 	return f.externalIDs, nil
 }
 
 func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
 	return f.detail, nil
+}
+
+func (f *fakeTMDBClient) GetCompany(_ context.Context, id int) (*tmdb.Company, error) {
+	if err, ok := f.companyErr[id]; ok {
+		return nil, err
+	}
+	if c, ok := f.companies[id]; ok {
+		return c, nil
+	}
+	return &tmdb.Company{ID: id}, nil
+}
+
+func (f *fakeTMDBClient) GetNetwork(_ context.Context, id int) (*tmdb.Network, error) {
+	if err, ok := f.networkErr[id]; ok {
+		return nil, err
+	}
+	if n, ok := f.networks[id]; ok {
+		return n, nil
+	}
+	return &tmdb.Network{ID: id}, nil
 }
 
 type fakeMovieAdapter struct {
