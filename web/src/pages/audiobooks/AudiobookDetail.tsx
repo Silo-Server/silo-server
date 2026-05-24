@@ -4,7 +4,7 @@ import { useAudiobook } from "@/hooks/audiobooks/useAudiobook";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight, Play } from "lucide-react";
-import AudiobookPlayer from "./AudiobookPlayer";
+import AudiobookPlayer from "./player/AudiobookPlayer";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
