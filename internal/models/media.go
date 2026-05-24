@@ -212,6 +212,8 @@ const (
 	PersonKindProducer  PersonKind = 4
 	PersonKindGuestStar PersonKind = 5
 	PersonKindComposer  PersonKind = 6
+	PersonKindAuthor    PersonKind = 7
+	PersonKindNarrator  PersonKind = 8
 )
 
 // String returns the Jellyfin-compatible type string for this PersonKind.
@@ -229,6 +231,10 @@ func (k PersonKind) String() string {
 		return "GuestStar"
 	case PersonKindComposer:
 		return "Composer"
+	case PersonKindAuthor:
+		return "Author"
+	case PersonKindNarrator:
+		return "Narrator"
 	default:
 		return "Unknown"
 	}
