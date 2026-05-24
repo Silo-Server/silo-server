@@ -34,6 +34,13 @@ type RequestService interface {
 	ListIntegrations(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.Integration, error)
 	UpsertIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
 	LoadIntegrationOptions(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.IntegrationOptions, error)
+
+	ListStudios(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
+	ListNetworks(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
+	ListGenres(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
+	BrowseStudio(ctx context.Context, viewer mediarequests.Viewer, slug, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	BrowseNetwork(ctx context.Context, viewer mediarequests.Viewer, slug, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	BrowseGenre(ctx context.Context, viewer mediarequests.Viewer, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
 }
 
 type RequestsHandler struct {
@@ -97,6 +104,109 @@ func (h *RequestsHandler) HandleDiscoverSection(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, section)
+}
+
+func (h *RequestsHandler) HandleListStudios(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	studios, err := h.service.ListStudios(r.Context(), viewer)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Studios []mediarequests.DiscoverBrandCard `json:"studios"`
+	}{Studios: studios})
+}
+
+func (h *RequestsHandler) HandleListNetworks(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	networks, err := h.service.ListNetworks(r.Context(), viewer)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Networks []mediarequests.DiscoverBrandCard `json:"networks"`
+	}{Networks: networks})
+}
+
+func (h *RequestsHandler) HandleListGenres(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	genres, err := h.service.ListGenres(r.Context(), viewer)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Genres []mediarequests.DiscoverBrandCard `json:"genres"`
+	}{Genres: genres})
+}
+
+func (h *RequestsHandler) HandleBrowseStudio(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	page, ok := parsePositiveIntQuery(w, r, "page", 1)
+	if !ok {
+		return
+	}
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	sort := strings.TrimSpace(r.URL.Query().Get("sort"))
+	resp, err := h.service.BrowseStudio(r.Context(), viewer, slug, sort, page)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *RequestsHandler) HandleBrowseNetwork(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	page, ok := parsePositiveIntQuery(w, r, "page", 1)
+	if !ok {
+		return
+	}
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	sort := strings.TrimSpace(r.URL.Query().Get("sort"))
+	resp, err := h.service.BrowseNetwork(r.Context(), viewer, slug, sort, page)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *RequestsHandler) HandleBrowseGenre(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	page, ok := parsePositiveIntQuery(w, r, "page", 1)
+	if !ok {
+		return
+	}
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	sort := strings.TrimSpace(r.URL.Query().Get("sort"))
+	mediaType := mediarequests.MediaType(strings.TrimSpace(r.URL.Query().Get("media_type")))
+	resp, err := h.service.BrowseGenre(r.Context(), viewer, slug, mediaType, sort, page)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *RequestsHandler) HandleGetDetail(w http.ResponseWriter, r *http.Request) {
