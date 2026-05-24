@@ -33,6 +33,7 @@ import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
 import Requests from "@/pages/Requests";
+import RequestBrowse from "@/pages/RequestBrowse";
 import RequestDetail from "@/pages/RequestDetail";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminActivity from "@/pages/AdminActivity";
@@ -450,6 +451,18 @@ function AppRoutes() {
                           />
                           <Route path="/requests" element={<Requests />} />
                           <Route path="/requests/:mediaType/:tmdbId" element={<RequestDetail />} />
+                          <Route
+                            path="/requests/browse/studio/:slug"
+                            element={<RequestBrowse kind="studio" />}
+                          />
+                          <Route
+                            path="/requests/browse/network/:slug"
+                            element={<RequestBrowse kind="network" />}
+                          />
+                          <Route
+                            path="/requests/browse/genre/:slug"
+                            element={<RequestBrowse kind="genre" />}
+                          />
                           <Route path="/recommendations" element={<Recommendations />} />
                           <Route
                             path="/recommendations/section/:kind"
