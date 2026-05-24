@@ -129,3 +129,43 @@ func testStringSliceContains(values []string, target string) bool {
 	}
 	return false
 }
+
+func TestIsAudiobookLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"audiobooks", true},
+		{"audiobook", true},
+		{"Audiobook", true},
+		{"  AUDIOBOOKS  ", true},
+		{"movies", false},
+		{"series", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isAudiobookLibraryType(tc.in); got != tc.want {
+			t.Errorf("isAudiobookLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIsPodcastLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"podcasts", true},
+		{"podcast", true},
+		{"Podcast", true},
+		{"  PODCASTS  ", true},
+		{"series", false},
+		{"audiobooks", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isPodcastLibraryType(tc.in); got != tc.want {
+			t.Errorf("isPodcastLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
