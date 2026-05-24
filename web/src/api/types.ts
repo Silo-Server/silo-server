@@ -1469,6 +1469,44 @@ export interface RequestDiscoveryResponse {
   sections: RequestDiscoverySection[];
 }
 
+export interface DiscoverBrandCard {
+  tmdb_id?: number;
+  slug: string;
+  display_name: string;
+  brand_color?: string;
+  logo_url?: string | null;
+  gradient_from?: string;
+  gradient_to?: string;
+  series_supported?: boolean;
+}
+
+export interface DiscoverStudiosResponse {
+  studios: DiscoverBrandCard[];
+}
+
+export interface DiscoverNetworksResponse {
+  networks: DiscoverBrandCard[];
+}
+
+export interface DiscoverGenresResponse {
+  genres: DiscoverBrandCard[];
+}
+
+export type DiscoverBrowseKind = "studio" | "network" | "genre";
+
+export interface DiscoverBrowseResponse {
+  kind: DiscoverBrowseKind;
+  slug: string;
+  display_name: string;
+  brand_color?: string;
+  logo_url?: string | null;
+  media_type: RequestMediaType;
+  sort: "popularity" | "vote_average" | "release_date";
+  page: number;
+  total_pages: number;
+  results: RequestMediaResult[];
+}
+
 export interface CreateMediaRequestInput {
   media_type: RequestMediaType;
   tmdb_id: number;
