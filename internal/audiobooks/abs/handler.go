@@ -148,8 +148,12 @@ func (h *Handler) Mount(parent chi.Router) {
 	})
 }
 
-func (h *Handler) mountRoutes(_ chi.Router) {
-	// TODO Stage 2: auth routes (login, logout, refresh, authorize, me, ping, status, init)
+func (h *Handler) mountRoutes(r chi.Router) {
+	// Stage 2: login (body-creds + host-proxied paths).
+	r.Post("/login", h.handleLogin)
+	r.Post("/abs/api/login", h.handleLogin)
+
+	// TODO Stage 2 (remaining): logout, refresh, authorize, me, ping, status, init
 	// TODO Stage 3: library browse routes (libraries, items, item detail, cover, authors, series, search, personalized)
 	// TODO Stage 4: playback session + file routes (play, file/download, public/track)
 	// TODO Stage 5: progress routes (me/progress/*, me/items-in-progress, me/listening-stats, me/stats/year/*)
