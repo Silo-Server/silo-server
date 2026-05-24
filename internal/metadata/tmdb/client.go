@@ -614,6 +614,260 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 	}, nil
 }
 
+// GetMediaDetail fetches a single TMDB movie or series with credits, external
+// IDs, recommendations, and the appropriate certification feed, returning a
+// normalized MediaDetail. mediaType accepts Silo-facing "movie" or "series".
+//
+// Cast is sorted by TMDB billing order and capped at 24 entries to keep the
+// payload bounded.
+func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (*MediaDetail, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("tmdb: media id must be > 0 (got %d)", id)
+	}
+
+	switch mediaType {
+	case "movie":
+		path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates", id)
+		var resp movieDetailResponse
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return nil, err
+		}
+		return normalizeMovieDetail(&resp), nil
+	case "series", "tv":
+		path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings", id)
+		var resp tvDetailResponse
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return nil, err
+		}
+		return normalizeTVDetail(&resp), nil
+	default:
+		return nil, fmt.Errorf("tmdb: invalid media type for detail: %q", mediaType)
+	}
+}
+
+func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
+	detail := &MediaDetail{
+		MediaType:     "movie",
+		ID:            resp.ID,
+		IMDbID:        resp.IMDbID,
+		Title:         resp.Title,
+		OriginalTitle: resp.OriginalTitle,
+		Tagline:       resp.Tagline,
+		Overview:      resp.Overview,
+		PosterPath:    resp.PosterPath,
+		BackdropPath:  resp.BackdropPath,
+		ReleaseDate:   resp.ReleaseDate,
+		Year:          releaseYear(resp.ReleaseDate),
+		Runtime:       resp.Runtime,
+		Genres:        namesFromGenres(resp.Genres),
+		VoteAverage:   resp.VoteAverage,
+		VoteCount:     resp.VoteCount,
+		Status:        resp.Status,
+		Homepage:      resp.Homepage,
+		ContentRating: pickMovieCertification(resp.ReleaseDates),
+	}
+	for _, company := range resp.ProductionCompanies {
+		if name := strings.TrimSpace(company.Name); name != "" {
+			detail.ProductionCompanies = append(detail.ProductionCompanies, name)
+		}
+	}
+	if resp.ExternalIDs != nil {
+		detail.TVDBID = resp.ExternalIDs.TVDBID
+		if detail.IMDbID == "" {
+			detail.IMDbID = resp.ExternalIDs.IMDbID
+		}
+	}
+	if resp.Credits != nil {
+		detail.Cast = normalizeCast(resp.Credits.Cast)
+		detail.Director = pickDirector(resp.Credits.Crew)
+	}
+	if resp.Recommendations != nil {
+		detail.Recommendations = make([]MediaResult, 0, len(resp.Recommendations.Results))
+		for _, item := range resp.Recommendations.Results {
+			detail.Recommendations = append(detail.Recommendations, MediaResult{
+				ID:           item.ID,
+				MediaType:    "movie",
+				Title:        item.Title,
+				Overview:     item.Overview,
+				PosterPath:   item.PosterPath,
+				BackdropPath: item.BackdropPath,
+				ReleaseDate:  item.ReleaseDate,
+				Year:         releaseYear(item.ReleaseDate),
+				Popularity:   item.Popularity,
+				VoteAverage:  item.VoteAverage,
+			})
+		}
+	}
+	return detail
+}
+
+func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
+	detail := &MediaDetail{
+		MediaType:        "series",
+		ID:               resp.ID,
+		Title:            resp.Name,
+		OriginalTitle:    resp.OriginalName,
+		Tagline:          resp.Tagline,
+		Overview:         resp.Overview,
+		PosterPath:       resp.PosterPath,
+		BackdropPath:     resp.BackdropPath,
+		ReleaseDate:      resp.FirstAirDate,
+		FirstAirDate:     resp.FirstAirDate,
+		LastAirDate:      resp.LastAirDate,
+		Year:             releaseYear(resp.FirstAirDate),
+		Genres:           namesFromGenres(resp.Genres),
+		VoteAverage:      resp.VoteAverage,
+		VoteCount:        resp.VoteCount,
+		Status:           resp.Status,
+		Homepage:         resp.Homepage,
+		NumberOfSeasons:  resp.NumberOfSeasons,
+		NumberOfEpisodes: resp.NumberOfEpisodes,
+		ContentRating:    pickTVRating(resp.ContentRatings),
+	}
+	if len(resp.EpisodeRunTime) > 0 {
+		detail.Runtime = resp.EpisodeRunTime[0]
+	}
+	for _, network := range resp.Networks {
+		if name := strings.TrimSpace(network.Name); name != "" {
+			detail.Networks = append(detail.Networks, name)
+		}
+	}
+	if resp.ExternalIDs != nil {
+		detail.IMDbID = resp.ExternalIDs.IMDbID
+		detail.TVDBID = resp.ExternalIDs.TVDBID
+	}
+	if resp.Credits != nil {
+		detail.Cast = normalizeCast(resp.Credits.Cast)
+	}
+	for _, person := range resp.CreatedBy {
+		if name := strings.TrimSpace(person.Name); name != "" {
+			detail.Creators = append(detail.Creators, name)
+		}
+	}
+	if resp.Recommendations != nil {
+		detail.Recommendations = make([]MediaResult, 0, len(resp.Recommendations.Results))
+		for _, item := range resp.Recommendations.Results {
+			detail.Recommendations = append(detail.Recommendations, MediaResult{
+				ID:           item.ID,
+				MediaType:    "series",
+				Title:        item.Name,
+				Overview:     item.Overview,
+				PosterPath:   item.PosterPath,
+				BackdropPath: item.BackdropPath,
+				ReleaseDate:  item.FirstAirDate,
+				Year:         releaseYear(item.FirstAirDate),
+				Popularity:   item.Popularity,
+				VoteAverage:  item.VoteAverage,
+			})
+		}
+	}
+	return detail
+}
+
+func namesFromGenres(genres []genreEntry) []string {
+	if len(genres) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(genres))
+	for _, g := range genres {
+		if name := strings.TrimSpace(g.Name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// normalizeCast sorts by billing order and caps the result so the response
+// payload stays bounded — the request detail UI surfaces only the top of the
+// list anyway.
+func normalizeCast(cast []castEntry) []MediaCastMember {
+	if len(cast) == 0 {
+		return nil
+	}
+	sorted := make([]castEntry, len(cast))
+	copy(sorted, cast)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j].Order < sorted[j-1].Order; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	const maxCast = 24
+	if len(sorted) > maxCast {
+		sorted = sorted[:maxCast]
+	}
+	out := make([]MediaCastMember, 0, len(sorted))
+	for _, member := range sorted {
+		out = append(out, MediaCastMember{
+			Name:        strings.TrimSpace(member.Name),
+			Character:   strings.TrimSpace(member.Character),
+			ProfilePath: member.ProfilePath,
+			Order:       member.Order,
+		})
+	}
+	return out
+}
+
+func pickDirector(crew []crewEntry) string {
+	for _, member := range crew {
+		if strings.EqualFold(member.Job, "Director") {
+			return strings.TrimSpace(member.Name)
+		}
+	}
+	return ""
+}
+
+// pickMovieCertification picks the US theatrical certification if available,
+// then falls back to any non-empty US certification, then any non-empty
+// certification at all. Type 3 is theatrical in TMDB's release-type taxonomy.
+func pickMovieCertification(rd *releaseDatesResponse) string {
+	if rd == nil {
+		return ""
+	}
+	var fallbackUS, fallbackAny string
+	for _, country := range rd.Results {
+		isUS := strings.EqualFold(country.ISO3166, "US")
+		for _, entry := range country.ReleaseDates {
+			cert := strings.TrimSpace(entry.Certification)
+			if cert == "" {
+				continue
+			}
+			if isUS && entry.Type == 3 {
+				return cert
+			}
+			if isUS && fallbackUS == "" {
+				fallbackUS = cert
+			}
+			if fallbackAny == "" {
+				fallbackAny = cert
+			}
+		}
+	}
+	if fallbackUS != "" {
+		return fallbackUS
+	}
+	return fallbackAny
+}
+
+func pickTVRating(cr *contentRatingsResponse) string {
+	if cr == nil {
+		return ""
+	}
+	var fallback string
+	for _, entry := range cr.Results {
+		rating := strings.TrimSpace(entry.Rating)
+		if rating == "" {
+			continue
+		}
+		if strings.EqualFold(entry.ISO3166, "US") {
+			return rating
+		}
+		if fallback == "" {
+			fallback = rating
+		}
+	}
+	return fallback
+}
+
 // GetExternalIDs fetches external IDs for a TMDB movie or TV entry.
 func (c *Client) GetExternalIDs(ctx context.Context, mediaType string, id int) (*ExternalIDs, error) {
 	var path string

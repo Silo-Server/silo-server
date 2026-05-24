@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { Check, Film, Loader2, Plus, Tv } from "lucide-react";
 import type { MediaRequest, RequestMediaResult } from "@/api/types";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,13 @@ function DiscoverCard({
   const availableInLibrary = item.availability === "available" && !item.request.status;
 
   return (
-    <article className={cn("group/req-card relative", POSTER_WIDTH)}>
+    <Link
+      to={`/requests/${item.media_type}/${item.tmdb_id}`}
+      className={cn(
+        "group/req-card relative block focus:outline-none focus-visible:outline-none",
+        POSTER_WIDTH,
+      )}
+    >
       <PosterFrame
         poster={poster}
         title={item.title}
@@ -71,6 +78,7 @@ function DiscoverCard({
               disabled={isSubmitting}
               onClick={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 onRequest();
               }}
               className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-[12px] font-semibold tracking-wide text-black shadow-lg shadow-black/40 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-70"
@@ -92,7 +100,7 @@ function DiscoverCard({
       </PosterFrame>
 
       <CardMeta title={item.title} year={item.year} rating={item.vote_average} />
-    </article>
+    </Link>
   );
 }
 
@@ -106,7 +114,13 @@ function MineCard({ request }: { request: MediaRequest }) {
     request.outcome === "cancelled";
 
   return (
-    <article className={cn("group/req-card relative", POSTER_WIDTH)}>
+    <Link
+      to={`/requests/${request.media_type}/${request.tmdb_id}`}
+      className={cn(
+        "group/req-card relative block focus:outline-none focus-visible:outline-none",
+        POSTER_WIDTH,
+      )}
+    >
       <PosterFrame
         poster={poster}
         title={request.title}
@@ -145,7 +159,7 @@ function MineCard({ request }: { request: MediaRequest }) {
           {request.last_error}
         </p>
       ) : null}
-    </article>
+    </Link>
   );
 }
 

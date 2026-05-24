@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,11 +25,32 @@ type HTTPError struct {
 	Body       string
 }
 
+type DecodeError struct {
+	StatusCode int
+	Err        error
+}
+
 func (e HTTPError) Error() string {
 	if e.Body == "" {
 		return fmt.Sprintf("arr: HTTP %d", e.StatusCode)
 	}
 	return fmt.Sprintf("arr: HTTP %d: %s", e.StatusCode, e.Body)
+}
+
+func (e DecodeError) Error() string {
+	return fmt.Sprintf("arr: decode response: %v", e.Err)
+}
+
+func (e DecodeError) Unwrap() error {
+	return e.Err
+}
+
+func IsEmptyOrTruncatedDecodeError(err error) bool {
+	var decodeErr DecodeError
+	if !errors.As(err, &decodeErr) {
+		return false
+	}
+	return errors.Is(decodeErr.Err, io.EOF) || errors.Is(decodeErr.Err, io.ErrUnexpectedEOF)
 }
 
 func New(baseURL, apiKey string, httpClient *http.Client) *Client {
@@ -92,7 +114,7 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body, dest any
 		return nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(dest); err != nil {
-		return fmt.Errorf("arr: decode response: %w", err)
+		return DecodeError{StatusCode: resp.StatusCode, Err: err}
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import type {
   RequestIntegrationOptions,
   RequestIntegrationsResponse,
   RequestListParams,
+  RequestMediaDetail,
   RequestMediaPage,
   RequestMediaType,
   RequestSettings,
@@ -62,6 +63,18 @@ export function useRequestDiscoverySection(section: string, page = 1) {
         `/requests/discover/${encodeURIComponent(section)}?page=${page}`,
       ),
     enabled: section.trim().length > 0,
+    staleTime: REQUESTS_STALE_TIME,
+  });
+}
+
+export function useRequestMediaDetail(mediaType: RequestMediaType, tmdbID: number) {
+  return useQuery({
+    queryKey: requestKeys.detail(mediaType, tmdbID),
+    queryFn: () =>
+      api<RequestMediaDetail>(
+        `/requests/detail/${encodeURIComponent(mediaType)}/${encodeURIComponent(String(tmdbID))}`,
+      ),
+    enabled: tmdbID > 0,
     staleTime: REQUESTS_STALE_TIME,
   });
 }

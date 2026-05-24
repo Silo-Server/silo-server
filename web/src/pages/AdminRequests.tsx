@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Check, Plug, RefreshCw, Save, Settings2, SlidersHorizontal, X } from "lucide-react";
 import type {
   MediaRequest,
@@ -130,9 +130,13 @@ function RequestQueueTab() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [outcome, setOutcome] = useState<OutcomeFilter>("all");
   const requests = useAdminMediaRequests({ status, outcome, limit: 100 });
+  const users = useAdminUsers();
   const approve = useApproveMediaRequest();
   const decline = useDeclineMediaRequest();
   const retry = useRetryMediaRequest();
+  const usernamesByID = useMemo(() => {
+    return new Map((users.data ?? []).map((user) => [user.id, user.username]));
+  }, [users.data]);
 
   function handleDecline(request: MediaRequest) {
     const reason = window.prompt(`Decline "${request.title}"?`, "");
@@ -207,6 +211,11 @@ function RequestQueueTab() {
                   <RequestQueueRow
                     key={request.id}
                     request={request}
+                    requesterUsername={
+                      request.requested_by_user_id
+                        ? usernamesByID.get(request.requested_by_user_id)
+                        : undefined
+                    }
                     approving={approve.isPending && approve.variables === request.id}
                     declining={decline.isPending && decline.variables?.id === request.id}
                     retrying={retry.isPending && retry.variables === request.id}
@@ -226,6 +235,7 @@ function RequestQueueTab() {
 
 function RequestQueueRow({
   request,
+  requesterUsername,
   approving,
   declining,
   retrying,
@@ -234,6 +244,7 @@ function RequestQueueRow({
   onRetry,
 }: {
   request: MediaRequest;
+  requesterUsername?: string;
   approving: boolean;
   declining: boolean;
   retrying: boolean;
@@ -244,19 +255,30 @@ function RequestQueueRow({
   const canApprove = request.status === "pending" && request.outcome === "active";
   const canDecline = request.status !== "completed" && request.outcome === "active";
   const canRetry = request.outcome === "failed";
+  const requesterLabel = requesterUsername ?? `User ${request.requested_by_user_id}`;
+  const requestDetailHref = `/requests/${request.media_type}/${request.tmdb_id}`;
 
   return (
     <TableRow>
       <TableCell>
         <div className="min-w-[220px]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{request.title}</span>
+            <Link to={requestDetailHref} className="font-medium hover:underline">
+              {request.title}
+            </Link>
             <Badge variant="secondary">{formatMediaType(request.media_type)}</Badge>
           </div>
           <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-3 text-xs">
             {request.year ? <span>{request.year}</span> : null}
             <span>TMDB {request.tmdb_id}</span>
-            {request.requested_by_user_id ? <span>User {request.requested_by_user_id}</span> : null}
+            {request.requested_by_user_id ? (
+              <Link
+                to={`/admin/users/${request.requested_by_user_id}`}
+                className="hover:text-foreground hover:underline"
+              >
+                {requesterLabel}
+              </Link>
+            ) : null}
           </div>
           {request.last_error ? (
             <p className="text-destructive mt-1 max-w-md text-xs">{request.last_error}</p>

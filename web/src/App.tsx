@@ -33,6 +33,7 @@ import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
 import Requests from "@/pages/Requests";
+import RequestDetail from "@/pages/RequestDetail";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminActivity from "@/pages/AdminActivity";
 import AdminLogs from "@/pages/AdminLogs";
@@ -448,6 +449,7 @@ function AppRoutes() {
                             element={<LegacyUserCollectionRedirect />}
                           />
                           <Route path="/requests" element={<Requests />} />
+                          <Route path="/requests/:mediaType/:tmdbId" element={<RequestDetail />} />
                           <Route path="/recommendations" element={<Recommendations />} />
                           <Route
                             path="/recommendations/section/:kind"

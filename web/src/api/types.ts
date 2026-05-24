@@ -1419,6 +1419,47 @@ export interface RequestMediaPage {
   results: RequestMediaResult[];
 }
 
+export interface RequestMediaCastMember {
+  name: string;
+  character?: string;
+  profile_path?: string;
+  order: number;
+}
+
+export interface RequestMediaDetail {
+  media_type: RequestMediaType;
+  tmdb_id: number;
+  imdb_id?: string;
+  tvdb_id?: number;
+  title: string;
+  original_title?: string;
+  tagline?: string;
+  overview?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+  release_date?: string;
+  year?: number;
+  runtime?: number;
+  genres?: string[];
+  vote_average?: number;
+  vote_count?: number;
+  status?: string;
+  homepage?: string;
+  content_rating?: string;
+  production_companies?: string[];
+  number_of_seasons?: number;
+  number_of_episodes?: number;
+  first_air_date?: string;
+  last_air_date?: string;
+  networks?: string[];
+  cast?: RequestMediaCastMember[];
+  director?: string;
+  creators?: string[];
+  recommendations?: RequestMediaResult[];
+  availability: RequestAvailability;
+  request: RequestState;
+}
+
 export interface RequestDiscoverySection extends RequestMediaPage {
   key: string;
   title: string;

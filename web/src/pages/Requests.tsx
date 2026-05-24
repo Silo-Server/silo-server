@@ -82,33 +82,37 @@ export default function Requests() {
   const totalMine = (mine.data ?? []).length;
 
   return (
-    <div className="page-shell space-y-8 py-6 sm:py-8">
-      <PageHeader />
+    <div className="space-y-8 py-6 sm:py-8">
+      <div className="space-y-8 px-4 sm:px-6 lg:px-10 xl:px-12">
+        <PageHeader />
 
-      <SearchBar
-        mediaType={mediaType}
-        onMediaTypeChange={setMediaType}
-        searchInput={searchInput}
-        onSearchInputChange={setSearchInput}
-        onSubmit={handleSearch}
-        onClear={clearSearch}
-        isSearching={isSearching}
-      />
+        <SearchBar
+          mediaType={mediaType}
+          onMediaTypeChange={setMediaType}
+          searchInput={searchInput}
+          onSearchInputChange={setSearchInput}
+          onSubmit={handleSearch}
+          onClear={clearSearch}
+          isSearching={isSearching}
+        />
+      </div>
 
       <Tabs defaultValue="discover">
-        <TabsList variant="line" className="border-border w-full justify-start border-b">
-          <TabsTrigger value="discover" className="px-3 text-[13px]">
-            Discover
-          </TabsTrigger>
-          <TabsTrigger value="mine" className="px-3 text-[13px]">
-            Yours
-            {totalMine > 0 && (
-              <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
-                {totalMine}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
+        <div className="px-4 sm:px-6 lg:px-10 xl:px-12">
+          <TabsList variant="line" className="border-border w-full justify-start border-b">
+            <TabsTrigger value="discover" className="px-3 text-[13px]">
+              Discover
+            </TabsTrigger>
+            <TabsTrigger value="mine" className="px-3 text-[13px]">
+              Yours
+              {totalMine > 0 && (
+                <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
+                  {totalMine}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="discover" className="space-y-8 pt-2">
           {isSearching ? (

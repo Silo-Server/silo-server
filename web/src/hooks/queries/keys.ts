@@ -123,6 +123,7 @@ export const requestKeys = {
     ["requests", "discovery", section, page] as const,
   search: (mediaType: string, query: string, page: number) =>
     ["requests", "search", mediaType, query, page] as const,
+  detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
   mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
 };
 

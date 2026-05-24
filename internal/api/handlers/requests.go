@@ -19,6 +19,7 @@ type RequestService interface {
 	Search(ctx context.Context, viewer mediarequests.Viewer, query string, mediaType mediarequests.MediaType, page int) (*mediarequests.MediaPage, error)
 	Discover(ctx context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error)
 	DiscoverAll(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error)
+	GetDetail(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error)
 	CreateRequest(ctx context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error)
 	ListMine(ctx context.Context, viewer mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error)
 	ListAdmin(ctx context.Context, viewer mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error)
@@ -96,6 +97,25 @@ func (h *RequestsHandler) HandleDiscoverSection(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, section)
+}
+
+func (h *RequestsHandler) HandleGetDetail(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	mediaType := mediarequests.MediaType(strings.TrimSpace(chi.URLParam(r, "media_type")))
+	tmdbID, err := strconv.Atoi(strings.TrimSpace(chi.URLParam(r, "tmdb_id")))
+	if err != nil || tmdbID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid tmdb id")
+		return
+	}
+	detail, err := h.service.GetDetail(r.Context(), viewer, mediaType, tmdbID)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (h *RequestsHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {

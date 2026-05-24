@@ -86,14 +86,6 @@ func (c *Client) SubmitMovie(ctx context.Context, req mediarequests.Request, int
 	}
 
 	client := arrclient.New(integration.BaseURL, integration.APIKeyRef, c.httpClient)
-	existing, err := c.lookupExisting(ctx, client, req.TMDBID)
-	if err != nil {
-		return mediarequests.FulfillmentResult{}, err
-	}
-	if existing != nil {
-		return resultFromMovie(*existing), nil
-	}
-
 	movie, err := c.lookupMovie(ctx, client, req.TMDBID)
 	if err != nil {
 		return mediarequests.FulfillmentResult{}, err
@@ -114,6 +106,9 @@ func (c *Client) SubmitMovie(ctx context.Context, req mediarequests.Request, int
 
 	var created movieResource
 	if err := client.PostJSON(ctx, "/api/v3/movie", movie, &created); err != nil {
+		if arrclient.IsEmptyOrTruncatedDecodeError(err) {
+			return acceptedWithoutResponse("radarr"), nil
+		}
 		return mediarequests.FulfillmentResult{}, err
 	}
 	return resultFromMovie(created), nil
@@ -123,18 +118,11 @@ func (c *Client) CheckMovieStatus(ctx context.Context, req mediarequests.Request
 	client := arrclient.New(integration.BaseURL, integration.APIKeyRef, c.httpClient)
 	movieID, _ := strconv.Atoi(req.ExternalID)
 	if movieID <= 0 {
-		existing, err := c.lookupExisting(ctx, client, req.TMDBID)
-		if err != nil {
-			return mediarequests.FulfillmentStatus{}, err
-		}
-		if existing == nil {
-			return mediarequests.FulfillmentStatus{
-				Status:          mediarequests.StatusQueued,
-				IntegrationKind: "radarr",
-				ExternalStatus:  "missing_from_radarr",
-			}, nil
-		}
-		movieID = existing.ID
+		return mediarequests.FulfillmentStatus{
+			Status:          mediarequests.StatusQueued,
+			IntegrationKind: "radarr",
+			ExternalStatus:  "external_id_unavailable",
+		}, nil
 	}
 
 	queues, err := c.queueDetails(ctx, client, movieID)
@@ -143,18 +131,6 @@ func (c *Client) CheckMovieStatus(ctx context.Context, req mediarequests.Request
 	}
 	evaluation := arrclient.EvaluateQueue(queues)
 	return statusFromQueueEvaluation("radarr", movieID, evaluation), nil
-}
-
-func (c *Client) lookupExisting(ctx context.Context, client *arrclient.Client, tmdbID int) (*movieResource, error) {
-	path := "/api/v3/movie?tmdbId=" + strconv.Itoa(tmdbID)
-	var movies []movieResource
-	if err := client.GetJSON(ctx, path, &movies); err != nil {
-		return nil, err
-	}
-	if len(movies) == 0 {
-		return nil, nil
-	}
-	return &movies[0], nil
 }
 
 func (c *Client) lookupMovie(ctx context.Context, client *arrclient.Client, tmdbID int) (movieResource, error) {
@@ -228,10 +204,21 @@ func (c *Client) tags(ctx context.Context, client *arrclient.Client) ([]mediareq
 }
 
 func resultFromMovie(movie movieResource) mediarequests.FulfillmentResult {
+	externalID := ""
+	if movie.ID > 0 {
+		externalID = strconv.Itoa(movie.ID)
+	}
 	return mediarequests.FulfillmentResult{
 		IntegrationKind: "radarr",
-		ExternalID:      strconv.Itoa(movie.ID),
+		ExternalID:      externalID,
 		ExternalStatus:  "queued",
+	}
+}
+
+func acceptedWithoutResponse(kind string) mediarequests.FulfillmentResult {
+	return mediarequests.FulfillmentResult{
+		IntegrationKind: kind,
+		ExternalStatus:  "accepted_without_response",
 	}
 }
 

@@ -91,14 +91,6 @@ func (c *Client) SubmitSeries(ctx context.Context, req mediarequests.Request, in
 	}
 
 	client := arrclient.New(integration.BaseURL, integration.APIKeyRef, c.httpClient)
-	existing, err := c.lookupExisting(ctx, client, *req.TVDBID)
-	if err != nil {
-		return mediarequests.FulfillmentResult{}, err
-	}
-	if existing != nil {
-		return resultFromSeries(*existing), nil
-	}
-
 	series, err := c.lookupSeries(ctx, client, *req.TVDBID)
 	if err != nil {
 		return mediarequests.FulfillmentResult{}, err
@@ -121,6 +113,9 @@ func (c *Client) SubmitSeries(ctx context.Context, req mediarequests.Request, in
 
 	var created seriesResource
 	if err := client.PostJSON(ctx, "/api/v3/series", series, &created); err != nil {
+		if arrclient.IsEmptyOrTruncatedDecodeError(err) {
+			return acceptedWithoutResponse("sonarr"), nil
+		}
 		return mediarequests.FulfillmentResult{}, err
 	}
 	return resultFromSeries(created), nil
@@ -130,21 +125,11 @@ func (c *Client) CheckSeriesStatus(ctx context.Context, req mediarequests.Reques
 	client := arrclient.New(integration.BaseURL, integration.APIKeyRef, c.httpClient)
 	seriesID, _ := strconv.Atoi(req.ExternalID)
 	if seriesID <= 0 {
-		if req.TVDBID == nil || *req.TVDBID <= 0 {
-			return mediarequests.FulfillmentStatus{}, fmt.Errorf("sonarr: tvdb_id is required")
-		}
-		existing, err := c.lookupExisting(ctx, client, *req.TVDBID)
-		if err != nil {
-			return mediarequests.FulfillmentStatus{}, err
-		}
-		if existing == nil {
-			return mediarequests.FulfillmentStatus{
-				Status:          mediarequests.StatusQueued,
-				IntegrationKind: "sonarr",
-				ExternalStatus:  "missing_from_sonarr",
-			}, nil
-		}
-		seriesID = existing.ID
+		return mediarequests.FulfillmentStatus{
+			Status:          mediarequests.StatusQueued,
+			IntegrationKind: "sonarr",
+			ExternalStatus:  "external_id_unavailable",
+		}, nil
 	}
 
 	queues, err := c.queueDetails(ctx, client, seriesID)
@@ -153,18 +138,6 @@ func (c *Client) CheckSeriesStatus(ctx context.Context, req mediarequests.Reques
 	}
 	evaluation := arrclient.EvaluateQueue(queues)
 	return statusFromQueueEvaluation("sonarr", seriesID, evaluation), nil
-}
-
-func (c *Client) lookupExisting(ctx context.Context, client *arrclient.Client, tvdbID int) (*seriesResource, error) {
-	path := "/api/v3/series?tvdbId=" + strconv.Itoa(tvdbID)
-	var series []seriesResource
-	if err := client.GetJSON(ctx, path, &series); err != nil {
-		return nil, err
-	}
-	if len(series) == 0 {
-		return nil, nil
-	}
-	return &series[0], nil
 }
 
 func (c *Client) lookupSeries(ctx context.Context, client *arrclient.Client, tvdbID int) (seriesResource, error) {
@@ -243,10 +216,21 @@ func (c *Client) tags(ctx context.Context, client *arrclient.Client) ([]mediareq
 }
 
 func resultFromSeries(series seriesResource) mediarequests.FulfillmentResult {
+	externalID := ""
+	if series.ID > 0 {
+		externalID = strconv.Itoa(series.ID)
+	}
 	return mediarequests.FulfillmentResult{
 		IntegrationKind: "sonarr",
-		ExternalID:      strconv.Itoa(series.ID),
+		ExternalID:      externalID,
 		ExternalStatus:  "queued",
+	}
+}
+
+func acceptedWithoutResponse(kind string) mediarequests.FulfillmentResult {
+	return mediarequests.FulfillmentResult{
+		IntegrationKind: kind,
+		ExternalStatus:  "accepted_without_response",
 	}
 }
 

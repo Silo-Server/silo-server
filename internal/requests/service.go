@@ -14,6 +14,7 @@ import (
 type TMDBClient interface {
 	SearchMedia(ctx context.Context, mediaType, query string, page int) (*tmdb.MediaPage, error)
 	DiscoverSection(ctx context.Context, section string, page int) (*tmdb.MediaPage, error)
+	GetMediaDetail(ctx context.Context, mediaType string, id int) (*tmdb.MediaDetail, error)
 }
 
 type TMDBExternalIDClient interface {
@@ -140,6 +141,101 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 		sections = append(sections, *section)
 	}
 	return sections, nil
+}
+
+// GetDetail fetches a TMDB detail payload and overlays the same availability /
+// request-state signals used by search and discovery. Recommendations carry
+// their own per-item state so the detail page can render them as request cards.
+func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbID int) (*MediaDetail, error) {
+	if s == nil || s.store == nil || s.tmdb == nil {
+		return nil, fmt.Errorf("request service is not configured")
+	}
+	mediaType, err := normalizeMediaType(mediaType)
+	if err != nil {
+		return nil, err
+	}
+	if tmdbID <= 0 {
+		return nil, fmt.Errorf("%w: tmdb id is required", ErrInvalidInput)
+	}
+
+	raw, err := s.tmdb.GetMediaDetail(ctx, string(mediaType), tmdbID)
+	if err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, ErrNotFound
+	}
+
+	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	primaryAvailable, err := s.lookupAvailable(ctx, mediaType, []int{raw.ID})
+	if err != nil {
+		return nil, err
+	}
+	primaryRequests, err := s.store.ListActiveByTMDB(ctx, mediaType, []int{raw.ID})
+	if err != nil {
+		return nil, err
+	}
+
+	detail := &MediaDetail{
+		MediaType:           mediaType,
+		TMDBID:              raw.ID,
+		IMDbID:              raw.IMDbID,
+		Title:               raw.Title,
+		OriginalTitle:       raw.OriginalTitle,
+		Tagline:             raw.Tagline,
+		Overview:            raw.Overview,
+		PosterPath:          raw.PosterPath,
+		BackdropPath:        raw.BackdropPath,
+		ReleaseDate:         raw.ReleaseDate,
+		Year:                raw.Year,
+		Runtime:             raw.Runtime,
+		Genres:              raw.Genres,
+		VoteAverage:         raw.VoteAverage,
+		VoteCount:           raw.VoteCount,
+		Status:              raw.Status,
+		Homepage:            raw.Homepage,
+		ContentRating:       raw.ContentRating,
+		ProductionCompanies: raw.ProductionCompanies,
+		NumberOfSeasons:     raw.NumberOfSeasons,
+		NumberOfEpisodes:    raw.NumberOfEpisodes,
+		FirstAirDate:        raw.FirstAirDate,
+		LastAirDate:         raw.LastAirDate,
+		Networks:            raw.Networks,
+		Director:            raw.Director,
+		Creators:            raw.Creators,
+		Availability:        availabilityValue(primaryAvailable[raw.ID]),
+		Request:             requestStateFor(viewer, policy, primaryAvailable[raw.ID], primaryRequests[raw.ID]),
+	}
+	if raw.TVDBID > 0 {
+		tvdb := raw.TVDBID
+		detail.TVDBID = &tvdb
+	}
+	if len(raw.Cast) > 0 {
+		detail.Cast = make([]MediaCastMember, 0, len(raw.Cast))
+		for _, member := range raw.Cast {
+			detail.Cast = append(detail.Cast, MediaCastMember{
+				Name:        member.Name,
+				Character:   member.Character,
+				ProfilePath: member.ProfilePath,
+				Order:       member.Order,
+			})
+		}
+	}
+
+	if len(raw.Recommendations) > 0 {
+		recPage := &tmdb.MediaPage{Results: raw.Recommendations}
+		enriched, err := s.enrichPage(ctx, viewer, recPage)
+		if err != nil {
+			return nil, err
+		}
+		detail.Recommendations = enriched.Results
+	}
+
+	return detail, nil
 }
 
 func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input CreateRequestInput) (*Request, error) {

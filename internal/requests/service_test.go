@@ -517,6 +517,7 @@ func (f *fakePresence) LookupTMDB(_ context.Context, mediaType MediaType, ids []
 type fakeTMDBClient struct {
 	page        *tmdb.MediaPage
 	externalIDs *tmdb.ExternalIDs
+	detail      *tmdb.MediaDetail
 }
 
 func (f *fakeTMDBClient) SearchMedia(context.Context, string, string, int) (*tmdb.MediaPage, error) {
@@ -529,6 +530,10 @@ func (f *fakeTMDBClient) DiscoverSection(context.Context, string, int) (*tmdb.Me
 
 func (f *fakeTMDBClient) GetExternalIDs(context.Context, string, int) (*tmdb.ExternalIDs, error) {
 	return f.externalIDs, nil
+}
+
+func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
+	return f.detail, nil
 }
 
 type fakeMovieAdapter struct {

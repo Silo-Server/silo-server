@@ -155,6 +155,47 @@ type MediaPage struct {
 	Results      []MediaResult `json:"results"`
 }
 
+type MediaCastMember struct {
+	Name        string `json:"name"`
+	Character   string `json:"character,omitempty"`
+	ProfilePath string `json:"profile_path,omitempty"`
+	Order       int    `json:"order"`
+}
+
+type MediaDetail struct {
+	MediaType           MediaType         `json:"media_type"`
+	TMDBID              int               `json:"tmdb_id"`
+	IMDbID              string            `json:"imdb_id,omitempty"`
+	TVDBID              *int              `json:"tvdb_id,omitempty"`
+	Title               string            `json:"title"`
+	OriginalTitle       string            `json:"original_title,omitempty"`
+	Tagline             string            `json:"tagline,omitempty"`
+	Overview            string            `json:"overview,omitempty"`
+	PosterPath          string            `json:"poster_path,omitempty"`
+	BackdropPath        string            `json:"backdrop_path,omitempty"`
+	ReleaseDate         string            `json:"release_date,omitempty"`
+	Year                int               `json:"year,omitempty"`
+	Runtime             int               `json:"runtime,omitempty"`
+	Genres              []string          `json:"genres,omitempty"`
+	VoteAverage         float64           `json:"vote_average,omitempty"`
+	VoteCount           int               `json:"vote_count,omitempty"`
+	Status              string            `json:"status,omitempty"`
+	Homepage            string            `json:"homepage,omitempty"`
+	ContentRating       string            `json:"content_rating,omitempty"`
+	ProductionCompanies []string          `json:"production_companies,omitempty"`
+	NumberOfSeasons     int               `json:"number_of_seasons,omitempty"`
+	NumberOfEpisodes    int               `json:"number_of_episodes,omitempty"`
+	FirstAirDate        string            `json:"first_air_date,omitempty"`
+	LastAirDate         string            `json:"last_air_date,omitempty"`
+	Networks            []string          `json:"networks,omitempty"`
+	Cast                []MediaCastMember `json:"cast,omitempty"`
+	Director            string            `json:"director,omitempty"`
+	Creators            []string          `json:"creators,omitempty"`
+	Recommendations     []MediaResult     `json:"recommendations,omitempty"`
+	Availability        Availability      `json:"availability"`
+	Request             RequestState      `json:"request"`
+}
+
 type CreateRequestInput struct {
 	MediaType    MediaType `json:"media_type"`
 	TMDBID       int       `json:"tmdb_id"`
