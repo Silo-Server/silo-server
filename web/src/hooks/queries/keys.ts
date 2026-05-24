@@ -130,17 +130,7 @@ export const requestKeys = {
     mediaType: string | undefined,
     sort: string,
     page: number,
-  ) =>
-    [
-      "requests",
-      "discover",
-      "browse",
-      kind,
-      slug,
-      mediaType ?? "",
-      sort,
-      page,
-    ] as const,
+  ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort, page] as const,
   search: (mediaType: string, query: string, page: number) =>
     ["requests", "search", mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,

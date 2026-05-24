@@ -78,9 +78,7 @@ export function useDiscoverStudios() {
   return useQuery({
     queryKey: requestKeys.discoverStudios(),
     queryFn: () =>
-      api<DiscoverStudiosResponse>("/requests/discover/studios").then(
-        (data) => data.studios ?? [],
-      ),
+      api<DiscoverStudiosResponse>("/requests/discover/studios").then((data) => data.studios ?? []),
     staleTime: DISCOVER_BRAND_STALE_TIME,
   });
 }
@@ -100,9 +98,7 @@ export function useDiscoverGenres() {
   return useQuery({
     queryKey: requestKeys.discoverGenres(),
     queryFn: () =>
-      api<DiscoverGenresResponse>("/requests/discover/genres").then(
-        (data) => data.genres ?? [],
-      ),
+      api<DiscoverGenresResponse>("/requests/discover/genres").then((data) => data.genres ?? []),
     staleTime: DISCOVER_BRAND_STALE_TIME,
   });
 }

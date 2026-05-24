@@ -42,7 +42,7 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
   const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
   const mediaTypeFromQuery = normalizeMediaType(searchParams.get("media_type"));
   const mediaType: RequestMediaType | undefined =
-    kind === "studio" ? "movie" : kind === "network" ? "series" : mediaTypeFromQuery ?? "movie";
+    kind === "studio" ? "movie" : kind === "network" ? "series" : (mediaTypeFromQuery ?? "movie");
 
   const browse = useRequestBrowse({ kind, slug, mediaType, sort, page });
   const createRequest = useCreateMediaRequest();
@@ -84,7 +84,10 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
         <p className="text-foreground text-lg font-semibold">
           {kind === "studio" ? "Studio" : kind === "network" ? "Network" : "Genre"} not found.
         </p>
-        <Link to="/requests" className="text-muted-foreground hover:text-foreground text-sm underline">
+        <Link
+          to="/requests"
+          className="text-muted-foreground hover:text-foreground text-sm underline"
+        >
           Back to Requests
         </Link>
       </div>
@@ -175,7 +178,11 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
           <span className="text-muted-foreground text-sm tabular-nums">
             Page {page} of {totalPages}
           </span>
-          <Button variant="outline" disabled={page >= totalPages} onClick={() => goToPage(page + 1)}>
+          <Button
+            variant="outline"
+            disabled={page >= totalPages}
+            onClick={() => goToPage(page + 1)}
+          >
             Next
           </Button>
         </div>
@@ -234,7 +241,9 @@ function BrowseGridSkeleton() {
 }
 
 function normalizeSort(value: string | null): BrowseSort {
-  return SORT_OPTIONS.some((option) => option.value === value) ? (value as BrowseSort) : "popularity";
+  return SORT_OPTIONS.some((option) => option.value === value)
+    ? (value as BrowseSort)
+    : "popularity";
 }
 
 function normalizeMediaType(value: string | null): RequestMediaType | undefined {

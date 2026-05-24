@@ -37,7 +37,7 @@ export default function BrandCard({
       aria-label={card.display_name}
       className={cn(
         "group relative flex h-20 w-[140px] flex-none items-center justify-center overflow-hidden rounded-lg shadow-sm",
-        "ring-1 ring-white/5 transition-colors hover:ring-white/30 focus:outline-none focus:ring-2 focus:ring-white",
+        "ring-1 ring-white/5 transition-colors hover:ring-white/30 focus:ring-2 focus:ring-white focus:outline-none",
       )}
       style={{ background }}
     >
