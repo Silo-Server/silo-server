@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -1271,6 +1272,7 @@ func main() {
 		historyReconciler := watchstate.NewHistoryReconciler(deps.DB, historyResolver)
 		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
+		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {
