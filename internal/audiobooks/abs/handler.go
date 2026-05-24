@@ -32,6 +32,10 @@ type MediaStore interface {
 	GetAudiobookByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 	ListAudiobooks(ctx context.Context, limit, offset int) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string) ([]*models.MediaFile, error)
+	// GetMediaFileByID fetches a single media file by its integer PK.
+	// Used by the ABS file-streaming handler when a caller supplies a
+	// raw file ID instead of an ino.
+	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
 }
 
 // TokenStore persists and validates the ABS JWT JTIs that back the
@@ -153,9 +157,26 @@ func (h *Handler) mountRoutes(r chi.Router) {
 	r.Post("/login", h.handleLogin)
 	r.Post("/abs/api/login", h.handleLogin)
 
+	// Stage 3: playback session + file routes, registered under both the
+	// legacy /abs/api prefix and the canonical /api prefix that the official
+	// ABS mobile client builds against (no /abs prefix at server root).
+	r.Group(func(r chi.Router) {
+		r.Use(h.bearerAuth)
+		for _, prefix := range []string{"/abs/api", "/api"} {
+			// POST /api/items/{libraryItemId}/play — start a play session,
+			// get back a stream URL + ABS-shaped manifest.
+			r.Post(prefix+"/items/{libraryItemId}/play", h.handlePlayStart)
+
+			// GET /api/items/{libraryItemId}/file/{ino} — stream a specific audio file.
+			// /download variant is the same handler; Content-Disposition is set when
+			// the path ends in /download.
+			r.Get(prefix+"/items/{libraryItemId}/file/{ino}", h.handleFileStream)
+			r.Get(prefix+"/items/{libraryItemId}/file/{ino}/download", h.handleFileStream)
+		}
+	})
+
 	// TODO Stage 2 (remaining): logout, refresh, authorize, me, ping, status, init
-	// TODO Stage 3: library browse routes (libraries, items, item detail, cover, authors, series, search, personalized)
-	// TODO Stage 4: playback session + file routes (play, file/download, public/track)
+	// TODO Stage 3 (remaining): library browse routes (libraries, items, item detail, cover, authors, series, search, personalized)
 	// TODO Stage 5: progress routes (me/progress/*, me/items-in-progress, me/listening-stats, me/stats/year/*)
 	// TODO Stage 6: social / collection routes (bookmarks, smart-collections, collections, playlists, RSS feeds, similar)
 }
