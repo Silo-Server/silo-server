@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
 import AudiobookPlayer from "./player/AudiobookPlayer";
 import { ChaptersSection } from "./components/ChaptersSection";
+import { NarratorCard } from "./components/NarratorCard";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
@@ -229,6 +230,7 @@ export default function AudiobookDetail() {
           currentPositionSeconds={playerOpen ? startSeconds : resumeSeconds || null}
           onSelect={(s) => openPlayer(s)}
         />
+        {narrator && <NarratorCard narrator={narrator} />}
       </div>
     </div>
   );
