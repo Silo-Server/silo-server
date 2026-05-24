@@ -4,7 +4,7 @@
 -- episodes table.
 
 CREATE TABLE IF NOT EXISTS public.podcast_feeds (
-    media_item_id              text primary key
+    media_item_id              text PRIMARY KEY
                                REFERENCES public.media_items(content_id) ON DELETE CASCADE,
     feed_url                   text NOT NULL,
     etag                       text,
