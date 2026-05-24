@@ -108,6 +108,8 @@ type Scanner struct {
 	folderRepo          *catalog.FolderRepository
 	libraryRepo         *catalog.LibraryItemRepository
 	episodeLibraryRepo  *catalog.EpisodeLibraryRepository
+	itemRepo            *catalog.ItemRepository
+	personRepo          *catalog.PersonRepository
 	ffprobePath         string
 	s3Client            *s3client.Client // public assets bucket (may be nil)
 	workers             int
@@ -157,6 +159,8 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		folderRepo:          catalog.NewFolderRepository(fileRepo.Pool()),
 		libraryRepo:         catalog.NewLibraryItemRepository(fileRepo.Pool()),
 		episodeLibraryRepo:  catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
+		itemRepo:            catalog.NewItemRepository(fileRepo.Pool()),
+		personRepo:          catalog.NewPersonRepository(fileRepo.Pool()),
 		ffprobePath:         ffprobePath,
 		s3Client:            s3Client,
 		workers:             workers,
@@ -192,9 +196,20 @@ func (s *Scanner) SetMetadataQueueProducer(producer MetadataQueueProducer) {
 // ScanFolder walks a media folder's directory tree, discovers media files,
 // probes them for technical data, and upserts them into the database.
 // Files previously in the DB that no longer exist on disk are marked as missing.
+//
+// Audiobook libraries are handled by ScanAudiobookFolder and bypass the
+// per-file movie/TV pipeline entirely.
 func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*ScanResult, error) {
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
+
+	if isAudiobookLibraryType(folder.Type) {
+		if err := s.ScanAudiobookFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+
 	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
 }
 
