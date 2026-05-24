@@ -72,6 +72,10 @@ interface VideoPlayerProps {
   intro: PlayerTimeRange | null;
   autoSkipIntro?: boolean;
   credits: PlayerTimeRange | null;
+  recap?: PlayerTimeRange | null;
+  autoSkipRecap?: boolean;
+  preview?: PlayerTimeRange | null;
+  autoPlayNextPreview?: boolean;
   duration?: number;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
@@ -91,6 +95,7 @@ interface VideoPlayerProps {
   onPlaybackTransportReady?: (transport: PlayerPlaybackTransport | null) => void;
   onReturnFromPostRoll?: () => void;
   onRealtimeEvent?: (event: PlaybackRealtimeEventEnvelope) => void;
+  onRealtimeConnectionStateChange?: (state: "disconnected" | "connecting" | "connected") => void;
   watchTogetherRoomId?: string | null;
   watchTogetherConnection?: WatchTogetherRoomConnectionResult;
 }
@@ -154,6 +159,10 @@ export function VideoPlayer({
   intro,
   autoSkipIntro = false,
   credits,
+  recap = null,
+  autoSkipRecap = false,
+  preview = null,
+  autoPlayNextPreview = false,
   duration: propDuration,
   seriesContext,
   onNavigateEpisode,
@@ -173,6 +182,7 @@ export function VideoPlayer({
   onPlaybackTransportReady,
   onReturnFromPostRoll,
   onRealtimeEvent,
+  onRealtimeConnectionStateChange,
   watchTogetherRoomId,
   watchTogetherConnection,
 }: VideoPlayerProps) {
@@ -190,6 +200,7 @@ export function VideoPlayer({
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
   const autoSkippedIntroKeyRef = useRef<string | null>(null);
+  const autoSkippedRecapKeyRef = useRef<string | null>(null);
   const endedFiredRef = useRef(false);
   const [hasEnded, setHasEnded] = useState(false);
   const onEndedRef = useRef(onEnded);
@@ -822,7 +833,7 @@ export function VideoPlayer({
   );
 
   const nextEpisode = useNextEpisode(
-    roomPlaybackActive ? null : credits,
+    roomPlaybackActive ? null : autoPlayNextPreview && preview ? preview : credits,
     roomPlaybackActive ? undefined : seriesContext,
     currentTime,
     handleNavigate,
@@ -886,10 +897,15 @@ export function VideoPlayer({
 
   // -- Intro skip --
   const showIntroSkip = intro != null && currentTime >= intro.start && currentTime < intro.end;
+  const showRecapSkip = recap != null && currentTime >= recap.start && currentTime < recap.end;
 
   const skipIntro = useCallback(() => {
     if (intro) handlePlayerSeek(intro.end);
   }, [intro, handlePlayerSeek]);
+
+  const skipRecap = useCallback(() => {
+    if (recap) handlePlayerSeek(recap.end);
+  }, [recap, handlePlayerSeek]);
 
   useEffect(() => {
     if (!autoSkipIntro || !intro || !isPlayerReady || awaitingFirstFrame) {
@@ -920,6 +936,41 @@ export function VideoPlayer({
     handlePlayerSeek,
     intro,
     isPlayerReady,
+    roomPlaybackActive,
+    sessionId,
+    watchTogether.room?.self_can_manage_room,
+    watchTogetherSync.attachedSessionId,
+  ]);
+
+  useEffect(() => {
+    if (!autoSkipRecap || !recap || !isPlayerReady || awaitingFirstFrame) {
+      return;
+    }
+    if (currentTime < recap.start || currentTime >= recap.end) {
+      return;
+    }
+    if (
+      roomPlaybackActive &&
+      (!watchTogether.room?.self_can_manage_room ||
+        watchTogetherSync.attachedSessionId !== sessionId)
+    ) {
+      return;
+    }
+
+    const recapKey = `${sessionId}:${activeFileId ?? "unknown"}:${recap.start}:${recap.end}`;
+    if (autoSkippedRecapKeyRef.current === recapKey) {
+      return;
+    }
+    autoSkippedRecapKeyRef.current = recapKey;
+    handlePlayerSeek(recap.end);
+  }, [
+    activeFileId,
+    autoSkipRecap,
+    awaitingFirstFrame,
+    currentTime,
+    handlePlayerSeek,
+    isPlayerReady,
+    recap,
     roomPlaybackActive,
     sessionId,
     watchTogether.room?.self_can_manage_room,
@@ -1665,11 +1716,15 @@ export function VideoPlayer({
     [handleExit, performPlayerSeek],
   );
 
-  usePlaybackRealtime({
+  const realtime = usePlaybackRealtime({
     sessionId,
     onCommand: executeRealtimeCommand,
     onEvent: onRealtimeEvent,
   });
+
+  useEffect(() => {
+    onRealtimeConnectionStateChange?.(realtime.connectionState);
+  }, [onRealtimeConnectionStateChange, realtime.connectionState]);
 
   // -- Postroll mini-player resize --
   const [miniPlayerWidth, setMiniPlayerWidth] = useState(320);
@@ -1972,6 +2027,7 @@ export function VideoPlayer({
 
       {/* Intro skip button */}
       {!isDetached && showIntroSkip && <IntroSkipButton onSkip={skipIntro} />}
+      {!isDetached && showRecapSkip && <IntroSkipButton onSkip={skipRecap} label="Skip Recap" />}
 
       {/* Next episode overlay */}
       {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (

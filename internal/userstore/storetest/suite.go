@@ -71,6 +71,8 @@ func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 		SubtitleMode:               "auto",
 		AutoSkipIntro:              true,
 		AutoSkipCredits:            false,
+		AutoSkipRecap:              false,
+		AutoPlayNextPreview:        false,
 		LibraryRestrictionsEnabled: true,
 		AllowedLibraryIDs:          []int{1, 3},
 		MaxPlaybackQuality:         "1080p",

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Sentinel errors for file repository operations.
@@ -41,9 +41,11 @@ const fileColumns = `id, content_id, episode_id, season_number, episode_number,
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
 	duration, bitrate, video_tracks, audio_tracks, subtitle_tracks, external_subtitles, chapters,
 	chapter_thumbnail_retry_after, chapter_thumbnail_failure_count, chapter_thumbnail_last_error,
-	intro_start, intro_end, credits_start, credits_end, markers_source, markers_confidence,
+	intro_start, intro_end, credits_start, credits_end, recap_start, recap_end, preview_start, preview_end, markers_source, markers_confidence,
 	intro_markers_source, intro_markers_provider, intro_markers_confidence, intro_markers_algorithm, intro_markers_detected_at,
 	credits_markers_source, credits_markers_provider, credits_markers_confidence, credits_markers_algorithm, credits_markers_detected_at,
+	recap_markers_source, recap_markers_provider, recap_markers_confidence, recap_markers_algorithm, recap_markers_detected_at,
+	preview_markers_source, preview_markers_provider, preview_markers_confidence, preview_markers_algorithm, preview_markers_detected_at,
 	edition_raw, edition_key, edition_confidence, edition_source,
 	presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 	multi_episode_start, multi_episode_end,
@@ -58,9 +60,11 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.season_number, mf
 	mf.codec_video, mf.codec_audio, mf.resolution, mf.audio_channels, mf.hdr, mf.container,
 	mf.duration, mf.bitrate, mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.chapters,
 	mf.chapter_thumbnail_retry_after, mf.chapter_thumbnail_failure_count, mf.chapter_thumbnail_last_error,
-	mf.intro_start, mf.intro_end, mf.credits_start, mf.credits_end, mf.markers_source, mf.markers_confidence,
+	mf.intro_start, mf.intro_end, mf.credits_start, mf.credits_end, mf.recap_start, mf.recap_end, mf.preview_start, mf.preview_end, mf.markers_source, mf.markers_confidence,
 	mf.intro_markers_source, mf.intro_markers_provider, mf.intro_markers_confidence, mf.intro_markers_algorithm, mf.intro_markers_detected_at,
 	mf.credits_markers_source, mf.credits_markers_provider, mf.credits_markers_confidence, mf.credits_markers_algorithm, mf.credits_markers_detected_at,
+	mf.recap_markers_source, mf.recap_markers_provider, mf.recap_markers_confidence, mf.recap_markers_algorithm, mf.recap_markers_detected_at,
+	mf.preview_markers_source, mf.preview_markers_provider, mf.preview_markers_confidence, mf.preview_markers_algorithm, mf.preview_markers_detected_at,
 	mf.edition_raw, mf.edition_key, mf.edition_confidence, mf.edition_source,
 	mf.presentation_kind, mf.presentation_group_key, mf.presentation_part_index, mf.presentation_part_total,
 	mf.multi_episode_start, mf.multi_episode_end,
@@ -81,6 +85,8 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	var codecVideo, codecAudio, resolution, container, probeSource *string
 	var markersSource, introMarkersSource, introMarkersProvider, introMarkersAlgorithm *string
 	var creditsMarkersSource, creditsMarkersProvider, creditsMarkersAlgorithm *string
+	var recapMarkersSource, recapMarkersProvider, recapMarkersAlgorithm *string
+	var previewMarkersSource, previewMarkersProvider, previewMarkersAlgorithm *string
 	var chapterThumbnailLastError *string
 	var editionRaw, editionKey, editionSource *string
 	var audioChannels *int
@@ -88,7 +94,9 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	var duration, bitrate *int
 	var chapterThumbnailFailureCount *int
 	var markersConfidence, introMarkersConfidence, creditsMarkersConfidence *float64
+	var recapMarkersConfidence, previewMarkersConfidence *float64
 	var introMarkersDetectedAt, creditsMarkersDetectedAt *time.Time
+	var recapMarkersDetectedAt, previewMarkersDetectedAt *time.Time
 	var editionConfidence *float64
 	var presentationPartIndex, presentationPartTotal *int
 	var multiEpisodeStart, multiEpisodeEnd *int
@@ -136,6 +144,10 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.IntroEnd,
 		&f.CreditsStart,
 		&f.CreditsEnd,
+		&f.RecapStart,
+		&f.RecapEnd,
+		&f.PreviewStart,
+		&f.PreviewEnd,
 		&markersSource,
 		&markersConfidence,
 		&introMarkersSource,
@@ -148,6 +160,16 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&creditsMarkersConfidence,
 		&creditsMarkersAlgorithm,
 		&creditsMarkersDetectedAt,
+		&recapMarkersSource,
+		&recapMarkersProvider,
+		&recapMarkersConfidence,
+		&recapMarkersAlgorithm,
+		&recapMarkersDetectedAt,
+		&previewMarkersSource,
+		&previewMarkersProvider,
+		&previewMarkersConfidence,
+		&previewMarkersAlgorithm,
+		&previewMarkersDetectedAt,
 		&editionRaw,
 		&editionKey,
 		&editionConfidence,
@@ -294,6 +316,16 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	f.CreditsMarkersConfidence = creditsMarkersConfidence
 	f.CreditsMarkersAlgorithm = creditsMarkersAlgorithm
 	f.CreditsMarkersDetectedAt = creditsMarkersDetectedAt
+	f.RecapMarkersSource = recapMarkersSource
+	f.RecapMarkersProvider = recapMarkersProvider
+	f.RecapMarkersConfidence = recapMarkersConfidence
+	f.RecapMarkersAlgorithm = recapMarkersAlgorithm
+	f.RecapMarkersDetectedAt = recapMarkersDetectedAt
+	f.PreviewMarkersSource = previewMarkersSource
+	f.PreviewMarkersProvider = previewMarkersProvider
+	f.PreviewMarkersConfidence = previewMarkersConfidence
+	f.PreviewMarkersAlgorithm = previewMarkersAlgorithm
+	f.PreviewMarkersDetectedAt = previewMarkersDetectedAt
 
 	if len(videoTracksJSON) > 0 {
 		if err := json.Unmarshal(videoTracksJSON, &f.VideoTracks); err != nil {
@@ -358,6 +390,8 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var codecVideo, codecAudio, resolution, container, probeSource *string
 		var markersSource, introMarkersSource, introMarkersProvider, introMarkersAlgorithm *string
 		var creditsMarkersSource, creditsMarkersProvider, creditsMarkersAlgorithm *string
+		var recapMarkersSource, recapMarkersProvider, recapMarkersAlgorithm *string
+		var previewMarkersSource, previewMarkersProvider, previewMarkersAlgorithm *string
 		var chapterThumbnailLastError *string
 		var editionRaw, editionKey, editionSource *string
 		var audioChannels *int
@@ -365,7 +399,9 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var duration, bitrate *int
 		var chapterThumbnailFailureCount *int
 		var markersConfidence, introMarkersConfidence, creditsMarkersConfidence *float64
+		var recapMarkersConfidence, previewMarkersConfidence *float64
 		var introMarkersDetectedAt, creditsMarkersDetectedAt *time.Time
+		var recapMarkersDetectedAt, previewMarkersDetectedAt *time.Time
 		var editionConfidence *float64
 		var presentationPartIndex, presentationPartTotal *int
 		var multiEpisodeStart, multiEpisodeEnd *int
@@ -413,6 +449,10 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.IntroEnd,
 			&f.CreditsStart,
 			&f.CreditsEnd,
+			&f.RecapStart,
+			&f.RecapEnd,
+			&f.PreviewStart,
+			&f.PreviewEnd,
 			&markersSource,
 			&markersConfidence,
 			&introMarkersSource,
@@ -425,6 +465,16 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&creditsMarkersConfidence,
 			&creditsMarkersAlgorithm,
 			&creditsMarkersDetectedAt,
+			&recapMarkersSource,
+			&recapMarkersProvider,
+			&recapMarkersConfidence,
+			&recapMarkersAlgorithm,
+			&recapMarkersDetectedAt,
+			&previewMarkersSource,
+			&previewMarkersProvider,
+			&previewMarkersConfidence,
+			&previewMarkersAlgorithm,
+			&previewMarkersDetectedAt,
 			&editionRaw,
 			&editionKey,
 			&editionConfidence,
@@ -567,6 +617,16 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		f.CreditsMarkersConfidence = creditsMarkersConfidence
 		f.CreditsMarkersAlgorithm = creditsMarkersAlgorithm
 		f.CreditsMarkersDetectedAt = creditsMarkersDetectedAt
+		f.RecapMarkersSource = recapMarkersSource
+		f.RecapMarkersProvider = recapMarkersProvider
+		f.RecapMarkersConfidence = recapMarkersConfidence
+		f.RecapMarkersAlgorithm = recapMarkersAlgorithm
+		f.RecapMarkersDetectedAt = recapMarkersDetectedAt
+		f.PreviewMarkersSource = previewMarkersSource
+		f.PreviewMarkersProvider = previewMarkersProvider
+		f.PreviewMarkersConfidence = previewMarkersConfidence
+		f.PreviewMarkersAlgorithm = previewMarkersAlgorithm
+		f.PreviewMarkersDetectedAt = previewMarkersDetectedAt
 
 		if len(videoTracksJSON) > 0 {
 			if err := json.Unmarshal(videoTracksJSON, &f.VideoTracks); err != nil {
@@ -905,6 +965,82 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	return nil
 }
 
+// segmentState tracks the mutable per-segment fields used by UpsertMarkers.
+// Each segment kind (intro, credits, recap, preview) has an independent state
+// that the apply step mutates if the priority check allows the write.
+type segmentState struct {
+	start      *float64
+	end        *float64
+	source     *string
+	provider   *string
+	confidence *float64
+	algorithm  *string
+}
+
+// applySegmentPatch merges the patched start/end into the segment state, then
+// gates the write on the shared priority check. Returns true if the state was
+// mutated. The legacy `markers_source` field is consulted as a fallback when
+// the segment-specific source is nil but the segment already has a range.
+func applySegmentPatch(
+	state *segmentState,
+	legacySharedSource *string,
+	update MarkerUpdate,
+	patchStart, patchEnd *float64,
+	duration float64,
+	segmentName string,
+) (bool, error) {
+	if patchStart == nil && patchEnd == nil {
+		return false, nil
+	}
+
+	nextStart := state.start
+	nextEnd := state.end
+	if patchStart != nil {
+		nextStart = patchStart
+	}
+	if patchEnd != nil {
+		nextEnd = patchEnd
+	}
+	if nextStart == nil || nextEnd == nil {
+		return false, nil
+	}
+	if *nextStart < 0 || *nextEnd <= *nextStart {
+		return false, fmt.Errorf("invalid %s marker range %.3f-%.3f", segmentName, *nextStart, *nextEnd)
+	}
+	if duration > 0 && *nextEnd > duration+1 {
+		return false, fmt.Errorf("%s marker end %.3f exceeds duration %.3f", segmentName, *nextEnd, duration)
+	}
+
+	effectiveSource := state.source
+	if effectiveSource == nil && state.start != nil && state.end != nil {
+		effectiveSource = legacySharedSource
+	}
+	if !markers.CanWriteMarker(effectiveSource, state.confidence, update.MarkersSource, update.MarkersConfidence) {
+		return false, nil
+	}
+
+	src := update.MarkersSource
+	algo := markerAlgorithm(update)
+	state.start = nextStart
+	state.end = nextEnd
+	state.source = &src
+	state.provider = update.MarkersProvider
+	state.confidence = update.MarkersConfidence
+	state.algorithm = &algo
+	return true, nil
+}
+
+// segmentEqual reports whether two segment states are byte-equivalent. Used to
+// detect no-op writes so the transaction can short-circuit without a SQL UPDATE.
+func segmentEqual(a, b segmentState) bool {
+	return ptrFloatEqual(a.start, b.start) &&
+		ptrFloatEqual(a.end, b.end) &&
+		ptrStringEqual(a.source, b.source) &&
+		ptrStringEqual(a.provider, b.provider) &&
+		ptrFloatEqual(a.confidence, b.confidence) &&
+		ptrStringEqual(a.algorithm, b.algorithm)
+}
+
 // UpsertMarkers updates only marker fields while enforcing source priority.
 func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update MarkerUpdate) (bool, error) {
 	if update.MarkersSource == "" {
@@ -918,21 +1054,13 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 	defer tx.Rollback(ctx)
 
 	var (
-		duration                float64
-		existingSource          *string
-		existingConfidence      *float64
-		existingIntroStart      *float64
-		existingIntroEnd        *float64
-		existingCreditsStart    *float64
-		existingCreditsEnd      *float64
-		existingIntroSource     *string
-		existingIntroProvider   *string
-		existingIntroConfidence *float64
-		existingIntroAlgorithm  *string
-		existingCreditsSource   *string
-		existingCreditsProvider *string
-		existingCreditsConf     *float64
-		existingCreditsAlgo     *string
+		duration           float64
+		existingSource     *string
+		existingConfidence *float64
+		intro              segmentState
+		credits            segmentState
+		recap              segmentState
+		preview            segmentState
 	)
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(duration, 0),
@@ -940,34 +1068,38 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 		        markers_confidence,
 		        intro_start,
 		        intro_end,
-		        credits_start,
-		        credits_end,
 		        intro_markers_source,
 		        intro_markers_provider,
 		        intro_markers_confidence,
 		        intro_markers_algorithm,
+		        credits_start,
+		        credits_end,
 		        credits_markers_source,
 		        credits_markers_provider,
 		        credits_markers_confidence,
-		        credits_markers_algorithm
+		        credits_markers_algorithm,
+		        recap_start,
+		        recap_end,
+		        recap_markers_source,
+		        recap_markers_provider,
+		        recap_markers_confidence,
+		        recap_markers_algorithm,
+		        preview_start,
+		        preview_end,
+		        preview_markers_source,
+		        preview_markers_provider,
+		        preview_markers_confidence,
+		        preview_markers_algorithm
 		 FROM media_files WHERE id = $1 FOR UPDATE`,
 		fileID,
 	).Scan(
 		&duration,
 		&existingSource,
 		&existingConfidence,
-		&existingIntroStart,
-		&existingIntroEnd,
-		&existingCreditsStart,
-		&existingCreditsEnd,
-		&existingIntroSource,
-		&existingIntroProvider,
-		&existingIntroConfidence,
-		&existingIntroAlgorithm,
-		&existingCreditsSource,
-		&existingCreditsProvider,
-		&existingCreditsConf,
-		&existingCreditsAlgo,
+		&intro.start, &intro.end, &intro.source, &intro.provider, &intro.confidence, &intro.algorithm,
+		&credits.start, &credits.end, &credits.source, &credits.provider, &credits.confidence, &credits.algorithm,
+		&recap.start, &recap.end, &recap.source, &recap.provider, &recap.confidence, &recap.algorithm,
+		&preview.start, &preview.end, &preview.source, &preview.provider, &preview.confidence, &preview.algorithm,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, ErrFileNotFound
@@ -975,101 +1107,34 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 		return false, fmt.Errorf("load existing marker source: %w", err)
 	}
 
-	nextIntroStart := existingIntroStart
-	nextIntroEnd := existingIntroEnd
-	nextIntroSource := existingIntroSource
-	nextIntroProvider := existingIntroProvider
-	nextIntroConfidence := existingIntroConfidence
-	nextIntroAlgorithm := existingIntroAlgorithm
-	writeIntro := update.IntroStart != nil && update.IntroEnd != nil
-	introApplied := false
-	if writeIntro {
-		if *update.IntroStart < 0 || *update.IntroEnd <= *update.IntroStart {
-			return false, fmt.Errorf("invalid intro marker range %.3f-%.3f", *update.IntroStart, *update.IntroEnd)
-		}
-		if duration > 0 && *update.IntroEnd > duration+1 {
-			return false, fmt.Errorf("intro marker end %.3f exceeds duration %.3f", *update.IntroEnd, duration)
-		}
-		currentIntroSource := ""
-		if existingIntroSource != nil {
-			currentIntroSource = *existingIntroSource
-		} else if existingIntroStart != nil && existingIntroEnd != nil && existingSource != nil {
-			currentIntroSource = *existingSource
-		}
-		canWriteIntro := models.MarkerSourcePriority(currentIntroSource) <= models.MarkerSourcePriority(update.MarkersSource)
-		if canWriteIntro && models.MarkerSourcePriority(currentIntroSource) == models.MarkerSourcePriority(update.MarkersSource) &&
-			existingIntroConfidence != nil && update.MarkersConfidence != nil &&
-			*existingIntroConfidence >= *update.MarkersConfidence {
-			canWriteIntro = false
-		}
-		if canWriteIntro {
-			nextIntroStart = update.IntroStart
-			nextIntroEnd = update.IntroEnd
-			nextIntroSource = &update.MarkersSource
-			nextIntroProvider = update.MarkersProvider
-			nextIntroConfidence = update.MarkersConfidence
-			algorithm := markerAlgorithm(update)
-			nextIntroAlgorithm = &algorithm
-			introApplied = true
-		}
-	}
+	originalIntro, originalCredits, originalRecap, originalPreview := intro, credits, recap, preview
 
-	nextCreditsStart := existingCreditsStart
-	nextCreditsEnd := existingCreditsEnd
-	nextCreditsSource := existingCreditsSource
-	nextCreditsProvider := existingCreditsProvider
-	nextCreditsConfidence := existingCreditsConf
-	nextCreditsAlgorithm := existingCreditsAlgo
-	creditsApplied := false
-	currentCreditsSource := ""
-	if existingCreditsSource != nil {
-		currentCreditsSource = *existingCreditsSource
-	} else if existingCreditsStart != nil && existingCreditsEnd != nil && existingSource != nil {
-		currentCreditsSource = *existingSource
-	}
-	canWriteCredits := models.MarkerSourcePriority(currentCreditsSource) <= models.MarkerSourcePriority(update.MarkersSource)
-	if canWriteCredits && update.CreditsStart != nil {
-		nextCreditsStart = update.CreditsStart
-		creditsApplied = true
-	}
-	if canWriteCredits && update.CreditsEnd != nil {
-		nextCreditsEnd = update.CreditsEnd
-		creditsApplied = true
-	}
-	if err := validateMarkerRange("credits", nextCreditsStart, nextCreditsEnd, duration); err != nil {
+	introApplied, err := applySegmentPatch(&intro, existingSource, update, update.IntroStart, update.IntroEnd, duration, "intro")
+	if err != nil {
 		return false, err
 	}
-	if creditsApplied {
-		nextCreditsSource = &update.MarkersSource
-		nextCreditsProvider = update.MarkersProvider
-		nextCreditsConfidence = update.MarkersConfidence
-		algorithm := markerAlgorithm(update)
-		nextCreditsAlgorithm = &algorithm
+	creditsApplied, err := applySegmentPatch(&credits, existingSource, update, update.CreditsStart, update.CreditsEnd, duration, "credits")
+	if err != nil {
+		return false, err
+	}
+	recapApplied, err := applySegmentPatch(&recap, existingSource, update, update.RecapStart, update.RecapEnd, duration, "recap")
+	if err != nil {
+		return false, err
+	}
+	previewApplied, err := applySegmentPatch(&preview, existingSource, update, update.PreviewStart, update.PreviewEnd, duration, "preview")
+	if err != nil {
+		return false, err
 	}
 
-	nextSource := existingSource
-	nextConfidence := existingConfidence
-	nextSource, nextConfidence = nextSharedMarkerAttribution(
-		nextSource,
-		nextConfidence,
-		update,
-		introApplied || creditsApplied,
-	)
+	anyApplied := introApplied || creditsApplied || recapApplied || previewApplied
+	nextSource, nextConfidence := nextSharedMarkerAttribution(existingSource, existingConfidence, update, anyApplied)
 
-	if ptrFloatEqual(existingIntroStart, nextIntroStart) &&
-		ptrFloatEqual(existingIntroEnd, nextIntroEnd) &&
-		ptrFloatEqual(existingCreditsStart, nextCreditsStart) &&
-		ptrFloatEqual(existingCreditsEnd, nextCreditsEnd) &&
+	if segmentEqual(intro, originalIntro) &&
+		segmentEqual(credits, originalCredits) &&
+		segmentEqual(recap, originalRecap) &&
+		segmentEqual(preview, originalPreview) &&
 		ptrStringEqual(existingSource, nextSource) &&
-		ptrFloatEqual(existingConfidence, nextConfidence) &&
-		ptrStringEqual(existingIntroSource, nextIntroSource) &&
-		ptrStringEqual(existingIntroProvider, nextIntroProvider) &&
-		ptrFloatEqual(existingIntroConfidence, nextIntroConfidence) &&
-		ptrStringEqual(existingIntroAlgorithm, nextIntroAlgorithm) &&
-		ptrStringEqual(existingCreditsSource, nextCreditsSource) &&
-		ptrStringEqual(existingCreditsProvider, nextCreditsProvider) &&
-		ptrFloatEqual(existingCreditsConf, nextCreditsConfidence) &&
-		ptrStringEqual(existingCreditsAlgo, nextCreditsAlgorithm) {
+		ptrFloatEqual(existingConfidence, nextConfidence) {
 		if err := tx.Commit(ctx); err != nil {
 			return false, fmt.Errorf("commit marker no-op transaction: %w", err)
 		}
@@ -1082,38 +1147,45 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 			intro_end = $3,
 			credits_start = $4,
 			credits_end = $5,
-			markers_source = $6,
-			markers_confidence = $7,
-			intro_markers_source = $8,
-			intro_markers_provider = $9,
-			intro_markers_confidence = $10,
-			intro_markers_algorithm = $11,
-			intro_markers_detected_at = CASE WHEN $12 THEN NOW() ELSE intro_markers_detected_at END,
-			credits_markers_source = $13,
-			credits_markers_provider = $14,
-			credits_markers_confidence = $15,
-			credits_markers_algorithm = $16,
-			credits_markers_detected_at = CASE WHEN $17 THEN NOW() ELSE credits_markers_detected_at END,
+			recap_start = $6,
+			recap_end = $7,
+			preview_start = $8,
+			preview_end = $9,
+			markers_source = $10,
+			markers_confidence = $11,
+			intro_markers_source = $12,
+			intro_markers_provider = $13,
+			intro_markers_confidence = $14,
+			intro_markers_algorithm = $15,
+			intro_markers_detected_at = CASE WHEN $16 THEN NOW() ELSE intro_markers_detected_at END,
+			credits_markers_source = $17,
+			credits_markers_provider = $18,
+			credits_markers_confidence = $19,
+			credits_markers_algorithm = $20,
+			credits_markers_detected_at = CASE WHEN $21 THEN NOW() ELSE credits_markers_detected_at END,
+			recap_markers_source = $22,
+			recap_markers_provider = $23,
+			recap_markers_confidence = $24,
+			recap_markers_algorithm = $25,
+			recap_markers_detected_at = CASE WHEN $26 THEN NOW() ELSE recap_markers_detected_at END,
+			preview_markers_source = $27,
+			preview_markers_provider = $28,
+			preview_markers_confidence = $29,
+			preview_markers_algorithm = $30,
+			preview_markers_detected_at = CASE WHEN $31 THEN NOW() ELSE preview_markers_detected_at END,
 			updated_at = NOW()
 		WHERE id = $1
 	`,
 		fileID,
-		nextIntroStart,
-		nextIntroEnd,
-		nextCreditsStart,
-		nextCreditsEnd,
-		nextSource,
-		nextConfidence,
-		nextIntroSource,
-		nextIntroProvider,
-		nextIntroConfidence,
-		nextIntroAlgorithm,
-		introApplied,
-		nextCreditsSource,
-		nextCreditsProvider,
-		nextCreditsConfidence,
-		nextCreditsAlgorithm,
-		creditsApplied,
+		intro.start, intro.end,
+		credits.start, credits.end,
+		recap.start, recap.end,
+		preview.start, preview.end,
+		nextSource, nextConfidence,
+		intro.source, intro.provider, intro.confidence, intro.algorithm, introApplied,
+		credits.source, credits.provider, credits.confidence, credits.algorithm, creditsApplied,
+		recap.source, recap.provider, recap.confidence, recap.algorithm, recapApplied,
+		preview.source, preview.provider, preview.confidence, preview.algorithm, previewApplied,
 	)
 	if err != nil {
 		return false, fmt.Errorf("updating media markers: %w", err)
@@ -1135,18 +1207,6 @@ func ptrFloatEqual(a, b *float64) bool {
 	return *a == *b
 }
 
-func validateMarkerRange(kind string, start, end *float64, duration float64) error {
-	if start == nil || end == nil {
-		return nil
-	}
-	if *start < 0 || *end <= *start {
-		return fmt.Errorf("invalid %s marker range %.3f-%.3f", kind, *start, *end)
-	}
-	if duration > 0 && *end > duration+1 {
-		return fmt.Errorf("%s marker end %.3f exceeds duration %.3f", kind, *end, duration)
-	}
-	return nil
-}
 
 func nextSharedMarkerAttribution(
 	existingSource *string,

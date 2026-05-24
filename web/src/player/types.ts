@@ -33,6 +33,8 @@ export interface PlayerFileVersion {
   chapters?: PlayerChapter[];
   intro?: PlayerTimeRange | null;
   credits?: PlayerTimeRange | null;
+  recap?: PlayerTimeRange | null;
+  preview?: PlayerTimeRange | null;
 }
 
 export interface PlayerPlaybackVariantPart {
@@ -240,6 +242,10 @@ export interface WatchPageProps {
   intro: PlayerTimeRange | null;
   autoSkipIntro?: boolean;
   credits: PlayerTimeRange | null;
+  recap?: PlayerTimeRange | null;
+  preview?: PlayerTimeRange | null;
+  autoSkipRecap?: boolean;
+  autoPlayNextPreview?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
   onEnded?: (state?: PlaybackExitState) => void | Promise<void>;

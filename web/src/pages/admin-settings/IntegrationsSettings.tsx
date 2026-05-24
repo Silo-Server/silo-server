@@ -396,6 +396,54 @@ function MDBListCredentialCard() {
   );
 }
 
+function IntroDBCredentialCard() {
+  const { data: sensitive } = useAdminSensitiveStatus();
+  const updateSetting = useUpdateServerSetting();
+  const [apiKey, setApiKey] = useState("");
+  const configured = new Set(sensitive?.configured ?? []).has("introdb.api_key");
+
+  function save() {
+    void updateSetting.mutateAsync({ key: "introdb.api_key", value: apiKey }).then(() => {
+      setApiKey("");
+    });
+  }
+
+  return (
+    <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">TheIntroDB</h3>
+          <p className="text-muted-foreground text-xs">
+            Community-sourced intro, recap, credits, and preview timestamps. Read access is free and
+            requires no key. Supplying your{" "}
+            <a
+              href="https://theintrodb.org/profile"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              TheIntroDB
+            </a>{" "}
+            API key lets the server use your pending submissions before they're community-verified.
+          </p>
+        </div>
+        <SubtitleCredentialStatus configured={configured} />
+      </div>
+      <SettingField
+        label="API Key (optional)"
+        type="password"
+        value={apiKey}
+        onChange={setApiKey}
+        sensitiveConfigured={configured}
+        hint="Leave blank to use anonymous read access."
+      />
+      <Button type="button" onClick={save} disabled={updateSetting.isPending}>
+        {updateSetting.isPending ? "Saving..." : "Save TheIntroDB API Key"}
+      </Button>
+    </div>
+  );
+}
+
 export default function IntegrationsSettings() {
   return (
     <div className="flex h-full flex-col">
@@ -409,6 +457,9 @@ export default function IntegrationsSettings() {
       </div>
       <div className="mb-8">
         <MDBListCredentialCard />
+      </div>
+      <div className="mb-8">
+        <IntroDBCredentialCard />
       </div>
       <SubtitlesContent />
     </div>

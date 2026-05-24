@@ -77,6 +77,8 @@ export function WatchPage({
   showForcedSubtitles,
   profileLanguage,
   autoSkipIntro,
+  autoSkipRecap,
+  autoPlayNextPreview,
   seriesContext,
   onNavigateEpisode,
   onEnded,
@@ -97,7 +99,11 @@ export function WatchPage({
   const playbackController = useWatchPlaybackController();
   const chapterRefreshAttemptsRef = useRef<Set<number>>(new Set());
   const handledSelectionRevisionRef = useRef<number | null>(null);
+  const markerRealtimeReconcileKeyRef = useRef<string | null>(null);
   const [playbackVersions, setPlaybackVersions] = useState(versions);
+  const [realtimeConnectionState, setRealtimeConnectionState] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
   const watchTogetherConnection = useWatchTogetherRoomConnection({
     roomId: watchTogetherRoomId,
     roomToken: watchTogetherRoomToken,
@@ -195,6 +201,7 @@ export function WatchPage({
 
   useEffect(() => {
     chapterRefreshAttemptsRef.current.clear();
+    markerRealtimeReconcileKeyRef.current = null;
   }, [contentId, playbackRequestKey]);
 
   useEffect(() => {
@@ -272,6 +279,51 @@ export function WatchPage({
     playbackVersions,
   ]);
 
+  useEffect(() => {
+    if (
+      realtimeConnectionState !== "connected" ||
+      !session.sessionId ||
+      !session.mediaFileId ||
+      session.loading ||
+      session.replacing
+    ) {
+      return;
+    }
+
+    const activeFileId = session.mediaFileId;
+    const reconcileKey = `${session.sessionId}:${activeFileId}`;
+    if (markerRealtimeReconcileKeyRef.current === reconcileKey) {
+      return;
+    }
+    markerRealtimeReconcileKeyRef.current = reconcileKey;
+
+    let cancelled = false;
+    void queryClient
+      .fetchQuery({
+        queryKey: itemKeys.watchDetail(contentId, activeFileId, libraryId),
+        queryFn: () => fetchWatchDetail(contentId, activeFileId, libraryId),
+        staleTime: 0,
+      })
+      .then((detail) => {
+        if (!cancelled) {
+          setPlaybackVersions(detail.versions);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    contentId,
+    libraryId,
+    queryClient,
+    realtimeConnectionState,
+    session.loading,
+    session.mediaFileId,
+    session.replacing,
+    session.sessionId,
+  ]);
+
   const handleRealtimeEvent = useCallback(
     (event: PlaybackRealtimeEventEnvelope) => {
       if (event.name === "chapter_thumbnail_ready") {
@@ -296,13 +348,19 @@ export function WatchPage({
         return;
       }
 
-      const { file_id, intro: nextIntro, credits: nextCredits } = event.payload;
+      const {
+        file_id,
+        intro: nextIntro,
+        credits: nextCredits,
+        recap: nextRecap,
+        preview: nextPreview,
+      } = event.payload;
       if (file_id !== session.mediaFileId) {
         return;
       }
 
       setPlaybackVersions((current) =>
-        patchVersionMarkers(current, file_id, nextIntro, nextCredits),
+        patchVersionMarkers(current, file_id, nextIntro, nextCredits, nextRecap, nextPreview),
       );
     },
     [session.mediaFileId],
@@ -405,6 +463,10 @@ export function WatchPage({
       intro={activeMarkers.intro}
       autoSkipIntro={autoSkipIntro}
       credits={activeMarkers.credits}
+      recap={activeMarkers.recap}
+      autoSkipRecap={autoSkipRecap}
+      preview={activeMarkers.preview}
+      autoPlayNextPreview={autoPlayNextPreview}
       duration={selectedDuration}
       qualityPreference={qualityPreference}
       seriesContext={seriesContext}
@@ -415,6 +477,7 @@ export function WatchPage({
       onPlaybackStateChange={onPlaybackStateChange}
       onPlaybackTransportReady={onPlaybackTransportReady}
       onRealtimeEvent={handleRealtimeEvent}
+      onRealtimeConnectionStateChange={setRealtimeConnectionState}
       onExit={onExit}
       onMinimize={onMinimize}
       onEnded={handleEnded}

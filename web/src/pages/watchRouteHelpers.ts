@@ -241,7 +241,11 @@ export function buildWatchPageProps({
 
   const intro: PlayerTimeRange | null = item.intro ?? null;
   const credits: PlayerTimeRange | null = item.credits ?? null;
+  const recap: PlayerTimeRange | null = item.recap ?? null;
+  const preview: PlayerTimeRange | null = item.preview ?? null;
   const autoSkipIntro = currentProfile?.auto_skip_intro ?? false;
+  const autoSkipRecap = currentProfile?.auto_skip_recap ?? false;
+  const autoPlayNextPreview = currentProfile?.auto_play_next_preview ?? false;
   const initialPosition = request.restart
     ? 0
     : item.user_data?.played === true
@@ -294,6 +298,10 @@ export function buildWatchPageProps({
     intro,
     autoSkipIntro,
     credits,
+    recap,
+    preview,
+    autoSkipRecap,
+    autoPlayNextPreview,
     seriesContext: item.series_id
       ? {
           seriesId: item.series_id,

@@ -121,6 +121,8 @@ type MarkersUpdatedPayload struct {
 	FileID    int               `json:"file_id"`
 	Intro     *TimeRangePayload `json:"intro"`
 	Credits   *TimeRangePayload `json:"credits"`
+	Recap     *TimeRangePayload `json:"recap"`
+	Preview   *TimeRangePayload `json:"preview"`
 }
 
 // NewEventEnvelope creates a validated realtime event envelope.
@@ -167,12 +169,16 @@ func NewMarkersUpdatedEvent(
 	fileID int,
 	intro *TimeRangePayload,
 	credits *TimeRangePayload,
+	recap *TimeRangePayload,
+	preview *TimeRangePayload,
 ) (EventEnvelope, error) {
 	payload, err := json.Marshal(MarkersUpdatedPayload{
 		SessionID: sessionID,
 		FileID:    fileID,
 		Intro:     intro,
 		Credits:   credits,
+		Recap:     recap,
+		Preview:   preview,
 	})
 	if err != nil {
 		return EventEnvelope{}, err

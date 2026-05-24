@@ -33,15 +33,17 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(_ context.Context, file *models.Me
 		return
 	}
 
-	var intro *TimeRangePayload
-	if file.IntroStart != nil && file.IntroEnd != nil {
-		intro = &TimeRangePayload{Start: *file.IntroStart, End: *file.IntroEnd}
+	rangePayload := func(start, end *float64) *TimeRangePayload {
+		if start == nil || end == nil {
+			return nil
+		}
+		return &TimeRangePayload{Start: *start, End: *end}
 	}
-	var credits *TimeRangePayload
-	if file.CreditsStart != nil && file.CreditsEnd != nil {
-		credits = &TimeRangePayload{Start: *file.CreditsStart, End: *file.CreditsEnd}
-	}
-	if intro == nil && credits == nil {
+	intro := rangePayload(file.IntroStart, file.IntroEnd)
+	credits := rangePayload(file.CreditsStart, file.CreditsEnd)
+	recap := rangePayload(file.RecapStart, file.RecapEnd)
+	preview := rangePayload(file.PreviewStart, file.PreviewEnd)
+	if intro == nil && credits == nil && recap == nil && preview == nil {
 		return
 	}
 
@@ -49,7 +51,7 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(_ context.Context, file *models.Me
 		if session == nil || session.ID == "" || !session.HasRealtimeConnection {
 			continue
 		}
-		event, err := NewMarkersUpdatedEvent(session.ID, file.ID, intro, credits)
+		event, err := NewMarkersUpdatedEvent(session.ID, file.ID, intro, credits, recap, preview)
 		if err != nil {
 			slog.Warn(
 				"failed to encode markers updated realtime event",

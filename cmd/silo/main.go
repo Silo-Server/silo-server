@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -46,6 +48,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/markers/introdb"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -417,6 +421,39 @@ func main() {
 			intromarkers.DefaultConfig(cfg.Playback.FFmpegPath),
 			slog.Default(),
 		)
+	}
+	if deps.DB != nil {
+		markerRegistry := markers.NewRegistry(slog.Default())
+		introdbAPIKey, err := settingsRepo.Get(appCtx, "introdb.api_key")
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("load introdb.api_key from settings failed; provider will run with no key",
+				"error", err)
+			introdbAPIKey = ""
+		}
+		introdbClient := introdb.NewClient(introdbAPIKey)
+		if err := markerRegistry.Register(introdb.NewProvider(introdbClient)); err != nil {
+			log.Fatalf("register introdb marker provider: %v", err)
+		}
+		deps.OnServerSettingUpdated = func(_ context.Context, key, value string) {
+			if key == "introdb.api_key" {
+				introdbClient.SetAPIKey(value)
+			}
+		}
+		if eventBus != nil {
+			_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+				if event.Type != cache.EventSettingsChanged || event.Payload != "introdb.api_key" {
+					return
+				}
+				value, loadErr := settingsRepo.Get(context.Background(), "introdb.api_key")
+				if loadErr != nil {
+					slog.Warn("introdb api key reload failed", "error", loadErr)
+					return
+				}
+				introdbClient.SetAPIKey(value)
+			})
+		}
+		deps.MarkerRegistry = markerRegistry
+		deps.MarkerResolver = markers.NewDBExternalIDResolver(deps.DB)
 	}
 	var watchProviderService *watchsync.Service
 	if deps.DB != nil {

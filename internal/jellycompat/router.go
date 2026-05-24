@@ -145,7 +145,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/{id}/Episodes", itemsHandler.HandleEpisodes)
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
-			r.Get("/MediaSegments/{id}", itemsHandler.HandleItemStub)
+			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
 			r.Get("/UserItems/Resume", itemsHandler.HandleResume)

@@ -31,6 +31,8 @@ describe("resolveActiveVersionMarkers", () => {
     ).toEqual({
       intro: null,
       credits: { start: 1500, end: 1790 },
+      recap: null,
+      preview: null,
     });
   });
 
@@ -38,6 +40,8 @@ describe("resolveActiveVersionMarkers", () => {
     expect(resolveActiveVersionMarkers(makeVersion({ intro: null, credits: null }))).toEqual({
       intro: null,
       credits: null,
+      recap: null,
+      preview: null,
     });
   });
 });

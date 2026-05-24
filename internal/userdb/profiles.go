@@ -56,12 +56,14 @@ func CreateProfile(db *sql.DB, p Profile) error {
 		INSERT INTO profiles (
 			id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 			quality_preference, language, subtitle_language, subtitle_mode,
-			auto_skip_intro, auto_skip_credits, show_forced_subtitles,
+			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
+			show_forced_subtitles,
 			library_restrictions_enabled, max_playback_quality, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
 		p.QualityPreference, p.Language, p.SubtitleLanguage, p.SubtitleMode,
-		p.AutoSkipIntro, p.AutoSkipCredits, p.ShowForcedSubtitles, p.LibraryRestrictionsEnabled,
+		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
+		p.ShowForcedSubtitles, p.LibraryRestrictionsEnabled,
 		p.MaxPlaybackQuality, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
@@ -80,13 +82,13 @@ func GetProfile(db *sql.DB, id string) (*Profile, error) {
 	err := db.QueryRow(`
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 		       quality_preference, language, subtitle_language, subtitle_mode,
-		       auto_skip_intro, auto_skip_credits, show_forced_subtitles,
+		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
 		       library_restrictions_enabled, max_playback_quality, created_at, updated_at
 		FROM profiles WHERE id = ?`, id,
 	).Scan(
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating,
 		&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
-		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.ShowForcedSubtitles,
+		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 		&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -107,7 +109,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 	rows, err := db.Query(`
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 		       quality_preference, language, subtitle_language, subtitle_mode,
-		       auto_skip_intro, auto_skip_credits, show_forced_subtitles,
+		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
 		       library_restrictions_enabled, max_playback_quality, created_at, updated_at
 		FROM profiles ORDER BY created_at ASC`)
 	if err != nil {
@@ -121,7 +123,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating,
 			&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
-			&p.AutoSkipIntro, &p.AutoSkipCredits, &p.ShowForcedSubtitles,
+			&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
 			&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning profile row: %w", err)
@@ -194,6 +196,14 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 	if u.AutoSkipIntro != nil {
 		setClauses = append(setClauses, "auto_skip_intro = ?")
 		args = append(args, *u.AutoSkipIntro)
+	}
+	if u.AutoSkipRecap != nil {
+		setClauses = append(setClauses, "auto_skip_recap = ?")
+		args = append(args, *u.AutoSkipRecap)
+	}
+	if u.AutoPlayNextPreview != nil {
+		setClauses = append(setClauses, "auto_play_next_preview = ?")
+		args = append(args, *u.AutoPlayNextPreview)
 	}
 	if u.AutoSkipCredits != nil {
 		setClauses = append(setClauses, "auto_skip_credits = ?")

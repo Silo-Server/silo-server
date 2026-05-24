@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -40,6 +41,9 @@ type ItemsHandler struct {
 	accessFilter AccessFilterResolver
 	subtitleRepo subtitles.Repository
 	recommender  recommendations.Recommender
+	// FileResolver is optional; when set, /MediaSegments returns real intro/
+	// credits/recap/preview segments for any file that has them.
+	FileResolver FilePathResolver
 }
 
 // NewItemsHandler creates a new items handler.
@@ -554,6 +558,135 @@ func (h *ItemsHandler) HandleItemStub(w http.ResponseWriter, r *http.Request) {
 		TotalRecordCount: 0,
 		StartIndex:       0,
 	})
+}
+
+// mediaSegmentDTO mirrors Jellyfin's MediaSegmentDto shape. Times are
+// expressed in 100-nanosecond ticks (the convention shared with RunTimeTicks
+// and chapter position fields).
+type mediaSegmentDTO struct {
+	Id         string `json:"Id"`
+	ItemId     string `json:"ItemId"`
+	Type       string `json:"Type"`
+	StartTicks int64  `json:"StartTicks"`
+	EndTicks   int64  `json:"EndTicks"`
+}
+
+// mediaSegmentsResultDTO is the paged envelope for /MediaSegments responses.
+type mediaSegmentsResultDTO struct {
+	Items            []mediaSegmentDTO `json:"Items"`
+	TotalRecordCount int               `json:"TotalRecordCount"`
+	StartIndex       int               `json:"StartIndex"`
+}
+
+// HandleMediaSegments returns the intro/credits/recap/preview ranges for an
+// item as a Jellyfin MediaSegments payload. Used by Jellyfin clients
+// (JellyCon, Findroid, Infuse) to render skip buttons.
+func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	raw := chiURLParam(r, "id")
+	if raw == "" {
+		writeError(w, http.StatusBadRequest, "BadRequest", "Missing item id")
+		return
+	}
+	contentID, err := h.codec.DecodeStringID(EncodedIDItem, raw)
+	var requestedFileID int
+	if err != nil {
+		if fileID, fileErr := h.codec.DecodeIntID(EncodedIDMediaSource, raw); fileErr == nil {
+			if owner, ok := h.codec.LookupMediaSourceOwner(fileID); ok {
+				contentID = owner
+				requestedFileID = int(fileID)
+			}
+		}
+	}
+	if contentID == "" {
+		slog.Debug("jellycompat: media segments lookup with undecodable id", "raw_id", raw)
+		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
+		return
+	}
+
+	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
+	if err != nil {
+		slog.Warn("jellycompat: media segments item lookup failed",
+			"content_id", contentID,
+			"error", err)
+		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
+		return
+	}
+	if detail == nil {
+		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
+		return
+	}
+	// Versions carry the same Intro/Credits/Recap/Preview that the native API
+	// surfaces; the default-playback version owns the segments shown to clients.
+	var version *catalog.FileVersion
+	if requestedFileID > 0 {
+		for i := range detail.Versions {
+			if detail.Versions[i].FileID == requestedFileID {
+				version = &detail.Versions[i]
+				break
+			}
+		}
+	}
+	if requestedFileID == 0 {
+		for i := range detail.Versions {
+			if version == nil || (detail.Versions[i].FileID != 0 && version.FileID == 0) {
+				version = &detail.Versions[i]
+			}
+		}
+	}
+	if version == nil {
+		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
+		return
+	}
+
+	segments := buildMediaSegmentDTOs(raw, version)
+	writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{
+		Items:            segments,
+		TotalRecordCount: len(segments),
+		StartIndex:       0,
+	})
+}
+
+// buildMediaSegmentDTOs converts the four optional marker ranges on a file
+// version into the flat segment list shape Jellyfin clients expect.
+func buildMediaSegmentDTOs(itemUUID string, version *catalog.FileVersion) []mediaSegmentDTO {
+	if version == nil {
+		return nil
+	}
+	segments := make([]mediaSegmentDTO, 0, 4)
+	add := func(kind string, marker *catalog.Marker) {
+		if marker == nil {
+			return
+		}
+		segments = append(segments, mediaSegmentDTO{
+			Id:         deriveSegmentID(itemUUID, kind),
+			ItemId:     itemUUID,
+			Type:       kind,
+			StartTicks: secondsToTicks(marker.Start),
+			EndTicks:   secondsToTicks(marker.End),
+		})
+	}
+	add("Intro", version.Intro)
+	add("Outro", version.Credits)
+	add("Recap", version.Recap)
+	add("Preview", version.Preview)
+	return segments
+}
+
+// mediaSegmentIDNamespace is the fixed UUIDv5 namespace under which segment
+// IDs are minted. A bespoke namespace ensures these IDs never collide with
+// other UUIDs minted elsewhere in the codec, while remaining deterministic
+// across processes and restarts.
+var mediaSegmentIDNamespace = uuid.MustParse("9f1b2f4a-3c0d-5e16-9a87-2c4f8d0a1d9b")
+
+// deriveSegmentID produces a stable UUID for a (item, kind) pair so repeated
+// GETs return the same Id (Jellyfin clients cache by Id).
+func deriveSegmentID(itemUUID, kind string) string {
+	return uuid.NewSHA1(mediaSegmentIDNamespace, []byte(itemUUID+":"+kind)).String()
 }
 
 // HandleGroupingOptionsStub serves GET /UserViews/GroupingOptions with an empty array.

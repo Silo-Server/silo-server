@@ -23,3 +23,4 @@ func MarkerSourcePriority(source string) int {
 		return 0
 	}
 }
+

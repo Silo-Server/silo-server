@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -112,6 +113,8 @@ type Dependencies struct {
 	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
+	MarkerRegistry               *markers.Registry
+	MarkerResolver               markers.ExternalIDResolver
 	WatchProviderService         handlers.WatchProviderService
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
@@ -128,6 +131,7 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	OnServerSettingUpdated func(ctx context.Context, key, value string)
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
@@ -570,6 +574,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.CommandDispatcher = playback.NewCommandDispatcher(deps.SessionMgr, realtimeHub, commandTracker)
 		playbackHandler.IntroAnalyzer = deps.IntroAnalyzer
 		playbackHandler.IntroRepository = deps.IntroRepository
+		playbackHandler.MarkerRegistry = deps.MarkerRegistry
+		playbackHandler.MarkerResolver = deps.MarkerResolver
+		if deps.FileRepo != nil {
+			playbackHandler.MarkerUpserter = deps.FileRepo
+		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
@@ -619,6 +628,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
+		}
+		if deps.OnServerSettingUpdated != nil {
+			adminHandler.OnServerSettingUpdated = deps.OnServerSettingUpdated
 		}
 	}
 	if deps.DB != nil {

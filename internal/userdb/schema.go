@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     subtitle_mode TEXT DEFAULT 'auto',
     auto_skip_intro BOOLEAN DEFAULT false,
     auto_skip_credits BOOLEAN DEFAULT false,
+    auto_skip_recap BOOLEAN DEFAULT false,
+    auto_play_next_preview BOOLEAN DEFAULT false,
     show_forced_subtitles BOOLEAN NOT NULL DEFAULT true,
     library_restrictions_enabled BOOLEAN DEFAULT false,
     max_playback_quality TEXT DEFAULT '',
@@ -267,10 +269,43 @@ func InitSchema(db *sql.DB) error {
 	if err := ensureDeviceSettingsProfileColumn(db); err != nil {
 		return err
 	}
+	if err := ensureAutoSkipRecapPreviewColumns(db); err != nil {
+		return err
+	}
 	if err := ensureWatchHistoryIdentityColumn(db); err != nil {
 		return err
 	}
 	return migratePlaybackSettingsToDeviceScope(db)
+}
+
+func ensureAutoSkipRecapPreviewColumns(db *sql.DB) error {
+	columns := []struct {
+		name       string
+		definition string
+	}{
+		{name: "auto_skip_recap", definition: "BOOLEAN DEFAULT false"},
+		{name: "auto_play_next_preview", definition: "BOOLEAN DEFAULT false"},
+	}
+
+	for _, column := range columns {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+			"profiles",
+			column.name,
+		).Scan(&count); err != nil {
+			return fmt.Errorf("checking profiles.%s column: %w", column.name, err)
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := db.Exec(
+			fmt.Sprintf("ALTER TABLE profiles ADD COLUMN %s %s", column.name, column.definition),
+		); err != nil {
+			return fmt.Errorf("adding profiles.%s column: %w", column.name, err)
+		}
+	}
+	return nil
 }
 
 func ensureWatchHistoryIdentityColumn(db *sql.DB) error {
