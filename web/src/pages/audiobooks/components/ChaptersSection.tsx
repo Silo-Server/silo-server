@@ -53,11 +53,7 @@ function formatChapterStart(totalSeconds: number): string {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export function ChaptersSection({
-  files,
-  currentPositionSeconds,
-  onSelect,
-}: ChaptersSectionProps) {
+export function ChaptersSection({ files, currentPositionSeconds, onSelect }: ChaptersSectionProps) {
   const rows = useMemo(() => buildRows(files), [files]);
   const [sort, setSort] = useState<SortMode>("position");
   const [sortOpen, setSortOpen] = useState(false);
