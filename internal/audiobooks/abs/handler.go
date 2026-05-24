@@ -89,6 +89,15 @@ type EventPublisher interface {
 	Broadcast(event string, payload any)
 }
 
+// SocketIOServer exposes the Socket.io HTTP handler. The concrete
+// implementation lives in internal/audiobooks/abssocket. Keeping the
+// interface here avoids a circular import: handler.go uses it, abssocket
+// imports abs for ParseToken/EventPublisher, and the wiring is done by the
+// caller (service.go or main.go) that imports both packages.
+type SocketIOServer interface {
+	Handler() http.Handler
+}
+
 // Recommender powers /items/{id}/similar. nil → route returns an empty list.
 type Recommender interface {
 	Similar(ctx context.Context, contentID string, limit int) ([]string, error)
@@ -135,6 +144,9 @@ type Dependencies struct {
 	// (migration 143) for /session/{sid}/sync and /session/{sid}/close.
 	// May be nil; handlers degrade gracefully.
 	PlaybackSessionStore ABSPlaybackSessionStore
+	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
+	// the route is only registered when a non-nil value is supplied.
+	SocketIO SocketIOServer
 }
 
 // Handler wires the /abs/api/* and canonical ABS-client paths.
@@ -247,7 +259,13 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		}
 	})
 
-	// TODO Stage 6: social / collection routes (bookmarks, smart-collections,
+	// Stage 6: Socket.io realtime endpoint.
+	if h.deps.SocketIO != nil {
+		r.Mount("/socket.io", h.deps.SocketIO.Handler())
+		r.Mount("/abs/socket.io", h.deps.SocketIO.Handler())
+	}
+
+	// TODO: social / collection routes (bookmarks, smart-collections,
 	// collections, playlists, RSS feeds, author/series detail, listening stats)
 }
 
