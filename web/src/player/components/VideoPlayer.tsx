@@ -95,6 +95,7 @@ interface VideoPlayerProps {
   onPlaybackTransportReady?: (transport: PlayerPlaybackTransport | null) => void;
   onReturnFromPostRoll?: () => void;
   onRealtimeEvent?: (event: PlaybackRealtimeEventEnvelope) => void;
+  onRealtimeConnectionStateChange?: (state: "disconnected" | "connecting" | "connected") => void;
   watchTogetherRoomId?: string | null;
   watchTogetherConnection?: WatchTogetherRoomConnectionResult;
 }
@@ -181,6 +182,7 @@ export function VideoPlayer({
   onPlaybackTransportReady,
   onReturnFromPostRoll,
   onRealtimeEvent,
+  onRealtimeConnectionStateChange,
   watchTogetherRoomId,
   watchTogetherConnection,
 }: VideoPlayerProps) {
@@ -1714,11 +1716,15 @@ export function VideoPlayer({
     [handleExit, performPlayerSeek],
   );
 
-  usePlaybackRealtime({
+  const realtime = usePlaybackRealtime({
     sessionId,
     onCommand: executeRealtimeCommand,
     onEvent: onRealtimeEvent,
   });
+
+  useEffect(() => {
+    onRealtimeConnectionStateChange?.(realtime.connectionState);
+  }, [onRealtimeConnectionStateChange, realtime.connectionState]);
 
   // -- Postroll mini-player resize --
   const [miniPlayerWidth, setMiniPlayerWidth] = useState(320);
