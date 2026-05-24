@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Search, Sparkles, X } from "lucide-react";
+import BrandCarousel from "@/components/BrandCarousel";
 import MediaCarousel from "@/components/MediaCarousel";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,9 @@ import type {
 } from "@/api/types";
 import {
   useCreateMediaRequest,
+  useDiscoverGenres,
+  useDiscoverNetworks,
+  useDiscoverStudios,
   useMyMediaRequests,
   useRequestDiscovery,
   useRequestSearch,
@@ -120,6 +124,9 @@ export default function Requests() {
   const [searchPage, setSearchPage] = useState(1);
 
   const discovery = useRequestDiscovery();
+  const studios = useDiscoverStudios();
+  const networks = useDiscoverNetworks();
+  const genres = useDiscoverGenres();
   const search = useRequestSearch(mediaType, submittedQuery, searchPage);
   const mine = useMyMediaRequests({ limit: 100 });
   const createRequest = useCreateMediaRequest();
@@ -212,6 +219,30 @@ export default function Requests() {
                   onRequest={submitRequest}
                 />
               ))}
+              <BrandCarousel
+                kind="studio"
+                title="Studios"
+                cards={studios.data}
+                isLoading={studios.isLoading}
+                isError={studios.isError}
+                onRetry={() => void studios.refetch()}
+              />
+              <BrandCarousel
+                kind="network"
+                title="Networks"
+                cards={networks.data}
+                isLoading={networks.isLoading}
+                isError={networks.isError}
+                onRetry={() => void networks.refetch()}
+              />
+              <BrandCarousel
+                kind="genre"
+                title="Genres"
+                cards={genres.data}
+                isLoading={genres.isLoading}
+                isError={genres.isError}
+                onRetry={() => void genres.refetch()}
+              />
             </div>
           )}
         </TabsContent>
