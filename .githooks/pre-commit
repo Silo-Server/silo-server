@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+scripts/check-local-path-leaks.sh --cached
