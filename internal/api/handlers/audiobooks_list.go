@@ -7,13 +7,17 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // AudiobookHandler serves silo-native audiobook endpoints under
 // /api/v1/audiobooks/*. Sub-plan 3 implements list/detail/progress;
 // sub-plan 4's ABS-compat layer is separate.
 type AudiobookHandler struct {
-	Items *catalog.ItemRepository
+	Items         *catalog.ItemRepository
+	Files         *scanner.FileRepository
+	StoreProvider userstore.UserStoreProvider
 }
 
 // HandleListAudiobooks serves GET /api/v1/audiobooks?limit=&offset=.
