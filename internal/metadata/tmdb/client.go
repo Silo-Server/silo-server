@@ -508,6 +508,42 @@ func (c *Client) Discover(ctx context.Context, mediaType string, params Discover
 	return results, nil
 }
 
+// DiscoverPage fetches a single page from TMDB's /discover/{movie,tv} endpoint
+// and returns the full MediaPage shape (with posters, overviews, etc.) so the
+// request system can enrich it with availability and request state. Unlike
+// Discover (which is intended for collection templates and returns just IDs
+// and titles), DiscoverPage exposes single-page semantics: callers control
+// pagination explicitly.
+func (c *Client) DiscoverPage(ctx context.Context, mediaType string, params DiscoverParams, page int) (*MediaPage, error) {
+	switch mediaType {
+	case "movie", "tv":
+	default:
+		return nil, fmt.Errorf("tmdb: invalid media type for discover: %q", mediaType)
+	}
+	if strings.TrimSpace(params.SortBy) == "" {
+		return nil, fmt.Errorf("tmdb: discover requires sort_by")
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	query := buildDiscoverQuery(mediaType, params) + "&page=" + strconv.Itoa(page)
+	path := "/discover/" + mediaType + "?" + query
+
+	if mediaType == "tv" {
+		var resp paginatedResponse[mediaTVResponse]
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return nil, err
+		}
+		return normalizeTVPage(resp), nil
+	}
+	var resp paginatedResponse[mediaMovieResponse]
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return normalizeMoviePage(resp), nil
+}
+
 // buildDiscoverQuery composes the TMDB discover query string (without the
 // leading "?" and without page or api_key — doGet handles those).
 func buildDiscoverQuery(mediaType string, params DiscoverParams) string {

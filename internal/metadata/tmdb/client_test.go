@@ -248,6 +248,137 @@ func TestDiscoverRequiresSortBy(t *testing.T) {
 	}
 }
 
+func TestDiscoverPageMovieReturnsFullResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/discover/movie" {
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if got := q.Get("sort_by"); got != "popularity.desc" {
+			t.Errorf("sort_by = %q, want popularity.desc", got)
+		}
+		if got := q.Get("with_companies"); got != "420" {
+			t.Errorf("with_companies = %q, want 420", got)
+		}
+		if got := q.Get("page"); got != "2" {
+			t.Errorf("page = %q, want 2", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"page": 2,
+			"total_pages": 8,
+			"total_results": 160,
+			"results": [
+				{"id": 24428, "title": "The Avengers", "release_date": "2012-04-25", "poster_path": "/p.jpg", "overview": "earth's mightiest", "popularity": 100.5, "vote_average": 7.7}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	page, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{
+		SortBy:        "popularity.desc",
+		WithCompanies: []int{420},
+	}, 2)
+	if err != nil {
+		t.Fatalf("DiscoverPage: %v", err)
+	}
+	if page.Page != 2 || page.TotalPages != 8 || page.TotalResults != 160 {
+		t.Fatalf("page = %+v", page)
+	}
+	if len(page.Results) != 1 {
+		t.Fatalf("results = %d, want 1", len(page.Results))
+	}
+	got := page.Results[0]
+	if got.ID != 24428 || got.MediaType != "movie" || got.Title != "The Avengers" || got.Year != 2012 {
+		t.Errorf("result = %+v", got)
+	}
+	if got.PosterPath != "/p.jpg" || got.Overview != "earth's mightiest" {
+		t.Errorf("result detail mismatch: %+v", got)
+	}
+}
+
+func TestDiscoverPageTVUsesFirstAirDate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/discover/tv" {
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if got := q.Get("with_networks"); got != "213" {
+			t.Errorf("with_networks = %q, want 213", got)
+		}
+		if got := q.Get("first_air_date.gte"); got != "" {
+			t.Errorf("first_air_date.gte = %q, want empty", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"page": 1,
+			"total_pages": 1,
+			"total_results": 1,
+			"results": [
+				{"id": 1399, "name": "Game of Thrones", "first_air_date": "2011-04-17", "poster_path": "/g.jpg"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	page, err := client.DiscoverPage(context.Background(), "tv", DiscoverParams{
+		SortBy:       "vote_average.desc",
+		WithNetworks: []int{213},
+	}, 1)
+	if err != nil {
+		t.Fatalf("DiscoverPage tv: %v", err)
+	}
+	if len(page.Results) != 1 {
+		t.Fatalf("results = %d, want 1", len(page.Results))
+	}
+	got := page.Results[0]
+	if got.MediaType != "series" || got.Title != "Game of Thrones" || got.Year != 2011 {
+		t.Errorf("result = %+v", got)
+	}
+}
+
+func TestDiscoverPageRejectsInvalidMediaType(t *testing.T) {
+	client := NewClient("test-key", 1000)
+	_, err := client.DiscoverPage(context.Background(), "all", DiscoverParams{SortBy: "popularity.desc"}, 1)
+	if err == nil {
+		t.Fatal("expected error for invalid media type")
+	}
+}
+
+func TestDiscoverPageRequiresSortBy(t *testing.T) {
+	client := NewClient("test-key", 1000)
+	_, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{}, 1)
+	if err == nil {
+		t.Fatal("expected error when sort_by is empty")
+	}
+}
+
+func TestDiscoverPageDefaultsToPage1(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("page"); got != "1" {
+			t.Errorf("page = %q, want 1", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"total_results":0,"results":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{SortBy: "popularity.desc"}, 0); err != nil {
+		t.Fatalf("DiscoverPage: %v", err)
+	}
+}
+
 func TestSearchMediaMovie(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search/movie" {
