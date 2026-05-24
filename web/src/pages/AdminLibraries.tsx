@@ -1983,6 +1983,10 @@ function contentLevelsForType(libraryType: string): string[] {
       return ["movie"];
     case "mixed":
       return ["movie", "series", "season", "episode"];
+    case "audiobooks":
+      return ["audiobook"];
+    case "podcasts":
+      return ["podcast", "podcast_episode"];
     default:
       return [];
   }
@@ -2395,6 +2399,8 @@ function LibraryForm({
               <SelectItem value="movies">Movies</SelectItem>
               <SelectItem value="series">Series</SelectItem>
               <SelectItem value="mixed">Mixed</SelectItem>
+              <SelectItem value="audiobooks">Audiobooks</SelectItem>
+              <SelectItem value="podcasts">Podcasts</SelectItem>
             </SelectContent>
           </Select>
         </div>
