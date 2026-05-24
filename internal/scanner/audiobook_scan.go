@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -31,24 +33,40 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	}
 
 	for _, root := range folder.Paths {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			slog.Warn("audiobook scan: read root failed", "root", root, "error", err)
-			continue
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
+		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				slog.Warn("audiobook scan: walk error", "path", path, "error", walkErr)
+				return nil
 			}
-			subPath := filepath.Join(root, entry.Name())
-			if err := s.reconcileAudiobookFolder(ctx, folder, subPath); err != nil {
+			if !d.IsDir() {
+				return nil
+			}
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				slog.Warn("audiobook scan: read dir failed", "path", path, "error", err)
+				return nil
+			}
+			hasAudio := false
+			for _, e := range entries {
+				if !e.IsDir() && SupportsAudioFile(e.Name()) {
+					hasAudio = true
+					break
+				}
+			}
+			if !hasAudio {
+				return nil
+			}
+			if err := s.reconcileAudiobookFolder(ctx, folder, path); err != nil {
 				slog.Warn("audiobook scan: folder failed",
 					"folder_id", folder.ID,
-					"path", subPath,
+					"path", path,
 					"error", err,
 				)
-				// Continue with siblings — one bad audiobook should not stop the scan.
 			}
+			return filepath.SkipDir
+		})
+		if walkErr != nil {
+			slog.Warn("audiobook scan: walk root failed", "root", root, "error", walkErr)
 		}
 	}
 	return nil
@@ -73,6 +91,38 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
 	}
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (content_id, media_folder_id) DO NOTHING
+	`, contentID, folder.ID); err != nil {
+		return fmt.Errorf("upsert audiobook library membership: %w", err)
+	}
+	if parsed.ASIN != "" {
+		// Two unique constraints can conflict: (content_id, provider) is the
+		// PK, and (provider, provider_id, item_type) prevents two content
+		// rows from claiming the same external ID. We want to silently skip
+		// when either fires; ON CONFLICT DO NOTHING (no target) catches both.
+		if _, err := s.fileRepo.Pool().Exec(ctx, `
+			INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
+			VALUES ($1, 'asin', $2, 'audiobook')
+			ON CONFLICT DO NOTHING
+		`, contentID, parsed.ASIN); err != nil {
+			return fmt.Errorf("upsert audiobook ASIN provider id: %w", err)
+		}
+	}
+	if len(parsed.Files) > 0 && s.imageCacher != nil {
+		poster, thumb := extractAndUploadAudiobookCover(ctx, ffmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID)
+		if poster != "" {
+			if _, err := s.fileRepo.Pool().Exec(ctx, `
+				UPDATE media_items
+				SET poster_path=$1, poster_thumbhash=$2, updated_at=NOW()
+				WHERE content_id=$3 AND (poster_path='' OR poster_path IS NULL)
+			`, poster, thumb, contentID); err != nil {
+				return fmt.Errorf("update audiobook poster_path: %w", err)
+			}
+		}
+	}
 
 	slog.Info("audiobook scan: indexed",
 		"folder_id", folder.ID,
@@ -94,10 +144,7 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudi
 
 	existing, err := s.itemRepo.GetByTitleYearType(ctx, book.Title, book.Year, "audiobook")
 	if err == nil && existing != nil {
-		// Found — refresh mutable fields and re-upsert.
-		existing.Title = book.Title
-		existing.Year = book.Year
-		existing.Type = "audiobook"
+		applyBookToMediaItem(existing, book)
 		if existing.SortTitle == "" {
 			existing.SortTitle = titleutil.DeriveDefaultSortTitle(book.Title)
 		}
@@ -110,7 +157,6 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudi
 		return "", fmt.Errorf("GetByTitleYearType: %w", err)
 	}
 
-	// Not found — create.
 	id, err := idgen.NextID()
 	if err != nil {
 		return "", fmt.Errorf("generate content_id: %w", err)
@@ -122,10 +168,92 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudi
 		SortTitle: titleutil.DeriveDefaultSortTitle(book.Title),
 		Year:      book.Year,
 	}
+	applyBookToMediaItem(item, book)
 	if err := s.itemRepo.Upsert(ctx, item); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// applyBookToMediaItem copies parsed-audiobook tag fields onto the
+// MediaItem. Used for both fresh inserts and re-scans of existing rows
+// so manual edits to fields not driven by the file (e.g., poster_path
+// set by the metadata enricher) survive.
+func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
+	item.Type = "audiobook"
+	item.Title = book.Title
+	item.Year = book.Year
+	if book.Overview != "" && item.Overview == "" {
+		item.Overview = book.Overview
+	}
+	if book.Publisher != "" {
+		item.Studios = mergeUniqueStrings(item.Studios, []string{book.Publisher})
+	}
+	if len(book.Genres) > 0 {
+		item.Genres = mergeUniqueStrings(item.Genres, book.Genres)
+	}
+	if rd := normalizeReleaseDateForSQL(book.ReleaseDate); rd != "" && (item.ReleaseDate == nil || *item.ReleaseDate == "") {
+		item.ReleaseDate = &rd
+	}
+	if book.Language != "" && item.OriginalLanguage == "" {
+		item.OriginalLanguage = book.Language
+	}
+}
+
+// normalizeReleaseDateForSQL coerces tag-derived date strings into the
+// ISO YYYY-MM-DD shape media_items.release_date expects. Year-only
+// tags ("2018") become "2018-01-01"; ISO already-correct values pass
+// through; everything else returns "" (skip the column).
+func normalizeReleaseDateForSQL(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
+		return s[:10]
+	}
+	if len(s) >= 4 {
+		y := s[:4]
+		ok := true
+		for _, c := range y {
+			if c < '0' || c > '9' {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return y + "-01-01"
+		}
+	}
+	return ""
+}
+
+func mergeUniqueStrings(existing, additions []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	out := make([]string, 0, len(existing)+len(additions))
+	for _, v := range existing {
+		k := strings.ToLower(strings.TrimSpace(v))
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, v)
+	}
+	for _, v := range additions {
+		k := strings.ToLower(strings.TrimSpace(v))
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 // upsertAudiobookMediaFiles writes one media_files row per audio file in the
@@ -164,6 +292,11 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 			FilePath:          af.Path,
 			Chapters:          chapters,
 			ProbeSource:       "local",
+			Duration:          af.Duration,
+			Bitrate:           af.Bitrate,
+			CodecAudio:        af.CodecAudio,
+			Container:         af.Container,
+			AudioChannels:     af.AudioChannels,
 		}
 
 		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {

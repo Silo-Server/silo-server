@@ -39,6 +39,8 @@ export interface AudiobookDetailItem {
   year: number;
   overview?: string;
   poster_url?: string;
+  publisher?: string;
+  genres?: string[];
 }
 
 export interface AudiobookDetailResponse {

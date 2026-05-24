@@ -84,6 +84,73 @@ func (c *Cacher) CacheImage(ctx context.Context, req metadata.CacheImageRequest)
 	}, nil
 }
 
+// CacheAudiobookCover is a thin convenience over CacheBytes specifically
+// for the audiobook scanner. Avoids exporting the imagecache request
+// struct to the scanner package (which would create an import cycle
+// scanner -> imagecache -> metadata -> scanner). Stores under
+// "local/audiobooks/{contentID}/poster/...".
+func (c *Cacher) CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error) {
+	res, err := c.CacheBytes(ctx, data, CacheRequest{
+		ProviderID:  "local",
+		ContentType: "audiobooks",
+		ContentID:   contentID,
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	return res.BasePath, res.Ext, res.Thumbhash, nil
+}
+
+// CacheBytes performs the same variant generation, thumbhash, and S3 upload as
+// Cache but starts from raw image bytes already in hand. Used by the
+// audiobook scanner to push embedded M4B cover art into S3 without round-
+// tripping through HTTP.
+func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) (*CacheResult, error) {
+	if strings.TrimSpace(req.ProviderID) == "" {
+		return nil, fmt.Errorf("imagecache: provider ID is required")
+	}
+	if strings.TrimSpace(req.ContentType) == "" {
+		return nil, fmt.Errorf("imagecache: content type is required")
+	}
+	if strings.TrimSpace(req.ContentID) == "" {
+		return nil, fmt.Errorf("imagecache: content ID is required")
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("imagecache: image data is empty")
+	}
+	thumbhash, err := imageutil.Thumbhash(data)
+	if err != nil {
+		return nil, fmt.Errorf("imagecache: thumbhash: %w", err)
+	}
+	widths := variantWidths(req.ImageType)
+	result, err := imageutil.GenerateVariants(data, widths)
+	if err != nil {
+		return nil, fmt.Errorf("imagecache: generate variants: %w", err)
+	}
+	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.SeasonNumber, req.EpisodeNumber)
+	bucket := c.s3.Bucket()
+	var wg sync.WaitGroup
+	uploadErrs := make([]error, len(result.Variants))
+	for i, v := range result.Variants {
+		wg.Add(1)
+		go func(idx int, variant imageutil.Variant) {
+			defer wg.Done()
+			key := basePath + "/" + variant.Key + result.Ext
+			if err := c.s3.PutObject(ctx, bucket, key, variant.Data); err != nil {
+				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
+			}
+		}(i, v)
+	}
+	wg.Wait()
+	for _, err := range uploadErrs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &CacheResult{BasePath: basePath, Thumbhash: thumbhash, Ext: result.Ext}, nil
+}
+
 // Cache downloads the image at req.SourceURL, generates variants, computes a
 // thumbhash, uploads all variants to S3, and returns the base path and thumbhash.
 func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, error) {

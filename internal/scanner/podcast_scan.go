@@ -66,6 +66,13 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 	if err := s.upsertPodcastEpisodesAndFiles(ctx, folder, showContentID, folderPath, parsed); err != nil {
 		return fmt.Errorf("upsert podcast episodes+files: %w", err)
 	}
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (content_id, media_folder_id) DO NOTHING
+	`, showContentID, folder.ID); err != nil {
+		return fmt.Errorf("upsert podcast library membership: %w", err)
+	}
 
 	slog.Info("podcast scan: indexed",
 		"folder_id", folder.ID,

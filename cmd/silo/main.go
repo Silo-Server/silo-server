@@ -740,6 +740,7 @@ func main() {
 	var groupClaimRepo *catalog.GroupClaimRepository
 	var seasonRepo *catalog.SeasonRepository
 	var episodeRepo *catalog.EpisodeRepository
+	var audiobookEnricher *audiobooks.Enricher
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
@@ -808,6 +809,18 @@ func main() {
 		personRefreshService = metadata.NewPersonRefreshService(deps.DB, pluginResolver, personRepo)
 		personRefreshService.SetImageResolver(imageResolver)
 
+		// Wire the audiobook enricher. It uses the same plugin resolver and chain
+		// repo as the movie/TV pipeline, but resolves providers at
+		// content_level='audiobook' and sweeps items directly rather than via a queue.
+		audiobookEnricher = audiobooks.NewEnricher(
+			deps.DB,
+			chainRepo,
+			pluginResolver,
+			itemRepo,
+			personRepo,
+			providerIDRepo,
+		)
+
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
 		metadataService.SetImageResolver(imageResolver)
@@ -818,6 +831,9 @@ func main() {
 			imageCacher := imagecache.New(deps.S3Public)
 			metadataService.SetImageCacher(imageCacher)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
+			if deps.Scanner != nil {
+				deps.Scanner.SetImageCacher(imageCacher)
+			}
 			if cfg.Metadata.CacheImages {
 				personRefreshService.SetImageCacher(imageCacher)
 				slog.Info("metadata image caching enabled")
@@ -1273,6 +1289,9 @@ func main() {
 		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
+		if audiobookEnricher != nil {
+			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
+		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {

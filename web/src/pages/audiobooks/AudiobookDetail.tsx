@@ -3,8 +3,10 @@ import { useParams } from "react-router";
 import { useAudiobook } from "@/hooks/audiobooks/useAudiobook";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Play, BookHeadphones } from "lucide-react";
+import { ChevronDown, ChevronRight, Play } from "lucide-react";
 import AudiobookPlayer from "./AudiobookPlayer";
+import DetailHero from "@/pages/ItemDetail/DetailHero";
+import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
 
 // ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ interface ChapterListProps {
 }
 
 function ChapterList({ files, onSelect }: ChapterListProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const chapters = buildChapterList(files);
 
   if (chapters.length === 0) return null;
@@ -181,11 +183,17 @@ export default function AudiobookDetail() {
 
   return (
     <div>
-      {/* Sticky inline player */}
+      {/* Fixed bottom player, matching the video player's bottom-HUD
+          placement. The key forces a remount when the user jumps to a
+          different position (chapter row, Play from Start, Resume) so
+          initialPositionSeconds takes effect even if the player was
+          already open. */}
       {playerOpen && (
-        <div className="bg-background sticky top-0 z-30 border-b">
+        <div className="bg-background fixed inset-x-0 bottom-0 z-40 border-t shadow-lg">
           <AudiobookPlayer
+            key={`${contentId}-${startSeconds}`}
             contentId={contentId ?? ""}
+            title={audiobook.title}
             files={files}
             initialPositionSeconds={startSeconds}
             onClose={() => setPlayerOpen(false)}
@@ -193,90 +201,69 @@ export default function AudiobookDetail() {
         </div>
       )}
 
-      <div className="page-shell py-8">
-        {/* Hero row */}
-        <div className="flex flex-col gap-8 sm:flex-row">
-          {/* Cover */}
-          <div className="w-full shrink-0 sm:w-[200px] md:w-[260px]">
-            <div className="aspect-[2/3] overflow-hidden rounded-xl">
-              {audiobook.poster_url ? (
-                <img
-                  src={audiobook.poster_url}
-                  alt={audiobook.title}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="bg-muted text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-3 p-4 text-center">
-                  <BookHeadphones className="h-16 w-16 opacity-30" />
-                  <span className="line-clamp-3 text-sm font-medium">{audiobook.title}</span>
-                </div>
+      <DetailHero
+        title={audiobook.title}
+        context="Audiobook"
+        studioLabel={data.audiobook.publisher || undefined}
+        posterUrl={audiobook.poster_url}
+        posterOrientation="portrait"
+        subtitle={
+          (author || narrator) && (
+            <div className="text-muted-foreground flex flex-col gap-0.5 text-sm">
+              {author && (
+                <span>
+                  <span className="font-medium">By</span> {author}
+                </span>
+              )}
+              {narrator && (
+                <span>
+                  <span className="font-medium">Narrated by</span> {narrator}
+                </span>
               )}
             </div>
-          </div>
-
-          {/* Info */}
-          <div className="flex flex-1 flex-col">
-            {/* Eyebrow */}
-            <p className="text-muted-foreground mb-2 text-xs font-semibold tracking-[0.2em] uppercase">
-              Audiobook
-              {audiobook.year > 0 && <> &middot; {audiobook.year}</>}
-              {durationTotal > 0 && <> &middot; {formatSeconds(durationTotal)}</>}
-            </p>
-
-            {/* Title */}
-            <h1 className="mb-1 text-3xl leading-tight font-bold tracking-tight">
-              {audiobook.title}
-            </h1>
-
-            {/* Author / narrator */}
-            {author && (
-              <p className="text-muted-foreground mt-1 text-sm">
-                <span className="font-medium">By</span> {author}
-              </p>
-            )}
-            {narrator && (
-              <p className="text-muted-foreground mt-0.5 text-sm">
-                <span className="font-medium">Narrated by</span> {narrator}
-              </p>
-            )}
-
-            {/* Overview */}
-            {audiobook.overview && (
-              <p className="mt-5 max-w-prose text-sm leading-relaxed">{audiobook.overview}</p>
-            )}
-
-            {/* Actions */}
-            {files.length > 0 && (
-              <div className="mt-6 flex items-center gap-3">
-                <Button onClick={handlePlayResume} className="gap-2">
-                  <Play className="h-4 w-4" />
+          )
+        }
+        metadata={
+          <MetadataBadges
+            year={audiobook.year > 0 ? String(audiobook.year) : undefined}
+            duration={durationTotal > 0 ? formatSeconds(durationTotal) : undefined}
+          />
+        }
+        overview={audiobook.overview}
+        genres={data.audiobook.genres}
+        actions={
+          files.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={handlePlayResume} size="lg" className="gap-2">
+                  <Play className="h-4 w-4 fill-current" />
                   {hasProgress ? "Resume" : "Play"}
                 </Button>
                 {hasProgress && (
-                  <Button variant="outline" onClick={() => openPlayer(0)}>
+                  <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
                     Play from Start
                   </Button>
                 )}
               </div>
-            )}
-
-            {/* Progress bar */}
-            {hasProgress && durationTotal > 0 && (
-              <div className="mt-4">
-                <div className="bg-muted h-1.5 w-full max-w-xs overflow-hidden rounded-full">
-                  <div
-                    className="bg-primary h-full rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (resumeSeconds / durationTotal) * 100)}%` }}
-                  />
+              {hasProgress && durationTotal > 0 && (
+                <div className="max-w-xs">
+                  <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
+                    <div
+                      className="bg-primary h-full rounded-full transition-all"
+                      style={{ width: `${Math.min(100, (resumeSeconds / durationTotal) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    {formatSeconds(resumeSeconds)} listened
+                  </p>
                 </div>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  {formatSeconds(resumeSeconds)} listened
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
+              )}
+            </div>
+          )
+        }
+      />
 
+      <div className={`page-shell pb-12 ${playerOpen ? "pb-32" : ""}`}>
         {/* Chapter list */}
         {files.length > 0 && <ChapterList files={files} onSelect={(s) => openPlayer(s)} />}
       </div>

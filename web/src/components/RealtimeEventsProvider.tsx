@@ -85,13 +85,18 @@ function sortJobs(jobs: AdminJob[]) {
     const leftTime = Date.parse(left.requested_at);
     const rightTime = Date.parse(right.requested_at);
     if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-      return right.id.localeCompare(left.id);
+      const leftID = left.id ?? "";
+      const rightID = right.id ?? "";
+      return rightID.localeCompare(leftID);
     }
     return rightTime - leftTime;
   });
 }
 
 function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 50) {
+  if (!nextJob || !nextJob.id) {
+    return existing ?? [];
+  }
   const jobs = existing ? [...existing] : [];
   const index = jobs.findIndex((job) => job.id === nextJob.id);
   if (index >= 0) {

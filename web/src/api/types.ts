@@ -800,7 +800,7 @@ export interface TimeRange {
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).

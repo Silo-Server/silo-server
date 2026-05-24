@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -57,7 +58,9 @@ func (h *AudiobookHandler) HandleGetAudiobook(w http.ResponseWriter, r *http.Req
 			Title:     item.Title,
 			Year:      item.Year,
 			Overview:  item.Overview,
-			PosterURL: item.PosterPath,
+			PosterURL: h.presignPoster(r.Context(), item.PosterPath),
+			Publisher: pickFirstString(item.Studios),
+			Genres:    append([]string(nil), item.Genres...),
 		},
 		Author:   author,
 		Narrator: narrator,
@@ -134,17 +137,39 @@ type audiobookDetailResponse struct {
 }
 
 type audiobookDetailItem struct {
-	ContentID string `json:"content_id"`
-	Title     string `json:"title"`
-	Year      int    `json:"year"`
-	Overview  string `json:"overview,omitempty"`
-	PosterURL string `json:"poster_url,omitempty"`
+	ContentID string   `json:"content_id"`
+	Title     string   `json:"title"`
+	Year      int      `json:"year"`
+	Overview  string   `json:"overview,omitempty"`
+	PosterURL string   `json:"poster_url,omitempty"`
+	Publisher string   `json:"publisher,omitempty"`
+	Genres    []string `json:"genres,omitempty"`
+}
+
+func (h *AudiobookHandler) presignPoster(ctx context.Context, path string) string {
+	if path == "" || h.Detail == nil {
+		return path
+	}
+	return h.Detail.PresignURL(ctx, path, "featured")
+}
+
+func pickFirstString(values []string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 type audiobookDetailFile struct {
 	ID              int                    `json:"id"`
 	Path            string                 `json:"path"`
 	DurationSeconds int                    `json:"duration_seconds"`
+	Container       string                 `json:"container,omitempty"`
+	CodecAudio      string                 `json:"codec_audio,omitempty"`
+	Bitrate         int                    `json:"bitrate,omitempty"`
+	AudioChannels   int                    `json:"audio_channels,omitempty"`
 	Chapters        []models.MediaChapter  `json:"chapters,omitempty"`
 }
 
@@ -161,6 +186,10 @@ func audiobookDetailFiles(files []*models.MediaFile) []audiobookDetailFile {
 			ID:              f.ID,
 			Path:            f.FilePath,
 			DurationSeconds: f.Duration,
+			Container:       f.Container,
+			CodecAudio:      f.CodecAudio,
+			Bitrate:         f.Bitrate,
+			AudioChannels:   f.AudioChannels,
 			Chapters:        f.Chapters,
 		})
 	}
