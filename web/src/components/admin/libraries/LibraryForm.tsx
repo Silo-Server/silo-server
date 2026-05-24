@@ -67,6 +67,10 @@ function contentLevelsForType(libraryType: string): string[] {
       return ["movie"];
     case "mixed":
       return ["movie", "series", "season", "episode"];
+    case "audiobooks":
+      return ["audiobook"];
+    case "podcasts":
+      return ["podcast", "podcast_episode"];
     default:
       return [];
   }
@@ -131,7 +135,10 @@ function buildLevelChainsFromServer(
 }
 
 function contentLevelLabel(level: string): string {
-  return level.charAt(0).toUpperCase() + level.slice(1);
+  return level
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function buildProviderChainBody(activeLevelChains: Record<string, LevelChainItem[]>) {
@@ -466,6 +473,8 @@ export function LibraryForm({
               <SelectItem value="movies">Movies</SelectItem>
               <SelectItem value="series">Series</SelectItem>
               <SelectItem value="mixed">Mixed</SelectItem>
+              <SelectItem value="audiobooks">Audiobooks</SelectItem>
+              <SelectItem value="podcasts">Podcasts</SelectItem>
             </SelectContent>
           </Select>
         </div>
