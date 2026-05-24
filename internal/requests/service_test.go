@@ -602,6 +602,113 @@ func TestListGenresReturnsBundleWithSeriesSupportFlag(t *testing.T) {
 	}
 }
 
+func TestBrowseStudioReturnsEnrichedMovies(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{discoverPage: &tmdb.MediaPage{
+		Page:         1,
+		TotalPages:   2,
+		TotalResults: 20,
+		Results: []tmdb.MediaResult{
+			{ID: 24428, MediaType: "movie", Title: "The Avengers", Year: 2012, Popularity: 100.5},
+		},
+	}}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	resp, err := service.BrowseStudio(context.Background(), testViewer(1), "marvel-studios", "popularity", 1)
+	if err != nil {
+		t.Fatalf("BrowseStudio: %v", err)
+	}
+	if resp.Kind != "studio" || resp.Slug != "marvel-studios" || resp.MediaType != MediaTypeMovie {
+		t.Errorf("resp = %+v", resp)
+	}
+	if resp.Page != 1 || resp.TotalPages != 2 {
+		t.Errorf("pagination = %d/%d", resp.Page, resp.TotalPages)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].TMDBID != 24428 {
+		t.Errorf("results = %+v", resp.Results)
+	}
+	if resp.Results[0].Availability == "" {
+		t.Error("availability should be enriched")
+	}
+}
+
+func TestBrowseStudioUnknownSlugReturnsNotFound(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
+	_, err := service.BrowseStudio(context.Background(), testViewer(1), "not-a-studio", "popularity", 1)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestBrowseStudioRejectsBadSort(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
+	_, err := service.BrowseStudio(context.Background(), testViewer(1), "marvel-studios", "made-up-sort", 1)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestBrowseStudioDefaultsBlankSortToPopularity(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{discoverPage: &tmdb.MediaPage{Results: []tmdb.MediaResult{}}}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	resp, err := service.BrowseStudio(context.Background(), testViewer(1), "marvel-studios", "", 1)
+	if err != nil {
+		t.Fatalf("BrowseStudio: %v", err)
+	}
+	if resp.Sort != "popularity" {
+		t.Errorf("sort = %q, want popularity (default)", resp.Sort)
+	}
+}
+
+func TestBrowseNetworkReturnsSeries(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{discoverPage: &tmdb.MediaPage{
+		Page: 1, TotalPages: 1, TotalResults: 1,
+		Results: []tmdb.MediaResult{
+			{ID: 1399, MediaType: "series", Title: "Game of Thrones", Year: 2011},
+		},
+	}}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	resp, err := service.BrowseNetwork(context.Background(), testViewer(1), "netflix", "popularity", 1)
+	if err != nil {
+		t.Fatalf("BrowseNetwork: %v", err)
+	}
+	if resp.MediaType != MediaTypeSeries {
+		t.Errorf("media_type = %q, want series", resp.MediaType)
+	}
+}
+
+func TestBrowseGenreRequiresMediaType(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
+	_, err := service.BrowseGenre(context.Background(), testViewer(1), "action", "", "popularity", 1)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestBrowseGenreSeriesRejectedWhenUnsupported(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
+	_, err := service.BrowseGenre(context.Background(), testViewer(1), "horror", "series", "popularity", 1)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput for horror+series", err)
+	}
+}
+
+func TestBrowseGenreMovieReturnsResults(t *testing.T) {
+	tmdbClient := &fakeTMDBClient{discoverPage: &tmdb.MediaPage{
+		Results: []tmdb.MediaResult{{ID: 1, MediaType: "movie", Title: "Movie"}},
+	}}
+	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+
+	resp, err := service.BrowseGenre(context.Background(), testViewer(1), "action", "movie", "popularity", 1)
+	if err != nil {
+		t.Fatalf("BrowseGenre: %v", err)
+	}
+	if resp.Kind != "genre" || resp.Slug != "action" || resp.MediaType != MediaTypeMovie {
+		t.Errorf("resp = %+v", resp)
+	}
+}
+
 type fakePresence struct {
 	available map[MediaType]map[int]bool
 }
