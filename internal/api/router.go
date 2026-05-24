@@ -1787,10 +1787,15 @@ func NewRouter(deps Dependencies) chi.Router {
 				r.Get("/sections/recipes", recipeHandler.HandleList)
 				r.Get("/sections/recipes/{type}/candidates", recipeHandler.HandleCandidates)
 
-				// Audiobook endpoints (no profile required — catalog-level list).
+				// Audiobook endpoints (no profile required — catalog-level list/detail).
 				if itemRepo != nil {
-					audiobookHandler := &handlers.AudiobookHandler{Items: itemRepo}
+					audiobookHandler := &handlers.AudiobookHandler{
+						Items:         itemRepo,
+						Files:         deps.FileRepo,
+						StoreProvider: deps.UserStoreProvider,
+					}
 					r.Get("/audiobooks", audiobookHandler.HandleListAudiobooks)
+					r.Get("/audiobooks/{id}", audiobookHandler.HandleGetAudiobook)
 				}
 
 				// Section endpoints (profile-scoped).
