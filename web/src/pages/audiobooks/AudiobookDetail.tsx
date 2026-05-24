@@ -31,6 +31,18 @@ function totalDuration(files: AudiobookFile[]): number {
   return files.reduce((acc, f) => acc + (f.duration_seconds ?? 0), 0);
 }
 
+function findChapterAt(
+  chapters: ReturnType<typeof buildChapterList>,
+  seconds: number,
+): { label: string; index: number } | null {
+  for (let i = chapters.length - 1; i >= 0; i--) {
+    if (seconds >= chapters[i].absoluteStart) {
+      return { label: chapters[i].label, index: i + 1 };
+    }
+  }
+  return chapters[0] ? { label: chapters[0].label, index: 1 } : null;
+}
+
 /** Gather all chapters across files, adjusting start/end by each file's cumulative offset. */
 function buildChapterList(files: AudiobookFile[]): Array<{
   chapter: AudiobookChapter;
@@ -233,20 +245,9 @@ export default function AudiobookDetail() {
         genres={data.audiobook.genres}
         actions={
           files.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={handlePlayResume} size="lg" className="gap-2">
-                  <Play className="h-4 w-4 fill-current" />
-                  {hasProgress ? "Resume" : "Play"}
-                </Button>
-                {hasProgress && (
-                  <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
-                    Play from Start
-                  </Button>
-                )}
-              </div>
+            <div className="flex max-w-md flex-col gap-3">
               {hasProgress && durationTotal > 0 && (
-                <div className="max-w-xs">
+                <div>
                   <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
                     <div
                       className="bg-primary h-full rounded-full transition-all"
@@ -254,10 +255,27 @@ export default function AudiobookDetail() {
                     />
                   </div>
                   <p className="text-muted-foreground mt-1 text-xs">
-                    {formatSeconds(resumeSeconds)} listened
+                    {formatSeconds(resumeSeconds)} listened ·{" "}
+                    {Math.round((resumeSeconds / durationTotal) * 100)}%
                   </p>
                 </div>
               )}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={handlePlayResume} size="lg" className="gap-2">
+                  <Play className="h-4 w-4 fill-current" />
+                  {hasProgress
+                    ? (() => {
+                        const ch = findChapterAt(buildChapterList(files), resumeSeconds);
+                        return ch ? `Resume · ${ch.label}` : "Resume";
+                      })()
+                    : "Play"}
+                </Button>
+                {hasProgress && (
+                  <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
+                    Play from Start
+                  </Button>
+                )}
+              </div>
             </div>
           )
         }
