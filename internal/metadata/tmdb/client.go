@@ -520,6 +520,12 @@ func buildDiscoverQuery(mediaType string, params DiscoverParams) string {
 	if without := joinIntSlice(params.WithoutGenres, ","); without != "" {
 		values.Set("without_genres", without)
 	}
+	if companies := joinIntSlice(params.WithCompanies, ","); companies != "" {
+		values.Set("with_companies", companies)
+	}
+	if networks := joinIntSlice(params.WithNetworks, ","); networks != "" {
+		values.Set("with_networks", networks)
+	}
 	if params.VoteCountGte > 0 {
 		values.Set("vote_count.gte", strconv.Itoa(params.VoteCountGte))
 	}

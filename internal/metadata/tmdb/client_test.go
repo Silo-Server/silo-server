@@ -204,6 +204,34 @@ func TestDiscoverTVUsesFirstAirDate(t *testing.T) {
 	}
 }
 
+func TestDiscoverIncludesCompaniesAndNetworks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if got := q.Get("with_companies"); got != "420,2" {
+			t.Errorf("with_companies = %q, want 420,2", got)
+		}
+		if got := q.Get("with_networks"); got != "213,49" {
+			t.Errorf("with_networks = %q, want 213,49", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"total_results":0,"results":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	_, err := client.Discover(context.Background(), "movie", DiscoverParams{
+		SortBy:        "popularity.desc",
+		WithCompanies: []int{420, 2},
+		WithNetworks:  []int{213, 49},
+		Limit:         5,
+	})
+	if err != nil {
+		t.Fatalf("Discover returned error: %v", err)
+	}
+}
+
 func TestDiscoverRejectsInvalidMediaType(t *testing.T) {
 	client := NewClient("test-key", 1000)
 	_, err := client.Discover(context.Background(), "all", DiscoverParams{SortBy: "popularity.desc"})

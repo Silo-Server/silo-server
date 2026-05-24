@@ -65,6 +65,8 @@ type MediaPage struct {
 type DiscoverParams struct {
 	WithGenres       []int
 	WithoutGenres    []int
+	WithCompanies    []int
+	WithNetworks     []int
 	SortBy           string
 	VoteCountGte     int
 	VoteAverageGte   float64
