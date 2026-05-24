@@ -1547,6 +1547,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)
 				})
 				r.Get("/direct-download", downloadHandler.HandleDirectDownload)
+				r.Head("/direct-download", downloadHandler.HandleDirectDownload)
 
 				// Recipe gallery catalog (no profile required — purely static metadata).
 				recipeHandler := &handlers.RecipeHandler{}
