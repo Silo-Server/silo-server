@@ -5,6 +5,7 @@ import { useReportAudiobookProgress } from "@/hooks/audiobooks/useReportAudioboo
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
+import { SpeedMenu } from "@/player/components/SpeedMenu";
 import type { PlayerChapter } from "@/player/types";
 
 export interface AudiobookPlayerProps {
@@ -200,12 +201,6 @@ export default function AudiobookPlayer({
     seekTo(audio.currentTime + delta);
   }
 
-  function handleRateChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const r = Number(e.target.value);
-    setRate(r);
-    if (audioRef.current) audioRef.current.playbackRate = r;
-  }
-
   const canPlay = Boolean(file);
 
   return (
@@ -239,7 +234,7 @@ export default function AudiobookPlayer({
               {title}
             </div>
           ) : null}
-          <div className="text-muted-foreground flex items-center gap-2 text-[10px] uppercase leading-tight">
+          <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
             <span className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums">
               {formatTime(currentTime)}
               <span className="mx-1 opacity-50">/</span>
@@ -285,19 +280,14 @@ export default function AudiobookPlayer({
           {chapters.length > 0 && (
             <ChaptersMenu chapters={chapters} currentTime={currentTime} onSeek={seekTo} />
           )}
-          <select
+          <SpeedMenu
+            rates={PLAYBACK_RATES}
             value={rate}
-            onChange={handleRateChange}
-            aria-label="Playback speed"
-            className="bg-background text-muted-foreground hover:text-foreground focus:ring-ring shrink-0 rounded border-0 px-1.5 py-1 text-xs outline-none focus:ring-1"
-            disabled={!canPlay}
-          >
-            {PLAYBACK_RATES.map((r) => (
-              <option key={r} value={r}>
-                {r}×
-              </option>
-            ))}
-          </select>
+            onChange={(r) => {
+              setRate(r);
+              if (audioRef.current) audioRef.current.playbackRate = r;
+            }}
+          />
           {onClose && (
             <button
               type="button"
