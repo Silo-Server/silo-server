@@ -1796,6 +1796,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					r.Get("/audiobooks", audiobookHandler.HandleListAudiobooks)
 					r.Get("/audiobooks/{id}", audiobookHandler.HandleGetAudiobook)
+					r.Post("/audiobooks/{id}/progress", audiobookHandler.HandleReportAudiobookProgress)
 				}
 
 				// Section endpoints (profile-scoped).
