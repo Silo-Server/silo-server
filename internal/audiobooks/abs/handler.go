@@ -115,6 +115,13 @@ type Dependencies struct {
 	// InstallID returns the current plugin install ID for building
 	// host-proxy-routable URLs. Defaults to "silo.audiobooks" when nil.
 	InstallID func() string
+	// ProgressStore provides access to user_watch_progress for ABS
+	// progress endpoints. May be nil; handlers degrade gracefully.
+	ProgressStore ProgressStore
+	// PlaybackSessionStore persists abs_playback_sessions rows
+	// (migration 143) for /session/{sid}/sync and /session/{sid}/close.
+	// May be nil; handlers degrade gracefully.
+	PlaybackSessionStore ABSPlaybackSessionStore
 }
 
 // Handler wires the /abs/api/* and canonical ABS-client paths.
@@ -177,8 +184,24 @@ func (h *Handler) mountRoutes(r chi.Router) {
 
 	// TODO Stage 2 (remaining): logout, refresh, authorize, me, ping, status, init
 	// TODO Stage 3 (remaining): library browse routes (libraries, items, item detail, cover, authors, series, search, personalized)
-	// TODO Stage 5: progress routes (me/progress/*, me/items-in-progress, me/listening-stats, me/stats/year/*)
 	// TODO Stage 6: social / collection routes (bookmarks, smart-collections, collections, playlists, RSS feeds, similar)
+
+	// Stage 4: progress + session tracking — requires bearerAuth.
+	r.Group(func(r chi.Router) {
+		r.Use(h.bearerAuth)
+		for _, prefix := range []string{"/abs/api", "/api"} {
+			// GET  /me/progress              — all audiobook progress for the caller
+			r.Get(prefix+"/me/progress", h.handleGetMyProgress)
+			// GET  /me/progress/{id}         — progress for one item
+			r.Get(prefix+"/me/progress/{libraryItemId}", h.handleGetItemProgress)
+			// POST /me/progress/{id}         — set / update progress (ABS PATCH semantics)
+			r.Post(prefix+"/me/progress/{libraryItemId}", h.handleSetItemProgress)
+			// PATCH /session/{sid}           — heartbeat: position + time_listening
+			r.Patch(prefix+"/session/{sid}", h.handleSessionSync)
+			// POST  /session/{sid}/close     — finalise the play session
+			r.Post(prefix+"/session/{sid}/close", h.handleSessionClose)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
