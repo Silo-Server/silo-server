@@ -29,6 +29,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
+	"github.com/Silo-Server/silo-server/internal/audiobooks"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -1286,6 +1287,12 @@ func main() {
 		slog.Info("task manager started")
 	}
 
+	// Scaffold audiobooks service (sub-plan 1: kill-switch reader only).
+	// audiobooksSettingsAdapter (defined at package level below) bridges
+	// catalog.ServerSettingsRepo.Get to audiobooks.SettingsReader.GetString.
+	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
+	_ = audiobooksService // sub-plan 2+ will register routes / scheduled tasks
+
 	if deps.DB != nil && pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && deps.PluginService != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
 		sessionRepo := auth.NewSessionRepository(deps.DB)
@@ -1826,4 +1833,15 @@ func mapFolderTypeToMediaType(t string) string {
 	default:
 		return "mixed"
 	}
+}
+
+// audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which
+// exposes Get) to the audiobooks.SettingsReader interface (which
+// requires GetString). The two signatures are identical modulo name.
+type audiobooksSettingsAdapter struct {
+	repo *catalog.ServerSettingsRepo
+}
+
+func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
+	return a.repo.Get(ctx, key)
 }
