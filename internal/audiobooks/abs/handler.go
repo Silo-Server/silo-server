@@ -25,17 +25,30 @@ import (
 // Dependency interfaces
 // ---------------------------------------------------------------------------
 
+// AudiobookLibrary is the narrow library view the ABS handlers expose.
+// The production adapter (Stage 7) builds these from media_folders WHERE
+// type = 'audiobooks'.
+type AudiobookLibrary struct {
+	ID   int64
+	Name string
+	Type string // always "audiobooks" for this surface
+}
+
 // MediaStore is the slice of silo's catalog the ABS handler reads.
 // Real impl: catalog.ItemRepository + scanner.FileRepository wrapped in
 // a small adapter struct added in a later stage.
 type MediaStore interface {
 	GetAudiobookByID(ctx context.Context, contentID string) (*models.MediaItem, error)
-	ListAudiobooks(ctx context.Context, limit, offset int) ([]*models.MediaItem, int, error)
+	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
+	// it filters to items in that media_folder; 0 means all audiobook items.
+	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string) ([]*models.MediaFile, error)
 	// GetMediaFileByID fetches a single media file by its integer PK.
 	// Used by the ABS file-streaming handler when a caller supplies a
 	// raw file ID instead of an ino.
 	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
+	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
+	ListAudiobookLibraries(ctx context.Context) ([]AudiobookLibrary, error)
 }
 
 // TokenStore persists and validates the ABS JWT JTIs that back the
@@ -164,6 +177,14 @@ func (h *Handler) mountRoutes(r chi.Router) {
 	r.Post("/login", h.handleLogin)
 	r.Post("/abs/api/login", h.handleLogin)
 
+	// Unauthenticated cover + author-image routes. Real ABS serves covers
+	// without auth (getDoesServerImagesRequireToken returns false for our
+	// version), so mounting these outside bearerAuth avoids 401s.
+	for _, prefix := range []string{"/abs/api", "/api"} {
+		r.Get(prefix+"/items/{id}/cover", h.handleItemCover)
+		r.Get(prefix+"/authors/{id}/image", h.handleAuthorImage)
+	}
+
 	// Stage 3: playback session + file routes, registered under both the
 	// legacy /abs/api prefix and the canonical /api prefix that the official
 	// ABS mobile client builds against (no /abs prefix at server root).
@@ -182,10 +203,6 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		}
 	})
 
-	// TODO Stage 2 (remaining): logout, refresh, authorize, me, ping, status, init
-	// TODO Stage 3 (remaining): library browse routes (libraries, items, item detail, cover, authors, series, search, personalized)
-	// TODO Stage 6: social / collection routes (bookmarks, smart-collections, collections, playlists, RSS feeds, similar)
-
 	// Stage 4: progress + session tracking — requires bearerAuth.
 	r.Group(func(r chi.Router) {
 		r.Use(h.bearerAuth)
@@ -202,6 +219,36 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Post(prefix+"/session/{sid}/close", h.handleSessionClose)
 		}
 	})
+
+	// Stage 5: browse routes (libraries, items, item detail, me, similar,
+	// continue-listening) + author/series/search/personalized stubs.
+	// Requires bearerAuth.
+	r.Group(func(r chi.Router) {
+		r.Use(h.bearerAuth)
+		for _, prefix := range []string{"/abs/api", "/api"} {
+			// Current user object.
+			r.Get(prefix+"/me", h.handleMe)
+			// Continue Listening shelf.
+			r.Get(prefix+"/me/items-in-progress", h.handleItemsInProgress)
+			// Library list + detail.
+			r.Get(prefix+"/libraries", h.handleLibraries)
+			r.Get(prefix+"/libraries/{libraryId}", h.handleLibraryDetail)
+			// Browse items in a library.
+			r.Get(prefix+"/libraries/{libraryId}/items", h.handleLibraryItems)
+			// Author / series / search / personalized — stubbed.
+			r.Get(prefix+"/libraries/{libraryId}/authors", h.handleLibraryAuthors)
+			r.Get(prefix+"/libraries/{libraryId}/series", h.handleLibrarySeries)
+			r.Get(prefix+"/libraries/{libraryId}/search", h.handleLibrarySearch)
+			r.Get(prefix+"/libraries/{libraryId}/personalized", h.handlePersonalized)
+			// Single item detail.
+			r.Get(prefix+"/items/{id}", h.handleItem)
+			// Similar items (optional Recommender; empty list when nil).
+			r.Get(prefix+"/items/{id}/similar", h.handleSimilarItems)
+		}
+	})
+
+	// TODO Stage 6: social / collection routes (bookmarks, smart-collections,
+	// collections, playlists, RSS feeds, author/series detail, listening stats)
 }
 
 // ---------------------------------------------------------------------------
