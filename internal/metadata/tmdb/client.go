@@ -133,6 +133,156 @@ func retryAfterOrDefault(resp *http.Response, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second
 }
 
+// SearchMedia searches TMDB directly for movies or TV series. mediaType accepts
+// Silo-facing "movie" or "series" values, plus TMDB-facing "tv" for callers
+// already working at the provider boundary.
+func (c *Client) SearchMedia(ctx context.Context, mediaType, query string, page int) (*MediaPage, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("tmdb: search query is required")
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	switch mediaType {
+	case "movie":
+		values := url.Values{}
+		values.Set("query", query)
+		values.Set("include_adult", "false")
+		values.Set("page", strconv.Itoa(page))
+		var resp paginatedResponse[mediaMovieResponse]
+		if err := c.doGet(ctx, "/search/movie?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeMoviePage(resp), nil
+	case "series", "tv":
+		values := url.Values{}
+		values.Set("query", query)
+		values.Set("include_adult", "false")
+		values.Set("page", strconv.Itoa(page))
+		var resp paginatedResponse[mediaTVResponse]
+		if err := c.doGet(ctx, "/search/tv?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeTVPage(resp), nil
+	default:
+		return nil, fmt.Errorf("tmdb: invalid media type for search: %q", mediaType)
+	}
+}
+
+// DiscoverSection fetches one of Silo's request-discovery sections directly
+// from TMDB. It intentionally does not go through collection sync or
+// collection templates.
+func (c *Client) DiscoverSection(ctx context.Context, section string, page int) (*MediaPage, error) {
+	if page <= 0 {
+		page = 1
+	}
+
+	values := url.Values{}
+	values.Set("page", strconv.Itoa(page))
+
+	switch section {
+	case "trending_movies":
+		var resp paginatedResponse[mediaMovieResponse]
+		if err := c.doGet(ctx, "/trending/movie/week?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeMoviePage(resp), nil
+	case "trending_series":
+		var resp paginatedResponse[mediaTVResponse]
+		if err := c.doGet(ctx, "/trending/tv/week?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeTVPage(resp), nil
+	case "popular_movies":
+		var resp paginatedResponse[mediaMovieResponse]
+		if err := c.doGet(ctx, "/movie/popular?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeMoviePage(resp), nil
+	case "popular_series":
+		var resp paginatedResponse[mediaTVResponse]
+		if err := c.doGet(ctx, "/tv/popular?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeTVPage(resp), nil
+	case "upcoming_movies":
+		var resp paginatedResponse[mediaMovieResponse]
+		if err := c.doGet(ctx, "/movie/upcoming?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeMoviePage(resp), nil
+	case "on_air_series":
+		var resp paginatedResponse[mediaTVResponse]
+		if err := c.doGet(ctx, "/tv/on_the_air?"+values.Encode(), &resp); err != nil {
+			return nil, err
+		}
+		return normalizeTVPage(resp), nil
+	default:
+		return nil, fmt.Errorf("tmdb: invalid discovery section: %q", section)
+	}
+}
+
+func normalizeMoviePage(resp paginatedResponse[mediaMovieResponse]) *MediaPage {
+	page := &MediaPage{
+		Page:         resp.Page,
+		TotalPages:   resp.TotalPages,
+		TotalResults: resp.TotalResults,
+		Results:      make([]MediaResult, 0, len(resp.Results)),
+	}
+	for _, item := range resp.Results {
+		page.Results = append(page.Results, MediaResult{
+			ID:           item.ID,
+			MediaType:    "movie",
+			Title:        item.Title,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.ReleaseDate,
+			Year:         releaseYear(item.ReleaseDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	return page
+}
+
+func normalizeTVPage(resp paginatedResponse[mediaTVResponse]) *MediaPage {
+	page := &MediaPage{
+		Page:         resp.Page,
+		TotalPages:   resp.TotalPages,
+		TotalResults: resp.TotalResults,
+		Results:      make([]MediaResult, 0, len(resp.Results)),
+	}
+	for _, item := range resp.Results {
+		page.Results = append(page.Results, MediaResult{
+			ID:           item.ID,
+			MediaType:    "series",
+			Title:        item.Name,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.FirstAirDate,
+			Year:         releaseYear(item.FirstAirDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	return page
+}
+
+func releaseYear(value string) int {
+	if len(value) < 4 {
+		return 0
+	}
+	year, err := strconv.Atoi(value[:4])
+	if err != nil {
+		return 0
+	}
+	return year
+}
+
 func normalizeCollectionPreset(preset, mediaType, timeWindow string) (string, string, string, string, error) {
 	switch preset {
 	case "trending":

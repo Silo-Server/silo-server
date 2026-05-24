@@ -1490,6 +1490,28 @@
     }
   }
 
+  /* Indeterminate progress shimmer used by in-flight request cards.
+     Renders as a thin sliding band over the bottom edge of the poster. */
+  .downloading-shimmer {
+    width: 40%;
+    animation: downloading-shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes downloading-shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(350%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .downloading-shimmer {
+      animation: none;
+      width: 100%;
+      opacity: 0.6;
+    }
+  }
+
   /* Pill-style tab bar used inside the marquee header.            */
   .marquee-tab-bar {
     display: inline-flex;

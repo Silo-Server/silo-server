@@ -35,6 +35,30 @@ type CollectionResult struct {
 	Title     string
 }
 
+// MediaResult is a normalized TMDB movie or TV result for request search and
+// discovery surfaces. MediaType is Silo-facing: "movie" or "series".
+type MediaResult struct {
+	ID           int
+	MediaType    string
+	Title        string
+	Overview     string
+	PosterPath   string
+	BackdropPath string
+	ReleaseDate  string
+	Year         int
+	Popularity   float64
+	VoteAverage  float64
+}
+
+// MediaPage is a paginated TMDB search/discovery response normalized for the
+// request system.
+type MediaPage struct {
+	Page         int
+	TotalPages   int
+	TotalResults int
+	Results      []MediaResult
+}
+
 // DiscoverParams mirrors the TMDB `/discover/{movie,tv}` query parameters and
 // is shaped to map 1:1 onto TMDBDiscoverSpec. Limit caps the total results
 // the client paginates over.
@@ -93,6 +117,28 @@ type collectionResponsePart struct {
 	MediaType   string `json:"media_type"`
 	Title       string `json:"title"`
 	ReleaseDate string `json:"release_date"`
+}
+
+type mediaMovieResponse struct {
+	ID           int     `json:"id"`
+	Title        string  `json:"title"`
+	Overview     string  `json:"overview"`
+	PosterPath   string  `json:"poster_path"`
+	BackdropPath string  `json:"backdrop_path"`
+	ReleaseDate  string  `json:"release_date"`
+	Popularity   float64 `json:"popularity"`
+	VoteAverage  float64 `json:"vote_average"`
+}
+
+type mediaTVResponse struct {
+	ID           int     `json:"id"`
+	Name         string  `json:"name"`
+	Overview     string  `json:"overview"`
+	PosterPath   string  `json:"poster_path"`
+	BackdropPath string  `json:"backdrop_path"`
+	FirstAirDate string  `json:"first_air_date"`
+	Popularity   float64 `json:"popularity"`
+	VoteAverage  float64 `json:"vote_average"`
 }
 
 type externalIDsResponse struct {

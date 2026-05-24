@@ -220,6 +220,103 @@ func TestDiscoverRequiresSortBy(t *testing.T) {
 	}
 }
 
+func TestSearchMediaMovie(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/movie" {
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if got := q.Get("query"); got != "fight club" {
+			t.Fatalf("query = %q, want fight club", got)
+		}
+		if got := q.Get("include_adult"); got != "false" {
+			t.Fatalf("include_adult = %q, want false", got)
+		}
+		if got := q.Get("page"); got != "2" {
+			t.Fatalf("page = %q, want 2", got)
+		}
+		if got := q.Get("api_key"); got != "test-key" {
+			t.Fatalf("api_key query = %q, want test-key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"page": 2,
+			"total_pages": 5,
+			"total_results": 50,
+			"results": [
+				{
+					"id": 550,
+					"title": "Fight Club",
+					"overview": "overview",
+					"poster_path": "/poster.jpg",
+					"backdrop_path": "/backdrop.jpg",
+					"release_date": "1999-10-15",
+					"popularity": 10.5,
+					"vote_average": 8.4
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	page, err := client.SearchMedia(context.Background(), "movie", "fight club", 2)
+	if err != nil {
+		t.Fatalf("SearchMedia returned error: %v", err)
+	}
+	if page.Page != 2 || page.TotalPages != 5 || len(page.Results) != 1 {
+		t.Fatalf("page = %+v, want page metadata and one result", page)
+	}
+	result := page.Results[0]
+	if result.ID != 550 || result.MediaType != "movie" || result.Year != 1999 {
+		t.Fatalf("result = %+v, want normalized movie result", result)
+	}
+}
+
+func TestDiscoverSectionTrendingSeries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/trending/tv/week" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.URL.Query().Get("page"); got != "1" {
+			t.Fatalf("page = %q, want 1", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"page": 1,
+			"total_pages": 1,
+			"total_results": 1,
+			"results": [
+				{
+					"id": 1399,
+					"name": "Game of Thrones",
+					"first_air_date": "2011-04-17"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	page, err := client.DiscoverSection(context.Background(), "trending_series", 1)
+	if err != nil {
+		t.Fatalf("DiscoverSection returned error: %v", err)
+	}
+	if len(page.Results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(page.Results))
+	}
+	result := page.Results[0]
+	if result.ID != 1399 || result.MediaType != "series" || result.Year != 2011 {
+		t.Fatalf("result = %+v, want normalized series result", result)
+	}
+}
+
 func TestGetCollection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/collection/86311" {

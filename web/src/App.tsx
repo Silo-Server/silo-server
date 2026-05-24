@@ -32,10 +32,12 @@ import ItemDetail from "@/pages/ItemDetail/index";
 import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
+import Requests from "@/pages/Requests";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminActivity from "@/pages/AdminActivity";
 import AdminLogs from "@/pages/AdminLogs";
 import AdminUsers from "@/pages/AdminUsers";
+import AdminRequests from "@/pages/AdminRequests";
 import AdminDevices from "@/pages/AdminDevices";
 import AdminLibraries from "@/pages/AdminLibraries";
 import AdminSettingsLayout from "@/pages/admin-settings/AdminSettingsLayout";
@@ -216,6 +218,7 @@ function QueryCacheManager() {
       qc.removeQueries({ queryKey: ["progress"] });
       qc.removeQueries({ queryKey: ["sections"] });
       qc.removeQueries({ queryKey: ["calendar"] });
+      qc.removeQueries({ queryKey: ["requests"] });
       // Recommendation rows include per-profile user_state (is_favorite, etc.);
       // the taste-seed picker depends on this for pre-selection.
       qc.removeQueries({ queryKey: ["recommendations"] });
@@ -350,6 +353,7 @@ function AppRoutes() {
                   <Route path="collections" element={<AdminCollections />} />
                   <Route path="collections/new" element={<AdminCollectionEditor />} />
                   <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
+                  <Route path="requests" element={<AdminRequests />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />
@@ -443,6 +447,7 @@ function AppRoutes() {
                             path="/collections/:id"
                             element={<LegacyUserCollectionRedirect />}
                           />
+                          <Route path="/requests" element={<Requests />} />
                           <Route path="/recommendations" element={<Recommendations />} />
                           <Route
                             path="/recommendations/section/:kind"

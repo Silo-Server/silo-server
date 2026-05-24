@@ -1382,6 +1382,167 @@ export interface ImportUserCollectionResponse {
   sync?: UserCollectionSyncResult;
 }
 
+// Media Requests
+export type RequestMediaType = "movie" | "series";
+export type MediaRequestStatus = "pending" | "approved" | "queued" | "downloading" | "completed";
+export type MediaRequestOutcome = "active" | "declined" | "cancelled" | "failed";
+export type RequestAvailability = "missing" | "available";
+export type RequestLimitMode = "inherit" | "custom" | "unlimited" | "blocked";
+export type RequestApprovalMode = "inherit" | "manual" | "auto" | "blocked";
+
+export interface RequestState {
+  status?: MediaRequestStatus;
+  requestable: boolean;
+  reason?: string;
+  request_id?: string;
+}
+
+export interface RequestMediaResult {
+  media_type: RequestMediaType;
+  tmdb_id: number;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+  release_date?: string;
+  popularity?: number;
+  vote_average?: number;
+  availability: RequestAvailability;
+  request: RequestState;
+}
+
+export interface RequestMediaPage {
+  page: number;
+  total_pages: number;
+  total_results: number;
+  results: RequestMediaResult[];
+}
+
+export interface RequestDiscoverySection extends RequestMediaPage {
+  key: string;
+  title: string;
+}
+
+export interface RequestDiscoveryResponse {
+  sections: RequestDiscoverySection[];
+}
+
+export interface CreateMediaRequestInput {
+  media_type: RequestMediaType;
+  tmdb_id: number;
+  tvdb_id?: number;
+  imdb_id?: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+}
+
+export interface MediaRequest {
+  id: string;
+  provider: string;
+  media_type: RequestMediaType;
+  tmdb_id: number;
+  tvdb_id?: number;
+  imdb_id?: string;
+  title: string;
+  year?: number;
+  overview?: string;
+  poster_path?: string;
+  backdrop_path?: string;
+  status: MediaRequestStatus;
+  outcome: MediaRequestOutcome;
+  requested_by_user_id?: number;
+  requested_by_profile_id?: string;
+  integration_kind?: string;
+  external_id?: string;
+  external_status?: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+  approved_at?: string;
+  completed_at?: string;
+}
+
+export interface MediaRequestsListResponse {
+  requests: MediaRequest[];
+}
+
+export interface RequestSettings {
+  requests_enabled: boolean;
+  global_max_requests: number;
+  global_window_days: number;
+  global_auto_approval_enabled: boolean;
+  updated_at: string;
+}
+
+export interface RequestUserLimit {
+  user_id: number;
+  limit_mode: RequestLimitMode;
+  max_requests?: number | null;
+  window_days?: number | null;
+  approval_mode: RequestApprovalMode;
+  updated_at?: string;
+}
+
+export interface RequestIntegration {
+  kind: string;
+  enabled: boolean;
+  base_url: string;
+  api_key_ref?: string;
+  has_api_key?: boolean;
+  root_folder: string;
+  quality_profile_id?: number | null;
+  tags: number[];
+  options: Record<string, unknown>;
+  last_check_at?: string | null;
+  last_check_status?: string;
+  last_check_error?: string;
+  updated_at?: string;
+}
+
+export interface RequestIntegrationRootFolder {
+  path: string;
+  free_space?: number;
+  total_space?: number;
+  accessible: boolean;
+}
+
+export interface RequestIntegrationQualityProfile {
+  id: number;
+  name: string;
+}
+
+export interface RequestIntegrationTag {
+  id: number;
+  label: string;
+}
+
+export interface RequestIntegrationOptions {
+  kind: string;
+  root_folders: RequestIntegrationRootFolder[];
+  quality_profiles: RequestIntegrationQualityProfile[];
+  tags: RequestIntegrationTag[];
+}
+
+export interface LoadRequestIntegrationOptionsRequest {
+  base_url: string;
+  api_key_ref?: string;
+}
+
+export interface RequestIntegrationsResponse {
+  integrations: RequestIntegration[];
+}
+
+export interface RequestListParams {
+  status?: MediaRequestStatus | "all";
+  outcome?: MediaRequestOutcome | "all";
+  limit?: number;
+  offset?: number;
+}
+
 // Admin
 export interface AdminUser {
   id: number;
