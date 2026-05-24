@@ -3,8 +3,9 @@ import { useParams } from "react-router";
 import { useAudiobook } from "@/hooks/audiobooks/useAudiobook";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import AudiobookPlayer from "./player/AudiobookPlayer";
+import { ChaptersSection } from "./components/ChaptersSection";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
@@ -71,65 +72,6 @@ function buildChapterList(files: AudiobookFile[]): Array<{
     offset += file.duration_seconds ?? 0;
   }
   return result;
-}
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-interface ChapterListProps {
-  files: AudiobookFile[];
-  onSelect: (absoluteSeconds: number) => void;
-}
-
-function ChapterList({ files, onSelect }: ChapterListProps) {
-  const [expanded, setExpanded] = useState(false);
-  const chapters = buildChapterList(files);
-
-  if (chapters.length === 0) return null;
-
-  return (
-    <div className="mt-10">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="mb-4 flex items-center gap-1.5 text-xl font-semibold tracking-tight"
-      >
-        {expanded ? (
-          <ChevronDown className="h-5 w-5 opacity-60" />
-        ) : (
-          <ChevronRight className="h-5 w-5 opacity-60" />
-        )}
-        Chapters
-        <span className="text-muted-foreground ml-1.5 text-sm font-normal">
-          ({chapters.length})
-        </span>
-      </button>
-
-      {expanded && (
-        <ol className="divide-border divide-y rounded-xl border">
-          {chapters.map(({ chapter, absoluteStart, label }, i) => (
-            <li key={`${chapter.index}-${i}`}>
-              <button
-                type="button"
-                onClick={() => onSelect(absoluteStart)}
-                className="hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors"
-              >
-                <span className="text-muted-foreground w-6 shrink-0 text-right text-xs tabular-nums">
-                  {i + 1}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
-                <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                  {formatSeconds(absoluteStart)}
-                </span>
-                <Play className="text-muted-foreground h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-              </button>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -282,8 +224,11 @@ export default function AudiobookDetail() {
       />
 
       <div className={`page-shell pb-12 ${playerOpen ? "pb-32" : ""}`}>
-        {/* Chapter list */}
-        {files.length > 0 && <ChapterList files={files} onSelect={(s) => openPlayer(s)} />}
+        <ChaptersSection
+          files={files}
+          currentPositionSeconds={playerOpen ? startSeconds : resumeSeconds || null}
+          onSelect={(s) => openPlayer(s)}
+        />
       </div>
     </div>
   );
