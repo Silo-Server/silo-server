@@ -15,9 +15,6 @@ export default function BrandCard({
 }: BrandCardProps) {
   const navigate = useNavigate();
   const isGenre = kind === "genre";
-  const background = isGenre
-    ? `linear-gradient(135deg, ${card.gradient_from ?? "#475569"}, ${card.gradient_to ?? "#0f172a"})`
-    : card.brand_color || "#1f2937";
 
   function handleClick() {
     const base = `/requests/browse/${kind}/${encodeURIComponent(card.slug)}`;
@@ -30,26 +27,48 @@ export default function BrandCard({
     navigate(base);
   }
 
+  const baseClasses =
+    "group relative flex h-28 w-52 flex-none transform-gpu cursor-pointer items-center justify-center overflow-hidden rounded-xl shadow-sm ring-1 transition duration-300 ease-in-out hover:scale-[1.03] focus:scale-[1.03] focus:outline-none sm:h-32 sm:w-64";
+
+  if (isGenre) {
+    const background = `linear-gradient(135deg, ${card.gradient_from ?? "#475569"}, ${card.gradient_to ?? "#0f172a"})`;
+    return (
+      <button
+        type="button"
+        onClick={handleClick}
+        aria-label={card.display_name}
+        className={cn(
+          baseClasses,
+          "ring-white/10 hover:ring-white/40 focus:ring-2 focus:ring-white",
+        )}
+        style={{ background }}
+      >
+        <span className="px-3 text-center text-base leading-tight font-semibold text-white drop-shadow">
+          {card.display_name}
+        </span>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
       onClick={handleClick}
       aria-label={card.display_name}
       className={cn(
-        "group relative flex h-20 w-[140px] flex-none items-center justify-center overflow-hidden rounded-lg shadow-sm",
-        "ring-1 ring-white/5 transition-colors hover:ring-white/30 focus:ring-2 focus:ring-white focus:outline-none",
+        baseClasses,
+        "bg-gray-800 ring-gray-700 hover:bg-gray-700 hover:ring-gray-500 focus:ring-2 focus:ring-white",
       )}
-      style={{ background }}
     >
-      {!isGenre && card.logo_url ? (
+      {card.logo_url ? (
         <img
           src={card.logo_url}
           alt={card.display_name}
           loading="lazy"
-          className="max-h-[60%] max-w-[80%] object-contain"
+          className="h-full w-full object-contain px-6 py-7 sm:px-8 sm:py-8"
         />
       ) : (
-        <span className="px-2 text-center text-sm leading-tight font-semibold text-white drop-shadow">
+        <span className="px-3 text-center text-base leading-tight font-semibold text-white">
           {card.display_name}
         </span>
       )}

@@ -544,32 +544,6 @@ func (c *Client) DiscoverPage(ctx context.Context, mediaType string, params Disc
 	return normalizeMoviePage(resp), nil
 }
 
-// GetCompany fetches a TMDB company (production studio) by ID. Used to
-// resolve logo paths for the bundled discovery studios.
-func (c *Client) GetCompany(ctx context.Context, id int) (*Company, error) {
-	if id <= 0 {
-		return nil, fmt.Errorf("tmdb: invalid company id: %d", id)
-	}
-	var company Company
-	if err := c.doGet(ctx, fmt.Sprintf("/company/%d", id), &company); err != nil {
-		return nil, err
-	}
-	return &company, nil
-}
-
-// GetNetwork fetches a TMDB TV network by ID. Used to resolve logo paths
-// for the bundled discovery networks.
-func (c *Client) GetNetwork(ctx context.Context, id int) (*Network, error) {
-	if id <= 0 {
-		return nil, fmt.Errorf("tmdb: invalid network id: %d", id)
-	}
-	var network Network
-	if err := c.doGet(ctx, fmt.Sprintf("/network/%d", id), &network); err != nil {
-		return nil, err
-	}
-	return &network, nil
-}
-
 // buildDiscoverQuery composes the TMDB discover query string (without the
 // leading "?" and without page or api_key — doGet handles those).
 func buildDiscoverQuery(mediaType string, params DiscoverParams) string {

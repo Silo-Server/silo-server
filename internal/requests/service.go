@@ -16,8 +16,6 @@ type TMDBClient interface {
 	DiscoverSection(ctx context.Context, section string, page int) (*tmdb.MediaPage, error)
 	GetMediaDetail(ctx context.Context, mediaType string, id int) (*tmdb.MediaDetail, error)
 	DiscoverPage(ctx context.Context, mediaType string, params tmdb.DiscoverParams, page int) (*tmdb.MediaPage, error)
-	GetCompany(ctx context.Context, id int) (*tmdb.Company, error)
-	GetNetwork(ctx context.Context, id int) (*tmdb.Network, error)
 }
 
 type TMDBExternalIDClient interface {
@@ -59,8 +57,6 @@ type Service struct {
 	secrets       SecretResolver
 	movieAdapter  MovieFulfillmentAdapter
 	seriesAdapter SeriesFulfillmentAdapter
-	companyLogos  *logoCache
-	networkLogos  *logoCache
 	Now           func() time.Time
 }
 
@@ -74,27 +70,12 @@ type DiscoverySection struct {
 }
 
 func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *Service {
-	svc := &Service{
+	return &Service{
 		store:    store,
 		tmdb:     tmdbClient,
 		presence: presence,
 		Now:      func() time.Time { return time.Now().UTC() },
 	}
-	svc.companyLogos = newLogoCache(func(ctx context.Context, id int) (string, error) {
-		company, err := tmdbClient.GetCompany(ctx, id)
-		if err != nil {
-			return "", err
-		}
-		return company.LogoPath, nil
-	}, 24*time.Hour)
-	svc.networkLogos = newLogoCache(func(ctx context.Context, id int) (string, error) {
-		network, err := tmdbClient.GetNetwork(ctx, id)
-		if err != nil {
-			return "", err
-		}
-		return network.LogoPath, nil
-	}, 24*time.Hour)
-	return svc
 }
 
 func (s *Service) SetSecretResolver(resolver SecretResolver) {

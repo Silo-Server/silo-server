@@ -143,7 +143,7 @@ func TestHandleListStudiosReturnsJSON(t *testing.T) {
 	svc := &fakeRequestService{
 		listStudiosFn: func() ([]mediarequests.DiscoverBrandCard, error) {
 			return []mediarequests.DiscoverBrandCard{
-				{TMDBID: 420, Slug: "marvel-studios", DisplayName: "Marvel Studios", BrandColor: "#ed1d24", LogoURL: &logo},
+				{TMDBID: 420, Slug: "marvel-studios", DisplayName: "Marvel Studios", LogoURL: &logo},
 			}, nil
 		},
 	}

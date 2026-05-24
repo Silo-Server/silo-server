@@ -1,21 +1,23 @@
 package requests
 
 // BundledStudio is a curated movie studio surfaced in the request discover
-// section. The TMDB ID identifies the company in /discover/movie?with_companies=.
+// section. LogoPath is a TMDB image file path that is rendered through the
+// duotone filter for uniform white-on-gray presentation.
 type BundledStudio struct {
 	TMDBID      int
 	Slug        string
 	DisplayName string
-	BrandColor  string
+	LogoPath    string
 }
 
 // BundledNetwork is a curated TV network surfaced in the request discover
-// section. The TMDB ID identifies the network in /discover/tv?with_networks=.
+// section. LogoPath is a TMDB image file path rendered through the duotone
+// filter.
 type BundledNetwork struct {
 	TMDBID      int
 	Slug        string
 	DisplayName string
-	BrandColor  string
+	LogoPath    string
 }
 
 // BundledGenre is a curated genre. MovieID is the TMDB movie genre ID;
@@ -30,33 +32,34 @@ type BundledGenre struct {
 }
 
 // BundledStudios is the compile-time list of studios shown in the Studios
-// carousel. Order is preservation order; render in this order.
+// carousel. TMDB IDs and logo paths follow the curated set used by Overseerr
+// so logos resolve reliably through the duotone filter.
 var BundledStudios = []BundledStudio{
-	{TMDBID: 2, Slug: "walt-disney-pictures", DisplayName: "Walt Disney Pictures", BrandColor: "#003087"},
-	{TMDBID: 3, Slug: "pixar", DisplayName: "Pixar", BrandColor: "#0a85ca"},
-	{TMDBID: 420, Slug: "marvel-studios", DisplayName: "Marvel Studios", BrandColor: "#ed1d24"},
-	{TMDBID: 1, Slug: "lucasfilm", DisplayName: "Lucasfilm", BrandColor: "#000000"},
-	{TMDBID: 174, Slug: "warner-bros-pictures", DisplayName: "Warner Bros. Pictures", BrandColor: "#004c97"},
-	{TMDBID: 33, Slug: "universal-pictures", DisplayName: "Universal Pictures", BrandColor: "#1f2a44"},
-	{TMDBID: 4, Slug: "paramount-pictures", DisplayName: "Paramount Pictures", BrandColor: "#0066b3"},
-	{TMDBID: 5, Slug: "sony-pictures", DisplayName: "Sony Pictures", BrandColor: "#bf2f38"},
-	{TMDBID: 25, Slug: "20th-century-studios", DisplayName: "20th Century Studios", BrandColor: "#000000"},
-	{TMDBID: 10342, Slug: "studio-ghibli", DisplayName: "Studio Ghibli", BrandColor: "#1a4d2e"},
+	{TMDBID: 2, Slug: "disney", DisplayName: "Disney", LogoPath: "/wdrCwmRnLFJhEoH8GSfymY85KHT.png"},
+	{TMDBID: 3, Slug: "pixar", DisplayName: "Pixar", LogoPath: "/1TjvGVDMYsj6JBxOAkUHpPEwLf7.png"},
+	{TMDBID: 420, Slug: "marvel-studios", DisplayName: "Marvel Studios", LogoPath: "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png"},
+	{TMDBID: 174, Slug: "warner-bros-pictures", DisplayName: "Warner Bros. Pictures", LogoPath: "/ky0xOc5OrhzkZ1N6KyUxacfQsCk.png"},
+	{TMDBID: 33, Slug: "universal-pictures", DisplayName: "Universal Pictures", LogoPath: "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png"},
+	{TMDBID: 4, Slug: "paramount-pictures", DisplayName: "Paramount Pictures", LogoPath: "/fycMZt242LVjagMByZOLUGbCvv3.png"},
+	{TMDBID: 34, Slug: "sony-pictures", DisplayName: "Sony Pictures", LogoPath: "/GagSvqWlyPdkFHMfQ3pNq6ix9P.png"},
+	{TMDBID: 127928, Slug: "20th-century-studios", DisplayName: "20th Century Studios", LogoPath: "/h0rjX5vjW5r8yEnUBStFarjcLT4.png"},
+	{TMDBID: 521, Slug: "dreamworks", DisplayName: "DreamWorks", LogoPath: "/kP7t6RwGz2AvvTkvnI1uteEwHet.png"},
+	{TMDBID: 41077, Slug: "a24", DisplayName: "A24", LogoPath: "/1ZXsGaFPgrgS6ZZGS37AqD5uU12.png"},
 }
 
 // BundledNetworks is the compile-time list of networks shown in the Networks
-// carousel. Order is preservation order.
+// carousel.
 var BundledNetworks = []BundledNetwork{
-	{TMDBID: 213, Slug: "netflix", DisplayName: "Netflix", BrandColor: "#e50914"},
-	{TMDBID: 2739, Slug: "disney-plus", DisplayName: "Disney+", BrandColor: "#0e3c7d"},
-	{TMDBID: 2552, Slug: "apple-tv-plus", DisplayName: "Apple TV+", BrandColor: "#000000"},
-	{TMDBID: 49, Slug: "hbo", DisplayName: "HBO", BrandColor: "#000000"},
-	{TMDBID: 453, Slug: "hulu", DisplayName: "Hulu", BrandColor: "#1ce783"},
-	{TMDBID: 1024, Slug: "amazon-prime-video", DisplayName: "Amazon Prime Video", BrandColor: "#00a8e1"},
-	{TMDBID: 3186, Slug: "max", DisplayName: "Max", BrandColor: "#002be7"},
-	{TMDBID: 4330, Slug: "paramount-plus", DisplayName: "Paramount+", BrandColor: "#0064ff"},
-	{TMDBID: 4, Slug: "bbc", DisplayName: "BBC", BrandColor: "#000000"},
-	{TMDBID: 88, Slug: "fx", DisplayName: "FX", BrandColor: "#000000"},
+	{TMDBID: 213, Slug: "netflix", DisplayName: "Netflix", LogoPath: "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"},
+	{TMDBID: 2739, Slug: "disney-plus", DisplayName: "Disney+", LogoPath: "/gJ8VX6JSu3ciXHuC2dDGAo2lvwM.png"},
+	{TMDBID: 1024, Slug: "prime-video", DisplayName: "Prime Video", LogoPath: "/ifhbNuuVnlwYy5oXA5VIb2YR8AZ.png"},
+	{TMDBID: 2552, Slug: "apple-tv-plus", DisplayName: "Apple TV+", LogoPath: "/4KAy34EHvRM25Ih8wb82AuGU7zJ.png"},
+	{TMDBID: 453, Slug: "hulu", DisplayName: "Hulu", LogoPath: "/pqUTCleNUiTLAVlelGxUgWn1ELh.png"},
+	{TMDBID: 49, Slug: "hbo", DisplayName: "HBO", LogoPath: "/tuomPhY2UtuPTqqFnKMVHvSb724.png"},
+	{TMDBID: 4330, Slug: "paramount-plus", DisplayName: "Paramount+", LogoPath: "/fi83B1oztoS47xxcemFdPMhIzK.png"},
+	{TMDBID: 174, Slug: "amc", DisplayName: "AMC", LogoPath: "/pmvRmATOCaDykE6JrVoeYxlFHw3.png"},
+	{TMDBID: 4, Slug: "bbc-one", DisplayName: "BBC One", LogoPath: "/mVn7xESaTNmjBUyUtGNvDQd3CT1.png"},
+	{TMDBID: 3353, Slug: "peacock", DisplayName: "Peacock", LogoPath: "/gIAcGTjKKr0KOHL5s4O36roJ8p7.png"},
 }
 
 // BundledGenres is the compile-time list of genres shown in the Genres

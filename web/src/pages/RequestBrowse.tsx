@@ -14,7 +14,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useCreateMediaRequest, useRequestBrowse } from "@/hooks/queries/requests";
 import { requestInputFromMediaResult } from "@/lib/mediaRequests";
-import { cn } from "@/lib/utils";
 import type {
   DiscoverBrowseKind,
   DiscoverBrowseResponse,
@@ -211,15 +210,12 @@ function BrowseHeaderTile({
     );
   }
   return (
-    <div
-      className={cn("flex h-16 w-28 items-center justify-center overflow-hidden rounded-md")}
-      style={{ background: browse.brand_color || "#1f2937" }}
-    >
+    <div className="flex h-16 w-28 items-center justify-center overflow-hidden rounded-md bg-gray-800 ring-1 ring-gray-700">
       {browse.logo_url ? (
         <img
           src={browse.logo_url}
           alt={browse.display_name}
-          className="max-h-[60%] max-w-[80%] object-contain"
+          className="h-full w-full object-contain p-2"
         />
       ) : (
         <span className="px-2 text-center text-xs font-semibold text-white">

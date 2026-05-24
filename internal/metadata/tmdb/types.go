@@ -86,20 +86,6 @@ type ExternalIDs struct {
 	TVDBID int    `json:"tvdb_id"`
 }
 
-// Company is the decoded payload of TMDB's /company/{id} endpoint.
-type Company struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	LogoPath string `json:"logo_path"`
-}
-
-// Network is the decoded payload of TMDB's /network/{id} endpoint.
-type Network struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	LogoPath string `json:"logo_path"`
-}
-
 // Collection is the decoded payload of TMDB's /collection/{id} endpoint.
 // TMDB collections only contain movies (franchises, sagas), so each Part is
 // implicitly a movie. The Parts slice preserves TMDB's ordering, which is

@@ -1473,7 +1473,6 @@ export interface DiscoverBrandCard {
   tmdb_id?: number;
   slug: string;
   display_name: string;
-  brand_color?: string;
   logo_url?: string | null;
   gradient_from?: string;
   gradient_to?: string;
@@ -1498,7 +1497,6 @@ export interface DiscoverBrowseResponse {
   kind: DiscoverBrowseKind;
   slug: string;
   display_name: string;
-  brand_color?: string;
   logo_url?: string | null;
   media_type: RequestMediaType;
   sort: "popularity" | "vote_average" | "release_date";

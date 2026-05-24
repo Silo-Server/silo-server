@@ -3,32 +3,27 @@ package requests
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
 // DiscoverBrandCard is one card on the Studios / Networks / Genres carousels.
-// Studios and networks carry a TMDB ID and a brand color plus lazy-fetched logo.
-// Genres carry no TMDB ID at this layer and render with a gradient and display
-// name instead of a logo.
+// Studios and networks carry a TMDB ID and a logo URL rendered with TMDB's
+// duotone filter; genres carry gradient hints and a display name instead.
 type DiscoverBrandCard struct {
 	TMDBID          int     `json:"tmdb_id,omitempty"`
 	Slug            string  `json:"slug"`
 	DisplayName     string  `json:"display_name"`
-	BrandColor      string  `json:"brand_color,omitempty"`
 	LogoURL         *string `json:"logo_url,omitempty"`
 	GradientFrom    string  `json:"gradient_from,omitempty"`
 	GradientTo      string  `json:"gradient_to,omitempty"`
 	SeriesSupported bool    `json:"series_supported,omitempty"`
 }
 
-// ListStudios returns the bundled studios with lazily-fetched logo URLs.
-// A failed logo lookup for any individual studio yields a card with LogoURL=nil;
-// the response is never failed wholesale.
-func (s *Service) ListStudios(ctx context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
-	if s == nil || s.tmdb == nil {
+// ListStudios returns the bundled studios with their curated logo URLs.
+func (s *Service) ListStudios(_ context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
+	if s == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
 	out := make([]DiscoverBrandCard, 0, len(BundledStudios))
@@ -37,16 +32,15 @@ func (s *Service) ListStudios(ctx context.Context, _ Viewer) ([]DiscoverBrandCar
 			TMDBID:      studio.TMDBID,
 			Slug:        studio.Slug,
 			DisplayName: studio.DisplayName,
-			BrandColor:  studio.BrandColor,
-			LogoURL:     s.resolveLogoURL(ctx, s.companyLogos, studio.TMDBID, "company", studio.Slug),
+			LogoURL:     duotoneLogoURL(studio.LogoPath),
 		})
 	}
 	return out, nil
 }
 
-// ListNetworks returns the bundled TV networks with lazily-fetched logo URLs.
-func (s *Service) ListNetworks(ctx context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
-	if s == nil || s.tmdb == nil {
+// ListNetworks returns the bundled TV networks with their curated logo URLs.
+func (s *Service) ListNetworks(_ context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
+	if s == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
 	out := make([]DiscoverBrandCard, 0, len(BundledNetworks))
@@ -55,8 +49,7 @@ func (s *Service) ListNetworks(ctx context.Context, _ Viewer) ([]DiscoverBrandCa
 			TMDBID:      network.TMDBID,
 			Slug:        network.Slug,
 			DisplayName: network.DisplayName,
-			BrandColor:  network.BrandColor,
-			LogoURL:     s.resolveLogoURL(ctx, s.networkLogos, network.TMDBID, "network", network.Slug),
+			LogoURL:     duotoneLogoURL(network.LogoPath),
 		})
 	}
 	return out, nil
@@ -82,27 +75,16 @@ func (s *Service) ListGenres(_ context.Context, _ Viewer) ([]DiscoverBrandCard, 
 	return out, nil
 }
 
-// resolveLogoURL fetches the cached logo path and renders it as a TMDB image
-// URL. It returns nil on lookup failure or when TMDB has no logo for the entity.
-func (s *Service) resolveLogoURL(ctx context.Context, cache *logoCache, id int, kind, slug string) *string {
-	if cache == nil {
-		return nil
-	}
-	path, err := cache.Get(ctx, id)
-	if err != nil {
-		slog.Warn("requests: logo lookup failed", "kind", kind, "slug", slug, "id", id, "error", err)
-		return nil
-	}
+// duotoneLogoURL returns a TMDB CDN URL that recolors the logo into a
+// white-on-light-gray duotone. Studio/network logos vary wildly in color
+// and contrast; the duotone treatment keeps every card legible against a
+// neutral background. Returns nil for empty paths.
+func duotoneLogoURL(path string) *string {
 	if path == "" {
 		return nil
 	}
-	url := tmdbImageURL(path, "w300")
+	url := "https://image.tmdb.org/t/p/w780_filter(duotone,ffffff,bababa)" + path
 	return &url
-}
-
-// tmdbImageURL is the public TMDB image CDN URL for a given file path and size.
-func tmdbImageURL(path, size string) string {
-	return "https://image.tmdb.org/t/p/" + size + path
 }
 
 // DiscoverBrowseResponse is the shape returned by the browse endpoints.
@@ -112,7 +94,6 @@ type DiscoverBrowseResponse struct {
 	Kind        string        `json:"kind"`
 	Slug        string        `json:"slug"`
 	DisplayName string        `json:"display_name"`
-	BrandColor  string        `json:"brand_color,omitempty"`
 	LogoURL     *string       `json:"logo_url,omitempty"`
 	MediaType   MediaType     `json:"media_type"`
 	Sort        string        `json:"sort"`
@@ -159,8 +140,7 @@ func (s *Service) BrowseStudio(ctx context.Context, viewer Viewer, slug, sort st
 		Kind:        "studio",
 		Slug:        studio.Slug,
 		DisplayName: studio.DisplayName,
-		BrandColor:  studio.BrandColor,
-		LogoURL:     s.resolveLogoURL(ctx, s.companyLogos, studio.TMDBID, "company", studio.Slug),
+		LogoURL:     duotoneLogoURL(studio.LogoPath),
 		MediaType:   MediaTypeMovie,
 		Sort:        sortKey,
 		Page:        enriched.Page,
@@ -198,8 +178,7 @@ func (s *Service) BrowseNetwork(ctx context.Context, viewer Viewer, slug, sort s
 		Kind:        "network",
 		Slug:        network.Slug,
 		DisplayName: network.DisplayName,
-		BrandColor:  network.BrandColor,
-		LogoURL:     s.resolveLogoURL(ctx, s.networkLogos, network.TMDBID, "network", network.Slug),
+		LogoURL:     duotoneLogoURL(network.LogoPath),
 		MediaType:   MediaTypeSeries,
 		Sort:        sortKey,
 		Page:        enriched.Page,

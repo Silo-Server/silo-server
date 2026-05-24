@@ -177,18 +177,16 @@ function PosterFrame({
   children?: React.ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "media-card-image relative aspect-[2/3] transition-[filter] duration-300",
-        dim && "brightness-[0.7] saturate-[0.55]",
-      )}
-    >
+    <div className="media-card-image relative aspect-[2/3]">
       {poster ? (
         <img
           src={poster}
           alt=""
           loading="lazy"
-          className="h-full w-full object-cover transition-transform duration-300 group-hover/req-card:scale-[1.04]"
+          className={cn(
+            "h-full w-full object-cover transition-[transform,filter] duration-300 group-hover/req-card:scale-[1.04]",
+            dim && "brightness-[0.85] saturate-[0.8]",
+          )}
         />
       ) : (
         <div className="bg-muted text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-2 p-3 text-center">
@@ -205,7 +203,7 @@ function PosterFrame({
 
 function TypeBadge({ mediaType }: { mediaType: "movie" | "series" }) {
   return (
-    <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/55 px-2 py-0.5 text-[10px] leading-none font-semibold tracking-[0.14em] text-white/90 uppercase backdrop-blur-md">
+    <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-full border border-white/25 bg-black/80 px-2 py-0.5 text-[10px] leading-none font-semibold tracking-[0.14em] text-white uppercase shadow-sm shadow-black/40 backdrop-blur-md">
       {mediaType === "series" ? "Series" : "Movie"}
     </span>
   );
@@ -234,13 +232,13 @@ type RibbonKind = "pending" | "approved" | "queued" | "downloading" | "completed
 
 const RIBBON_STYLES: Record<RibbonKind, string> = {
   pending:
-    "bg-amber-500/15 text-amber-100 ring-amber-400/40 [&_.dot]:bg-amber-300 [&_.dot]:animate-pulse",
-  approved: "bg-emerald-500/15 text-emerald-100 ring-emerald-400/40 [&_.dot]:bg-emerald-300",
-  queued: "bg-sky-500/15 text-sky-100 ring-sky-400/40 [&_.dot]:bg-sky-300 [&_.dot]:animate-pulse",
+    "bg-amber-500/85 text-amber-50 ring-amber-300/60 [&_.dot]:bg-amber-200 [&_.dot]:animate-pulse",
+  approved: "bg-emerald-500/85 text-emerald-50 ring-emerald-300/60 [&_.dot]:bg-emerald-200",
+  queued: "bg-sky-500/85 text-sky-50 ring-sky-300/60 [&_.dot]:bg-sky-200 [&_.dot]:animate-pulse",
   downloading:
-    "bg-sky-500/20 text-sky-100 ring-sky-400/50 [&_.dot]:bg-sky-300 [&_.dot]:animate-pulse",
-  completed: "bg-emerald-500/20 text-emerald-100 ring-emerald-400/40 [&_.dot]:bg-emerald-300",
-  blocked: "bg-zinc-700/60 text-zinc-200 ring-zinc-500/40 [&_.dot]:bg-zinc-400",
+    "bg-sky-500/90 text-sky-50 ring-sky-300/70 [&_.dot]:bg-sky-200 [&_.dot]:animate-pulse",
+  completed: "bg-emerald-500/90 text-emerald-50 ring-emerald-300/60 [&_.dot]:bg-emerald-200",
+  blocked: "bg-zinc-800/85 text-zinc-50 ring-zinc-400/60 [&_.dot]:bg-zinc-300",
 };
 
 function StatusRibbon({ status, label }: { status: string; label: string }) {
@@ -248,7 +246,7 @@ function StatusRibbon({ status, label }: { status: string; label: string }) {
   return (
     <span
       className={cn(
-        "absolute top-2.5 right-2.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] leading-none font-semibold tracking-[0.08em] uppercase ring-1 backdrop-blur-md",
+        "absolute top-2.5 right-2.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] leading-none font-semibold tracking-[0.08em] uppercase shadow-sm ring-1 shadow-black/40 backdrop-blur-md",
         RIBBON_STYLES[kind],
       )}
     >

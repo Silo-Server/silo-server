@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -497,13 +498,8 @@ func (f *fakeStore) UpsertIntegration(context.Context, Integration) (*Integratio
 	return nil, nil
 }
 
-func TestListStudiosReturnsBundleWithLogos(t *testing.T) {
-	tmdbClient := &fakeTMDBClient{
-		companies: map[int]*tmdb.Company{
-			420: {ID: 420, Name: "Marvel Studios", LogoPath: "/hUze.png"},
-		},
-	}
-	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+func TestListStudiosReturnsBundleWithDuotoneLogos(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
 
 	studios, err := service.ListStudios(context.Background(), testViewer(1))
 	if err != nil {
@@ -513,55 +509,19 @@ func TestListStudiosReturnsBundleWithLogos(t *testing.T) {
 		t.Fatalf("len = %d, want %d", len(studios), len(BundledStudios))
 	}
 
-	var marvel *DiscoverBrandCard
-	for i := range studios {
-		if studios[i].Slug == "marvel-studios" {
-			marvel = &studios[i]
-			break
-		}
-	}
-	if marvel == nil {
-		t.Fatal("marvel-studios missing from response")
-	}
-	if marvel.LogoURL == nil || *marvel.LogoURL == "" {
-		t.Errorf("expected non-nil logo URL for marvel, got %v", marvel.LogoURL)
-	}
-}
-
-func TestListStudiosToleratesLogoLookupFailure(t *testing.T) {
-	tmdbClient := &fakeTMDBClient{
-		companies: map[int]*tmdb.Company{},
-		companyErr: map[int]error{
-			420: errors.New("tmdb down"),
-		},
-	}
-	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
-
-	studios, err := service.ListStudios(context.Background(), testViewer(1))
-	if err != nil {
-		t.Fatalf("ListStudios should not fail wholesale: %v", err)
-	}
-	if len(studios) != len(BundledStudios) {
-		t.Fatalf("len = %d, want %d", len(studios), len(BundledStudios))
-	}
 	for _, s := range studios {
-		if s.Slug == "marvel-studios" {
-			if s.LogoURL != nil {
-				t.Errorf("expected nil logo URL on failure, got %v", *s.LogoURL)
-			}
-			return
+		if s.LogoURL == nil || *s.LogoURL == "" {
+			t.Errorf("studio %q missing logo URL", s.Slug)
+			continue
+		}
+		if !strings.Contains(*s.LogoURL, "filter(duotone,ffffff,bababa)") {
+			t.Errorf("studio %q logo URL missing duotone filter: %s", s.Slug, *s.LogoURL)
 		}
 	}
-	t.Error("marvel-studios missing")
 }
 
-func TestListNetworksReturnsBundle(t *testing.T) {
-	tmdbClient := &fakeTMDBClient{
-		networks: map[int]*tmdb.Network{
-			213: {ID: 213, Name: "Netflix", LogoPath: "/wuU9.png"},
-		},
-	}
-	service := newTestServiceWithTMDB(newFakeStore(), tmdbClient)
+func TestListNetworksReturnsBundleWithDuotoneLogos(t *testing.T) {
+	service := newTestServiceWithTMDB(newFakeStore(), &fakeTMDBClient{})
 
 	networks, err := service.ListNetworks(context.Background(), testViewer(1))
 	if err != nil {
@@ -569,6 +529,15 @@ func TestListNetworksReturnsBundle(t *testing.T) {
 	}
 	if len(networks) != len(BundledNetworks) {
 		t.Fatalf("len = %d, want %d", len(networks), len(BundledNetworks))
+	}
+	for _, n := range networks {
+		if n.LogoURL == nil || *n.LogoURL == "" {
+			t.Errorf("network %q missing logo URL", n.Slug)
+			continue
+		}
+		if !strings.Contains(*n.LogoURL, "filter(duotone,ffffff,bababa)") {
+			t.Errorf("network %q logo URL missing duotone filter: %s", n.Slug, *n.LogoURL)
+		}
 	}
 }
 
@@ -730,10 +699,6 @@ type fakeTMDBClient struct {
 	page         *tmdb.MediaPage
 	externalIDs  *tmdb.ExternalIDs
 	detail       *tmdb.MediaDetail
-	companies    map[int]*tmdb.Company
-	companyErr   map[int]error
-	networks     map[int]*tmdb.Network
-	networkErr   map[int]error
 	discoverPage *tmdb.MediaPage
 	discoverErr  error
 }
@@ -762,26 +727,6 @@ func (f *fakeTMDBClient) GetExternalIDs(context.Context, string, int) (*tmdb.Ext
 
 func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
 	return f.detail, nil
-}
-
-func (f *fakeTMDBClient) GetCompany(_ context.Context, id int) (*tmdb.Company, error) {
-	if err, ok := f.companyErr[id]; ok {
-		return nil, err
-	}
-	if c, ok := f.companies[id]; ok {
-		return c, nil
-	}
-	return &tmdb.Company{ID: id}, nil
-}
-
-func (f *fakeTMDBClient) GetNetwork(_ context.Context, id int) (*tmdb.Network, error) {
-	if err, ok := f.networkErr[id]; ok {
-		return nil, err
-	}
-	if n, ok := f.networks[id]; ok {
-		return n, nil
-	}
-	return &tmdb.Network{ID: id}, nil
 }
 
 type fakeMovieAdapter struct {

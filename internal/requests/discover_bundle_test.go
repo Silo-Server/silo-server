@@ -28,8 +28,8 @@ func TestBundleStudiosHaveRequiredFields(t *testing.T) {
 		if strings.TrimSpace(s.DisplayName) == "" {
 			t.Errorf("studio %q missing DisplayName", s.Slug)
 		}
-		if !strings.HasPrefix(s.BrandColor, "#") {
-			t.Errorf("studio %q BrandColor must start with #, got %q", s.Slug, s.BrandColor)
+		if !strings.HasPrefix(s.LogoPath, "/") || !strings.HasSuffix(s.LogoPath, ".png") {
+			t.Errorf("studio %q LogoPath must be a TMDB file path (/...png), got %q", s.Slug, s.LogoPath)
 		}
 	}
 }
@@ -45,8 +45,8 @@ func TestBundleNetworksHaveRequiredFields(t *testing.T) {
 		if strings.TrimSpace(n.DisplayName) == "" {
 			t.Errorf("network %q missing DisplayName", n.Slug)
 		}
-		if !strings.HasPrefix(n.BrandColor, "#") {
-			t.Errorf("network %q BrandColor must start with #, got %q", n.Slug, n.BrandColor)
+		if !strings.HasPrefix(n.LogoPath, "/") || !strings.HasSuffix(n.LogoPath, ".png") {
+			t.Errorf("network %q LogoPath must be a TMDB file path (/...png), got %q", n.Slug, n.LogoPath)
 		}
 	}
 }
