@@ -34,7 +34,7 @@ func (p *PlexProvider) ValidateCreateInput(input CreateConnectionInput) error {
 	return nil
 }
 
-func (p *PlexProvider) DefaultActor(ctx context.Context, _ *Connection, input CreateConnectionInput) (string, string, bool, error) {
+func (p *PlexProvider) DefaultUser(ctx context.Context, _ *Connection, input CreateConnectionInput) (string, string, bool, error) {
 	account, err := p.client.GetCurrentUser(ctx, input.AccessToken)
 	if err != nil {
 		return "", "", false, err
@@ -42,20 +42,20 @@ func (p *PlexProvider) DefaultActor(ctx context.Context, _ *Connection, input Cr
 	return strconv.Itoa(account.ID), account.Title, true, nil
 }
 
-func (p *PlexProvider) DiscoverActors(ctx context.Context, conn *Connection, mappings []ActorMapping) ([]DiscoveredActor, bool, error) {
+func (p *PlexProvider) DiscoverUsers(ctx context.Context, conn *Connection, mappings []ProfileMapping) ([]DiscoveredUser, bool, error) {
 	if strings.TrimSpace(conn.BaseURL) == "" || strings.TrimSpace(conn.AccessToken) == "" {
-		return mappingsToDiscoveredActors(mappings), false, nil
+		return mappingsToDiscoveredUsers(mappings), false, nil
 	}
 	accounts, err := p.client.ListAccounts(ctx, conn.BaseURL, conn.AccessToken)
 	if err != nil {
 		return nil, false, err
 	}
 	accounts = filterDiscoveredAccounts(accounts, mappings)
-	result := make([]DiscoveredActor, 0, len(accounts))
+	result := make([]DiscoveredUser, 0, len(accounts))
 	for _, a := range accounts {
-		result = append(result, DiscoveredActor{
-			ExternalActorID:   a.ID,
-			ExternalActorName: a.Name,
+		result = append(result, DiscoveredUser{
+			ExternalUserID:   a.ID,
+			ExternalUserName: a.Name,
 		})
 	}
 	return result, true, nil
@@ -121,8 +121,8 @@ func (p *PlexProvider) ParseWebhook(ctx context.Context, conn *Connection, r *ht
 		OccurredAt:      occurredAt,
 		Action:          ActionImportProgress,
 		EventKind:       payload.Event,
-		ActorID:         strconv.FormatInt(payload.Account.ID, 10),
-		ActorName:       payload.Account.Title,
+		UserID:          strconv.FormatInt(payload.Account.ID, 10),
+		UserName:        payload.Account.Title,
 		ExternalItemID:  payload.Metadata.RatingKey,
 		MediaKind:       payload.Metadata.Type,
 		Completed:       canonical.Played,
@@ -147,12 +147,12 @@ func (p *EmbyProvider) ValidateCreateInput(input CreateConnectionInput) error {
 	return nil
 }
 
-func (p *EmbyProvider) DefaultActor(context.Context, *Connection, CreateConnectionInput) (string, string, bool, error) {
+func (p *EmbyProvider) DefaultUser(context.Context, *Connection, CreateConnectionInput) (string, string, bool, error) {
 	return "", "", false, nil
 }
 
-func (p *EmbyProvider) DiscoverActors(_ context.Context, _ *Connection, mappings []ActorMapping) ([]DiscoveredActor, bool, error) {
-	return mappingsToDiscoveredActors(mappings), false, nil
+func (p *EmbyProvider) DiscoverUsers(_ context.Context, _ *Connection, mappings []ProfileMapping) ([]DiscoveredUser, bool, error) {
+	return mappingsToDiscoveredUsers(mappings), false, nil
 }
 
 func (p *EmbyProvider) ParseWebhook(_ context.Context, conn *Connection, r *http.Request) (*CanonicalEvent, error) {
@@ -191,8 +191,8 @@ func (p *EmbyProvider) ParseWebhook(_ context.Context, conn *Connection, r *http
 		OccurredAt:      record.UpdatedAt,
 		Action:          action,
 		EventKind:       eventName,
-		ActorID:         payload.User.ID,
-		ActorName:       payload.User.Name,
+		UserID:          payload.User.ID,
+		UserName:        payload.User.Name,
 		ExternalItemID:  payload.Item.ID,
 		MediaKind:       mediaKind,
 		Completed:       record.Played,
@@ -338,12 +338,12 @@ func (p *JellyfinProvider) ValidateCreateInput(input CreateConnectionInput) erro
 	return nil
 }
 
-func (p *JellyfinProvider) DefaultActor(context.Context, *Connection, CreateConnectionInput) (string, string, bool, error) {
+func (p *JellyfinProvider) DefaultUser(context.Context, *Connection, CreateConnectionInput) (string, string, bool, error) {
 	return "", "", false, nil
 }
 
-func (p *JellyfinProvider) DiscoverActors(_ context.Context, _ *Connection, mappings []ActorMapping) ([]DiscoveredActor, bool, error) {
-	return mappingsToDiscoveredActors(mappings), false, nil
+func (p *JellyfinProvider) DiscoverUsers(_ context.Context, _ *Connection, mappings []ProfileMapping) ([]DiscoveredUser, bool, error) {
+	return mappingsToDiscoveredUsers(mappings), false, nil
 }
 
 func (p *JellyfinProvider) ParseWebhook(_ context.Context, conn *Connection, r *http.Request) (*CanonicalEvent, error) {
@@ -412,8 +412,8 @@ func (p *JellyfinProvider) ParseWebhook(_ context.Context, conn *Connection, r *
 		OccurredAt:      record.UpdatedAt,
 		Action:          ActionImportProgress,
 		EventKind:       payload.NotificationType,
-		ActorID:         payload.User.ID,
-		ActorName:       payload.User.Name,
+		UserID:          payload.User.ID,
+		UserName:        payload.User.Name,
 		ExternalItemID:  payload.Item.ID,
 		MediaKind:       mediaKind,
 		Completed:       record.Played,
@@ -562,13 +562,13 @@ func shouldApplyPlexWebhookEvent(event string) bool {
 	}
 }
 
-func filterDiscoveredAccounts(accounts []historyimport.ExternalUser, mappings []ActorMapping) []historyimport.ExternalUser {
+func filterDiscoveredAccounts(accounts []historyimport.ExternalUser, mappings []ProfileMapping) []historyimport.ExternalUser {
 	if len(accounts) == 0 {
 		return nil
 	}
 	mappedIDs := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
-		mappedIDs[mapping.ExternalActorID] = struct{}{}
+		mappedIDs[mapping.ExternalUserID] = struct{}{}
 	}
 	filtered := make([]historyimport.ExternalUser, 0, len(accounts))
 	for _, account := range accounts {

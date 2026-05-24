@@ -50,9 +50,9 @@ func (r *Repository) ListConnections(ctx context.Context, userID int) ([]Connect
 		       c.webhook_secret, c.account_discovery_available,
 		       c.last_webhook_received_at, c.last_webhook_error_at, COALESCE(c.last_webhook_error_message, ''),
 		       c.created_at, c.updated_at,
-		       COUNT(a.id)::integer AS actor_count
+		       COUNT(m.id)::integer AS user_count
 		FROM webhook_sync_connections c
-		LEFT JOIN webhook_sync_actor_mappings a ON a.connection_id = c.id
+		LEFT JOIN webhook_sync_profile_mappings m ON m.connection_id = c.id
 		WHERE c.user_id = $1
 		GROUP BY c.id
 		ORDER BY c.created_at DESC`, userID)
@@ -68,7 +68,7 @@ func (r *Repository) ListConnections(ctx context.Context, userID int) ([]Connect
 			&c.ID, &c.UserID, &c.Provider, &c.ServerID, &c.ServerName, &c.BaseURL, &c.AccessToken, &c.DefaultProfileID,
 			&c.WebhookSecret, &c.AccountDiscoveryAvailable,
 			&c.LastWebhookReceivedAt, &c.LastWebhookErrorAt, &c.LastWebhookErrorMessage,
-			&c.CreatedAt, &c.UpdatedAt, &c.ActorCount,
+			&c.CreatedAt, &c.UpdatedAt, &c.UserCount,
 		); err != nil {
 			return nil, fmt.Errorf("scanning webhook sync connection: %w", err)
 		}
@@ -170,22 +170,22 @@ func (r *Repository) SetDiscoveryAvailable(ctx context.Context, connectionID str
 	return nil
 }
 
-func (r *Repository) ListMappings(ctx context.Context, connectionID string) ([]ActorMapping, error) {
+func (r *Repository) ListMappings(ctx context.Context, connectionID string) ([]ProfileMapping, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, connection_id, external_actor_id, external_actor_name, silo_profile_id,
+		SELECT id, connection_id, external_user_id, external_user_name, silo_profile_id,
 		       last_seen_at, created_at, updated_at
-		FROM webhook_sync_actor_mappings
+		FROM webhook_sync_profile_mappings
 		WHERE connection_id = $1
-		ORDER BY external_actor_name ASC, id ASC`, connectionID)
+		ORDER BY external_user_name ASC, id ASC`, connectionID)
 	if err != nil {
 		return nil, fmt.Errorf("listing webhook sync mappings: %w", err)
 	}
 	defer rows.Close()
-	var out []ActorMapping
+	var out []ProfileMapping
 	for rows.Next() {
-		var m ActorMapping
+		var m ProfileMapping
 		if err := rows.Scan(
-			&m.ID, &m.ConnectionID, &m.ExternalActorID, &m.ExternalActorName, &m.SiloProfileID,
+			&m.ID, &m.ConnectionID, &m.ExternalUserID, &m.ExternalUserName, &m.SiloProfileID,
 			&m.LastSeenAt, &m.CreatedAt, &m.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning webhook sync mapping: %w", err)
@@ -198,15 +198,15 @@ func (r *Repository) ListMappings(ctx context.Context, connectionID string) ([]A
 	return out, nil
 }
 
-func (r *Repository) GetMappingByActor(ctx context.Context, connectionID, actorID string) (*ActorMapping, error) {
+func (r *Repository) GetMappingByUser(ctx context.Context, connectionID, externalUserID string) (*ProfileMapping, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, connection_id, external_actor_id, external_actor_name, silo_profile_id,
+		SELECT id, connection_id, external_user_id, external_user_name, silo_profile_id,
 		       last_seen_at, created_at, updated_at
-		FROM webhook_sync_actor_mappings
-		WHERE connection_id = $1 AND external_actor_id = $2`, connectionID, actorID)
-	var m ActorMapping
+		FROM webhook_sync_profile_mappings
+		WHERE connection_id = $1 AND external_user_id = $2`, connectionID, externalUserID)
+	var m ProfileMapping
 	if err := row.Scan(
-		&m.ID, &m.ConnectionID, &m.ExternalActorID, &m.ExternalActorName, &m.SiloProfileID,
+		&m.ID, &m.ConnectionID, &m.ExternalUserID, &m.ExternalUserName, &m.SiloProfileID,
 		&m.LastSeenAt, &m.CreatedAt, &m.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -217,30 +217,30 @@ func (r *Repository) GetMappingByActor(ctx context.Context, connectionID, actorI
 	return &m, nil
 }
 
-func (r *Repository) ReplaceMappings(ctx context.Context, connectionID string, mappings []UpdateActorMapping) ([]ActorMapping, error) {
+func (r *Repository) ReplaceMappings(ctx context.Context, connectionID string, mappings []UpdateProfileMapping) ([]ProfileMapping, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin replace webhook mappings: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if _, err := tx.Exec(ctx, `DELETE FROM webhook_sync_actor_mappings WHERE connection_id = $1`, connectionID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM webhook_sync_profile_mappings WHERE connection_id = $1`, connectionID); err != nil {
 		return nil, fmt.Errorf("deleting webhook sync mappings: %w", err)
 	}
 
-	out := make([]ActorMapping, 0, len(mappings))
+	out := make([]ProfileMapping, 0, len(mappings))
 	for _, input := range mappings {
 		row := tx.QueryRow(ctx, `
-			INSERT INTO webhook_sync_actor_mappings (
-				connection_id, external_actor_id, external_actor_name, silo_profile_id, last_seen_at
+			INSERT INTO webhook_sync_profile_mappings (
+				connection_id, external_user_id, external_user_name, silo_profile_id, last_seen_at
 			) VALUES ($1, $2, $3, $4, NOW())
-			RETURNING id, connection_id, external_actor_id, external_actor_name, silo_profile_id,
+			RETURNING id, connection_id, external_user_id, external_user_name, silo_profile_id,
 			          last_seen_at, created_at, updated_at`,
-			connectionID, input.ExternalActorID, input.ExternalActorName, input.SiloProfileID,
+			connectionID, input.ExternalUserID, input.ExternalUserName, input.SiloProfileID,
 		)
-		var m ActorMapping
+		var m ProfileMapping
 		if err := row.Scan(
-			&m.ID, &m.ConnectionID, &m.ExternalActorID, &m.ExternalActorName, &m.SiloProfileID,
+			&m.ID, &m.ConnectionID, &m.ExternalUserID, &m.ExternalUserName, &m.SiloProfileID,
 			&m.LastSeenAt, &m.CreatedAt, &m.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("creating webhook sync mapping: %w", err)
@@ -254,18 +254,18 @@ func (r *Repository) ReplaceMappings(ctx context.Context, connectionID string, m
 	return out, nil
 }
 
-func (r *Repository) CreateDefaultMapping(ctx context.Context, connectionID, actorID, actorName, profileID string) (*ActorMapping, error) {
+func (r *Repository) CreateDefaultMapping(ctx context.Context, connectionID, externalUserID, externalUserName, profileID string) (*ProfileMapping, error) {
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO webhook_sync_actor_mappings (
-			connection_id, external_actor_id, external_actor_name, silo_profile_id, last_seen_at
+		INSERT INTO webhook_sync_profile_mappings (
+			connection_id, external_user_id, external_user_name, silo_profile_id, last_seen_at
 		) VALUES ($1, $2, $3, $4, NOW())
-		RETURNING id, connection_id, external_actor_id, external_actor_name, silo_profile_id,
+		RETURNING id, connection_id, external_user_id, external_user_name, silo_profile_id,
 		          last_seen_at, created_at, updated_at`,
-		connectionID, actorID, actorName, &profileID,
+		connectionID, externalUserID, externalUserName, &profileID,
 	)
-	var m ActorMapping
+	var m ProfileMapping
 	if err := row.Scan(
-		&m.ID, &m.ConnectionID, &m.ExternalActorID, &m.ExternalActorName, &m.SiloProfileID,
+		&m.ID, &m.ConnectionID, &m.ExternalUserID, &m.ExternalUserName, &m.SiloProfileID,
 		&m.LastSeenAt, &m.CreatedAt, &m.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("creating default webhook mapping: %w", err)
@@ -273,34 +273,34 @@ func (r *Repository) CreateDefaultMapping(ctx context.Context, connectionID, act
 	return &m, nil
 }
 
-func (r *Repository) UpsertSeenActor(ctx context.Context, connectionID, actorID, actorName string) error {
+func (r *Repository) UpsertSeenUser(ctx context.Context, connectionID, externalUserID, externalUserName string) error {
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO webhook_sync_actor_mappings (
-			connection_id, external_actor_id, external_actor_name, last_seen_at
+		INSERT INTO webhook_sync_profile_mappings (
+			connection_id, external_user_id, external_user_name, last_seen_at
 		) VALUES ($1, $2, $3, NOW())
-		ON CONFLICT (connection_id, external_actor_id) DO UPDATE SET
-			external_actor_name = EXCLUDED.external_actor_name,
+		ON CONFLICT (connection_id, external_user_id) DO UPDATE SET
+			external_user_name = EXCLUDED.external_user_name,
 			last_seen_at = NOW(),
 			updated_at = NOW()`,
-		connectionID, actorID, actorName,
+		connectionID, externalUserID, externalUserName,
 	)
 	if err != nil {
-		return fmt.Errorf("upserting seen actor: %w", err)
+		return fmt.Errorf("upserting seen external user: %w", err)
 	}
 	return nil
 }
 
-func (r *Repository) GetItemState(ctx context.Context, connectionID, externalActorID, externalItemID string) (*ItemState, error) {
+func (r *Repository) GetItemState(ctx context.Context, connectionID, externalUserID, externalItemID string) (*ItemState, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT connection_id, external_actor_id, external_item_id, COALESCE(media_item_id, ''),
+		SELECT connection_id, external_user_id, external_item_id, COALESCE(media_item_id, ''),
 		       last_event_at, last_completed, last_position_seconds, updated_at
 		FROM webhook_sync_item_state
-		WHERE connection_id = $1 AND external_actor_id = $2 AND external_item_id = $3`,
-		connectionID, externalActorID, externalItemID,
+		WHERE connection_id = $1 AND external_user_id = $2 AND external_item_id = $3`,
+		connectionID, externalUserID, externalItemID,
 	)
 	var state ItemState
 	if err := row.Scan(
-		&state.ConnectionID, &state.ExternalActorID, &state.ExternalItemID, &state.MediaItemID,
+		&state.ConnectionID, &state.ExternalUserID, &state.ExternalItemID, &state.MediaItemID,
 		&state.LastEventAt, &state.LastCompleted, &state.LastPositionSecond, &state.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -314,16 +314,16 @@ func (r *Repository) GetItemState(ctx context.Context, connectionID, externalAct
 func (r *Repository) UpsertItemState(ctx context.Context, state ItemState) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO webhook_sync_item_state (
-			connection_id, external_actor_id, external_item_id, media_item_id,
+			connection_id, external_user_id, external_item_id, media_item_id,
 			last_event_at, last_completed, last_position_seconds, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-		ON CONFLICT (connection_id, external_actor_id, external_item_id) DO UPDATE SET
+		ON CONFLICT (connection_id, external_user_id, external_item_id) DO UPDATE SET
 			media_item_id = EXCLUDED.media_item_id,
 			last_event_at = EXCLUDED.last_event_at,
 			last_completed = EXCLUDED.last_completed,
 			last_position_seconds = EXCLUDED.last_position_seconds,
 			updated_at = NOW()`,
-		state.ConnectionID, state.ExternalActorID, state.ExternalItemID, state.MediaItemID,
+		state.ConnectionID, state.ExternalUserID, state.ExternalItemID, state.MediaItemID,
 		state.LastEventAt, state.LastCompleted, state.LastPositionSecond,
 	)
 	if err != nil {

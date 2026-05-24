@@ -4,11 +4,11 @@ import type {
   CreateWebhookSyncConnectionRequest,
   CreateWebhookSyncConnectionResponse,
   RotateWebhookSyncWebhookResponse,
-  UpdateWebhookSyncActorsRequest,
   UpdateWebhookSyncConnectionRequest,
-  WebhookSyncActorsResponse,
+  UpdateWebhookSyncProfileMappingsRequest,
   WebhookSyncConnection,
   WebhookSyncEventLog,
+  WebhookSyncProfileMappingsResponse,
 } from "@/api/types";
 import { webhookSyncKeys } from "./keys";
 import { toast } from "sonner";
@@ -32,7 +32,9 @@ export function useCreateWebhookSyncConnection() {
     onSuccess: (result) => {
       toast.success("Webhook connection created");
       queryClient.invalidateQueries({ queryKey: webhookSyncKeys.connections() });
-      queryClient.invalidateQueries({ queryKey: webhookSyncKeys.actors(result.connection.id) });
+      queryClient.invalidateQueries({
+        queryKey: webhookSyncKeys.profileMappings(result.connection.id),
+      });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to create webhook connection");
@@ -105,17 +107,17 @@ export function useRotateWebhookSyncWebhook() {
   });
 }
 
-export function useWebhookSyncActors(connectionId?: string) {
+export function useWebhookSyncProfileMappings(connectionId?: string) {
   return useQuery({
-    queryKey: webhookSyncKeys.actors(connectionId),
+    queryKey: webhookSyncKeys.profileMappings(connectionId),
     queryFn: () =>
-      api<WebhookSyncActorsResponse>(`/webhook-sync/connections/${connectionId}/actors`).then(
-        (d) => ({
-          mappings: d?.mappings ?? [],
-          discovered_actors: d?.discovered_actors ?? [],
-          account_discovery_available: d?.account_discovery_available ?? false,
-        }),
-      ),
+      api<WebhookSyncProfileMappingsResponse>(
+        `/webhook-sync/connections/${connectionId}/profile-mappings`,
+      ).then((d) => ({
+        mappings: d?.mappings ?? [],
+        discovered_users: d?.discovered_users ?? [],
+        account_discovery_available: d?.account_discovery_available ?? false,
+      })),
     enabled: !!connectionId,
     staleTime: 10_000,
   });
@@ -134,7 +136,7 @@ export function useWebhookSyncEvents(connectionId?: string) {
   });
 }
 
-export function useUpdateWebhookSyncActors() {
+export function useUpdateWebhookSyncProfileMappings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -142,21 +144,21 @@ export function useUpdateWebhookSyncActors() {
       body,
     }: {
       connectionId: string;
-      body: UpdateWebhookSyncActorsRequest;
+      body: UpdateWebhookSyncProfileMappingsRequest;
     }) =>
-      api(`/webhook-sync/connections/${connectionId}/actors`, {
+      api(`/webhook-sync/connections/${connectionId}/profile-mappings`, {
         method: "PUT",
         body: JSON.stringify(body),
       }),
     onSuccess: (_, variables) => {
-      toast.success("Actor routing saved");
+      toast.success("Profile mappings saved");
       queryClient.invalidateQueries({
-        queryKey: webhookSyncKeys.actors(variables.connectionId),
+        queryKey: webhookSyncKeys.profileMappings(variables.connectionId),
       });
       queryClient.invalidateQueries({ queryKey: webhookSyncKeys.connections() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save actor routing");
+      toast.error(err instanceof Error ? err.message : "Failed to save profile mappings");
     },
   });
 }

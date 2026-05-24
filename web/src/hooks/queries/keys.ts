@@ -204,7 +204,8 @@ export const webhookSyncKeys = {
   all: ["webhook-sync"] as const,
   connections: () => ["webhook-sync", "connections"] as const,
   events: (connectionId?: string) => ["webhook-sync", "events", connectionId] as const,
-  actors: (connectionId?: string) => ["webhook-sync", "actors", connectionId] as const,
+  profileMappings: (connectionId?: string) =>
+    ["webhook-sync", "profile-mappings", connectionId] as const,
   connection: (connectionId?: string) => ["webhook-sync", "connection", connectionId] as const,
 };
 

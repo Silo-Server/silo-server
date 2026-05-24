@@ -23,21 +23,21 @@ func TestToLegacyPlexActorsResponse(t *testing.T) {
 
 	now := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
 	profileID := "profile-1"
-	resp := toLegacyPlexActorsResponse(&webhooksync.ActorMappingsResponse{
-		Mappings: []webhooksync.ActorMapping{
+	resp := toLegacyPlexActorsResponse(&webhooksync.ProfileMappingsResponse{
+		Mappings: []webhooksync.ProfileMapping{
 			{
-				ID:                11,
-				ConnectionID:      "conn-1",
-				ExternalActorID:   "42",
-				ExternalActorName: "Alice",
-				SiloProfileID:     &profileID,
-				CreatedAt:         now,
-				UpdatedAt:         now,
+				ID:               11,
+				ConnectionID:     "conn-1",
+				ExternalUserID:   "42",
+				ExternalUserName: "Alice",
+				SiloProfileID:    &profileID,
+				CreatedAt:        now,
+				UpdatedAt:        now,
 			},
 		},
-		DiscoveredActors: []webhooksync.DiscoveredActor{
-			{ExternalActorID: "42", ExternalActorName: "Alice"},
-			{ExternalActorID: "77", ExternalActorName: "Bob"},
+		DiscoveredUsers: []webhooksync.DiscoveredUser{
+			{ExternalUserID: "42", ExternalUserName: "Alice"},
+			{ExternalUserID: "77", ExternalUserName: "Bob"},
 		},
 		AccountDiscoveryAvailable: true,
 	})

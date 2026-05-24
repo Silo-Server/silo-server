@@ -231,7 +231,7 @@ export interface WebhookSyncConnection {
   server_name: string;
   default_profile_id: string;
   webhook_url?: string;
-  actor_count?: number;
+  user_count?: number;
   account_discovery_available?: boolean;
   last_webhook_received_at?: string | null;
   last_webhook_error_at?: string | null;
@@ -253,25 +253,25 @@ export interface WebhookSyncEventLog {
   attrs?: Record<string, unknown>;
 }
 
-export interface WebhookSyncActorMapping {
+export interface WebhookSyncProfileMapping {
   id: number;
   connection_id?: string;
-  external_actor_id: string;
-  external_actor_name: string;
+  external_user_id: string;
+  external_user_name: string;
   silo_profile_id?: string | null;
   last_seen_at?: string;
   created_at?: string;
   updated_at?: string;
 }
 
-export interface WebhookSyncDiscoveredActor {
-  external_actor_id: string;
-  external_actor_name: string;
+export interface WebhookSyncDiscoveredUser {
+  external_user_id: string;
+  external_user_name: string;
 }
 
-export interface WebhookSyncActorsResponse {
-  mappings: WebhookSyncActorMapping[];
-  discovered_actors?: WebhookSyncDiscoveredActor[];
+export interface WebhookSyncProfileMappingsResponse {
+  mappings: WebhookSyncProfileMapping[];
+  discovered_users?: WebhookSyncDiscoveredUser[];
   account_discovery_available?: boolean;
 }
 
@@ -304,10 +304,10 @@ export interface UpdateWebhookSyncConnectionRequest {
   default_profile_id?: string;
 }
 
-export interface UpdateWebhookSyncActorsRequest {
+export interface UpdateWebhookSyncProfileMappingsRequest {
   mappings: Array<{
-    external_actor_id: string;
-    external_actor_name: string;
+    external_user_id: string;
+    external_user_name: string;
     silo_profile_id: string | null;
   }>;
 }

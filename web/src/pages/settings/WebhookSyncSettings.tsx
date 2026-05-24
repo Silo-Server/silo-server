@@ -48,20 +48,20 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
-  WebhookSyncActorMapping,
   WebhookSyncConnection,
-  WebhookSyncDiscoveredActor,
+  WebhookSyncDiscoveredUser,
   WebhookSyncEventLog,
+  WebhookSyncProfileMapping,
 } from "@/api/types";
 import {
   useCreateWebhookSyncConnection,
   useDeleteWebhookSyncConnection,
   useRotateWebhookSyncWebhook,
   useUpdateWebhookSyncConnection,
-  useUpdateWebhookSyncActors,
-  useWebhookSyncActors,
+  useUpdateWebhookSyncProfileMappings,
   useWebhookSyncConnections,
   useWebhookSyncEvents,
+  useWebhookSyncProfileMappings,
 } from "@/hooks/queries/webhook-sync";
 import {
   buildPlexAuthURL,
@@ -190,11 +190,11 @@ function eventAttrString(event: WebhookSyncEventLog, key: string) {
   return "";
 }
 
-function eventActorLabel(event: WebhookSyncEventLog) {
-  const actorName = eventAttrString(event, "actor_name");
-  const actorID = eventAttrString(event, "actor_id");
-  if (actorName && actorID) return `${actorName} (${actorID})`;
-  return actorName || actorID || "Unknown actor";
+function eventUserLabel(event: WebhookSyncEventLog) {
+  const userName = eventAttrString(event, "external_user_name");
+  const userID = eventAttrString(event, "external_user_id");
+  if (userName && userID) return `${userName} (${userID})`;
+  return userName || userID || "Unknown user";
 }
 
 function eventMatchedItemLabel(event: WebhookSyncEventLog) {
@@ -204,8 +204,8 @@ function eventMatchedItemLabel(event: WebhookSyncEventLog) {
 const EVENT_ATTR_LABELS: Record<string, string> = {
   event_kind: "Event kind",
   action: "Action",
-  actor_id: "Actor ID",
-  actor_name: "Actor",
+  external_user_id: "External user ID",
+  external_user_name: "External user",
   external_item_id: "External item ID",
   media_kind: "Media kind",
   matched_media_item_id: "Matched item ID",
@@ -224,6 +224,46 @@ function eventAttrLabel(key: string) {
 type ProviderType = "plex" | "emby" | "jellyfin";
 type ConnectionDraft = { serverName: string; defaultProfileId: string };
 
+type EventMatrixTone = "required" | "recommended" | "skip";
+type EventMatrixSection = {
+  label: string;
+  tone: EventMatrixTone;
+  items: { event: string; note: string }[];
+};
+
+const EVENT_MATRIX_TONE: Record<EventMatrixTone, string> = {
+  required: "text-emerald-300",
+  recommended: "text-sky-300",
+  skip: "text-muted-foreground",
+};
+
+function EventMatrix({ sections }: { sections: EventMatrixSection[] }) {
+  return (
+    <div className="border-border/50 divide-border/50 divide-y rounded-md border">
+      {sections.map((section) => (
+        <div key={section.label} className="space-y-1.5 px-3 py-2.5">
+          <p
+            className={cn(
+              "text-[11px] font-medium tracking-wide uppercase",
+              EVENT_MATRIX_TONE[section.tone],
+            )}
+          >
+            {section.label}
+          </p>
+          <ul className="space-y-1">
+            {section.items.map((item) => (
+              <li key={item.event} className="text-[13px] leading-relaxed">
+                <span className="text-foreground font-medium">{item.event}</span>
+                <span className="text-muted-foreground"> — {item.note}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function WebhookSyncSettings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -234,7 +274,7 @@ export default function WebhookSyncSettings() {
   const deleteConnectionMutation = useDeleteWebhookSyncConnection();
   const rotateWebhookMutation = useRotateWebhookSyncWebhook();
   const updateConnectionMutation = useUpdateWebhookSyncConnection();
-  const updateActorsMutation = useUpdateWebhookSyncActors();
+  const updateMappingsMutation = useUpdateWebhookSyncProfileMappings();
 
   const [provider, setProvider] = useState<ProviderType>("plex");
   const [manualServerName, setManualServerName] = useState("");
@@ -246,7 +286,7 @@ export default function WebhookSyncSettings() {
   const [connectionDraftsById, setConnectionDraftsById] = useState<Record<string, ConnectionDraft>>(
     {},
   );
-  const [actorDraftsByConnection, setActorDraftsByConnection] = useState<
+  const [mappingDraftsByConnection, setMappingDraftsByConnection] = useState<
     Record<string, Record<string, string>>
   >({});
   const [plexAuthPending, setPlexAuthPending] = useState(false);
@@ -265,11 +305,11 @@ export default function WebhookSyncSettings() {
   }, [connections, selectedConnectionId]);
 
   const currentConnectionId = selectedConnection?.id ?? "";
-  const actorsQuery = useWebhookSyncActors(currentConnectionId || undefined);
+  const mappingsQuery = useWebhookSyncProfileMappings(currentConnectionId || undefined);
   const eventsQuery = useWebhookSyncEvents(currentConnectionId || undefined);
   const effectiveSelectedServerId = selectedServerId || plexServers[0]?.clientIdentifier || "";
   const effectiveDefaultProfileId = defaultProfileId || profile?.id || profiles[0]?.id || "";
-  const currentActorDrafts = actorDraftsByConnection[currentConnectionId] ?? {};
+  const currentMappingDrafts = mappingDraftsByConnection[currentConnectionId] ?? {};
   const currentConnectionDraft = currentConnectionId
     ? connectionDraftsById[currentConnectionId]
     : undefined;
@@ -279,36 +319,36 @@ export default function WebhookSyncSettings() {
     [effectiveSelectedServerId, plexServers],
   );
 
-  const actorRows = useMemo(() => {
-    const discoveredActors = actorsQuery.data?.discovered_actors ?? [];
-    const mappings = actorsQuery.data?.mappings ?? [];
-    const byActorId = new Map<
+  const mappingRows = useMemo(() => {
+    const discoveredUsers = mappingsQuery.data?.discovered_users ?? [];
+    const mappings = mappingsQuery.data?.mappings ?? [];
+    const byUserId = new Map<
       string,
-      { actor: WebhookSyncDiscoveredActor; mapping?: WebhookSyncActorMapping }
+      { user: WebhookSyncDiscoveredUser; mapping?: WebhookSyncProfileMapping }
     >();
 
-    for (const actor of discoveredActors) {
-      byActorId.set(actor.external_actor_id, { actor });
+    for (const user of discoveredUsers) {
+      byUserId.set(user.external_user_id, { user });
     }
     for (const mapping of mappings) {
-      const existing = byActorId.get(mapping.external_actor_id);
-      byActorId.set(mapping.external_actor_id, {
-        actor: existing?.actor ?? {
-          external_actor_id: mapping.external_actor_id,
-          external_actor_name: mapping.external_actor_name,
+      const existing = byUserId.get(mapping.external_user_id);
+      byUserId.set(mapping.external_user_id, {
+        user: existing?.user ?? {
+          external_user_id: mapping.external_user_id,
+          external_user_name: mapping.external_user_name,
         },
         mapping,
       });
     }
 
-    return Array.from(byActorId.values())
-      .map(({ actor, mapping }) => ({
-        external_actor_id: actor.external_actor_id,
-        external_actor_name: actor.external_actor_name,
+    return Array.from(byUserId.values())
+      .map(({ user, mapping }) => ({
+        external_user_id: user.external_user_id,
+        external_user_name: user.external_user_name,
         silo_profile_id: mapping?.silo_profile_id ?? "",
       }))
-      .sort((a, b) => a.external_actor_name.localeCompare(b.external_actor_name));
-  }, [actorsQuery.data]);
+      .sort((a, b) => a.external_user_name.localeCompare(b.external_user_name));
+  }, [mappingsQuery.data]);
 
   const EVENTS_PER_PAGE = 15;
 
@@ -322,7 +362,7 @@ export default function WebhookSyncSettings() {
       events = events.filter(
         (e) =>
           e.summary.toLowerCase().includes(q) ||
-          eventActorLabel(e).toLowerCase().includes(q) ||
+          eventUserLabel(e).toLowerCase().includes(q) ||
           (e.error_message ?? "").toLowerCase().includes(q),
       );
     }
@@ -485,19 +525,19 @@ export default function WebhookSyncSettings() {
     setSelectedConnectionId(result.connection.id);
   }
 
-  async function handleSaveActors() {
+  async function handleSaveMappings() {
     if (!currentConnectionId) {
       return;
     }
 
-    await updateActorsMutation.mutateAsync({
+    await updateMappingsMutation.mutateAsync({
       connectionId: currentConnectionId,
       body: {
-        mappings: actorRows.map((row) => {
-          const value = currentActorDrafts[row.external_actor_id] ?? row.silo_profile_id;
+        mappings: mappingRows.map((row) => {
+          const value = currentMappingDrafts[row.external_user_id] ?? row.silo_profile_id;
           return {
-            external_actor_id: row.external_actor_id,
-            external_actor_name: row.external_actor_name,
+            external_user_id: row.external_user_id,
+            external_user_name: row.external_user_name,
             silo_profile_id: !value || value === UNMAPPED_VALUE ? null : value,
           };
         }),
@@ -505,15 +545,15 @@ export default function WebhookSyncSettings() {
     });
   }
 
-  function setDraftProfile(actorId: string, profileId: string) {
+  function setDraftProfile(externalUserId: string, profileId: string) {
     if (!currentConnectionId) {
       return;
     }
-    setActorDraftsByConnection((current) => ({
+    setMappingDraftsByConnection((current) => ({
       ...current,
       [currentConnectionId]: {
         ...(current[currentConnectionId] ?? {}),
-        [actorId]: profileId,
+        [externalUserId]: profileId,
       },
     }));
   }
@@ -678,7 +718,7 @@ export default function WebhookSyncSettings() {
       {/* ── Connected servers ── */}
       <SettingsGroup
         title="Connected servers"
-        description="Manage webhook endpoints, provider setup instructions, and actor routing."
+        description="Manage webhook endpoints, provider setup instructions, and profile mappings."
       >
         {connectionsQuery.isLoading ? (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
@@ -724,8 +764,8 @@ export default function WebhookSyncSettings() {
                         </span>
                       </span>
                       <p className="text-muted-foreground text-xs">
-                        {connection.actor_count ?? 0} actor
-                        {(connection.actor_count ?? 0) === 1 ? "" : "s"}
+                        {connection.user_count ?? 0} user
+                        {(connection.user_count ?? 0) === 1 ? "" : "s"}
                         {connection.last_webhook_received_at
                           ? ` · last event ${relativeTime(connection.last_webhook_received_at) ?? formatTimestamp(connection.last_webhook_received_at)}`
                           : ""}
@@ -896,51 +936,51 @@ export default function WebhookSyncSettings() {
                     </div>
                   </div>
 
-                  {/* Actor routing — part of connection config */}
+                  {/* Profile mapping — part of connection config */}
                   <div className="border-border/50 space-y-3 border-t pt-4">
                     <div className="space-y-0.5">
-                      <Label className="text-sm font-medium">Actor routing</Label>
+                      <Label className="text-sm font-medium">Profile mapping</Label>
                       <p className="text-muted-foreground text-[13px] leading-relaxed">
-                        Map external users to Silo profiles. Unmapped users fall back to the default
-                        profile above.
+                        Map each external user to a Silo profile. Unmapped users fall back to the
+                        default profile above.
                       </p>
                     </div>
 
-                    {actorsQuery.isLoading ? (
+                    {mappingsQuery.isLoading ? (
                       <div className="text-muted-foreground flex items-center gap-2 text-sm">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading actors...
+                        Loading users...
                       </div>
-                    ) : actorsQuery.isError ? (
+                    ) : mappingsQuery.isError ? (
                       <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                         <p className="text-sm leading-relaxed text-red-300">
-                          {actorsQuery.error instanceof Error
-                            ? actorsQuery.error.message
-                            : "Failed to load actor routing"}
+                          {mappingsQuery.error instanceof Error
+                            ? mappingsQuery.error.message
+                            : "Failed to load profile mappings"}
                         </p>
                       </div>
-                    ) : actorRows.length > 0 ? (
+                    ) : mappingRows.length > 0 ? (
                       <div className="space-y-3">
-                        {actorRows.map((row) => (
+                        {mappingRows.map((row) => (
                           <div
-                            key={row.external_actor_id}
+                            key={row.external_user_id}
                             className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div className="min-w-0">
-                              <p className="text-sm font-medium">{row.external_actor_name}</p>
+                              <p className="text-sm font-medium">{row.external_user_name}</p>
                               <p className="text-muted-foreground truncate text-xs">
-                                {row.external_actor_id}
+                                {row.external_user_id}
                               </p>
                             </div>
                             <Select
                               value={
-                                currentActorDrafts[row.external_actor_id] ??
+                                currentMappingDrafts[row.external_user_id] ??
                                 row.silo_profile_id ??
                                 UNMAPPED_VALUE
                               }
                               onValueChange={(value) =>
-                                setDraftProfile(row.external_actor_id, value)
+                                setDraftProfile(row.external_user_id, value)
                               }
                             >
                               <SelectTrigger className="w-full sm:w-[240px]">
@@ -960,19 +1000,19 @@ export default function WebhookSyncSettings() {
 
                         <div className="flex justify-end">
                           <Button
-                            onClick={handleSaveActors}
-                            disabled={updateActorsMutation.isPending}
+                            onClick={handleSaveMappings}
+                            disabled={updateMappingsMutation.isPending}
                           >
-                            {updateActorsMutation.isPending ? (
+                            {updateMappingsMutation.isPending ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : null}
-                            Save routing
+                            Save mappings
                           </Button>
                         </div>
                       </div>
                     ) : (
                       <p className="text-muted-foreground text-sm">
-                        No actors discovered yet. Send a webhook event first, then map users here.
+                        No users discovered yet. Send a webhook event first, then map them here.
                       </p>
                     )}
                   </div>
@@ -985,47 +1025,128 @@ export default function WebhookSyncSettings() {
                     </summary>
                     <div className="mt-3">
                       {selectedConnection.provider === "plex" ? (
-                        <p className="text-muted-foreground text-sm leading-relaxed">
-                          In Plex Media Server, add the webhook URL above under server webhook
-                          settings. Existing `/api/v1/plex-sync/webhooks/...` endpoints remain
-                          valid.
-                        </p>
+                        <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 text-sm leading-relaxed">
+                          <li>
+                            In Plex, open{" "}
+                            <span className="text-foreground">Settings → Webhooks</span> (Plex Pass
+                            required).
+                          </li>
+                          <li>
+                            Click <span className="text-foreground">Add Webhook</span> and paste the
+                            URL above.
+                          </li>
+                          <li>
+                            Save. Plex sends events automatically — no per-event toggles to
+                            configure.
+                          </li>
+                        </ol>
                       ) : null}
                       {selectedConnection.provider === "emby" ? (
-                        <div className="text-muted-foreground space-y-1 text-sm leading-relaxed">
-                          <p>In Emby Webhooks, configure a POST to the URL above.</p>
-                          <p>
-                            Enable <code>Playback &gt; Stop</code>.{" "}
-                            <code>Users &gt; Mark Played</code> is optional but may duplicate
-                            completion events.
-                          </p>
+                        <div className="space-y-4 text-sm">
+                          <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 leading-relaxed">
+                            <li>
+                              In the Emby dashboard, open{" "}
+                              <span className="text-foreground">Notifications</span> and add a new{" "}
+                              <span className="text-foreground">Webhooks</span> notification.
+                            </li>
+                            <li>
+                              Paste the URL above into <span className="text-foreground">Url</span>,
+                              and set <span className="text-foreground">Request content type</span>{" "}
+                              to <span className="text-foreground">application/json</span>.
+                            </li>
+                            <li>Enable the events listed below, then save.</li>
+                          </ol>
+
+                          <EventMatrix
+                            sections={[
+                              {
+                                label: "Required",
+                                tone: "required",
+                                items: [
+                                  {
+                                    event: "Playback → Stop",
+                                    note: "Records watch progress and completion.",
+                                  },
+                                ],
+                              },
+                              {
+                                label: "Recommended",
+                                tone: "recommended",
+                                items: [
+                                  {
+                                    event: "Users → Add to Favorites, Remove from Favorites",
+                                    note: "Syncs favorites to the mapped Silo profile.",
+                                  },
+                                  {
+                                    event: "Users → Mark Played, Mark Unplayed",
+                                    note: "Needed only if your household manually marks items watched without playing them. Mark Played will duplicate Stop for normal completions, but the result is the same.",
+                                  },
+                                ],
+                              },
+                              {
+                                label: "Skip",
+                                tone: "skip",
+                                items: [
+                                  {
+                                    event: "Playback → Start, Pause, Unpause",
+                                    note: "Silo only records completion, not in-progress state.",
+                                  },
+                                ],
+                              },
+                            ]}
+                          />
                         </div>
                       ) : null}
                       {selectedConnection.provider === "jellyfin" ? (
-                        <div className="space-y-2">
-                          <div className="text-muted-foreground space-y-1 text-sm leading-relaxed">
-                            <p>
-                              Use the official Jellyfin webhook plugin with destination type
-                              `Generic Notification`.
-                            </p>
-                            <p>
-                              Enable only `PlaybackStop`. Do not enable `PlaybackProgress` or
-                              `UserDataSaved`.
-                            </p>
+                        <div className="space-y-4 text-sm">
+                          <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 leading-relaxed">
+                            <li>
+                              Install the official <span className="text-foreground">Webhook</span>{" "}
+                              plugin from{" "}
+                              <span className="text-foreground">Dashboard → Plugins → Catalog</span>{" "}
+                              and restart Jellyfin.
+                            </li>
+                            <li>
+                              Open{" "}
+                              <span className="text-foreground">Dashboard → Plugins → Webhook</span>{" "}
+                              and add a <span className="text-foreground">Generic Destination</span>
+                              .
+                            </li>
+                            <li>
+                              Paste the URL above into{" "}
+                              <span className="text-foreground">Webhook Url</span>.
+                            </li>
+                            <li>
+                              Under <span className="text-foreground">Notification Type</span>,
+                              enable only <span className="text-foreground">Playback Stop</span>.
+                              Leave <span className="text-foreground">Playback Progress</span> and{" "}
+                              <span className="text-foreground">User Data Saved</span> off — Silo
+                              ignores them and they generate heavy traffic.
+                            </li>
+                            <li>
+                              Paste the template below into{" "}
+                              <span className="text-foreground">Template</span> and save.
+                            </li>
+                          </ol>
+
+                          <div className="space-y-1.5">
+                            <Label className="text-muted-foreground text-xs">
+                              Webhook payload template
+                            </Label>
+                            <textarea
+                              readOnly
+                              value={JELLYFIN_TEMPLATE}
+                              className="border-input bg-background min-h-56 w-full rounded-md border px-3 py-2 font-mono text-xs"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void copyText(JELLYFIN_TEMPLATE)}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              Copy template
+                            </Button>
                           </div>
-                          <textarea
-                            readOnly
-                            value={JELLYFIN_TEMPLATE}
-                            className="border-input bg-background min-h-56 w-full rounded-md border px-3 py-2 font-mono text-xs"
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void copyText(JELLYFIN_TEMPLATE)}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copy template
-                          </Button>
                         </div>
                       ) : null}
                     </div>
@@ -1130,7 +1251,7 @@ export default function WebhookSyncSettings() {
                             )}
                           </TableCell>
                           <TableCell className="text-muted-foreground text-xs">
-                            {eventActorLabel(event)}
+                            {eventUserLabel(event)}
                           </TableCell>
                           <TableCell className="text-muted-foreground text-right text-xs">
                             {relativeTime(event.received_at) ?? formatTimestamp(event.received_at)}

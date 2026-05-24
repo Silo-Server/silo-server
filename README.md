@@ -118,7 +118,7 @@ helper and cutover guide in [docs/continuum-to-silo-docker-migration.md](docs/co
 
 ## Development
 
-Local development remains intentionally separate from the deploy-oriented compose setup. Use [docker-compose.dev.yml](docker-compose.dev.yml) and the existing source-build workflow for local development.
+Local development remains intentionally separate from the deploy-oriented compose setup. Use [docker-compose.yml](docker-compose.yml) and the existing source-build workflow for local development.
 
 ```sh
 # Run the frontend dev server (hot reload, proxies API to :8090)

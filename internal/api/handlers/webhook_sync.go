@@ -167,7 +167,7 @@ func (h *WebhookSyncHandler) HandleLegacyCreateConnection(w http.ResponseWriter,
 		h.writeError(w, err)
 		return
 	}
-	actors, err := h.service.GetActors(r.Context(), userID, resp.Connection.ID)
+	actors, err := h.service.GetProfileMappings(r.Context(), userID, resp.Connection.ID)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -251,14 +251,14 @@ func (h *WebhookSyncHandler) HandleLegacyRotateWebhook(w http.ResponseWriter, r 
 	})
 }
 
-func (h *WebhookSyncHandler) HandleGetActors(w http.ResponseWriter, r *http.Request) {
+func (h *WebhookSyncHandler) HandleGetProfileMappings(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Connection ID is required")
 		return
 	}
-	resp, err := h.service.GetActors(r.Context(), userID, id)
+	resp, err := h.service.GetProfileMappings(r.Context(), userID, id)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -292,7 +292,7 @@ func (h *WebhookSyncHandler) HandleLegacyGetActors(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "bad_request", "Connection ID is required")
 		return
 	}
-	resp, err := h.service.GetActors(r.Context(), userID, id)
+	resp, err := h.service.GetProfileMappings(r.Context(), userID, id)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -300,19 +300,19 @@ func (h *WebhookSyncHandler) HandleLegacyGetActors(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, toLegacyPlexActorsResponse(resp))
 }
 
-func (h *WebhookSyncHandler) HandleUpdateActors(w http.ResponseWriter, r *http.Request) {
+func (h *WebhookSyncHandler) HandleUpdateProfileMappings(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Connection ID is required")
 		return
 	}
-	var req webhooksync.UpdateActorMappingsInput
+	var req webhooksync.UpdateProfileMappingsInput
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.service.UpdateActors(r.Context(), userID, id, req)
+	resp, err := h.service.UpdateProfileMappings(r.Context(), userID, id, req)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -332,18 +332,18 @@ func (h *WebhookSyncHandler) HandleLegacyUpdateActors(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	input := webhooksync.UpdateActorMappingsInput{
-		Mappings: make([]webhooksync.UpdateActorMapping, 0, len(req.Mappings)),
+	input := webhooksync.UpdateProfileMappingsInput{
+		Mappings: make([]webhooksync.UpdateProfileMapping, 0, len(req.Mappings)),
 	}
 	for _, mapping := range req.Mappings {
 		profileID := mapping.SiloProfileID
-		input.Mappings = append(input.Mappings, webhooksync.UpdateActorMapping{
-			ExternalActorID:   strconv.FormatInt(mapping.PlexAccountID, 10),
-			ExternalActorName: mapping.PlexAccountTitle,
-			SiloProfileID:     &profileID,
+		input.Mappings = append(input.Mappings, webhooksync.UpdateProfileMapping{
+			ExternalUserID:   strconv.FormatInt(mapping.PlexAccountID, 10),
+			ExternalUserName: mapping.PlexAccountTitle,
+			SiloProfileID:    &profileID,
 		})
 	}
-	resp, err := h.service.UpdateActors(r.Context(), userID, id, input)
+	resp, err := h.service.UpdateProfileMappings(r.Context(), userID, id, input)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -460,11 +460,11 @@ func webhookEventAttrs(meta webhooksync.WebhookRequestLogContext, result *webhoo
 	if result.Action != "" {
 		attrs["action"] = result.Action
 	}
-	if result.ActorID != "" {
-		attrs["actor_id"] = result.ActorID
+	if result.UserID != "" {
+		attrs["external_user_id"] = result.UserID
 	}
-	if result.ActorName != "" {
-		attrs["actor_name"] = result.ActorName
+	if result.UserName != "" {
+		attrs["external_user_name"] = result.UserName
 	}
 	if result.ExternalItemID != "" {
 		attrs["external_item_id"] = result.ExternalItemID
@@ -506,8 +506,8 @@ func logWebhookDelivery(result *webhooksync.ProcessWebhookResult, meta webhooksy
 		if result.Action != "" {
 			args = append(args, "action", result.Action)
 		}
-		if result.ActorID != "" {
-			args = append(args, "actor_id", result.ActorID)
+		if result.UserID != "" {
+			args = append(args, "external_user_id", result.UserID)
 		}
 		if result.ExternalItemID != "" {
 			args = append(args, "external_item_id", result.ExternalItemID)
@@ -576,7 +576,7 @@ func toLegacyPlexConnection(connection webhooksync.Connection, webhookURL string
 		PlexServerName:            connection.ServerName,
 		WebhookURL:                webhookURL,
 		BindingsReady:             false,
-		ActorCount:                connection.ActorCount,
+		ActorCount:                connection.UserCount,
 		AccountDiscoveryAvailable: connection.AccountDiscoveryAvailable,
 		LastWebhookReceivedAt:     connection.LastWebhookReceivedAt,
 		LastWebhookErrorAt:        connection.LastWebhookErrorAt,
@@ -586,24 +586,24 @@ func toLegacyPlexConnection(connection webhooksync.Connection, webhookURL string
 	}
 }
 
-func toLegacyPlexActorsResponse(resp *webhooksync.ActorMappingsResponse) legacyPlexSyncActorsResponse {
+func toLegacyPlexActorsResponse(resp *webhooksync.ProfileMappingsResponse) legacyPlexSyncActorsResponse {
 	if resp == nil {
 		return legacyPlexSyncActorsResponse{}
 	}
 	return legacyPlexSyncActorsResponse{
 		Mappings:                  toLegacyPlexActorMappings(resp.Mappings),
-		DiscoveredActors:          toLegacyPlexDiscoveredActors(resp.DiscoveredActors),
+		DiscoveredActors:          toLegacyPlexDiscoveredActors(resp.DiscoveredUsers),
 		AccountDiscoveryAvailable: resp.AccountDiscoveryAvailable,
 	}
 }
 
-func toLegacyPlexActorMappings(mappings []webhooksync.ActorMapping) []legacyPlexSyncActorMapping {
+func toLegacyPlexActorMappings(mappings []webhooksync.ProfileMapping) []legacyPlexSyncActorMapping {
 	if len(mappings) == 0 {
 		return nil
 	}
 	out := make([]legacyPlexSyncActorMapping, 0, len(mappings))
 	for _, mapping := range mappings {
-		accountID, err := strconv.ParseInt(mapping.ExternalActorID, 10, 64)
+		accountID, err := strconv.ParseInt(mapping.ExternalUserID, 10, 64)
 		if err != nil {
 			continue
 		}
@@ -611,7 +611,7 @@ func toLegacyPlexActorMappings(mappings []webhooksync.ActorMapping) []legacyPlex
 			ID:               mapping.ID,
 			ConnectionID:     mapping.ConnectionID,
 			PlexAccountID:    accountID,
-			PlexAccountTitle: mapping.ExternalActorName,
+			PlexAccountTitle: mapping.ExternalUserName,
 			SiloProfileID:    valueOrEmpty(mapping.SiloProfileID),
 			CreatedAt:        mapping.CreatedAt,
 			UpdatedAt:        mapping.UpdatedAt,
@@ -620,25 +620,25 @@ func toLegacyPlexActorMappings(mappings []webhooksync.ActorMapping) []legacyPlex
 	return out
 }
 
-func toLegacyPlexDiscoveredActors(actors []webhooksync.DiscoveredActor) []legacyPlexSyncDiscoveredActor {
+func toLegacyPlexDiscoveredActors(actors []webhooksync.DiscoveredUser) []legacyPlexSyncDiscoveredActor {
 	if len(actors) == 0 {
 		return nil
 	}
 	out := make([]legacyPlexSyncDiscoveredActor, 0, len(actors))
 	for _, actor := range actors {
-		accountID, err := strconv.ParseInt(actor.ExternalActorID, 10, 64)
+		accountID, err := strconv.ParseInt(actor.ExternalUserID, 10, 64)
 		if err != nil {
 			continue
 		}
 		out = append(out, legacyPlexSyncDiscoveredActor{
 			PlexAccountID:    accountID,
-			PlexAccountTitle: actor.ExternalActorName,
+			PlexAccountTitle: actor.ExternalUserName,
 		})
 	}
 	return out
 }
 
-func firstLegacyMappedActor(mappings []webhooksync.ActorMapping) legacyPlexSyncActorMapping {
+func firstLegacyMappedActor(mappings []webhooksync.ProfileMapping) legacyPlexSyncActorMapping {
 	legacyMappings := toLegacyPlexActorMappings(mappings)
 	if len(legacyMappings) == 0 {
 		return legacyPlexSyncActorMapping{}
