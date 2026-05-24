@@ -3,6 +3,11 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import type {
   CreateMediaRequestInput,
+  DiscoverBrowseKind,
+  DiscoverBrowseResponse,
+  DiscoverGenresResponse,
+  DiscoverNetworksResponse,
+  DiscoverStudiosResponse,
   LoadRequestIntegrationOptionsRequest,
   MediaRequest,
   MediaRequestsListResponse,
@@ -21,6 +26,8 @@ import type {
 import { adminKeys, requestKeys } from "./keys";
 
 const REQUESTS_STALE_TIME = 30_000;
+const DISCOVER_BRAND_STALE_TIME = 24 * 60 * 60 * 1000;
+const BROWSE_STALE_TIME = 60 * 1000;
 
 function listParamsKey(params: RequestListParams) {
   return {
@@ -64,6 +71,62 @@ export function useRequestDiscoverySection(section: string, page = 1) {
       ),
     enabled: section.trim().length > 0,
     staleTime: REQUESTS_STALE_TIME,
+  });
+}
+
+export function useDiscoverStudios() {
+  return useQuery({
+    queryKey: requestKeys.discoverStudios(),
+    queryFn: () =>
+      api<DiscoverStudiosResponse>("/requests/discover/studios").then(
+        (data) => data.studios ?? [],
+      ),
+    staleTime: DISCOVER_BRAND_STALE_TIME,
+  });
+}
+
+export function useDiscoverNetworks() {
+  return useQuery({
+    queryKey: requestKeys.discoverNetworks(),
+    queryFn: () =>
+      api<DiscoverNetworksResponse>("/requests/discover/networks").then(
+        (data) => data.networks ?? [],
+      ),
+    staleTime: DISCOVER_BRAND_STALE_TIME,
+  });
+}
+
+export function useDiscoverGenres() {
+  return useQuery({
+    queryKey: requestKeys.discoverGenres(),
+    queryFn: () =>
+      api<DiscoverGenresResponse>("/requests/discover/genres").then(
+        (data) => data.genres ?? [],
+      ),
+    staleTime: DISCOVER_BRAND_STALE_TIME,
+  });
+}
+
+export interface UseRequestBrowseArgs {
+  kind: DiscoverBrowseKind;
+  slug: string;
+  mediaType?: RequestMediaType;
+  sort: "popularity" | "vote_average" | "release_date";
+  page: number;
+}
+
+export function useRequestBrowse({ kind, slug, mediaType, sort, page }: UseRequestBrowseArgs) {
+  return useQuery({
+    queryKey: requestKeys.discoverBrowse(kind, slug, mediaType, sort, page),
+    queryFn: () => {
+      const params = new URLSearchParams({ sort, page: String(page) });
+      if (mediaType) params.set("media_type", mediaType);
+      return api<DiscoverBrowseResponse>(
+        `/requests/discover/browse/${kind}/${encodeURIComponent(slug)}?${params}`,
+      );
+    },
+    enabled: slug.trim().length > 0 && (kind !== "genre" || Boolean(mediaType)),
+    staleTime: BROWSE_STALE_TIME,
   });
 }
 

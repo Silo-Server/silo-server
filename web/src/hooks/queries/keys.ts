@@ -121,6 +121,26 @@ export const requestKeys = {
   discovery: () => ["requests", "discovery"] as const,
   discoverySection: (section: string, page: number) =>
     ["requests", "discovery", section, page] as const,
+  discoverStudios: () => ["requests", "discover", "studios"] as const,
+  discoverNetworks: () => ["requests", "discover", "networks"] as const,
+  discoverGenres: () => ["requests", "discover", "genres"] as const,
+  discoverBrowse: (
+    kind: "studio" | "network" | "genre",
+    slug: string,
+    mediaType: string | undefined,
+    sort: string,
+    page: number,
+  ) =>
+    [
+      "requests",
+      "discover",
+      "browse",
+      kind,
+      slug,
+      mediaType ?? "",
+      sort,
+      page,
+    ] as const,
   search: (mediaType: string, query: string, page: number) =>
     ["requests", "search", mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
