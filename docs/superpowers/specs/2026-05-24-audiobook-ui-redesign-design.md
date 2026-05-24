@@ -55,7 +55,8 @@ User-visible outcome:
   remaining-time toggle, overflow menu).
 - Restructured audiobook detail page (progress + chapter-aware Resume
   action, chapters expanded by default with currently-playing
-  highlight, narrator card, "Also by author", "In this series").
+  highlight, narrator card, embedding-based "Similar audiobooks"
+  rail, "Also by author", "In this series").
 - Extraction of `CircleButton` and a new `SpeedMenu` into
   `web/src/player/components/` as shared primitives between video and
   audiobook players.
@@ -336,17 +337,23 @@ search-results page filtered by narrator name as a fallback.
 
 ### Cross-book rails
 
-New sections, each rendered only when its data is present:
+Three sections, each rendered only when its data is present, ordered
+top-to-bottom:
 
-- "Also by {author}" — horizontal scroller of cover tiles, same
+- **"Similar audiobooks"** — embedding-based recommendations. Ranked
+  by vector similarity against this book; ordering and inclusion
+  decided server-side. Renders with a subtitle "Based on listening
+  patterns" to give the rail a small bit of provenance copy that the
+  metadata rails don't need.
+- **"Also by {author}"** — horizontal scroller of cover tiles, same
   pattern as `MediaRow` used elsewhere in Silo.
-- "In this series" — same pattern, with "Book n of m" subtitle and
+- **"In this series"** — same pattern, with "Book n of m" subtitle and
   the current book non-clickable / highlighted.
 
-Both rails ship behind feature-detection: if the API response for the
-book includes the related arrays, render them; if not, hide the
-section without showing a placeholder. This avoids blocking v1 on
-backend rail support.
+All three rails ship behind feature-detection: if the API response
+for the book includes the related array, render it; if not, hide the
+section without showing a placeholder. This avoids blocking v1 on any
+specific backend rail support — each lights up as the data lands.
 
 ### What's *not* in the new detail page
 
@@ -366,6 +373,7 @@ items to call out:
 | Bookmarks | **Deferred to v1.1.** Needs `audiobook_bookmarks` table (`content_id`, `profile_id`, `position_seconds`, `note`, `created_at`) plus CRUD endpoints. v1 ships with the button hidden and `useAudiobookPlayback` exposing no-op bookmark stubs. |
 | Narrator card with "n audiobooks in library" count | Needs narrator-aware query. If the detail endpoint already returns it, render; otherwise hide the count line and show only the name. |
 | "Also by author" / "In this series" rails | Render only when arrays present. v1 doesn't require backend changes — it just adapts to whatever the response contains. |
+| "Similar audiobooks" rail (embedding-based) | Render only when `similar_audiobooks` array present on the detail response. Backend computes similarity from per-book embeddings server-side and includes the top-N already ranked. v1 frontend has no embedding logic — it just renders whatever ordered list the API returns. |
 
 ## Routing & view-transition wiring
 

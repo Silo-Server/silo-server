@@ -2899,6 +2899,132 @@ git commit -m "feat(audiobooks): render Also-by-author / In-series rails when AP
 
 ---
 
+## Task 14b: Embedding-based "Similar audiobooks" rail
+
+**Files:**
+- Modify: `web/src/lib/audiobooks/types.ts` (add optional `similar_audiobooks` array)
+- Modify: `web/src/pages/audiobooks/components/RelatedRail.tsx` (accept optional `subtitle` prop)
+- Modify: `web/src/pages/audiobooks/AudiobookDetail.tsx` (mount the third rail, placed FIRST)
+
+Third feature-detected rail, same shape as the two from Task 14 but with a small subtitle to give the recommendation source a tiny bit of provenance copy. The backend computes similarity from per-book embeddings server-side and returns the top-N already ranked; the frontend has no embedding logic of its own.
+
+- [ ] **Step 1: Extend the response type**
+
+In `web/src/lib/audiobooks/types.ts`, extend `AudiobookDetailResponse` with one new optional field (the `AudiobookRelatedItem` type is already defined in Task 14):
+
+```ts
+export interface AudiobookDetailResponse {
+  audiobook: AudiobookDetailItem;
+  author?: string;
+  narrator?: string;
+  files: AudiobookFile[];
+  progress?: AudiobookProgress;
+  similar_audiobooks?: AudiobookRelatedItem[];
+  also_by_author?: AudiobookRelatedItem[];
+  in_series?: {
+    name?: string;
+    entries: AudiobookSeriesEntry[];
+  };
+}
+```
+
+- [ ] **Step 2: Add optional `subtitle` prop to `RelatedRail`**
+
+In `web/src/pages/audiobooks/components/RelatedRail.tsx`, extend `RelatedRailProps` and render the subtitle under the heading when present:
+
+```tsx
+interface RelatedRailProps {
+  heading: string;
+  subtitle?: string;
+  items: RelatedRailItem[];
+}
+
+export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
+  if (items.length === 0) return null;
+  return (
+    <section className="mt-10">
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold tracking-tight">{heading}</h2>
+        {subtitle && (
+          <p className="text-muted-foreground mt-1 text-xs">{subtitle}</p>
+        )}
+      </div>
+      <div className="-mx-2 flex gap-3 overflow-x-auto px-2 pb-2">
+        {items.map((item) => (
+          <ViewTransitionLink
+            key={item.content_id}
+            to={`/audiobooks/book/${item.content_id}`}
+            className={`block w-[112px] shrink-0 ${
+              item.highlight ? "ring-primary rounded-lg ring-2 ring-offset-2" : ""
+            }`}
+          >
+            <div className="bg-muted relative aspect-[2/3] overflow-hidden rounded-lg">
+              {item.poster_url ? (
+                <img
+                  src={item.poster_url}
+                  alt={item.title}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              ) : null}
+            </div>
+            <div className="mt-2 truncate text-[13px] font-medium">{item.title}</div>
+            {item.subtitle && (
+              <div className="text-muted-foreground truncate text-[11px]">{item.subtitle}</div>
+            )}
+          </ViewTransitionLink>
+        ))}
+      </div>
+    </section>
+  );
+}
+```
+
+(The previous Task 14 mounted `RelatedRail` without `subtitle`, which remains valid — the prop is optional.)
+
+- [ ] **Step 3: Mount the rail FIRST in `AudiobookDetail.tsx`**
+
+Add the new rail block above the existing two from Task 14 (so the rendered order, top to bottom, is: Similar audiobooks → Also by author → In this series):
+
+```tsx
+{data.similar_audiobooks && data.similar_audiobooks.length > 0 && (
+  <RelatedRail
+    heading="Similar audiobooks"
+    subtitle="Based on listening patterns"
+    items={data.similar_audiobooks.map((it) => ({
+      content_id: it.content_id,
+      title: it.title,
+      poster_url: it.poster_url,
+      subtitle: it.year ? String(it.year) : undefined,
+    }))}
+  />
+)}
+```
+
+No new imports — `RelatedRail` is already imported by Task 14.
+
+- [ ] **Step 4: Manual verification**
+
+Run: `cd web && pnpm dev`. Open any audiobook detail page — the rail should NOT appear (backend doesn't ship the array yet). To smoke-test the render path locally, temporarily mock the hook return to include three `similar_audiobooks` entries; revert before commit. Confirm:
+- Heading reads "Similar audiobooks".
+- Subtitle reads "Based on listening patterns".
+- Rail renders above any "Also by author" / "In series" rails when both are present.
+
+- [ ] **Step 5: Lint + commit**
+
+```bash
+cd web && pnpm run lint && pnpm run format:check
+```
+
+```bash
+git add web/src/lib/audiobooks/types.ts \
+        web/src/pages/audiobooks/components/RelatedRail.tsx \
+        web/src/pages/audiobooks/AudiobookDetail.tsx
+git commit -m "feat(audiobooks): add embedding-based Similar audiobooks rail"
+```
+
+---
+
 ## Final verification
 
 - [ ] **Run the full frontend test suite:**
