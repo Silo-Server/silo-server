@@ -50,6 +50,7 @@ import {
   PinOff,
   LayoutGrid,
   Puzzle,
+  BookHeadphones,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
@@ -509,6 +510,23 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 )}
                 <CalendarDays className="h-[18px] w-[18px] shrink-0" />
                 <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
+              </ViewTransitionLink>
+            </li>
+            <li>
+              <ViewTransitionLink
+                to="/audiobooks"
+                onClick={onNavigate}
+                className={navLinkClass("/audiobooks")}
+                aria-current={isActive("/audiobooks") ? "page" : undefined}
+              >
+                {isActive("/audiobooks") && (
+                  <span
+                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                    style={{ background: "var(--primary)" }}
+                  />
+                )}
+                <BookHeadphones className="h-[18px] w-[18px] shrink-0" />
+                <SidebarLabel show={showLabels}>Audiobooks</SidebarLabel>
               </ViewTransitionLink>
             </li>
           </ul>

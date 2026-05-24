@@ -77,6 +77,8 @@ import WatchTogetherJoin from "@/pages/WatchTogetherJoin";
 import WatchTogetherRoomPage from "@/pages/WatchTogetherRoomPage";
 import WatchRoute from "@/pages/WatchRoute";
 import ProfileCustomizeHome from "@/pages/ProfileCustomizeHome";
+import AudiobookLibrary from "@/pages/audiobooks/AudiobookLibrary";
+import AudiobookDetail from "@/pages/audiobooks/AudiobookDetail";
 import {
   WatchPlaybackBar,
   WatchPlaybackHost,
@@ -453,6 +455,8 @@ function AppRoutes() {
                             element={<RecommendationsSection />}
                           />
                           <Route path="/calendar" element={<Calendar />} />
+                          <Route path="/audiobooks" element={<AudiobookLibrary />} />
+                          <Route path="/audiobooks/book/:contentId" element={<AudiobookDetail />} />
                           <Route
                             path="/profile/customize-home"
                             element={<ProfileCustomizeHome />}
