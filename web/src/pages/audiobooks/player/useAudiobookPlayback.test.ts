@@ -41,8 +41,8 @@ describe("useAudiobookPlayback", () => {
       useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds: 0 }),
     );
     expect(result.current.chapters).toHaveLength(2);
-    expect(result.current.chapters[0].start_seconds).toBe(0);
-    expect(result.current.chapters[1].start_seconds).toBe(300);
+    expect(result.current.chapters[0]!.start_seconds).toBe(0);
+    expect(result.current.chapters[1]!.start_seconds).toBe(300);
   });
 
   it("computes streamUrl from the first file id", () => {

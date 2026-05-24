@@ -39,8 +39,9 @@ function findChapterAt(
   seconds: number,
 ): { label: string; index: number } | null {
   for (let i = chapters.length - 1; i >= 0; i--) {
-    if (seconds >= chapters[i].absoluteStart) {
-      return { label: chapters[i].label, index: i + 1 };
+    const ch = chapters[i];
+    if (ch && seconds >= ch.absoluteStart) {
+      return { label: ch.label, index: i + 1 };
     }
   }
   return chapters[0] ? { label: chapters[0].label, index: 1 } : null;

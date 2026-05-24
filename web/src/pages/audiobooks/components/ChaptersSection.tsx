@@ -68,7 +68,8 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
   const currentIndex = useMemo(() => {
     if (currentPositionSeconds == null) return -1;
     for (let i = rows.length - 1; i >= 0; i--) {
-      if (currentPositionSeconds >= rows[i].absoluteStart) return i;
+      const row = rows[i];
+      if (row && currentPositionSeconds >= row.absoluteStart) return i;
     }
     return -1;
   }, [rows, currentPositionSeconds]);

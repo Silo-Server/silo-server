@@ -32,13 +32,13 @@ describe("ChaptersSection", () => {
   it("sort menu switches between position and longest-first orders", async () => {
     render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
     const rowsBefore = screen.getAllByRole("button", { name: /Prologue|Memory/ });
-    expect(within(rowsBefore[0]).getByText("Prologue")).toBeInTheDocument();
+    expect(within(rowsBefore[0]!).getByText("Prologue")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /sort/i }));
     await userEvent.click(screen.getByRole("menuitem", { name: /longest first/i }));
 
     const rowsAfter = screen.getAllByRole("button", { name: /Prologue|Memory/ });
-    expect(within(rowsAfter[0]).getByText("Memory")).toBeInTheDocument();
+    expect(within(rowsAfter[0]!).getByText("Memory")).toBeInTheDocument();
   });
 
   it("calls onSelect with absolute start seconds when a chapter is clicked", async () => {
