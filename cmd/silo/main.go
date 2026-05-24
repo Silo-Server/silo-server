@@ -1577,6 +1577,9 @@ func main() {
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)
+			compatDeps.APIKeyValidator = auth.NewAPIKeyRepository(deps.DB)
+			compatDeps.APIKeyUserLoader = userRepo
+			compatDeps.ScanQueue = deps.LibraryScanQueue
 			sessionRepo := auth.NewSessionRepository(deps.DB)
 			jwtService := auth.NewJWTService(
 				cfg.Auth.JWTSecret,

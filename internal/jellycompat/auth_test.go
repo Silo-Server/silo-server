@@ -1,10 +1,14 @@
 package jellycompat
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestRequireSession_SkipsRefreshWhenNoAuthService(t *testing.T) {
@@ -113,4 +117,69 @@ func TestRequireSession_NoAuthService_PassesThroughExpiredStreamAppToken(t *test
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 (no authService = skip refresh), got %d", rec.Code)
 	}
+}
+
+func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
+	authn := NewAdminAPIKeyAuthenticator(
+		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
+		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
+	)
+	req := httptest.NewRequest("GET", "/Library/VirtualFolders", nil)
+	req.Header.Set("X-Emby-Token", "sa_test")
+	rec := httptest.NewRecorder()
+
+	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !AdminAPIKeyFromContext(r.Context()) {
+			t.Fatal("expected admin API key marker in context")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRequireAdminAPIKey_RejectsNonAdminKey(t *testing.T) {
+	authn := NewAdminAPIKeyAuthenticator(
+		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
+		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "user", Enabled: true}},
+	)
+	req := httptest.NewRequest("POST", "/Library/Media/Updated", nil)
+	req.Header.Set("X-Emby-Token", "sa_test")
+	rec := httptest.NewRecorder()
+
+	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not run")
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+type fakeAPIKeyValidator struct {
+	key *models.APIKey
+}
+
+func (f *fakeAPIKeyValidator) GetByKey(_ context.Context, key string) (*models.APIKey, error) {
+	if f.key != nil && f.key.Key == key {
+		return f.key, nil
+	}
+	return nil, auth.ErrAPIKeyNotFound
+}
+
+func (f *fakeAPIKeyValidator) UpdateLastUsed(context.Context, int64) error {
+	return nil
+}
+
+type fakeAPIKeyUserLoader struct {
+	user *models.User
+}
+
+func (f *fakeAPIKeyUserLoader) GetByID(_ context.Context, id int) (*models.User, error) {
+	if f.user != nil && f.user.ID == id {
+		return f.user, nil
+	}
+	return nil, auth.ErrNotFound
 }
