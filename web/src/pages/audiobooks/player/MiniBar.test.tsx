@@ -43,4 +43,27 @@ describe("MiniBar", () => {
     await userEvent.click(screen.getByRole("button", { name: /close player/i }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("renders the current chapter title under the book title", () => {
+    render(
+      <MiniBar
+        title="X"
+        playback={makePlayback({
+          currentChapter: {
+            index: 6,
+            title: "The Astrophage",
+            start_seconds: 0,
+            end_seconds: 100,
+            source: "embedded",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("The Astrophage")).toBeInTheDocument();
+  });
+
+  it("omits the chapter row when no current chapter is known", () => {
+    render(<MiniBar title="X" playback={makePlayback({ currentChapter: null })} />);
+    expect(screen.queryByTestId("minibar-chapter-title")).not.toBeInTheDocument();
+  });
 });

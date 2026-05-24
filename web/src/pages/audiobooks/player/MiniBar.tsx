@@ -38,6 +38,15 @@ export function MiniBar({ title, playback, onClose }: MiniBarProps) {
               {title}
             </div>
           ) : null}
+          {playback.currentChapter ? (
+            <div
+              data-testid="minibar-chapter-title"
+              className="text-muted-foreground truncate text-[11px] leading-tight"
+              title={playback.currentChapter.title}
+            >
+              {playback.currentChapter.title}
+            </div>
+          ) : null}
           <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
             <span className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums">
               {formatTime(playback.currentTime)}
