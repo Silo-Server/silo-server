@@ -183,23 +183,22 @@ export default function AudiobookDetail() {
 
   return (
     <div>
-      {/* Fixed bottom player, matching the video player's bottom-HUD
-          placement. The key forces a remount when the user jumps to a
-          different position (chapter row, Play from Start, Resume) so
-          initialPositionSeconds takes effect even if the player was
-          already open. */}
+      {/* The player owns its own positioning (mini bar at the bottom or
+          Now Listening full-screen overlay). Key forces a remount when the
+          user jumps to a different position so initialPositionSeconds
+          takes effect even if the player was already open. */}
       {playerOpen && (
-        <div className="bg-background fixed inset-x-0 bottom-0 z-40 border-t shadow-lg">
-          <AudiobookPlayer
-            key={`${contentId}-${startSeconds}`}
-            contentId={contentId ?? ""}
-            title={audiobook.title}
-            posterUrl={audiobook.poster_url}
-            files={files}
-            initialPositionSeconds={startSeconds}
-            onClose={() => setPlayerOpen(false)}
-          />
-        </div>
+        <AudiobookPlayer
+          key={`${contentId}-${startSeconds}`}
+          contentId={contentId ?? ""}
+          title={audiobook.title}
+          author={author}
+          narrator={narrator}
+          posterUrl={audiobook.poster_url}
+          files={files}
+          initialPositionSeconds={startSeconds}
+          onClose={() => setPlayerOpen(false)}
+        />
       )}
 
       <DetailHero

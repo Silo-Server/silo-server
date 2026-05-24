@@ -28,7 +28,7 @@ export function MiniBar({
   onExpand,
 }: MiniBarProps) {
   return (
-    <div className="bg-background border-b px-3 pt-2 pb-2 sm:px-6">
+    <div className="bg-background fixed inset-x-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6">
       <SeekBar
         currentTime={playback.currentTime}
         duration={playback.duration}
