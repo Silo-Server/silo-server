@@ -43,10 +43,29 @@ export interface AudiobookDetailItem {
   genres?: string[];
 }
 
+export interface AudiobookRelatedItem {
+  content_id: string;
+  title: string;
+  poster_url?: string;
+  year?: number;
+}
+
+export interface AudiobookSeriesEntry {
+  content_id: string;
+  title: string;
+  poster_url?: string;
+  series_index?: number;
+}
+
 export interface AudiobookDetailResponse {
   audiobook: AudiobookDetailItem;
   author?: string;
   narrator?: string;
   files: AudiobookFile[];
   progress?: AudiobookProgress;
+  also_by_author?: AudiobookRelatedItem[];
+  in_series?: {
+    name?: string;
+    entries: AudiobookSeriesEntry[];
+  };
 }

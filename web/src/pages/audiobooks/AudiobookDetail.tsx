@@ -7,6 +7,7 @@ import { Play } from "lucide-react";
 import AudiobookPlayer from "./player/AudiobookPlayer";
 import { ChaptersSection } from "./components/ChaptersSection";
 import { NarratorCard } from "./components/NarratorCard";
+import { RelatedRail } from "./components/RelatedRail";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
@@ -231,6 +232,31 @@ export default function AudiobookDetail() {
           onSelect={(s) => openPlayer(s)}
         />
         {narrator && <NarratorCard narrator={narrator} />}
+
+        {data.also_by_author && data.also_by_author.length > 0 && (
+          <RelatedRail
+            heading={`Also by ${author ?? "this author"}`}
+            items={data.also_by_author.map((it) => ({
+              content_id: it.content_id,
+              title: it.title,
+              poster_url: it.poster_url,
+              subtitle: it.year ? String(it.year) : undefined,
+            }))}
+          />
+        )}
+
+        {data.in_series && data.in_series.entries.length > 0 && (
+          <RelatedRail
+            heading={data.in_series.name ? `In ${data.in_series.name}` : "In this series"}
+            items={data.in_series.entries.map((it) => ({
+              content_id: it.content_id,
+              title: it.title,
+              poster_url: it.poster_url,
+              subtitle: typeof it.series_index === "number" ? `Book ${it.series_index}` : undefined,
+              highlight: it.content_id === contentId,
+            }))}
+          />
+        )}
       </div>
     </div>
   );

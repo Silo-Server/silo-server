@@ -1,0 +1,49 @@
+import ViewTransitionLink from "@/components/ViewTransitionLink";
+
+interface RelatedRailItem {
+  content_id: string;
+  title: string;
+  poster_url?: string;
+  subtitle?: string;
+  highlight?: boolean;
+}
+
+interface RelatedRailProps {
+  heading: string;
+  items: RelatedRailItem[];
+}
+
+export function RelatedRail({ heading, items }: RelatedRailProps) {
+  if (items.length === 0) return null;
+  return (
+    <section className="mt-10">
+      <h2 className="mb-4 text-xl font-semibold tracking-tight">{heading}</h2>
+      <div className="-mx-2 flex gap-3 overflow-x-auto px-2 pb-2">
+        {items.map((item) => (
+          <ViewTransitionLink
+            key={item.content_id}
+            to={`/audiobooks/book/${item.content_id}`}
+            className={`block w-[112px] shrink-0 ${
+              item.highlight ? "ring-primary rounded-lg ring-2 ring-offset-2" : ""
+            }`}
+          >
+            <div className="bg-muted relative aspect-[2/3] overflow-hidden rounded-lg">
+              {item.poster_url ? (
+                <img
+                  src={item.poster_url}
+                  alt={item.title}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              ) : null}
+            </div>
+            <div className="mt-2 truncate text-[13px] font-medium">{item.title}</div>
+            {item.subtitle && (
+              <div className="text-muted-foreground truncate text-[11px]">{item.subtitle}</div>
+            )}
+          </ViewTransitionLink>
+        ))}
+      </div>
+    </section>
+  );
+}
