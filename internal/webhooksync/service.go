@@ -64,7 +64,7 @@ func (s *Service) ListConnections(ctx context.Context, userID int) ([]Connection
 		if providerErr != nil {
 			continue
 		}
-		if _, available, err := provider.DiscoverActors(ctx, &connections[i], nil); err == nil {
+		if _, available, err := provider.DiscoverUsers(ctx, &connections[i], nil); err == nil {
 			connections[i].AccountDiscoveryAvailable = available
 			if err := s.repo.SetDiscoveryAvailable(ctx, connections[i].ID, available); err != nil {
 				slog.Warn("webhook sync: failed to persist discovery availability", "connection_id", connections[i].ID, "error", err)
@@ -107,10 +107,10 @@ func (s *Service) CreateConnection(ctx context.Context, userID int, input Create
 	if err != nil {
 		return nil, err
 	}
-	if actorID, actorName, ok, err := provider.DefaultActor(ctx, conn, input); err != nil {
+	if userID, userName, ok, err := provider.DefaultUser(ctx, conn, input); err != nil {
 		return nil, err
 	} else if ok {
-		if _, err := s.repo.CreateDefaultMapping(ctx, conn.ID, actorID, actorName, input.DefaultProfileID); err != nil {
+		if _, err := s.repo.CreateDefaultMapping(ctx, conn.ID, userID, userName, input.DefaultProfileID); err != nil {
 			return nil, err
 		}
 	}
@@ -152,7 +152,7 @@ func (s *Service) RotateWebhook(ctx context.Context, userID int, id, baseURL str
 	return &RotateWebhookResult{WebhookURL: buildWebhookURL(baseURL, secret)}, nil
 }
 
-func (s *Service) GetActors(ctx context.Context, userID int, id string) (*ActorMappingsResponse, error) {
+func (s *Service) GetProfileMappings(ctx context.Context, userID int, id string) (*ProfileMappingsResponse, error) {
 	conn, err := s.repo.GetConnection(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -165,24 +165,24 @@ func (s *Service) GetActors(ctx context.Context, userID int, id string) (*ActorM
 	if err != nil {
 		return nil, err
 	}
-	discovered, available, discoverErr := provider.DiscoverActors(ctx, conn, mappings)
+	discovered, available, discoverErr := provider.DiscoverUsers(ctx, conn, mappings)
 	if discoverErr == nil {
 		conn.AccountDiscoveryAvailable = available
 		_ = s.repo.SetDiscoveryAvailable(ctx, conn.ID, available)
 	} else {
-		discovered = mappingsToDiscoveredActors(mappings)
+		discovered = mappingsToDiscoveredUsers(mappings)
 	}
 	if len(discovered) == 0 {
-		discovered = mappingsToDiscoveredActors(mappings)
+		discovered = mappingsToDiscoveredUsers(mappings)
 	}
-	return &ActorMappingsResponse{
+	return &ProfileMappingsResponse{
 		Mappings:                  mappings,
-		DiscoveredActors:          discovered,
+		DiscoveredUsers:           discovered,
 		AccountDiscoveryAvailable: conn.AccountDiscoveryAvailable,
 	}, nil
 }
 
-func (s *Service) UpdateActors(ctx context.Context, userID int, id string, input UpdateActorMappingsInput) ([]ActorMapping, error) {
+func (s *Service) UpdateProfileMappings(ctx context.Context, userID int, id string, input UpdateProfileMappingsInput) ([]ProfileMapping, error) {
 	conn, err := s.repo.GetConnection(ctx, userID, id)
 	if err != nil {
 		return nil, err
@@ -238,8 +238,8 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 	if event != nil {
 		result.EventKind = event.EventKind
 		result.Action = event.Action
-		result.ActorID = event.ActorID
-		result.ActorName = event.ActorName
+		result.UserID = event.UserID
+		result.UserName = event.UserName
 		result.ExternalItemID = event.ExternalItemID
 		result.MediaKind = event.MediaKind
 	}
@@ -251,20 +251,20 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 		result.Summary = webhookResultSummary(event, "Ignored unsupported webhook event")
 		return result, nil
 	}
-	if err := s.repo.UpsertSeenActor(ctx, conn.ID, event.ActorID, event.ActorName); err != nil {
-		slog.Warn("webhook sync: failed to upsert seen actor", "connection_id", conn.ID, "actor_id", event.ActorID, "error", err)
+	if err := s.repo.UpsertSeenUser(ctx, conn.ID, event.UserID, event.UserName); err != nil {
+		slog.Warn("webhook sync: failed to upsert seen external user", "connection_id", conn.ID, "external_user_id", event.UserID, "error", err)
 	}
 
 	profileID := conn.DefaultProfileID
-	if mapping, err := s.repo.GetMappingByActor(ctx, conn.ID, event.ActorID); err != nil {
-		return s.failWebhook(ctx, conn.ID, result, err, "Failed to resolve actor routing")
+	if mapping, err := s.repo.GetMappingByUser(ctx, conn.ID, event.UserID); err != nil {
+		return s.failWebhook(ctx, conn.ID, result, err, "Failed to resolve profile mapping")
 	} else if mapping != nil && mapping.SiloProfileID != nil && *mapping.SiloProfileID != "" {
 		profileID = *mapping.SiloProfileID
 	}
 	result.ProfileID = profileID
 	if profileID == "" {
 		result.Outcome = OutcomeSkipped
-		result.Summary = "Skipped because no default or actor-specific profile is configured"
+		result.Summary = "Skipped because no default or user-specific profile is configured"
 		return result, nil
 	}
 
@@ -283,7 +283,7 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 
 	switch event.Action {
 	case ActionMarkUnplayed:
-		if state, err := s.repo.GetItemState(ctx, conn.ID, event.ActorID, event.ExternalItemID); err != nil {
+		if state, err := s.repo.GetItemState(ctx, conn.ID, event.UserID, event.ExternalItemID); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to load existing item state")
 		} else if state != nil && !event.OccurredAt.After(state.LastEventAt) {
 			result.Outcome = OutcomeSkipped
@@ -295,7 +295,7 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 		}
 		if err := s.repo.UpsertItemState(ctx, ItemState{
 			ConnectionID:       conn.ID,
-			ExternalActorID:    event.ActorID,
+			ExternalUserID:     event.UserID,
 			ExternalItemID:     event.ExternalItemID,
 			MediaItemID:        match.MediaItemID,
 			LastEventAt:        event.OccurredAt,
@@ -342,7 +342,7 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 		return result, nil
 	}
 
-	state, err := s.repo.GetItemState(ctx, conn.ID, event.ActorID, event.ExternalItemID)
+	state, err := s.repo.GetItemState(ctx, conn.ID, event.UserID, event.ExternalItemID)
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to load existing item state")
 	}
@@ -369,7 +369,7 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 
 	if err := s.repo.UpsertItemState(ctx, ItemState{
 		ConnectionID:       conn.ID,
-		ExternalActorID:    event.ActorID,
+		ExternalUserID:     event.UserID,
 		ExternalItemID:     event.ExternalItemID,
 		MediaItemID:        match.MediaItemID,
 		LastEventAt:        event.OccurredAt,
@@ -402,15 +402,15 @@ func webhookResultSummary(event *CanonicalEvent, fallback string) string {
 	return fallback
 }
 
-func mappingsToDiscoveredActors(mappings []ActorMapping) []DiscoveredActor {
+func mappingsToDiscoveredUsers(mappings []ProfileMapping) []DiscoveredUser {
 	if len(mappings) == 0 {
 		return nil
 	}
-	out := make([]DiscoveredActor, 0, len(mappings))
+	out := make([]DiscoveredUser, 0, len(mappings))
 	for _, mapping := range mappings {
-		out = append(out, DiscoveredActor{
-			ExternalActorID:   mapping.ExternalActorID,
-			ExternalActorName: mapping.ExternalActorName,
+		out = append(out, DiscoveredUser{
+			ExternalUserID:   mapping.ExternalUserID,
+			ExternalUserName: mapping.ExternalUserName,
 		})
 	}
 	return out
@@ -481,7 +481,7 @@ func (r CanonicalRecord) toHistoryImportRecord() historyimport.Record {
 type Provider interface {
 	ID() string
 	ValidateCreateInput(input CreateConnectionInput) error
-	DefaultActor(ctx context.Context, conn *Connection, input CreateConnectionInput) (actorID string, actorName string, ok bool, err error)
-	DiscoverActors(ctx context.Context, conn *Connection, mappings []ActorMapping) ([]DiscoveredActor, bool, error)
+	DefaultUser(ctx context.Context, conn *Connection, input CreateConnectionInput) (externalUserID string, externalUserName string, ok bool, err error)
+	DiscoverUsers(ctx context.Context, conn *Connection, mappings []ProfileMapping) ([]DiscoveredUser, bool, error)
 	ParseWebhook(ctx context.Context, conn *Connection, r *http.Request) (*CanonicalEvent, error)
 }

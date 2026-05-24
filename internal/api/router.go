@@ -1437,8 +1437,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Delete("/connections/{id}", webhookSyncHandler.HandleDeleteConnection)
 						r.Post("/connections/{id}/webhook/rotate", webhookSyncHandler.HandleRotateWebhook)
 						r.Get("/connections/{id}/events", webhookSyncHandler.HandleListEvents)
-						r.Get("/connections/{id}/actors", webhookSyncHandler.HandleGetActors)
-						r.Put("/connections/{id}/actors", webhookSyncHandler.HandleUpdateActors)
+						r.Get("/connections/{id}/profile-mappings", webhookSyncHandler.HandleGetProfileMappings)
+						r.Put("/connections/{id}/profile-mappings", webhookSyncHandler.HandleUpdateProfileMappings)
 					})
 				}
 

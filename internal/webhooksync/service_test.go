@@ -52,8 +52,8 @@ func TestFilterDiscoveredAccounts(t *testing.T) {
 		{ID: "3", Name: "Friend"},
 		{ID: "4", Name: "Mapped Friend"},
 	}
-	mappings := []ActorMapping{
-		{ExternalActorID: "4"},
+	mappings := []ProfileMapping{
+		{ExternalUserID: "4"},
 	}
 
 	filtered := filterDiscoveredAccounts(accounts, mappings)

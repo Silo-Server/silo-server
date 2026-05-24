@@ -22,7 +22,7 @@ type Connection struct {
 	AccessToken               string     `json:"-"`
 	WebhookSecret             string     `json:"-"`
 	AccountDiscoveryAvailable bool       `json:"account_discovery_available"`
-	ActorCount                int        `json:"actor_count"`
+	UserCount                 int        `json:"user_count"`
 	LastWebhookReceivedAt     *time.Time `json:"last_webhook_received_at,omitempty"`
 	LastWebhookErrorAt        *time.Time `json:"last_webhook_error_at,omitempty"`
 	LastWebhookErrorMessage   string     `json:"last_webhook_error_message,omitempty"`
@@ -30,25 +30,25 @@ type Connection struct {
 	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
-type ActorMapping struct {
-	ID                int       `json:"id"`
-	ConnectionID      string    `json:"connection_id"`
-	ExternalActorID   string    `json:"external_actor_id"`
-	ExternalActorName string    `json:"external_actor_name"`
-	SiloProfileID     *string   `json:"silo_profile_id,omitempty"`
-	LastSeenAt        time.Time `json:"last_seen_at"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+type ProfileMapping struct {
+	ID               int       `json:"id"`
+	ConnectionID     string    `json:"connection_id"`
+	ExternalUserID   string    `json:"external_user_id"`
+	ExternalUserName string    `json:"external_user_name"`
+	SiloProfileID    *string   `json:"silo_profile_id,omitempty"`
+	LastSeenAt       time.Time `json:"last_seen_at"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-type DiscoveredActor struct {
-	ExternalActorID   string `json:"external_actor_id"`
-	ExternalActorName string `json:"external_actor_name"`
+type DiscoveredUser struct {
+	ExternalUserID   string `json:"external_user_id"`
+	ExternalUserName string `json:"external_user_name"`
 }
 
 type ItemState struct {
 	ConnectionID       string
-	ExternalActorID    string
+	ExternalUserID     string
 	ExternalItemID     string
 	MediaItemID        string
 	LastEventAt        time.Time
@@ -80,20 +80,20 @@ type RotateWebhookResult struct {
 	WebhookURL string `json:"webhook_url"`
 }
 
-type ActorMappingsResponse struct {
-	Mappings                  []ActorMapping    `json:"mappings"`
-	DiscoveredActors          []DiscoveredActor `json:"discovered_actors"`
-	AccountDiscoveryAvailable bool              `json:"account_discovery_available"`
+type ProfileMappingsResponse struct {
+	Mappings                  []ProfileMapping `json:"mappings"`
+	DiscoveredUsers           []DiscoveredUser `json:"discovered_users"`
+	AccountDiscoveryAvailable bool             `json:"account_discovery_available"`
 }
 
-type UpdateActorMappingsInput struct {
-	Mappings []UpdateActorMapping `json:"mappings"`
+type UpdateProfileMappingsInput struct {
+	Mappings []UpdateProfileMapping `json:"mappings"`
 }
 
-type UpdateActorMapping struct {
-	ExternalActorID   string  `json:"external_actor_id"`
-	ExternalActorName string  `json:"external_actor_name"`
-	SiloProfileID     *string `json:"silo_profile_id"`
+type UpdateProfileMapping struct {
+	ExternalUserID   string  `json:"external_user_id"`
+	ExternalUserName string  `json:"external_user_name"`
+	SiloProfileID    *string `json:"silo_profile_id"`
 }
 
 type CanonicalEvent struct {
@@ -102,8 +102,8 @@ type CanonicalEvent struct {
 	OccurredAt      time.Time
 	Action          string
 	EventKind       string
-	ActorID         string
-	ActorName       string
+	UserID          string
+	UserName        string
 	ExternalItemID  string
 	MediaKind       string
 	Completed       bool
@@ -158,8 +158,8 @@ type ProcessWebhookResult struct {
 	Provider              string
 	EventKind             string
 	Action                string
-	ActorID               string
-	ActorName             string
+	UserID                string
+	UserName              string
 	ExternalItemID        string
 	MediaKind             string
 	MatchedMediaItemID    string

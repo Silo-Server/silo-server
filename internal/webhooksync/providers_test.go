@@ -45,8 +45,8 @@ func TestEmbyProviderParseWebhook(t *testing.T) {
 	if event.Action != ActionImportProgress {
 		t.Fatalf("unexpected action: %q", event.Action)
 	}
-	if event.ActorID != "user-1" || event.ActorName != "Alice" {
-		t.Fatalf("unexpected actor: %#v", event)
+	if event.UserID != "user-1" || event.UserName != "Alice" {
+		t.Fatalf("unexpected external user: %#v", event)
 	}
 	if event.Record.Kind != "episode" || event.Record.SeriesTitle != "The Show" {
 		t.Fatalf("unexpected record: %#v", event.Record)
