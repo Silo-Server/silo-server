@@ -232,6 +232,45 @@ func isPodcastLibraryType(libraryType string) bool {
 	}
 }
 
+// walkMode tells walkLogicalTree which file extensions to surface and
+// which library-specific filename heuristics (sample/extra skipping)
+// to apply.
+type walkMode int
+
+const (
+	walkModeVideo     walkMode = iota // bare video walk: video extensions, no movie skipping
+	walkModeMovie                     // movie library: video extensions + sample/extra skipping
+	walkModeAudiobook                 // audiobook library: audio extensions, no skipping
+	walkModePodcast                   // podcast library: audio extensions, no skipping
+)
+
+// walkModeFor derives a walkMode from a media_folders.type string.
+// Unknown types default to walkModeVideo so existing call sites that
+// pass arbitrary types preserve their prior behavior.
+func walkModeFor(folderType string) walkMode {
+	switch {
+	case isMovieLibraryType(folderType):
+		return walkModeMovie
+	case isAudiobookLibraryType(folderType):
+		return walkModeAudiobook
+	case isPodcastLibraryType(folderType):
+		return walkModePodcast
+	default:
+		return walkModeVideo
+	}
+}
+
+// acceptsExt reports whether the given lowercased extension belongs to
+// the file types this walk mode is looking for.
+func (m walkMode) acceptsExt(ext string) bool {
+	switch m {
+	case walkModeAudiobook, walkModePodcast:
+		return audioExtensions[ext]
+	default:
+		return videoExtensions[ext]
+	}
+}
+
 func canonicalWalkPath(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -252,7 +291,7 @@ func walkLogicalTree(
 	ctx context.Context,
 	logicalPath string,
 	physicalPath string,
-	movieLibrary bool,
+	mode walkMode,
 	visitedPhysicalDirs map[string]struct{},
 	filePaths *[]string,
 ) error {
@@ -280,22 +319,22 @@ func walkLogicalTree(
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, movieLibrary, visitedPhysicalDirs, filePaths)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, filePaths)
 		}
-		if movieLibrary && shouldSkipMovieSupplementalFile(logicalPath) {
+		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(logicalPath))] {
+		if mode.acceptsExt(strings.ToLower(filepath.Ext(logicalPath))) {
 			*filePaths = append(*filePaths, logicalPath)
 		}
 		return nil
 	}
 
 	if !info.IsDir() {
-		if movieLibrary && shouldSkipMovieSupplementalFile(logicalPath) {
+		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(logicalPath))] {
+		if mode.acceptsExt(strings.ToLower(filepath.Ext(logicalPath))) {
 			*filePaths = append(*filePaths, logicalPath)
 		}
 		return nil
@@ -314,7 +353,7 @@ func walkLogicalTree(
 	if isIgnoredDirectoryPath(logicalPath) {
 		return nil
 	}
-	if movieLibrary && shouldSkipMovieSupplementalDir(logicalPath) {
+	if mode == walkModeMovie && shouldSkipMovieSupplementalDir(logicalPath) {
 		return nil
 	}
 
@@ -345,31 +384,31 @@ func walkLogicalTree(
 				continue
 			}
 			if targetInfo.IsDir() {
-				if err := walkLogicalTree(ctx, logicalChild, resolved, movieLibrary, visitedPhysicalDirs, filePaths); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, filePaths); err != nil {
 					return err
 				}
 				continue
 			}
-			if movieLibrary && shouldSkipMovieSupplementalFile(logicalChild) {
+			if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 				continue
 			}
-			if videoExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+			if mode.acceptsExt(strings.ToLower(filepath.Ext(entry.Name()))) {
 				*filePaths = append(*filePaths, logicalChild)
 			}
 			continue
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, movieLibrary, visitedPhysicalDirs, filePaths); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, filePaths); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if movieLibrary && shouldSkipMovieSupplementalFile(logicalChild) {
+		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 			continue
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+		if mode.acceptsExt(strings.ToLower(filepath.Ext(entry.Name()))) {
 			*filePaths = append(*filePaths, logicalChild)
 		}
 	}
@@ -380,7 +419,7 @@ func walkLogicalTree(
 func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string) ([]string, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
-	movieLibrary := isMovieLibraryType(libraryType)
+	mode := walkModeFor(libraryType)
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
@@ -392,7 +431,7 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if cleanRoot == "" || cleanRoot == "." {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, movieLibrary, visitedPhysicalDirs, &filePaths); err != nil {
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths); err != nil {
 			return nil, err
 		}
 	}
