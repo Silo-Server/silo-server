@@ -63,6 +63,7 @@ export interface AudiobookDetailResponse {
   narrator?: string;
   files: AudiobookFile[];
   progress?: AudiobookProgress;
+  similar_audiobooks?: AudiobookRelatedItem[];
   also_by_author?: AudiobookRelatedItem[];
   in_series?: {
     name?: string;

@@ -233,6 +233,19 @@ export default function AudiobookDetail() {
         />
         {narrator && <NarratorCard narrator={narrator} />}
 
+        {data.similar_audiobooks && data.similar_audiobooks.length > 0 && (
+          <RelatedRail
+            heading="Similar audiobooks"
+            subtitle="Based on listening patterns"
+            items={data.similar_audiobooks.map((it) => ({
+              content_id: it.content_id,
+              title: it.title,
+              poster_url: it.poster_url,
+              subtitle: it.year ? String(it.year) : undefined,
+            }))}
+          />
+        )}
+
         {data.also_by_author && data.also_by_author.length > 0 && (
           <RelatedRail
             heading={`Also by ${author ?? "this author"}`}
