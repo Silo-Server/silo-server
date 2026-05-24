@@ -14,7 +14,13 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { MediaRequest, RequestDiscoverySection, RequestMediaResult } from "@/api/types";
+import type {
+  MediaRequest,
+  MediaRequestOutcome,
+  MediaRequestStatus,
+  RequestDiscoverySection,
+  RequestMediaResult,
+} from "@/api/types";
 import {
   useCreateMediaRequest,
   useMyMediaRequests,
@@ -23,9 +29,13 @@ import {
 } from "@/hooks/queries/requests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { cn } from "@/lib/utils";
-import { requestInputFromMediaResult } from "@/lib/mediaRequests";
+import { formatRequestStatus, requestInputFromMediaResult } from "@/lib/mediaRequests";
 
 type MineBucketKey = "motion" | "completed" | "issues";
+type StatusGuideItem = {
+  description: string;
+  tone: string;
+};
 
 const MINE_BUCKET_META: Record<MineBucketKey, { title: string; eyebrow: string; accent: string }> =
   {
@@ -45,6 +55,61 @@ const MINE_BUCKET_META: Record<MineBucketKey, { title: string; eyebrow: string; 
       accent: "text-red-200/90",
     },
   };
+
+const REQUEST_PROGRESS_GUIDE: Array<StatusGuideItem & { status: MediaRequestStatus }> = [
+  {
+    status: "pending",
+    description: "Waiting for an admin to approve the request.",
+    tone: "bg-amber-500/15 text-amber-100 ring-amber-400/40",
+  },
+  {
+    status: "approved",
+    description: "Approved, but not yet sent to the download automation.",
+    tone: "bg-emerald-500/15 text-emerald-100 ring-emerald-400/40",
+  },
+  {
+    status: "queued",
+    description: "Sent to the request automation and waiting for download/import activity.",
+    tone: "bg-sky-500/15 text-sky-100 ring-sky-400/40",
+  },
+  {
+    status: "downloading",
+    description: "Downloading or importing now.",
+    tone: "bg-sky-500/20 text-sky-100 ring-sky-400/50",
+  },
+  {
+    status: "completed",
+    description: "In your Silo library and ready to watch.",
+    tone: "bg-emerald-500/20 text-emerald-100 ring-emerald-400/40",
+  },
+];
+
+const REQUEST_ISSUE_GUIDE: Array<
+  StatusGuideItem & {
+    outcome: Extract<MediaRequestOutcome, "declined" | "cancelled" | "failed">;
+    label: string;
+  }
+> = [
+  {
+    outcome: "declined",
+    label: "Declined",
+    description: "An admin declined the request.",
+    tone: "bg-zinc-700/60 text-zinc-200 ring-zinc-500/40",
+  },
+  {
+    outcome: "cancelled",
+    label: "Cancelled",
+    description: "The request was cancelled before completion.",
+    tone: "bg-zinc-700/60 text-zinc-200 ring-zinc-500/40",
+  },
+  {
+    outcome: "failed",
+    label: "Failed",
+    description:
+      "Silo or the external request automation hit an error. If details are available, they appear on the request card.",
+    tone: "bg-red-500/15 text-red-100 ring-red-400/40",
+  },
+];
 
 export default function Requests() {
   useDocumentTitle("Requests");
@@ -164,6 +229,7 @@ export default function Requests() {
           ) : (
             <>
               <MineSummary counts={mineCounts} />
+              <RequestStatusGuide />
               <div className="space-y-10">
                 {(Object.keys(MINE_BUCKET_META) as MineBucketKey[]).map((key) => {
                   const items = buckets[key];
@@ -175,6 +241,83 @@ export default function Requests() {
           )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function RequestStatusGuide() {
+  return (
+    <section className="px-4 sm:px-6 lg:px-10 xl:px-12" aria-labelledby="request-status-guide">
+      <div className="border-border/60 bg-card/40 rounded-2xl border px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1 lg:w-[220px] lg:shrink-0">
+            <h2 id="request-status-guide" className="text-foreground text-sm font-semibold">
+              Status guide
+            </h2>
+            <p className="text-muted-foreground text-[13px] leading-5">
+              Statuses update automatically as Silo checks the library and connected request
+              integrations.
+            </p>
+          </div>
+          <div className="grid min-w-0 flex-1 gap-5 md:grid-cols-2">
+            <StatusGuideGroup title="Request progress">
+              {REQUEST_PROGRESS_GUIDE.map((item) => (
+                <StatusGuideRow
+                  key={item.status}
+                  label={formatRequestStatus(item.status)}
+                  description={item.description}
+                  tone={item.tone}
+                />
+              ))}
+            </StatusGuideGroup>
+            <StatusGuideGroup title="Needs attention">
+              {REQUEST_ISSUE_GUIDE.map((item) => (
+                <StatusGuideRow
+                  key={item.outcome}
+                  label={item.label}
+                  description={item.description}
+                  tone={item.tone}
+                />
+              ))}
+            </StatusGuideGroup>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StatusGuideGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-muted-foreground text-xs font-medium">{title}</h3>
+      <dl className="space-y-2">{children}</dl>
+    </section>
+  );
+}
+
+function StatusGuideRow({
+  label,
+  description,
+  tone,
+}: {
+  label: string;
+  description: string;
+  tone: string;
+}) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-start sm:gap-3">
+      <dt>
+        <span
+          className={cn(
+            "inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] leading-5 font-semibold ring-1",
+            tone,
+          )}
+        >
+          {label}
+        </span>
+      </dt>
+      <dd className="text-muted-foreground text-[13px] leading-5">{description}</dd>
     </div>
   );
 }
