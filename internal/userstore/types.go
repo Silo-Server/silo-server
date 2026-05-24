@@ -17,6 +17,8 @@ type Profile struct {
 	SubtitleMode               string
 	AutoSkipIntro              bool
 	AutoSkipCredits            bool
+	AutoSkipRecap              bool
+	AutoPlayNextPreview        bool
 	ShowForcedSubtitles        bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
@@ -50,6 +52,8 @@ type UpdateProfileInput struct {
 	SubtitleMode               *string
 	AutoSkipIntro              *bool
 	AutoSkipCredits            *bool
+	AutoSkipRecap              *bool
+	AutoPlayNextPreview        *bool
 	ShowForcedSubtitles        *bool
 	LibraryRestrictionsEnabled *bool
 	AllowedLibraryIDs          *[]int

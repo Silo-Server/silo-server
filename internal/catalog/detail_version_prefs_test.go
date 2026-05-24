@@ -219,7 +219,7 @@ func TestBuildPlaybackInfo_SetsEffectiveAudioLanguageFromOriginalWhenTrackLangua
 	}
 	service.SetUserStoreProvider(testDetailUserStoreProvider{store: store})
 
-	versions, _, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
+	versions, _, _, _, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
 		{
 			ID:            7,
 			ContentID:     "movie-1",
@@ -246,7 +246,7 @@ func TestBuildPlaybackInfo_SetsEffectiveAudioLanguageFromOriginalWhenTrackLangua
 func TestBuildPlaybackInfo_GroupsMultipartVariants(t *testing.T) {
 	service := &DetailService{}
 
-	_, variants, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
+	_, variants, _, _, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
 		{
 			ID:                    11,
 			ContentID:             "movie-1",
@@ -294,7 +294,7 @@ func TestBuildPlaybackInfo_SelectedFileWithoutIntroDoesNotInheritAnotherVersionI
 	introStart := 12.5
 	introEnd := 42.75
 
-	versions, _, _, intro, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
+	versions, _, _, intro, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
 		{
 			ID:         11,
 			ContentID:  "movie-1",
@@ -330,7 +330,7 @@ func TestBuildPlaybackInfo_NoSelectedFileKeepsAvailableIntroFallback(t *testing.
 	introStart := 12.5
 	introEnd := 42.75
 
-	_, _, _, intro, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
+	_, _, _, intro, _, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
 		{
 			ID:         11,
 			ContentID:  "movie-1",
@@ -382,7 +382,7 @@ func TestBuildPlaybackInfo_StoresCreditsOnFileVersion(t *testing.T) {
 	creditsStart := 1400.0
 	creditsEnd := 1500.0
 
-	versions, _, _, _, credits := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
+	versions, _, _, _, credits, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
 		{
 			ID:           11,
 			ContentID:    "movie-1",

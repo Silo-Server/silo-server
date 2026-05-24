@@ -296,13 +296,19 @@ export function WatchPage({
         return;
       }
 
-      const { file_id, intro: nextIntro, credits: nextCredits } = event.payload;
+      const {
+        file_id,
+        intro: nextIntro,
+        credits: nextCredits,
+        recap: nextRecap,
+        preview: nextPreview,
+      } = event.payload;
       if (file_id !== session.mediaFileId) {
         return;
       }
 
       setPlaybackVersions((current) =>
-        patchVersionMarkers(current, file_id, nextIntro, nextCredits),
+        patchVersionMarkers(current, file_id, nextIntro, nextCredits, nextRecap, nextPreview),
       );
     },
     [session.mediaFileId],

@@ -131,9 +131,11 @@ type ItemDetail struct {
 	// Aggregated subtitles across all versions.
 	Subtitles []SubtitleInfo `json:"subtitles"`
 
-	// Intro/credits markers (from first file that has them).
+	// Intro/credits/recap/preview markers (from first file that has them).
 	Intro   *Marker `json:"intro,omitempty"`
 	Credits *Marker `json:"credits,omitempty"`
+	Recap   *Marker `json:"recap,omitempty"`
+	Preview *Marker `json:"preview,omitempty"`
 
 	// Effective subtitle defaults for episode playback derived from
 	// profile, library, and series-level preferences.
@@ -231,6 +233,8 @@ type FileVersion struct {
 	Chapters                 []VersionChapter       `json:"chapters,omitempty"`
 	Intro                    *Marker                `json:"intro,omitempty"`
 	Credits                  *Marker                `json:"credits,omitempty"`
+	Recap                    *Marker                `json:"recap,omitempty"`
+	Preview                  *Marker                `json:"preview,omitempty"`
 }
 
 // PlaybackVariant is one logical watch choice, optionally spanning multiple ordered parts.
@@ -332,6 +336,8 @@ type WatchDetail struct {
 	Subtitles                       []SubtitleInfo                    `json:"subtitles"`
 	Intro                           *Marker                           `json:"intro,omitempty"`
 	Credits                         *Marker                           `json:"credits,omitempty"`
+	Recap                           *Marker                           `json:"recap,omitempty"`
+	Preview                         *Marker                           `json:"preview,omitempty"`
 	UserData                        *SeasonUserData                   `json:"user_data,omitempty"`
 	SeriesID                        string                            `json:"series_id,omitempty"`
 	SeriesTitle                     string                            `json:"series_title,omitempty"`
@@ -826,7 +832,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 
 		files = FilterMediaFilesByAccess(files, filter)
 		files = s.preparePlaybackFiles(ctx, files)
-		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits = s.buildPlaybackInfo(
+		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
 			ctx,
 			files,
 			filter,
@@ -1096,7 +1102,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 	}
 	files = FilterMediaFilesByAccess(files, filter)
 	files = s.preparePlaybackFiles(ctx, files)
-	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits = s.buildPlaybackInfo(
+	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
 		ctx,
 		files,
 		filter,
@@ -1256,7 +1262,7 @@ func (s *DetailService) newWatchDetail(
 	filter AccessFilter,
 	audioPreferenceContentID string,
 ) *WatchDetail {
-	versions, playbackVariants, subtitles, intro, credits := s.buildPlaybackInfo(
+	versions, playbackVariants, subtitles, intro, credits, recap, preview := s.buildPlaybackInfo(
 		ctx,
 		files,
 		filter,
@@ -1272,6 +1278,8 @@ func (s *DetailService) newWatchDetail(
 		Subtitles:        subtitles,
 		Intro:            intro,
 		Credits:          credits,
+		Recap:            recap,
+		Preview:          preview,
 	}
 }
 
@@ -1547,16 +1555,25 @@ func bestPlayableFile(files []*models.MediaFile) *models.MediaFile {
 	return best
 }
 
+// markerFromRange converts a (start, end) pair into a *Marker, returning nil
+// when either bound is missing. Used to lift the four per-file segment kinds
+// (intro/credits/recap/preview) into the api response shape.
+func markerFromRange(start, end *float64) *Marker {
+	if start == nil || end == nil {
+		return nil
+	}
+	return &Marker{Start: *start, End: *end}
+}
+
 func (s *DetailService) buildPlaybackInfo(
 	ctx context.Context,
 	files []*models.MediaFile,
 	filter AccessFilter,
 	audioPreferenceContentID string,
-) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker) {
+) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	versions := make([]FileVersion, 0, len(files))
 	subtitleSet := make(map[string]SubtitleInfo)
-	var firstIntro *Marker
-	var firstCredits *Marker
+	var firstIntro, firstCredits, firstRecap, firstPreview *Marker
 
 	for _, f := range files {
 		if f == nil {
@@ -1568,19 +1585,21 @@ func (s *DetailService) buildPlaybackInfo(
 			audioPreferenceContentID,
 			f,
 		)
-		var versionIntro *Marker
-		if f.IntroStart != nil && f.IntroEnd != nil {
-			versionIntro = &Marker{Start: *f.IntroStart, End: *f.IntroEnd}
-			if firstIntro == nil {
-				firstIntro = versionIntro
-			}
+		versionIntro := markerFromRange(f.IntroStart, f.IntroEnd)
+		if versionIntro != nil && firstIntro == nil {
+			firstIntro = versionIntro
 		}
-		var versionCredits *Marker
-		if f.CreditsStart != nil && f.CreditsEnd != nil {
-			versionCredits = &Marker{Start: *f.CreditsStart, End: *f.CreditsEnd}
-			if firstCredits == nil {
-				firstCredits = versionCredits
-			}
+		versionCredits := markerFromRange(f.CreditsStart, f.CreditsEnd)
+		if versionCredits != nil && firstCredits == nil {
+			firstCredits = versionCredits
+		}
+		versionRecap := markerFromRange(f.RecapStart, f.RecapEnd)
+		if versionRecap != nil && firstRecap == nil {
+			firstRecap = versionRecap
+		}
+		versionPreview := markerFromRange(f.PreviewStart, f.PreviewEnd)
+		if versionPreview != nil && firstPreview == nil {
+			firstPreview = versionPreview
 		}
 
 		versions = append(versions, FileVersion{
@@ -1611,6 +1630,8 @@ func (s *DetailService) buildPlaybackInfo(
 			Chapters:                 s.buildVersionChapters(ctx, f),
 			Intro:                    versionIntro,
 			Credits:                  versionCredits,
+			Recap:                    versionRecap,
+			Preview:                  versionPreview,
 		})
 
 		for _, sub := range f.SubtitleTracks {
@@ -1649,20 +1670,19 @@ func (s *DetailService) buildPlaybackInfo(
 
 	variants := buildPlaybackVariants(versions, filter.SelectedFileID)
 	selectedVersionExists := playbackVersionExists(versions, filter.SelectedFileID)
-	intro := selectedPlaybackMarker(versions, variants, filter.SelectedFileID, func(v FileVersion) *Marker {
-		return v.Intro
-	})
-	if intro == nil && !selectedVersionExists {
-		intro = firstIntro
+	pick := func(field func(v FileVersion) *Marker, fallback *Marker) *Marker {
+		m := selectedPlaybackMarker(versions, variants, filter.SelectedFileID, field)
+		if m == nil && !selectedVersionExists {
+			return fallback
+		}
+		return m
 	}
-	credits := selectedPlaybackMarker(versions, variants, filter.SelectedFileID, func(v FileVersion) *Marker {
-		return v.Credits
-	})
-	if credits == nil && !selectedVersionExists {
-		credits = firstCredits
-	}
+	intro := pick(func(v FileVersion) *Marker { return v.Intro }, firstIntro)
+	credits := pick(func(v FileVersion) *Marker { return v.Credits }, firstCredits)
+	recap := pick(func(v FileVersion) *Marker { return v.Recap }, firstRecap)
+	preview := pick(func(v FileVersion) *Marker { return v.Preview }, firstPreview)
 
-	return versions, variants, subtitles, intro, credits
+	return versions, variants, subtitles, intro, credits, recap, preview
 }
 
 func playbackVersionExists(versions []FileVersion, selectedFileID int) bool {

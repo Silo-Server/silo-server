@@ -62,6 +62,8 @@ export interface PlaybackMarkersUpdatedPayload {
   file_id: number;
   intro?: PlaybackTimeRangePayload | null;
   credits?: PlaybackTimeRangePayload | null;
+  recap?: PlaybackTimeRangePayload | null;
+  preview?: PlaybackTimeRangePayload | null;
 }
 
 export interface PlaybackRealtimeEventEnvelopeBase {
@@ -149,12 +151,16 @@ function isTimeRangePayload(value: unknown): value is PlaybackTimeRangePayload {
 }
 
 function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdatedPayload {
+  const isOptionalRange = (range: unknown) =>
+    range === undefined || range === null || isTimeRangePayload(range);
   return (
     isRecord(value) &&
     typeof value.session_id === "string" &&
     typeof value.file_id === "number" &&
-    (value.intro === undefined || value.intro === null || isTimeRangePayload(value.intro)) &&
-    (value.credits === undefined || value.credits === null || isTimeRangePayload(value.credits))
+    isOptionalRange(value.intro) &&
+    isOptionalRange(value.credits) &&
+    isOptionalRange(value.recap) &&
+    isOptionalRange(value.preview)
   );
 }
 

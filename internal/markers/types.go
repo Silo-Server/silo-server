@@ -44,6 +44,16 @@ type MarkerKind int
 const (
 	MarkerKindIntro MarkerKind = iota + 1
 	MarkerKindCredits
+	MarkerKindRecap
+	MarkerKindPreview
+)
+
+// Canonical keys for Request.ExternalIDs. Providers consult these so we
+// don't scatter raw "tmdb"/"imdb" string literals across the codebase.
+const (
+	ExternalIDKeyTMDB = "tmdb"
+	ExternalIDKeyIMDB = "imdb"
+	ExternalIDKeyTVDB = "tvdb"
 )
 
 type Request struct {
@@ -57,6 +67,7 @@ type Request struct {
 type Result struct {
 	SourceClass string
 	ProviderID  string
+	Algorithm   string
 	Markers     []Marker
 }
 

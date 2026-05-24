@@ -52,6 +52,8 @@ type createProfileRequest struct {
 	SubtitleMode               string `json:"subtitle_mode,omitempty"`
 	AutoSkipIntro              bool   `json:"auto_skip_intro"`
 	AutoSkipCredits            bool   `json:"auto_skip_credits"`
+	AutoSkipRecap              bool   `json:"auto_skip_recap"`
+	AutoPlayNextPreview        bool   `json:"auto_play_next_preview"`
 	ShowForcedSubtitles        *bool  `json:"show_forced_subtitles,omitempty"`
 	LibraryRestrictionsEnabled bool   `json:"library_restrictions_enabled"`
 	AllowedLibraryIDs          []int  `json:"allowed_library_ids"`
@@ -70,6 +72,8 @@ type updateProfileRequest struct {
 	SubtitleMode               *string `json:"subtitle_mode,omitempty"`
 	AutoSkipIntro              *bool   `json:"auto_skip_intro,omitempty"`
 	AutoSkipCredits            *bool   `json:"auto_skip_credits,omitempty"`
+	AutoSkipRecap              *bool   `json:"auto_skip_recap,omitempty"`
+	AutoPlayNextPreview        *bool   `json:"auto_play_next_preview,omitempty"`
 	ShowForcedSubtitles        *bool   `json:"show_forced_subtitles,omitempty"`
 	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty"`
 	AllowedLibraryIDs          *[]int  `json:"allowed_library_ids,omitempty"`
@@ -96,6 +100,8 @@ type profileResponse struct {
 	SubtitleMode               string `json:"subtitle_mode,omitempty"`
 	AutoSkipIntro              bool   `json:"auto_skip_intro"`
 	AutoSkipCredits            bool   `json:"auto_skip_credits"`
+	AutoSkipRecap              bool   `json:"auto_skip_recap"`
+	AutoPlayNextPreview        bool   `json:"auto_play_next_preview"`
 	ShowForcedSubtitles        bool   `json:"show_forced_subtitles"`
 	LibraryRestrictionsEnabled bool   `json:"library_restrictions_enabled"`
 	AllowedLibraryIDs          []int  `json:"allowed_library_ids"`
@@ -354,6 +360,8 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		SubtitleMode:               req.SubtitleMode,
 		AutoSkipIntro:              req.AutoSkipIntro,
 		AutoSkipCredits:            req.AutoSkipCredits,
+		AutoSkipRecap:              req.AutoSkipRecap,
+		AutoPlayNextPreview:        req.AutoPlayNextPreview,
 		ShowForcedSubtitles:        showForcedSubtitles,
 		LibraryRestrictionsEnabled: req.LibraryRestrictionsEnabled,
 		AllowedLibraryIDs:          req.AllowedLibraryIDs,
@@ -501,6 +509,8 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		SubtitleMode:               req.SubtitleMode,
 		AutoSkipIntro:              req.AutoSkipIntro,
 		AutoSkipCredits:            req.AutoSkipCredits,
+		AutoSkipRecap:              req.AutoSkipRecap,
+		AutoPlayNextPreview:        req.AutoPlayNextPreview,
 		ShowForcedSubtitles:        req.ShowForcedSubtitles,
 		LibraryRestrictionsEnabled: req.LibraryRestrictionsEnabled,
 		AllowedLibraryIDs:          req.AllowedLibraryIDs,
@@ -678,6 +688,8 @@ func (h *ProfileHandler) toProfileResponse(ctx context.Context, p userstore.Prof
 		SubtitleMode:               p.SubtitleMode,
 		AutoSkipIntro:              p.AutoSkipIntro,
 		AutoSkipCredits:            p.AutoSkipCredits,
+		AutoSkipRecap:              p.AutoSkipRecap,
+		AutoPlayNextPreview:        p.AutoPlayNextPreview,
 		ShowForcedSubtitles:        p.ShowForcedSubtitles,
 		LibraryRestrictionsEnabled: p.LibraryRestrictionsEnabled,
 		AllowedLibraryIDs:          append([]int(nil), p.AllowedLibraryIDs...),

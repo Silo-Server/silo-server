@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -112,6 +113,8 @@ type Dependencies struct {
 	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
+	MarkerRegistry               *markers.Registry
+	MarkerResolver               markers.ExternalIDResolver
 	WatchProviderService         handlers.WatchProviderService
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
@@ -570,6 +573,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.CommandDispatcher = playback.NewCommandDispatcher(deps.SessionMgr, realtimeHub, commandTracker)
 		playbackHandler.IntroAnalyzer = deps.IntroAnalyzer
 		playbackHandler.IntroRepository = deps.IntroRepository
+		playbackHandler.MarkerRegistry = deps.MarkerRegistry
+		playbackHandler.MarkerResolver = deps.MarkerResolver
+		if deps.FileRepo != nil {
+			playbackHandler.MarkerUpserter = deps.FileRepo
+		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 

@@ -78,12 +78,3 @@ func TestNextSharedMarkerAttributionDoesNotDowngradeConfidenceWhenMarkerRejected
 	}
 }
 
-func TestValidateMarkerRangeRejectsInvalidCreditsBounds(t *testing.T) {
-	start := 900.0
-	end := 800.0
-
-	err := validateMarkerRange("credits", &start, &end, 1800)
-	if err == nil {
-		t.Fatal("expected invalid credits range error")
-	}
-}

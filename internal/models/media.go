@@ -65,6 +65,10 @@ type MediaFile struct {
 	IntroEnd                     *float64
 	CreditsStart                 *float64
 	CreditsEnd                   *float64
+	RecapStart                   *float64
+	RecapEnd                     *float64
+	PreviewStart                 *float64
+	PreviewEnd                   *float64
 	MarkersSource                *string
 	MarkersConfidence            *float64
 	IntroMarkersSource           *string
@@ -77,6 +81,16 @@ type MediaFile struct {
 	CreditsMarkersConfidence     *float64
 	CreditsMarkersAlgorithm      *string
 	CreditsMarkersDetectedAt     *time.Time
+	RecapMarkersSource           *string
+	RecapMarkersProvider         *string
+	RecapMarkersConfidence       *float64
+	RecapMarkersAlgorithm        *string
+	RecapMarkersDetectedAt       *time.Time
+	PreviewMarkersSource         *string
+	PreviewMarkersProvider       *string
+	PreviewMarkersConfidence     *float64
+	PreviewMarkersAlgorithm      *string
+	PreviewMarkersDetectedAt     *time.Time
 	EditionRaw                   string
 	EditionKey                   string
 	EditionConfidence            *float64

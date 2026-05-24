@@ -42,6 +42,8 @@ func TestNewMarkersUpdatedEvent(t *testing.T) {
 		42,
 		&TimeRangePayload{Start: 12, End: 75},
 		nil,
+		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("NewMarkersUpdatedEvent() error = %v", err)

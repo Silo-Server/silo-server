@@ -141,6 +141,8 @@ export default function PlaybackSettings() {
     language?: string;
     auto_skip_intro?: boolean;
     auto_skip_credits?: boolean;
+    auto_skip_recap?: boolean;
+    auto_play_next_preview?: boolean;
   }) => {
     updateMutation.mutate(
       { id: profile.id, body },
@@ -241,6 +243,36 @@ export default function PlaybackSettings() {
                 checked={profile.auto_skip_credits ?? false}
                 disabled={updateMutation.isPending}
                 onCheckedChange={(checked) => saveProfileField({ auto_skip_credits: checked })}
+              />
+            </div>
+          )}
+        />
+
+        <SettingRow
+          label="Auto-skip recaps"
+          description="Skip 'previously on…' recaps automatically when Silo can detect them."
+          control={(id) => (
+            <div id={id}>
+              <Switch
+                checked={profile.auto_skip_recap ?? false}
+                disabled={updateMutation.isPending}
+                onCheckedChange={(checked) => saveProfileField({ auto_skip_recap: checked })}
+              />
+            </div>
+          )}
+        />
+
+        <SettingRow
+          label="Start next at preview"
+          description="Begin the next episode when the current one reaches its next-episode preview teaser, rather than waiting for the end credits."
+          control={(id) => (
+            <div id={id}>
+              <Switch
+                checked={profile.auto_play_next_preview ?? false}
+                disabled={updateMutation.isPending}
+                onCheckedChange={(checked) =>
+                  saveProfileField({ auto_play_next_preview: checked })
+                }
               />
             </div>
           )}

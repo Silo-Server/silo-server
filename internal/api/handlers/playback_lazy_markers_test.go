@@ -69,6 +69,10 @@ func (e fakePlaybackIntroEligibility) IntroDetectionEligibleForPlayback(context.
 	return e.eligible, e.err
 }
 
+func (e fakePlaybackIntroEligibility) IsFileInEnabledLibrary(context.Context, int) (bool, error) {
+	return e.eligible, e.err
+}
+
 type fakePlaybackMarkerFileResolver struct {
 	mu   sync.Mutex
 	file *models.MediaFile

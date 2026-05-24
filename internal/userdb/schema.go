@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     subtitle_mode TEXT DEFAULT 'auto',
     auto_skip_intro BOOLEAN DEFAULT false,
     auto_skip_credits BOOLEAN DEFAULT false,
+    auto_skip_recap BOOLEAN DEFAULT false,
+    auto_play_next_preview BOOLEAN DEFAULT false,
     show_forced_subtitles BOOLEAN NOT NULL DEFAULT true,
     library_restrictions_enabled BOOLEAN DEFAULT false,
     max_playback_quality TEXT DEFAULT '',

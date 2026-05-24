@@ -172,6 +172,29 @@ func (r *Repository) IntroDetectionEligibleForPlayback(ctx context.Context, file
 	return true, nil
 }
 
+// IsFileInEnabledLibrary returns true when the file lives in any enabled
+// library, regardless of folder type or intro_detection_enabled. Online
+// marker providers (TheIntroDB, etc.) gate on this rather than the
+// stricter local-chromaprint-only check so movie libraries can participate
+// without opting into expensive audio fingerprinting.
+func (r *Repository) IsFileInEnabledLibrary(ctx context.Context, fileID int) (bool, error) {
+	var id int
+	err := r.pool.QueryRow(ctx, `
+		SELECT mf.id
+		FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.id = $1
+		  AND folders.enabled = true
+		  AND mf.missing_since IS NULL`, fileID).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("checking playback online marker eligibility: %w", err)
+	}
+	return true, nil
+}
+
 func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 	defer rows.Close()
 	var candidates []Candidate

@@ -81,6 +81,23 @@ const definitions: SettingDefinition[] = [
     defaultValue: "false",
   },
   {
+    key: "playback.auto_skip_recap",
+    scope: "device",
+    label: "Auto-skip recaps",
+    description: "Skip 'previously on…' recaps automatically when Silo can detect them.",
+    control: "switch",
+    defaultValue: "false",
+  },
+  {
+    key: "playback.auto_play_next_preview",
+    scope: "device",
+    label: "Start next episode at preview",
+    description:
+      "Begin playing the next episode when the current one reaches its next-episode preview teaser, rather than waiting for the end credits.",
+    control: "switch",
+    defaultValue: "false",
+  },
+  {
     key: "playback.auto_play_next",
     scope: "device",
     label: "Auto-play next episode",

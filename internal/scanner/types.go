@@ -116,8 +116,21 @@ type MarkerUpdate struct {
 	IntroEnd          *float64
 	CreditsStart      *float64
 	CreditsEnd        *float64
+	RecapStart        *float64
+	RecapEnd          *float64
+	PreviewStart      *float64
+	PreviewEnd        *float64
 	MarkersSource     string
 	MarkersProvider   *string
 	MarkersConfidence *float64
 	MarkersAlgorithm  string
+}
+
+// HasAnySegment reports whether the update would write at least one segment.
+// An update with no segment bounds set is a no-op and skipped by UpsertMarkers.
+func (u MarkerUpdate) HasAnySegment() bool {
+	return u.IntroStart != nil || u.IntroEnd != nil ||
+		u.CreditsStart != nil || u.CreditsEnd != nil ||
+		u.RecapStart != nil || u.RecapEnd != nil ||
+		u.PreviewStart != nil || u.PreviewEnd != nil
 }

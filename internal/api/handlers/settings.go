@@ -131,6 +131,16 @@ var settingsRegistry = map[string]settingSpec{
 		DefaultValue: "false",
 		Validate:     validateBoolSetting("playback.auto_skip_credits"),
 	},
+	"playback.auto_skip_recap": {
+		Scope:        scopeDevice,
+		DefaultValue: "false",
+		Validate:     validateBoolSetting("playback.auto_skip_recap"),
+	},
+	"playback.auto_play_next_preview": {
+		Scope:        scopeDevice,
+		DefaultValue: "false",
+		Validate:     validateBoolSetting("playback.auto_play_next_preview"),
+	},
 	"playback.auto_play_next": {
 		Scope:        scopeDevice,
 		DefaultValue: "true",

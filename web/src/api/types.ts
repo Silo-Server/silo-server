@@ -128,6 +128,8 @@ export interface Profile {
   show_forced_subtitles?: boolean;
   auto_skip_intro: boolean;
   auto_skip_credits: boolean;
+  auto_skip_recap: boolean;
+  auto_play_next_preview: boolean;
   library_restrictions_enabled: boolean;
   allowed_library_ids: number[] | null;
   max_playback_quality: string;
@@ -153,6 +155,8 @@ export interface CreateProfileRequest {
   show_forced_subtitles?: boolean;
   auto_skip_intro?: boolean;
   auto_skip_credits?: boolean;
+  auto_skip_recap?: boolean;
+  auto_play_next_preview?: boolean;
   library_restrictions_enabled?: boolean;
   allowed_library_ids?: number[] | null;
   max_playback_quality?: string;
@@ -690,6 +694,8 @@ export interface FileVersion {
   chapters?: VersionChapter[];
   intro?: TimeRange | null;
   credits?: TimeRange | null;
+  recap?: TimeRange | null;
+  preview?: TimeRange | null;
 }
 
 export interface PlaybackVariantPart {
@@ -856,6 +862,8 @@ export interface ItemDetail {
   subtitles: SubtitleInfo[];
   intro: TimeRange | null;
   credits: TimeRange | null;
+  recap?: TimeRange | null;
+  preview?: TimeRange | null;
   effective_subtitle_language?: string;
   effective_subtitle_mode?: string;
   effective_show_forced_subtitles?: boolean;
@@ -877,6 +885,8 @@ export interface WatchDetail {
   subtitles: SubtitleInfo[];
   intro: TimeRange | null;
   credits: TimeRange | null;
+  recap?: TimeRange | null;
+  preview?: TimeRange | null;
   user_data?: LeafItemUserData;
   series_id?: string;
   series_title?: string;
