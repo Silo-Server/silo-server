@@ -812,11 +812,10 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	argIdx := 2
 
 	// All title-side text on both sides of @@ flows through
-	// public.normalize_search_text() (migration 127), which strips
-	// non-alphanumeric chars and standalone "and" tokens. This makes "&" and
-	// "and" interchangeable so "Law & Order" and "Law and Order" match the
-	// same items. The expression must match idx_media_items_search_title_fields
-	// exactly for the GIN index to be used.
+	// public.normalize_search_text() (migrations 127 / 138), which strips
+	// non-alphanumeric chars, drops standalone "and" tokens, and normalizes
+	// common title numbers. The expression must match
+	// idx_media_items_search_title_fields exactly for the GIN index to be used.
 	//
 	// Overview uses the 'english' config which natively treats "and" as a
 	// stop word, so it does not need explicit normalization.

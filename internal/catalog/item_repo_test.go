@@ -238,7 +238,7 @@ func TestItemRepo_Search_StrictTitleFilter_UsesWindowCount(t *testing.T) {
 //
 // The original_title and sort_title fallbacks are intentionally not stored
 // as generated columns (less search traffic), so they call the
-// public.normalize_search_text() function (migration 127) inline.
+// public.normalize_search_text() function (migrations 127 / 138) inline.
 func TestItemRepo_Search_UsesTitleNormalizedColumn(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, AccessFilter{})
@@ -260,9 +260,9 @@ func TestItemRepo_Search_UsesTitleNormalizedColumn(t *testing.T) {
 // text is wrapped in public.normalize_search_text() before being handed to
 // websearch_to_tsquery on the title arm, and to phraseto_tsquery for the
 // phrase rank. The tsvector side of @@ applies the same normalization, so
-// "&" and "and" become interchangeable end-to-end (migration 127). The
-// overview arm is intentionally left unwrapped — the 'english' config
-// already treats "and" as a stop word.
+// title normalization stays symmetric end-to-end. The overview arm is
+// intentionally left unwrapped — the 'english' config already treats "and"
+// as a stop word.
 func TestItemRepo_Search_NormalizesTsqueryInput(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("law and order", []string{"movie"}, 20, 0, AccessFilter{})

@@ -99,7 +99,7 @@ func parseYearToken(token string) (int, bool) {
 }
 
 // normalizeTitleForComparison must stay in lockstep with the SQL function
-// public.normalize_search_text (migration 127) and the title_normalized
+// public.normalize_search_text (migrations 127 / 138) and the title_normalized
 // generated column. Mismatches between Go and SQL normalization produce
 // asymmetric search results (Go-computed ExactTitleHint failing to match a
 // row whose title_normalized has the same logical content).
@@ -116,14 +116,14 @@ func normalizeTitleForComparison(input string) string {
 		}
 	}
 
-	return stripStandaloneAndTokens(collapseSearchWhitespace(b.String()))
+	return normalizeSearchTokens(collapseSearchWhitespace(b.String()))
 }
 
-// stripStandaloneAndTokens drops the standalone token "and" from a
-// whitespace-separated lowercase string. Together with the alphanumeric
-// pass above, this makes "&" and the word "and" interchangeable: both
-// "Law & Order" and "Law and Order" reduce to "law order".
-func stripStandaloneAndTokens(input string) string {
+// normalizeSearchTokens drops the standalone token "and" from a
+// whitespace-separated lowercase string and maps common number words /
+// ordinals to digit tokens. Together with the alphanumeric pass above, this
+// mirrors public.normalize_search_text().
+func normalizeSearchTokens(input string) string {
 	if input == "" {
 		return ""
 	}
@@ -133,9 +133,83 @@ func stripStandaloneAndTokens(input string) string {
 		if f == "and" {
 			continue
 		}
-		filtered = append(filtered, f)
+		filtered = append(filtered, normalizeSearchNumberToken(f))
 	}
 	return strings.Join(filtered, " ")
+}
+
+func normalizeSearchNumberToken(token string) string {
+	switch token {
+	case "zero", "zeroth":
+		return "0"
+	case "one", "first":
+		return "1"
+	case "two", "second":
+		return "2"
+	case "three", "third":
+		return "3"
+	case "four", "fourth":
+		return "4"
+	case "five", "fifth":
+		return "5"
+	case "six", "sixth":
+		return "6"
+	case "seven", "seventh":
+		return "7"
+	case "eight", "eighth":
+		return "8"
+	case "nine", "ninth":
+		return "9"
+	case "ten", "tenth":
+		return "10"
+	case "eleven", "eleventh":
+		return "11"
+	case "twelve", "twelfth":
+		return "12"
+	case "thirteen", "thirteenth":
+		return "13"
+	case "fourteen", "fourteenth":
+		return "14"
+	case "fifteen", "fifteenth":
+		return "15"
+	case "sixteen", "sixteenth":
+		return "16"
+	case "seventeen", "seventeenth":
+		return "17"
+	case "eighteen", "eighteenth":
+		return "18"
+	case "nineteen", "nineteenth":
+		return "19"
+	case "twenty", "twentieth":
+		return "20"
+	}
+
+	if stripped, ok := stripDigitOrdinalSuffix(token); ok {
+		return stripped
+	}
+	return token
+}
+
+func stripDigitOrdinalSuffix(token string) (string, bool) {
+	for _, suffix := range []string{"st", "nd", "rd", "th"} {
+		stem := strings.TrimSuffix(token, suffix)
+		if stem != token && hasOnlyDigits(stem) {
+			return stem, true
+		}
+	}
+	return "", false
+}
+
+func hasOnlyDigits(input string) bool {
+	if input == "" {
+		return false
+	}
+	for _, r := range input {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func collapseSearchWhitespace(input string) string {
