@@ -37,7 +37,7 @@ func (s *Service) Enabled(ctx context.Context) (bool, error) {
 	}
 	value, err := s.settings.GetString(ctx, "audiobooks.enabled")
 	if err != nil {
-		return false, fmt.Errorf("audiobooks: read audiobooks.enabled: %w", err)
+		return false, fmt.Errorf("read audiobooks.enabled: %w", err)
 	}
 	return value == "true", nil
 }
