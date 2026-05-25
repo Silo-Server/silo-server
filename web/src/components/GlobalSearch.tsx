@@ -7,13 +7,17 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { buildQueryCatalogHref } from "@/pages/catalogSearchParams";
 import type { BrowseItem } from "@/api/types";
 import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/catalog";
+import { useRequestSearch } from "@/hooks/queries/useRequests";
+import { useCanRequest } from "@/hooks/useCanRequest";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
+import { RequestToAddSection } from "./RequestToAddSection";
 
 const PREVIEW_LIMIT = 8;
 const DEBOUNCE_MS = 200;
+const TMDB_DEBOUNCE_MS = 400;
 
 function typeLabel(type: BrowseItem["type"]): string {
   switch (type) {
@@ -100,6 +104,16 @@ export function GlobalSearch({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const navigate = useViewTransitionNavigate();
   const debouncedQuery = useDebounce(query.trim(), DEBOUNCE_MS);
+  const tmdbDebouncedQuery = useDebounce(query.trim(), TMDB_DEBOUNCE_MS);
+  const canRequest = useCanRequest();
+  const tmdbQuery = useRequestSearch("all", tmdbDebouncedQuery, 1, {
+    enabled: canRequest.discoveryEnabled,
+  });
+  const tmdbMissingCount =
+    tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
+  const tmdbStillLoading =
+    canRequest.discoveryEnabled && tmdbDebouncedQuery.length > 1 && tmdbQuery.isLoading;
+  const tmdbWillRender = canRequest.discoveryEnabled && tmdbMissingCount > 0;
 
   const searchState = useMemo(
     () => createCatalogSearchState("query", { q: debouncedQuery || undefined }),
@@ -179,7 +193,9 @@ export function GlobalSearch({
     !previewQuery.isFetching &&
     debouncedQuery.length > 0 &&
     items.length === 0 &&
-    !previewQuery.isError;
+    !previewQuery.isError &&
+    !tmdbStillLoading &&
+    !tmdbWillRender;
   const showError = previewQuery.isError;
 
   return (
@@ -264,6 +280,13 @@ export function GlobalSearch({
                   onPick={handlePickItem}
                 />
               ))}
+              {tmdbDebouncedQuery.length > 1 && canRequest.discoveryEnabled && (
+                <RequestToAddSection
+                  variant="dialog"
+                  query={tmdbDebouncedQuery}
+                  libraryHadHits={items.length > 0}
+                />
+              )}
             </div>
             <div role="status" aria-live="polite" className="sr-only">
               {items.length} results found
