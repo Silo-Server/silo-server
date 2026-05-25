@@ -138,8 +138,11 @@ func (s *Service) EnqueueScans(ctx context.Context, targets []scantrigger.Target
 	}
 	inputs := make([]CreateInput, 0, len(targets))
 	for _, target := range targets {
+		if target.Folder == nil {
+			return fmt.Errorf("scan queue: target is missing folder")
+		}
 		inputs = append(inputs, CreateInput{
-			LibraryID: target.LibraryID,
+			LibraryID: target.Folder.ID,
 			Mode:      target.Mode,
 			Path:      target.Path,
 			Trigger:   target.Trigger,

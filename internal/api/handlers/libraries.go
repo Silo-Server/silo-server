@@ -572,10 +572,9 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 	} else {
 		initialScanID := ulid.Make().String()
 		h.recordAcceptedScan(initialScanID, &scantrigger.Target{
-			Folder:    folder,
-			LibraryID: folder.ID,
-			Mode:      scantrigger.ModeLibrary,
-			Trigger:   "library_created",
+			Folder:  folder,
+			Mode:    scantrigger.ModeLibrary,
+			Trigger: "library_created",
 		})
 		h.runFolderScanAsync(initialScanID, folder, "library_created")
 	}
@@ -663,10 +662,9 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 		} else {
 			updateScanID := ulid.Make().String()
 			h.recordAcceptedScan(updateScanID, &scantrigger.Target{
-				Folder:    folder,
-				LibraryID: folder.ID,
-				Mode:      scantrigger.ModeLibrary,
-				Trigger:   "library_paths_changed",
+				Folder:  folder,
+				Mode:    scantrigger.ModeLibrary,
+				Trigger: "library_paths_changed",
 			})
 			h.runFolderScanAsync(updateScanID, folder, "library_paths_changed")
 		}
@@ -819,8 +817,8 @@ func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.ScanQueue != nil {
-		if _, err := h.ScanQueue.EnqueueScan(r.Context(), target.LibraryID, target.Mode, target.Path, target.Trigger); err != nil {
-			slog.Error("queueing library scan", "library_id", target.LibraryID, "error", err)
+		if _, err := h.ScanQueue.EnqueueScan(r.Context(), target.Folder.ID, target.Mode, target.Path, target.Trigger); err != nil {
+			slog.Error("queueing library scan", "library_id", target.Folder.ID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue scan")
 			return
 		}
@@ -843,7 +841,7 @@ func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, scanResponse{
 		Status:    "accepted",
 		Mode:      target.Mode,
-		LibraryID: target.LibraryID,
+		LibraryID: target.Folder.ID,
 	})
 }
 
@@ -1057,7 +1055,7 @@ func (h *LibraryHandler) recordAcceptedScan(scanID string, target *scantrigger.T
 	}
 	h.ScanRegistry.Upsert(evt.ScanRun{
 		ID:        scanID,
-		LibraryID: target.LibraryID,
+		LibraryID: target.Folder.ID,
 		Mode:      target.Mode,
 		Path:      target.Path,
 		Trigger:   target.Trigger,

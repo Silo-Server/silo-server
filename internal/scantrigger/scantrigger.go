@@ -36,12 +36,14 @@ type Request struct {
 	Trigger   string
 }
 
+// Target is a fully-resolved scan request. Folder is always non-nil for
+// targets returned by Resolver; callers should read the library ID via
+// target.Folder.ID rather than tracking it separately.
 type Target struct {
-	Folder    *models.MediaFolder
-	LibraryID int
-	Mode      string
-	Path      string
-	Trigger   string
+	Folder  *models.MediaFolder
+	Mode    string
+	Path    string
+	Trigger string
 }
 
 type RequestError struct {
@@ -121,7 +123,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 		if folder != nil && !folder.Enabled {
 			return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled"}
 		}
-		return &Target{Folder: folder, LibraryID: folder.ID, Mode: ModeLibrary, Trigger: trigger}, nil
+		return &Target{Folder: folder, Mode: ModeLibrary, Trigger: trigger}, nil
 	}
 
 	cleanPath := filepath.Clean(req.Path)
@@ -167,7 +169,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	if mode == ModeLibrary {
 		targetPath = ""
 	}
-	return &Target{Folder: folder, LibraryID: folder.ID, Mode: mode, Path: targetPath, Trigger: trigger}, nil
+	return &Target{Folder: folder, Mode: mode, Path: targetPath, Trigger: trigger}, nil
 }
 
 func EnqueueAll(ctx context.Context, queue Queuer, targets []Target) error {

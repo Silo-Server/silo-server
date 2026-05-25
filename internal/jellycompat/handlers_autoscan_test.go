@@ -59,8 +59,12 @@ func (q *fakeAutoscanQueue) EnqueueScans(_ context.Context, targets []scantrigge
 		return q.batchErr
 	}
 	for _, target := range targets {
+		folderID := 0
+		if target.Folder != nil {
+			folderID = target.Folder.ID
+		}
 		q.calls = append(q.calls, queuedScan{
-			libraryID: target.LibraryID,
+			libraryID: folderID,
 			mode:      target.Mode,
 			path:      target.Path,
 			trigger:   target.Trigger,

@@ -29,9 +29,11 @@ type AdminAPIKeyAuthenticator struct {
 }
 
 type adminAPIKeyAuthResult struct {
-	ctx    context.Context
-	status int
-	ok     bool
+	ctx     context.Context
+	status  int
+	code    string
+	message string
+	ok      bool
 }
 
 func NewAdminAPIKeyAuthenticator(keys apiKeyValidator, users apiKeyUserLoader) *AdminAPIKeyAuthenticator {
@@ -50,7 +52,7 @@ func (a *AdminAPIKeyAuthenticator) RequireAdminAPIKey(next http.Handler) http.Ha
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		result := a.authenticate(r)
 		if !result.ok {
-			writeError(w, result.status, authErrorCode(result.status), authErrorMessage(result.status))
+			writeError(w, result.status, result.code, result.message)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(result.ctx))
@@ -64,7 +66,7 @@ func RequireSessionOrAdminAPIKey(sessionAuth *Authenticator, keyAuth *AdminAPIKe
 			if ok && strings.HasPrefix(token, "sa_") {
 				result := keyAuth.authenticate(r)
 				if !result.ok {
-					writeError(w, result.status, authErrorCode(result.status), authErrorMessage(result.status))
+					writeError(w, result.status, result.code, result.message)
 					return
 				}
 				next.ServeHTTP(w, r.WithContext(result.ctx))
@@ -76,23 +78,34 @@ func RequireSessionOrAdminAPIKey(sessionAuth *Authenticator, keyAuth *AdminAPIKe
 }
 
 func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuthResult {
+	unauthorized := adminAPIKeyAuthResult{
+		ctx:     r.Context(),
+		status:  http.StatusUnauthorized,
+		code:    "Unauthorized",
+		message: "Invalid API key",
+	}
 	if a == nil || a.keys == nil || a.users == nil {
-		return adminAPIKeyAuthResult{ctx: r.Context(), status: http.StatusUnauthorized}
+		return unauthorized
 	}
 	token, ok := ExtractToken(r)
 	if !ok || !strings.HasPrefix(token, "sa_") {
-		return adminAPIKeyAuthResult{ctx: r.Context(), status: http.StatusUnauthorized}
+		return unauthorized
 	}
 	apiKey, err := a.keys.GetByKey(r.Context(), token)
 	if err != nil || apiKey == nil {
-		return adminAPIKeyAuthResult{ctx: r.Context(), status: http.StatusUnauthorized}
+		return unauthorized
 	}
 	user, err := a.users.GetByID(r.Context(), apiKey.UserID)
 	if err != nil || user == nil || !user.Enabled {
-		return adminAPIKeyAuthResult{ctx: r.Context(), status: http.StatusUnauthorized}
+		return unauthorized
 	}
 	if user.Role != "admin" {
-		return adminAPIKeyAuthResult{ctx: context.WithValue(r.Context(), adminAPIKeyKey, false), status: http.StatusForbidden}
+		return adminAPIKeyAuthResult{
+			ctx:     r.Context(),
+			status:  http.StatusForbidden,
+			code:    "Forbidden",
+			message: "Admin access required",
+		}
 	}
 	go func(id int64) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -106,18 +119,4 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 		status: http.StatusOK,
 		ok:     true,
 	}
-}
-
-func authErrorCode(status int) string {
-	if status == http.StatusForbidden {
-		return "Forbidden"
-	}
-	return "Unauthorized"
-}
-
-func authErrorMessage(status int) string {
-	if status == http.StatusForbidden {
-		return "Admin access required"
-	}
-	return "Invalid API key"
 }

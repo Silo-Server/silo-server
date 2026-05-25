@@ -44,7 +44,7 @@ func TestResolverClassifiesLibraryRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if target.LibraryID != 7 || target.Mode != ModeLibrary || target.Path != "" {
+	if target.Folder == nil || target.Folder.ID != 7 || target.Mode != ModeLibrary || target.Path != "" {
 		t.Fatalf("unexpected target: %#v", target)
 	}
 }
@@ -66,7 +66,7 @@ func TestResolverClassifiesSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if target.LibraryID != 8 || target.Mode != ModeSubtree || target.Path != filepath.Clean(subtree) {
+	if target.Folder == nil || target.Folder.ID != 8 || target.Mode != ModeSubtree || target.Path != filepath.Clean(subtree) {
 		t.Fatalf("unexpected target: %#v", target)
 	}
 }
@@ -88,7 +88,7 @@ func TestResolverClassifiesVideoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if target.LibraryID != 9 || target.Mode != ModeFile || target.Path != filepath.Clean(filePath) {
+	if target.Folder == nil || target.Folder.ID != 9 || target.Mode != ModeFile || target.Path != filepath.Clean(filePath) {
 		t.Fatalf("unexpected target: %#v", target)
 	}
 }
@@ -176,7 +176,7 @@ type fakeQueue struct {
 }
 
 func (q *fakeQueue) EnqueueScan(_ context.Context, folderID int, mode, path, trigger string) (bool, error) {
-	q.calls = append(q.calls, Target{LibraryID: folderID, Mode: mode, Path: path, Trigger: trigger})
+	q.calls = append(q.calls, Target{Folder: &models.MediaFolder{ID: folderID}, Mode: mode, Path: path, Trigger: trigger})
 	return true, nil
 }
 
@@ -192,9 +192,10 @@ func (q *fakeQueue) EnqueueScans(_ context.Context, targets []Target) error {
 
 func TestEnqueueAllUsesBatchQueue(t *testing.T) {
 	queue := &fakeQueue{}
+	folder := &models.MediaFolder{ID: 1}
 	targets := []Target{
-		{LibraryID: 1, Mode: ModeFile, Path: "/media/one.mkv", Trigger: "autoscan"},
-		{LibraryID: 1, Mode: ModeFile, Path: "/media/two.mkv", Trigger: "autoscan"},
+		{Folder: folder, Mode: ModeFile, Path: "/media/one.mkv", Trigger: "autoscan"},
+		{Folder: folder, Mode: ModeFile, Path: "/media/two.mkv", Trigger: "autoscan"},
 	}
 
 	if err := EnqueueAll(context.Background(), queue, targets); err != nil {
