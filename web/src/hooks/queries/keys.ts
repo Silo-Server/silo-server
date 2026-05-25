@@ -118,6 +118,7 @@ export const collectionKeys = {
 
 export const requestKeys = {
   all: ["requests"] as const,
+  status: () => ["requests", "status"] as const,
   discovery: () => ["requests", "discovery"] as const,
   discoverySection: (section: string, page: number) =>
     ["requests", "discovery", section, page] as const,

@@ -29,6 +29,7 @@ type RequestService interface {
 	Decline(ctx context.Context, viewer mediarequests.Viewer, id, reason string) (*mediarequests.Request, error)
 	Cancel(ctx context.Context, viewer mediarequests.Viewer, id, reason string) (*mediarequests.Request, error)
 	Retry(ctx context.Context, viewer mediarequests.Viewer, id string) (*mediarequests.Request, error)
+	GetFeatureStatus(ctx context.Context, viewer mediarequests.Viewer) (mediarequests.FeatureStatus, error)
 	GetSettings(ctx context.Context, viewer mediarequests.Viewer) (mediarequests.Settings, error)
 	UpdateSettings(ctx context.Context, viewer mediarequests.Viewer, settings mediarequests.Settings) (mediarequests.Settings, error)
 	GetUserLimit(ctx context.Context, viewer mediarequests.Viewer, userID int) (*mediarequests.UserLimit, error)
@@ -360,6 +361,19 @@ func (h *RequestsHandler) HandleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, req)
+}
+
+func (h *RequestsHandler) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, true)
+	if !ok {
+		return
+	}
+	status, err := h.service.GetFeatureStatus(r.Context(), viewer)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (h *RequestsHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {

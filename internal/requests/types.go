@@ -70,6 +70,10 @@ type Settings struct {
 	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
+type FeatureStatus struct {
+	RequestsEnabled bool `json:"requests_enabled"`
+}
+
 type UserLimit struct {
 	UserID       int          `json:"user_id"`
 	LimitMode    LimitMode    `json:"limit_mode"`

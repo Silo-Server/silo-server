@@ -103,6 +103,10 @@ func (f *fakeRequestService) Retry(context.Context, mediarequests.Viewer, string
 	return nil, nil
 }
 
+func (f *fakeRequestService) GetFeatureStatus(context.Context, mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
+	return mediarequests.FeatureStatus{}, nil
+}
+
 func (f *fakeRequestService) GetSettings(context.Context, mediarequests.Viewer) (mediarequests.Settings, error) {
 	return mediarequests.Settings{}, nil
 }

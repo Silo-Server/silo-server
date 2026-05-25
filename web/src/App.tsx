@@ -62,6 +62,7 @@ import Calendar from "@/pages/Calendar";
 import Signup from "@/pages/Signup";
 import TasteSeed from "@/pages/TasteSeed";
 import { useFavorites } from "@/hooks/queries/favorites";
+import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { isTasteSeedDismissed } from "@/lib/tasteSeed";
 import SettingsLayout from "@/pages/SettingsLayout";
 import AppearanceSettings from "@/pages/settings/AppearanceSettings";
@@ -174,6 +175,20 @@ function RequirePrimaryOrAdmin({ children }: { children: ReactNode }) {
   if (user?.role !== "admin" && profile?.is_primary !== true) {
     return <Navigate to="/" replace />;
   }
+  return <>{children}</>;
+}
+
+function RequireRequestsEnabled({ children }: { children: ReactNode }) {
+  const status = useRequestFeatureStatus();
+  if (status.isLoading) {
+    return (
+      <div className="p-8" role="status" aria-live="polite">
+        <span className="sr-only">Loading request availability</span>
+        Loading...
+      </div>
+    );
+  }
+  if (status.data?.requests_enabled !== true) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -449,19 +464,45 @@ function AppRoutes() {
                             path="/collections/:id"
                             element={<LegacyUserCollectionRedirect />}
                           />
-                          <Route path="/requests" element={<Requests />} />
-                          <Route path="/requests/:mediaType/:tmdbId" element={<RequestDetail />} />
+                          <Route
+                            path="/requests"
+                            element={
+                              <RequireRequestsEnabled>
+                                <Requests />
+                              </RequireRequestsEnabled>
+                            }
+                          />
+                          <Route
+                            path="/requests/:mediaType/:tmdbId"
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestDetail />
+                              </RequireRequestsEnabled>
+                            }
+                          />
                           <Route
                             path="/requests/browse/studio/:slug"
-                            element={<RequestBrowse kind="studio" />}
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestBrowse kind="studio" />
+                              </RequireRequestsEnabled>
+                            }
                           />
                           <Route
                             path="/requests/browse/network/:slug"
-                            element={<RequestBrowse kind="network" />}
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestBrowse kind="network" />
+                              </RequireRequestsEnabled>
+                            }
                           />
                           <Route
                             path="/requests/browse/genre/:slug"
-                            element={<RequestBrowse kind="genre" />}
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestBrowse kind="genre" />
+                              </RequireRequestsEnabled>
+                            }
                           />
                           <Route path="/recommendations" element={<Recommendations />} />
                           <Route

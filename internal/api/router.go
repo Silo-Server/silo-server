@@ -1404,6 +1404,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/discover/browse/genre/{slug}", requestHandler.HandleBrowseGenre)
 						r.Get("/discover/{section}", requestHandler.HandleDiscoverSection)
 						r.Get("/detail/{media_type}/{tmdb_id}", requestHandler.HandleGetDetail)
+						r.Get("/status", requestHandler.HandleGetStatus)
 						r.Post("/", requestHandler.HandleCreate)
 						r.Get("/mine", requestHandler.HandleListMine)
 						r.Get("/{id}", requestHandler.HandleGet)

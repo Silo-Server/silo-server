@@ -13,6 +13,7 @@ import type {
   MediaRequestsListResponse,
   RequestDiscoveryResponse,
   RequestDiscoverySection,
+  RequestFeatureStatus,
   RequestIntegration,
   RequestIntegrationOptions,
   RequestIntegrationsResponse,
@@ -59,6 +60,14 @@ export function useRequestDiscovery() {
     queryKey: requestKeys.discovery(),
     queryFn: () =>
       api<RequestDiscoveryResponse>("/requests/discover").then((data) => data.sections ?? []),
+    staleTime: REQUESTS_STALE_TIME,
+  });
+}
+
+export function useRequestFeatureStatus() {
+  return useQuery({
+    queryKey: requestKeys.status(),
+    queryFn: () => api<RequestFeatureStatus>("/requests/status"),
     staleTime: REQUESTS_STALE_TIME,
   });
 }
@@ -269,6 +278,7 @@ export function useUpdateRequestSettings() {
     onSuccess: () => {
       toast.success("Request settings saved");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestSettings() });
+      queryClient.invalidateQueries({ queryKey: requestKeys.status() });
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {

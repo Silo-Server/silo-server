@@ -37,10 +37,10 @@ func TestCreateRequestQuotaExceeded(t *testing.T) {
 
 func TestNormalizeListFilterCapsLimit(t *testing.T) {
 	cases := []struct {
-		name     string
-		in       ListFilter
-		wantLim  int
-		wantOff  int
+		name    string
+		in      ListFilter
+		wantLim int
+		wantOff int
 	}{
 		{"zero defaults", ListFilter{}, defaultRequestListLimit, 0},
 		{"negative defaults", ListFilter{Limit: -10, Offset: -5}, defaultRequestListLimit, 0},
@@ -597,6 +597,100 @@ func TestSearchWithoutMediaTypeSearchesMoviesAndSeries(t *testing.T) {
 	}
 }
 
+func TestDisabledRequestsBlockUserSurfaces(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = false
+	store.requests["req-1"] = &Request{
+		ID:                "req-1",
+		MediaType:         MediaTypeMovie,
+		TMDBID:            550,
+		Status:            StatusPending,
+		Outcome:           OutcomeActive,
+		RequestedByUserID: 1,
+	}
+	tmdbClient := &fakeTMDBClient{
+		page:         &tmdb.MediaPage{Results: []tmdb.MediaResult{{ID: 550, MediaType: "movie", Title: "Fight Club"}}},
+		detail:       &tmdb.MediaDetail{ID: 550, MediaType: "movie", Title: "Fight Club"},
+		discoverPage: &tmdb.MediaPage{Results: []tmdb.MediaResult{{ID: 550, MediaType: "movie", Title: "Fight Club"}}},
+	}
+	service := newTestServiceWithTMDB(store, tmdbClient)
+	viewer := testViewer(1)
+
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"search", func() error {
+			_, err := service.Search(context.Background(), viewer, "fight", MediaTypeMovie, 1)
+			return err
+		}},
+		{"discover all", func() error {
+			_, err := service.DiscoverAll(context.Background(), viewer)
+			return err
+		}},
+		{"discover section", func() error {
+			_, err := service.Discover(context.Background(), viewer, "popular_movies", 1)
+			return err
+		}},
+		{"detail", func() error {
+			_, err := service.GetDetail(context.Background(), viewer, MediaTypeMovie, 550)
+			return err
+		}},
+		{"create", func() error {
+			_, err := service.CreateRequest(context.Background(), viewer, CreateRequestInput{
+				MediaType: MediaTypeMovie,
+				TMDBID:    550,
+				Title:     "Fight Club",
+			})
+			return err
+		}},
+		{"mine", func() error {
+			_, err := service.ListMine(context.Background(), viewer, ListFilter{})
+			return err
+		}},
+		{"get", func() error {
+			_, err := service.GetRequest(context.Background(), viewer, "req-1")
+			return err
+		}},
+		{"cancel", func() error {
+			_, err := service.Cancel(context.Background(), viewer, "req-1", "")
+			return err
+		}},
+		{"studios", func() error {
+			_, err := service.ListStudios(context.Background(), viewer)
+			return err
+		}},
+		{"networks", func() error {
+			_, err := service.ListNetworks(context.Background(), viewer)
+			return err
+		}},
+		{"genres", func() error {
+			_, err := service.ListGenres(context.Background(), viewer)
+			return err
+		}},
+		{"browse studio", func() error {
+			_, err := service.BrowseStudio(context.Background(), viewer, "marvel-studios", "popularity", 1)
+			return err
+		}},
+		{"browse network", func() error {
+			_, err := service.BrowseNetwork(context.Background(), viewer, "netflix", "popularity", 1)
+			return err
+		}},
+		{"browse genre", func() error {
+			_, err := service.BrowseGenre(context.Background(), viewer, "action", MediaTypeMovie, "popularity", 1)
+			return err
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); !errors.Is(err, ErrRequestsDisabled) {
+				t.Fatalf("err = %v, want ErrRequestsDisabled", err)
+			}
+		})
+	}
+}
+
 func TestReconcileRequestsCompletesFromCatalogPresence(t *testing.T) {
 	store := newFakeStore()
 	store.candidates = []*Request{{
@@ -875,6 +969,7 @@ type fakeStore struct {
 func newFakeStore() *fakeStore {
 	return &fakeStore{
 		settings: Settings{
+			RequestsEnabled:   true,
 			GlobalMaxRequests: 5,
 			GlobalWindowDays:  7,
 		},

@@ -1548,6 +1548,10 @@ export interface MediaRequestsListResponse {
   requests: MediaRequest[];
 }
 
+export interface RequestFeatureStatus {
+  requests_enabled: boolean;
+}
+
 export interface RequestSettings {
   requests_enabled: boolean;
   global_max_requests: number;

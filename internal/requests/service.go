@@ -95,6 +95,9 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
+	}
 	mediaType, err := normalizeSearchMediaType(mediaType)
 	if err != nil {
 		return nil, err
@@ -113,6 +116,9 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
+	}
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
 	}
 	section = strings.TrimSpace(section)
 	if _, ok := discoverySectionTitles[section]; !ok {
@@ -137,6 +143,12 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 }
 
 func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySection, error) {
+	if s == nil || s.store == nil || s.tmdb == nil {
+		return nil, fmt.Errorf("request service is not configured")
+	}
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
+	}
 	sections := make([]DiscoverySection, len(discoverySectionOrder))
 	group, gctx := errgroup.WithContext(ctx)
 	group.SetLimit(externalIDHydrationConcurrency)
@@ -163,6 +175,9 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbID int) (*MediaDetail, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
+	}
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
 	}
 	mediaType, err := normalizeMediaType(mediaType)
 	if err != nil {
@@ -256,6 +271,12 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := validateViewer(viewer); err != nil {
 		return nil, err
 	}
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("request service is not configured")
+	}
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
+	}
 	normalized, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -342,6 +363,9 @@ func (s *Service) ListMine(ctx context.Context, viewer Viewer, filter ListFilter
 	if viewer.UserID == 0 {
 		return nil, ErrForbidden
 	}
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
+	}
 	return s.store.ListMine(ctx, viewer.UserID, normalizeListFilter(filter))
 }
 
@@ -353,6 +377,9 @@ func (s *Service) ListAdmin(ctx context.Context, viewer Viewer, filter ListFilte
 }
 
 func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Request, error) {
+	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
+	}
 	req, err := s.store.GetRequest(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
@@ -411,6 +438,11 @@ func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string)
 func (s *Service) Cancel(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
 	if viewer.UserID == 0 {
 		return nil, ErrForbidden
+	}
+	if !viewer.IsAdmin {
+		if err := s.ensureRequestsEnabled(ctx); err != nil {
+			return nil, err
+		}
 	}
 	req, err := s.store.GetRequest(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -504,6 +536,25 @@ func (s *Service) GetSettings(ctx context.Context, viewer Viewer) (Settings, err
 		return Settings{}, ErrForbidden
 	}
 	return s.store.GetSettings(ctx)
+}
+
+func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus, error) {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return FeatureStatus{}, err
+	}
+	return FeatureStatus{RequestsEnabled: settings.RequestsEnabled}, nil
+}
+
+func (s *Service) ensureRequestsEnabled(ctx context.Context) error {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.RequestsEnabled {
+		return ErrRequestsDisabled
+	}
+	return nil
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, viewer Viewer, settings Settings) (Settings, error) {
