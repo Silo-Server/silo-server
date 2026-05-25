@@ -424,7 +424,7 @@ describe("Catalog page", () => {
       </QueryClientProvider>,
     );
 
-    const call = mockUseRequestSearch.mock.calls.at(-1);
+    const call = mockUseRequestSearch.mock.calls[mockUseRequestSearch.mock.calls.length - 1];
     expect(call?.[3]).toEqual({ enabled: false });
   });
 

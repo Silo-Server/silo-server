@@ -219,7 +219,7 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
     renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
 
-    const call = mocks.useRequestSearch.mock.calls.at(-1);
+    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
     expect(call?.[3]).toEqual({ enabled: false });
   });
 

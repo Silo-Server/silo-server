@@ -77,7 +77,7 @@ describe("RequestToAddSection (dialog variant)", () => {
 
     render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
 
-    const call = mocks.useRequestSearch.mock.calls.at(-1);
+    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
     expect(call?.[0]).toBe("all");
     expect(call?.[1]).toBe("dune");
     expect(call?.[2]).toBe(1);
@@ -94,7 +94,7 @@ describe("RequestToAddSection (dialog variant)", () => {
 
     render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
 
-    const call = mocks.useRequestSearch.mock.calls.at(-1);
+    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
     expect(call?.[3]).toEqual({ enabled: true });
   });
 
