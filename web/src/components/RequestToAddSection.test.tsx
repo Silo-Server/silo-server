@@ -194,3 +194,63 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(markup).toMatch(/title="[^"]+"/);
   });
 });
+
+describe("RequestToAddSection (grid variant)", () => {
+  beforeEach(() => {
+    mocks.useCanRequest.mockReset();
+    mocks.useRequestSearch.mockReset();
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+  });
+
+  it("renders a card per result with the Request to Add header when library had hits", () => {
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 2,
+        results: [
+          missingResult({ tmdb_id: 1, title: "Dune: Prophecy" }),
+          missingResult({ tmdb_id: 2, title: "Dune (1984)" }),
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = render(<RequestToAddSection variant="grid" query="dune" libraryHadHits />);
+    expect(markup).toContain("Request to Add");
+    expect(markup).toContain("Dune: Prophecy");
+    expect(markup).toContain("Dune (1984)");
+  });
+
+  it("renders the soft framing in the grid variant when library had 0 hits", () => {
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [missingResult({ tmdb_id: 1, title: "Dune: Prophecy" })],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = render(
+      <RequestToAddSection variant="grid" query="dune" libraryHadHits={false} />,
+    );
+    expect(markup).toContain("Not in your library, but you can request");
+  });
+
+  it("limits the grid to at most 20 cards", () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      missingResult({ tmdb_id: i + 100, title: `Result ${i}` }),
+    );
+    mocks.useRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 1, total_results: many.length, results: many },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = render(<RequestToAddSection variant="grid" query="dune" libraryHadHits />);
+    expect(markup).toContain("Result 0");
+    expect(markup).toContain("Result 19");
+    expect(markup).not.toContain("Result 20");
+  });
+});

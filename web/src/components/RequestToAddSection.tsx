@@ -5,6 +5,7 @@ import { useRequestSearch } from "@/hooks/queries/useRequests";
 import type { RequestMediaResult } from "@/api/types";
 import { formatRequestReason, tmdbImageURL } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
+import RequestPosterCard from "./RequestPosterCard";
 
 const DIALOG_LIMIT = 4;
 const GRID_LIMIT = 20;
@@ -130,11 +131,31 @@ function DialogRow({ item }: { item: RequestMediaResult }) {
 }
 
 function GridVariant({
-  items: _items,
-  libraryHadHits: _libraryHadHits,
+  items,
+  libraryHadHits,
 }: {
   items: RequestMediaResult[];
   libraryHadHits: boolean;
 }) {
-  return null;
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-3 text-amber-300/85">
+        <div className="h-px flex-1 bg-amber-400/20" />
+        <h2 className="text-[11px] font-semibold tracking-[0.12em] uppercase">
+          {libraryHadHits ? "Request to Add" : "Not in your library, but you can request"}
+        </h2>
+        <div className="h-px flex-1 bg-amber-400/20" />
+      </div>
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8">
+        {items.map((item) => (
+          <RequestPosterCard
+            key={`${item.media_type}-${item.tmdb_id}`}
+            variant="discover"
+            item={item}
+            fluid
+          />
+        ))}
+      </div>
+    </section>
+  );
 }
