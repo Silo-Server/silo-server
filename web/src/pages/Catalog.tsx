@@ -4,10 +4,13 @@ import { CheckSquare, Search, Trash2, X } from "lucide-react";
 
 import type { BrowseItem } from "@/api/types";
 import ItemGrid from "@/components/ItemGrid";
+import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { useRemoveHistory } from "@/hooks/queries/history";
+import { useRequestSearch } from "@/hooks/queries/useRequests";
+import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -101,6 +104,20 @@ function CatalogResults({
     visibleRange,
     includeTotal: showExactResultCount,
   });
+  const canRequest = useCanRequest();
+  const isQuerySource = state.source === "query" && Boolean(state.q);
+  const tmdbQuery = useRequestSearch("all", state.q ?? "", 1, {
+    enabled: canRequest.discoveryEnabled && isQuerySource,
+  });
+  const tmdbMissingCount =
+    tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
+  const libraryEmpty = (catalogQuery.data?.totalItems ?? 0) === 0;
+  const tmdbPendingForEmptyLibrary =
+    isQuerySource && canRequest.discoveryEnabled && libraryEmpty && tmdbQuery.isLoading;
+  const tmdbWillRenderForEmptyLibrary =
+    isQuerySource && canRequest.discoveryEnabled && libraryEmpty && tmdbMissingCount > 0;
+  const itemGridLoading =
+    catalogQuery.isLoading || tmdbPendingForEmptyLibrary || tmdbWillRenderForEmptyLibrary;
   const loadedHistoryItems = useMemo(() => {
     if (!isHistorySource) {
       return [] as BrowseItem[];
@@ -253,12 +270,20 @@ function CatalogResults({
         totalItems={catalogQuery.data?.totalItems ?? 0}
         pages={catalogQuery.data?.pages ?? new Map()}
         pageSize={limit}
-        loading={catalogQuery.isLoading}
+        loading={itemGridLoading}
         onVisibleRangeChange={handleVisibleRangeChange}
         selectionMode={isHistorySource && selectionMode}
         selectedIds={selectedIds}
         onToggleSelect={toggleHistorySelection}
       />
+
+      {isQuerySource && canRequest.discoveryEnabled ? (
+        <RequestToAddSection
+          variant="grid"
+          query={state.q!}
+          libraryHadHits={(catalogQuery.data?.totalItems ?? 0) > 0}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={removeConfirmOpen}
