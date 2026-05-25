@@ -24,9 +24,7 @@ export function RequestToAddSection({ variant, query, libraryHadHits }: RequestT
   if (!discoveryEnabled) return null;
   if (search.isError) return null;
 
-  const filtered = (search.data?.results ?? []).filter(
-    (item) => item.availability !== "available",
-  );
+  const filtered = (search.data?.results ?? []).filter((item) => item.availability !== "available");
   if (filtered.length === 0) return null;
 
   const limit = variant === "dialog" ? DIALOG_LIMIT : GRID_LIMIT;
