@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type {
   CreateMediaRequestInput,
   DiscoverBrowseKind,
@@ -28,6 +29,7 @@ import type {
 import { adminKeys, requestKeys } from "./keys";
 
 const REQUESTS_STALE_TIME = 30_000;
+const REQUEST_SEARCH_STALE_TIME = 5 * 60 * 1000;
 const DISCOVER_BRAND_STALE_TIME = 24 * 60 * 60 * 1000;
 const BROWSE_STALE_TIME = 60 * 1000;
 
@@ -148,20 +150,34 @@ export function useRequestMediaDetail(mediaType: RequestMediaType, tmdbID: numbe
   });
 }
 
-export function useRequestSearch(mediaType: RequestSearchMediaType, query: string, page = 1) {
+export interface UseRequestSearchOptions {
+  /** When false, suppresses the query regardless of the query string. Default: true. */
+  enabled?: boolean;
+}
+
+export function useRequestSearch(
+  mediaType: RequestSearchMediaType,
+  query: string,
+  page = 1,
+  options: UseRequestSearchOptions = {},
+) {
   const normalizedQuery = query.trim();
+  const { profile } = useCurrentProfile();
+  const viewerKey = profile?.id ?? "anon";
+  const enabledOverride = options.enabled ?? true;
+
   return useQuery({
-    queryKey: requestKeys.search(mediaType, normalizedQuery, page),
-    queryFn: () => {
+    queryKey: requestKeys.search(mediaType, normalizedQuery, page, viewerKey),
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         q: normalizedQuery,
         media_type: mediaType,
         page: String(page),
       });
-      return api<RequestMediaPage>(`/requests/search?${params}`);
+      return api<RequestMediaPage>(`/requests/search?${params}`, { signal });
     },
-    enabled: normalizedQuery.length > 1,
-    staleTime: REQUESTS_STALE_TIME,
+    enabled: enabledOverride && normalizedQuery.length > 1,
+    staleTime: REQUEST_SEARCH_STALE_TIME,
   });
 }
 
