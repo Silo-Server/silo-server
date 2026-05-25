@@ -35,6 +35,16 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 	return &ItemRepository{pool: pool}
 }
 
+// overviewMatchFloor is the minimum ts_rank_cd score an overview-only match
+// must achieve to be returned when no title FTS match exists in the candidate
+// set. The overview tsvector is built without setweight(), so PostgreSQL's
+// default D weight (0.1) applies: a single occurrence of a single-term query
+// scores ~0.1. A floor of 0.15 effectively requires more than one occurrence
+// (or a tightly clustered match for multi-term queries), which keeps niche
+// description-only searches viable while suppressing the long tail of
+// incidental one-mention hits that flooded results before.
+const overviewMatchFloor = 0.15
+
 // itemColumns is the list of columns returned by all SELECT queries on media_items.
 const itemColumns = `content_id, type, title, sort_title, default_metadata_language, original_title, year, genres,
 	content_rating, runtime, overview, tagline,
@@ -773,17 +783,19 @@ func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []s
 // buildSearchSQL assembles the unified search query, returning the SQL string
 // and bound args (or empty string when the input parses to no searchable text).
 //
-// The query always uses a single `WITH scored AS (...)` CTE that aggregates
-// per-content_id ranking signals. The final SELECT off the CTE selects
-// itemColumns plus COUNT(*) OVER () AS total_count, ordered by relevance and
-// paged via LIMIT/OFFSET. When the parsed text spans multiple words, a strict
-// title-match path is enabled: a `stats` CTE is computed off `scored`, and the
-// final SELECT cross-joins it with a WHERE clause that suppresses non-matching
-// rows when at least one row has a strong title match. Because the window
-// count runs in the final SELECT (after the cross-joined WHERE), the total
-// reflects the post-filter count automatically.
+// The query uses two CTEs: `scored` aggregates per-content_id ranking signals
+// (title_rank, overview_rank, phrase_rank, plus exact/contiguous/year match
+// flags), and `stats` derives a single has_title_match boolean over the
+// scored set. The final SELECT CROSS JOINs stats and applies a WHERE that
+// keeps every row whose title FTS rank is positive, plus overview-only rows
+// when no title match exists in the candidate set AND the overview rank
+// clears overviewMatchFloor. This suppresses single-word body-only matches
+// for queries like "obsession" without harming queries where the term truly
+// only appears in descriptions (those still surface as the fallback bucket).
+// COUNT(*) OVER () in the final SELECT means the returned total reflects
+// the post-filter row count automatically.
 //
-// Argument order is intentionally fixed across both paths:
+// Argument order is intentionally fixed:
 //
 //	$1               searchText (always)
 //	itemType placeholders, allowed/disabled libraries, MaxContentRating
@@ -791,10 +803,6 @@ func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []s
 //	parsed.Year (or NULL)
 //	parsed.Phrase
 //	limit, offset
-//
-// The single ExactTitleHint binding is reused by both the strict-only
-// contiguous_title_match LIKE filter inside the CTE and the exact_title_match
-// equality predicate used for ranking.
 func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter) (dataSQL, countSQL string, args []any) {
 	parsed := parseSearchQuery(query)
 	searchText := parsed.Text
@@ -804,9 +812,6 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	if searchText == "" {
 		return "", "", nil
 	}
-	normalizedSearchText := normalizeTitleForComparison(searchText)
-	strictTitleFilter := len(strings.Fields(normalizedSearchText)) > 1
-
 	var conditions []string
 	args = []any{searchText}
 	argIdx := 2
@@ -873,9 +878,9 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	// Bind ExactTitleHint exactly once. The same arg index is referenced by
-	// both contiguous_title_match (used as a ranking signal in all paths and
-	// as the strict-title CROSS JOIN filter when strictTitleFilter is true)
-	// and exact_title_match (used as a ranking signal in all paths).
+	// both contiguous_title_match and exact_title_match (used as ranking
+	// signals in the ORDER BY). The post-CTE WHERE itself gates on title_rank
+	// > 0 (true title FTS match), not on contiguous_title_match.
 	exactIdx := argIdx
 	args = append(args, parsed.ExactTitleHint)
 	argIdx++
@@ -957,39 +962,44 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
 	// duplicates from the library JOIN, so the window count preserves the
 	// COUNT(DISTINCT mi.content_id) semantics of the prior 2-query path.
-	// In strict-title mode, placing the window count in the final SELECT
-	// (after the cross-joined WHERE filter) means the total reflects the
+	// The stats CTE + CROSS JOIN below means the window count reflects the
 	// post-filter row count automatically.
+	//
+	// The stats CTE gates on title_rank > 0 (true title FTS match) rather
+	// than contiguous_title_match (LIKE substring), so reordered-token title
+	// queries like "order law" → "Law and Order" aren't wrongly demoted to
+	// the overview-fallback bucket. The post-CTE WHERE then keeps every title
+	// FTS hit, and admits overview-only rows only when no title hit exists
+	// anywhere in the candidate set AND the overview rank clears
+	// overviewMatchFloor. This suppresses single-occurrence body matches
+	// (which score at PostgreSQL's default D weight of 0.1) for common
+	// single-word queries like "obsession" that would otherwise flood
+	// results with description-only hits.
 	//
 	// countSQL is a count-only sibling that omits LIMIT/OFFSET/ORDER BY. It is
 	// invoked only as a fallback when the data SELECT returns an empty page
 	// past offset 0 — COUNT(*) OVER () emits no rows in that case so total
 	// would otherwise default to 0.
-	if strictTitleFilter {
-		statsCTE := `
-			, stats AS (
-				SELECT MAX(contiguous_title_match) AS has_strong_title_match
-				FROM scored
-			)`
-		dataSQL = scoredCTE + statsCTE + fmt.Sprintf(`
-			SELECT %s, COUNT(*) OVER () AS total_count
+	statsCTE := `
+		, stats AS (
+			SELECT MAX(CASE WHEN title_rank > 0 THEN 1 ELSE 0 END) AS has_title_match
 			FROM scored
-			CROSS JOIN stats
-			WHERE COALESCE(stats.has_strong_title_match, 0) = 0 OR scored.contiguous_title_match = 1
-			ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
-			LIMIT $%d OFFSET $%d`, itemColumns, argIdx, argIdx+1)
-		countSQL = scoredCTE + statsCTE + `
-			SELECT COUNT(*) FROM scored
-			CROSS JOIN stats
-			WHERE COALESCE(stats.has_strong_title_match, 0) = 0 OR scored.contiguous_title_match = 1`
-	} else {
-		dataSQL = scoredCTE + fmt.Sprintf(`
-			SELECT %s, COUNT(*) OVER () AS total_count
-			FROM scored
-			ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
-			LIMIT $%d OFFSET $%d`, itemColumns, argIdx, argIdx+1)
-		countSQL = scoredCTE + `SELECT COUNT(*) FROM scored`
-	}
+		)`
+	// postFilter is the FROM + CROSS JOIN + WHERE shared by both dataSQL and
+	// countSQL. Keeping it in one string ensures the empty-page fallback count
+	// can never drift from the data query's filter.
+	postFilter := fmt.Sprintf(`FROM scored
+		CROSS JOIN stats
+		WHERE scored.title_rank > 0
+		   OR (COALESCE(stats.has_title_match, 0) = 0 AND scored.overview_rank >= %g)`, overviewMatchFloor)
+	dataSQL = scoredCTE + statsCTE + fmt.Sprintf(`
+		SELECT %s, COUNT(*) OVER () AS total_count
+		%s
+		ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
+		LIMIT $%d OFFSET $%d`, itemColumns, postFilter, argIdx, argIdx+1)
+	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
+		SELECT COUNT(*)
+		%s`, postFilter)
 	args = append(args, limit, offset)
 	return dataSQL, countSQL, args
 }

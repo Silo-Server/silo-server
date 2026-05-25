@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -238,25 +239,73 @@ func TestItemRepo_Search_UsesWindowCount(t *testing.T) {
 	}
 }
 
-// TestItemRepo_Search_StrictTitleFilter_UsesWindowCount asserts the unified
-// query also applies to the multi-word "strict title filter" path: the stats
-// CTE is computed off the scored CTE, and the window count still runs on the
-// final filtered result so the total reflects the strict-title CROSS JOIN
-// filter rather than the broader pre-filter set.
-func TestItemRepo_Search_StrictTitleFilter_UsesWindowCount(t *testing.T) {
+// TestItemRepo_Search_TitleGate_UsesWindowCount asserts the unified query
+// pairs the scored CTE with a stats CTE that derives has_title_match, and
+// that the window count runs on the final filtered result so the total
+// reflects the title-gate CROSS JOIN filter rather than the broader
+// pre-filter set.
+func TestItemRepo_Search_TitleGate_UsesWindowCount(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("the matrix reloaded", []string{"movie"}, 20, 0, AccessFilter{})
 	if !strings.Contains(sql, "COUNT(*) OVER ()") {
-		t.Fatalf("expected COUNT(*) OVER () in strict-title path; got %s", sql)
+		t.Fatalf("expected COUNT(*) OVER () in title-gate path; got %s", sql)
 	}
 	if strings.Count(sql, "WITH scored AS") != 1 {
 		t.Fatalf("expected exactly one scored CTE; got %s", sql)
 	}
 	if !strings.Contains(sql, "stats AS") {
-		t.Fatalf("expected stats CTE for strict-title filtering; got %s", sql)
+		t.Fatalf("expected stats CTE; got %s", sql)
 	}
-	if !strings.Contains(sql, "has_strong_title_match") {
-		t.Fatalf("expected strict-title filter predicate; got %s", sql)
+	if !strings.Contains(sql, "has_title_match") {
+		t.Fatalf("expected has_title_match predicate; got %s", sql)
+	}
+}
+
+// TestItemRepo_Search_SingleWordEnablesTitleGate pins the bug fix for the
+// "obsession returns 2000 results" report: even single-word queries must
+// route through the stats CTE + CROSS JOIN, so overview-only matches are
+// suppressed whenever any title match exists. Prior to this, single-word
+// queries skipped the stats CTE entirely and returned every row where the
+// search term appeared in the description.
+func TestItemRepo_Search_SingleWordEnablesTitleGate(t *testing.T) {
+	repo := &ItemRepository{}
+	sql, _, _ := repo.buildSearchSQL("obsession", []string{"movie"}, 20, 0, AccessFilter{})
+	if !strings.Contains(sql, "stats AS") {
+		t.Fatalf("expected single-word query to include the stats CTE; got %s", sql)
+	}
+	if !strings.Contains(sql, "CROSS JOIN stats") {
+		t.Fatalf("expected single-word query to CROSS JOIN stats; got %s", sql)
+	}
+	if !strings.Contains(sql, "scored.title_rank > 0") {
+		t.Fatalf("expected title gate to use title_rank > 0; got %s", sql)
+	}
+}
+
+// TestItemRepo_Search_AppliesOverviewRankFloor pins that the overview-only
+// fallback arm is gated by overviewMatchFloor, so weak single-occurrence
+// description matches do not pass through when no title match exists. The
+// floor literal is derived from the constant so the test stays in sync if
+// the threshold is retuned.
+func TestItemRepo_Search_AppliesOverviewRankFloor(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, _ := repo.buildSearchSQL("obsession", []string{"movie"}, 20, 0, AccessFilter{})
+	want := fmt.Sprintf("scored.overview_rank >= %g", overviewMatchFloor)
+	if !strings.Contains(dataSQL, want) {
+		t.Fatalf("expected %q in dataSQL; got %s", want, dataSQL)
+	}
+	if !strings.Contains(countSQL, want) {
+		t.Fatalf("expected %q in countSQL too (must mirror dataSQL); got %s", want, countSQL)
+	}
+}
+
+// TestItemRepo_Search_EmptyQueryReturnsEmpty pins the early-return contract
+// when input parses to no searchable text. Downstream callers rely on
+// (dataSQL == "") to short-circuit without binding any args.
+func TestItemRepo_Search_EmptyQueryReturnsEmpty(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, args := repo.buildSearchSQL("   ", nil, 20, 0, AccessFilter{})
+	if dataSQL != "" || countSQL != "" || args != nil {
+		t.Fatalf("expected (\"\", \"\", nil) for whitespace-only query; got (%q, %q, %v)", dataSQL, countSQL, args)
 	}
 }
 
