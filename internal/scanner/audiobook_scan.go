@@ -8,13 +8,29 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
+
+// audiobookScanWorkers returns the configured number of parallel workers
+// for audiobook reconciliation. Defaults to 8 — high enough to keep all
+// cores busy on the ffprobe step (which dominates per-book wall time)
+// without overwhelming a small server. Override with SILO_AUDIOBOOK_SCAN_WORKERS.
+func audiobookScanWorkers() int {
+	if v := os.Getenv("SILO_AUDIOBOOK_SCAN_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 8
+}
 
 // ScanAudiobookFolder walks an audiobooks-typed media folder and writes
 // one media_items row per subdirectory it can parse as an audiobook,
@@ -32,6 +48,10 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
 	}
 
+	// Phase 1: walk the tree to collect candidate book folders. This is
+	// I/O-light (no ffprobe), and avoids holding the worker pool open
+	// for the duration of a 240k-folder scan.
+	var candidates []string
 	for _, root := range folder.Paths {
 		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -46,29 +66,85 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 				slog.Warn("audiobook scan: read dir failed", "path", path, "error", err)
 				return nil
 			}
-			hasAudio := false
 			for _, e := range entries {
 				if !e.IsDir() && SupportsAudioFile(e.Name()) {
-					hasAudio = true
-					break
+					candidates = append(candidates, path)
+					return filepath.SkipDir
 				}
 			}
-			if !hasAudio {
-				return nil
-			}
-			if err := s.reconcileAudiobookFolder(ctx, folder, path); err != nil {
-				slog.Warn("audiobook scan: folder failed",
-					"folder_id", folder.ID,
-					"path", path,
-					"error", err,
-				)
-			}
-			return filepath.SkipDir
+			return nil
 		})
 		if walkErr != nil {
 			slog.Warn("audiobook scan: walk root failed", "root", root, "error", walkErr)
 		}
 	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Phase 2: reconcile in parallel. ffprobe dominates per-book wall time
+	// (hundreds of ms each), so single-threaded scans of a large library
+	// take days. Worker pool brings this to ~hours.
+	workers := audiobookScanWorkers()
+	slog.Info("audiobook scan: starting",
+		"folder_id", folder.ID,
+		"candidates", len(candidates),
+		"workers", workers,
+	)
+
+	ch := make(chan string, workers*2)
+	var (
+		wg        sync.WaitGroup
+		processed int64
+		failed    int64
+	)
+	start := time.Now()
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range ch {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := s.reconcileAudiobookFolder(ctx, folder, path); err != nil {
+					atomic.AddInt64(&failed, 1)
+					slog.Warn("audiobook scan: folder failed",
+						"folder_id", folder.ID,
+						"path", path,
+						"error", err,
+					)
+				}
+				n := atomic.AddInt64(&processed, 1)
+				if n%500 == 0 {
+					slog.Info("audiobook scan: progress",
+						"folder_id", folder.ID,
+						"processed", n,
+						"failed", atomic.LoadInt64(&failed),
+						"total", len(candidates),
+						"elapsed_sec", int(time.Since(start).Seconds()),
+					)
+				}
+			}
+		}()
+	}
+
+	for _, p := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
+		ch <- p
+	}
+	close(ch)
+	wg.Wait()
+
+	slog.Info("audiobook scan: completed",
+		"folder_id", folder.ID,
+		"processed", atomic.LoadInt64(&processed),
+		"failed", atomic.LoadInt64(&failed),
+		"elapsed_sec", int(time.Since(start).Seconds()),
+	)
 	return nil
 }
 
@@ -90,6 +166,9 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	}
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
+	}
+	if err := s.upsertAudiobookSeries(ctx, contentID, parsed); err != nil {
+		return fmt.Errorf("upsert audiobook series: %w", err)
 	}
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
@@ -134,27 +213,44 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	return nil
 }
 
-// upsertAudiobookMediaItem looks up an existing media_items row by
-// title+year+type, updates it if found, or creates a new row.
-// Returns the content_id used.
+// upsertAudiobookMediaItem looks up an existing media_items row by the
+// audio file path (the most stable identity for an audiobook), updates
+// it if found, or creates a new row. Audiobook titles routinely include
+// narrator/edition suffixes that vary across copies of the same book, so
+// the previous title+year lookup risked collapsing separate narrations
+// into one row when titles were cleaned. File path side-steps that.
 func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudiobook) (string, error) {
 	if s.itemRepo == nil {
 		return "", fmt.Errorf("itemRepo not configured on Scanner")
 	}
+	cleanTitle := stripNarratorSuffix(book.Title)
 
-	existing, err := s.itemRepo.GetByTitleYearType(ctx, book.Title, book.Year, "audiobook")
-	if err == nil && existing != nil {
+	if existing := s.findAudiobookByFilePath(ctx, book); existing != nil {
 		applyBookToMediaItem(existing, book)
 		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(book.Title)
+			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
 		}
 		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
 			return "", err
 		}
 		return existing.ContentID, nil
 	}
-	if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
-		return "", fmt.Errorf("GetByTitleYearType: %w", err)
+
+	// Secondary dedup: catch books stored under two folders ("Foo" + "Foo
+	// Subtitle Version"). Same scan-time rule as the one-shot
+	// scripts/dedup_audiobooks.py — author + narrator + year + duration
+	// within tolerance + title is equal or an exact "X" / "X: subtitle"
+	// prefix relation. Attaches the new file to the existing row so we
+	// don't pile up duplicates as the scan progresses.
+	if existing := s.findAudiobookDuplicate(ctx, book, cleanTitle); existing != nil {
+		applyBookToMediaItem(existing, book)
+		if existing.SortTitle == "" {
+			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
+		}
+		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
+			return "", err
+		}
+		return existing.ContentID, nil
 	}
 
 	id, err := idgen.NextID()
@@ -164,8 +260,8 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudi
 	item := &models.MediaItem{
 		ContentID: id,
 		Type:      "audiobook",
-		Title:     book.Title,
-		SortTitle: titleutil.DeriveDefaultSortTitle(book.Title),
+		Title:     cleanTitle,
+		SortTitle: titleutil.DeriveDefaultSortTitle(cleanTitle),
 		Year:      book.Year,
 	}
 	applyBookToMediaItem(item, book)
@@ -175,13 +271,115 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudi
 	return id, nil
 }
 
+// findAudiobookDuplicate returns an existing audiobook media_items row that
+// matches the parsed book on (author, narrator, year, duration ±0.5%/±10s,
+// title-prefix). Used after the file-path lookup misses to detect the same
+// recording stored under a different folder name. Returns nil when no match
+// exists or any required attribute (author, narrator, year, duration) is
+// missing — under-tagged files don't qualify for automatic dedup.
+func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiobook, cleanTitle string) *models.MediaItem {
+	if s.fileRepo == nil {
+		return nil
+	}
+	if book.Author == "" || book.Narrator == "" || book.Year == 0 {
+		return nil
+	}
+	var totalDuration int
+	for _, f := range book.Files {
+		totalDuration += f.Duration
+	}
+	if totalDuration <= 0 {
+		return nil
+	}
+	tolerance := totalDuration / 200 // 0.5%
+	if tolerance < 10 {
+		tolerance = 10
+	}
+	var existingID string
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT mi.content_id
+		FROM media_items mi
+		JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
+		JOIN people pa ON pa.id = ipa.person_id AND pa.name = $1
+		JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
+		JOIN people pn ON pn.id = ipn.person_id AND pn.name = $2
+		JOIN LATERAL (
+			SELECT COALESCE(SUM(mf.duration), 0) AS dur
+			FROM media_files mf WHERE mf.content_id = mi.content_id
+		) f ON TRUE
+		WHERE mi.type = 'audiobook'
+		  AND mi.year = $3
+		  AND f.dur > 0
+		  AND ABS(f.dur - $4) <= $5
+		  AND (
+			  LOWER(mi.title) = LOWER($6)
+		   OR (LENGTH(mi.title) > LENGTH($6) AND LOWER(mi.title) LIKE LOWER($6) || ':%')
+		   OR (LENGTH($6) > LENGTH(mi.title) AND LOWER($6) LIKE LOWER(mi.title) || ':%')
+		  )
+		LIMIT 1
+	`, book.Author, book.Narrator, book.Year, totalDuration, tolerance, cleanTitle).Scan(&existingID)
+	if err != nil || existingID == "" {
+		return nil
+	}
+	items, err := s.itemRepo.GetByIDs(ctx, []string{existingID})
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	return items[0]
+}
+
+// findAudiobookByFilePath returns an existing audiobook media_items row
+// whose media_files reference any of this book's audio file paths.
+// Returns nil when no match exists (a fresh scan of a new folder).
+func (s *Scanner) findAudiobookByFilePath(ctx context.Context, book *parsedAudiobook) *models.MediaItem {
+	if s.fileRepo == nil || len(book.Files) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(book.Files))
+	for _, f := range book.Files {
+		if f.Path != "" {
+			paths = append(paths, f.Path)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	var existingID string
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT mf.content_id
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.file_path = ANY($1)
+		  AND mi.type = 'audiobook'
+		LIMIT 1
+	`, paths).Scan(&existingID)
+	if err != nil || existingID == "" {
+		return nil
+	}
+	items, err := s.itemRepo.GetByIDs(ctx, []string{existingID})
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	return items[0]
+}
+
 // applyBookToMediaItem copies parsed-audiobook tag fields onto the
 // MediaItem. Used for both fresh inserts and re-scans of existing rows
 // so manual edits to fields not driven by the file (e.g., poster_path
 // set by the metadata enricher) survive.
+//
+// Audiobook titles are stripped of trailing narrator/edition suffixes
+// (`Foo (Read by Bar)`, `Foo - read by Bar`, etc.) since that data is
+// already captured as item_people kind=8. The raw tag value is preserved
+// in OriginalTitle when it differs so the original is never lost.
 func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 	item.Type = "audiobook"
-	item.Title = book.Title
+	raw := book.Title
+	cleaned := stripNarratorSuffix(raw)
+	item.Title = cleaned
+	if cleaned != raw && item.OriginalTitle == "" {
+		item.OriginalTitle = raw
+	}
 	item.Year = book.Year
 	if book.Overview != "" && item.Overview == "" {
 		item.Overview = book.Overview
@@ -347,4 +545,74 @@ func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, b
 	// For audiobook scanning this is acceptable — we re-derive all credits
 	// from the file metadata on every scan, so the set is authoritative.
 	return s.itemRepo.ReplacePeople(ctx, contentID, people)
+}
+
+// upsertAudiobookSeries writes the parsed series_name and series_index into
+// the audiobook_series table, overwriting any prior row (e.g. one populated
+// by migration 145's title-pattern backfill). A blank book.Series clears
+// the row so books explicitly retagged out of a series stop appearing in
+// the "In this series" rail on the next scan.
+func (s *Scanner) upsertAudiobookSeries(ctx context.Context, contentID string, book *parsedAudiobook) error {
+	if s.fileRepo == nil {
+		return fmt.Errorf("fileRepo not configured on Scanner")
+	}
+	name := strings.TrimSpace(book.Series)
+	if name == "" {
+		_, err := s.fileRepo.Pool().Exec(ctx,
+			`DELETE FROM audiobook_series WHERE content_id = $1`, contentID)
+		if err != nil {
+			return fmt.Errorf("delete audiobook_series row: %w", err)
+		}
+		return nil
+	}
+	var idx any
+	if v := parseSeriesIndex(book.SeriesPosition); v != nil {
+		idx = *v
+	}
+	_, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO audiobook_series (content_id, series_name, series_index, updated_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (content_id) DO UPDATE SET
+			series_name  = EXCLUDED.series_name,
+			series_index = EXCLUDED.series_index,
+			updated_at   = NOW()
+	`, contentID, name, idx)
+	if err != nil {
+		return fmt.Errorf("upsert audiobook_series row: %w", err)
+	}
+	return nil
+}
+
+// parseSeriesIndex extracts a leading numeric value from a freeform tag
+// like "5", "1.5", "2 of 8", or "1a". Returns nil when no leading number
+// is present so the audiobook_series.series_index column stays NULL rather
+// than carrying a misleading zero.
+func parseSeriesIndex(raw string) *float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	end := 0
+	dot := false
+	for end < len(raw) {
+		c := raw[end]
+		if c >= '0' && c <= '9' {
+			end++
+			continue
+		}
+		if c == '.' && !dot {
+			dot = true
+			end++
+			continue
+		}
+		break
+	}
+	if end == 0 {
+		return nil
+	}
+	var v float64
+	if _, err := fmt.Sscanf(raw[:end], "%f", &v); err != nil {
+		return nil
+	}
+	return &v
 }

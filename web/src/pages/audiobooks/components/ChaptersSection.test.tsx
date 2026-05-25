@@ -16,21 +16,36 @@ const files: AudiobookFile[] = [
   },
 ];
 
+async function expandChapters(): Promise<void> {
+  await userEvent.click(screen.getByRole("button", { name: /^chapters/i }));
+}
+
 describe("ChaptersSection", () => {
-  it("renders chapters expanded by default", () => {
+  it("renders chapter section collapsed by default", () => {
     render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Prologue/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Memory/ })).not.toBeInTheDocument();
+    // Header toggle is visible.
+    expect(screen.getByRole("button", { name: /^chapters/i })).toBeInTheDocument();
+  });
+
+  it("expands when the header is clicked", async () => {
+    render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
+    await expandChapters();
     expect(screen.getByRole("button", { name: /Prologue/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Memory/ })).toBeInTheDocument();
   });
 
-  it("highlights the currently-playing chapter", () => {
+  it("highlights the currently-playing chapter once expanded", async () => {
     render(<ChaptersSection files={files} currentPositionSeconds={250} onSelect={vi.fn()} />);
+    await expandChapters();
     const row = screen.getByRole("button", { name: /Memory/ });
     expect(row).toHaveAttribute("data-current", "true");
   });
 
   it("sort menu switches between position and longest-first orders", async () => {
     render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
+    await expandChapters();
     const rowsBefore = screen.getAllByRole("button", { name: /Prologue|Memory/ });
     expect(within(rowsBefore[0]!).getByText("Prologue")).toBeInTheDocument();
 
@@ -44,6 +59,7 @@ describe("ChaptersSection", () => {
   it("calls onSelect with absolute start seconds when a chapter is clicked", async () => {
     const onSelect = vi.fn();
     render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={onSelect} />);
+    await expandChapters();
     await userEvent.click(screen.getByRole("button", { name: /Memory/ }));
     expect(onSelect).toHaveBeenCalledWith(200);
   });

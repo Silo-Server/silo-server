@@ -597,7 +597,7 @@ export interface MediaItemUserState {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -1048,7 +1048,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode";
+  media_scope?: "movie" | "series" | "episode" | "audiobook";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -2266,7 +2266,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -2425,7 +2425,8 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
     media_scope:
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
-      value?.media_scope === "episode"
+      value?.media_scope === "episode" ||
+      value?.media_scope === "audiobook"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
@@ -2485,7 +2486,9 @@ export function queryDefinitionFromSectionConfig(
         ? "series"
         : config.media_scope === "episode" || config.filter_type === "episode"
           ? "episode"
-          : undefined;
+          : config.media_scope === "audiobook" || config.filter_type === "audiobook"
+            ? "audiobook"
+            : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;

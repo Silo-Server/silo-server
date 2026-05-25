@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowUpDown, Play } from "lucide-react";
+import { ArrowUpDown, ChevronDown, Play } from "lucide-react";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
 
 interface ChaptersSectionProps {
@@ -57,6 +57,7 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
   const rows = useMemo(() => buildRows(files), [files]);
   const [sort, setSort] = useState<SortMode>("position");
   const [sortOpen, setSortOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const sorted = useMemo(() => {
     if (sort === "longest-first") {
@@ -77,82 +78,94 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
   if (rows.length === 0) return null;
 
   return (
-    <section className="mt-10">
+    <section>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xl font-semibold tracking-tight">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="hover:text-primary flex items-center gap-2 text-xl font-semibold tracking-tight transition-colors"
+        >
+          <ChevronDown
+            className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90"}`}
+          />
           Chapters
-          <span className="text-muted-foreground ml-2 text-sm font-normal">({rows.length})</span>
-        </h2>
-        <div className="relative">
-          <button
-            type="button"
-            aria-label="Sort chapters"
-            aria-haspopup="menu"
-            aria-expanded={sortOpen}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
-            onClick={() => setSortOpen((v) => !v)}
-          >
-            <ArrowUpDown className="h-3.5 w-3.5" />
-            Sort
-          </button>
-          {sortOpen && (
-            <div
-              role="menu"
-              className="bg-popover absolute right-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
+          <span className="text-muted-foreground text-sm font-normal">({rows.length})</span>
+        </button>
+        {expanded && (
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Sort chapters"
+              aria-haspopup="menu"
+              aria-expanded={sortOpen}
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
+              onClick={() => setSortOpen((v) => !v)}
             >
-              {(["position", "longest-first"] as SortMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  role="menuitem"
-                  type="button"
-                  data-active={mode === sort ? "true" : undefined}
-                  className="hover:bg-muted/60 w-full px-3 py-2 text-left text-sm"
-                  onClick={() => {
-                    setSort(mode);
-                    setSortOpen(false);
-                  }}
-                >
-                  {mode === "position" ? "By position" : "Longest first"}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              Sort
+            </button>
+            {sortOpen && (
+              <div
+                role="menu"
+                className="bg-popover absolute right-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
+              >
+                {(["position", "longest-first"] as SortMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    role="menuitem"
+                    type="button"
+                    data-active={mode === sort ? "true" : undefined}
+                    className="hover:bg-muted/60 w-full px-3 py-2 text-left text-sm"
+                    onClick={() => {
+                      setSort(mode);
+                      setSortOpen(false);
+                    }}
+                  >
+                    {mode === "position" ? "By position" : "Longest first"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <ol className="divide-border divide-y rounded-xl border">
-        {sorted.map((row) => {
-          const isCurrent = rows[currentIndex]?.chapter === row.chapter;
-          return (
-            <li key={`${row.chapter.index}-${row.absoluteStart}`}>
-              <button
-                type="button"
-                onClick={() => onSelect(row.absoluteStart)}
-                data-current={isCurrent ? "true" : undefined}
-                className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                  isCurrent ? "bg-muted/50 border-primary border-l-2" : ""
-                }`}
-              >
-                <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
-                  {row.positionIndex}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>
-                <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">
-                  {formatChapterStart(row.absoluteStart)}
-                </span>
-                <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                  {formatChapterDuration(row.durationSeconds)}
-                </span>
-                {isCurrent && (
-                  <span className="text-primary flex shrink-0 items-center gap-1 text-xs">
-                    <Play className="h-3 w-3 fill-current" /> playing
+      {expanded && (
+        <ol className="divide-border divide-y rounded-xl border">
+          {sorted.map((row) => {
+            const isCurrent = rows[currentIndex]?.chapter === row.chapter;
+            return (
+              <li key={`${row.chapter.index}-${row.absoluteStart}`}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(row.absoluteStart)}
+                  data-current={isCurrent ? "true" : undefined}
+                  className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                    isCurrent ? "bg-muted/50 border-primary border-l-2" : ""
+                  }`}
+                >
+                  <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
+                    {row.positionIndex}
                   </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>
+                  <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">
+                    {formatChapterStart(row.absoluteStart)}
+                  </span>
+                  <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                    {formatChapterDuration(row.durationSeconds)}
+                  </span>
+                  {isCurrent && (
+                    <span className="text-primary flex shrink-0 items-center gap-1 text-xs">
+                      <Play className="h-3 w-3 fill-current" /> playing
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      )}
     </section>
   );
 }

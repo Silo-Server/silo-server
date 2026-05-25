@@ -724,6 +724,13 @@ func templateEligibleForLibrary(tmpl templates.Template, library *models.MediaFo
 		return tmpl.MediaKind == templates.MediaMovie || tmpl.MediaKind == templates.MediaMixed
 	case "series", "tv", "show", "shows", "tvshows":
 		return tmpl.MediaKind == templates.MediaTV || tmpl.MediaKind == templates.MediaMixed
+	case "audiobook", "audiobooks":
+		// Audiobook libraries only accept audiobook-targeted templates.
+		// Today the catalog has none (built-ins are TMDB/Trakt/MDBList
+		// movie/TV imports), so this evaluates to an empty gallery —
+		// the correct UX. Previously this fell through to default:true
+		// and offered admins broken movie/TV templates.
+		return tmpl.MediaKind == templates.MediaAudiobook || tmpl.MediaKind == templates.MediaMixed
 	default:
 		return true
 	}

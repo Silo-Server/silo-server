@@ -17,7 +17,7 @@ interface RelatedRailProps {
 export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
   if (items.length === 0) return null;
   return (
-    <section className="mt-10">
+    <section>
       <div className="mb-4">
         <h2 className="text-xl font-semibold tracking-tight">{heading}</h2>
         {subtitle && <p className="text-muted-foreground mt-1 text-xs">{subtitle}</p>}
@@ -27,11 +27,11 @@ export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
           <ViewTransitionLink
             key={item.content_id}
             to={`/audiobooks/book/${item.content_id}`}
-            className={`block w-[112px] shrink-0 ${
+            className={`block w-[140px] shrink-0 sm:w-[160px] lg:w-[185px] ${
               item.highlight ? "ring-primary rounded-lg ring-2 ring-offset-2" : ""
             }`}
           >
-            <div className="bg-muted relative aspect-[2/3] overflow-hidden rounded-lg">
+            <div className="bg-muted relative aspect-square overflow-hidden rounded-lg">
               {item.poster_url ? (
                 <img
                   src={item.poster_url}
@@ -41,9 +41,9 @@ export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
                 />
               ) : null}
             </div>
-            <div className="mt-2 truncate text-[13px] font-medium">{item.title}</div>
+            <div className="mt-2 truncate text-sm font-medium">{item.title}</div>
             {item.subtitle && (
-              <div className="text-muted-foreground truncate text-[11px]">{item.subtitle}</div>
+              <div className="text-muted-foreground truncate text-xs">{item.subtitle}</div>
             )}
           </ViewTransitionLink>
         ))}

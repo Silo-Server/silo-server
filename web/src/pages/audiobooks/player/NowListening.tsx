@@ -37,15 +37,15 @@ export function NowListening({
     : formatTime(playback.duration);
 
   return (
-    <div className="bg-background fixed inset-0 z-50 flex flex-col">
-      <div className="flex items-center justify-between px-6 py-4">
+    <div className="bg-background fixed inset-0 z-50 flex flex-col overflow-y-auto">
+      <div className="bg-background/95 sticky top-0 z-10 flex items-center justify-between px-6 py-4 backdrop-blur">
         <button
           type="button"
           onClick={onCollapse}
-          aria-label="Collapse player"
-          className="text-muted-foreground hover:text-foreground rounded p-1.5"
+          className="text-muted-foreground hover:bg-muted hover:text-foreground -ml-2 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors"
         >
           <ChevronDown className="h-5 w-5" />
+          <span>Back to player</span>
         </button>
         <button
           type="button"
@@ -56,10 +56,10 @@ export function NowListening({
         </button>
       </div>
 
-      <div className="grid flex-1 grid-cols-1 items-center gap-10 px-6 pb-6 md:grid-cols-[auto_1fr] md:px-16">
-        <div className="mx-auto w-full max-w-[360px] md:mx-0">
+      <div className="grid flex-1 grid-cols-1 items-center gap-8 px-6 pt-2 pb-10 sm:gap-10 md:grid-cols-[auto_1fr] md:px-16">
+        <div className="mx-auto w-full max-w-[min(70vw,320px)] md:mx-0 md:max-w-[360px]">
           <div
-            className="bg-muted aspect-[2/3] w-full overflow-hidden rounded-2xl shadow-2xl"
+            className="bg-muted aspect-square w-full overflow-hidden rounded-2xl shadow-2xl"
             style={{ viewTransitionName: `audiobook-cover-${contentId}` }}
           >
             {posterUrl ? (

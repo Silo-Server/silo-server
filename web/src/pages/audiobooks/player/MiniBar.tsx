@@ -29,7 +29,10 @@ export function MiniBar({
   onExpand,
 }: MiniBarProps) {
   return (
-    <div className="bg-background fixed inset-x-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6">
+    <div
+      className="bg-background fixed right-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6"
+      style={{ left: "var(--app-sidebar-offset, 0px)" }}
+    >
       <SeekBar
         currentTime={playback.currentTime}
         duration={playback.duration}

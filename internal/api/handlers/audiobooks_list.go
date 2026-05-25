@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -18,6 +19,11 @@ type AudiobookHandler struct {
 	Files         *scanner.FileRepository
 	StoreProvider userstore.UserStoreProvider
 	Detail        *catalog.DetailService
+	// Recs is optional. When set, the detail handler uses embedding-based
+	// nearest-neighbor search for the "You might also like" rail and falls
+	// back to shared-genre matching only when no embedding exists for the
+	// source book yet.
+	Recs *recommendations.Repo
 }
 
 // HandleListAudiobooks serves GET /api/v1/audiobooks?limit=&offset=.
@@ -31,11 +37,15 @@ func (h *AudiobookHandler) HandleListAudiobooks(w http.ResponseWriter, r *http.R
 	if offset < 0 {
 		offset = 0
 	}
+	genre := r.URL.Query().Get("genre")
 
 	pool := h.Files.Pool()
 	ctx := r.Context()
 	var total int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE type='audiobook'`).Scan(&total); err != nil {
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM media_items
+		WHERE type='audiobook' AND ($1 = '' OR $1 = ANY(genres))
+	`, genre).Scan(&total); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "list audiobooks count failed")
 		return
 	}
@@ -52,10 +62,11 @@ func (h *AudiobookHandler) HandleListAudiobooks(w http.ResponseWriter, r *http.R
 		FROM media_items mi
 		LEFT JOIN media_files mf ON mf.content_id = mi.content_id
 		WHERE mi.type='audiobook'
+		  AND ($3 = '' OR $3 = ANY(mi.genres))
 		GROUP BY mi.content_id, mi.title, mi.year, mi.poster_path, mi.sort_title
 		ORDER BY LOWER(mi.sort_title), LOWER(mi.title)
 		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	`, limit, offset, genre)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "list audiobooks failed")
 		return

@@ -78,3 +78,24 @@ func TestParseAudiobookFolderMultiFile(t *testing.T) {
 		}
 	}
 }
+
+func TestStripNarratorSuffix(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"Solitaire Read By Holly Gibbs", "Solitaire"},
+		{"The Skyward Series 3 - Cytonic (UK Version: Read by Sophie Aldred)", "The Skyward Series 3 - Cytonic"},
+		{"Mick Stranahan (unabridged) 1 - Skin Tight", "Mick Stranahan 1 - Skin Tight"},
+		{"An Evening with Alan Titchmarsh (Unabridged)", "An Evening with Alan Titchmarsh"},
+		// "Read by Celebrities" is a series name here, not a narrator credit
+		{"Classic Stories and Tales Read by Celebrities 1 - Classics of Childhood, Volume One",
+			"Classic Stories and Tales Read by Celebrities 1 - Classics of Childhood, Volume One"},
+		{"Old Harry's Game", "Old Harry's Game"}, // unchanged
+	}
+	for _, c := range cases {
+		got := stripNarratorSuffix(c.in)
+		if got != c.want {
+			t.Errorf("stripNarratorSuffix(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

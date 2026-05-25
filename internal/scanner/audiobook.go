@@ -5,9 +5,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// narratorSuffixRE matches a trailing "read by X" / "(Read by X)" /
+// "(UK Version: Read by X)" / "- read by X" pattern that some audiobook
+// taggers put in the title field. The narrator is already captured as
+// item_people kind=8 from the dedicated narrator tag, so removing this
+// noise yields a clean human-readable title without losing any data.
+//
+// The narrator body deliberately excludes the dash so titles like
+// "Series Name Read by Foo N - Book Title" don't get mistakenly
+// truncated (the "Read by Foo" there is part of the series name, not a
+// narrator credit). Real narrator suffixes never contain a `-` after the
+// "read by".
+var narratorSuffixRE = regexp.MustCompile(`(?i)\s*\(?\s*[-:,]?\s*(UK Version:?|US Version:?)?\s*read by [A-Za-z0-9., '&]+\)?\s*$`)
+
+// unabridgedTokenRE matches a parenthesized "(unabridged)" anywhere in
+// the title (sometimes mid-string between series and book). Stripped
+// because it's a format marker, not part of the work's name.
+var unabridgedTokenRE = regexp.MustCompile(`(?i)\s*\(unabridged\)\s*`)
+
+// collapseSpacesRE squashes any runs of whitespace into a single space.
+// Used after the strip passes since removing a mid-string token can
+// leave double spaces behind.
+var collapseSpacesRE = regexp.MustCompile(`\s+`)
+
+// stripNarratorSuffix removes the narrator-suffix noise and "(unabridged)"
+// markers from a title. Returns the input unchanged when no match.
+// Kept in sync with the SQL `regexp_replace` used by migration 146 so
+// the scanner write path and one-shot backfill produce identical output.
+func stripNarratorSuffix(title string) string {
+	cleaned := narratorSuffixRE.ReplaceAllString(title, "")
+	cleaned = unabridgedTokenRE.ReplaceAllString(cleaned, " ")
+	cleaned = collapseSpacesRE.ReplaceAllString(cleaned, " ")
+	return strings.TrimSpace(cleaned)
+}
 
 // parsedAudiobook is the structured output of parseAudiobookFolder.
 // The scanner write path (Task 8) converts this into media_items +

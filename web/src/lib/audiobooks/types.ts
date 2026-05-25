@@ -57,6 +57,13 @@ export interface AudiobookSeriesEntry {
   series_index?: number;
 }
 
+export interface AudiobookNarration {
+  content_id: string;
+  title: string;
+  narrator?: string;
+  year?: number;
+}
+
 export interface AudiobookDetailResponse {
   audiobook: AudiobookDetailItem;
   author?: string;
@@ -69,4 +76,5 @@ export interface AudiobookDetailResponse {
     name?: string;
     entries: AudiobookSeriesEntry[];
   };
+  other_narrations?: AudiobookNarration[];
 }

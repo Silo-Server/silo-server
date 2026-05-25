@@ -13,7 +13,7 @@ function initials(name: string): string {
 
 export function NarratorCard({ narrator }: NarratorCardProps) {
   return (
-    <section className="mt-10">
+    <section>
       <h2 className="mb-4 text-xl font-semibold tracking-tight">Narrator</h2>
       <div className="bg-muted/30 flex items-center gap-4 rounded-xl border p-4">
         <div className="bg-muted text-muted-foreground flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-lg font-medium">

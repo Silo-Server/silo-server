@@ -3,10 +3,12 @@ import { useParams } from "react-router";
 import { useAudiobook } from "@/hooks/audiobooks/useAudiobook";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Play } from "lucide-react";
+import { FolderPlus, Play } from "lucide-react";
+import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import AudiobookPlayer from "./player/AudiobookPlayer";
 import { ChaptersSection } from "./components/ChaptersSection";
 import { NarratorCard } from "./components/NarratorCard";
+import { NarratorPicker } from "./components/NarratorPicker";
 import { RelatedRail } from "./components/RelatedRail";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
@@ -85,7 +87,7 @@ function AudiobookDetailSkeleton() {
   return (
     <div className="page-shell py-8">
       <div className="flex flex-col gap-8 sm:flex-row">
-        <Skeleton className="aspect-[2/3] w-full rounded-xl sm:w-[200px] sm:shrink-0 md:w-[260px]" />
+        <Skeleton className="aspect-square w-full rounded-xl sm:w-[200px] sm:shrink-0 md:w-[260px]" />
         <div className="flex flex-1 flex-col gap-3">
           <Skeleton className="h-8 w-3/4" />
           <Skeleton className="h-4 w-1/3" />
@@ -108,6 +110,13 @@ export default function AudiobookDetail() {
 
   const [playerOpen, setPlayerOpen] = useState(false);
   const [startSeconds, setStartSeconds] = useState(0);
+  const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
+  // Bumped on every openPlayer() call so the AudiobookPlayer key changes
+  // even when startSeconds was already at the requested value. Without
+  // this, clicking "Play from Start" while the player is already open at
+  // position 0 is a no-op (state doesn't change → no remount → audio
+  // keeps playing from its current position).
+  const [playToken, setPlayToken] = useState(0);
 
   if (isLoading && !data) {
     return <AudiobookDetailSkeleton />;
@@ -131,6 +140,7 @@ export default function AudiobookDetail() {
 
   function openPlayer(atSeconds: number) {
     setStartSeconds(atSeconds);
+    setPlayToken((t) => t + 1);
     setPlayerOpen(true);
   }
 
@@ -140,13 +150,19 @@ export default function AudiobookDetail() {
 
   return (
     <div>
+      <AddToCollectionDialog
+        open={addToCollectionOpen}
+        onOpenChange={setAddToCollectionOpen}
+        mediaItemId={contentId ?? ""}
+        itemTitle={data.audiobook.title}
+      />
       {/* The player owns its own positioning (mini bar at the bottom or
           Now Listening full-screen overlay). Key forces a remount when the
           user jumps to a different position so initialPositionSeconds
           takes effect even if the player was already open. */}
       {playerOpen && (
         <AudiobookPlayer
-          key={`${contentId}-${startSeconds}`}
+          key={`${contentId}-${startSeconds}-${playToken}`}
           contentId={contentId ?? ""}
           title={audiobook.title}
           author={author}
@@ -163,7 +179,7 @@ export default function AudiobookDetail() {
         context="Audiobook"
         studioLabel={data.audiobook.publisher || undefined}
         posterUrl={audiobook.poster_url}
-        posterOrientation="portrait"
+        posterOrientation="square"
         subtitle={
           (author || narrator) && (
             <div className="text-muted-foreground flex flex-col gap-0.5 text-sm">
@@ -174,7 +190,16 @@ export default function AudiobookDetail() {
               )}
               {narrator && (
                 <span>
-                  <span className="font-medium">Narrated by</span> {narrator}
+                  <span className="font-medium">Narrated by</span>{" "}
+                  {data.other_narrations && data.other_narrations.length > 0 ? (
+                    <NarratorPicker
+                      currentNarrator={narrator}
+                      currentContentId={contentId ?? ""}
+                      others={data.other_narrations}
+                    />
+                  ) : (
+                    narrator
+                  )}
                 </span>
               )}
             </div>
@@ -188,6 +213,7 @@ export default function AudiobookDetail() {
         }
         overview={audiobook.overview}
         genres={data.audiobook.genres}
+        genreHref={(g) => `/audiobooks?genre=${encodeURIComponent(g)}`}
         actions={
           files.length > 0 && (
             <div className="flex max-w-md flex-col gap-3">
@@ -215,6 +241,16 @@ export default function AudiobookDetail() {
                       })()
                     : "Play"}
                 </Button>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => setAddToCollectionOpen(true)}
+                  className="gap-2"
+                  title="Add to a manual collection"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  Add to Collection
+                </Button>
                 {hasProgress && (
                   <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
                     Play from Start
@@ -226,23 +262,21 @@ export default function AudiobookDetail() {
         }
       />
 
-      <div className={`page-shell pb-12 ${playerOpen ? "pb-32" : ""}`}>
-        <ChaptersSection
-          files={files}
-          currentPositionSeconds={playerOpen ? startSeconds : resumeSeconds || null}
-          onSelect={(s) => openPlayer(s)}
-        />
+      <div
+        className="page-shell space-y-12 py-10 sm:space-y-14"
+        style={playerOpen ? { paddingBottom: "8rem" } : undefined}
+      >
         {narrator && <NarratorCard narrator={narrator} />}
 
-        {data.similar_audiobooks && data.similar_audiobooks.length > 0 && (
+        {data.in_series && data.in_series.entries.length > 0 && (
           <RelatedRail
-            heading="Similar audiobooks"
-            subtitle="Based on listening patterns"
-            items={data.similar_audiobooks.map((it) => ({
+            heading={data.in_series.name ? `In ${data.in_series.name}` : "In this series"}
+            items={data.in_series.entries.map((it) => ({
               content_id: it.content_id,
               title: it.title,
               poster_url: it.poster_url,
-              subtitle: it.year ? String(it.year) : undefined,
+              subtitle: typeof it.series_index === "number" ? `Book ${it.series_index}` : undefined,
+              highlight: it.content_id === contentId,
             }))}
           />
         )}
@@ -259,18 +293,23 @@ export default function AudiobookDetail() {
           />
         )}
 
-        {data.in_series && data.in_series.entries.length > 0 && (
+        {data.similar_audiobooks && data.similar_audiobooks.length > 0 && (
           <RelatedRail
-            heading={data.in_series.name ? `In ${data.in_series.name}` : "In this series"}
-            items={data.in_series.entries.map((it) => ({
+            heading="You might also like"
+            items={data.similar_audiobooks.map((it) => ({
               content_id: it.content_id,
               title: it.title,
               poster_url: it.poster_url,
-              subtitle: typeof it.series_index === "number" ? `Book ${it.series_index}` : undefined,
-              highlight: it.content_id === contentId,
+              subtitle: it.year ? String(it.year) : undefined,
             }))}
           />
         )}
+
+        <ChaptersSection
+          files={files}
+          currentPositionSeconds={playerOpen ? startSeconds : resumeSeconds || null}
+          onSelect={(s) => openPlayer(s)}
+        />
       </div>
     </div>
   );

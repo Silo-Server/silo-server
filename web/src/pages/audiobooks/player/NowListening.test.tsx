@@ -64,7 +64,7 @@ describe("NowListening", () => {
         onCollapse={onCollapse}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: /collapse/i }));
+    await userEvent.click(screen.getByRole("button", { name: /back to player/i }));
     expect(onCollapse).toHaveBeenCalled();
   });
 

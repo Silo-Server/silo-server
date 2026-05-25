@@ -1,5 +1,5 @@
 export type QuerySortOrder = "asc" | "desc";
-export type QuerySortRelevanceScope = "movie" | "series" | "episode" | "all";
+export type QuerySortRelevanceScope = "movie" | "series" | "episode" | "audiobook" | "all";
 export type QuerySortField =
   | "title"
   | "added_at"
@@ -47,7 +47,7 @@ interface QuerySortLike {
   order?: string | null;
 }
 
-const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = ["movie", "series", "episode"];
+const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = ["movie", "series", "episode", "audiobook"];
 
 export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
   {

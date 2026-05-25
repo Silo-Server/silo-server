@@ -38,7 +38,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "movie" | "series" | "episode";
+  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook";
   libraryIds: number[];
   genres: string[];
   decade: string;

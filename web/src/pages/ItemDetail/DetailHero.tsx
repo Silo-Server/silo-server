@@ -9,11 +9,17 @@ interface DetailHeroProps {
   backdropThumbhash?: string;
   posterUrl?: string;
   posterThumbhash?: string;
-  posterOrientation?: "portrait" | "landscape";
+  posterOrientation?: "portrait" | "landscape" | "square";
   hidePoster?: boolean;
   logoUrl?: string;
   metadata?: ReactNode;
   genres?: string[];
+  /**
+   * Optional URL builder that turns each genre into a router path. When
+   * provided, genre badges render as <a> links to the filtered library
+   * view. When omitted, badges render as plain text (default).
+   */
+  genreHref?: (genre: string) => string;
   overview?: string;
   actions?: ReactNode;
   aside?: ReactNode;
@@ -37,6 +43,7 @@ export default function DetailHero({
   logoUrl,
   metadata,
   genres,
+  genreHref,
   overview,
   actions,
   aside,
@@ -52,16 +59,32 @@ export default function DetailHero({
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
 
-  const posterSizeClass =
-    posterOrientation === "portrait"
-      ? isCompact
-        ? "w-[140px] sm:w-[160px]"
-        : "w-[170px] sm:w-[220px]"
-      : isCompact
-        ? "w-[200px] sm:w-[260px]"
-        : "w-[240px] sm:w-[320px]";
+  const posterSizeClass = (() => {
+    switch (posterOrientation) {
+      case "portrait":
+        return isCompact ? "w-[140px] sm:w-[160px]" : "w-[170px] sm:w-[220px]";
+      case "square":
+        // Bigger than portrait — square posters are visually smaller per
+        // pixel than 2:3 ones at the same width, so bump dimensions to
+        // keep them feeling like a comparable hero focal element.
+        return isCompact ? "w-[180px] sm:w-[200px]" : "w-[200px] sm:w-[260px]";
+      case "landscape":
+      default:
+        return isCompact ? "w-[200px] sm:w-[260px]" : "w-[240px] sm:w-[320px]";
+    }
+  })();
 
-  const posterAspect = posterOrientation === "portrait" ? "aspect-[2/3]" : "aspect-video";
+  const posterAspect = (() => {
+    switch (posterOrientation) {
+      case "portrait":
+        return "aspect-[2/3]";
+      case "square":
+        return "aspect-square";
+      case "landscape":
+      default:
+        return "aspect-video";
+    }
+  })();
 
   return (
     <section className="item-detail-hero border-border/10 relative isolate overflow-hidden border-b">
@@ -217,11 +240,21 @@ export default function DetailHero({
                 genres &&
                 genres.length > 0 && (
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {genres.map((genre) => (
-                      <span key={genre} className="metadata-badge">
-                        {genre}
-                      </span>
-                    ))}
+                    {genres.map((genre) =>
+                      genreHref ? (
+                        <a
+                          key={genre}
+                          href={genreHref(genre)}
+                          className="metadata-badge hover:bg-foreground/10 transition-colors"
+                        >
+                          {genre}
+                        </a>
+                      ) : (
+                        <span key={genre} className="metadata-badge">
+                          {genre}
+                        </span>
+                      ),
+                    )}
                   </div>
                 )
               )}
