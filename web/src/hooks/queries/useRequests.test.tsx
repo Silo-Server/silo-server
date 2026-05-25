@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { requestKeys } from "./keys";
 
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
@@ -106,5 +107,32 @@ describe("useRequestSearch", () => {
 
     const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
     expect(options.enabled).toBe(true);
+  });
+});
+
+describe("requestKeys.all invalidation", () => {
+  it("invalidates entries under requestKeys.search() when invalidating requestKeys.all", async () => {
+    const client = new QueryClient();
+    client.setQueryData(requestKeys.search("all", "dune", 1, "profile-1"), { sentinel: true });
+
+    expect(client.getQueryData(requestKeys.search("all", "dune", 1, "profile-1"))).toEqual({
+      sentinel: true,
+    });
+
+    await client.invalidateQueries({ queryKey: requestKeys.all });
+
+    const state = client.getQueryState(requestKeys.search("all", "dune", 1, "profile-1"));
+    expect(state?.isInvalidated).toBe(true);
+  });
+});
+
+describe("viewer-scoped cache isolation", () => {
+  it("does not return profile-1 results when keyed by profile-2", () => {
+    const client = new QueryClient();
+    client.setQueryData(requestKeys.search("all", "dune", 1, "profile-1"), {
+      results: [{ tmdb_id: 1 }],
+    });
+
+    expect(client.getQueryData(requestKeys.search("all", "dune", 1, "profile-2"))).toBeUndefined();
   });
 });

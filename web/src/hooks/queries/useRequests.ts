@@ -53,6 +53,9 @@ function buildListQuery(params: RequestListParams = {}) {
 }
 
 function invalidateRequestSurfaces(queryClient: ReturnType<typeof useQueryClient>) {
+  // requestKeys.all = ["requests"], so invalidating it cascades to nested keys,
+  // including requestKeys.search(...). Policy mutations rely on this to refresh
+  // viewer-scoped search results when request eligibility changes.
   queryClient.invalidateQueries({ queryKey: requestKeys.all });
   queryClient.invalidateQueries({ queryKey: adminKeys.requestsRoot() });
 }
