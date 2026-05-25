@@ -790,6 +790,33 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(markup).toBe("");
   });
 
+  it("passes enabled=false to useRequestSearch when discovery is disabled so no network call fires", () => {
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+
+    render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
+
+    const call = mocks.useRequestSearch.mock.calls.at(-1);
+    expect(call?.[0]).toBe("all");
+    expect(call?.[1]).toBe("dune");
+    expect(call?.[2]).toBe(1);
+    expect(call?.[3]).toEqual({ enabled: false });
+  });
+
+  it("passes enabled=true to useRequestSearch when discovery is enabled", () => {
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 1, total_results: 0, results: [] },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
+
+    const call = mocks.useRequestSearch.mock.calls.at(-1);
+    expect(call?.[3]).toEqual({ enabled: true });
+  });
+
   it("renders 'Request to Add' header when library had hits", () => {
     mocks.useRequestSearch.mockReturnValue({
       data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
@@ -920,7 +947,10 @@ export type RequestToAddSectionProps = {
 
 export function RequestToAddSection({ variant, query, libraryHadHits }: RequestToAddSectionProps) {
   const { discoveryEnabled } = useCanRequest();
-  const search = useRequestSearch("all", query, 1);
+  // Gate the TMDB query firing on discovery eligibility. The `!discoveryEnabled`
+  // early return below hides the UI, but the hook still runs unconditionally
+  // (rules of hooks) — passing `enabled` is what prevents the network call.
+  const search = useRequestSearch("all", query, 1, { enabled: discoveryEnabled });
 
   if (!discoveryEnabled) return null;
   if (search.isError) return null;
@@ -1323,6 +1353,13 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     expect(call?.[3]).toEqual({ enabled: false });
   });
 
+  it("does not mount RequestToAddSection when discovery is disabled", () => {
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
+
+    expect(markup).not.toContain('data-testid="request-section"');
+  });
+
   it("suppresses 'No matches' when library is empty and TMDB is still loading", () => {
     mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
     mocks.useQuery.mockReturnValue({
@@ -1464,7 +1501,7 @@ Then in the `showResultsPanel` JSX block, add the `<RequestToAddSection>` render
                   onPick={handlePickItem}
                 />
               ))}
-              {tmdbDebouncedQuery.length > 1 && (
+              {tmdbDebouncedQuery.length > 1 && canRequest.discoveryEnabled && (
                 <RequestToAddSection
                   variant="dialog"
                   query={tmdbDebouncedQuery}
@@ -1591,6 +1628,7 @@ describe("Catalog + RequestToAddSection wiring", () => {
   });
 
   it("renders the grid variant when source=query and library has results", () => {
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
     mocks.useCatalogWindow.mockReturnValue({
       data: {
         title: 'Results for "dune"',
@@ -1608,6 +1646,7 @@ describe("Catalog + RequestToAddSection wiring", () => {
   });
 
   it("renders the grid variant with libraryHadHits=false when library has 0 hits", () => {
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
     mocks.useCatalogWindow.mockReturnValue({
       data: { title: 'Results for "noresults"', totalItems: 0, pages: new Map() },
       isLoading: false,
@@ -1619,12 +1658,28 @@ describe("Catalog + RequestToAddSection wiring", () => {
   });
 
   it("does not render the section when source is not query", () => {
+    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
     mocks.useCatalogWindow.mockReturnValue({
       data: { title: "Favorites", totalItems: 0, pages: new Map() },
       isLoading: false,
     });
 
     const markup = render("/catalog?source=favorites");
+    expect(markup).not.toContain('data-testid="request-section"');
+  });
+
+  it("does not render the section when discovery is disabled", () => {
+    // Default beforeEach sets discoveryEnabled=false; assert the parent gate blocks the mount.
+    mocks.useCatalogWindow.mockReturnValue({
+      data: {
+        title: 'Results for "dune"',
+        totalItems: 2,
+        pages: new Map([[0, [{ content_id: "lib-1", title: "Dune", type: "movie", year: 2021 }]]]),
+      },
+      isLoading: false,
+    });
+
+    const markup = render("/catalog?source=query&q=dune");
     expect(markup).not.toContain('data-testid="request-section"');
   });
 
@@ -1749,7 +1804,7 @@ Update the `<ItemGrid loading=...>` prop:
 After the `ItemGrid`, before the `ConfirmDialog`, render the section:
 
 ```typescript
-      {isQuerySource ? (
+      {isQuerySource && canRequest.discoveryEnabled ? (
         <RequestToAddSection
           variant="grid"
           query={state.q!}
