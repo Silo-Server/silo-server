@@ -1330,6 +1330,20 @@ type MediaTMDBRow struct {
 	Title     string
 }
 
+type ExternalIDLookupCandidate struct {
+	TMDBID string
+	TVDBID string
+	IMDbID string
+}
+
+type ExternalIDMatchRow struct {
+	QueryTMDBID     string
+	MediaID         string
+	MatchedProvider string
+	LibraryID       string
+	Title           string
+}
+
 // LookupTMDBIDs returns one row per matching media item that has its tmdb_id
 // in the supplied list and is linked to at least one enabled library.
 // mediaType is "movie" or "series" (silo's internal naming).
@@ -1341,38 +1355,121 @@ func (r *ItemRepository) LookupTMDBIDs(ctx context.Context, mediaType string, tm
 	if len(tmdbIDs) == 0 {
 		return nil, nil
 	}
-	// Convert string IDs to int: TMDB IDs are stored as text in media_items
-	// but the plugin sends them as strings.  We do an ANY match directly on
-	// the text column so no int conversion is required.
-	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT ON (mi.content_id)
-		       mi.content_id,
-		       COALESCE(mi.tmdb_id, ''),
-		       mil.media_folder_id::text,
-		       mi.title
-		FROM media_items mi
-		JOIN media_item_libraries mil ON mil.content_id = mi.content_id
-		JOIN media_folders mf ON mf.id = mil.media_folder_id
-		WHERE mi.tmdb_id = ANY($1)
-		  AND mi.type = $2
-		  AND mf.enabled = true
-		ORDER BY mi.content_id, mil.media_folder_id ASC
-	`, tmdbIDs, mediaType)
+	candidates := make([]ExternalIDLookupCandidate, 0, len(tmdbIDs))
+	for _, id := range tmdbIDs {
+		if strings.TrimSpace(id) != "" {
+			candidates = append(candidates, ExternalIDLookupCandidate{TMDBID: id})
+		}
+	}
+	rows, err := r.LookupExternalIDs(ctx, mediaType, candidates)
 	if err != nil {
-		return nil, fmt.Errorf("lookup tmdb ids: %w", err)
+		return nil, err
+	}
+	out := make([]MediaTMDBRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, MediaTMDBRow{
+			MediaID:   row.MediaID,
+			TMDBID:    row.QueryTMDBID,
+			LibraryID: row.LibraryID,
+			Title:     row.Title,
+		})
+	}
+	return out, nil
+}
+
+func lookupExternalIDsSQL() string {
+	return `
+		WITH requested(query_tmdb_id, provider, provider_id, ord) AS (
+			SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::int[])
+		),
+		direct_matches AS (
+			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			FROM requested r
+			JOIN media_items mi
+			  ON mi.type = $5
+			 AND (
+				(r.provider = 'tmdb' AND mi.tmdb_id <> '' AND mi.tmdb_id = r.provider_id)
+				OR (r.provider = 'tvdb' AND mi.tvdb_id <> '' AND mi.tvdb_id = r.provider_id)
+				OR (r.provider = 'imdb' AND mi.imdb_id <> '' AND mi.imdb_id = r.provider_id)
+			 )
+			JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+			JOIN media_folders mf ON mf.id = mil.media_folder_id
+			WHERE mf.enabled = true
+		),
+		provider_matches AS (
+			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			FROM requested r
+			JOIN media_item_provider_ids mip
+			  ON mip.provider = r.provider
+			 AND mip.provider_id = r.provider_id
+			 AND mip.item_type = $5
+			JOIN media_items mi ON mi.content_id = mip.content_id AND mi.type = $5
+			JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+			JOIN media_folders mf ON mf.id = mil.media_folder_id
+			WHERE mf.enabled = true
+		)
+		SELECT DISTINCT ON (query_tmdb_id)
+		       query_tmdb_id, content_id, provider, media_folder_id, title
+		FROM (
+			SELECT * FROM direct_matches
+			UNION ALL
+			SELECT * FROM provider_matches
+		) matches
+		ORDER BY query_tmdb_id, provider_rank ASC, ord ASC, content_id ASC, media_folder_id ASC`
+}
+
+func (r *ItemRepository) LookupExternalIDs(
+	ctx context.Context,
+	mediaType string,
+	candidates []ExternalIDLookupCandidate,
+) ([]ExternalIDMatchRow, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	queryTMDBIDs := make([]string, 0, len(candidates)*3)
+	providers := make([]string, 0, len(candidates)*3)
+	providerIDs := make([]string, 0, len(candidates)*3)
+	ordinals := make([]int32, 0, len(candidates)*3)
+
+	appendID := func(candidate ExternalIDLookupCandidate, provider, providerID string, ordinal int) {
+		providerID = strings.TrimSpace(providerID)
+		if providerID == "" {
+			return
+		}
+		queryTMDBIDs = append(queryTMDBIDs, strings.TrimSpace(candidate.TMDBID))
+		providers = append(providers, provider)
+		providerIDs = append(providerIDs, providerID)
+		ordinals = append(ordinals, int32(ordinal))
+	}
+
+	for i, candidate := range candidates {
+		appendID(candidate, "tmdb", candidate.TMDBID, i)
+		appendID(candidate, "tvdb", candidate.TVDBID, i)
+		appendID(candidate, "imdb", candidate.IMDbID, i)
+	}
+	if len(providerIDs) == 0 {
+		return nil, nil
+	}
+
+	rows, err := r.pool.Query(ctx, lookupExternalIDsSQL(), queryTMDBIDs, providers, providerIDs, ordinals, mediaType)
+	if err != nil {
+		return nil, fmt.Errorf("lookup external ids: %w", err)
 	}
 	defer rows.Close()
 
-	var out []MediaTMDBRow
+	out := make([]ExternalIDMatchRow, 0)
 	for rows.Next() {
-		var row MediaTMDBRow
-		if err := rows.Scan(&row.MediaID, &row.TMDBID, &row.LibraryID, &row.Title); err != nil {
-			return nil, fmt.Errorf("scanning tmdb lookup row: %w", err)
+		var row ExternalIDMatchRow
+		if err := rows.Scan(&row.QueryTMDBID, &row.MediaID, &row.MatchedProvider, &row.LibraryID, &row.Title); err != nil {
+			return nil, fmt.Errorf("scanning external id lookup row: %w", err)
 		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating tmdb lookup rows: %w", err)
+		return nil, fmt.Errorf("iterating external id lookup rows: %w", err)
 	}
 	return out, nil
 }

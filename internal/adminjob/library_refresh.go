@@ -110,6 +110,14 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 			OR COALESCE(mi.logo_path, '') LIKE '%//logo/%'
 			OR mi.refresh_failures > 0
 			OR mi.episode_metadata_incomplete = TRUE
+			OR (
+				LOWER(TRIM(COALESCE(mi.status, ''))) = 'matched'
+				AND COALESCE(mi.tmdb_id, '') = ''
+				AND (
+					COALESCE(mi.tvdb_id, '') <> ''
+					OR COALESCE(mi.imdb_id, '') <> ''
+				)
+			)
 			OR EXISTS (
 				SELECT 1
 				FROM stale_media_ids smi

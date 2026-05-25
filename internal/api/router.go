@@ -46,6 +46,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/requests/radarr"
+	"github.com/Silo-Server/silo-server/internal/requests/sonarr"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -323,6 +326,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var detailSvc *catalog.DetailService
 	var calendarRepo *catalog.CalendarRepository
 	var webhookSyncHandler *handlers.WebhookSyncHandler
+	var requestHandler *handlers.RequestsHandler
 	if deps.DB != nil {
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -381,6 +385,19 @@ func NewRouter(deps Dependencies) chi.Router {
 				WithUserStoreProvider(deps.UserStoreProvider),
 			itemsHandler,
 		)
+
+		tmdbAPIKey := ""
+		if deps.Config != nil {
+			tmdbAPIKey = deps.Config.TMDBAPIKey
+		}
+		requestSvc := mediarequests.NewService(
+			mediarequests.NewRepository(deps.DB),
+			tmdb.NewClient(tmdbAPIKey, 40),
+			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
+		)
+		requestSvc.SetSecretResolver(settingsRepo)
+		requestSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
 		if deps.PersonRepo != nil {
 			peopleHandler = handlers.NewPeopleHandler(deps.PersonRepo, browseRepo, itemRepo, detailSvc)
@@ -1374,6 +1391,26 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
+				if requestHandler != nil {
+					r.Route("/requests", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/search", requestHandler.HandleSearch)
+						r.Get("/discover", requestHandler.HandleDiscover)
+						r.Get("/discover/studios", requestHandler.HandleListStudios)
+						r.Get("/discover/networks", requestHandler.HandleListNetworks)
+						r.Get("/discover/genres", requestHandler.HandleListGenres)
+						r.Get("/discover/browse/studio/{slug}", requestHandler.HandleBrowseStudio)
+						r.Get("/discover/browse/network/{slug}", requestHandler.HandleBrowseNetwork)
+						r.Get("/discover/browse/genre/{slug}", requestHandler.HandleBrowseGenre)
+						r.Get("/discover/{section}", requestHandler.HandleDiscoverSection)
+						r.Get("/detail/{media_type}/{tmdb_id}", requestHandler.HandleGetDetail)
+						r.Post("/", requestHandler.HandleCreate)
+						r.Get("/mine", requestHandler.HandleListMine)
+						r.Get("/{id}", requestHandler.HandleGet)
+						r.Post("/{id}/cancel", requestHandler.HandleCancel)
+					})
+				}
+
 				// Settings routes (user-scoped, no profile required).
 				if settingsHandler != nil {
 					r.Route("/settings", func(r chi.Router) {
@@ -1868,6 +1905,21 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Post("/api-keys", apiKeyHandler.HandleAdminCreateAPIKey)
 							r.Delete("/api-keys/{id}", apiKeyHandler.HandleAdminDeleteAPIKey)
 							r.Put("/api-keys/{id}/tier", apiKeyHandler.HandleAdminUpdateTier)
+						}
+
+						if requestHandler != nil {
+							r.Get("/requests", requestHandler.HandleAdminList)
+							r.Post("/requests/{id}/approve", requestHandler.HandleApprove)
+							r.Post("/requests/{id}/decline", requestHandler.HandleDecline)
+							r.Post("/requests/{id}/cancel", requestHandler.HandleCancel)
+							r.Post("/requests/{id}/retry", requestHandler.HandleRetry)
+							r.Get("/request-settings", requestHandler.HandleGetSettings)
+							r.Put("/request-settings", requestHandler.HandleUpdateSettings)
+							r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
+							r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
+							r.Get("/request-integrations", requestHandler.HandleListIntegrations)
+							r.Put("/request-integrations", requestHandler.HandleUpdateIntegrations)
+							r.Post("/request-integrations/{kind}/options", requestHandler.HandleLoadIntegrationOptions)
 						}
 
 						if deps.ActivityLogRepo != nil {

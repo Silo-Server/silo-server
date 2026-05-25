@@ -19,6 +19,7 @@ import {
   ScrollText,
   Blocks,
   Puzzle,
+  Send,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -102,6 +103,11 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
           label: "Collections",
           icon: <LayoutPanelTop className="h-[18px] w-[18px]" />,
           href: "/admin/collections",
+        },
+        {
+          label: "Requests",
+          icon: <Send className="h-[18px] w-[18px]" />,
+          href: "/admin/requests",
         },
         {
           label: "Sections",

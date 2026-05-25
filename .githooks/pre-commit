@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve via git toplevel so the hook works from any cwd (e.g., when
+# git invokes hooks from within a non-root subdirectory).
+"$(git rev-parse --show-toplevel)/scripts/check-local-path-leaks.sh" --cached

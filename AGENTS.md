@@ -3,6 +3,8 @@
 ## Project Structure & Module Organization
 `cmd/silo` contains the main server entrypoint. Backend code lives in `internal/`, organized by domain (`api`, `catalog`, `metadata`, `playback`, `scanner`, `jellycompat`, etc.); keep new code in the package that owns the behavior instead of creating catch-all helpers. Database changes belong in `migrations/` as paired numbered `.up.sql` and `.down.sql` files. The React frontend lives in `web/src/`, with feature code split across `components/`, `pages/`, `hooks/`, `player/`, and `lib/`. Reference material belongs in `docs/architecture/` or `docs/superpowers/{specs,plans}/`; ad hoc SQL helpers live in `scripts/`.
 
+When creating or editing `docs/superpowers/specs/` or `docs/superpowers/plans/`, never include local absolute filesystem paths or transient worktree IDs. Use repository-relative paths and wording like "Commands assume the repository root is the cwd."
+
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
 
@@ -56,6 +58,7 @@ Run before opening a merge request:
 
 - `cd web && pnpm run lint`
 - `cd web && pnpm run format:check`
+- `make verify-local-paths`
 
 For local services, start PostgreSQL and Redis with `docker compose up -d postgres redis`.
 

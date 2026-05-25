@@ -1985,7 +1985,11 @@ func (s *MetadataService) syncRefreshDebtFailure(ctx context.Context, contentID 
 		return err
 	}
 	reasonMask |= staleReason
-	if strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+	if strings.EqualFold(strings.TrimSpace(item.Status), "matched") &&
+		!hasRefreshDebtReason(reasonMask, RefreshDebtReasonProviderIDIncomplete) {
+		// Items missing provider IDs fail for that reason, not because the
+		// refresh itself errored. Tagging them with RefreshFailure muddies
+		// the metrics — the priority logic already prefers ProviderIDIncomplete.
 		reasonMask |= RefreshDebtReasonRefreshFailure
 	}
 	if reasonMask == 0 {

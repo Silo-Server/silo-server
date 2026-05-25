@@ -448,6 +448,7 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 	}{
 		{reason: "episode_incomplete", mask: RefreshDebtReasonEpisodeIncomplete},
 		{reason: "stale_provider_id", mask: RefreshDebtReasonStaleProviderID},
+		{reason: "provider_id_incomplete", mask: RefreshDebtReasonProviderIDIncomplete},
 		{reason: "refresh_failure", mask: RefreshDebtReasonRefreshFailure},
 		{reason: "core_metadata_incomplete", mask: RefreshDebtReasonCoreMetadataIncomplete},
 	}

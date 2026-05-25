@@ -42,10 +42,12 @@ export default function Layout({ children }: LayoutProps) {
     })();
   const isRecommendationsRoute = location.pathname === "/recommendations";
   const isCalendarRoute = location.pathname === "/calendar";
+  const isRequestDetailRoute = /^\/requests\/(movie|series)\//.test(location.pathname);
   const needsNoPadding =
     isHomePath ||
     isLibraryRoute ||
     isItemRoute ||
+    isRequestDetailRoute ||
     isSearchLandingRoute ||
     isRecommendationsRoute ||
     isCalendarRoute;
