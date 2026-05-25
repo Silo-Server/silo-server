@@ -27,6 +27,7 @@ type FolderRepository interface {
 
 type Queuer interface {
 	EnqueueScan(ctx context.Context, folderID int, mode, path, trigger string) (bool, error)
+	EnqueueScans(ctx context.Context, targets []Target) error
 }
 
 type Request struct {
@@ -63,8 +64,23 @@ func NewResolver(folders FolderRepository) *Resolver {
 
 func (r *Resolver) ResolveAll(ctx context.Context, requests []Request) ([]Target, error) {
 	targets := make([]Target, 0, len(requests))
+	var pathFolders []*models.MediaFolder
+	pathFoldersLoaded := false
 	for _, req := range requests {
-		target, err := r.Resolve(ctx, req)
+		usePathFolders := req.LibraryID == nil && strings.TrimSpace(req.Path) != ""
+		if usePathFolders && !pathFoldersLoaded {
+			if r == nil || r.folders == nil {
+				return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available"}
+			}
+			folders, listErr := r.folders.List(ctx)
+			if listErr != nil {
+				return nil, fmt.Errorf("listing libraries for scan: %w", listErr)
+			}
+			pathFolders = folders
+			pathFoldersLoaded = true
+		}
+
+		target, err := r.resolve(ctx, req, pathFolders, usePathFolders)
 		if err != nil {
 			return nil, err
 		}
@@ -74,6 +90,10 @@ func (r *Resolver) ResolveAll(ctx context.Context, requests []Request) ([]Target
 }
 
 func (r *Resolver) Resolve(ctx context.Context, req Request) (*Target, error) {
+	return r.resolve(ctx, req, nil, false)
+}
+
+func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*models.MediaFolder, usePathFolders bool) (*Target, error) {
 	if r == nil || r.folders == nil {
 		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available"}
 	}
@@ -115,9 +135,13 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (*Target, error) {
 			return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path does not belong to the specified library"}
 		}
 	} else {
-		folders, listErr := r.folders.List(ctx)
-		if listErr != nil {
-			return nil, fmt.Errorf("listing libraries for scan: %w", listErr)
+		folders := pathFolders
+		if !usePathFolders {
+			var listErr error
+			folders, listErr = r.folders.List(ctx)
+			if listErr != nil {
+				return nil, fmt.Errorf("listing libraries for scan: %w", listErr)
+			}
 		}
 		folder, matchedRoot, err = MatchFolderForPath(cleanPath, folders)
 		if err != nil {
@@ -150,10 +174,8 @@ func EnqueueAll(ctx context.Context, queue Queuer, targets []Target) error {
 	if queue == nil {
 		return &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available"}
 	}
-	for _, target := range targets {
-		if _, err := queue.EnqueueScan(ctx, target.LibraryID, target.Mode, target.Path, target.Trigger); err != nil {
-			return fmt.Errorf("queueing library scan: %w", err)
-		}
+	if err := queue.EnqueueScans(ctx, targets); err != nil {
+		return fmt.Errorf("queueing library scans: %w", err)
 	}
 	return nil
 }

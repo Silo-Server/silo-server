@@ -13,6 +13,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
 const (
@@ -129,6 +130,31 @@ func (s *Service) EnqueueScan(ctx context.Context, folderID int, mode, path, tri
 		s.publish(ctx, "scan.accepted", run)
 	}
 	return created, nil
+}
+
+func (s *Service) EnqueueScans(ctx context.Context, targets []scantrigger.Target) error {
+	if s == nil || s.repo == nil {
+		return fmt.Errorf("scan queue is not configured")
+	}
+	inputs := make([]CreateInput, 0, len(targets))
+	for _, target := range targets {
+		inputs = append(inputs, CreateInput{
+			LibraryID: target.LibraryID,
+			Mode:      target.Mode,
+			Path:      target.Path,
+			Trigger:   target.Trigger,
+		})
+	}
+	runs, created, err := s.repo.CreateBatch(ctx, inputs)
+	if err != nil {
+		return err
+	}
+	for i, run := range runs {
+		if i < len(created) && created[i] {
+			s.publish(ctx, "scan.accepted", run)
+		}
+	}
+	return nil
 }
 
 func (s *Service) CancelAcceptedByLibrary(ctx context.Context, libraryID int) (int, error) {

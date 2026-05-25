@@ -13,7 +13,8 @@ import (
 )
 
 type fakeFolderRepo struct {
-	folders []*models.MediaFolder
+	folders   []*models.MediaFolder
+	listCalls int
 }
 
 func (r *fakeFolderRepo) GetByID(_ context.Context, id int) (*models.MediaFolder, error) {
@@ -26,6 +27,7 @@ func (r *fakeFolderRepo) GetByID(_ context.Context, id int) (*models.MediaFolder
 }
 
 func (r *fakeFolderRepo) List(context.Context) ([]*models.MediaFolder, error) {
+	r.listCalls++
 	return r.folders, nil
 }
 
@@ -133,5 +135,75 @@ func TestResolveAllIsAllOrFail(t *testing.T) {
 	}
 	if reqErr.Message != "Path does not exist" {
 		t.Fatalf("unexpected error message: %q", reqErr.Message)
+	}
+}
+
+func TestResolveAllReusesPathOnlyLibraryList(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "First.mkv")
+	second := filepath.Join(root, "Second.mkv")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      12,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	targets, err := NewResolver(repo).ResolveAll(context.Background(), []Request{
+		{Path: first},
+		{Path: second},
+	})
+	if err != nil {
+		t.Fatalf("ResolveAll returned error: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("expected two targets, got %d", len(targets))
+	}
+	if repo.listCalls != 1 {
+		t.Fatalf("expected one folder list lookup, got %d", repo.listCalls)
+	}
+}
+
+type fakeQueue struct {
+	calls    []Target
+	batches  [][]Target
+	batchErr error
+}
+
+func (q *fakeQueue) EnqueueScan(_ context.Context, folderID int, mode, path, trigger string) (bool, error) {
+	q.calls = append(q.calls, Target{LibraryID: folderID, Mode: mode, Path: path, Trigger: trigger})
+	return true, nil
+}
+
+func (q *fakeQueue) EnqueueScans(_ context.Context, targets []Target) error {
+	copied := append([]Target(nil), targets...)
+	q.batches = append(q.batches, copied)
+	if q.batchErr != nil {
+		return q.batchErr
+	}
+	q.calls = append(q.calls, targets...)
+	return nil
+}
+
+func TestEnqueueAllUsesBatchQueue(t *testing.T) {
+	queue := &fakeQueue{}
+	targets := []Target{
+		{LibraryID: 1, Mode: ModeFile, Path: "/media/one.mkv", Trigger: "autoscan"},
+		{LibraryID: 1, Mode: ModeFile, Path: "/media/two.mkv", Trigger: "autoscan"},
+	}
+
+	if err := EnqueueAll(context.Background(), queue, targets); err != nil {
+		t.Fatalf("EnqueueAll returned error: %v", err)
+	}
+	if len(queue.batches) != 1 {
+		t.Fatalf("expected one batch enqueue, got %d", len(queue.batches))
+	}
+	if len(queue.calls) != 2 {
+		t.Fatalf("expected two queued calls from batch, got %d", len(queue.calls))
 	}
 }

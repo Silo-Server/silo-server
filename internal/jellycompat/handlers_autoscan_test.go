@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
 type fakeAutoscanFolders struct {
@@ -33,7 +35,9 @@ func (f *fakeAutoscanFolders) List(context.Context) ([]*models.MediaFolder, erro
 }
 
 type fakeAutoscanQueue struct {
-	calls []queuedScan
+	calls    []queuedScan
+	batches  [][]scantrigger.Target
+	batchErr error
 }
 
 type queuedScan struct {
@@ -46,6 +50,23 @@ type queuedScan struct {
 func (q *fakeAutoscanQueue) EnqueueScan(_ context.Context, folderID int, mode, path, trigger string) (bool, error) {
 	q.calls = append(q.calls, queuedScan{libraryID: folderID, mode: mode, path: path, trigger: trigger})
 	return true, nil
+}
+
+func (q *fakeAutoscanQueue) EnqueueScans(_ context.Context, targets []scantrigger.Target) error {
+	copied := append([]scantrigger.Target(nil), targets...)
+	q.batches = append(q.batches, copied)
+	if q.batchErr != nil {
+		return q.batchErr
+	}
+	for _, target := range targets {
+		q.calls = append(q.calls, queuedScan{
+			libraryID: target.LibraryID,
+			mode:      target.Mode,
+			path:      target.Path,
+			trigger:   target.Trigger,
+		})
+	}
+	return nil
 }
 
 func TestAutoscanVirtualFoldersIncludesEnabledLocationsForAdminKey(t *testing.T) {
@@ -104,6 +125,9 @@ func TestAutoscanMediaUpdatedEnqueuesResolvedPath(t *testing.T) {
 	if len(queue.calls) != 1 {
 		t.Fatalf("expected one queued scan, got %d", len(queue.calls))
 	}
+	if len(queue.batches) != 1 {
+		t.Fatalf("expected one batch enqueue, got %d", len(queue.batches))
+	}
 	if queue.calls[0].libraryID != 3 || queue.calls[0].mode != "file" || queue.calls[0].path != filePath || queue.calls[0].trigger != "jellyfin_autoscan" {
 		t.Fatalf("unexpected queued scan: %#v", queue.calls[0])
 	}
@@ -142,5 +166,34 @@ func TestAutoscanMediaUpdatedAllOrFail(t *testing.T) {
 	}
 	if len(queue.calls) != 0 {
 		t.Fatalf("expected no partial enqueue, got %#v", queue.calls)
+	}
+}
+
+func TestAutoscanMediaUpdatedHidesInternalQueueError(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "Movie.mkv")
+	if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	queue := &fakeAutoscanQueue{batchErr: errors.New("database password leaked")}
+	handler := NewAutoscanHandler(&fakeAutoscanFolders{folders: []*models.MediaFolder{{
+		ID:      5,
+		Name:    "Movies",
+		Type:    "movie",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}, queue, NewResourceIDCodec(), nil)
+
+	body := []byte(`{"Updates":[{"path":` + strconv.Quote(filePath) + `,"updateType":"Modified"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/Library/Media/Updated", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleMediaUpdated(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("database password leaked")) {
+		t.Fatalf("response leaked internal error: %s", rec.Body.String())
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -142,5 +141,5 @@ func writeScanTriggerError(w http.ResponseWriter, err error) {
 		return
 	}
 	slog.Error("jellycompat autoscan: scan update failed", "error", err)
-	writeError(w, http.StatusInternalServerError, "InternalServerError", fmt.Sprintf("Failed to process scan update: %v", err))
+	writeError(w, http.StatusInternalServerError, "InternalServerError", "Failed to process scan update")
 }

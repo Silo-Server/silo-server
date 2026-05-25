@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -83,7 +84,7 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 		return adminAPIKeyAuthResult{ctx: r.Context(), status: http.StatusUnauthorized}
 	}
 	apiKey, err := a.keys.GetByKey(r.Context(), token)
-	if err != nil {
+	if err != nil || apiKey == nil {
 		return adminAPIKeyAuthResult{ctx: r.Context(), status: http.StatusUnauthorized}
 	}
 	user, err := a.users.GetByID(r.Context(), apiKey.UserID)
@@ -94,7 +95,9 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 		return adminAPIKeyAuthResult{ctx: context.WithValue(r.Context(), adminAPIKeyKey, false), status: http.StatusForbidden}
 	}
 	go func(id int64) {
-		if err := a.keys.UpdateLastUsed(context.Background(), id); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.keys.UpdateLastUsed(ctx, id); err != nil {
 			slog.Debug("jellycompat api key last-used update failed", "id", id, "error", err)
 		}
 	}(apiKey.ID)
