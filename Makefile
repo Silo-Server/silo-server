@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web-bundle migrate-continuum-check
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web-bundle migrate-continuum-check verify-local-paths install-hooks
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -42,6 +42,18 @@ dev-transcode:
 lint:
 	golangci-lint run
 	cd web && pnpm run lint
+
+# Check committed content for local machine path leaks.
+verify-local-paths:
+	scripts/check-local-path-leaks.sh
+
+# Install repo-local git hooks for this checkout/worktree.
+install-hooks:
+	@existing="$$(git config --local core.hooksPath 2>/dev/null || true)"; \
+	if [ -n "$$existing" ] && [ "$$existing" != ".githooks" ]; then \
+		echo "warning: overwriting existing local core.hooksPath ($$existing) with .githooks"; \
+	fi
+	git config core.hooksPath .githooks
 
 # Fetch and build the pinned Jellyfin Web bundle
 jellyfin-web-bundle:

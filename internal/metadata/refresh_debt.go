@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	RefreshDebtReasonEpisodeIncomplete int64 = 1 << iota
-	RefreshDebtReasonStaleProviderID
-	RefreshDebtReasonRefreshFailure
-	RefreshDebtReasonCoreMetadataIncomplete
+	RefreshDebtReasonEpisodeIncomplete      int64 = 1
+	RefreshDebtReasonStaleProviderID        int64 = 2
+	RefreshDebtReasonRefreshFailure         int64 = 4
+	RefreshDebtReasonCoreMetadataIncomplete int64 = 8
+	RefreshDebtReasonProviderIDIncomplete   int64 = 16
 )
 
 const (
@@ -43,6 +44,8 @@ func refreshDebtPriority(reasonMask int64) int {
 		return 300
 	case hasRefreshDebtReason(reasonMask, RefreshDebtReasonStaleProviderID):
 		return 250
+	case hasRefreshDebtReason(reasonMask, RefreshDebtReasonProviderIDIncomplete):
+		return 240
 	case hasRefreshDebtReason(reasonMask, RefreshDebtReasonRefreshFailure):
 		return 200
 	case hasRefreshDebtReason(reasonMask, RefreshDebtReasonCoreMetadataIncomplete):
@@ -95,10 +98,23 @@ func refreshDebtReasonsForItem(item *models.MediaItem) int64 {
 	if hasCoreMetadataRefreshDebt(item) {
 		reasonMask |= RefreshDebtReasonCoreMetadataIncomplete
 	}
+	if hasProviderIDRefreshDebt(item) {
+		reasonMask |= RefreshDebtReasonProviderIDIncomplete
+	}
 	if item.RefreshFailures > 0 && strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
 		reasonMask |= RefreshDebtReasonRefreshFailure
 	}
 	return reasonMask
+}
+
+func hasProviderIDRefreshDebt(item *models.MediaItem) bool {
+	if item == nil || !strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+		return false
+	}
+	if strings.TrimSpace(item.TmdbID) != "" {
+		return false
+	}
+	return strings.TrimSpace(item.TvdbID) != "" || strings.TrimSpace(item.ImdbID) != ""
 }
 
 func hasCoreMetadataRefreshDebt(item *models.MediaItem) bool {

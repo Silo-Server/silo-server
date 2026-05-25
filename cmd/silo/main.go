@@ -67,6 +67,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/requests/radarr"
+	"github.com/Silo-Server/silo-server/internal/requests/sonarr"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -1282,6 +1285,17 @@ func main() {
 		if watchProviderService != nil {
 			taskMgr.Register(tasks.NewSyncWatchProvidersTask(watchProviderService))
 		}
+		requestReconcileSvc := mediarequests.NewService(
+			mediarequests.NewRepository(deps.DB),
+			nil,
+			mediarequests.NewCatalogPresence(
+				catalog.NewItemRepository(deps.DB),
+				catalog.NewProviderIDRepository(deps.DB),
+			),
+		)
+		requestReconcileSvc.SetSecretResolver(settingsRepo)
+		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)

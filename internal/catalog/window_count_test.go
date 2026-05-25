@@ -272,43 +272,42 @@ func TestBuildBrowseFavoritesPlan_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T)
 
 // TestItemRepo_Search_CountSQL_OmitsLimitOffsetOrderBy pins the same
 // empty-page fallback contract for the Search path. The count sibling must
-// preserve the strict-title CROSS JOIN filter so the recovered total
-// reflects the post-filter row count (matching COUNT(*) OVER () semantics).
+// preserve the title-gate CROSS JOIN filter so the recovered total reflects
+// the post-filter row count (matching COUNT(*) OVER () semantics on the
+// data SELECT). Single-word and multi-word queries share one SQL shape.
 func TestItemRepo_Search_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T) {
 	repo := &ItemRepository{}
 
-	// Single-word path: count from scored CTE.
-	_, countSQL, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, AccessFilter{})
-	if !strings.Contains(countSQL, "WITH scored AS") {
-		t.Fatalf("countSQL must include scored CTE; got:\n%s", countSQL)
-	}
-	if !strings.Contains(countSQL, "SELECT COUNT(*) FROM scored") {
-		t.Fatalf("expected SELECT COUNT(*) FROM scored; got:\n%s", countSQL)
-	}
-	if strings.Contains(countSQL, "LIMIT ") {
-		t.Fatalf("countSQL must omit LIMIT; got:\n%s", countSQL)
-	}
-	if strings.Contains(countSQL, "OFFSET ") {
-		t.Fatalf("countSQL must omit OFFSET; got:\n%s", countSQL)
-	}
-	if strings.Contains(countSQL, "ORDER BY") {
-		t.Fatalf("countSQL must omit ORDER BY; got:\n%s", countSQL)
-	}
-	if strings.Contains(countSQL, "COUNT(*) OVER ()") {
-		t.Fatalf("countSQL must use plain COUNT(*); got:\n%s", countSQL)
-	}
-
-	// Strict-title path: count must apply the same CROSS JOIN stats filter so
-	// the recovered total reflects post-filter row count (not the broader
-	// pre-filter set). Otherwise the fallback would over-count.
-	_, strictCountSQL, _ := repo.buildSearchSQL("the matrix reloaded", []string{"movie"}, 20, 0, AccessFilter{})
-	if !strings.Contains(strictCountSQL, "stats AS") {
-		t.Fatalf("strict-title countSQL must include stats CTE; got:\n%s", strictCountSQL)
-	}
-	if !strings.Contains(strictCountSQL, "CROSS JOIN stats") {
-		t.Fatalf("strict-title countSQL must CROSS JOIN stats so the recovered total reflects the post-filter set; got:\n%s", strictCountSQL)
-	}
-	if !strings.Contains(strictCountSQL, "has_strong_title_match") {
-		t.Fatalf("strict-title countSQL must apply the strict-title predicate; got:\n%s", strictCountSQL)
+	for _, query := range []string{"avatar", "the matrix reloaded"} {
+		t.Run(query, func(t *testing.T) {
+			_, countSQL, _ := repo.buildSearchSQL(query, []string{"movie"}, 20, 0, AccessFilter{})
+			if !strings.Contains(countSQL, "WITH scored AS") {
+				t.Fatalf("countSQL must include scored CTE; got:\n%s", countSQL)
+			}
+			if !strings.Contains(countSQL, "stats AS") {
+				t.Fatalf("countSQL must include stats CTE; got:\n%s", countSQL)
+			}
+			if !strings.Contains(countSQL, "CROSS JOIN stats") {
+				t.Fatalf("countSQL must CROSS JOIN stats so the recovered total reflects the post-filter set; got:\n%s", countSQL)
+			}
+			if !strings.Contains(countSQL, "has_title_match") {
+				t.Fatalf("countSQL must apply the title-gate predicate; got:\n%s", countSQL)
+			}
+			if !strings.Contains(countSQL, "SELECT COUNT(*)") {
+				t.Fatalf("expected SELECT COUNT(*); got:\n%s", countSQL)
+			}
+			if strings.Contains(countSQL, "LIMIT ") {
+				t.Fatalf("countSQL must omit LIMIT; got:\n%s", countSQL)
+			}
+			if strings.Contains(countSQL, "OFFSET ") {
+				t.Fatalf("countSQL must omit OFFSET; got:\n%s", countSQL)
+			}
+			if strings.Contains(countSQL, "ORDER BY") {
+				t.Fatalf("countSQL must omit ORDER BY; got:\n%s", countSQL)
+			}
+			if strings.Contains(countSQL, "COUNT(*) OVER ()") {
+				t.Fatalf("countSQL must use plain COUNT(*); got:\n%s", countSQL)
+			}
+		})
 	}
 }

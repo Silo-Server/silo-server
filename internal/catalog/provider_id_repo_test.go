@@ -40,3 +40,17 @@ func TestNormalizeDurableProviderIDsOrdersCanonicalKeysFirst(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeDurableProviderIDsKeepsTMDBFirstForBackfill(t *testing.T) {
+	entries := normalizeDurableProviderIDs(map[string]string{
+		"tvdb": "420105",
+		"imdb": "tt18076310",
+		"tmdb": "201992",
+	})
+	if len(entries) != 3 {
+		t.Fatalf("len(entries) = %d, want 3", len(entries))
+	}
+	if entries[0].Provider != "tmdb" || entries[0].ProviderID != "201992" {
+		t.Fatalf("first entry = (%q, %q), want tmdb/201992", entries[0].Provider, entries[0].ProviderID)
+	}
+}

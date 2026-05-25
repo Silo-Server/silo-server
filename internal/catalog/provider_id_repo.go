@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,102 @@ type ProviderIDRepository struct {
 // given pool.
 func NewProviderIDRepository(pool *pgxpool.Pool) *ProviderIDRepository {
 	return &ProviderIDRepository{pool: pool}
+}
+
+func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, itemType string, tmdbID int) error {
+	contentID = strings.TrimSpace(contentID)
+	itemType = strings.TrimSpace(itemType)
+	if contentID == "" {
+		return fmt.Errorf("content_id is required")
+	}
+	if itemType == "" {
+		return fmt.Errorf("item_type is required")
+	}
+	if tmdbID <= 0 {
+		return fmt.Errorf("tmdb_id must be positive")
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin attach tmdb transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	tmdbText := strconv.Itoa(tmdbID)
+	var existingType, existingTMDBID string
+	if err := tx.QueryRow(ctx, `
+		SELECT type, COALESCE(tmdb_id, '')
+		FROM media_items
+		WHERE content_id = $1
+		FOR UPDATE
+	`, contentID).Scan(&existingType, &existingTMDBID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("loading media item for tmdb attach: content not found")
+		}
+		return fmt.Errorf("loading media item for tmdb attach: %w", err)
+	}
+	if existingType != itemType {
+		return fmt.Errorf("media item type mismatch: got %q, want %q", existingType, itemType)
+	}
+	if existingTMDBID != "" && existingTMDBID != tmdbText {
+		return fmt.Errorf("media item tmdb id conflict: got %q, want %q", existingTMDBID, tmdbText)
+	}
+
+	var existingProviderTMDBID string
+	err = tx.QueryRow(ctx, `
+		SELECT provider_id
+		FROM media_item_provider_ids
+		WHERE content_id = $1 AND provider = 'tmdb'
+		FOR UPDATE
+	`, contentID).Scan(&existingProviderTMDBID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("loading media item tmdb provider id: %w", err)
+	}
+	if existingProviderTMDBID != "" && existingProviderTMDBID != tmdbText {
+		return fmt.Errorf("media item tmdb provider id conflict: got %q, want %q", existingProviderTMDBID, tmdbText)
+	}
+
+	var existingOwnerContentID string
+	err = tx.QueryRow(ctx, `
+		SELECT content_id
+		FROM media_items
+		WHERE type = $1
+		  AND tmdb_id = $2
+		  AND content_id <> $3
+		LIMIT 1
+	`, itemType, tmdbText, contentID).Scan(&existingOwnerContentID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("checking tmdb id owner: %w", err)
+	}
+	if existingOwnerContentID != "" {
+		return fmt.Errorf("tmdb id %q already belongs to content_id %q", tmdbText, existingOwnerContentID)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items
+		SET tmdb_id = $1,
+		    updated_at = NOW()
+		WHERE content_id = $2
+		  AND type = $3
+	`, tmdbText, contentID, itemType); err != nil {
+		return fmt.Errorf("updating media item tmdb id: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
+		VALUES ($1, $2, 'tmdb', $3, NOW(), NOW())
+		ON CONFLICT (content_id, provider) DO UPDATE
+		SET item_type = EXCLUDED.item_type,
+		    provider_id = EXCLUDED.provider_id,
+		    updated_at = NOW()
+	`, contentID, itemType, tmdbText); err != nil {
+		return fmt.Errorf("upserting media item tmdb provider id: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit attach tmdb transaction: %w", err)
+	}
+	return nil
 }
 
 const providerIDColumns = `content_id, item_type, provider, provider_id, created_at, updated_at`

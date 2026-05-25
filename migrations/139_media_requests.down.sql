@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS public.media_request_events;
+DROP INDEX IF EXISTS public.idx_media_requests_outcome_created;
+DROP INDEX IF EXISTS public.idx_media_requests_status_created;
+DROP INDEX IF EXISTS public.idx_media_requests_profile_created;
+DROP INDEX IF EXISTS public.idx_media_requests_user_created;
+DROP INDEX IF EXISTS public.idx_media_requests_active_tmdb;
+DROP TABLE IF EXISTS public.media_requests;
+DROP TABLE IF EXISTS public.request_integrations;
+DROP TABLE IF EXISTS public.request_user_limits;
+DROP TABLE IF EXISTS public.request_settings;

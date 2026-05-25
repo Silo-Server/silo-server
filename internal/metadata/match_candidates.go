@@ -25,12 +25,40 @@ type MatchCandidate struct {
 	AgreementHints []string          `json:"agreement_hints"`
 }
 
+var canonicalCandidateIDKeys = []string{"tmdb", "tvdb", "imdb"}
+
+func compatibleProviderIDs(left, right map[string]string) bool {
+	overlap := false
+	for _, key := range canonicalCandidateIDKeys {
+		lv := strings.TrimSpace(left[key])
+		rv := strings.TrimSpace(right[key])
+		if lv == "" || rv == "" {
+			continue
+		}
+		if lv != rv {
+			return false
+		}
+		overlap = true
+	}
+	return overlap
+}
+
+func providerIDRichness(ids map[string]string) int {
+	score := 0
+	for _, key := range canonicalCandidateIDKeys {
+		if strings.TrimSpace(ids[key]) != "" {
+			score++
+		}
+	}
+	return score
+}
+
 // normalizedKey returns a stable grouping key from provider IDs.
 // Results with identical provider ID fingerprints (the exact set of
 // tmdb/tvdb/imdb key=value pairs) are considered the same candidate.
 func normalizedKey(ids map[string]string) string {
 	var parts []string
-	for _, k := range []string{"tmdb", "tvdb", "imdb"} {
+	for _, k := range canonicalCandidateIDKeys {
 		if v, ok := ids[k]; ok && v != "" {
 			parts = append(parts, k+"="+v)
 		}
@@ -59,7 +87,16 @@ func NormalizeCandidates(results []SearchResult, contentType string) []MatchCand
 	buckets := make(map[string]*bucket)
 
 	for _, sr := range results {
-		key := normalizedKey(sr.ProviderIDs)
+		key := ""
+		for _, existingKey := range ordered {
+			if compatibleProviderIDs(buckets[existingKey].candidate.ProviderIDs, sr.ProviderIDs) {
+				key = existingKey
+				break
+			}
+		}
+		if key == "" {
+			key = normalizedKey(sr.ProviderIDs)
+		}
 		if key == "" {
 			// Cannot group by provider IDs; create a synthetic unique key.
 			key = sr.Provider + ":" + sr.Name + ":" + strings.Repeat("?", len(ordered))
@@ -193,6 +230,7 @@ func scoreMatchCandidate(hints *MatchHints, candidate MatchCandidate) float64 {
 
 	if len(candidate.ProviderIDs) > 0 {
 		score += 5
+		score += float64(providerIDRichness(candidate.ProviderIDs))
 	}
 
 	return score

@@ -116,6 +116,28 @@ export const collectionKeys = {
   mdblistTop: () => ["collections", "mdblist", "top"] as const,
 };
 
+export const requestKeys = {
+  all: ["requests"] as const,
+  status: () => ["requests", "status"] as const,
+  discovery: () => ["requests", "discovery"] as const,
+  discoverySection: (section: string, page: number) =>
+    ["requests", "discovery", section, page] as const,
+  discoverStudios: () => ["requests", "discover", "studios"] as const,
+  discoverNetworks: () => ["requests", "discover", "networks"] as const,
+  discoverGenres: () => ["requests", "discover", "genres"] as const,
+  discoverBrowse: (
+    kind: "studio" | "network" | "genre",
+    slug: string,
+    mediaType: string | undefined,
+    sort: string,
+    page: number,
+  ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort, page] as const,
+  search: (mediaType: string, query: string, page: number) =>
+    ["requests", "search", mediaType, query, page] as const,
+  detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
+  mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
+};
+
 export const libraryCollectionKeys = {
   all: ["libraryCollections"] as const,
   list: (libraryId: number) => ["libraryCollections", "list", libraryId] as const,
@@ -317,6 +339,11 @@ export const adminKeys = {
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
+  requestsRoot: () => ["admin", "requests"] as const,
+  requests: (params: Record<string, unknown>) => ["admin", "requests", params] as const,
+  requestSettings: () => ["admin", "requests", "settings"] as const,
+  requestIntegrations: () => ["admin", "requests", "integrations"] as const,
+  requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,
   recommendationsStatus: () => ["admin", "recommendationsStatus"] as const,
   inviteCodes: () => ["admin", "inviteCodes"] as const,
   apiKeys: () => ["admin", "apiKeys"] as const,

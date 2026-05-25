@@ -62,6 +62,61 @@ func TestNormalizeCandidates(t *testing.T) {
 			},
 		},
 		{
+			name: "merge compatible candidates with overlapping provider IDs",
+			results: []SearchResult{
+				{
+					Name:        "The Rookie: Feds",
+					Year:        2022,
+					Provider:    "tvdb",
+					ProviderIDs: map[string]string{"tvdb": "420105", "imdb": "tt18076310"},
+				},
+				{
+					Name:        "The Rookie: Feds",
+					Year:        2022,
+					Provider:    "tmdb",
+					ProviderIDs: map[string]string{"tmdb": "201992", "tvdb": "420105", "imdb": "tt18076310"},
+				},
+			},
+			content: "series",
+			wantLen: 1,
+			check: func(t *testing.T, candidates []MatchCandidate) {
+				c := candidates[0]
+				if c.ProviderIDs["tmdb"] != "201992" {
+					t.Fatalf("tmdb id = %q, want 201992", c.ProviderIDs["tmdb"])
+				}
+				if c.ProviderIDs["tvdb"] != "420105" || c.ProviderIDs["imdb"] != "tt18076310" {
+					t.Fatalf("provider ids = %+v, want tvdb and imdb preserved", c.ProviderIDs)
+				}
+				if len(c.Sources) != 2 {
+					t.Fatalf("sources = %+v, want two providers", c.Sources)
+				}
+			},
+		},
+		{
+			name: "do not merge candidates with conflicting overlapping provider IDs",
+			results: []SearchResult{
+				{
+					Name:        "Show A",
+					Year:        2022,
+					Provider:    "tvdb",
+					ProviderIDs: map[string]string{"tvdb": "420105", "imdb": "tt18076310"},
+				},
+				{
+					Name:        "Show B",
+					Year:        2022,
+					Provider:    "tmdb",
+					ProviderIDs: map[string]string{"tmdb": "201992", "tvdb": "999999", "imdb": "tt18076310"},
+				},
+			},
+			content: "series",
+			wantLen: 2,
+			check: func(t *testing.T, candidates []MatchCandidate) {
+				if len(candidates) != 2 {
+					t.Fatalf("len(candidates) = %d, want 2", len(candidates))
+				}
+			},
+		},
+		{
 			name: "no recognized provider IDs gets synthetic key and stays separate",
 			results: []SearchResult{
 				{

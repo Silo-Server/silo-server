@@ -29,6 +29,7 @@ const ADMIN_TITLES: Record<string, string> = {
   maintenance: "Admin Maintenance",
   nodes: "Admin Nodes",
   recommendations: "Admin Recommendations",
+  requests: "Admin Requests",
   sections: "Admin Sections",
   settings: "Admin Settings",
   tasks: "Admin Tasks",

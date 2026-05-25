@@ -3,6 +3,8 @@
 ## Project Structure & Module Organization
 `cmd/silo` contains the main server entrypoint. Backend code lives in `internal/`, organized by domain (`api`, `catalog`, `metadata`, `playback`, `scanner`, `jellycompat`, etc.); keep new code in the package that owns the behavior instead of creating catch-all helpers. Database changes belong in `migrations/` as paired numbered `.up.sql` and `.down.sql` files. The React frontend lives in `web/src/`, with feature code split across `components/`, `pages/`, `hooks/`, `player/`, and `lib/`. Reference material belongs in `docs/architecture/` or `docs/superpowers/{specs,plans}/`; ad hoc SQL helpers live in `scripts/`.
 
+When creating or editing `docs/superpowers/specs/` or `docs/superpowers/plans/`, never include local absolute filesystem paths or transient worktree IDs. Use repository-relative paths and wording like "Commands assume the repository root is the cwd."
+
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
 
@@ -19,7 +21,7 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
 
 This repository is part of a broader multi-repo Silo workspace. The sibling
-repositories are usually checked out under `/Users/nathangray/dev/github/SiloServer`.
+repositories are usually checked out side-by-side in the same parent directory.
 
 - `silo-server` owns the Go backend, web admin UI, API contracts, auth/session
   behavior, catalog/scanner/playback services, database migrations, Jellyfin
@@ -56,6 +58,7 @@ Run before opening a merge request:
 
 - `cd web && pnpm run lint`
 - `cd web && pnpm run format:check`
+- `make verify-local-paths`
 
 For local services, start PostgreSQL and Redis with `docker compose up -d postgres redis`.
 
