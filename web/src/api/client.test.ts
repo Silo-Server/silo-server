@@ -121,6 +121,34 @@ describe("client helper inventory", () => {
 });
 
 describe("api", () => {
+  it("forwards AbortSignal from options to fetch", async () => {
+    Object.defineProperty(globalThis, "sessionStorage", {
+      value: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        clear: () => {},
+      },
+      configurable: true,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const controller = new AbortController();
+    await api("/test", { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0]!;
+    const init = call[1] as RequestInit;
+    expect(init.signal).toBe(controller.signal);
+  });
+
   it("treats 202 responses with an empty body as success", async () => {
     Object.defineProperty(globalThis, "sessionStorage", {
       value: {
