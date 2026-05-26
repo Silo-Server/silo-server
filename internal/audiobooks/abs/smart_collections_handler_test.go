@@ -161,3 +161,137 @@ func TestSmartCollection_Create_InvalidBody_400(t *testing.T) {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
+
+func TestSmartCollection_List_WrappedAsItems(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	_ = createSmartCollectionForUser(t, hb, "1", "", `{"name":"a"}`)
+	_ = createSmartCollectionForUser(t, hb, "1", "", `{"name":"b"}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections", nil, nil, "1", "", hb.H.handleListSmartCollections)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	list, ok := env["items"].([]any)
+	if !ok {
+		t.Fatalf("response missing 'items' key (wrapped envelope); body=%s", rec.Body.String())
+	}
+	if len(list) != 2 {
+		t.Errorf("list len = %d, want 2", len(list))
+	}
+}
+
+func TestSmartCollection_List_DoesNotLeakOtherUsers(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	_ = createSmartCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections", nil, nil, "2", "", hb.H.handleListSmartCollections)
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	list, _ := env["items"].([]any)
+	if len(list) != 0 {
+		t.Errorf("user 2 sees %d, want 0", len(list))
+	}
+}
+
+func TestSmartCollection_Get_Owner_ReturnsFullShape(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetSmartCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "mine" {
+		t.Errorf("name = %v", got["name"])
+	}
+}
+
+func TestSmartCollection_Get_NonOwner_Private_404(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"private"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleGetSmartCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestSmartCollection_Get_NonOwner_Public_OK(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"public","isPublic":true}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleGetSmartCollection)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestSmartCollection_Get_Unknown_404(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/01HZZZ", map[string]string{"id": "01HZZZ"}, nil, "1", "", hb.H.handleGetSmartCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestSmartCollection_Patch_OwnerUpdates(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"old"}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/me/smart-collections/"+id, map[string]string{"id": id}, []byte(`{"name":"new","isPinned":true}`), "1", "", hb.H.handleUpdateSmartCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "new" || got["isPinned"] != true {
+		t.Errorf("PATCH didn't apply: %v", got)
+	}
+}
+
+func TestSmartCollection_Patch_NonOwner_404(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/me/smart-collections/"+id, map[string]string{"id": id}, []byte(`{"name":"hijack"}`), "2", "", hb.H.handleUpdateSmartCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	c, _ := hb.SC.GetSmartCollection(context.Background(), id)
+	if c.Name != "mine" {
+		t.Errorf("non-owner leak: %q", c.Name)
+	}
+}
+
+func TestSmartCollection_Patch_InvalidQueryDef_400(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+	body := []byte(`{"query_def":{"match":"all","groups":[{"match":"all","rules":[{"field":"nonsense","op":"is","value":1}]}]}}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/me/smart-collections/"+id, map[string]string{"id": id}, body, "1", "", hb.H.handleUpdateSmartCollection)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestSmartCollection_Delete_Owner_204(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/me/smart-collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleDeleteSmartCollection)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	rec2 := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetSmartCollection)
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("post-delete GET status = %d, want 404", rec2.Code)
+	}
+}
+
+func TestSmartCollection_Delete_NonOwner_404(t *testing.T) {
+	hb := newSmartCollectionsHarness(t)
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/me/smart-collections/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleDeleteSmartCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if _, err := hb.SC.GetSmartCollection(context.Background(), id); err != nil {
+		t.Errorf("non-owner DELETE leaked: %v", err)
+	}
+}
