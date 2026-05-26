@@ -169,3 +169,88 @@ func (h *Handler) handleGetCollection(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, h.collectionFullShape(r, c))
 }
+
+// handleUpdateCollection — PATCH /collections/{id}.
+// Owner-only. Partial body: only fields explicitly present are
+// modified. Non-owner gets 404 (no leak).
+func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.CollectionStore == nil {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	id := chiURLID(r)
+	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs collection get-for-update failed", "err", err, "id", id)
+		http.Error(w, "collection get failed", http.StatusInternalServerError)
+		return
+	}
+
+	var body collectionBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.Name != nil {
+		c.Name = *body.Name
+	}
+	if body.Description != nil {
+		c.Description = *body.Description
+	}
+	if body.IsPublic != nil {
+		c.IsPublic = *body.IsPublic
+	}
+	if err := h.deps.CollectionStore.UpdateCollection(r.Context(), c); err != nil {
+		slog.Error("abs collection update failed", "err", err, "id", id)
+		http.Error(w, "collection persist failed", http.StatusInternalServerError)
+		return
+	}
+
+	persisted, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if err != nil {
+		slog.Warn("abs collection get-after-update failed", "err", err, "id", id)
+		persisted = c
+	}
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+}
+
+// handleDeleteCollection — DELETE /collections/{id}.
+// Owner-only. Cascade drops abs_collection_items via FK CASCADE.
+// 204 on success; 404 for unknown or non-owned.
+func (h *Handler) handleDeleteCollection(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.CollectionStore == nil {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	id := chiURLID(r)
+	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs collection get-for-delete failed", "err", err, "id", id)
+		http.Error(w, "collection get failed", http.StatusInternalServerError)
+		return
+	}
+	if err := h.deps.CollectionStore.DeleteCollection(r.Context(), id); err != nil {
+		slog.Error("abs collection delete failed", "err", err, "id", id)
+		http.Error(w, "collection delete failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

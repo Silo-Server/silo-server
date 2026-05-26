@@ -373,3 +373,90 @@ func TestCollection_Get_Unknown_404(t *testing.T) {
 		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestCollection_Patch_OwnerUpdatesNameAndDescription(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"old","description":"d1"}`)
+
+	body := []byte(`{"name":"new","description":"d2","isPublic":true}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/collections/"+id, map[string]string{"id": id}, body, "1", "", hb.H.handleUpdateCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "new" {
+		t.Errorf("name = %v, want 'new'", got["name"])
+	}
+	if got["description"] != "d2" {
+		t.Errorf("description = %v, want 'd2'", got["description"])
+	}
+	if got["isPublic"] != true {
+		t.Errorf("isPublic = %v, want true", got["isPublic"])
+	}
+}
+
+func TestCollection_Patch_PartialOnlyChangesPresentFields(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"keep","description":"d1"}`)
+
+	// PATCH only name; description and isPublic must stay.
+	body := []byte(`{"name":"renamed"}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/collections/"+id, map[string]string{"id": id}, body, "1", "", hb.H.handleUpdateCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "renamed" {
+		t.Errorf("name = %v, want 'renamed'", got["name"])
+	}
+	if got["description"] != "d1" {
+		t.Errorf("description = %v, want 'd1' (unchanged)", got["description"])
+	}
+}
+
+func TestCollection_Patch_NonOwner_404(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	body := []byte(`{"name":"hijack"}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/collections/"+id, map[string]string{"id": id}, body, "2", "", hb.H.handleUpdateCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (no leak); body=%s", rec.Code, rec.Body.String())
+	}
+	// User 1's collection must be untouched.
+	c, _ := hb.Coll.GetCollection(context.Background(), id)
+	if c.Name != "mine" {
+		t.Errorf("collection name = %q, want 'mine'; non-owner mutation leaked", c.Name)
+	}
+}
+
+func TestCollection_Delete_Owner_204(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleDeleteCollection)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	// Subsequent GET must 404.
+	rec2 := dispatchABSWithParams(http.MethodGet, "/api/collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetCollection)
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("post-delete GET status = %d, want 404", rec2.Code)
+	}
+}
+
+func TestCollection_Delete_NonOwner_404(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/collections/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleDeleteCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	// User 1's collection still exists.
+	if _, err := hb.Coll.GetCollection(context.Background(), id); err != nil {
+		t.Errorf("collection wrongly deleted: %v", err)
+	}
+}
