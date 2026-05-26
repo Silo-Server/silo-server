@@ -1,6 +1,7 @@
 package abs
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -111,13 +112,15 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	dateStr := now.UTC().Format("2006-01-02")
 	dayOfWeek := now.UTC().Weekday().String()
 
-	// currentTime seeds the audio element's initial position. Without it the
-	// player stays in BUFFERING. Progress lookup is best-effort: an error here
-	// means the client starts at position 0, which is always correct for a
-	// first listen.
-	//
-	// TODO Stage 5: wire MediaStore.GetAudiobookProgress to supply resume position.
+	// currentTime seeds the audio element's initial position so cross-device
+	// resume works. Lookup is best-effort: any error returns position 0,
+	// which is always correct for a first listen.
 	var currentTime float64
+	currentTime, err = resolveResumeTime(r.Context(), h.deps.ProgressStore, a.UserID, a.ProfileID, contentID)
+	if err != nil {
+		slog.Debug("play: progress lookup failed", "user", a.UserID, "item", contentID, "err", err)
+		// currentTime is already 0 on error path; safe to continue.
+	}
 
 	playbackSession := map[string]any{
 		"id":            sessionID,
@@ -488,4 +491,22 @@ func stripHTML(s string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// resolveResumeTime returns the persisted currentTime for (userID, profileID,
+// contentID) from the progress store, or 0 when no row exists / store is nil.
+// Returned error is propagated so callers can log it; the caller is expected
+// to fall back to 0 on error (a fresh-listen start is always correct).
+func resolveResumeTime(ctx context.Context, store ProgressStore, userID, profileID, contentID string) (float64, error) {
+	if store == nil {
+		return 0, nil
+	}
+	row, err := store.GetProgress(ctx, userID, profileID, contentID)
+	if err != nil {
+		return 0, err
+	}
+	if row == nil {
+		return 0, nil
+	}
+	return row.CurrentSeconds, nil
 }
