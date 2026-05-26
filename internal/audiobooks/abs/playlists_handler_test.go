@@ -613,3 +613,96 @@ func TestPlaylist_RemoveItem_NonOwner_404(t *testing.T) {
 		t.Errorf("items len = %d, want 1 (non-owner remove leaked)", len(items))
 	}
 }
+
+func TestPlaylist_BatchAdd_TolerantOfPartialFailures(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1", "book-2") // book-3 unknown
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"items":[{"libraryItemId":"book-1"},{"libraryItemId":"book-3"},{"libraryItemId":"book-2"}]}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/batch/add",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleBatchAddPlaylistItems)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 2 {
+		t.Errorf("items len = %d, want 2 (book-3 skipped)", len(items))
+	}
+}
+
+func TestPlaylist_BatchAdd_FiresOneUpdatedEvent(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1", "book-2")
+	id := createPlaylistForUser(t, hb, "7", "", `{"name":"q"}`)
+	before := len(hb.Pub.snapshot())
+
+	body := []byte(`{"items":[{"libraryItemId":"book-1"},{"libraryItemId":"book-2"}]}`)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/batch/add",
+		map[string]string{"id": id}, body, "7", "", hb.H.handleBatchAddPlaylistItems)
+
+	evts := hb.Pub.snapshot()
+	if len(evts)-before != 1 {
+		t.Errorf("event delta = %d, want exactly 1", len(evts)-before)
+	}
+}
+
+func TestPlaylist_BatchAdd_EmptyItems_OKNoOp(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"items":[]}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/batch/add",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleBatchAddPlaylistItems)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestPlaylist_BatchAdd_InvalidBody_400(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/batch/add",
+		map[string]string{"id": id}, []byte(`{not json`), "1", "", hb.H.handleBatchAddPlaylistItems)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPlaylist_BatchAdd_NonOwner_404(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	body := []byte(`{"items":[{"libraryItemId":"book-1"}]}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/batch/add",
+		map[string]string{"id": id}, body, "2", "", hb.H.handleBatchAddPlaylistItems)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestPlaylist_BatchRemove(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1", "book-2", "book-3")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+	for _, b := range []string{"book-1", "book-2", "book-3"} {
+		_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+			map[string]string{"id": id}, []byte(`{"libraryItemId":"`+b+`"}`), "1", "", hb.H.handleAddPlaylistItem)
+	}
+
+	body := []byte(`{"items":[{"libraryItemId":"book-1"},{"libraryItemId":"book-3"}]}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/batch/remove",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleBatchRemovePlaylistItems)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1 (book-2 should remain)", len(items))
+	}
+	if items[0].(map[string]any)["libraryItemId"] != "book-2" {
+		t.Errorf("remaining item = %v, want book-2", items[0])
+	}
+}

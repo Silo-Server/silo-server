@@ -331,6 +331,116 @@ func (h *Handler) handleDeletePlaylist(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// batchItemsBody is the shared body shape for batch add/remove.
+type batchItemsBody struct {
+	Items []playlistItemRef `json:"items"`
+}
+
+// handleBatchAddPlaylistItems — POST /playlists/{id}/batch/add.
+// Body: {items: [{libraryItemId, episodeId?}]}. Per-item failures are
+// tolerated silently (matches continuum). Only the whole-body decode
+// failure surfaces as 400. Audiobook items validated per-entry; failed
+// validations skipped with slog.Debug (the entry never reaches the
+// store). One playlist_updated event fires for the whole batch.
+func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	id := playlistURLID(r)
+	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs playlist get-for-batch-add failed", "err", err, "id", id)
+		http.Error(w, "playlist get failed", http.StatusInternalServerError)
+		return
+	}
+
+	var body batchItemsBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	for _, it := range body.Items {
+		if it.LibraryItemID == "" {
+			slog.Debug("abs playlist batch-add: skipping empty libraryItemId")
+			continue
+		}
+		// Audiobook validation; episode items skip.
+		if it.EpisodeID == "" {
+			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID)
+			if lookupErr != nil || item == nil {
+				slog.Debug("abs playlist batch-add: skipping unknown audiobook", "id", it.LibraryItemID)
+				continue
+			}
+		}
+		if addErr := h.deps.PlaylistStore.AddPlaylistItem(r.Context(), id, it.LibraryItemID, it.EpisodeID); addErr != nil {
+			slog.Debug("abs playlist batch-add: store error", "err", addErr, "id", it.LibraryItemID)
+		}
+	}
+
+	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if err != nil {
+		persisted = p
+	}
+	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+}
+
+// handleBatchRemovePlaylistItems — POST /playlists/{id}/batch/remove.
+// Body: {items: [{libraryItemId, episodeId?}]}. Per-item failures
+// tolerated; one playlist_updated event for the whole batch.
+func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	id := playlistURLID(r)
+	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs playlist get-for-batch-remove failed", "err", err, "id", id)
+		http.Error(w, "playlist get failed", http.StatusInternalServerError)
+		return
+	}
+
+	var body batchItemsBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	for _, it := range body.Items {
+		if rmErr := h.deps.PlaylistStore.RemovePlaylistItem(r.Context(), id, it.LibraryItemID, it.EpisodeID); rmErr != nil {
+			slog.Debug("abs playlist batch-remove: store error", "err", rmErr, "id", it.LibraryItemID)
+		}
+	}
+
+	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if err != nil {
+		persisted = p
+	}
+	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+}
+
 // handleRemovePlaylistItem — DELETE /playlists/{id}/item/{libraryItemId}.
 // Owner-only. Removes the item with empty episode_id. Idempotent.
 // Fires playlist_updated.
