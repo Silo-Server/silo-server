@@ -460,3 +460,104 @@ func TestCollection_Delete_NonOwner_404(t *testing.T) {
 		t.Errorf("collection wrongly deleted: %v", err)
 	}
 }
+
+func TestCollection_AddBook_Owner_HydratesInResponse(t *testing.T) {
+	hb := newCollectionsHarness(t, "book-1")
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	rec := dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleAddCollectionBook)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	books, _ := got["books"].([]any)
+	if len(books) != 1 {
+		t.Fatalf("books len = %d, want 1", len(books))
+	}
+	entry := books[0].(map[string]any)
+	if entry["id"] != "book-1" {
+		t.Errorf("book entry id = %v, want book-1", entry["id"])
+	}
+	if _, has := entry["media"]; !has {
+		t.Errorf("book entry missing media hydration: %v", entry)
+	}
+}
+
+func TestCollection_AddBook_Idempotent(t *testing.T) {
+	hb := newCollectionsHarness(t, "book-1")
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleAddCollectionBook)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleAddCollectionBook)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second add status = %d, want 200 (idempotent); body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	books, _ := got["books"].([]any)
+	if len(books) != 1 {
+		t.Errorf("books len after double-add = %d, want 1", len(books))
+	}
+}
+
+func TestCollection_AddBook_UnknownItem_404(t *testing.T) {
+	hb := newCollectionsHarness(t /* no known items */)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	rec := dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/ghost",
+		map[string]string{"id": id, "bookId": "ghost"}, nil, "1", "", hb.H.handleAddCollectionBook)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (item not found); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCollection_AddBook_NonOwner_404(t *testing.T) {
+	hb := newCollectionsHarness(t, "book-1")
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	rec := dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "2", "", hb.H.handleAddCollectionBook)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (no leak); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCollection_RemoveBook_Idempotent(t *testing.T) {
+	hb := newCollectionsHarness(t, "book-1")
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	// Remove book that was never added — should be 200 with empty books.
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleRemoveCollectionBook)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	books, _ := got["books"].([]any)
+	if len(books) != 0 {
+		t.Errorf("books len = %d, want 0", len(books))
+	}
+}
+
+func TestCollection_RemoveBook_NonOwner_404(t *testing.T) {
+	hb := newCollectionsHarness(t, "book-1")
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleAddCollectionBook)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "2", "", hb.H.handleRemoveCollectionBook)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	// User 1's items must be intact.
+	items, _ := hb.Coll.ListCollectionItems(context.Background(), id)
+	if len(items) != 1 {
+		t.Errorf("items len = %d, want 1 (non-owner remove leaked)", len(items))
+	}
+}

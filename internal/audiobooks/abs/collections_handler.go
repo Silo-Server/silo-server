@@ -223,6 +223,103 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
 }
 
+// handleAddCollectionBook — POST /collections/{id}/book/{bookId}.
+// Owner-gated. Validates the item exists via MediaStore (returns 404
+// for unknown items). Idempotent: re-adding is a silent no-op.
+// Returns the parent collection's full-shape with updated books[].
+func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.CollectionStore == nil {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	id := chiURLID(r)
+	bookID := chi.URLParam(r, "bookId")
+	if bookID == "" {
+		http.Error(w, "bookId required", http.StatusBadRequest)
+		return
+	}
+
+	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs collection get-for-add failed", "err", err, "id", id)
+		http.Error(w, "collection get failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Item validation — avoid orphan refs.
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), bookID)
+	if err != nil || item == nil {
+		http.Error(w, "item not found", http.StatusNotFound)
+		return
+	}
+
+	if err := h.deps.CollectionStore.AddCollectionItem(r.Context(), id, bookID); err != nil {
+		slog.Error("abs collection add-item failed", "err", err, "id", id, "book", bookID)
+		http.Error(w, "collection persist failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Re-fetch to surface updated_at bump.
+	persisted, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if err != nil {
+		persisted = c
+	}
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+}
+
+// handleRemoveCollectionBook — DELETE /collections/{id}/book/{bookId}.
+// Owner-gated. Idempotent: removing a non-member is a no-op.
+// Returns the parent collection's full-shape with updated books[].
+func (h *Handler) handleRemoveCollectionBook(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.CollectionStore == nil {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	id := chiURLID(r)
+	bookID := chi.URLParam(r, "bookId")
+	if bookID == "" {
+		http.Error(w, "bookId required", http.StatusBadRequest)
+		return
+	}
+
+	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs collection get-for-remove failed", "err", err, "id", id)
+		http.Error(w, "collection get failed", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.deps.CollectionStore.RemoveCollectionItem(r.Context(), id, bookID); err != nil {
+		slog.Error("abs collection remove-item failed", "err", err, "id", id, "book", bookID)
+		http.Error(w, "collection delete failed", http.StatusInternalServerError)
+		return
+	}
+
+	persisted, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
+	if err != nil {
+		persisted = c
+	}
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+}
+
 // handleDeleteCollection — DELETE /collections/{id}.
 // Owner-only. Cascade drops abs_collection_items via FK CASCADE.
 // 204 on success; 404 for unknown or non-owned.
