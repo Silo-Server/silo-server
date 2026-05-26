@@ -1,7 +1,10 @@
 package abs
 
 import (
+	"bufio"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -68,4 +71,26 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	n, err := s.ResponseWriter.Write(b)
 	s.bytes += n
 	return n, err
+}
+
+// Hijack passes through to the wrapped ResponseWriter so socket.io
+// WebSocket upgrades can take ownership of the raw connection.
+// Without this, the underlying engine.io transport sees a
+// ResponseWriter that doesn't satisfy http.Hijacker and rejects the
+// upgrade with `{"code":3,"message":"Bad request"}`.
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("ResponseWriter does not implement http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+// Flush passes through to the wrapped ResponseWriter so chunked /
+// server-sent-events responses (engine.io polling long-poll) flush
+// promptly.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

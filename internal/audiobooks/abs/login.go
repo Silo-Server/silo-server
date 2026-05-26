@@ -345,12 +345,37 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	// /authorize re-mints the envelope using the caller's bearer as the
-	// access token (client already has it); refresh isn't rotated here.
-	// userID is passed as displayName because the JWT carries no display-name
-	// claim (Claims has sub/pid/jti only) — the client's stored profile name
-	// takes precedence anyway, so the echoed userID is just a harmless seed.
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, a.Token, ""))
+	// Mint a NEW access token. ABS v2.26.0+ clients check whether the
+	// stored `serverConfig.token` equals the `user.token` echoed by
+	// /authorize; if equal they assume the server is still on the
+	// pre-v2.26 single-token shape and force re-login. Rotating the
+	// access JWT here keeps the client happy without changing the
+	// refresh-token contract. The OLD access JTI stays valid for its
+	// natural TTL (don't revoke — multiple devices share the same JTI
+	// via the share-on-login pattern, and a hard revoke would log
+	// other devices out).
+	access := a.Token
+	if h.deps.Config != nil && h.deps.TokenStore != nil {
+		if secret, err := h.deps.Config.JWTSecret(r.Context()); err == nil {
+			accessTTL, _ := h.deps.Config.AccessTTL(r.Context())
+			if accessTTL == 0 {
+				accessTTL = 24 * time.Hour
+			}
+			newJTI := ulid.Make().String()
+			if token, mintErr := IssueAccessToken(secret, a.UserID, a.ProfileID, newJTI, accessTTL); mintErr == nil {
+				if persistErr := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+					ID:        newJTI,
+					UserID:    a.UserID,
+					ProfileID: a.ProfileID,
+					JTI:       newJTI,
+					ExpiresAt: time.Now().Add(accessTTL),
+				}); persistErr == nil {
+					access = token
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, access, ""))
 }
 
 // handleRefresh — POST /auth/refresh
