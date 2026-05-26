@@ -2,11 +2,9 @@ package audiobooks
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 
@@ -111,7 +109,7 @@ func (s *ABSBookmarkStore) Delete(ctx context.Context, userID, profileID, itemID
 	if err != nil {
 		return fmt.Errorf("abs_bookmark_store: invalid user id %q: %w", userID, err)
 	}
-	_, err = s.Pool.Exec(ctx, `
+	if _, err := s.Pool.Exec(ctx, `
 		DELETE FROM abs_bookmarks
 		WHERE user_id = $1
 		  AND COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid)
@@ -119,8 +117,7 @@ func (s *ABSBookmarkStore) Delete(ctx context.Context, userID, profileID, itemID
 		  AND library_item_id = $3
 		  AND time_seconds = $4`,
 		uid, profileArg(profileID), itemID, timeSeconds,
-	)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	); err != nil {
 		return fmt.Errorf("abs_bookmark_store: delete: %w", err)
 	}
 	return nil
