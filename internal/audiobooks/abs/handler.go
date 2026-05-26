@@ -297,6 +297,9 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// Real-ABS /authorize: validates the bearer and re-mints the
 			// /me envelope so the client can resume without retyping creds.
 			r.Post(prefix+"/authorize", h.handleABSAuthorize)
+			// Logout: revokes the caller's access JTI. Mounted inside
+			// bearerAuth so the JTI is already in context.
+			r.Post(prefix+"/logout", h.handleLogout)
 			// Continue Listening shelf.
 			r.Get(prefix+"/me/items-in-progress", h.handleItemsInProgress)
 			// Library list + detail.

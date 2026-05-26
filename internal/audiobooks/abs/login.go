@@ -459,3 +459,35 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		"refreshToken": refresh,
 	})
 }
+
+// handleLogout — POST /logout
+//
+// Mounted inside the bearerAuth group: the middleware has already parsed
+// and validated the access JTI. We revoke that JTI (idempotent) and
+// return 204. There is no body and no JSON response.
+//
+// Note: this revokes ONLY the access token. The associated refresh token
+// has its own JTI and stays valid until the client also calls /auth/refresh
+// with a since-revoked access; the refresh endpoint will then deny the
+// rotation. Clients that want a hard "log out everywhere" should iterate
+// the sessions list (added in Phase 3) instead.
+func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.JTI == "" {
+		// No auth context — middleware shouldn't have let us through, but
+		// be defensive and return 204 anyway (logout is idempotent).
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if h.deps.TokenStore == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), a.JTI); err != nil {
+		slog.Warn("abs logout: revoke failed", "jti", a.JTI, "user", a.UserID, "err", err)
+		http.Error(w, "logout failed", http.StatusInternalServerError)
+		return
+	}
+	slog.Debug("abs logout: revoked", "jti", a.JTI, "user", a.UserID)
+	w.WriteHeader(http.StatusNoContent)
+}
