@@ -16,8 +16,18 @@ var assignablePermissions = map[Permission]struct{}{
 	PermissionMetadataCuration: {},
 }
 
-var effectiveAdminPermissions = []string{
-	string(PermissionMetadataCuration),
+func assignablePermissionList() []string {
+	out := make([]string, 0, len(assignablePermissions))
+	for permission := range assignablePermissions {
+		out = append(out, string(permission))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func isAssignablePermission(permission Permission) bool {
+	_, ok := assignablePermissions[permission]
+	return ok
 }
 
 func NormalizePermissions(values []string) ([]string, error) {
@@ -33,7 +43,7 @@ func NormalizePermissions(values []string) ([]string, error) {
 			continue
 		}
 		permission := Permission(key)
-		if _, ok := assignablePermissions[permission]; !ok {
+		if !isAssignablePermission(permission) {
 			return nil, fmt.Errorf("unknown permission %q", key)
 		}
 		if _, ok := seen[key]; ok {
@@ -63,7 +73,7 @@ func HasEffectivePermission(user *models.User, permission Permission) bool {
 		return false
 	}
 	if user.Role == "admin" {
-		return true
+		return isAssignablePermission(permission)
 	}
 	return HasAssignedPermission(user, permission)
 }
@@ -73,7 +83,7 @@ func EffectivePermissions(user *models.User) []string {
 		return []string{}
 	}
 	if user.Role == "admin" {
-		return append([]string(nil), effectiveAdminPermissions...)
+		return assignablePermissionList()
 	}
 	permissions, err := NormalizePermissions(user.Permissions)
 	if err != nil {

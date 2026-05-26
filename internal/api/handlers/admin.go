@@ -259,7 +259,7 @@ func toAdminUserResponse(u *models.User) adminUserResponse {
 		Username:                 u.Username,
 		Email:                    u.Email,
 		Role:                     u.Role,
-		Permissions:              append([]string(nil), u.Permissions...),
+		Permissions:              append([]string{}, u.Permissions...),
 		Enabled:                  u.Enabled,
 		LibraryIDs:               append([]int(nil), u.LibraryIDs...),
 		MaxPlaybackQuality:       access.NormalizePlaybackQuality(u.MaxPlaybackQuality),
@@ -944,7 +944,7 @@ func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.
 		publishEventJob(r.Context(), h.RealtimeHub.EventsHub(), "job.created", job)
 	}
 
-	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
+	writeJSON(w, http.StatusAccepted, adminJobToResponseForClaims(r, job, nil, apimw.GetClaims(r.Context())))
 }
 
 // UpdateItemMetadataRequest contains the fields that can be updated via

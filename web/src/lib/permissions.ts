@@ -14,3 +14,17 @@ export function hasPermission(
 export function canCurateMetadata(user: Pick<User, "role" | "permissions"> | null | undefined) {
   return hasPermission(user, PERMISSION_METADATA_CURATION);
 }
+
+export function hasAssignedPermission(permissions: string[] | undefined, permission: string) {
+  return Array.isArray(permissions) && permissions.includes(permission);
+}
+
+export function setAssignedPermission(permissions: string[], permission: string, enabled: boolean) {
+  const next = new Set(permissions);
+  if (enabled) {
+    next.add(permission);
+  } else {
+    next.delete(permission);
+  }
+  return Array.from(next).sort();
+}

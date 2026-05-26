@@ -66,7 +66,11 @@ import {
   playbackQualityValueFromPreset,
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
-import { PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import {
+  PERMISSION_METADATA_CURATION,
+  hasAssignedPermission,
+  setAssignedPermission,
+} from "@/lib/permissions";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
 import { formatSettingValue, getSettingDefinition } from "@/lib/settingsManifest";
 import {
@@ -315,20 +319,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <span className="text-sm font-medium">{value}</span>
     </div>
   );
-}
-
-function hasAssignedPermission(permissions: string[] | undefined, permission: string) {
-  return Array.isArray(permissions) && permissions.includes(permission);
-}
-
-function setAssignedPermission(permissions: string[], permission: string, enabled: boolean) {
-  const next = new Set(permissions);
-  if (enabled) {
-    next.add(permission);
-  } else {
-    next.delete(permission);
-  }
-  return Array.from(next).sort();
 }
 
 function ProfilesTab({ userId }: { userId: number }) {

@@ -59,7 +59,11 @@ import {
   playbackQualityValueFromPreset,
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
-import { PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import {
+  PERMISSION_METADATA_CURATION,
+  hasAssignedPermission,
+  setAssignedPermission,
+} from "@/lib/permissions";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -513,20 +517,6 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
   }
 
   return fallback;
-}
-
-function hasAssignedPermission(permissions: string[] | undefined, permission: string) {
-  return Array.isArray(permissions) && permissions.includes(permission);
-}
-
-function setAssignedPermission(permissions: string[], permission: string, enabled: boolean) {
-  const next = new Set(permissions);
-  if (enabled) {
-    next.add(permission);
-  } else {
-    next.delete(permission);
-  }
-  return Array.from(next).sort();
 }
 
 function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => void }) {
