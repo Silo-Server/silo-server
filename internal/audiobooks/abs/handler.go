@@ -369,6 +369,10 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// Playlists — owner-gated CRUD with cross-user public reads,
 			// realtime events on every mutation, batch endpoints.
 			r.Get(prefix+"/playlists", h.handleListPlaylists)
+			// Per-library playlist list — mobile create-playlist modal
+			// loads from here before opening the form. Emits
+			// `{results: [...]}` with full-shape entries.
+			r.Get(prefix+"/libraries/{libraryId}/playlists", h.handleListLibraryPlaylists)
 			r.Post(prefix+"/playlists", h.handleCreatePlaylist)
 			r.Get(prefix+"/playlists/{id}", h.handleGetPlaylist)
 			r.Patch(prefix+"/playlists/{id}", h.handleUpdatePlaylist)

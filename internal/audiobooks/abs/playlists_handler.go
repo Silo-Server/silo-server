@@ -158,6 +158,47 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 // uniformly with the collections handler's chiURLID.
 func playlistURLID(r *http.Request) string { return chi.URLParam(r, "id") }
 
+// handleListLibraryPlaylists — GET /libraries/{libraryId}/playlists.
+//
+// The ABS mobile create-playlist modal hits this endpoint BEFORE
+// opening the form so it can show "already in playlist X" badges and
+// the existing-playlists picker. It accesses `data.results` on the
+// response (NOT `data.playlists`), and iterates `playlist.items` to
+// check membership, so we emit:
+//   {"results": [Playlist full-shape with items[]]}
+//
+// The libraryId URL param is accepted but ignored — silo scopes
+// playlists per (user, profile) globally rather than per-library;
+// the mobile UI only needs to know which of the user's playlists
+// already contain the selected item.
+//
+// Ref: audiobookshelf-app components/modals/playlists/AddCreateModal.vue
+// loadPlaylists().
+func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+		return
+	}
+	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		slog.Error("abs library playlist list failed", "err", err, "user", a.UserID)
+		http.Error(w, "playlist list failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, p := range rows {
+		// Full-shape (with items[]) so the modal can check
+		// existing-membership via playlist.items.some(...).
+		out = append(out, h.playlistFullShape(r, p))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": out})
+}
+
 // handleListPlaylists — GET /playlists.
 // Returns the caller's playlists wrapped in {"playlists": [...]}.
 // List-shape (no items[]).
