@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useParams, Link } from "react-router";
 import {
@@ -66,6 +66,7 @@ import {
   playbackQualityValueFromPreset,
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
+import { PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
 import { formatSettingValue, getSettingDefinition } from "@/lib/settingsManifest";
 import {
@@ -276,6 +277,14 @@ function OverviewTab({ user }: { user: AdminUser }) {
         <div className="divide-border divide-y">
           <DetailRow label="Library Access" value={libraryNames} />
           <DetailRow
+            label="Metadata Curation"
+            value={
+              hasAssignedPermission(user.permissions, PERMISSION_METADATA_CURATION)
+                ? "Allowed"
+                : "Not allowed"
+            }
+          />
+          <DetailRow
             label="Max Playback Quality"
             value={formatPlaybackQualityPreset(user.max_playback_quality)}
           />
@@ -306,6 +315,20 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <span className="text-sm font-medium">{value}</span>
     </div>
   );
+}
+
+function hasAssignedPermission(permissions: string[] | undefined, permission: string) {
+  return Array.isArray(permissions) && permissions.includes(permission);
+}
+
+function setAssignedPermission(permissions: string[], permission: string, enabled: boolean) {
+  const next = new Set(permissions);
+  if (enabled) {
+    next.add(permission);
+  } else {
+    next.delete(permission);
+  }
+  return Array.from(next).sort();
 }
 
 function ProfilesTab({ userId }: { userId: number }) {
@@ -878,6 +901,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(user.role);
   const [enabled, setEnabled] = useState(user.enabled);
+  const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user.library_ids);
   const [maxStreams, setMaxStreams] = useState(user.max_streams);
   const [maxTranscodes, setMaxTranscodes] = useState(user.max_transcodes);
@@ -889,6 +913,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [downloadTranscodeAllowed, setDownloadTranscodeAllowed] = useState(
     user.download_transcode_allowed,
   );
+  const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
 
   function handleSubmit(e: FormEvent) {
@@ -897,6 +922,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       username,
       email,
       role,
+      permissions,
       enabled,
       library_ids: libraryIDs,
       max_streams: maxStreams,
@@ -982,6 +1008,23 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
               value={libraryIDs}
               onChange={setLibraryIDs}
             />
+            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <Label htmlFor={metadataCurationId}>Metadata Curation</Label>
+                <p className="text-muted-foreground text-xs">
+                  Edit, refresh, and rematch metadata within assigned libraries.
+                </p>
+              </div>
+              <Switch
+                id={metadataCurationId}
+                checked={hasAssignedPermission(permissions, PERMISSION_METADATA_CURATION)}
+                onCheckedChange={(checked) =>
+                  setPermissions((current) =>
+                    setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
+                  )
+                }
+              />
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
                 <Label>Downloads Allowed</Label>
