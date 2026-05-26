@@ -2,9 +2,11 @@ package audiobooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
@@ -53,7 +55,10 @@ func (s *ABSCollectionStore) ListUserCollections(ctx context.Context, userID, pr
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("abs_collection_store: list rows: %w", err)
+	}
+	return out, nil
 }
 
 func (s *ABSCollectionStore) GetCollection(ctx context.Context, id string) (abs.Collection, error) {
@@ -64,7 +69,7 @@ func (s *ABSCollectionStore) GetCollection(ctx context.Context, id string) (abs.
 		SELECT id, user_id, profile_id, name, description, is_public, created_at, updated_at
 		FROM abs_user_collections WHERE id = $1`, id)
 	if err := row.Scan(&c.ID, &uidScan, &profileScan, &c.Name, &c.Description, &c.IsPublic, &c.CreatedAt, &c.UpdatedAt); err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return abs.Collection{}, abs.ErrNotFound
 		}
 		return abs.Collection{}, fmt.Errorf("abs_collection_store: get: %w", err)
@@ -128,7 +133,10 @@ func (s *ABSCollectionStore) ListCollectionItems(ctx context.Context, collection
 		}
 		out = append(out, it)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("abs_collection_store: list-items rows: %w", err)
+	}
+	return out, nil
 }
 
 func (s *ABSCollectionStore) AddCollectionItem(ctx context.Context, collectionID, libraryItemID string) error {
