@@ -182,6 +182,9 @@ type Dependencies struct {
 	// POST/PATCH/DELETE /me/item/{itemId}/bookmark endpoints. May be
 	// nil; handlers respond 503 when unset.
 	BookmarkStore BookmarkStore
+	// CollectionStore persists ABS user-collection rows (migrations 149 + 150).
+	// May be nil; handlers respond 503 when unset.
+	CollectionStore CollectionStore
 	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
 	// the route is only registered when a non-nil value is supplied.
 	SocketIO SocketIOServer
