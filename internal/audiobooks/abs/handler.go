@@ -320,6 +320,14 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Post(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_created"))
 			r.Patch(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_updated"))
 			r.Delete(prefix+"/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)
+			// Collections — owner-gated CRUD with cross-user public reads.
+			r.Get(prefix+"/collections", h.handleListCollections)
+			r.Post(prefix+"/collections", h.handleCreateCollection)
+			r.Get(prefix+"/collections/{id}", h.handleGetCollection)
+			r.Patch(prefix+"/collections/{id}", h.handleUpdateCollection)
+			r.Delete(prefix+"/collections/{id}", h.handleDeleteCollection)
+			r.Post(prefix+"/collections/{id}/book/{bookId}", h.handleAddCollectionBook)
+			r.Delete(prefix+"/collections/{id}/book/{bookId}", h.handleRemoveCollectionBook)
 		}
 	})
 
