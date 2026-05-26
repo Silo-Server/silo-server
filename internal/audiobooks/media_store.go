@@ -342,7 +342,8 @@ func (s *ABSMediaStore) ListContinueListening(ctx context.Context, userID, profi
 		  AND wp.user_id::text = $1
 		  AND ($2 = '' OR wp.profile_id = $2)
 		  AND wp.position_seconds > 0
-		  AND COALESCE(wp.completed, FALSE) = FALSE` + libFilter + `
+		  AND COALESCE(wp.completed, FALSE) = FALSE
+		  AND COALESCE(wp.hide_from_continue, FALSE) = FALSE` + libFilter + `
 		ORDER BY wp.updated_at DESC
 		LIMIT $3
 	`

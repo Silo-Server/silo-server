@@ -27,6 +27,9 @@ func (f *fakeProgressStore) UpsertProgress(_ context.Context, _ ProgressRow) err
 func (f *fakeProgressStore) UpdateProgressPosition(_ context.Context, _, _, _ string, _ float64) error {
 	return nil
 }
+func (f *fakeProgressStore) SetHideFromContinue(_ context.Context, _, _, _ string, _ bool) error {
+	return nil
+}
 
 func TestResumeTimeFromProgressStore_HasRow(t *testing.T) {
 	store := &fakeProgressStore{

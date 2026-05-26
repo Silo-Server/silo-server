@@ -32,6 +32,9 @@ type ProgressStore interface {
 	// (userID, profileID, contentID). Used by session sync to avoid overwriting
 	// is_finished / progress_pct that the user set explicitly.
 	UpdateProgressPosition(ctx context.Context, userID, profileID, contentID string, positionSeconds float64) error
+	// SetHideFromContinue toggles the hide_from_continue flag on a
+	// progress row. Idempotent — succeeds even when no row matches.
+	SetHideFromContinue(ctx context.Context, userID, profileID, contentID string, hide bool) error
 }
 
 // ABSPlaybackSessionStore tracks the active /abs/api/items/{id}/play sessions

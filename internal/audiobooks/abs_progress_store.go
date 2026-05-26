@@ -177,3 +177,21 @@ func (s *ABSProgressStore) UpdateProgressPosition(ctx context.Context, userID, p
 	}
 	return nil
 }
+
+// SetHideFromContinue sets the hide_from_continue flag for the given
+// progress row. Idempotent on missing-row.
+func (s *ABSProgressStore) SetHideFromContinue(ctx context.Context, userID, profileID, contentID string, hide bool) error {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return fmt.Errorf("abs_progress_store: invalid user id %q: %w", userID, err)
+	}
+	if _, err := s.Pool.Exec(ctx, `
+		UPDATE user_watch_progress
+		SET hide_from_continue = $4
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		uid, profileID, contentID, hide,
+	); err != nil {
+		return fmt.Errorf("abs_progress_store: set hide_from_continue: %w", err)
+	}
+	return nil
+}
