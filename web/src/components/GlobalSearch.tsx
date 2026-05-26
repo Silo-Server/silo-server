@@ -108,6 +108,8 @@ export function GlobalSearch({
   const canRequest = useCanRequest();
   const tmdbQuery = useRequestSearch("all", tmdbDebouncedQuery, 1, {
     enabled: canRequest.discoveryEnabled,
+    requireProfile: true,
+    staleTime: 5 * 60 * 1000,
   });
   const tmdbMissingCount =
     tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;

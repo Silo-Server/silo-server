@@ -29,7 +29,6 @@ import type {
 import { adminKeys, requestKeys } from "./keys";
 
 const REQUESTS_STALE_TIME = 30_000;
-const REQUEST_SEARCH_STALE_TIME = 5 * 60 * 1000;
 const DISCOVER_BRAND_STALE_TIME = 24 * 60 * 60 * 1000;
 const BROWSE_STALE_TIME = 60 * 1000;
 
@@ -156,6 +155,10 @@ export function useRequestMediaDetail(mediaType: RequestMediaType, tmdbID: numbe
 export interface UseRequestSearchOptions {
   /** When false, suppresses the query regardless of the query string. Default: true. */
   enabled?: boolean;
+  /** When true, suppresses the query until the active profile is loaded. Default: false. */
+  requireProfile?: boolean;
+  /** Cache freshness window for this search surface. Default: existing Requests page timing. */
+  staleTime?: number;
 }
 
 export function useRequestSearch(
@@ -172,6 +175,7 @@ export function useRequestSearch(
   // later be read by a different viewer.
   const viewerKey = profile?.id ?? "anon";
   const enabledOverride = options.enabled ?? true;
+  const requireProfile = options.requireProfile ?? false;
 
   return useQuery({
     queryKey: requestKeys.search(mediaType, normalizedQuery, page, viewerKey),
@@ -183,8 +187,9 @@ export function useRequestSearch(
       });
       return api<RequestMediaPage>(`/requests/search?${params}`, { signal });
     },
-    enabled: enabledOverride && normalizedQuery.length > 1 && Boolean(profile?.id),
-    staleTime: REQUEST_SEARCH_STALE_TIME,
+    enabled:
+      enabledOverride && normalizedQuery.length > 1 && (!requireProfile || Boolean(profile?.id)),
+    staleTime: options.staleTime ?? REQUESTS_STALE_TIME,
   });
 }
 

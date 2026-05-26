@@ -112,6 +112,8 @@ function CatalogResults({
   const tmdbDebouncedQ = useDebounce(state.q ?? "", 200);
   const tmdbQuery = useRequestSearch("all", tmdbDebouncedQ, 1, {
     enabled: canRequest.discoveryEnabled && isQuerySource,
+    requireProfile: true,
+    staleTime: 5 * 60 * 1000,
   });
   const tmdbMissingCount =
     tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;

@@ -441,7 +441,11 @@ describe("Catalog page", () => {
     );
 
     const call = mockUseRequestSearch.mock.calls[mockUseRequestSearch.mock.calls.length - 1];
-    expect(call?.[3]).toEqual({ enabled: false });
+    expect(call?.[3]).toEqual({
+      enabled: false,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+    });
   });
 
   it("hides ItemGrid when library is empty and TMDB is still loading (request section will rescue)", () => {

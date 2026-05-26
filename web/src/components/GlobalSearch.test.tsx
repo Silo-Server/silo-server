@@ -240,7 +240,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
 
     const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
-    expect(call?.[3]).toEqual({ enabled: false });
+    expect(call?.[3]).toEqual({
+      enabled: false,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+    });
   });
 
   it("does not mount RequestToAddSection when discovery is disabled", () => {

@@ -6,6 +6,7 @@ import { useCreateMediaRequest, useRequestSearch } from "@/hooks/queries/useRequ
 import type { RequestMediaResult } from "@/api/types";
 import {
   formatRequestReason,
+  formatRequestStatus,
   requestInputFromMediaResult,
   tmdbImageURL,
 } from "@/lib/mediaRequests";
@@ -14,6 +15,16 @@ import RequestPosterCard from "./RequestPosterCard";
 
 function cardKey(item: Pick<RequestMediaResult, "media_type" | "tmdb_id">): string {
   return `${item.media_type}-${item.tmdb_id}`;
+}
+
+function nonRequestableLabel(item: RequestMediaResult): string {
+  if (item.request.status) {
+    return formatRequestStatus(item.request.status);
+  }
+  if (item.request.reason) {
+    return formatRequestReason(item.request.reason);
+  }
+  return "Blocked";
 }
 
 const DIALOG_LIMIT = 4;
@@ -28,10 +39,14 @@ export type RequestToAddSectionProps = {
 
 export function RequestToAddSection({ variant, query, libraryHadHits }: RequestToAddSectionProps) {
   const { discoveryEnabled } = useCanRequest();
-  const search = useRequestSearch("all", query, 1, { enabled: discoveryEnabled });
+  const search = useRequestSearch("all", query, 1, {
+    enabled: discoveryEnabled,
+    requireProfile: true,
+    staleTime: 5 * 60 * 1000,
+  });
 
   if (!discoveryEnabled) return null;
-  if (search.isError) return null;
+  if (search.isError && !search.data) return null;
 
   const filtered = (search.data?.results ?? []).filter((item) => item.availability !== "available");
   if (filtered.length === 0) return null;
@@ -89,11 +104,7 @@ function DialogRow({ item }: { item: RequestMediaResult }) {
   const poster = tmdbImageURL(item.poster_path);
   const Icon = item.media_type === "series" ? Tv : Film;
   const requestable = item.request.requestable;
-  const reasonLabel = !requestable
-    ? item.request.reason
-      ? formatRequestReason(item.request.reason)
-      : "Blocked"
-    : null;
+  const unavailableLabel = requestable ? null : nonRequestableLabel(item);
 
   return (
     <Link
@@ -128,9 +139,9 @@ function DialogRow({ item }: { item: RequestMediaResult }) {
       ) : (
         <span
           className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] font-medium tracking-[0.5px] text-white/60 uppercase"
-          title={reasonLabel ?? "Blocked"}
+          title={unavailableLabel ?? "Blocked"}
         >
-          {reasonLabel}
+          {unavailableLabel}
         </span>
       )}
     </Link>

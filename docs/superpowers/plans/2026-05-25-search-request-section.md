@@ -1,5 +1,7 @@
 # Search Request Section Implementation Plan
 
+Commands assume the repository root is the cwd.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a TMDB-backed "Request to Add" section beneath library results in both the Cmd+K search dialog (`GlobalSearch`) and the Catalog search results page, so users can discover and request items missing from the library without leaving the search flow.

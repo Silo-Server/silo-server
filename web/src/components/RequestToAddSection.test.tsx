@@ -95,7 +95,11 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(call?.[0]).toBe("all");
     expect(call?.[1]).toBe("dune");
     expect(call?.[2]).toBe(1);
-    expect(call?.[3]).toEqual({ enabled: false });
+    expect(call?.[3]).toEqual({
+      enabled: false,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+    });
   });
 
   it("passes enabled=true to useRequestSearch when discovery is enabled", () => {
@@ -113,7 +117,11 @@ describe("RequestToAddSection (dialog variant)", () => {
     render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
 
     const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
-    expect(call?.[3]).toEqual({ enabled: true });
+    expect(call?.[3]).toEqual({
+      enabled: true,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+    });
   });
 
   it("renders 'Request to Add' header when library had hits", () => {
@@ -164,6 +172,16 @@ describe("RequestToAddSection (dialog variant)", () => {
     mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: true });
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
     expect(markup).toBe("");
+  });
+
+  it("keeps rendering cached TMDB results when a refetch errors", () => {
+    mocks.useRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
+      isLoading: false,
+      isError: true,
+    });
+    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
+    expect(markup).toContain("Dune: Prophecy");
   });
 
   it("renders nothing when all TMDB results are already in the library", () => {
@@ -217,6 +235,32 @@ describe("RequestToAddSection (dialog variant)", () => {
     expect(markup).not.toContain("bg-amber-400/15");
     expect(markup).toContain("Limit reached");
     expect(markup).toContain('title="Limit reached"');
+  });
+
+  it("prefers request status over reason when a row is already requested", () => {
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          missingResult({
+            tmdb_id: 8,
+            title: "Already Pending Movie",
+            request: { requestable: false, reason: "blocked", status: "pending" },
+          }),
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
+
+    expect(markup).toContain("Already Pending Movie");
+    expect(markup).toContain("Pending");
+    expect(markup).toContain('title="Pending"');
+    expect(markup).not.toContain('title="Blocked"');
   });
 });
 

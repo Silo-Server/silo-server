@@ -80,9 +80,22 @@ describe("useRequestSearch", () => {
     expect(init.signal).toBe(controller.signal);
   });
 
-  it("uses a 5-minute staleTime", () => {
+  it("keeps the existing Requests page staleTime by default", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
     render(<CallHook mediaType="all" q="dune" />);
+
+    const options = mocks.useQuery.mock.calls[0]![0] as { staleTime: number };
+    expect(options.staleTime).toBe(30 * 1000);
+  });
+
+  it("allows callers to opt into a longer staleTime", () => {
+    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
+
+    function CallHookWithStaleTime() {
+      useRequestSearch("all", "dune", 1, { staleTime: 5 * 60 * 1000 });
+      return null;
+    }
+    render(<CallHookWithStaleTime />);
 
     const options = mocks.useQuery.mock.calls[0]![0] as { staleTime: number };
     expect(options.staleTime).toBe(5 * 60 * 1000);
@@ -107,6 +120,27 @@ describe("useRequestSearch", () => {
 
     const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
     expect(options.enabled).toBe(true);
+  });
+
+  it("does not require profile by default", () => {
+    mocks.useCurrentProfile.mockReturnValue({ profile: null });
+    render(<CallHook mediaType="all" q="dune" />);
+
+    const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
+    expect(options.enabled).toBe(true);
+  });
+
+  it("can require a profile before fetching", () => {
+    mocks.useCurrentProfile.mockReturnValue({ profile: null });
+
+    function CallHookRequiringProfile() {
+      useRequestSearch("all", "dune", 1, { requireProfile: true });
+      return null;
+    }
+    render(<CallHookRequiringProfile />);
+
+    const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
+    expect(options.enabled).toBe(false);
   });
 });
 
