@@ -71,6 +71,7 @@ interface ActionBarProps {
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   isAdmin?: boolean;
+  canCurateMetadata?: boolean;
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
@@ -119,6 +120,7 @@ export default function ActionBar({
   onEditMetadata,
   onMatchItem,
   isAdmin = false,
+  canCurateMetadata = false,
   versions,
   playbackVariants,
   selectedVersion,
@@ -222,6 +224,10 @@ export default function ActionBar({
   };
   const hasOverflowActions = Boolean(
     restartHref || onToggleWatchlist || onDownload || onSearchSubtitles,
+  );
+  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectIntro));
+  const hasMetadataActions = Boolean(
+    canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem),
   );
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
@@ -370,10 +376,10 @@ export default function ActionBar({
                 Search Subtitles
               </DropdownMenuItem>
             )}
-            {isAdmin && (
+            {(hasAdminActions || hasMetadataActions) && (
               <>
                 {hasOverflowActions && <DropdownMenuSeparator />}
-                {contentId && (
+                {isAdmin && contentId && (
                   <DropdownMenuItem
                     onSelect={() =>
                       navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)
@@ -382,7 +388,7 @@ export default function ActionBar({
                     View Play History
                   </DropdownMenuItem>
                 )}
-                {onRefresh && (
+                {canCurateMetadata && onRefresh && (
                   <DropdownMenuItem
                     disabled={isRefreshing}
                     onSelect={() => {
@@ -393,19 +399,19 @@ export default function ActionBar({
                     Refresh Metadata
                   </DropdownMenuItem>
                 )}
-                {onRedetectIntro && (
+                {isAdmin && onRedetectIntro && (
                   <DropdownMenuItem disabled={isRedetectingIntro} onSelect={onRedetectIntro}>
                     <RefreshCw className={`size-4 ${isRedetectingIntro ? "animate-spin" : ""}`} />
                     Re-detect Intro Markers
                   </DropdownMenuItem>
                 )}
-                {onEditMetadata && (
+                {canCurateMetadata && onEditMetadata && (
                   <DropdownMenuItem onSelect={onEditMetadata}>
                     <Pencil className="size-4" />
                     Edit Metadata
                   </DropdownMenuItem>
                 )}
-                {onMatchItem && (
+                {canCurateMetadata && onMatchItem && (
                   <DropdownMenuItem onSelect={onMatchItem}>
                     <Search className="size-4" />
                     Match Item

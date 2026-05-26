@@ -15,6 +15,7 @@ import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import type { EpisodeNavigationState } from "./itemDetailLayout";
 import { getWatchedActionLabel } from "./watchedState";
+import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 function seasonLabel(seasonNumber: number, title?: string) {
   if (title) return title;
@@ -27,6 +28,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const canCurateMetadata = canCurateMetadataForUser(user);
   const [editOpen, setEditOpen] = useState(false);
   const watchedMutation = useWatchedStateMutation(item);
   const refreshMetadataMutation = useRefreshItemMetadata();
@@ -103,16 +105,20 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
             watchedLabel={getWatchedActionLabel(item)}
             onToggleWatched={() => watchedMutation.mutate(!(item.user_data?.played ?? false))}
             isUpdatingWatched={watchedMutation.isPending}
-            onRefresh={(mode) =>
-              refreshMetadataMutation.mutate({
-                item,
-                mode,
-                onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-              })
+            onRefresh={
+              canCurateMetadata
+                ? (mode) =>
+                    refreshMetadataMutation.mutate({
+                      item,
+                      mode,
+                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
+                    })
+                : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
             isAdmin={isAdmin}
-            onEditMetadata={isAdmin ? () => setEditOpen(true) : undefined}
+            canCurateMetadata={canCurateMetadata}
+            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
           />
         }
       />
@@ -144,7 +150,9 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
           </div>
         )}
       </div>
-      {isAdmin && <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />}
+      {canCurateMetadata && (
+        <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
+      )}
     </div>
   );
 }
