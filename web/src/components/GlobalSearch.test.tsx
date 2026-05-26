@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
+  useCanRequest: vi.fn(),
+  useRequestSearch: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -19,6 +21,30 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("@/hooks/useDebounce", () => ({
   useDebounce: <T,>(v: T) => v,
+}));
+
+vi.mock("@/hooks/useCanRequest", () => ({
+  useCanRequest: () => mocks.useCanRequest(),
+}));
+
+vi.mock("@/hooks/queries/useRequests", () => ({
+  useRequestSearch: (...args: unknown[]) => mocks.useRequestSearch(...args),
+}));
+
+vi.mock("@/components/RequestToAddSection", () => ({
+  RequestToAddSection: ({
+    variant,
+    query,
+    libraryHadHits,
+  }: {
+    variant: string;
+    query: string;
+    libraryHadHits: boolean;
+  }) => (
+    <div data-testid="request-section">
+      {`variant="${variant}" query="${query}" libraryHadHits="${String(libraryHadHits)}"`}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -66,6 +92,18 @@ function renderSearchMarkup(props: Partial<Parameters<typeof GlobalSearch>[0]> =
 describe("GlobalSearch", () => {
   beforeEach(() => {
     mocks.useQuery.mockReset();
+    mocks.useCanRequest.mockReset();
+    mocks.useRequestSearch.mockReset();
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+    });
     mocks.useQuery.mockReturnValue({
       data: {
         total: 50,
@@ -103,5 +141,196 @@ describe("GlobalSearch", () => {
       enabled: boolean;
     };
     expect(lastCall.enabled).toBe(false);
+  });
+});
+
+describe("GlobalSearch + RequestToAddSection wiring", () => {
+  beforeEach(() => {
+    mocks.useQuery.mockReset();
+    mocks.useCanRequest.mockReset();
+    mocks.useRequestSearch.mockReset();
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+    });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 50, has_more: true, items: [browseFixture] },
+      isFetching: false,
+      isError: false,
+    });
+  });
+
+  it("renders the section with libraryHadHits=true when library returned results", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
+
+    expect(markup).toContain('data-testid="request-section"');
+    expect(markup).toContain("libraryHadHits=&quot;true&quot;");
+    expect(markup).toContain("variant=&quot;dialog&quot;");
+  });
+
+  it("renders the section with libraryHadHits=false when library returned 0 results", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "ThisDoesNotExist" });
+
+    expect(markup).toContain("libraryHadHits=&quot;false&quot;");
+  });
+
+  it("does not call useRequestSearch with enabled=true when discoveryEnabled is false", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
+
+    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
+    expect(call?.[3]).toEqual({
+      enabled: false,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+    });
+  });
+
+  it("does not mount RequestToAddSection when discovery is disabled", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
+
+    expect(markup).not.toContain('data-testid="request-section"');
+  });
+
+  it("suppresses 'No matches' when library is empty and TMDB is still loading", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+    });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Pending" });
+
+    expect(markup).not.toContain("No matches");
+  });
+
+  it("suppresses 'No matches' when library is empty and TMDB has missing results", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "FoundOnTmdb" });
+
+    expect(markup).not.toContain("No matches");
+  });
+
+  it("still shows 'No matches' when both library and TMDB are empty", () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 1, total_results: 0, results: [] },
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "ZzzNothing" });
+
+    expect(markup).toContain("No matches");
   });
 });

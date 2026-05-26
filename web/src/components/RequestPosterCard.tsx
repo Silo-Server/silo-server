@@ -9,8 +9,10 @@ const POSTER_WIDTH = "w-[148px] sm:w-[164px] lg:w-[184px]";
 type DiscoverProps = {
   variant: "discover";
   item: RequestMediaResult;
-  isSubmitting: boolean;
-  onRequest: () => void;
+  /** Called when the inline hover Request button is clicked. Omit to suppress the button. */
+  onRequest?: () => void;
+  /** Displays the spinner state on the hover Request button. Ignored when onRequest is omitted. */
+  isSubmitting?: boolean;
   /** When true, fills the parent (use inside grids). Default: fixed carousel width. */
   fluid?: boolean;
 };
@@ -44,8 +46,8 @@ function DiscoverCard({
   fluid,
 }: {
   item: RequestMediaResult;
-  isSubmitting: boolean;
-  onRequest: () => void;
+  isSubmitting?: boolean;
+  onRequest?: () => void;
   fluid?: boolean;
 }) {
   const poster = tmdbImageURL(item.poster_path);
@@ -92,11 +94,11 @@ function DiscoverCard({
         />
       </Link>
 
-      {requestable && (
+      {requestable && onRequest && (
         <div className="pointer-events-none absolute inset-x-0 top-0 flex aspect-[2/3] translate-y-2 items-end justify-center bg-gradient-to-t from-black/85 via-black/45 to-transparent p-3 opacity-0 transition-all duration-200 ease-out group-focus-within/req-card:translate-y-0 group-focus-within/req-card:opacity-100 group-hover/req-card:translate-y-0 group-hover/req-card:opacity-100">
           <button
             type="button"
-            disabled={isSubmitting}
+            disabled={Boolean(isSubmitting)}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();

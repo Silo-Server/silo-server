@@ -132,8 +132,8 @@ export const requestKeys = {
     sort: string,
     page: number,
   ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort, page] as const,
-  search: (mediaType: string, query: string, page: number) =>
-    ["requests", "search", mediaType, query, page] as const,
+  search: (mediaType: string, query: string, page: number, viewerKey: string) =>
+    ["requests", "search", viewerKey, mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
   mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
 };
