@@ -94,6 +94,31 @@ func (m *memBookmarkStore) Delete(_ context.Context, userID, profileID, itemID s
 	return nil
 }
 
+func (m *memBookmarkStore) CountByUser(_ context.Context, userID, profileID string) (map[string]int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]int{}
+	prefix := userID + "|" + profileID + "|"
+	for k := range m.rows {
+		if strings.HasPrefix(k, prefix) {
+			rest := k[len(prefix):]
+			sep := -1
+			for i, c := range rest {
+				if c == '|' {
+					sep = i
+					break
+				}
+			}
+			if sep < 0 {
+				continue
+			}
+			itemID := rest[:sep]
+			out[itemID]++
+		}
+	}
+	return out, nil
+}
+
 func formatSeq(n int) string {
 	b, _ := json.Marshal(n)
 	return string(b)

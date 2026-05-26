@@ -20,6 +20,11 @@ type BookmarkStore interface {
 	// Returns nil when no row matched — DELETE is idempotent (a UX
 	// convenience, not a 404 surface). See spec §6.
 	Delete(ctx context.Context, userID, profileID, itemID string, timeSeconds float64) error
+	// CountByUser returns a map of library_item_id -> bookmark count
+	// for the given (user, profile). Empty map (never nil) when none.
+	// Used by the smart-collection items evaluator to hydrate the
+	// `bookmark_count` personalized rule in one SQL pass.
+	CountByUser(ctx context.Context, userID, profileID string) (map[string]int, error)
 }
 
 // Bookmark is the in-memory representation of an abs_bookmarks row as

@@ -122,3 +122,39 @@ func (s *ABSBookmarkStore) Delete(ctx context.Context, userID, profileID, itemID
 	}
 	return nil
 }
+
+// CountByUser returns a map of library_item_id -> bookmark count for
+// the given (user, profile). One SQL query; used by the
+// smart-collection items evaluator for batch hydration.
+func (s *ABSBookmarkStore) CountByUser(ctx context.Context, userID, profileID string) (map[string]int, error) {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return nil, fmt.Errorf("abs_bookmark_store: invalid user id %q: %w", userID, err)
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT library_item_id, COUNT(*)
+		FROM abs_bookmarks
+		WHERE user_id = $1
+		  AND COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid)
+		      = COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+		GROUP BY library_item_id`,
+		uid, profileArg(profileID),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("abs_bookmark_store: count-by-user: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var itemID string
+		var count int
+		if err := rows.Scan(&itemID, &count); err != nil {
+			return nil, fmt.Errorf("abs_bookmark_store: count-by-user scan: %w", err)
+		}
+		out[itemID] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("abs_bookmark_store: count-by-user rows: %w", err)
+	}
+	return out, nil
+}
