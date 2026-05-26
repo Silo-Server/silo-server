@@ -372,7 +372,7 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 		}
 		secret, err := h.deps.Config.JWTSecret(r.Context())
 		if err != nil {
-			slog.Error("abs bearerAuth: jwt secret fetch failed", "err", err)
+			slog.Error("abs bearerAuth: jwt secret fetch failed", "err", err, "path", r.URL.Path)
 			http.Error(w, "config unavailable", http.StatusInternalServerError)
 			return
 		}

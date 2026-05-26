@@ -88,7 +88,7 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		} else {
-			slog.Error("abs login: cred validator failed", "username", body.Username, "error", err)
+			slog.Error("abs login: cred validator failed", "username", body.Username, "err", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)
 		}
 		return
