@@ -73,6 +73,16 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.recommender = deps.Recommender
+	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
+	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader)
+	autoscanVirtualFoldersRegistered := false
+	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
+		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth)).
+			Get("/Library/VirtualFolders", autoscanHandler.HandleVirtualFolders)
+		r.With(adminAPIKeyAuth.RequireAdminAPIKey).
+			Post("/Library/Media/Updated", autoscanHandler.HandleMediaUpdated)
+		autoscanVirtualFoldersRegistered = true
+	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
 	if deps.DB != nil {
@@ -120,7 +130,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
 			r.Get("/UserViews", itemsHandler.HandleViews)
 			r.Get("/UserViews/GroupingOptions", itemsHandler.HandleGroupingOptionsStub)
-			r.Get("/Library/VirtualFolders", itemsHandler.HandleVirtualFolders)
+			if !autoscanVirtualFoldersRegistered {
+				r.Get("/Library/VirtualFolders", itemsHandler.HandleVirtualFolders)
+			}
 			r.Get("/Users/{userId}/Views", itemsHandler.HandleViews)
 			r.Get("/Items", itemsHandler.HandleItems)
 			r.Get("/Users/{id}/Items", itemsHandler.HandleItems)

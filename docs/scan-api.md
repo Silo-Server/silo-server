@@ -185,9 +185,22 @@ curl -X POST http://your-server:8090/api/v1/scan \
 
 ## Integration with Autoscan
 
-[Autoscan](https://github.com/Cloudbox/autoscan) monitors Sonarr, Radarr, and other sources for new downloads, then relays scan requests to media servers. To use Autoscan with Silo, configure a **manual/generic target** using a custom script or webhook that calls the Silo scan API.
+[Autoscan](https://github.com/Cloudbox/autoscan) monitors Sonarr, Radarr, and
+other sources for new downloads, then relays scan requests to media servers.
+Silo supports Autoscan's stock Jellyfin target through the Jellyfin compatibility
+server.
 
-### Autoscan Custom Script Target
+Use:
+
+- URL: Silo's Jellyfin compatibility URL, usually `http://your-server:8096`
+- Token: a Silo admin API key beginning with `sa_`
+- Target type: Autoscan `jellyfin`
+
+Autoscan discovers library roots from `GET /Library/VirtualFolders` and sends
+changed paths to `POST /Library/Media/Updated`. The paths must be server-side
+paths as Silo sees them.
+
+### Alternative: Autoscan Custom Script Target
 
 Create a script (e.g., `silo-scan.sh`) that Autoscan calls with the changed path:
 

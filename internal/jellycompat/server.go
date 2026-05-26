@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -40,6 +41,11 @@ type Dependencies struct {
 	ContentService  ContentService
 	UserDataService UserDataService
 	AuthService     *auth.Service
+
+	// Autoscan / admin compatibility support.
+	APIKeyValidator  apiKeyValidator
+	APIKeyUserLoader apiKeyUserLoader
+	ScanQueue        scantrigger.Queuer
 
 	// Catalog repos (for ContentService construction)
 	BrowseRepo     *catalog.BrowseRepository

@@ -121,6 +121,68 @@ func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.Sca
 	return nil, false, fmt.Errorf("create scan run: %w", err)
 }
 
+func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*models.ScanRun, []bool, error) {
+	if len(inputs) == 0 {
+		return []*models.ScanRun{}, []bool{}, nil
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin scan run batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	runs := make([]*models.ScanRun, 0, len(inputs))
+	created := make([]bool, 0, len(inputs))
+	for _, input := range inputs {
+		run, err := scanRunRow(tx.QueryRow(ctx, `
+			INSERT INTO scan_runs (
+				id, media_folder_id, mode, path, trigger, status
+			) VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT DO NOTHING
+			RETURNING `+scanRunColumns,
+			ulid.Make().String(),
+			input.LibraryID,
+			input.Mode,
+			input.Path,
+			input.Trigger,
+			StatusAccepted,
+		))
+		if err == nil {
+			runs = append(runs, run)
+			created = append(created, true)
+			continue
+		}
+		if !errors.Is(err, ErrScanRunNotFound) {
+			return nil, nil, fmt.Errorf("create scan run: %w", err)
+		}
+
+		existing, lookupErr := scanRunRow(tx.QueryRow(ctx, `
+			SELECT `+scanRunColumns+`
+			FROM scan_runs
+			WHERE media_folder_id = $1
+			  AND mode = $2
+			  AND path = $3
+			  AND status = ANY($4)
+			ORDER BY requested_at ASC
+			LIMIT 1`,
+			input.LibraryID,
+			input.Mode,
+			input.Path,
+			[]string{StatusAccepted, StatusRunning},
+		))
+		if lookupErr != nil {
+			return nil, nil, lookupErr
+		}
+		runs = append(runs, existing)
+		created = append(created, false)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("commit scan run batch: %w", err)
+	}
+	return runs, created, nil
+}
+
 func (r *Repository) GetActiveByScope(ctx context.Context, libraryID int, mode, path string) (*models.ScanRun, error) {
 	return scanRunRow(r.pool.QueryRow(ctx, `
 		SELECT `+scanRunColumns+`
