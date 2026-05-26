@@ -77,22 +77,54 @@ func (m *memSmartCollectionStore) DeleteSmartCollection(_ context.Context, id st
 }
 
 type smartCollectionsHarness struct {
-	H  *Handler
-	SC *memSmartCollectionStore
+	H    *Handler
+	SC   *memSmartCollectionStore
+	Prog *fakeProgressStore
+	Book *memBookmarkStore
 }
 
 func newSmartCollectionsHarness(t *testing.T, knownItems ...string) *smartCollectionsHarness {
 	t.Helper()
 	known := map[string]*models.MediaItem{}
 	for _, id := range knownItems {
-		known[id] = nil
+		known[id] = &models.MediaItem{ContentID: id, Title: "Title-" + id}
 	}
 	store := newMemSmartCollectionStore()
+	prog := &fakeProgressStore{}
+	book := newMemBookmarkStore()
 	h := New(Dependencies{
-		MediaStore:           &stubMediaStore{known: known},
+		MediaStore:           &itemListStubMediaStore{stubMediaStore: stubMediaStore{known: known}, items: itemListFromKnown(known)},
 		SmartCollectionStore: store,
+		ProgressStore:        prog,
+		BookmarkStore:        book,
 	})
-	return &smartCollectionsHarness{H: h, SC: store}
+	return &smartCollectionsHarness{H: h, SC: store, Prog: prog, Book: book}
+}
+
+// itemListStubMediaStore extends stubMediaStore with ListAudiobooks +
+// ListAudiobookLibraries so the smart-collection items handler can
+// build candidates and resolve libraries.
+type itemListStubMediaStore struct {
+	stubMediaStore
+	items []*models.MediaItem
+}
+
+func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, _ int64, _, _ int) ([]*models.MediaItem, int, error) {
+	return s.items, len(s.items), nil
+}
+
+func (s *itemListStubMediaStore) ListAudiobookLibraries(_ context.Context) ([]AudiobookLibrary, error) {
+	return []AudiobookLibrary{{ID: 9, Name: "Audiobooks", Type: "audiobooks"}}, nil
+}
+
+func itemListFromKnown(known map[string]*models.MediaItem) []*models.MediaItem {
+	out := make([]*models.MediaItem, 0, len(known))
+	for _, it := range known {
+		if it != nil {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func createSmartCollectionForUser(t *testing.T, hb *smartCollectionsHarness, userID, profileID, body string) string {
@@ -293,5 +325,60 @@ func TestSmartCollection_Delete_NonOwner_404(t *testing.T) {
 	}
 	if _, err := hb.SC.GetSmartCollection(context.Background(), id); err != nil {
 		t.Errorf("non-owner DELETE leaked: %v", err)
+	}
+}
+
+func TestSmartCollection_Items_OwnerEvaluatesRules(t *testing.T) {
+	hb := newSmartCollectionsHarness(t, "book-a", "book-b", "book-c")
+	id := createSmartCollectionForUser(t, hb, "1", "",
+		`{"name":"a-only","query_def":{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"contains","value":"book-a"}]}]}}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id+"/items",
+		map[string]string{"id": id}, nil, "1", "", hb.H.handleSmartCollectionItems)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	results, _ := env["results"].([]any)
+	if len(results) != 1 {
+		t.Errorf("results len = %d, want 1; body=%s", len(results), rec.Body.String())
+	}
+}
+
+func TestSmartCollection_Items_PaginatedEnvelope(t *testing.T) {
+	hb := newSmartCollectionsHarness(t, "book-a", "book-b")
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"all"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id+"/items",
+		map[string]string{"id": id}, nil, "1", "", hb.H.handleSmartCollectionItems)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	for _, k := range []string{"results", "total", "limit", "page", "sortBy", "sortDesc", "filterBy", "minified", "include"} {
+		if _, has := env[k]; !has {
+			t.Errorf("envelope missing %q", k)
+		}
+	}
+}
+
+func TestSmartCollection_Items_NonOwnerPrivate_404(t *testing.T) {
+	hb := newSmartCollectionsHarness(t, "book-a")
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"private"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id+"/items",
+		map[string]string{"id": id}, nil, "2", "", hb.H.handleSmartCollectionItems)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestSmartCollection_Items_NonOwnerPublic_OK(t *testing.T) {
+	hb := newSmartCollectionsHarness(t, "book-a")
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"public","isPublic":true}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id+"/items",
+		map[string]string{"id": id}, nil, "2", "", hb.H.handleSmartCollectionItems)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }
