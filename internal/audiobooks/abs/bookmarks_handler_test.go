@@ -394,3 +394,68 @@ func TestMissingTime_400(t *testing.T) {
 		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func assertOneEvent(t *testing.T, pub *recordingPublisher, wantUser, wantReason string) {
+	t.Helper()
+	evts := pub.snapshot()
+	if len(evts) != 1 {
+		t.Fatalf("publisher events = %d, want 1: %+v", len(evts), evts)
+	}
+	e := evts[0]
+	if e.UserID != wantUser {
+		t.Errorf("event userID = %q, want %q", e.UserID, wantUser)
+	}
+	if e.Event != "user_updated" {
+		t.Errorf("event name = %q, want user_updated", e.Event)
+	}
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]any", e.Payload)
+	}
+	if payload["reason"] != wantReason {
+		t.Errorf("reason = %v, want %q", payload["reason"], wantReason)
+	}
+	if _, ok := payload["bookmark"].(map[string]any); !ok {
+		t.Errorf("bookmark payload missing or wrong type: %T", payload["bookmark"])
+	}
+}
+
+func TestSocketEvent_FiredOnCreate(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	assertOneEvent(t, hb.Pub, "7", "bookmark_created")
+}
+
+func TestSocketEvent_FiredOnUpdate(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	// Seed (publishes a create event); then PATCH and only assert the
+	// second event.
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	_ = dispatchBookmark(hb.H, http.MethodPatch, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"y","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_updated"))
+	evts := hb.Pub.snapshot()
+	if len(evts) != 2 {
+		t.Fatalf("publisher events = %d, want 2", len(evts))
+	}
+	payload := evts[1].Payload.(map[string]any)
+	if payload["reason"] != "bookmark_updated" {
+		t.Errorf("second event reason = %v, want bookmark_updated", payload["reason"])
+	}
+}
+
+func TestSocketEvent_FiredOnDelete(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "7", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	_ = dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/1", "book-1", "1", nil, "7", "", hb.H.handleDeleteBookmark)
+	evts := hb.Pub.snapshot()
+	if len(evts) != 2 {
+		t.Fatalf("publisher events = %d, want 2 (create + delete)", len(evts))
+	}
+	payload := evts[1].Payload.(map[string]any)
+	if payload["reason"] != "bookmark_deleted" {
+		t.Errorf("delete event reason = %v, want bookmark_deleted", payload["reason"])
+	}
+	bm, _ := payload["bookmark"].(map[string]any)
+	if bm["title"] != "x" {
+		t.Errorf("delete payload title = %v, want 'x' (pre-delete snapshot)", bm["title"])
+	}
+}
