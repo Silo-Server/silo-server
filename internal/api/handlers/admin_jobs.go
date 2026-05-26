@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -110,7 +111,20 @@ func (h *AdminJobsHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, adminJobToResponse(r, job, h.store))
+	claims := apimw.GetClaims(r.Context())
+	if !canReadAdminJob(claims, job) {
+		writeError(w, http.StatusForbidden, "forbidden", "Admin access required")
+		return
+	}
+
+	response := adminJobToResponse(r, job, h.store)
+	if claims == nil || claims.Role != "admin" {
+		response.RequestPayload = json.RawMessage(`{}`)
+		response.PublicURL = ""
+		response.DownloadURL = ""
+		response.DownloadExpiresAt = nil
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArtifactStore) adminJobResponse {
@@ -175,4 +189,14 @@ func currentAdminUserID(r *http.Request) int {
 		return 0
 	}
 	return claims.UserID
+}
+
+func canReadAdminJob(claims *auth.Claims, job *models.AdminJob) bool {
+	if claims == nil || job == nil {
+		return false
+	}
+	if claims.Role == "admin" {
+		return true
+	}
+	return job.JobType == adminjob.JobTypeItemRefresh && job.CreatedByUserID == claims.UserID
 }
