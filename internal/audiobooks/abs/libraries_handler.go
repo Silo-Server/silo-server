@@ -271,15 +271,21 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	libID := audiobookLibraryID(lib)
 	total := len(authors)
 	// Local slice for the requested page.
-	start := page * limit
-	end := start + limit
-	if start > total {
-		start = total
+	// ABS contract: limit=0 means "return all".
+	var pageAuthors []AuthorSummary
+	if limit == 0 {
+		pageAuthors = authors
+	} else {
+		start := page * limit
+		end := start + limit
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+		pageAuthors = authors[start:end]
 	}
-	if end > total {
-		end = total
-	}
-	pageAuthors := authors[start:end]
 	results := make([]map[string]any, 0, len(pageAuthors))
 	for _, a := range pageAuthors {
 		results = append(results, map[string]any{
@@ -311,15 +317,21 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	}
 	libID := audiobookLibraryID(lib)
 	total := len(series)
-	start := page * limit
-	end := start + limit
-	if start > total {
-		start = total
+	// ABS contract: limit=0 means "return all".
+	var pageSeries []SeriesSummary
+	if limit == 0 {
+		pageSeries = series
+	} else {
+		start := page * limit
+		end := start + limit
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+		pageSeries = series[start:end]
 	}
-	if end > total {
-		end = total
-	}
-	pageSeries := series[start:end]
 	results := make([]map[string]any, 0, len(pageSeries))
 	for _, s := range pageSeries {
 		results = append(results, map[string]any{
@@ -395,6 +407,10 @@ func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
 	if !ok || a.UserID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.MediaStore == nil {
+		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 	baseURL := h.absBaseURL(r)

@@ -85,7 +85,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 			// can play. Heartbeat/close calls will fail with 404 until the
 			// next play_start lands cleanly.
 			slog.Warn("abs play: persist session failed",
-				"session_id", sessionID, "content_id", contentID, "error", err)
+				"session_id", sessionID, "content_id", contentID, "err", err)
 		}
 	}
 
@@ -252,6 +252,7 @@ func buildSiloAudioTracks(
 			ChannelLayout:        channelLayout,
 			Chapters:             nil,
 			EmbeddedCoverArt:     nil,
+			MetaTags:             map[string]string{},
 			MimeType:             mimeType,
 			Title:                filename,
 			StartOffset:          startOffset,
