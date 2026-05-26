@@ -317,6 +317,11 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		r.Head(prefix+"/public/session/{sid}/track/{idx}", h.handlePublicTrack)
 	}
 
+	// Public RSS feed routes — slug is the capability token, no auth.
+	r.Get("/feed/{slug}.xml", h.handlePublicFeed)
+	r.Get("/feed/{slug}", h.handlePublicFeed)
+	r.Get("/feed/{slug}/file/{ino}", h.handlePublicFeedFile)
+
 	// Stage 3: playback session + file routes, registered under both the
 	// legacy /abs/api prefix and the canonical /api prefix that the official
 	// ABS mobile client builds against (no /abs prefix at server root).
@@ -380,6 +385,17 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Get(prefix+"/me/smart-collections/{id}/items", h.handleSmartCollectionItems)
 			r.Patch(prefix+"/me/smart-collections/{id}", h.handleUpdateSmartCollection)
 			r.Delete(prefix+"/me/smart-collections/{id}", h.handleDeleteSmartCollection)
+			// Phase 1 close-out: listening stats / author+series / continue / RSS auth.
+			r.Get(prefix+"/me/listening-stats", h.handleListeningStats)
+			r.Get(prefix+"/me/listening-sessions", h.handleListeningSessions)
+			r.Get(prefix+"/me/listening-sessions/{sid}", h.handleListeningSessionDetail)
+			r.Get(prefix+"/authors/{id}", h.handleAuthorDetail)
+			r.Get(prefix+"/series/{id}", h.handleSeriesDetail)
+			r.Get(prefix+"/me/progress/{itemId}/remove-from-continue-listening", h.handleRemoveFromContinueListening)
+			r.Get(prefix+"/me/progress/{itemId}/readd-to-continue-listening", h.handleReaddToContinueListening)
+			r.Get(prefix+"/feeds", h.handleListRSSFeeds)
+			r.Post(prefix+"/feeds/item/{itemId}/open", h.handleOpenItemFeed)
+			r.Post(prefix+"/feeds/{id}/close", h.handleCloseFeed)
 		}
 	})
 

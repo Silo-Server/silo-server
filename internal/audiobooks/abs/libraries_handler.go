@@ -243,12 +243,27 @@ func (h *Handler) handleItemCover(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// handleAuthorImage — GET /abs/api/authors/{id}/image (unauthenticated)
-//
-// Author images are not yet stored in silo; return a clean 404 so the
-// ABS client renders the placeholder.
-func (h *Handler) handleAuthorImage(w http.ResponseWriter, _ *http.Request) {
-	http.NotFound(w, nil)
+// handleAuthorImage — GET /authors/{id}/image. Public unauthenticated
+// route (mounted outside bearerAuth in handler.go). Uses MediaStore
+// to resolve the people row, then CoverResolver to mint a presigned
+// URL and 302-redirect to it.
+func (h *Handler) handleAuthorImage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	author, err := h.deps.MediaStore.GetAuthorByID(r.Context(), id)
+	if err != nil || author.PosterPath == "" {
+		http.Error(w, "author image not found", http.StatusNotFound)
+		return
+	}
+	if h.deps.CoverResolver == nil {
+		http.Error(w, "image resolver not configured", http.StatusServiceUnavailable)
+		return
+	}
+	url := h.deps.CoverResolver(r.Context(), author.PosterPath, "")
+	if url == "" {
+		http.Error(w, "image resolution failed", http.StatusNotFound)
+		return
+	}
+	http.Redirect(w, r, url, http.StatusFound)
 }
 
 // handleLibraryAuthors — GET /abs/api/libraries/{id}/authors
