@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const mocks = vi.hoisted(() => ({
   useCanRequest: vi.fn(),
   useRequestSearch: vi.fn(),
+  useCreateMediaRequest: vi.fn(),
   useDebounce: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("@/hooks/useCanRequest", () => ({
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: (...args: unknown[]) => mocks.useRequestSearch(...args),
+  useCreateMediaRequest: () => mocks.useCreateMediaRequest(),
 }));
 
 vi.mock("@/hooks/useDebounce", () => ({
@@ -59,12 +61,20 @@ describe("RequestToAddSection (dialog variant)", () => {
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();
     mocks.useDebounce.mockReset();
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useDebounce.mockImplementation((v: unknown) => v);
   });
 
   it("renders nothing when discovery is disabled", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
 
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
@@ -72,7 +82,11 @@ describe("RequestToAddSection (dialog variant)", () => {
   });
 
   it("passes enabled=false to useRequestSearch when discovery is disabled so no network call fires", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
 
     render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
@@ -85,7 +99,11 @@ describe("RequestToAddSection (dialog variant)", () => {
   });
 
   it("passes enabled=true to useRequestSearch when discovery is enabled", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useRequestSearch.mockReturnValue({
       data: { page: 1, total_pages: 1, total_results: 0, results: [] },
       isLoading: false,
@@ -123,6 +141,10 @@ describe("RequestToAddSection (dialog variant)", () => {
   });
 
   it("filters out results already available in the library", () => {
+    // missingResult has tmdb_id 1, availableResult has tmdb_id 2. The DialogRow
+    // renders item.title only as text content (never as a `title=` attribute), so
+    // a substring check on `title="Dune"` would pass even with the filter removed.
+    // Check the link target instead — it's a precise, filter-driven signal.
     mocks.useRequestSearch.mockReturnValue({
       data: {
         page: 1,
@@ -134,8 +156,8 @@ describe("RequestToAddSection (dialog variant)", () => {
       isError: false,
     });
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
-    expect(markup).toContain("Dune: Prophecy");
-    expect(markup).not.toContain('title="Dune"');
+    expect(markup).toContain("/requests/movie/1");
+    expect(markup).not.toContain("/requests/movie/2");
   });
 
   it("renders nothing when TMDB returned an error", () => {
@@ -179,7 +201,9 @@ describe("RequestToAddSection (dialog variant)", () => {
           missingResult({
             tmdb_id: 7,
             title: "Quota Capped Movie",
-            request: { requestable: false, reason: "quota_exhausted" },
+            // formatRequestReason recognises "quota_exceeded" (not "quota_exhausted");
+            // assert on the produced label so a regression in that mapping is caught.
+            request: { requestable: false, reason: "quota_exceeded" },
           }),
         ],
       },
@@ -191,7 +215,8 @@ describe("RequestToAddSection (dialog variant)", () => {
 
     expect(markup).toContain("Quota Capped Movie");
     expect(markup).not.toContain("bg-amber-400/15");
-    expect(markup).toMatch(/title="[^"]+"/);
+    expect(markup).toContain("Limit reached");
+    expect(markup).toContain('title="Limit reached"');
   });
 });
 
@@ -199,7 +224,17 @@ describe("RequestToAddSection (grid variant)", () => {
   beforeEach(() => {
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCreateMediaRequest.mockReset();
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useCreateMediaRequest.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      variables: undefined,
+    });
   });
 
   it("renders a card per result with the Request to Add header when library had hits", () => {

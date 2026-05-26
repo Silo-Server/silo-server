@@ -111,9 +111,15 @@ export function GlobalSearch({
   });
   const tmdbMissingCount =
     tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
+  // Cap at DIALOG_LIMIT (4) — RequestToAddSection slices results to that many rows.
+  const tmdbVisibleCount = Math.min(tmdbMissingCount, 4);
   const tmdbStillLoading =
     canRequest.discoveryEnabled && tmdbDebouncedQuery.length > 1 && tmdbQuery.isLoading;
   const tmdbWillRender = canRequest.discoveryEnabled && tmdbMissingCount > 0;
+  // Hide empty state while the TMDB debounce trails the library debounce; otherwise
+  // the user sees "No matches" flash between t=200ms and t=400ms after typing.
+  const tmdbDebounceCatchingUp =
+    canRequest.discoveryEnabled && tmdbDebouncedQuery !== debouncedQuery;
 
   const searchState = useMemo(
     () => createCatalogSearchState("query", { q: debouncedQuery || undefined }),
@@ -195,7 +201,9 @@ export function GlobalSearch({
     items.length === 0 &&
     !previewQuery.isError &&
     !tmdbStillLoading &&
-    !tmdbWillRender;
+    !tmdbWillRender &&
+    !canRequest.isResolving &&
+    !tmdbDebounceCatchingUp;
   const showError = previewQuery.isError;
 
   return (
@@ -252,34 +260,33 @@ export function GlobalSearch({
         </form>
         {showResultsPanel && (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div
-              role="listbox"
-              className="max-h-[min(22rem,55vh)] overflow-y-auto overscroll-contain px-2 py-2"
-            >
-              {showLoading && (
-                <div className="text-muted-foreground px-3 py-6 text-center text-sm">
-                  Searching...
-                </div>
-              )}
-              {showError && (
-                <div className="text-destructive px-3 py-4 text-center text-sm">
-                  Could not load results. Press Enter to open the search page.
-                </div>
-              )}
-              {showEmpty && (
-                <div className="text-muted-foreground px-3 py-6 text-center text-sm">
-                  No matches
-                </div>
-              )}
-              {items.map((item, i) => (
-                <GlobalSearchResultRow
-                  key={item.content_id}
-                  item={item}
-                  index={i}
-                  isSelected={i === selectedIndex}
-                  onPick={handlePickItem}
-                />
-              ))}
+            <div className="max-h-[min(22rem,55vh)] overflow-y-auto overscroll-contain px-2 py-2">
+              <div role="listbox">
+                {showLoading && (
+                  <div className="text-muted-foreground px-3 py-6 text-center text-sm">
+                    Searching...
+                  </div>
+                )}
+                {showError && (
+                  <div className="text-destructive px-3 py-4 text-center text-sm">
+                    Could not load results. Press Enter to open the search page.
+                  </div>
+                )}
+                {showEmpty && (
+                  <div className="text-muted-foreground px-3 py-6 text-center text-sm">
+                    No matches
+                  </div>
+                )}
+                {items.map((item, i) => (
+                  <GlobalSearchResultRow
+                    key={item.content_id}
+                    item={item}
+                    index={i}
+                    isSelected={i === selectedIndex}
+                    onPick={handlePickItem}
+                  />
+                ))}
+              </div>
               {tmdbDebouncedQuery.length > 1 && canRequest.discoveryEnabled && (
                 <RequestToAddSection
                   variant="dialog"
@@ -289,7 +296,9 @@ export function GlobalSearch({
               )}
             </div>
             <div role="status" aria-live="polite" className="sr-only">
-              {items.length} results found
+              {tmdbVisibleCount > 0
+                ? `${items.length} library results, ${tmdbVisibleCount} request suggestions`
+                : `${items.length} results found`}
             </div>
             <div className="text-muted-foreground border-t px-3 py-2 text-center text-xs">
               {total > PREVIEW_LIMIT ? (

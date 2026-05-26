@@ -189,7 +189,11 @@ describe("Catalog page", () => {
     mockItemGrid.mockReset();
     mockUseCanRequest.mockReset();
     mockUseRequestSearch.mockReset();
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
 
     mockUseCatalogWindow.mockReturnValue({
@@ -325,7 +329,11 @@ describe("Catalog page", () => {
   });
 
   it("renders the request grid variant when source=query and library has results", () => {
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseRequestSearch.mockReturnValue({
       data: {
         page: 1,
@@ -357,7 +365,11 @@ describe("Catalog page", () => {
   });
 
   it("renders the request grid variant with libraryHadHits=false when library has 0 hits", () => {
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseCatalogWindow.mockReturnValue({
       data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
       isLoading: false,
@@ -392,7 +404,11 @@ describe("Catalog page", () => {
 
   it("does not render the request section when source is not query", () => {
     appInitialEntries = ["/catalog?source=favorites"];
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseCatalogWindow.mockReturnValue({
       data: { title: "Favorites", totalItems: 0, pages: new Map() },
       isLoading: false,
@@ -428,8 +444,12 @@ describe("Catalog page", () => {
     expect(call?.[3]).toEqual({ enabled: false });
   });
 
-  it("keeps ItemGrid in a loading state when library is empty and TMDB is still loading", () => {
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+  it("hides ItemGrid when library is empty and TMDB is still loading (request section will rescue)", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseCatalogWindow.mockReturnValue({
       data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
       isLoading: false,
@@ -442,11 +462,17 @@ describe("Catalog page", () => {
       </QueryClientProvider>,
     );
 
-    expect(markup).toContain('data-loading="true"');
+    // Previously this case forced ItemGrid into loading=true, rendering 24 fake
+    // skeletons forever above the section. Now ItemGrid is hidden entirely.
+    expect(markup).not.toContain('data-kind="item-grid"');
   });
 
-  it("keeps ItemGrid in a loading state when library is empty and TMDB has missing results", () => {
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+  it("hides ItemGrid when library is empty and TMDB has missing results", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseCatalogWindow.mockReturnValue({
       data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
       isLoading: false,
@@ -476,11 +502,38 @@ describe("Catalog page", () => {
       </QueryClientProvider>,
     );
 
-    expect(markup).toContain('data-loading="true"');
+    expect(markup).not.toContain('data-kind="item-grid"');
+    expect(markup).toContain('data-testid="request-section"');
+  });
+
+  it("hides ItemGrid when library is empty and discovery feature status is still resolving", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: true,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    // Avoids the empty-state flash before the feature status resolves and TMDB
+    // either rescues with results or confirms there are none.
+    expect(markup).not.toContain('data-kind="item-grid"');
   });
 
   it("renders the normal ItemGrid empty state when both library and TMDB are empty", () => {
-    mockUseCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mockUseCatalogWindow.mockReturnValue({
       data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
       isLoading: false,

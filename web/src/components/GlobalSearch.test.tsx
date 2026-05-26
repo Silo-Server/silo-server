@@ -94,7 +94,11 @@ describe("GlobalSearch", () => {
     mocks.useQuery.mockReset();
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useRequestSearch.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -145,7 +149,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     mocks.useQuery.mockReset();
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useRequestSearch.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -159,7 +167,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("renders the section with libraryHadHits=true when library returned results", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useRequestSearch.mockReturnValue({
       data: {
         page: 1,
@@ -186,7 +198,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("renders the section with libraryHadHits=false when library returned 0 results", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useQuery.mockReturnValue({
       data: { total: 0, has_more: false, items: [] },
       isFetching: false,
@@ -216,7 +232,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("does not call useRequestSearch with enabled=true when discoveryEnabled is false", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
 
     const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
@@ -224,14 +244,22 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("does not mount RequestToAddSection when discovery is disabled", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: false, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
 
     expect(markup).not.toContain('data-testid="request-section"');
   });
 
   it("suppresses 'No matches' when library is empty and TMDB is still loading", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useQuery.mockReturnValue({
       data: { total: 0, has_more: false, items: [] },
       isFetching: false,
@@ -248,7 +276,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("suppresses 'No matches' when library is empty and TMDB has missing results", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useQuery.mockReturnValue({
       data: { total: 0, has_more: false, items: [] },
       isFetching: false,
@@ -278,7 +310,11 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("still shows 'No matches' when both library and TMDB are empty", () => {
-    mocks.useCanRequest.mockReturnValue({ discoveryEnabled: true, submitDisabledReason: null });
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
     mocks.useQuery.mockReturnValue({
       data: { total: 0, has_more: false, items: [] },
       isFetching: false,

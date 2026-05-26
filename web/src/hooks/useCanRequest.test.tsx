@@ -31,7 +31,10 @@ function render(child: ReactNode) {
 
 describe("useCanRequest", () => {
   it("returns discoveryEnabled=false when requests_enabled is false", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({ data: { requests_enabled: false } });
+    mocks.useRequestFeatureStatus.mockReturnValue({
+      data: { requests_enabled: false },
+      isLoading: false,
+    });
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });
 
     let captured: ReturnType<typeof useCanRequest> | null = null;
@@ -43,11 +46,18 @@ describe("useCanRequest", () => {
       />,
     );
 
-    expect(captured).toEqual({ discoveryEnabled: false, submitDisabledReason: null });
+    expect(captured).toEqual({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
   });
 
   it("returns discoveryEnabled=false when there is no profile", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({ data: { requests_enabled: true } });
+    mocks.useRequestFeatureStatus.mockReturnValue({
+      data: { requests_enabled: true },
+      isLoading: false,
+    });
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
 
     let captured: ReturnType<typeof useCanRequest> | null = null;
@@ -59,11 +69,18 @@ describe("useCanRequest", () => {
       />,
     );
 
-    expect(captured).toEqual({ discoveryEnabled: false, submitDisabledReason: null });
+    expect(captured).toEqual({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
   });
 
   it("returns discoveryEnabled=true when requests are enabled and there is a profile", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({ data: { requests_enabled: true } });
+    mocks.useRequestFeatureStatus.mockReturnValue({
+      data: { requests_enabled: true },
+      isLoading: false,
+    });
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });
 
     let captured: ReturnType<typeof useCanRequest> | null = null;
@@ -75,11 +92,15 @@ describe("useCanRequest", () => {
       />,
     );
 
-    expect(captured).toEqual({ discoveryEnabled: true, submitDisabledReason: null });
+    expect(captured).toEqual({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
   });
 
-  it("returns discoveryEnabled=false while the feature status is still loading", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({ data: undefined });
+  it("returns isResolving=true and discoveryEnabled=false while the feature status is still loading", () => {
+    mocks.useRequestFeatureStatus.mockReturnValue({ data: undefined, isLoading: true });
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });
 
     let captured: ReturnType<typeof useCanRequest> | null = null;
@@ -91,6 +112,10 @@ describe("useCanRequest", () => {
       />,
     );
 
-    expect(captured).toEqual({ discoveryEnabled: false, submitDisabledReason: null });
+    expect(captured).toEqual({
+      discoveryEnabled: false,
+      isResolving: true,
+      submitDisabledReason: null,
+    });
   });
 });

@@ -24,7 +24,9 @@ describe("RequestPosterCard (discover variant)", () => {
         />
       </MemoryRouter>,
     );
-    expect(markup).toContain("Request");
+    // Must render an actual <button> with the "Request" label, not just any "Request"
+    // substring (the /requests/... URL would match a naive includes check).
+    expect(markup).toMatch(/<button[^>]*>[\s\S]*?Request[\s\S]*?<\/button>/);
   });
 
   it("does not render the hover Request button when onRequest is omitted", () => {
@@ -34,6 +36,8 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).not.toContain("rounded-full bg-white");
+    // The discover variant only contains one <button> (the hover Request action);
+    // its absence is the strongest signal that the button was suppressed.
+    expect(markup).not.toContain("<button");
   });
 });

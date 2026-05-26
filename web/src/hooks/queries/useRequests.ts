@@ -166,6 +166,10 @@ export function useRequestSearch(
 ) {
   const normalizedQuery = query.trim();
   const { profile } = useCurrentProfile();
+  // Use a sentinel viewerKey when there is no profile so the cache key is stable,
+  // but suppress the actual fetch — see the `enabled` gate below. This prevents
+  // any anonymous request results from being written into a bucket that could
+  // later be read by a different viewer.
   const viewerKey = profile?.id ?? "anon";
   const enabledOverride = options.enabled ?? true;
 
@@ -179,7 +183,7 @@ export function useRequestSearch(
       });
       return api<RequestMediaPage>(`/requests/search?${params}`, { signal });
     },
-    enabled: enabledOverride && normalizedQuery.length > 1,
+    enabled: enabledOverride && normalizedQuery.length > 1 && Boolean(profile?.id),
     staleTime: REQUEST_SEARCH_STALE_TIME,
   });
 }
