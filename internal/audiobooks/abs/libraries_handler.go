@@ -43,20 +43,46 @@ func (h *Handler) handleLibraryDetail(w http.ResponseWriter, r *http.Request) {
 		"library": audiobookLibraryMap(lib),
 	}
 	if includeHas(r.URL.Query().Get("include"), "filterdata") {
-		resp["filterdata"] = emptyFilterData()
+		resp["filterdata"] = h.buildFilterData(r, lib)
 		resp["issues"] = 0
 		resp["numUserPlaylists"] = 0
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// emptyFilterData returns a zero-entry filter-data block. Populating authors /
-// series / narrators from silo's catalog is deferred: for now ABS clients
-// will show empty filter dropdowns rather than crash.
-func emptyFilterData() map[string]any {
+// buildFilterData populates the filter sheet payload from the same store
+// queries /libraries/{id}/authors and /libraries/{id}/series use. Caps at
+// 5000 per kind to keep the response bounded; libraries larger than that
+// will paginate via the dedicated /authors and /series endpoints.
+//
+// Narrators / genres / publishers / languages / tags are left as empty
+// arrays for now — Phase 1 will populate them once the catalog has the
+// aggregations indexed. iOS tolerates empty filter dropdowns gracefully.
+func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[string]any {
+	ctx := r.Context()
+	const cap = 5000
+
+	authorObjs := []AuthorObj{}
+	if h.deps.MediaStore != nil {
+		if rows, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, cap); err == nil {
+			for _, a := range rows {
+				authorObjs = append(authorObjs, AuthorObj{ID: a.ID, Name: a.Name})
+			}
+		}
+	}
+
+	seriesObjs := []SeriesObj{}
+	if h.deps.MediaStore != nil {
+		if rows, err := h.deps.MediaStore.ListLibrarySeries(ctx, lib.ID, cap); err == nil {
+			for _, s := range rows {
+				seriesObjs = append(seriesObjs, SeriesObj{ID: s.ID, Name: s.Name})
+			}
+		}
+	}
+
 	return map[string]any{
-		"authors":    []AuthorObj{},
-		"series":     []SeriesObj{},
+		"authors":    authorObjs,
+		"series":     seriesObjs,
 		"narrators":  []string{},
 		"genres":     []string{},
 		"publishers": []string{},
