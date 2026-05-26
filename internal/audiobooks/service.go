@@ -92,6 +92,11 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		playbackSessionStore = &ABSPlaybackSessionStore{Pool: deps.Pool}
 	}
 
+	var bookmarkStore abs.BookmarkStore
+	if deps.Pool != nil {
+		bookmarkStore = &ABSBookmarkStore{Pool: deps.Pool}
+	}
+
 	var configProvider abs.ConfigProvider
 	if deps.Settings != nil {
 		configProvider = &ABSConfigProvider{Settings: deps.Settings}
@@ -127,6 +132,7 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		Recommender:          buildABSRecommender(deps),
 		ProgressStore:        progressStore,
 		PlaybackSessionStore: playbackSessionStore,
+		BookmarkStore:        bookmarkStore,
 		SocketIO:             socketServer,
 		CoverResolver: func(ctx context.Context, path, variant string) string {
 			if deps.Detail == nil {
