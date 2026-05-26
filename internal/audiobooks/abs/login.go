@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -87,6 +88,7 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		} else {
+			slog.Error("abs login: cred validator failed", "username", body.Username, "error", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)
 		}
 		return
@@ -101,6 +103,8 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	slog.Debug("abs standalone login: validator OK",
+		"username", body.Username, "user_id", userID, "profile_id", profileID)
 	h.completeLogin(w, r, userID, profileID, displayName)
 }
 
@@ -171,24 +175,44 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		return
 	}
 
+	slog.Debug("abs completeLogin: tokens persisted",
+		"user_id", userID, "access_jti", accessJTI, "refresh_jti", refreshJTI)
+
 	// Build user object. displayName falls back to userID when empty.
 	name := displayName
 	if name == "" {
 		name = userID
 	}
 
+	// Resolve the audiobook library list + default ID up front so we can
+	// emit them in the login envelope. ABS clients require these on the
+	// initial login response to seed the library picker before /me lands.
+	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
+	libraryMaps := make([]map[string]any, 0, len(libs))
+	defaultLibraryID := VirtualLibraryID
+	for i, lib := range libs {
+		if i == 0 {
+			defaultLibraryID = audiobookLibraryID(lib)
+		}
+		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
+	}
+
 	user := map[string]any{
-		"id":       userID,
-		"username": name,
-		"type":     "user",
+		"id":                  userID,
+		"username":            name,
+		"type":                "user",
+		"defaultLibraryId":    defaultLibraryID,
+		"librariesAccessible": []any{}, // empty = "all libraries accessible"
+		"mediaProgress":       []any{},
+		"bookmarks":           []any{},
+		"isOldToken":          false,
+		"token":               access, // legacy field some 2.17- clients still read
 		"permissions": map[string]any{
 			"update":                true,
 			"delete":                true,
 			"download":              true,
 			"accessExplicitContent": true,
 		},
-		// Legacy field for 2.17- clients.
-		"token": access,
 	}
 
 	// x-return-tokens opt-in: when set, embed token pair on user object too
@@ -199,16 +223,98 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user": user,
+		"user":                 user,
+		"userDefaultLibraryId": defaultLibraryID,
 		"serverSettings": map[string]any{
-			"id":                    "server-settings",
-			"version":               "2.35.0",
-			"language":              "en-us",
-			"buildNumber":           1,
-			"authActiveAuthMethods": []string{"local"},
+			"version":  ServerVersion,
+			"language": "en-us",
 		},
 		"ereaderDevices": []any{},
-		"accessToken":    access,
-		"refreshToken":   refresh,
+		"libraries":      libraryMaps,
+		// Legacy top-level token fields for clients that read them
+		// directly (mainline reads from the user object; some third-party
+		// clients still read top-level).
+		"accessToken":  access,
+		"refreshToken": refresh,
+	})
+}
+
+// handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
+// matches the continuum-plugin-audiobooks implementation exactly: clients
+// use this to validate the URL before showing the login form, and any
+// other shape causes the official mobile app to reject the server.
+func (h *Handler) handleABSPing(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"server":  "audiobookshelf",
+		"version": ServerVersion,
+		"pong":    true,
+	})
+}
+
+// handleABSInit — GET /init. Real ABS first-run detection probe.
+func (h *Handler) handleABSInit(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"isInit": true})
+}
+
+// handleABSStatus — GET /status. Mobile clients call this on every
+// connection to confirm the server is an ABS install and pull a few
+// global flags. Matches the plugin shape exactly (key order intentional).
+func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"isInit":        true,
+		"language":      "en-us",
+		"app":           "audiobookshelf",
+		"serverVersion": ServerVersion,
+	})
+}
+
+// handleABSAuthorize — POST /api/authorize. Real ABS uses this to
+// validate a bearer token and re-mint the login envelope so the client
+// can resume without retyping credentials. Mounted inside the bearerAuth
+// group so it inherits the same token validation.
+//
+// The response shape is the FULL login envelope — same fields, same
+// ordering — not a `{"user": ...}` wrapper. Mirrors the
+// continuum-plugin-audiobooks handleAuthorize verbatim.
+func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
+	libraryMaps := make([]map[string]any, 0, len(libs))
+	defaultLibraryID := VirtualLibraryID
+	for i, lib := range libs {
+		if i == 0 {
+			defaultLibraryID = audiobookLibraryID(lib)
+		}
+		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
+	}
+	user := map[string]any{
+		"id":                  a.UserID,
+		"username":            a.UserID,
+		"type":                "user",
+		"defaultLibraryId":    defaultLibraryID,
+		"librariesAccessible": []any{},
+		"mediaProgress":       []any{},
+		"bookmarks":           []any{},
+		"isOldToken":          false,
+		"permissions": map[string]any{
+			"update":                true,
+			"delete":                true,
+			"download":              true,
+			"accessExplicitContent": true,
+		},
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":                 user,
+		"userDefaultLibraryId": defaultLibraryID,
+		"serverSettings": map[string]any{
+			"version":  ServerVersion,
+			"language": "en-us",
+		},
+		"ereaderDevices": []any{},
+		"libraries":      libraryMaps,
 	})
 }

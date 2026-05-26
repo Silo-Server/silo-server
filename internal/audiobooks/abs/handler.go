@@ -11,6 +11,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,6 +50,39 @@ type MediaStore interface {
 	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
 	ListAudiobookLibraries(ctx context.Context) ([]AudiobookLibrary, error)
+	// SearchAudiobooks does a fuzzy title/author/narrator match for the ABS
+	// /libraries/{id}/search endpoint. Hydrates People so the mapper has
+	// author/narrator names.
+	SearchAudiobooks(ctx context.Context, libraryID int64, query string, limit int) ([]*models.MediaItem, error)
+	// ListContinueListening returns books that the given user has progress
+	// on but hasn't finished — feeds the Home tab's continue shelf.
+	ListContinueListening(ctx context.Context, userID, profileID string, libraryID int64, limit int) ([]*models.MediaItem, error)
+	// ListRecentlyAdded returns the most recently added audiobooks for the
+	// Home tab's recently-added shelf.
+	ListRecentlyAdded(ctx context.Context, libraryID int64, limit int) ([]*models.MediaItem, error)
+	// ListDiscover returns a randomized sampling of audiobooks for the
+	// Home tab's discover shelf (helps new users browse the library).
+	ListDiscover(ctx context.Context, libraryID int64, limit int) ([]*models.MediaItem, error)
+	// ListLibraryAuthors returns distinct authors of audiobooks in the
+	// library along with each author's book count.
+	ListLibraryAuthors(ctx context.Context, libraryID int64, limit int) ([]AuthorSummary, error)
+	// ListLibrarySeries returns distinct series (from audiobook_series)
+	// represented in the library, ordered by name.
+	ListLibrarySeries(ctx context.Context, libraryID int64, limit int) ([]SeriesSummary, error)
+}
+
+// AuthorSummary is an aggregated author entry for /libraries/{id}/authors.
+type AuthorSummary struct {
+	ID        string
+	Name      string
+	NumBooks  int
+}
+
+// SeriesSummary is an aggregated series entry for /libraries/{id}/series.
+type SeriesSummary struct {
+	ID       string
+	Name     string
+	NumBooks int
 }
 
 // TokenStore persists and validates the ABS JWT JTIs that back the
@@ -147,6 +181,11 @@ type Dependencies struct {
 	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
 	// the route is only registered when a non-nil value is supplied.
 	SocketIO SocketIOServer
+	// CoverResolver translates a raw silo poster path (e.g.
+	// "local/audiobooks/.../original.webp") into a fully-qualified URL
+	// the ABS client can fetch. Optional; when nil, /api/items/{id}/cover
+	// 404s rather than redirecting to an unreachable relative path.
+	CoverResolver func(ctx context.Context, path, variant string) string
 }
 
 // Handler wires the /abs/api/* and canonical ABS-client paths.
@@ -185,6 +224,17 @@ func (h *Handler) Mount(parent chi.Router) {
 }
 
 func (h *Handler) mountRoutes(r chi.Router) {
+	// Discovery + auth endpoints: real ABS exposes these at server ROOT
+	// (no /api or /abs/api prefix). Mobile clients do `${addr}/ping`,
+	// `${addr}/login`, etc. Designed to be mounted on a dedicated listener
+	// so the routes don't collide with silo's SPA catch-all.
+	for _, prefix := range []string{"", "/abs/api"} {
+		r.Get(prefix+"/ping", h.handleABSPing)
+		r.Get(prefix+"/healthcheck", h.handleABSPing) // same body as /ping
+		r.Get(prefix+"/init", h.handleABSInit)
+		r.Get(prefix+"/status", h.handleABSStatus)
+	}
+
 	// Stage 2: login (body-creds + host-proxied paths).
 	r.Post("/login", h.handleLogin)
 	r.Post("/abs/api/login", h.handleLogin)
@@ -240,6 +290,9 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		for _, prefix := range []string{"/abs/api", "/api"} {
 			// Current user object.
 			r.Get(prefix+"/me", h.handleMe)
+			// Real-ABS /authorize: validates the bearer and re-mints the
+			// /me envelope so the client can resume without retyping creds.
+			r.Post(prefix+"/authorize", h.handleABSAuthorize)
 			// Continue Listening shelf.
 			r.Get(prefix+"/me/items-in-progress", h.handleItemsInProgress)
 			// Library list + detail.
@@ -305,26 +358,44 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 			raw = r.URL.Query().Get("token")
 		}
 		if raw == "" {
+			slog.Debug("abs bearerAuth: no token", "path", r.URL.Path, "remote", r.RemoteAddr)
 			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
 		if h.deps.Config == nil || h.deps.TokenStore == nil {
-			// Dependencies not yet wired — reject to avoid a security hole.
+			slog.Warn("abs bearerAuth: deps not wired",
+				"have_config", h.deps.Config != nil,
+				"have_token_store", h.deps.TokenStore != nil,
+				"path", r.URL.Path)
 			http.Error(w, "auth not configured", http.StatusServiceUnavailable)
 			return
 		}
 		secret, err := h.deps.Config.JWTSecret(r.Context())
 		if err != nil {
+			slog.Error("abs bearerAuth: jwt secret fetch failed", "err", err)
 			http.Error(w, "config unavailable", http.StatusInternalServerError)
 			return
 		}
 		claims, err := ParseToken(secret, raw)
-		if err != nil || claims.Type != "access" {
+		if err != nil {
+			slog.Debug("abs bearerAuth: parse failed", "err", err, "path", r.URL.Path)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		if claims.Type != "access" {
+			slog.Debug("abs bearerAuth: wrong token type", "type", claims.Type, "path", r.URL.Path)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 		row, err := h.deps.TokenStore.GetTokenByJTI(r.Context(), claims.JTI)
-		if err != nil || row.RevokedAt != nil {
+		if err != nil {
+			slog.Debug("abs bearerAuth: jti lookup failed",
+				"jti", claims.JTI, "err", err, "path", r.URL.Path)
+			http.Error(w, "token revoked", http.StatusUnauthorized)
+			return
+		}
+		if row.RevokedAt != nil {
+			slog.Debug("abs bearerAuth: jti revoked", "jti", claims.JTI, "path", r.URL.Path)
 			http.Error(w, "token revoked", http.StatusUnauthorized)
 			return
 		}
