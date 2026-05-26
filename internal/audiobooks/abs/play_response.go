@@ -115,6 +115,13 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	// currentTime seeds the audio element's initial position so cross-device
 	// resume works. Lookup is best-effort: any error returns position 0,
 	// which is always correct for a first listen.
+	//
+	// Note: we deliberately do NOT emit a "progress" (0.0-1.0) field on the
+	// play session response. The canonical continuum-plugin handler omits it
+	// too — "progress" belongs to /me/progress responses, not playbackSession.
+	// The spec's Phase 0 row mentioning "currentTime AND progress fields" was
+	// over-specified; matching the canonical wire shape is the load-bearing
+	// requirement.
 	var currentTime float64
 	currentTime, err = resolveResumeTime(r.Context(), h.deps.ProgressStore, a.UserID, a.ProfileID, contentID)
 	if err != nil {

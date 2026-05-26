@@ -220,6 +220,10 @@ func (h *Handler) loginEnvelope(
 	r *http.Request,
 	userID, displayName, accessToken, refreshToken string,
 ) map[string]any {
+	// displayName falls back to userID when the validator didn't supply one
+	// (host-proxied logins without X-Silo-Profile-Name, /authorize re-mints
+	// that have no name claim in the JWT). ABS clients require a non-empty
+	// username on the user envelope.
 	name := displayName
 	if name == "" {
 		name = userID
@@ -418,12 +422,14 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	newRefreshJTI := ulid.Make().String()
 	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, newAccessJTI, accessTTL)
 	if err != nil {
-		http.Error(w, "token mint failed: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("abs refresh: mint access failed", "user", claims.UserID, "err", err)
+		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
 	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, newRefreshJTI, refreshTTL)
 	if err != nil {
-		http.Error(w, "token mint failed: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("abs refresh: mint refresh failed", "user", claims.UserID, "err", err)
+		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
 	now := time.Now()
@@ -431,18 +437,21 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		ID: newAccessJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
 	}); err != nil {
-		http.Error(w, "token persist failed: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("abs refresh: persist access failed", "user", claims.UserID, "jti", newAccessJTI, "err", err)
+		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}
 	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
 		ID: newRefreshJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
-		http.Error(w, "token persist failed: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("abs refresh: persist refresh failed", "user", claims.UserID, "jti", newRefreshJTI, "err", err)
+		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}
 	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
-		http.Error(w, "token rotation failed: "+err.Error(), http.StatusInternalServerError)
+		slog.Error("abs refresh: revoke old failed", "user", claims.UserID, "old_jti", claims.JTI, "err", err)
+		http.Error(w, "token rotation failed", http.StatusInternalServerError)
 		return
 	}
 

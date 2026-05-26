@@ -1,10 +1,23 @@
 package abs
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// resolveDefaultLibrary returns the first audiobook library (the canonical
+// "default" for response embedding) or a virtual fallback when the store
+// is empty or errors. Centralizes the snippet that handleItem,
+// handleSimilarItems, and handleItemsInProgress all need so the fallback
+// shape stays consistent across all three response paths.
+func (h *Handler) resolveDefaultLibrary(ctx context.Context) AudiobookLibrary {
+	if libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx); err == nil && len(libs) > 0 {
+		return libs[0]
+	}
+	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
+}
 
 // handleItem — GET /abs/api/items/{id} (and /api/items/{id})
 //
@@ -37,16 +50,7 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the library this item belongs to (first matching audiobooks lib
-	// or the virtual fallback). Best-effort: if the list call fails we
-	// proceed with a zero-ID virtual library so the item still renders.
-	var lib AudiobookLibrary
-	if libs, lerr := h.deps.MediaStore.ListAudiobookLibraries(r.Context()); lerr == nil && len(libs) > 0 {
-		lib = libs[0]
-	} else {
-		lib = AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
-	}
-
+	lib := h.resolveDefaultLibrary(r.Context())
 	baseURL := h.absBaseURL(r)
 	result := siloItemToLibraryItemDetail(item, files, lib, baseURL)
 	writeJSON(w, http.StatusOK, result)
@@ -54,9 +58,11 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 
 // handleSimilarItems — GET /abs/api/items/{id}/similar
 //
-// Returns a list of similar audiobooks. Uses the optional Recommender if
-// wired; otherwise returns an empty list so the ABS client falls back to
-// its default UI rather than crashing.
+// Returns similar audiobooks in the canonical ABS paged envelope so
+// mobile clients can render the "Similar" rail. Sort metadata is
+// "relevance" desc to match continuum-plugin-audiobooks; the envelope
+// is emitted even when empty so clients that iterate
+// `results`/`total` don't crash.
 func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
 	if !ok || a.UserID == "" {
@@ -70,24 +76,21 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	const limit = 10
+	emptyEnvelope := pagedEnvelope([]any{}, 0, limit, 0, "relevance", true, "", false, "")
+
 	if h.deps.Recommender == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"libraryItems": []any{}})
+		writeJSON(w, http.StatusOK, emptyEnvelope)
 		return
 	}
 
-	ids, err := h.deps.Recommender.Similar(r.Context(), contentID, 10)
+	ids, err := h.deps.Recommender.Similar(r.Context(), contentID, limit)
 	if err != nil || len(ids) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"libraryItems": []any{}})
+		writeJSON(w, http.StatusOK, emptyEnvelope)
 		return
 	}
 
-	var lib AudiobookLibrary
-	if libs, lerr := h.deps.MediaStore.ListAudiobookLibraries(r.Context()); lerr == nil && len(libs) > 0 {
-		lib = libs[0]
-	} else {
-		lib = AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
-	}
-
+	lib := h.resolveDefaultLibrary(r.Context())
 	baseURL := h.absBaseURL(r)
 	out := make([]LibraryItem, 0, len(ids))
 	for _, id := range ids {
@@ -97,7 +100,7 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, siloItemToLibraryItem(si, lib, baseURL))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"libraryItems": out})
+	writeJSON(w, http.StatusOK, pagedEnvelope(out, len(out), limit, 0, "relevance", true, "", false, ""))
 }
 
 // handleItemsInProgress — GET /abs/api/me/items-in-progress
@@ -123,13 +126,7 @@ func (h *Handler) handleItemsInProgress(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var lib AudiobookLibrary
-	if libs, lerr := h.deps.MediaStore.ListAudiobookLibraries(r.Context()); lerr == nil && len(libs) > 0 {
-		lib = libs[0]
-	} else {
-		lib = AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
-	}
-
+	lib := h.resolveDefaultLibrary(r.Context())
 	baseURL := h.absBaseURL(r)
 	items := make([]any, 0, len(rows))
 	for _, p := range rows {
