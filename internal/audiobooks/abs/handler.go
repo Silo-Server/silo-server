@@ -215,6 +215,9 @@ type Dependencies struct {
 	// SmartCollectionStore persists abs_smart_collections rows
 	// (migration 153). May be nil; handlers respond 503 when unset.
 	SmartCollectionStore SmartCollectionStore
+	// RSSFeedStore persists abs_rss_feeds rows (migration 155).
+	// May be nil; handlers respond 503 when unset.
+	RSSFeedStore RSSFeedStore
 	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
 	// the route is only registered when a non-nil value is supplied.
 	SocketIO SocketIOServer
