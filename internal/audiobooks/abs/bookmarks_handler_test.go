@@ -236,3 +236,40 @@ func TestCreate_NewBookmark_ReturnsListContainingIt(t *testing.T) {
 		}
 	}
 }
+
+func TestUpsert_SameTime_UpdatesTitleNoDuplicate(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+
+	// POST first.
+	postBody := []byte(`{"title":"first","time":10}`)
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", postBody, "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var postList []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &postList)
+	if len(postList) != 1 {
+		t.Fatalf("after POST list len = %d, want 1", len(postList))
+	}
+	firstID := postList[0]["id"]
+
+	// PATCH at the same time with a new title.
+	patchBody := []byte(`{"title":"renamed","time":10}`)
+	rec2 := dispatchBookmark(hb.H, http.MethodPatch, "/api/me/item/book-1/bookmark", "book-1", "", patchBody, "1", "", hb.H.handleUpsertBookmark("bookmark_updated"))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
+	}
+	var patchList []map[string]any
+	if err := json.Unmarshal(rec2.Body.Bytes(), &patchList); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec2.Body.String())
+	}
+	if len(patchList) != 1 {
+		t.Fatalf("after PATCH list len = %d, want 1 (upsert, not insert)", len(patchList))
+	}
+	if patchList[0]["title"] != "renamed" {
+		t.Errorf("title = %v, want renamed", patchList[0]["title"])
+	}
+	if patchList[0]["id"] != firstID {
+		t.Errorf("id changed across upsert: was %v, now %v (id must be preserved)", firstID, patchList[0]["id"])
+	}
+}
