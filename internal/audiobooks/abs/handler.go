@@ -238,6 +238,10 @@ func (h *Handler) mountRoutes(r chi.Router) {
 	// Stage 2: login (body-creds + host-proxied paths).
 	r.Post("/login", h.handleLogin)
 	r.Post("/abs/api/login", h.handleLogin)
+	// Token rotation — mobile clients call this every ~22h to avoid the
+	// 24h access-token interactive re-login trap.
+	r.Post("/auth/refresh", h.handleRefresh)
+	r.Post("/abs/api/auth/refresh", h.handleRefresh)
 
 	// Unauthenticated cover + author-image routes. Real ABS serves covers
 	// without auth (getDoesServerImagesRequireToken returns false for our

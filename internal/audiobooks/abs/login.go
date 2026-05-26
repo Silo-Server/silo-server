@@ -343,3 +343,119 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 	// takes precedence anyway, so the echoed userID is just a harmless seed.
 	writeJSON(w, http.StatusOK, h.loginEnvelope(r, a.UserID, a.UserID, a.Token, ""))
 }
+
+// handleRefresh — POST /auth/refresh
+//
+// Real ABS clients send the refresh token via x-refresh-token header with
+// an empty body; legacy / 3rd-party clients send {refreshToken: "..."} in
+// the JSON body. Accept either; header takes precedence when both are sent.
+//
+// Token rotation semantics (ported from continuum-plugin-audiobooks):
+//  1. Validate the refresh token signature + type.
+//  2. Confirm the JTI is in the store and not revoked.
+//  3. Mint a NEW access + refresh pair with fresh JTIs.
+//  4. Persist both new JTIs BEFORE revoking the old one. If anything in
+//     step 3-4 fails, the old refresh stays valid and the client can retry.
+//  5. Revoke the old refresh JTI.
+//  6. Return {user:{accessToken, refreshToken}} AND top-level token fields
+//     for client compatibility — mainline app reads from user{}, third-party
+//     readers may read from the top level.
+func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	refreshTok := strings.TrimSpace(r.Header.Get("x-refresh-token"))
+	if refreshTok == "" {
+		var p struct {
+			RefreshToken string `json:"refreshToken"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&p); err == nil {
+			refreshTok = p.RefreshToken
+		}
+	}
+	if refreshTok == "" {
+		http.Error(w, "refreshToken required", http.StatusBadRequest)
+		return
+	}
+	if h.deps.Config == nil || h.deps.TokenStore == nil {
+		http.Error(w, "auth not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	secret, err := h.deps.Config.JWTSecret(r.Context())
+	if err != nil {
+		http.Error(w, "config unavailable", http.StatusInternalServerError)
+		return
+	}
+	claims, err := ParseToken(secret, refreshTok)
+	if err != nil || claims.Type != "refresh" {
+		claimsType := ""
+		if claims != nil {
+			claimsType = claims.Type
+		}
+		slog.Debug("abs refresh: parse/type failed", "err", err, "type", claimsType)
+		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+	row, err := h.deps.TokenStore.GetTokenByJTI(r.Context(), claims.JTI)
+	if err != nil {
+		slog.Debug("abs refresh: jti lookup failed", "jti", claims.JTI, "err", err)
+		http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+		return
+	}
+	if row.RevokedAt != nil {
+		http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+		return
+	}
+
+	accessTTL, err := h.deps.Config.AccessTTL(r.Context())
+	if err != nil || accessTTL == 0 {
+		accessTTL = 24 * time.Hour
+	}
+	refreshTTL, err := h.deps.Config.RefreshTTL(r.Context())
+	if err != nil || refreshTTL == 0 {
+		refreshTTL = 30 * 24 * time.Hour
+	}
+
+	newAccessJTI := ulid.Make().String()
+	newRefreshJTI := ulid.Make().String()
+	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, newAccessJTI, accessTTL)
+	if err != nil {
+		http.Error(w, "token mint failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, newRefreshJTI, refreshTTL)
+	if err != nil {
+		http.Error(w, "token mint failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now()
+	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+		ID: newAccessJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
+		JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
+	}); err != nil {
+		http.Error(w, "token persist failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+		ID: newRefreshJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
+		JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
+	}); err != nil {
+		http.Error(w, "token persist failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
+		http.Error(w, "token rotation failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slog.Debug("abs refresh: rotated", "user", claims.UserID,
+		"old_jti", claims.JTI, "new_access_jti", newAccessJTI, "new_refresh_jti", newRefreshJTI)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user": map[string]any{
+			"id":           claims.UserID,
+			"accessToken":  access,
+			"refreshToken": refresh,
+		},
+		"accessToken":  access,
+		"refreshToken": refresh,
+	})
+}
