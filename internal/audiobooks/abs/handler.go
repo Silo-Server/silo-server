@@ -346,6 +346,13 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Post(prefix+"/playlists/{id}/batch/remove", h.handleBatchRemovePlaylistItems)
 			r.Delete(prefix+"/playlists/{id}/item/{libraryItemId}", h.handleRemovePlaylistItem)
 			r.Delete(prefix+"/playlists/{id}/item/{libraryItemId}/{episodeId}", h.handleRemovePlaylistEpisode)
+			// Smart collections — rule-based dynamic groupings.
+			r.Get(prefix+"/me/smart-collections", h.handleListSmartCollections)
+			r.Post(prefix+"/me/smart-collections", h.handleCreateSmartCollection)
+			r.Get(prefix+"/me/smart-collections/{id}", h.handleGetSmartCollection)
+			r.Get(prefix+"/me/smart-collections/{id}/items", h.handleSmartCollectionItems)
+			r.Patch(prefix+"/me/smart-collections/{id}", h.handleUpdateSmartCollection)
+			r.Delete(prefix+"/me/smart-collections/{id}", h.handleDeleteSmartCollection)
 		}
 	})
 

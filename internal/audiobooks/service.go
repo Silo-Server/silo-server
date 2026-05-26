@@ -107,6 +107,11 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		playlistStore = &ABSPlaylistStore{Pool: deps.Pool}
 	}
 
+	var smartCollectionStore abs.SmartCollectionStore
+	if deps.Pool != nil {
+		smartCollectionStore = &ABSSmartCollectionStore{Pool: deps.Pool}
+	}
+
 	var configProvider abs.ConfigProvider
 	if deps.Settings != nil {
 		configProvider = &ABSConfigProvider{Settings: deps.Settings}
@@ -145,6 +150,7 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		BookmarkStore:        bookmarkStore,
 		CollectionStore:      collectionStore,
 		PlaylistStore:        playlistStore,
+		SmartCollectionStore: smartCollectionStore,
 		SocketIO:             socketServer,
 		CoverResolver: func(ctx context.Context, path, variant string) string {
 			if deps.Detail == nil {
