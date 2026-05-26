@@ -40,6 +40,9 @@ func TestSiloItemToMetadata_SeriesHaveSlugIDs(t *testing.T) {
 	if m.Series[0].ID == "" {
 		t.Errorf("series ID is empty; want slugified name")
 	}
+	if m.Series[0].ID != "the-dark-tower" {
+		t.Errorf("series ID = %q, want %q", m.Series[0].ID, "the-dark-tower")
+	}
 	if m.Series[0].Name != "The Dark Tower" {
 		t.Errorf("series Name = %q, want %q", m.Series[0].Name, "The Dark Tower")
 	}

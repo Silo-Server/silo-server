@@ -1,6 +1,7 @@
 package abs
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -64,6 +65,29 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := ulid.Make().String()
 
+	// Persist the session row so subsequent PATCH /session/{sid} heartbeats
+	// and POST /session/{sid}/close can find it. Without this, the session
+	// ID is returned to the client but every sync/close lookup 404s.
+	if h.deps.PlaybackSessionStore != nil {
+		sess := ABSPlaybackSession{
+			ID:        sessionID,
+			UserID:    a.UserID,
+			ProfileID: a.ProfileID,
+			ContentID: contentID,
+		}
+		if len(files) > 0 {
+			fid := files[0].ID
+			sess.MediaFileID = &fid
+		}
+		if err := h.deps.PlaybackSessionStore.InsertPlaybackSession(r.Context(), sess); err != nil {
+			// Non-fatal: log but still return the manifest so the client
+			// can play. Heartbeat/close calls will fail with 404 until the
+			// next play_start lands cleanly.
+			slog.Warn("abs play: persist session failed",
+				"session_id", sessionID, "content_id", contentID, "error", err)
+		}
+	}
+
 	audioTracks := buildSiloAudioTracks(contentID, files, baseURL, sessionID, accessToken)
 
 	totalDuration := float64(0)
@@ -74,7 +98,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	chapters := buildSiloChapters(files)
 
 	mediaMetadata := buildSiloPlayMediaMetadata(item)
-	libraryItem := buildSiloPlayLibraryItem(item, contentID, mediaMetadata, audioTracks, chapters, totalDuration)
+	libraryItem := buildSiloPlayLibraryItem(item, contentID, mediaMetadata, audioTracks, chapters, totalDuration, baseURL)
 
 	displayTitle := item.Title
 	displayAuthor := ""
@@ -107,7 +131,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 		"chapters":      chapters,
 		"displayTitle":  displayTitle,
 		"displayAuthor": displayAuthor,
-		"coverPath":     nilIfEmpty(item.PosterPath),
+		"coverPath":     baseURL + "/api/items/" + contentID + "/cover",
 		"duration":      totalDuration,
 		"playMethod":    0, // DIRECTPLAY
 		"mediaPlayer":   "exo-player",
@@ -312,6 +336,7 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 		"series":            []any{},
 		"seriesName":        "",
 		"genres":            genres,
+		"tags":              []string{},
 		"publishedYear":     publishedYear,
 		"publishedDate":     nil,
 		"publisher":         nil,
@@ -336,6 +361,7 @@ func buildSiloPlayLibraryItem(
 	audioTracks []AudioTrack,
 	chapters []map[string]any,
 	totalDuration float64,
+	baseURL string,
 ) map[string]any {
 	firstIno := contentID
 	if len(audioTracks) > 0 {
@@ -388,7 +414,7 @@ func buildSiloPlayLibraryItem(
 			"id":            contentID,
 			"libraryItemId": contentID,
 			"metadata":      mediaMetadata,
-			"coverPath":     nilIfEmpty(item.PosterPath),
+			"coverPath":     baseURL + "/api/items/" + contentID + "/cover",
 			"tags":          []any{},
 			"audioFiles":    audioTracks,
 			"chapters":      chapters,

@@ -233,14 +233,29 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, page := readPagedQuery(r, 50)
-	authors, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, limit)
+	// Fetch the full list (capped at 5000) and paginate locally so the
+	// envelope's total reflects real DB count, not the page slice length.
+	// ABS clients use total to decide whether to fetch page 2.
+	const fetchCap = 5000
+	authors, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, fetchCap)
 	if err != nil {
 		http.Error(w, "list authors: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	libID := audiobookLibraryID(lib)
-	results := make([]map[string]any, 0, len(authors))
-	for _, a := range authors {
+	total := len(authors)
+	// Local slice for the requested page.
+	start := page * limit
+	end := start + limit
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	pageAuthors := authors[start:end]
+	results := make([]map[string]any, 0, len(pageAuthors))
+	for _, a := range pageAuthors {
 		results = append(results, map[string]any{
 			"id":        a.ID,
 			"name":      a.Name,
@@ -248,7 +263,7 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 			"libraryId": libID,
 		})
 	}
-	writeJSON(w, http.StatusOK, pagedEnvelope(results, len(results), limit, page, "name", false, "", false, ""))
+	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
 }
 
 // handleLibrarySeries — GET /abs/api/libraries/{id}/series
@@ -262,14 +277,25 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, page := readPagedQuery(r, 25)
-	series, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, limit)
+	const fetchCap = 5000
+	series, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, fetchCap)
 	if err != nil {
 		http.Error(w, "list series: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	libID := audiobookLibraryID(lib)
-	results := make([]map[string]any, 0, len(series))
-	for _, s := range series {
+	total := len(series)
+	start := page * limit
+	end := start + limit
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	pageSeries := series[start:end]
+	results := make([]map[string]any, 0, len(pageSeries))
+	for _, s := range pageSeries {
 		results = append(results, map[string]any{
 			"id":        s.ID,
 			"name":      s.Name,
@@ -278,7 +304,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 			"addedAt":   0,
 		})
 	}
-	writeJSON(w, http.StatusOK, pagedEnvelope(results, len(results), limit, page, "name", false, "", false, ""))
+	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
 }
 
 // handleLibrarySearch — GET /abs/api/libraries/{id}/search?q=…&limit=…
