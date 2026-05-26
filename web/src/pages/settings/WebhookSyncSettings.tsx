@@ -678,7 +678,7 @@ export default function WebhookSyncSettings() {
           <div className="min-w-0 space-y-0.5">
             <Label className="text-sm font-medium">Default profile</Label>
             <p className="text-muted-foreground text-[13px] leading-relaxed">
-              Activity from unmapped users goes to this profile.
+              The signed-in external user is linked to this profile when the connection is created.
             </p>
           </div>
           <Select
@@ -894,7 +894,7 @@ export default function WebhookSyncSettings() {
                             <SelectValue placeholder="Choose a profile" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value={UNMAPPED_VALUE}>No fallback profile</SelectItem>
+                            <SelectItem value={UNMAPPED_VALUE}>No default profile</SelectItem>
                             {profiles.map((candidate) => (
                               <SelectItem key={candidate.id} value={candidate.id}>
                                 {candidate.name}
@@ -941,8 +941,7 @@ export default function WebhookSyncSettings() {
                     <div className="space-y-0.5">
                       <Label className="text-sm font-medium">Profile mapping</Label>
                       <p className="text-muted-foreground text-[13px] leading-relaxed">
-                        Map each external user to a Silo profile. Unmapped users fall back to the
-                        default profile above.
+                        Map each external user to a Silo profile. Unmapped users are ignored.
                       </p>
                     </div>
 
@@ -987,7 +986,7 @@ export default function WebhookSyncSettings() {
                                 <SelectValue placeholder="Choose a profile" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value={UNMAPPED_VALUE}>Use default profile</SelectItem>
+                                <SelectItem value={UNMAPPED_VALUE}>Ignore this user</SelectItem>
                                 {profiles.map((candidate) => (
                                   <SelectItem key={candidate.id} value={candidate.id}>
                                     {candidate.name}

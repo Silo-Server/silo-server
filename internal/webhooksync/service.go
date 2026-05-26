@@ -255,18 +255,16 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 		slog.Warn("webhook sync: failed to upsert seen external user", "connection_id", conn.ID, "external_user_id", event.UserID, "error", err)
 	}
 
-	profileID := conn.DefaultProfileID
 	if mapping, err := s.repo.GetMappingByUser(ctx, conn.ID, event.UserID); err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to resolve profile mapping")
-	} else if mapping != nil && mapping.SiloProfileID != nil && *mapping.SiloProfileID != "" {
-		profileID = *mapping.SiloProfileID
-	}
-	result.ProfileID = profileID
-	if profileID == "" {
+	} else if profileID, ok := resolveWebhookProfileID(mapping); ok {
+		result.ProfileID = profileID
+	} else {
 		result.Outcome = OutcomeSkipped
-		result.Summary = "Skipped because no default or user-specific profile is configured"
+		result.Summary = "Skipped because external user is not linked to a Silo profile"
 		return result, nil
 	}
+	profileID := result.ProfileID
 
 	record := event.Record.toHistoryImportRecord()
 	match, _, err := s.matcher.Match(ctx, record)
@@ -430,6 +428,13 @@ func shouldSkipEvent(state *ItemState, event *CanonicalEvent) bool {
 		return false
 	}
 	return true
+}
+
+func resolveWebhookProfileID(mapping *ProfileMapping) (string, bool) {
+	if mapping == nil || mapping.SiloProfileID == nil || strings.TrimSpace(*mapping.SiloProfileID) == "" {
+		return "", false
+	}
+	return *mapping.SiloProfileID, true
 }
 
 func buildWebhookURL(baseURL, secret string) string {
