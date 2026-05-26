@@ -197,7 +197,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	nowMs := time.Now().UnixMilli()
+	nowMs := now.UnixMilli()
 
 	// Real ABS clients pattern-match on a richer login envelope than the
 	// minimum we previously sent. The added fields (itemTagsAccessible,
