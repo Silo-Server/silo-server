@@ -306,3 +306,81 @@ func TestPlaylist_Get_Unknown_404(t *testing.T) {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestPlaylist_Patch_UpdatesCover(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	body := []byte(`{"cover_item":"01HCOVER"}`)
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/playlists/"+id, map[string]string{"id": id}, body, "1", "", hb.H.handleUpdatePlaylist)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["coverPath"] != "01HCOVER" {
+		t.Errorf("coverPath = %v, want 01HCOVER", got["coverPath"])
+	}
+}
+
+func TestPlaylist_Patch_FiresUpdatedEvent(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "7", "", `{"name":"x"}`)
+	// snapshot count after create
+	before := len(hb.Pub.snapshot())
+
+	_ = dispatchABSWithParams(http.MethodPatch, "/api/playlists/"+id, map[string]string{"id": id}, []byte(`{"name":"renamed"}`), "7", "", hb.H.handleUpdatePlaylist)
+
+	evts := hb.Pub.snapshot()
+	if len(evts) != before+1 {
+		t.Fatalf("events = %d (delta %d), want exactly 1 new event", len(evts), len(evts)-before)
+	}
+	if evts[len(evts)-1].Event != "playlist_updated" {
+		t.Errorf("event = %q, want playlist_updated", evts[len(evts)-1].Event)
+	}
+}
+
+func TestPlaylist_Patch_NonOwner_404(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/playlists/"+id, map[string]string{"id": id}, []byte(`{"name":"hijack"}`), "2", "", hb.H.handleUpdatePlaylist)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	p, _ := hb.Play.GetPlaylist(context.Background(), id)
+	if p.Name != "mine" {
+		t.Errorf("non-owner mutation leaked: name = %q", p.Name)
+	}
+}
+
+func TestPlaylist_Delete_Owner_FiresRemovedEvent(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "7", "", `{"name":"x"}`)
+	before := len(hb.Pub.snapshot())
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/playlists/"+id, map[string]string{"id": id}, nil, "7", "", hb.H.handleDeletePlaylist)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	evts := hb.Pub.snapshot()
+	if len(evts) != before+1 {
+		t.Fatalf("events = %d, want exactly 1 new event", len(evts)-before)
+	}
+	if evts[len(evts)-1].Event != "playlist_removed" {
+		t.Errorf("event = %q, want playlist_removed", evts[len(evts)-1].Event)
+	}
+}
+
+func TestPlaylist_Delete_NonOwner_404(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/playlists/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleDeletePlaylist)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if _, err := hb.Play.GetPlaylist(context.Background(), id); err != nil {
+		t.Errorf("playlist wrongly deleted: %v", err)
+	}
+}

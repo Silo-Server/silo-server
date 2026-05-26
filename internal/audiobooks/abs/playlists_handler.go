@@ -181,3 +181,91 @@ func (h *Handler) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, h.playlistFullShape(r, p))
 }
+
+// handleUpdatePlaylist — PATCH /playlists/{id}.
+// Owner-only. Partial body. Fires playlist_updated.
+func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	id := playlistURLID(r)
+	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs playlist get-for-update failed", "err", err, "id", id)
+		http.Error(w, "playlist get failed", http.StatusInternalServerError)
+		return
+	}
+
+	var body playlistBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.Name != nil {
+		p.Name = *body.Name
+	}
+	if body.Description != nil {
+		p.Description = *body.Description
+	}
+	if body.CoverItem != nil {
+		p.CoverItem = *body.CoverItem
+	}
+	if body.IsPublic != nil {
+		p.IsPublic = *body.IsPublic
+	}
+	if err := h.deps.PlaylistStore.UpdatePlaylist(r.Context(), p); err != nil {
+		slog.Error("abs playlist update failed", "err", err, "id", id)
+		http.Error(w, "playlist persist failed", http.StatusInternalServerError)
+		return
+	}
+
+	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if err != nil {
+		persisted = p
+	}
+	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+}
+
+// handleDeletePlaylist — DELETE /playlists/{id}.
+// Owner-only. Cascade drops abs_playlist_items via FK.
+// Fires playlist_removed.
+func (h *Handler) handleDeletePlaylist(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	id := playlistURLID(r)
+	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs playlist get-for-delete failed", "err", err, "id", id)
+		http.Error(w, "playlist get failed", http.StatusInternalServerError)
+		return
+	}
+	if err := h.deps.PlaylistStore.DeletePlaylist(r.Context(), id); err != nil {
+		slog.Error("abs playlist delete failed", "err", err, "id", id)
+		http.Error(w, "playlist delete failed", http.StatusInternalServerError)
+		return
+	}
+	h.publish(a.UserID, "playlist_removed", map[string]any{"id": id})
+	w.WriteHeader(http.StatusNoContent)
+}
