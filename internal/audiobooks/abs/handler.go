@@ -178,6 +178,10 @@ type Dependencies struct {
 	// (migration 143) for /session/{sid}/sync and /session/{sid}/close.
 	// May be nil; handlers degrade gracefully.
 	PlaybackSessionStore ABSPlaybackSessionStore
+	// BookmarkStore persists ABS bookmark rows (migration 148) for the
+	// POST/PATCH/DELETE /me/item/{itemId}/bookmark endpoints. May be
+	// nil; handlers respond 503 when unset.
+	BookmarkStore BookmarkStore
 	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
 	// the route is only registered when a non-nil value is supplied.
 	SocketIO SocketIOServer
