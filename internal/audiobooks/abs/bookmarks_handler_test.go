@@ -168,6 +168,12 @@ func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string) (*models
 	}
 	return nil, nil
 }
+func (s *stubMediaStore) GetAuthorByID(_ context.Context, id string) (Author, error) {
+	return Author{}, ErrNotFound
+}
+func (s *stubMediaStore) GetSeriesByName(_ context.Context, name string) (Series, error) {
+	return Series{}, ErrNotFound
+}
 
 // ---------------------------------------------------------------------------
 // Test harness

@@ -52,6 +52,8 @@ func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int) ([]AuthorS
 func (noopMediaStore) ListLibrarySeries(context.Context, int64, int) ([]SeriesSummary, error) {
 	return nil, nil
 }
+func (noopMediaStore) GetAuthorByID(context.Context, string) (Author, error)   { return Author{}, ErrNotFound }
+func (noopMediaStore) GetSeriesByName(context.Context, string) (Series, error) { return Series{}, ErrNotFound }
 
 // memTokenStore is an in-memory TokenStore for handleRefresh tests.
 type memTokenStore struct {

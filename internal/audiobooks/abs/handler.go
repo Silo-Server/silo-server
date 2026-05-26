@@ -69,6 +69,15 @@ type MediaStore interface {
 	// ListLibrarySeries returns distinct series (from audiobook_series)
 	// represented in the library, ordered by name.
 	ListLibrarySeries(ctx context.Context, libraryID int64, limit int) ([]SeriesSummary, error)
+	// GetAuthorByID returns the author with the given people.id plus
+	// their audiobook list, sorted by title. Returns ErrNotFound when
+	// no people row matches.
+	GetAuthorByID(ctx context.Context, authorID string) (Author, error)
+	// GetSeriesByName returns the canonical series (case-insensitive
+	// match on audiobook_series.series_name) with its books ordered
+	// by series_index ASC (NULLS LAST), title fallback. Returns
+	// ErrNotFound when no rows match.
+	GetSeriesByName(ctx context.Context, seriesName string) (Series, error)
 }
 
 // AuthorSummary is an aggregated author entry for /libraries/{id}/authors.
@@ -83,6 +92,21 @@ type SeriesSummary struct {
 	ID       string
 	Name     string
 	NumBooks int
+}
+
+// Author is the detail-shape author with embedded books list.
+type Author struct {
+	ID         string
+	Name       string
+	PosterPath string  // resolved via CoverResolver on emit
+	Books      []*models.MediaItem
+}
+
+// Series is the detail-shape series with books ordered by series_index.
+type Series struct {
+	ID    string  // lowercased series_name
+	Name  string  // canonical series_name
+	Books []*models.MediaItem
 }
 
 // TokenStore persists and validates the ABS JWT JTIs that back the
