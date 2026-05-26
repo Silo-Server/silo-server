@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestLoginEnvelope_HasRequiredKeys marshals the response and asserts every
@@ -16,7 +17,7 @@ func TestLoginEnvelope_HasRequiredKeys(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, "u1", "Display Name", "access.jwt", "refresh.jwt")
+	env := h.loginEnvelope(req, time.Now(),"u1", "Display Name", "access.jwt", "refresh.jwt")
 	body, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -104,7 +105,7 @@ func TestLoginEnvelope_XReturnTokens_SurfacesOnUser(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.Header.Set("x-return-tokens", "true")
 
-	env := h.loginEnvelope(req, "u1", "Display Name", "access.jwt", "refresh.jwt")
+	env := h.loginEnvelope(req, time.Now(),"u1", "Display Name", "access.jwt", "refresh.jwt")
 	user, ok := env["user"].(map[string]any)
 	if !ok {
 		t.Fatalf("user is not a map: %T", env["user"])
@@ -123,7 +124,7 @@ func TestLoginEnvelope_NoXReturnTokens_OmitsFromUser(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, "u1", "Display Name", "access.jwt", "refresh.jwt")
+	env := h.loginEnvelope(req, time.Now(),"u1", "Display Name", "access.jwt", "refresh.jwt")
 	user, _ := env["user"].(map[string]any)
 	if _, present := user["accessToken"]; present {
 		t.Errorf("user.accessToken should not be set without x-return-tokens header")
@@ -137,7 +138,7 @@ func TestLoginEnvelope_DisplayNameFallsBackToUserID(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, "user-42", "", "a", "r")
+	env := h.loginEnvelope(req, time.Now(),"user-42", "", "a", "r")
 	user, _ := env["user"].(map[string]any)
 	if user["username"] != "user-42" {
 		t.Errorf("username = %v, want user-42 (fallback)", user["username"])

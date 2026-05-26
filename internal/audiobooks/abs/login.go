@@ -178,7 +178,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	slog.Debug("abs completeLogin: tokens persisted",
 		"user_id", userID, "access_jti", accessJTI, "refresh_jti", refreshJTI)
 
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, userID, displayName, access, refresh))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, userID, displayName, access, refresh))
 }
 
 // handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
@@ -216,8 +216,13 @@ func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
 // accessToken/refreshToken may be empty for /authorize (client already has
 // them); in that case the top-level fields are still included as empty
 // strings so the JSON shape stays stable.
+//
+// `now` is threaded in from the caller so the user.lastSeen/createdAt
+// timestamps share a single instant with the token ExpiresAt the caller
+// persisted — avoids two near-simultaneous time.Now() calls drifting apart.
 func (h *Handler) loginEnvelope(
 	r *http.Request,
+	now time.Time,
 	userID, displayName, accessToken, refreshToken string,
 ) map[string]any {
 	// displayName falls back to userID when the validator didn't supply one
@@ -239,7 +244,7 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	nowMs := time.Now().UnixMilli()
+	nowMs := now.UnixMilli()
 
 	user := map[string]any{
 		"id":                              userID,
@@ -345,7 +350,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 	// userID is passed as displayName because the JWT carries no display-name
 	// claim (Claims has sub/pid/jti only) — the client's stored profile name
 	// takes precedence anyway, so the echoed userID is just a harmless seed.
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, a.UserID, a.UserID, a.Token, ""))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, a.Token, ""))
 }
 
 // handleRefresh — POST /auth/refresh

@@ -58,6 +58,12 @@ func (h *Handler) handleLibraryDetail(w http.ResponseWriter, r *http.Request) {
 // Narrators / genres / publishers / languages / tags are left as empty
 // arrays for now — Phase 1 will populate them once the catalog has the
 // aggregations indexed. iOS tolerates empty filter dropdowns gracefully.
+//
+// The two fetch/convert blocks deliberately stay un-abstracted: they target
+// different store methods (ListLibraryAuthors / ListLibrarySeries) and
+// produce different output types (AuthorObj / SeriesObj). A generic helper
+// would need closures at each call site that are longer than the inlined
+// code; the structural parallelism is the cheapest form here.
 func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[string]any {
 	ctx := r.Context()
 	const fetchCap = 5000
