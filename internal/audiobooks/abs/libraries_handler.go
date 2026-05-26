@@ -571,6 +571,7 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 			Tracks:     []AudioTrack{},
 			Chapters:   []ChapterABS{},
 			NumTracks:  0, // populated by item-detail handler
+			Tags:       []string{},
 		},
 		AddedAt:   addedAtMs,
 		UpdatedAt: updatedAtMs,

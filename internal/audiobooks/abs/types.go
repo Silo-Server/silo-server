@@ -121,6 +121,13 @@ type LibraryItemMedia struct {
 	Tracks     []AudioTrack `json:"tracks"`
 	Chapters   []ChapterABS `json:"chapters"`
 	NumTracks  int          `json:"numTracks"`
+	// Tags is a book-level tag list. NEVER null on the wire — the ABS
+	// Android client's Kotlin `Book.tags: List<String>` is non-nullable,
+	// so Jackson throws MissingKotlinParameterException when the field
+	// is absent (or null) and the entire LibraryItem fails to parse —
+	// which silently breaks downloads (the downloader's apiHandler
+	// callback receives null and gives up). Always emit []  in v1.
+	Tags []string `json:"tags"`
 }
 
 // CollapsedSeriesV1 is the per-item annotation real ABS attaches when
