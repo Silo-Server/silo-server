@@ -384,3 +384,153 @@ func TestPlaylist_Delete_NonOwner_404(t *testing.T) {
 		t.Errorf("playlist wrongly deleted: %v", err)
 	}
 }
+
+func TestPlaylist_AddItem_AudiobookHydrates(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"libraryItemId":"book-1"}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	entry := items[0].(map[string]any)
+	if entry["libraryItemId"] != "book-1" {
+		t.Errorf("libraryItemId = %v, want book-1", entry["libraryItemId"])
+	}
+	if _, has := entry["title"]; !has {
+		t.Errorf("audiobook item missing 'title' hydration: %v", entry)
+	}
+	if pos, _ := entry["position"].(float64); pos != 1 {
+		t.Errorf("first item position = %v, want 1", entry["position"])
+	}
+}
+
+func TestPlaylist_AddItem_AppendsAtNextPosition(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1", "book-2", "book-3")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	for _, b := range []string{"book-1", "book-2", "book-3"} {
+		body := []byte(`{"libraryItemId":"` + b + `"}`)
+		_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+			map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	}
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetPlaylist)
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("items len = %d, want 3", len(items))
+	}
+	for i, raw := range items {
+		entry := raw.(map[string]any)
+		wantPos := float64(i + 1)
+		if entry["position"] != wantPos {
+			t.Errorf("items[%d] position = %v, want %v", i, entry["position"], wantPos)
+		}
+	}
+}
+
+func TestPlaylist_AddItem_Idempotent(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"libraryItemId":"book-1"}`)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item", map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item", map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second add status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Errorf("items len = %d, want 1 (idempotent)", len(items))
+	}
+}
+
+func TestPlaylist_AddItem_Episode_AcceptsAndEchoes(t *testing.T) {
+	hb := newPlaylistsHarness(t /* no known items - episode skips validation */)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"libraryItemId":"podcast-x","episodeId":"ep-1"}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	entry := items[0].(map[string]any)
+	if entry["episodeId"] != "ep-1" {
+		t.Errorf("episodeId = %v, want ep-1", entry["episodeId"])
+	}
+	if _, has := entry["title"]; has {
+		t.Errorf("episode item must NOT be hydrated: %v", entry)
+	}
+}
+
+func TestPlaylist_AddItem_UnknownAudiobook_404(t *testing.T) {
+	hb := newPlaylistsHarness(t /* no known items */)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"libraryItemId":"ghost"}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (item not found); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPlaylist_AddItem_LibraryItemIdRequired_400(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	body := []byte(`{"libraryItemId":""}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, body, "1", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPlaylist_AddItem_NonOwner_404(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	body := []byte(`{"libraryItemId":"book-1"}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, body, "2", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestPlaylist_AddItem_FiresUpdatedEvent(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "7", "", `{"name":"q"}`)
+	before := len(hb.Pub.snapshot())
+
+	body := []byte(`{"libraryItemId":"book-1"}`)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, body, "7", "", hb.H.handleAddPlaylistItem)
+
+	evts := hb.Pub.snapshot()
+	if len(evts) != before+1 {
+		t.Fatalf("events = %d, want exactly 1 new event", len(evts)-before)
+	}
+	if evts[len(evts)-1].Event != "playlist_updated" {
+		t.Errorf("event = %q, want playlist_updated", evts[len(evts)-1].Event)
+	}
+}

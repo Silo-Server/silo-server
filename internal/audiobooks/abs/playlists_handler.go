@@ -237,6 +237,67 @@ func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
 }
 
+// handleAddPlaylistItem — POST /playlists/{id}/item.
+// Body: {libraryItemId, episodeId?}.
+// Owner-only. Item validation: audiobooks validated via MediaStore
+// (404 on unknown); episode items skip validation per spec §7.1 (the
+// audiobook-only-hydration policy doesn't reject opaque episode IDs).
+// Idempotent on (libraryItemId, episodeId) tuple. Fires playlist_updated.
+func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	id := playlistURLID(r)
+	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs playlist get-for-add failed", "err", err, "id", id)
+		http.Error(w, "playlist get failed", http.StatusInternalServerError)
+		return
+	}
+
+	var body playlistItemRef
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.LibraryItemID == "" {
+		http.Error(w, "libraryItemId required", http.StatusBadRequest)
+		return
+	}
+
+	// Audiobook items validated; episodes skip validation.
+	if body.EpisodeID == "" {
+		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), body.LibraryItemID)
+		if err != nil || item == nil {
+			http.Error(w, "item not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	if err := h.deps.PlaylistStore.AddPlaylistItem(r.Context(), id, body.LibraryItemID, body.EpisodeID); err != nil {
+		slog.Error("abs playlist add-item failed", "err", err, "id", id)
+		http.Error(w, "playlist persist failed", http.StatusInternalServerError)
+		return
+	}
+
+	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
+	if err != nil {
+		persisted = p
+	}
+	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+}
+
 // handleDeletePlaylist — DELETE /playlists/{id}.
 // Owner-only. Cascade drops abs_playlist_items via FK.
 // Fires playlist_removed.
