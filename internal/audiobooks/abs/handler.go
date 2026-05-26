@@ -188,6 +188,9 @@ type Dependencies struct {
 	// PlaylistStore persists ABS playlist rows (migrations 151 + 152).
 	// May be nil; handlers respond 503 when unset.
 	PlaylistStore PlaylistStore
+	// SmartCollectionStore persists abs_smart_collections rows
+	// (migration 153). May be nil; handlers respond 503 when unset.
+	SmartCollectionStore SmartCollectionStore
 	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
 	// the route is only registered when a non-nil value is supplied.
 	SocketIO SocketIOServer
