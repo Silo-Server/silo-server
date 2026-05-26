@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -183,5 +184,38 @@ func TestFeed_Close_NonOwner_404(t *testing.T) {
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/"+id+"/close", map[string]string{"id": id}, nil, "2", "", h.handleCloseFeed)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestPublicFeed_UnknownSlug_404(t *testing.T) {
+	h, _ := newFeedsHarness(t, "book-1")
+	rec := dispatchABSWithParams(http.MethodGet, "/feed/missing.xml",
+		map[string]string{"slug": "missing.xml"}, nil, "", "", h.handlePublicFeed)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestPublicFeed_HappyPath_XML(t *testing.T) {
+	h, _ := newFeedsHarness(t, "book-1")
+	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
+		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"happy-feed"}`), "1", "", h.handleOpenItemFeed)
+	if openRec.Code != http.StatusOK {
+		t.Fatalf("seed open failed: %s", openRec.Body.String())
+	}
+
+	rec := dispatchABSWithParams(http.MethodGet, "/feed/happy-feed.xml",
+		map[string]string{"slug": "happy-feed.xml"}, nil, "", "", h.handlePublicFeed)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/rss+xml") {
+		t.Errorf("Content-Type = %q, want application/rss+xml", ct)
+	}
+	body := rec.Body.String()
+	for _, needle := range []string{"<rss", "<channel>", "<title>"} {
+		if !strings.Contains(body, needle) {
+			t.Errorf("body missing %q; got %s", needle, body)
+		}
 	}
 }

@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 var slugRe = regexp.MustCompile(`^[a-z0-9-]{4,64}$`)
@@ -137,4 +140,95 @@ func randomSlug() string {
 		buf[i] = alphabet[int(b)%len(alphabet)]
 	}
 	return string(buf)
+}
+
+// handlePublicFeed — GET /feed/{slug}.xml and GET /feed/{slug}.
+// Public, no auth. The slug is the capability token.
+func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
+	if h.deps.RSSFeedStore == nil {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+	slug := strings.TrimSuffix(chi.URLParam(r, "slug"), ".xml")
+	f, err := h.deps.RSSFeedStore.GetFeedBySlug(r.Context(), slug)
+	if errors.Is(err, ErrNotFound) || (err == nil && f.ClosedAt != nil) {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs public feed get failed", "err", err, "slug", slug)
+		http.Error(w, "feed get failed", http.StatusInternalServerError)
+		return
+	}
+
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), f.LibraryItemID)
+	if err != nil || item == nil {
+		http.Error(w, "feed item not found", http.StatusNotFound)
+		return
+	}
+	files, _ := h.deps.MediaStore.GetMediaFiles(r.Context(), f.LibraryItemID)
+
+	base := h.absBaseURL(r)
+	xml := renderFeedXML(f, item, files, base)
+	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+	_, _ = w.Write([]byte(xml))
+}
+
+// renderFeedXML builds a minimal RSS 2.0 + iTunes document.
+func renderFeedXML(f RSSFeed, item *models.MediaItem, files []*models.MediaFile, baseURL string) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	b.WriteString(`<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">` + "\n")
+	b.WriteString("<channel>\n")
+	b.WriteString("<title>" + xmlEscape(item.Title) + "</title>\n")
+	b.WriteString("<link>" + xmlEscape(baseURL+"/feed/"+f.Slug+".xml") + "</link>\n")
+	b.WriteString("<description>silo audiobook feed</description>\n")
+	for _, mf := range files {
+		enc := baseURL + "/feed/" + f.Slug + "/file/" + strconv.Itoa(mf.ID)
+		b.WriteString("<item>\n")
+		b.WriteString("<title>" + xmlEscape(item.Title) + "</title>\n")
+		b.WriteString(`<enclosure url="` + xmlEscape(enc) + `" type="audio/mpeg" length="0"/>` + "\n")
+		b.WriteString("<guid>" + xmlEscape(f.Slug+"-"+strconv.Itoa(mf.ID)) + "</guid>\n")
+		b.WriteString("</item>\n")
+	}
+	b.WriteString("</channel>\n")
+	b.WriteString("</rss>\n")
+	return b.String()
+}
+
+func xmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+	return r.Replace(s)
+}
+
+// handlePublicFeedFile — GET /feed/{slug}/file/{ino}. Streams the
+// media file when the slug is valid + open and the ino belongs to
+// the underlying library item.
+func (h *Handler) handlePublicFeedFile(w http.ResponseWriter, r *http.Request) {
+	if h.deps.RSSFeedStore == nil {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+	slug := chi.URLParam(r, "slug")
+	f, err := h.deps.RSSFeedStore.GetFeedBySlug(r.Context(), slug)
+	if errors.Is(err, ErrNotFound) || (err == nil && f.ClosedAt != nil) {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "feed get failed", http.StatusInternalServerError)
+		return
+	}
+	inoStr := chi.URLParam(r, "ino")
+	ino, parseErr := strconv.Atoi(inoStr)
+	if parseErr != nil {
+		http.Error(w, "invalid ino", http.StatusBadRequest)
+		return
+	}
+	mf, mfErr := h.deps.MediaStore.GetMediaFileByID(r.Context(), ino)
+	if mfErr != nil || mf == nil || mf.ContentID != f.LibraryItemID {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	http.ServeFile(w, r, mf.FilePath)
 }
