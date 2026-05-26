@@ -1780,7 +1780,7 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), fileID)
 	if err != nil {
-		return nil, err
+		return nil, mapMediaFileLookupError(err)
 	}
 	if file == nil || file.MissingSince != nil {
 		return nil, catalog.ErrItemNotFound

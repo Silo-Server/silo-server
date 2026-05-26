@@ -714,6 +714,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
 	var adminSubtitleHandler *handlers.AdminSubtitleHandler
+	var subtitleManager *subtitles.Manager
 	if subtitleRepo != nil {
 		adminSubtitleHandler = handlers.NewAdminSubtitleHandler(subtitleRepo)
 	}
@@ -721,7 +722,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build subtitle search handler if we have DB and S3.
 	var subtitleSearchHandler *handlers.SubtitleSearchHandler
 	if deps.DB != nil && deps.S3Public != nil && subtitleRepo != nil {
-		subtitleManager := subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
+		subtitleManager = subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
 
 		// Load provider configs from DB and register enabled providers.
 		providerConfigs, _ := subtitleRepo.ListProviderConfigs(deps.AppContext)
@@ -753,6 +754,10 @@ func NewRouter(deps Dependencies) chi.Router {
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
+	}
+
+	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
+		adminSubtitleHandler.SetDownloadedSubtitleDeps(deps.DB, subtitleManager)
 	}
 
 	// Build section handler if DB is available.
@@ -1512,9 +1517,18 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				// Subtitle search routes.
 				if subtitleSearchHandler != nil {
+					if deps.FileRepo != nil && itemRepo != nil {
+						subtitleSearchHandler.FileAuthorizer = &handlers.MediaFileAuthorizer{
+							FileResolver:  deps.FileRepo,
+							ItemAccess:    itemRepo,
+							EpisodeLookup: episodeRepo,
+						}
+					}
 					r.Route("/subtitles", func(r chi.Router) {
 						r.Post("/search", subtitleSearchHandler.HandleSearch)
 						r.Post("/download", subtitleSearchHandler.HandleDownload)
+						r.Post("/upload", subtitleSearchHandler.HandleUpload)
+						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
 						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
 						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
 					})
@@ -1886,6 +1900,14 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Route("/{provider}", func(r chi.Router) {
 									r.Put("/", adminSubtitleHandler.HandleUpdateProvider)
 									r.Post("/test", adminSubtitleHandler.HandleTestProvider)
+								})
+							})
+							r.Route("/subtitles", func(r chi.Router) {
+								r.Get("/", adminSubtitleHandler.HandleListDownloadedSubtitles)
+								r.Route("/{id}", func(r chi.Router) {
+									r.Patch("/", adminSubtitleHandler.HandlePatchDownloadedSubtitle)
+									r.Get("/download", adminSubtitleHandler.HandleDownloadDownloadedSubtitle)
+									r.Delete("/", adminSubtitleHandler.HandleDeleteDownloadedSubtitle)
 								})
 							})
 						}

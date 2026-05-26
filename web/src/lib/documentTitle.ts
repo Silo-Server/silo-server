@@ -31,6 +31,7 @@ const ADMIN_TITLES: Record<string, string> = {
   recommendations: "Admin Recommendations",
   requests: "Admin Requests",
   sections: "Admin Sections",
+  subtitles: "Admin Subtitles",
   settings: "Admin Settings",
   tasks: "Admin Tasks",
   users: "Admin Users",
