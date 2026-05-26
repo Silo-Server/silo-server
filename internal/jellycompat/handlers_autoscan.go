@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -110,21 +111,64 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "BadRequest", "Updates is required")
 		return
 	}
-	scanRequests := make([]scantrigger.Request, 0, len(req.Updates))
+	resolver := scantrigger.NewResolver(h.folders)
+	targets := make([]scantrigger.Target, 0, len(req.Updates))
+	seenTargets := make(map[autoscanTargetKey]struct{}, len(req.Updates))
 	for _, update := range req.Updates {
 		path := strings.TrimSpace(update.Path)
 		if path == "" {
 			writeError(w, http.StatusBadRequest, "BadRequest", "Update path is required")
 			return
 		}
-		scanRequests = append(scanRequests, scantrigger.Request{
+
+		target, err := resolver.Resolve(r.Context(), scantrigger.Request{
 			Path:    path,
 			Trigger: autoscanTrigger,
 		})
+		if err != nil {
+			if parentTarget, handled, fallbackErr := resolveAutoscanParentTarget(r.Context(), resolver, path, err); handled {
+				if fallbackErr != nil {
+					slog.Warn("jellycompat autoscan: media update parent path rejected",
+						"path", path,
+						"parent_path", filepath.Dir(filepath.Clean(path)),
+						"update_type", update.UpdateType,
+						"error", fallbackErr,
+					)
+					writeScanTriggerError(w, fallbackErr)
+					return
+				}
+				if parentTarget != nil {
+					slog.Debug("jellycompat autoscan: media update falling back to parent scan",
+						"path", path,
+						"parent_path", parentTarget.Path,
+						"parent_mode", parentTarget.Mode,
+						"update_type", update.UpdateType,
+					)
+					targets = appendAutoscanTarget(targets, seenTargets, parentTarget)
+				}
+				continue
+			}
+			if softAutoscanUpdateError(err) {
+				slog.Debug("jellycompat autoscan: media update ignored",
+					"path", path,
+					"update_type", update.UpdateType,
+					"error", err,
+				)
+				continue
+			}
+			slog.Warn("jellycompat autoscan: media update path rejected",
+				"path", path,
+				"update_type", update.UpdateType,
+				"error", err,
+			)
+			writeScanTriggerError(w, err)
+			return
+		}
+		targets = appendAutoscanTarget(targets, seenTargets, target)
 	}
-	targets, err := scantrigger.NewResolver(h.folders).ResolveAll(r.Context(), scanRequests)
-	if err != nil {
-		writeScanTriggerError(w, err)
+	targets = compactAutoscanTargets(targets)
+	if len(targets) == 0 {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err := scantrigger.EnqueueAll(r.Context(), h.queue, targets); err != nil {
@@ -132,6 +176,133 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type autoscanTargetKey struct {
+	folderID int
+	mode     string
+	path     string
+	trigger  string
+}
+
+func appendAutoscanTarget(
+	targets []scantrigger.Target,
+	seen map[autoscanTargetKey]struct{},
+	target *scantrigger.Target,
+) []scantrigger.Target {
+	if target == nil {
+		return targets
+	}
+	folderID := 0
+	if target.Folder != nil {
+		folderID = target.Folder.ID
+	}
+	key := autoscanTargetKey{
+		folderID: folderID,
+		mode:     target.Mode,
+		path:     target.Path,
+		trigger:  target.Trigger,
+	}
+	if _, ok := seen[key]; ok {
+		return targets
+	}
+	seen[key] = struct{}{}
+	return append(targets, *target)
+}
+
+func compactAutoscanTargets(targets []scantrigger.Target) []scantrigger.Target {
+	if len(targets) < 2 {
+		return targets
+	}
+	compacted := make([]scantrigger.Target, 0, len(targets))
+	for i, target := range targets {
+		if autoscanTargetCoveredByOther(target, targets, i) {
+			continue
+		}
+		compacted = append(compacted, target)
+	}
+	return compacted
+}
+
+func autoscanTargetCoveredByOther(target scantrigger.Target, targets []scantrigger.Target, index int) bool {
+	if target.Folder == nil || target.Mode == scantrigger.ModeLibrary {
+		return false
+	}
+	for i, other := range targets {
+		if i == index || other.Folder == nil || other.Folder.ID != target.Folder.ID || other.Trigger != target.Trigger {
+			continue
+		}
+		switch other.Mode {
+		case scantrigger.ModeLibrary:
+			return true
+		case scantrigger.ModeSubtree:
+			if target.Path != "" && scantrigger.PathWithinRoot(target.Path, other.Path) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resolveAutoscanParentTarget(
+	ctx context.Context,
+	resolver *scantrigger.Resolver,
+	path string,
+	err error,
+) (*scantrigger.Target, bool, error) {
+	if !parentFallbackAutoscanUpdateError(err) {
+		return nil, false, nil
+	}
+	cleanPath := filepath.Clean(path)
+	parentPath := filepath.Dir(cleanPath)
+	if parentPath == "." || parentPath == cleanPath {
+		return nil, true, nil
+	}
+	target, parentErr := resolver.Resolve(ctx, scantrigger.Request{
+		Path:    parentPath,
+		Trigger: autoscanTrigger,
+	})
+	if parentErr == nil {
+		if target.Mode == scantrigger.ModeLibrary {
+			return nil, true, nil
+		}
+		return target, true, nil
+	}
+	if softAutoscanUpdateError(parentErr) {
+		return nil, true, nil
+	}
+	return nil, true, parentErr
+}
+
+func parentFallbackAutoscanUpdateError(err error) bool {
+	var reqErr *scantrigger.RequestError
+	if !errors.As(err, &reqErr) || reqErr.Status != http.StatusBadRequest {
+		return false
+	}
+	switch reqErr.Message {
+	case "Path does not exist",
+		"Path must be a file or directory",
+		"Unsupported media file extension":
+		return true
+	default:
+		return false
+	}
+}
+
+func softAutoscanUpdateError(err error) bool {
+	var reqErr *scantrigger.RequestError
+	if !errors.As(err, &reqErr) || reqErr.Status != http.StatusBadRequest {
+		return false
+	}
+	switch reqErr.Message {
+	case "No library matches the given path",
+		"Path does not exist",
+		"Path must be a file or directory",
+		"Unsupported media file extension":
+		return true
+	default:
+		return false
+	}
 }
 
 func writeScanTriggerError(w http.ResponseWriter, err error) {
