@@ -39,6 +39,14 @@ func (f *fakePlaybackSessionStore) SyncPlaybackSession(context.Context, string, 
 }
 func (f *fakePlaybackSessionStore) ClosePlaybackSession(context.Context, string) error { return nil }
 
+func (f *fakePlaybackSessionStore) AggregateStats(_ context.Context, userID, profileID string) (Stats, error) {
+	return Stats{Days: []DayStat{}, Monthly: []MonthStat{}}, nil
+}
+
+func (f *fakePlaybackSessionStore) ListClosedSessions(_ context.Context, userID, profileID string, limit, offset int) ([]ABSPlaybackSession, int, error) {
+	return nil, 0, nil
+}
+
 // filesMediaStore returns a fixed slice of MediaFile entries for the
 // configured contentID, satisfying the MediaStore interface for the
 // public-track tests. Unconfigured methods inherit no-op behavior from

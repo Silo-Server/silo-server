@@ -107,3 +107,144 @@ func (s *ABSPlaybackSessionStore) ClosePlaybackSession(ctx context.Context, id s
 	}
 	return nil
 }
+
+// AggregateStats returns the aggregated /me/listening-stats payload.
+func (s *ABSPlaybackSessionStore) AggregateStats(ctx context.Context, userID, profileID string) (abs.Stats, error) {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: invalid user id %q: %w", userID, err)
+	}
+	out := abs.Stats{Days: []abs.DayStat{}, Monthly: []abs.MonthStat{}}
+
+	row := s.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(time_listening_seconds), 0), COUNT(DISTINCT content_id)
+		FROM abs_playback_sessions
+		WHERE user_id = $1 AND profile_id = $2`,
+		uid, profileID,
+	)
+	if err := row.Scan(&out.TotalTime, &out.Items); err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats totals: %w", err)
+	}
+
+	rows, err := s.Pool.Query(ctx, `
+		SELECT TO_CHAR(date_trunc('day', started_at), 'YYYY-MM-DD'),
+		       COALESCE(SUM(time_listening_seconds), 0)
+		FROM abs_playback_sessions
+		WHERE user_id = $1 AND profile_id = $2
+		  AND started_at >= now() - INTERVAL '30 days'
+		GROUP BY 1
+		ORDER BY 1 DESC`,
+		uid, profileID,
+	)
+	if err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats days: %w", err)
+	}
+	for rows.Next() {
+		var d abs.DayStat
+		if scanErr := rows.Scan(&d.Date, &d.Seconds); scanErr != nil {
+			rows.Close()
+			return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats days scan: %w", scanErr)
+		}
+		out.Days = append(out.Days, d)
+	}
+	rows.Close()
+
+	dowRows, err := s.Pool.Query(ctx, `
+		SELECT EXTRACT(DOW FROM started_at)::int,
+		       COALESCE(SUM(time_listening_seconds), 0)
+		FROM abs_playback_sessions
+		WHERE user_id = $1 AND profile_id = $2
+		GROUP BY 1`,
+		uid, profileID,
+	)
+	if err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats dow: %w", err)
+	}
+	for dowRows.Next() {
+		var dow, secs int
+		if scanErr := dowRows.Scan(&dow, &secs); scanErr != nil {
+			dowRows.Close()
+			return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats dow scan: %w", scanErr)
+		}
+		if dow >= 0 && dow < 7 {
+			out.DayOfWeek[dow] = secs
+		}
+	}
+	dowRows.Close()
+
+	mRows, err := s.Pool.Query(ctx, `
+		SELECT TO_CHAR(date_trunc('month', started_at), 'YYYY-MM'),
+		       COALESCE(SUM(time_listening_seconds), 0)
+		FROM abs_playback_sessions
+		WHERE user_id = $1 AND profile_id = $2
+		  AND started_at >= now() - INTERVAL '12 months'
+		GROUP BY 1
+		ORDER BY 1 DESC`,
+		uid, profileID,
+	)
+	if err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats months: %w", err)
+	}
+	for mRows.Next() {
+		var m abs.MonthStat
+		if scanErr := mRows.Scan(&m.Month, &m.Seconds); scanErr != nil {
+			mRows.Close()
+			return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats months scan: %w", scanErr)
+		}
+		out.Monthly = append(out.Monthly, m)
+	}
+	mRows.Close()
+	return out, nil
+}
+
+func (s *ABSPlaybackSessionStore) ListClosedSessions(ctx context.Context, userID, profileID string, limit, offset int) ([]abs.ABSPlaybackSession, int, error) {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("abs_playback_session_store: invalid user id %q: %w", userID, err)
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 30
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM abs_playback_sessions
+		WHERE user_id = $1 AND profile_id = $2 AND closed_at IS NOT NULL`,
+		uid, profileID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("abs_playback_session_store: list closed count: %w", err)
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, user_id, profile_id, content_id,
+		       time_listening_seconds, current_position_seconds, closed_at
+		FROM abs_playback_sessions
+		WHERE user_id = $1 AND profile_id = $2 AND closed_at IS NOT NULL
+		ORDER BY started_at DESC
+		LIMIT $3 OFFSET $4`,
+		uid, profileID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("abs_playback_session_store: list closed: %w", err)
+	}
+	defer rows.Close()
+	out := make([]abs.ABSPlaybackSession, 0, limit)
+	for rows.Next() {
+		var sess abs.ABSPlaybackSession
+		var scanUID int
+		var scanProfile string
+		var closedAt *time.Time
+		if err := rows.Scan(&sess.ID, &scanUID, &scanProfile, &sess.ContentID, &sess.TimeListeningSeconds, &sess.CurrentPositionSeconds, &closedAt); err != nil {
+			return nil, 0, fmt.Errorf("abs_playback_session_store: list closed scan: %w", err)
+		}
+		sess.UserID = strconv.Itoa(scanUID)
+		sess.ProfileID = scanProfile
+		sess.ClosedAt = closedAt
+		out = append(out, sess)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("abs_playback_session_store: list closed rows: %w", err)
+	}
+	return out, total, nil
+}

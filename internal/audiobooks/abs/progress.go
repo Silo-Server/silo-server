@@ -48,6 +48,30 @@ type ABSPlaybackSessionStore interface {
 	SyncPlaybackSession(ctx context.Context, id string, currentPositionSeconds float64, timeListeningSeconds int) error
 	// ClosePlaybackSession sets closed_at to now().
 	ClosePlaybackSession(ctx context.Context, id string) error
+	// AggregateStats returns aggregated listening stats for (user, profile).
+	AggregateStats(ctx context.Context, userID, profileID string) (Stats, error)
+	// ListClosedSessions returns paginated closed sessions for (user, profile)
+	// ordered by started_at DESC. Returns (rows, totalRowCount, error).
+	ListClosedSessions(ctx context.Context, userID, profileID string, limit, offset int) ([]ABSPlaybackSession, int, error)
+}
+
+// Stats is the aggregated /me/listening-stats response shape.
+type Stats struct {
+	TotalTime int        // seconds
+	Items     int        // distinct content_ids listened to
+	Days      []DayStat  // recent days (most-recent first)
+	DayOfWeek [7]int     // index 0 = Sunday
+	Monthly   []MonthStat
+}
+
+type DayStat struct {
+	Date    string
+	Seconds int
+}
+
+type MonthStat struct {
+	Month   string
+	Seconds int
 }
 
 // ProgressRow is the in-memory representation of a user_watch_progress row
@@ -211,8 +235,20 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 
 // syncPayload is the JSON body for PATCH /abs/api/session/{sid}/sync.
 type syncPayload struct {
-	CurrentTime  float64 `json:"currentTime"`
-	TimeListened float64 `json:"timeListened"`
+	CurrentTime float64 `json:"currentTime"`
+	// Accept both spellings: real ABS clients send "timeListening"; an older
+	// silo-plugin draft used "timeListened". UnmarshalJSON merges them.
+	TimeListening float64 `json:"timeListening"`
+	TimeListened  float64 `json:"timeListened"`
+}
+
+// timeDelta returns the accumulated listening time from whichever spelling
+// the client used. Both fields are tried; non-zero wins.
+func (p syncPayload) timeDelta() float64 {
+	if p.TimeListening != 0 {
+		return p.TimeListening
+	}
+	return p.TimeListened
 }
 
 // handleSessionSync — PATCH /abs/api/session/{sid}/sync
@@ -254,7 +290,7 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 
 	// Accumulate listening time and update position in abs_playback_sessions.
 	if err := h.deps.PlaybackSessionStore.SyncPlaybackSession(
-		r.Context(), sid, p.CurrentTime, int(p.TimeListened),
+		r.Context(), sid, p.CurrentTime, int(p.timeDelta()),
 	); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -280,7 +316,7 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 		"id":            sid,
 		"libraryItemId": sess.ContentID,
 		"currentTime":   p.CurrentTime,
-		"timeListened":  p.TimeListened,
+		"timeListening": p.timeDelta(),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
