@@ -243,3 +243,61 @@ func TestCollection_Create_InvalidBody_400(t *testing.T) {
 		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestCollection_List_ReturnsWrappedEnvelope(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	// Seed two collections.
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(`{"name":"A"}`), "1", "", hb.H.handleCreateCollection)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(`{"name":"B"}`), "1", "", hb.H.handleCreateCollection)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections", nil, nil, "1", "", hb.H.handleListCollections)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	list, ok := env["collections"].([]any)
+	if !ok {
+		t.Fatalf("response missing 'collections' key; body=%s", rec.Body.String())
+	}
+	if len(list) != 2 {
+		t.Errorf("list len = %d, want 2", len(list))
+	}
+	// List-shape must omit books.
+	for _, c := range list {
+		entry := c.(map[string]any)
+		if _, has := entry["books"]; has {
+			t.Errorf("list entry has books key (should be detail-only): %v", entry)
+		}
+	}
+}
+
+func TestCollection_List_DoesNotLeakOtherUsers(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	// User 1 creates.
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(`{"name":"mine"}`), "1", "", hb.H.handleCreateCollection)
+	// User 2 lists.
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections", nil, nil, "2", "", hb.H.handleListCollections)
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	list, _ := env["collections"].([]any)
+	if len(list) != 0 {
+		t.Errorf("user 2 sees %d collections, want 0", len(list))
+	}
+}
+
+func TestCollection_List_ProfileIsolation(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	pA := "00000000-0000-0000-0000-0000000000aa"
+	pB := "00000000-0000-0000-0000-0000000000bb"
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(`{"name":"A"}`), "1", pA, hb.H.handleCreateCollection)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections", nil, nil, "1", pB, hb.H.handleListCollections)
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	list, _ := env["collections"].([]any)
+	if len(list) != 0 {
+		t.Errorf("profile B sees %d collections, want 0", len(list))
+	}
+}

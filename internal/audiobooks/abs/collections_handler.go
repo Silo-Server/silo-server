@@ -113,6 +113,32 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 	return out
 }
 
+// handleListCollections — GET /collections.
+// Returns the caller's collections wrapped in {"collections": [...]}.
+// List-shape (no books[]).
+func (h *Handler) handleListCollections(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.CollectionStore == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"collections": []any{}})
+		return
+	}
+	rows, err := h.deps.CollectionStore.ListUserCollections(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		slog.Error("abs collection list failed", "err", err, "user", a.UserID)
+		http.Error(w, "collection list failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, c := range rows {
+		out = append(out, collectionToABS(c, nil)) // list-shape: nil books
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"collections": out})
+}
+
 // chiURLID is a tiny shim around chi.URLParam(r, "id") so handler call
 // sites read uniformly. Inlined where unambiguous.
 func chiURLID(r *http.Request) string { return chi.URLParam(r, "id") }
