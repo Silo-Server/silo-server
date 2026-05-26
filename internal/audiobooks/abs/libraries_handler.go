@@ -559,10 +559,16 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 	updatedAtMs := item.UpdatedAt.UnixMilli()
 
 	return LibraryItem{
-		ID:        item.ContentID,
-		LibraryID: libID,
-		FolderID:  VirtualFolderID,
-		MediaType: LibraryMediaType,
+		ID:          item.ContentID,
+		Ino:         item.ContentID, // stable item-level ino; matches real-ABS shape
+		LibraryID:   libID,
+		FolderID:    VirtualFolderID,
+		Path:        "",
+		RelPath:     "",
+		MtimeMs:     addedAtMs,
+		CtimeMs:     addedAtMs,
+		BirthtimeMs: addedAtMs,
+		MediaType:   LibraryMediaType,
 		Media: LibraryItemMedia{
 			Metadata:   meta,
 			Duration:   duration,

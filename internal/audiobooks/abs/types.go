@@ -104,6 +104,11 @@ type Metadata struct {
 	Publisher     string      `json:"publisher,omitempty"`
 	Genres        []string    `json:"genres"`
 	Tags          []string    `json:"tags"`
+	// Explicit is a content-warning flag the Kotlin BookMetadata declares
+	// as non-nullable Boolean. Always emit (default false). silo does not
+	// track per-item explicit metadata today; surface it when scanner-side
+	// support lands.
+	Explicit bool `json:"explicit"`
 }
 
 // LibraryItemMedia carries the bulk of the audiobook metadata.
@@ -149,10 +154,25 @@ type CollapsedSeriesV1 struct {
 // It folds every book in a series into a single representative entry. ABS
 // clients pattern-match on the presence of this field to switch from "list
 // of books" to "list of series" UI.
+//
+// Ino / Path / RelPath / MtimeMs / CtimeMs / BirthtimeMs mirror fields the
+// real-ABS filesystem-watcher emits at the item root. The ABS Android
+// client's Kotlin LibraryItem declares all of these as non-nullable —
+// jackson-module-kotlin's behaviour around missing primitives is lenient
+// in some configurations but throws in stricter ones, so we always emit
+// them with safe defaults (ID-derived ino, empty path strings, AddedAt
+// echoed across the three time fields). Costs almost nothing on the wire
+// and never causes a parser failure that silently breaks downloads.
 type LibraryItem struct {
 	ID        string        `json:"id"`
+	Ino       string        `json:"ino"`
 	LibraryID string        `json:"libraryId"`
 	FolderID  string        `json:"folderId"`
+	Path      string        `json:"path"`
+	RelPath   string        `json:"relPath"`
+	MtimeMs   int64         `json:"mtimeMs"`
+	CtimeMs   int64         `json:"ctimeMs"`
+	BirthtimeMs int64       `json:"birthtimeMs"`
 	MediaType string        `json:"mediaType"`
 	// IsMissing / IsInvalid are gating fields the ABS mobile client checks
 	// before rendering the play affordance. We always emit them (no omitempty)
