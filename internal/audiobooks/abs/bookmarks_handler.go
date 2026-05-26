@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -74,6 +75,82 @@ func (h *Handler) handleUpsertBookmark(reason string) http.HandlerFunc {
 
 		writeBookmarkList(w, r, h, a.UserID, a.ProfileID, itemID)
 	}
+}
+
+// handleDeleteBookmark — DELETE /me/item/{itemId}/bookmark/{time}.
+//
+// Idempotent: returns 200 with the caller's current bookmark list,
+// whether or not the (item, time) row existed. Crucially, this means
+// a DELETE against another user's bookmark returns the caller's own
+// (empty-or-other) list — no enumeration vector.
+//
+// Item validation is intentionally skipped: a bookmark whose item was
+// just deleted should still be removable. (Upsert keeps validation
+// because it would create a new orphan row.)
+func (h *Handler) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.BookmarkStore == nil {
+		http.Error(w, "bookmark store unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	itemID := chi.URLParam(r, "itemId")
+	if itemID == "" {
+		http.Error(w, "itemId required", http.StatusBadRequest)
+		return
+	}
+	t, ok := parseBookmarkTime(chi.URLParam(r, "time"))
+	if !ok {
+		http.Error(w, "time required", http.StatusBadRequest)
+		return
+	}
+
+	// Snapshot the pre-delete row so the realtime payload carries the
+	// title that just got removed (clients prefer this over a bare ID).
+	var pre Bookmark
+	if rows, err := h.deps.BookmarkStore.List(r.Context(), a.UserID, a.ProfileID, itemID); err == nil {
+		for _, b := range rows {
+			if b.Time == t {
+				pre = b
+				break
+			}
+		}
+	}
+
+	if err := h.deps.BookmarkStore.Delete(r.Context(), a.UserID, a.ProfileID, itemID, t); err != nil {
+		slog.Error("abs bookmark delete failed", "err", err, "user", a.UserID, "item", itemID)
+		http.Error(w, "bookmark delete failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Only publish when the row actually existed (pre.ID is empty
+	// otherwise). Avoids notifying other devices about a phantom delete.
+	if pre.ID != "" {
+		h.publish(a.UserID, "user_updated", map[string]any{
+			"reason":   "bookmark_deleted",
+			"bookmark": bookmarkToABS(pre),
+		})
+	}
+
+	writeBookmarkList(w, r, h, a.UserID, a.ProfileID, itemID)
+}
+
+// parseBookmarkTime parses the {time} URL parameter on DELETE
+// /me/item/{itemId}/bookmark/{time}. Returns (0, false) on parse
+// failure.
+func parseBookmarkTime(s string) (float64, bool) {
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(v) {
+		return 0, false
+	}
+	return v, true
 }
 
 // writeBookmarkList re-fetches the item's bookmarks and writes them as

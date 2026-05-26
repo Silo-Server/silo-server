@@ -273,3 +273,37 @@ func TestUpsert_SameTime_UpdatesTitleNoDuplicate(t *testing.T) {
 		t.Errorf("id changed across upsert: was %v, now %v (id must be preserved)", firstID, patchList[0]["id"])
 	}
 }
+
+func TestDelete_ExistingBookmark_RemovedFromList(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+
+	// Seed a bookmark via POST.
+	postBody := []byte(`{"title":"to delete","time":99}`)
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", postBody, "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+
+	// DELETE it.
+	rec := dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/99", "book-1", "99", nil, "1", "", hb.H.handleDeleteBookmark)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	if len(list) != 0 {
+		t.Errorf("list len = %d, want 0; body=%s", len(list), rec.Body.String())
+	}
+}
+
+func TestDelete_NonExistentTime_IdempotentReturnsEmptyList(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	rec := dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/123", "book-1", "123", nil, "1", "", hb.H.handleDeleteBookmark)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (idempotent); body=%s", rec.Code, rec.Body.String())
+	}
+	var list []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list) != 0 {
+		t.Errorf("list len = %d, want 0", len(list))
+	}
+}
