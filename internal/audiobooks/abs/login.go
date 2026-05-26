@@ -264,6 +264,8 @@ func (h *Handler) loginEnvelope(
 		},
 	}
 
+	// x-return-tokens opt-in: when set, embed token pair on user object too
+	// (some clients read from the user envelope, others from the top level).
 	if strings.EqualFold(r.Header.Get("x-return-tokens"), "true") {
 		user["accessToken"] = accessToken
 		user["refreshToken"] = refreshToken
@@ -336,5 +338,8 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	// /authorize re-mints the envelope using the caller's bearer as the
 	// access token (client already has it); refresh isn't rotated here.
+	// userID is passed as displayName because the JWT carries no display-name
+	// claim (Claims has sub/pid/jti only) — the client's stored profile name
+	// takes precedence anyway, so the echoed userID is just a harmless seed.
 	writeJSON(w, http.StatusOK, h.loginEnvelope(r, a.UserID, a.UserID, a.Token, ""))
 }
