@@ -268,6 +268,15 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		r.Get(prefix+"/authors/{id}/image", h.handleAuthorImage)
 	}
 
+	// Session-scoped audio streaming (ABS v2.22.0+ DirectPlay). The Android
+	// and iOS clients call this WITHOUT a bearer token — the session ID is
+	// the capability. Mounted at both /public/session and /abs/public/session
+	// for compatibility with clients that pin either prefix.
+	for _, prefix := range []string{"", "/abs"} {
+		r.Get(prefix+"/public/session/{sid}/track/{idx}", h.handlePublicTrack)
+		r.Head(prefix+"/public/session/{sid}/track/{idx}", h.handlePublicTrack)
+	}
+
 	// Stage 3: playback session + file routes, registered under both the
 	// legacy /abs/api prefix and the canonical /api prefix that the official
 	// ABS mobile client builds against (no /abs prefix at server root).
