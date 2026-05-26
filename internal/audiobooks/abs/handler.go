@@ -331,6 +331,18 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Delete(prefix+"/collections/{id}", h.handleDeleteCollection)
 			r.Post(prefix+"/collections/{id}/book/{bookId}", h.handleAddCollectionBook)
 			r.Delete(prefix+"/collections/{id}/book/{bookId}", h.handleRemoveCollectionBook)
+			// Playlists — owner-gated CRUD with cross-user public reads,
+			// realtime events on every mutation, batch endpoints.
+			r.Get(prefix+"/playlists", h.handleListPlaylists)
+			r.Post(prefix+"/playlists", h.handleCreatePlaylist)
+			r.Get(prefix+"/playlists/{id}", h.handleGetPlaylist)
+			r.Patch(prefix+"/playlists/{id}", h.handleUpdatePlaylist)
+			r.Delete(prefix+"/playlists/{id}", h.handleDeletePlaylist)
+			r.Post(prefix+"/playlists/{id}/item", h.handleAddPlaylistItem)
+			r.Post(prefix+"/playlists/{id}/batch/add", h.handleBatchAddPlaylistItems)
+			r.Post(prefix+"/playlists/{id}/batch/remove", h.handleBatchRemovePlaylistItems)
+			r.Delete(prefix+"/playlists/{id}/item/{libraryItemId}", h.handleRemovePlaylistItem)
+			r.Delete(prefix+"/playlists/{id}/item/{libraryItemId}/{episodeId}", h.handleRemovePlaylistEpisode)
 		}
 	})
 
