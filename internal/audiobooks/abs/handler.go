@@ -251,6 +251,14 @@ func (h *Handler) mountRoutes(r chi.Router) {
 	// 24h access-token interactive re-login trap.
 	r.Post("/auth/refresh", h.handleRefresh)
 	r.Post("/abs/api/auth/refresh", h.handleRefresh)
+	// Logout is mounted OUTSIDE bearerAuth so an expired-access client can
+	// still sign out (the primary "sign out" UX moment). The handler parses
+	// the bearer locally, revokes the JTI if parseable, and always returns
+	// 204 — matches the canonical continuum-plugin behavior.
+	r.Post("/logout", h.handleLogout)
+	r.Post("/api/logout", h.handleLogout)
+	r.Post("/abs/api/logout", h.handleLogout)
+	r.Post("/abs/api/auth/logout", h.handleLogout) // legacy path
 
 	// Unauthenticated cover + author-image routes. Real ABS serves covers
 	// without auth (getDoesServerImagesRequireToken returns false for our
@@ -306,9 +314,6 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// Real-ABS /authorize: validates the bearer and re-mints the
 			// /me envelope so the client can resume without retyping creds.
 			r.Post(prefix+"/authorize", h.handleABSAuthorize)
-			// Logout: revokes the caller's access JTI. Mounted inside
-			// bearerAuth so the JTI is already in context.
-			r.Post(prefix+"/logout", h.handleLogout)
 			// Continue Listening shelf.
 			r.Get(prefix+"/me/items-in-progress", h.handleItemsInProgress)
 			// Library list + detail.

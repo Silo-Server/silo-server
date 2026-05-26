@@ -460,11 +460,13 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleLogout — POST /logout
+// handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)
 //
-// Mounted inside the bearerAuth group: the middleware has already parsed
-// and validated the access JTI. We revoke that JTI (idempotent) and
-// return 204. There is no body and no JSON response.
+// Mounted OUTSIDE the bearerAuth group so a client whose access token has
+// expired — the most common "I want to sign out" moment — can still revoke
+// their JTI without first re-authenticating. The handler parses the bearer
+// itself, attempts JTI revoke if parseable, and ALWAYS returns 204. Mirrors
+// continuum-plugin-audiobooks/internal/abs/handler.go:handleLogout.
 //
 // Note: this revokes ONLY the access token. The associated refresh token
 // has its own JTI and stays valid until the client also calls /auth/refresh
@@ -472,22 +474,28 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 // rotation. Clients that want a hard "log out everywhere" should iterate
 // the sessions list (added in Phase 3) instead.
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
-	a, ok := absAuthFrom(r)
-	if !ok || a.JTI == "" {
-		// No auth context — middleware shouldn't have let us through, but
-		// be defensive and return 204 anyway (logout is idempotent).
-		w.WriteHeader(http.StatusNoContent)
+	defer w.WriteHeader(http.StatusNoContent)
+
+	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if raw == "" {
+		raw = r.URL.Query().Get("token")
+	}
+	if raw == "" || h.deps.TokenStore == nil || h.deps.Config == nil {
 		return
 	}
-	if h.deps.TokenStore == nil {
-		w.WriteHeader(http.StatusNoContent)
+	secret, err := h.deps.Config.JWTSecret(r.Context())
+	if err != nil {
+		slog.Debug("abs logout: jwt secret fetch failed", "err", err)
 		return
 	}
-	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), a.JTI); err != nil {
-		slog.Warn("abs logout: revoke failed", "jti", a.JTI, "user", a.UserID, "err", err)
-		http.Error(w, "logout failed", http.StatusInternalServerError)
+	claims, err := ParseToken(secret, raw)
+	if err != nil || claims.JTI == "" {
+		slog.Debug("abs logout: parse failed", "err", err)
 		return
 	}
-	slog.Debug("abs logout: revoked", "jti", a.JTI, "user", a.UserID)
-	w.WriteHeader(http.StatusNoContent)
+	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
+		slog.Warn("abs logout: revoke failed", "jti", claims.JTI, "user", claims.UserID, "err", err)
+		return
+	}
+	slog.Debug("abs logout: revoked", "jti", claims.JTI, "user", claims.UserID)
 }
