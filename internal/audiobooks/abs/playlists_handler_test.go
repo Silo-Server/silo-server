@@ -534,3 +534,82 @@ func TestPlaylist_AddItem_FiresUpdatedEvent(t *testing.T) {
 		t.Errorf("event = %q, want playlist_updated", evts[len(evts)-1].Event)
 	}
 }
+
+func TestPlaylist_RemoveItem_Single(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1", "book-2")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, []byte(`{"libraryItemId":"book-1"}`), "1", "", hb.H.handleAddPlaylistItem)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, []byte(`{"libraryItemId":"book-2"}`), "1", "", hb.H.handleAddPlaylistItem)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/playlists/"+id+"/item/book-1",
+		map[string]string{"id": id, "libraryItemId": "book-1"}, nil, "1", "", hb.H.handleRemovePlaylistItem)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	if items[0].(map[string]any)["libraryItemId"] != "book-2" {
+		t.Errorf("remaining item = %v, want book-2", items[0])
+	}
+}
+
+func TestPlaylist_RemoveItem_Idempotent(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/playlists/"+id+"/item/book-99",
+		map[string]string{"id": id, "libraryItemId": "book-99"}, nil, "1", "", hb.H.handleRemovePlaylistItem)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (idempotent)", rec.Code)
+	}
+}
+
+func TestPlaylist_RemoveItem_WithEpisode(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)
+
+	// Seed two items at the same libraryItemId — one with episode, one without.
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, []byte(`{"libraryItemId":"podcast-x","episodeId":"ep-1"}`), "1", "", hb.H.handleAddPlaylistItem)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, []byte(`{"libraryItemId":"podcast-x","episodeId":"ep-2"}`), "1", "", hb.H.handleAddPlaylistItem)
+
+	// Remove ep-1 specifically.
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/playlists/"+id+"/item/podcast-x/ep-1",
+		map[string]string{"id": id, "libraryItemId": "podcast-x", "episodeId": "ep-1"}, nil, "1", "", hb.H.handleRemovePlaylistEpisode)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	items, _ := got["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1 (ep-2 should remain)", len(items))
+	}
+	if items[0].(map[string]any)["episodeId"] != "ep-2" {
+		t.Errorf("remaining item episodeId = %v, want ep-2", items[0])
+	}
+}
+
+func TestPlaylist_RemoveItem_NonOwner_404(t *testing.T) {
+	hb := newPlaylistsHarness(t, "book-1")
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"mine"}`)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, []byte(`{"libraryItemId":"book-1"}`), "1", "", hb.H.handleAddPlaylistItem)
+
+	rec := dispatchABSWithParams(http.MethodDelete, "/api/playlists/"+id+"/item/book-1",
+		map[string]string{"id": id, "libraryItemId": "book-1"}, nil, "2", "", hb.H.handleRemovePlaylistItem)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	items, _ := hb.Play.ListPlaylistItems(context.Background(), id)
+	if len(items) != 1 {
+		t.Errorf("items len = %d, want 1 (non-owner remove leaked)", len(items))
+	}
+}
