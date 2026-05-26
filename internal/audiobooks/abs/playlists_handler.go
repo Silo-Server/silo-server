@@ -129,3 +129,55 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 // playlistURLID is a tiny shim around chi.URLParam(r, "id") to read
 // uniformly with the collections handler's chiURLID.
 func playlistURLID(r *http.Request) string { return chi.URLParam(r, "id") }
+
+// handleListPlaylists — GET /playlists.
+// Returns the caller's playlists wrapped in {"playlists": [...]}.
+// List-shape (no items[]).
+func (h *Handler) handleListPlaylists(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"playlists": []any{}})
+		return
+	}
+	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		slog.Error("abs playlist list failed", "err", err, "user", a.UserID)
+		http.Error(w, "playlist list failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, playlistToABS(p, nil))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"playlists": out})
+}
+
+// handleGetPlaylist — GET /playlists/{id}.
+// Owner gets full-shape; non-owner gets full-shape only when isPublic.
+// Otherwise 404 (no existence leak).
+func (h *Handler) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.PlaylistStore == nil {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), playlistURLID(r))
+	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID && !p.IsPublic) {
+		http.Error(w, "playlist not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs playlist get failed", "err", err)
+		http.Error(w, "playlist get failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.playlistFullShape(r, p))
+}

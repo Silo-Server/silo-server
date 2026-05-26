@@ -205,3 +205,104 @@ func TestPlaylist_Create_FiresPlaylistAddedEvent(t *testing.T) {
 		t.Errorf("payload name = %v, want queue", payload["name"])
 	}
 }
+
+func createPlaylistForUser(t *testing.T, hb *playlistsHarness, userID, profileID, body string) string {
+	t.Helper()
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists", nil, []byte(body), userID, profileID, hb.H.handleCreatePlaylist)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("seed POST status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	id, _ := got["id"].(string)
+	if id == "" {
+		t.Fatalf("seed POST returned no id; body=%s", rec.Body.String())
+	}
+	return id
+}
+
+func TestPlaylist_List_WrappedEnvelope(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	_ = createPlaylistForUser(t, hb, "1", "", `{"name":"a"}`)
+	_ = createPlaylistForUser(t, hb, "1", "", `{"name":"b"}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists", nil, nil, "1", "", hb.H.handleListPlaylists)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	list, ok := env["playlists"].([]any)
+	if !ok {
+		t.Fatalf("response missing 'playlists' key; body=%s", rec.Body.String())
+	}
+	if len(list) != 2 {
+		t.Errorf("list len = %d, want 2", len(list))
+	}
+	for _, p := range list {
+		entry := p.(map[string]any)
+		if _, has := entry["items"]; has {
+			t.Errorf("list entry has items key (should be detail-only): %v", entry)
+		}
+	}
+}
+
+func TestPlaylist_List_ProfileIsolation(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	pA := "00000000-0000-0000-0000-0000000000aa"
+	pB := "00000000-0000-0000-0000-0000000000bb"
+	_ = createPlaylistForUser(t, hb, "1", pA, `{"name":"A"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists", nil, nil, "1", pB, hb.H.handleListPlaylists)
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	list, _ := env["playlists"].([]any)
+	if len(list) != 0 {
+		t.Errorf("profile B sees %d playlists, want 0", len(list))
+	}
+}
+
+func TestPlaylist_Get_Owner_ReturnsFullShape(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetPlaylist)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "mine" {
+		t.Errorf("name = %v, want 'mine'", got["name"])
+	}
+	if _, has := got["items"]; !has {
+		t.Errorf("items missing on full-shape: %v", got)
+	}
+}
+
+func TestPlaylist_Get_NonOwner_Private_404(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"private"}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleGetPlaylist)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPlaylist_Get_NonOwner_Public_OK(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"public","isPublic":true}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleGetPlaylist)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPlaylist_Get_Unknown_404(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/playlists/01HZZZ", map[string]string{"id": "01HZZZ"}, nil, "1", "", hb.H.handleGetPlaylist)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
