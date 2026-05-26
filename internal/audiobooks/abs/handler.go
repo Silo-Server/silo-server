@@ -313,6 +313,10 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Patch(prefix+"/session/{sid}", h.handleSessionSync)
 			// POST  /session/{sid}/close     — finalise the play session
 			r.Post(prefix+"/session/{sid}/close", h.handleSessionClose)
+			// Bookmarks — POST/PATCH both upsert; DELETE is idempotent.
+			r.Post(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_created"))
+			r.Patch(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_updated"))
+			r.Delete(prefix+"/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)
 		}
 	})
 
