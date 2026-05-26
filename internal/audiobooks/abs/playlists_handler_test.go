@@ -370,6 +370,11 @@ func TestPlaylist_Delete_Owner_FiresRemovedEvent(t *testing.T) {
 	if evts[len(evts)-1].Event != "playlist_removed" {
 		t.Errorf("event = %q, want playlist_removed", evts[len(evts)-1].Event)
 	}
+	// Post-delete GET must 404 (symmetry with collection delete test).
+	rec2 := dispatchABSWithParams(http.MethodGet, "/api/playlists/"+id, map[string]string{"id": id}, nil, "7", "", hb.H.handleGetPlaylist)
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("post-delete GET status = %d, want 404", rec2.Code)
+	}
 }
 
 func TestPlaylist_Delete_NonOwner_404(t *testing.T) {

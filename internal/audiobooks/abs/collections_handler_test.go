@@ -433,8 +433,12 @@ func TestCollection_Patch_NonOwner_404(t *testing.T) {
 }
 
 func TestCollection_Delete_Owner_204(t *testing.T) {
-	hb := newCollectionsHarness(t)
+	hb := newCollectionsHarness(t, "book-1")
 	id := createCollectionForUser(t, hb, "1", "", `{"name":"x"}`)
+
+	// Seed an item so the cascade-delete is exercised.
+	_ = dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
+		map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleAddCollectionBook)
 
 	rec := dispatchABSWithParams(http.MethodDelete, "/api/collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleDeleteCollection)
 	if rec.Code != http.StatusNoContent {
@@ -444,6 +448,11 @@ func TestCollection_Delete_Owner_204(t *testing.T) {
 	rec2 := dispatchABSWithParams(http.MethodGet, "/api/collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetCollection)
 	if rec2.Code != http.StatusNotFound {
 		t.Errorf("post-delete GET status = %d, want 404", rec2.Code)
+	}
+	// Cascade: items table must be empty for the deleted collection.
+	items, _ := hb.Coll.ListCollectionItems(context.Background(), id)
+	if len(items) != 0 {
+		t.Errorf("items len = %d, want 0 (cascade did not drop child rows)", len(items))
 	}
 }
 
