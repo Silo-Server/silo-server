@@ -197,21 +197,38 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
+	nowMs := time.Now().UnixMilli()
+
+	// Real ABS clients pattern-match on a richer login envelope than the
+	// minimum we previously sent. The added fields (itemTagsAccessible,
+	// itemTagsSelected, lastSeen, createdAt) keep the iOS app off its
+	// "degraded mode" branch. Permissions stays the canonical eight-key
+	// object; setting all relevant flags true matches what real ABS does
+	// for a non-admin user.
 	user := map[string]any{
-		"id":                  userID,
-		"username":            name,
-		"type":                "user",
-		"defaultLibraryId":    defaultLibraryID,
-		"librariesAccessible": []any{}, // empty = "all libraries accessible"
-		"mediaProgress":       []any{},
-		"bookmarks":           []any{},
-		"isOldToken":          false,
-		"token":               access, // legacy field some 2.17- clients still read
+		"id":                              userID,
+		"username":                        name,
+		"type":                            "user",
+		"defaultLibraryId":                defaultLibraryID,
+		"librariesAccessible":             []any{}, // empty = "all libraries accessible"
+		"itemTagsAccessible":              []any{}, // empty = "all tags accessible"
+		"itemTagsSelected":                []any{},
+		"mediaProgress":                   []any{},
+		"bookmarks":                       []any{},
+		"seriesHideFromContinueListening": []any{},
+		"isOldToken":                      false,
+		"token":                           access, // legacy field some 2.17- clients still read
+		"lastSeen":                        nowMs,
+		"createdAt":                       nowMs,
 		"permissions": map[string]any{
-			"update":                true,
-			"delete":                true,
-			"download":              true,
-			"accessExplicitContent": true,
+			"download":                  true,
+			"update":                    true,
+			"delete":                    true,
+			"upload":                    true,
+			"accessAllLibraries":        true,
+			"accessAllTags":             true,
+			"accessExplicitContent":     true,
+			"selectedTagsNotAccessible": false,
 		},
 	}
 
@@ -222,15 +239,55 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		user["refreshToken"] = refresh
 	}
 
+	// Server settings: real ABS emits many flags; clients use these to
+	// branch UI. Defaults match the official server's defaults so clients
+	// pick predictable UX paths.
+	serverSettings := map[string]any{
+		"id":                                "server-settings",
+		"version":                           ServerVersion,
+		"buildNumber":                       1,
+		"language":                          "en-us",
+		"dateFormat":                        "MM/dd/yyyy",
+		"timeFormat":                        "HH:mm",
+		"timeZone":                          "UTC",
+		"coverAspectRatio":                  1,
+		"storeCoverWithItem":                false,
+		"storeMetadataWithItem":             false,
+		"metadataFileFormat":                "json",
+		"scannerDisableWatcher":             true,
+		"scannerParseSubtitle":              false,
+		"scannerFindCovers":                 false,
+		"scannerCoverProvider":              "google",
+		"scannerPreferMatchedMetadata":      false,
+		"scannerPreferOverdriveMediaMarker": false,
+		"sortingIgnorePrefix":               false,
+		"sortingPrefixes":                   []string{"the", "a"},
+		"chromecastEnabled":                 false,
+		"enableEReader":                     false,
+		"dateString":                        "",
+		"logLevel":                          1,
+		"version_id":                        ServerVersion,
+		"sessionTimeout":                    0,
+		"backupSchedule":                    false,
+		"backupsToKeep":                     2,
+		"maxBackupSize":                     1,
+		"loggerDailyLogsToKeep":             7,
+		"loggerScannerLogsToKeep":           2,
+		"homeBookshelfView":                 1,
+		"bookshelfView":                     1,
+		"podcastEpisodeSchedule":            "0 * * * *",
+		"sortingIgnorePrefixesValue":        "",
+		"allowIframe":                       false,
+		"authActiveAuthMethods":             []string{"local"},
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":                 user,
 		"userDefaultLibraryId": defaultLibraryID,
-		"serverSettings": map[string]any{
-			"version":  ServerVersion,
-			"language": "en-us",
-		},
-		"ereaderDevices": []any{},
-		"libraries":      libraryMaps,
+		"serverSettings":       serverSettings,
+		"Source":               "silo",
+		"ereaderDevices":       []any{},
+		"libraries":            libraryMaps,
 		// Legacy top-level token fields for clients that read them
 		// directly (mainline reads from the user object; some third-party
 		// clients still read top-level).
