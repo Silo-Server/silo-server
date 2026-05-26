@@ -356,3 +356,29 @@ Single-shot per phase, no human review gate. **Each phase gets its own implement
 - Bug catalog for response shape: `booklore-ng/BOOKLORE_ABS_IMPLEMENTATION_ISSUES.md`.
 - Canonical socket event list: `booklore-ng/src/lib/socket/events.ts`.
 - ABS API documentation: `booklore-ng/AUDIOBOOKSHELF_API_DOCUMENTATION.md`.
+
+## 10. Phase 0 — Status
+
+**Implemented:** 2026-05-26. Plan: `docs/superpowers/plans/2026-05-26-abs-phase-0-login-and-critical-fixes.md`. All 11 plan tasks committed on `feat/audiobooks` and deployed to the production silo container. Endpoint smoke tests confirm correct mount + status codes for `/ping`, `/login`, `/auth/refresh`, `/logout`, `/me`, `/authorize` at both root and `/api`/`/abs/api` prefixes. End-to-end iOS/Plappa app validation pending operator hand-off.
+
+**Phase 0 commits (13 total — implementation + review-feedback fixes):**
+
+| # | SHA | Subject |
+|---|-----|---------|
+| 1 | `6c9c721` | feat(audiobooks): diagnostic logging to ABS bearer auth and login |
+| 1+ | `d5edb24` | chore(audiobooks): normalize slog "err" key + add path to secret-fetch log |
+| 2 | `877120f` | fix(audiobooks): enrich ABS login envelope |
+| 2+ | `47c04f1` | chore(audiobooks): reuse existing now var in login envelope |
+| 3 | `045984c` | fix(audiobooks): /authorize returns identical envelope to /login |
+| 3+ | `0306cfe` | docs(audiobooks): restore x-return-tokens and displayName fallback comments |
+| 4 | `e163858` | fix(audiobooks): emit IDs on authors/series and stable genres/tags arrays |
+| 4+ | `470a483` | fix(audiobooks): proper pagination total + tags key in play session |
+| 5 | `7f600b2` | fix(audiobooks): hydrate filterdata authors and series in library detail |
+| 5+ | `2e2b411` | chore(audiobooks): rename const cap to fetchCap in buildFilterData |
+| 6 | `7e956f1` | fix(audiobooks): seed currentTime from ProgressStore so resume works |
+| 7 | `93e321f` | feat(audiobooks): POST /auth/refresh for ABS token rotation |
+| 8 | `278f815` | feat(audiobooks): POST /logout for ABS sign-out |
+
+**Tests added:** 15 (6 metadata + 4 resume + 5 refresh + 4 logout — note 4 logout overlaps with refresh's memTokenStore). `go test ./internal/audiobooks/... -count=1` all pass.
+
+**Next:** Phase 1 (bookmarks, collections, playlists, smart collections, RSS, author/series detail, listening stats) will start with its own brainstorming → writing-plans cycle after operator confirms Phase 0 works against real clients.
