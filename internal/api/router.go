@@ -1678,6 +1678,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						})
 
 						if adminJobsHandler != nil {
+							// Curators must poll their own item-refresh jobs, so this stays outside
+							// the admin-only group. HandleGet enforces per-job authorization.
 							r.Get("/jobs/{id}", adminJobsHandler.HandleGet)
 						}
 

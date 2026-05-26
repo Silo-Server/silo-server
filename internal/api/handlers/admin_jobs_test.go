@@ -53,7 +53,8 @@ func TestAdminJobToResponseForClaims_NonAdminSanitizesItemRefreshPayloads(t *tes
 		ResultPayload: json.RawMessage(
 			`{"requested_content_id":"item-1","detail_content_id":"item-2","scan_path":"/srv/media/private/movie","scan_result":{"New":1,"RootObservations":[{"RootPath":"/srv/media/private","SampleFilePath":"/srv/media/private/movie.mkv"}]}}`,
 		),
-		PublicURL: "https://example.test/public",
+		ErrorMessage: "scan scope: stat /srv/media/private/movie: permission denied",
+		PublicURL:    "https://example.test/public",
 	}
 
 	resp := adminJobToResponseForClaims(nil, job, nil, claims)
@@ -73,5 +74,8 @@ func TestAdminJobToResponseForClaims_NonAdminSanitizesItemRefreshPayloads(t *tes
 	if !bytes.Contains(resp.ResultPayload, []byte("requested_content_id")) ||
 		!bytes.Contains(resp.ResultPayload, []byte("detail_content_id")) {
 		t.Fatalf("ResultPayload = %s, want safe item refresh summary fields", resp.ResultPayload)
+	}
+	if resp.ErrorMessage != "" {
+		t.Fatalf("ErrorMessage = %q, want stripped for non-admin", resp.ErrorMessage)
 	}
 }

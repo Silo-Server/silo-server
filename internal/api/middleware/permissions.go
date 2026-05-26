@@ -30,6 +30,9 @@ func NewPermissionMiddleware(users PermissionUserLoader, libraries MetadataTarge
 	return &PermissionMiddleware{users: users, libraries: libraries}
 }
 
+// RequireMetadataCurationForItem allows admins or users with metadata_curation
+// permission when every library containing the target item is within the user's
+// assigned libraries. A nil user library list means unrestricted library access.
 func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())

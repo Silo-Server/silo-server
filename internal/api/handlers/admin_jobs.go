@@ -171,6 +171,7 @@ func sanitizeAdminJobResponseForClaims(response *adminJobResponse, claims *auth.
 	}
 	response.RequestPayload = json.RawMessage(`{}`)
 	response.ResultPayload = sanitizeNonAdminAdminJobResultPayload(response.JobType, response.ResultPayload)
+	response.ErrorMessage = ""
 	response.PublicURL = ""
 	response.DownloadURL = ""
 	response.DownloadExpiresAt = nil
