@@ -142,3 +142,30 @@ func (h *Handler) handleListCollections(w http.ResponseWriter, r *http.Request) 
 // chiURLID is a tiny shim around chi.URLParam(r, "id") so handler call
 // sites read uniformly. Inlined where unambiguous.
 func chiURLID(r *http.Request) string { return chi.URLParam(r, "id") }
+
+// handleGetCollection — GET /collections/{id}.
+// Owner gets full-shape; non-owner gets full-shape only when isPublic.
+// Otherwise 404 (no existence leak — indistinguishable from real
+// not-found).
+func (h *Handler) handleGetCollection(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.CollectionStore == nil {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	c, err := h.deps.CollectionStore.GetCollection(r.Context(), chiURLID(r))
+	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID && !c.IsPublic) {
+		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("abs collection get failed", "err", err)
+		http.Error(w, "collection get failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, c))
+}

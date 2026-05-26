@@ -301,3 +301,75 @@ func TestCollection_List_ProfileIsolation(t *testing.T) {
 		t.Errorf("profile B sees %d collections, want 0", len(list))
 	}
 }
+
+// createCollectionForUser is a tiny helper that POSTs a collection and
+// returns its id. Used by tests that need to seed a row.
+func createCollectionForUser(t *testing.T, hb *collectionsHarness, userID, profileID, body string) string {
+	t.Helper()
+	rec := dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(body), userID, profileID, hb.H.handleCreateCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("seed POST status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	id, _ := got["id"].(string)
+	if id == "" {
+		t.Fatalf("seed POST returned no id; body=%s", rec.Body.String())
+	}
+	return id
+}
+
+func TestCollection_Get_Owner_ReturnsFullShape(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections/"+id, map[string]string{"id": id}, nil, "1", "", hb.H.handleGetCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "mine" {
+		t.Errorf("name = %v, want 'mine'", got["name"])
+	}
+	books, ok := got["books"].([]any)
+	if !ok {
+		t.Errorf("books missing on full-shape response: %v", got)
+	}
+	if len(books) != 0 {
+		t.Errorf("books len = %d, want 0 for freshly created", len(books))
+	}
+}
+
+func TestCollection_Get_NonOwner_Private_404(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"private"}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleGetCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("non-owner private GET status = %d, want 404 (anti-enumeration); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCollection_Get_NonOwner_Public_OK(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"public","isPublic":true}`)
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections/"+id, map[string]string{"id": id}, nil, "2", "", hb.H.handleGetCollection)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("non-owner public GET status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["name"] != "public" {
+		t.Errorf("name = %v, want 'public'", got["name"])
+	}
+}
+
+func TestCollection_Get_Unknown_404(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/collections/01HZZZ", map[string]string{"id": "01HZZZ"}, nil, "1", "", hb.H.handleGetCollection)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
