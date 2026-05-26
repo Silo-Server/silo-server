@@ -7,6 +7,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abssocket"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,14 +37,25 @@ func New(settings SettingsReader) *Service {
 }
 
 // ABSHandlerDeps bundles the concrete silo dependencies needed to construct
-// the ABS-compat abs.Handler. All fields except Pool are optional; the handler
-// degrades gracefully when any of them is nil.
+// the ABS-compat abs.Handler. Pool, Items, and Files are required — the ABS
+// handler dereferences MediaStore from many request paths and a nil store
+// would panic on the first request. BuildABSHandler validates this at startup.
 type ABSHandlerDeps struct {
-	Pool      *pgxpool.Pool
-	Items     *catalog.ItemRepository
-	Files     *scanner.FileRepository
-	Settings  *catalog.ServerSettingsRepo
-	Auth      absAuthAdapter // see BuildABSHandler below
+	Pool     *pgxpool.Pool
+	Items    *catalog.ItemRepository
+	Files    *scanner.FileRepository
+	Settings *catalog.ServerSettingsRepo
+	Auth     absAuthAdapter // see BuildABSHandler below
+	// Recs is the recommendations repository used to power the
+	// /items/{id}/similar endpoint via embedding nearest-neighbor search.
+	// Optional; when nil, ABSRecommender falls back to the shared-genre
+	// SQL path. When the full chain is unwired (Recs and Pool both nil),
+	// the ABS Recommender field stays nil and similar returns empty.
+	Recs *recommendations.Repo
+	// Detail resolves audiobook poster S3 paths into fully-qualified URLs
+	// that ABS clients can fetch. Optional; when nil, /api/items/{id}/cover
+	// 404s rather than redirecting to an unreachable storage path.
+	Detail *catalog.DetailService
 }
 
 // absAuthAdapter is the narrow slice of internal/auth that BuildABSHandler
@@ -56,13 +68,13 @@ type absAuthAdapter = abs.ProfileCredentialValidator
 // *abs.Handler. Callers pass the handler to service.ABSHandler and to the
 // HTTP router (via api.Dependencies.ABSHandler).
 func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
-	var mediaStore abs.MediaStore
-	if deps.Items != nil && deps.Files != nil {
-		mediaStore = &ABSMediaStore{
-			Items: deps.Items,
-			Files: deps.Files,
-			Pool:  deps.Pool,
-		}
+	if deps.Items == nil || deps.Files == nil {
+		panic("audiobooks.BuildABSHandler: Items and Files repositories are required")
+	}
+	mediaStore := &ABSMediaStore{
+		Items: deps.Items,
+		Files: deps.Files,
+		Pool:  deps.Pool,
 	}
 
 	var tokenStore abs.TokenStore
@@ -112,13 +124,29 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		CredValidator:        deps.Auth,
 		Config:               configProvider,
 		Publisher:            nil, // EventPublisher: no-op stub; Socket.io handles realtime
-		Recommender:          nil, // Recommender: stub returning empty
+		Recommender:          buildABSRecommender(deps),
 		ProgressStore:        progressStore,
 		PlaybackSessionStore: playbackSessionStore,
 		SocketIO:             socketServer,
+		CoverResolver: func(ctx context.Context, path, variant string) string {
+			if deps.Detail == nil {
+				return ""
+			}
+			return deps.Detail.PresignURL(ctx, path, variant)
+		},
 	})
 	s.ABSHandler = h
 	return h
+}
+
+// buildABSRecommender returns the abs.Recommender adapter when at least one
+// of its data sources is available. Nil result means /items/{id}/similar
+// keeps returning an empty list (the route's documented degradation path).
+func buildABSRecommender(deps ABSHandlerDeps) abs.Recommender {
+	if deps.Pool == nil && deps.Recs == nil {
+		return nil
+	}
+	return &ABSRecommender{Pool: deps.Pool, Recs: deps.Recs}
 }
 
 // Enabled reports whether the audiobooks feature flag (set by migration

@@ -195,7 +195,16 @@ type Handler struct {
 
 // New constructs an ABS Handler. Sensible defaults are applied for optional
 // fields (LoginLimiter, InstallID).
+//
+// MediaStore is required: many handlers (libraries, items, me, play) deref
+// it unconditionally on the request hot path, and a nil store would panic
+// the first time a real request hits them. Fail fast at construction so
+// misconfigured deployments break at startup rather than silently passing
+// /login and crashing on the next request.
 func New(deps Dependencies) *Handler {
+	if deps.MediaStore == nil {
+		panic("abs.New: MediaStore is required")
+	}
 	if deps.LoginLimiter == nil {
 		deps.LoginLimiter = NewLoginLimiter()
 	}

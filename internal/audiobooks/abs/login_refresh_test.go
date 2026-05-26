@@ -10,7 +10,48 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// noopMediaStore satisfies the MediaStore interface with empty returns.
+// abs.New panics on a nil MediaStore, so handler tests that don't exercise
+// catalog reads pass this to satisfy the contract.
+type noopMediaStore struct{}
+
+func (noopMediaStore) GetAudiobookByID(context.Context, string) (*models.MediaItem, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int) ([]*models.MediaItem, int, error) {
+	return nil, 0, nil
+}
+func (noopMediaStore) GetMediaFiles(context.Context, string) ([]*models.MediaFile, error) {
+	return nil, nil
+}
+func (noopMediaStore) GetMediaFileByID(context.Context, int) (*models.MediaFile, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListAudiobookLibraries(context.Context) ([]AudiobookLibrary, error) {
+	return nil, nil
+}
+func (noopMediaStore) SearchAudiobooks(context.Context, int64, string, int) ([]*models.MediaItem, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListContinueListening(context.Context, string, string, int64, int) ([]*models.MediaItem, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListRecentlyAdded(context.Context, int64, int) ([]*models.MediaItem, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListDiscover(context.Context, int64, int) ([]*models.MediaItem, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int) ([]AuthorSummary, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibrarySeries(context.Context, int64, int) ([]SeriesSummary, error) {
+	return nil, nil
+}
 
 // memTokenStore is an in-memory TokenStore for handleRefresh tests.
 type memTokenStore struct {
@@ -64,6 +105,7 @@ func newRefreshTestHandler(t *testing.T) (*Handler, *memTokenStore, *staticConfi
 	h := New(Dependencies{
 		Config:     cfg,
 		TokenStore: store,
+		MediaStore: noopMediaStore{},
 	})
 	return h, store, cfg
 }

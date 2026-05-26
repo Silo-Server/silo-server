@@ -227,14 +227,12 @@ func (h *Handler) loginEnvelope(
 
 	libraryMaps := make([]map[string]any, 0)
 	defaultLibraryID := VirtualLibraryID
-	if h.deps.MediaStore != nil {
-		libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
-		for i, lib := range libs {
-			if i == 0 {
-				defaultLibraryID = audiobookLibraryID(lib)
-			}
-			libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
+	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
+	for i, lib := range libs {
+		if i == 0 {
+			defaultLibraryID = audiobookLibraryID(lib)
 		}
+		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
 	nowMs := time.Now().UnixMilli()

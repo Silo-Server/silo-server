@@ -63,20 +63,16 @@ func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[str
 	const fetchCap = 5000
 
 	authorObjs := []AuthorObj{}
-	if h.deps.MediaStore != nil {
-		if rows, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, fetchCap); err == nil {
-			for _, a := range rows {
-				authorObjs = append(authorObjs, AuthorObj{ID: a.ID, Name: a.Name})
-			}
+	if rows, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, fetchCap); err == nil {
+		for _, a := range rows {
+			authorObjs = append(authorObjs, AuthorObj{ID: a.ID, Name: a.Name})
 		}
 	}
 
 	seriesObjs := []SeriesObj{}
-	if h.deps.MediaStore != nil {
-		if rows, err := h.deps.MediaStore.ListLibrarySeries(ctx, lib.ID, fetchCap); err == nil {
-			for _, s := range rows {
-				seriesObjs = append(seriesObjs, SeriesObj{ID: s.ID, Name: s.Name})
-			}
+	if rows, err := h.deps.MediaStore.ListLibrarySeries(ctx, lib.ID, fetchCap); err == nil {
+		for _, s := range rows {
+			seriesObjs = append(seriesObjs, SeriesObj{ID: s.ID, Name: s.Name})
 		}
 	}
 

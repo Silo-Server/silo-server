@@ -12,7 +12,7 @@ func TestHandleLogout_RevokesJTIAndReturns204(t *testing.T) {
 	jti := "logout-test-jti"
 	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "1", JTI: jti})
 
-	h := New(Dependencies{TokenStore: store})
+	h := New(Dependencies{TokenStore: store, MediaStore: noopMediaStore{}})
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	// Simulate bearerAuth having populated the context.
 	ctx := context.WithValue(req.Context(), ctxKey{}, ctxAuth{
@@ -34,7 +34,7 @@ func TestHandleLogout_RevokesJTIAndReturns204(t *testing.T) {
 
 func TestHandleLogout_NoAuthContext_204(t *testing.T) {
 	store := newMemTokenStore()
-	h := New(Dependencies{TokenStore: store})
+	h := New(Dependencies{TokenStore: store, MediaStore: noopMediaStore{}})
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	rec := httptest.NewRecorder()
 	h.handleLogout(rec, req)
@@ -44,7 +44,7 @@ func TestHandleLogout_NoAuthContext_204(t *testing.T) {
 }
 
 func TestHandleLogout_NilTokenStore_204(t *testing.T) {
-	h := New(Dependencies{})
+	h := New(Dependencies{MediaStore: noopMediaStore{}})
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	ctx := context.WithValue(req.Context(), ctxKey{}, ctxAuth{UserID: "1", JTI: "x"})
 	req = req.WithContext(ctx)
@@ -59,7 +59,7 @@ func TestHandleLogout_IsIdempotent(t *testing.T) {
 	store := newMemTokenStore()
 	jti := "idem-jti"
 	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "1", JTI: jti})
-	h := New(Dependencies{TokenStore: store})
+	h := New(Dependencies{TokenStore: store, MediaStore: noopMediaStore{}})
 
 	for i := 0; i < 3; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/logout", nil)
