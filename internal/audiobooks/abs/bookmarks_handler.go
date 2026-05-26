@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -95,16 +94,3 @@ func writeBookmarkList(w http.ResponseWriter, r *http.Request, h *Handler, userI
 	writeJSON(w, http.StatusOK, out)
 }
 
-// parseBookmarkTime parses the {time} URL parameter on DELETE
-// /me/item/{itemId}/bookmark/{time}. Returns (0, false) on parse
-// failure.
-func parseBookmarkTime(s string) (float64, bool) {
-	if s == "" {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil || math.IsNaN(v) {
-		return 0, false
-	}
-	return v, true
-}
