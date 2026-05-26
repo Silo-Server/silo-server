@@ -13,12 +13,17 @@ import (
 
 // playlistBody is the JSON body for POST and PATCH /playlists[/{id}].
 // Fields are pointers so PATCH can distinguish "field absent" from
-// "field set to empty/false".
+// "field set to empty/false". The real-ABS mobile client also sends
+// `items` and `libraryId` on POST — the create flow expects the
+// playlist + its initial members in a single round-trip — so we
+// accept (and apply) both here. PATCH ignores them.
 type playlistBody struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	CoverItem   *string `json:"cover_item"`
-	IsPublic    *bool   `json:"isPublic"`
+	Name        *string           `json:"name"`
+	Description *string           `json:"description"`
+	CoverItem   *string           `json:"cover_item"`
+	IsPublic    *bool             `json:"isPublic"`
+	LibraryID   *string           `json:"libraryId"`
+	Items       []playlistItemRef `json:"items"`
 }
 
 // playlistItemRef is the JSON body for adding/removing a single
@@ -72,6 +77,29 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		slog.Error("abs playlist create failed", "err", err, "user", a.UserID)
 		http.Error(w, "playlist persist failed", http.StatusInternalServerError)
 		return
+	}
+
+	// Add any items the client sent on the same POST — real-ABS mobile
+	// builds the playlist + initial member list in one round-trip
+	// (see audiobookshelf-app components/modals/playlists/
+	// AddCreateModal.vue submitCreatePlaylist). Per-item errors are
+	// tolerated silently; whole-batch failure already surfaced above.
+	for _, it := range body.Items {
+		if it.LibraryItemID == "" {
+			continue
+		}
+		// Episode items skip audiobook MediaStore validation per the
+		// audiobook-only-hydration policy. Audiobook items get a
+		// MediaStore lookup so typos don't create orphan rows.
+		if it.EpisodeID == "" {
+			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID); mErr != nil || mi == nil {
+				slog.Debug("abs playlist create-items: skipping unknown audiobook", "id", it.LibraryItemID)
+				continue
+			}
+		}
+		if addErr := h.deps.PlaylistStore.AddPlaylistItem(r.Context(), p.ID, it.LibraryItemID, it.EpisodeID); addErr != nil {
+			slog.Debug("abs playlist create-items: store error", "err", addErr, "id", it.LibraryItemID)
+		}
 	}
 
 	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), p.ID)
