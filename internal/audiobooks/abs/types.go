@@ -90,6 +90,9 @@ type AudioTrack struct {
 
 // Metadata is the book-level metadata block. Authors / Narrators / Series
 // match the ABS spec: arrays of references (or strings for Narrators).
+// Genres and Tags intentionally do NOT use omitempty — strict 3rd-party
+// clients (Plappa, AudioBookShelfFully) branch on these keys being present
+// (even if empty), and dropping the key sends them into degraded mode.
 type Metadata struct {
 	Title         string      `json:"title"`
 	Authors       []AuthorObj `json:"authors"`
@@ -99,7 +102,8 @@ type Metadata struct {
 	PublishedYear string      `json:"publishedYear,omitempty"`
 	ISBN          string      `json:"isbn,omitempty"`
 	Publisher     string      `json:"publisher,omitempty"`
-	Genres        []string    `json:"genres,omitempty"`
+	Genres        []string    `json:"genres"`
+	Tags          []string    `json:"tags"`
 }
 
 // LibraryItemMedia carries the bulk of the audiobook metadata.

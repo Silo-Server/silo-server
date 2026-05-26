@@ -194,8 +194,25 @@ func (h *Handler) handleItemCover(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// Redirect to silo's native image endpoint rather than proxying bytes.
-	http.Redirect(w, r, item.PosterPath, http.StatusFound)
+	target := item.PosterPath
+	// Raw silo paths (e.g. "local/audiobooks/.../original.webp") need to
+	// be resolved into a real URL via the CoverResolver before redirect;
+	// otherwise the client follows a relative path that doesn't exist on
+	// the ABS listener.
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		if h.deps.CoverResolver != nil {
+			if resolved := h.deps.CoverResolver(r.Context(), target, "card"); resolved != "" {
+				target = resolved
+			} else {
+				http.NotFound(w, r)
+				return
+			}
+		} else {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // handleAuthorImage — GET /abs/api/authors/{id}/image (unauthenticated)
@@ -207,48 +224,180 @@ func (h *Handler) handleAuthorImage(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleLibraryAuthors — GET /abs/api/libraries/{id}/authors
-// Stubbed: silo does not yet maintain a normalised author table.
+// Lists audiobook authors aggregated from item_people kind=7, including
+// per-author book counts. Returns the canonical ABS paged envelope to
+// match the continuum-plugin-audiobooks shape verbatim.
 func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.resolveLibrary(w, r); !ok {
+	lib, ok := h.resolveLibrary(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authors": []any{}})
+	limit, page := readPagedQuery(r, 50)
+	authors, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, limit)
+	if err != nil {
+		http.Error(w, "list authors: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	libID := audiobookLibraryID(lib)
+	results := make([]map[string]any, 0, len(authors))
+	for _, a := range authors {
+		results = append(results, map[string]any{
+			"id":        a.ID,
+			"name":      a.Name,
+			"numBooks":  a.NumBooks,
+			"libraryId": libID,
+		})
+	}
+	writeJSON(w, http.StatusOK, pagedEnvelope(results, len(results), limit, page, "name", false, "", false, ""))
 }
 
 // handleLibrarySeries — GET /abs/api/libraries/{id}/series
-// Stubbed: silo does not yet maintain a normalised series table.
+// Lists audiobook series. Single-book series are filtered out by the
+// store query since they're not useful as series. Returns the canonical
+// ABS paged envelope; addedAt is 0 because the v1 catalog has no series
+// added-at column (real ABS clients tolerate the placeholder).
 func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.resolveLibrary(w, r); !ok {
+	lib, ok := h.resolveLibrary(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": []any{}, "total": 0})
+	limit, page := readPagedQuery(r, 25)
+	series, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, limit)
+	if err != nil {
+		http.Error(w, "list series: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	libID := audiobookLibraryID(lib)
+	results := make([]map[string]any, 0, len(series))
+	for _, s := range series {
+		results = append(results, map[string]any{
+			"id":        s.ID,
+			"name":      s.Name,
+			"numBooks":  s.NumBooks,
+			"libraryId": libID,
+			"addedAt":   0,
+		})
+	}
+	writeJSON(w, http.StatusOK, pagedEnvelope(results, len(results), limit, page, "name", false, "", false, ""))
 }
 
-// handleLibrarySearch — GET /abs/api/libraries/{id}/search
-// Stubbed: returns empty results for all categories.
+// handleLibrarySearch — GET /abs/api/libraries/{id}/search?q=…&limit=…
+// Returns matching books grouped under "book", with empty arrays for the
+// other ABS-standard buckets (podcast, series, authors, tags). Bucket
+// names match continuum-plugin-audiobooks exactly: note "authors" plural,
+// not "author" — ABS mobile clients key off the plural form and a
+// singular bucket is silently dropped.
 func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.resolveLibrary(w, r); !ok {
+	lib, ok := h.resolveLibrary(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"book":   []any{},
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := 12
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 50 {
+		limit = n
+	}
+	empty := map[string]any{
+		"book":    []any{},
 		"podcast": []any{},
-		"author": []any{},
-		"series": []any{},
-		"tags":   []any{},
-	})
+		"series":  []any{},
+		"authors": []any{},
+		"tags":    []any{},
+	}
+	if q == "" {
+		writeJSON(w, http.StatusOK, empty)
+		return
+	}
+	items, err := h.deps.MediaStore.SearchAudiobooks(r.Context(), lib.ID, q, limit)
+	if err != nil {
+		http.Error(w, "search: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	baseURL := h.absBaseURL(r)
+	books := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		books = append(books, map[string]any{
+			"libraryItem": siloItemToLibraryItem(it, lib, baseURL),
+			"matchKey":    "title",
+			"matchText":   it.Title,
+		})
+	}
+	out := empty
+	out["book"] = books
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handlePersonalized — GET /abs/api/libraries/{id}/personalized
-// Stubbed: returns an empty shelf list. Continue Listening is served via
-// /me/items-in-progress; this endpoint feeds the home-tab "shelves".
-// A full implementation would build Recently Added, Continue Listening,
-// Newest Authors, etc. from silo's catalog + progress tables.
+//
+// Emits the canonical six-shelf Home tab payload that ABS mobile clients
+// expect: continue-listening, continue-series, newest, recent-series,
+// discover, listen-again. Shelves we don't yet populate (continue-series,
+// listen-again) ship with empty entities/total — the client iterates the
+// shelf list by id and skips empties cleanly, but it crashes on a missing
+// shelf id. Matches continuum-plugin-audiobooks/handlePersonalized layout.
 func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.resolveLibrary(w, r); !ok {
+	lib, ok := h.resolveLibrary(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, []any{})
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	baseURL := h.absBaseURL(r)
+	const shelfLimit = 10
+
+	shelves := []map[string]any{
+		{"id": "continue-listening", "label": "Continue Listening", "labelStringKey": "LabelContinueListening", "type": "book", "entities": []any{}, "total": 0},
+		{"id": "continue-series", "label": "Continue Series", "labelStringKey": "LabelContinueSeries", "type": "book", "entities": []any{}, "total": 0},
+		{"id": "newest", "label": "Newest", "labelStringKey": "LabelNewest", "type": "book", "entities": []any{}, "total": 0},
+		{"id": "recent-series", "label": "Recent Series", "labelStringKey": "LabelRecentSeries", "type": "series", "entities": []any{}, "total": 0},
+		{"id": "discover", "label": "Discover", "labelStringKey": "LabelDiscover", "type": "book", "entities": []any{}, "total": 0},
+		{"id": "listen-again", "label": "Listen Again", "labelStringKey": "LabelListenAgain", "type": "book", "entities": []any{}, "total": 0},
+	}
+
+	if items, err := h.deps.MediaStore.ListContinueListening(r.Context(), a.UserID, a.ProfileID, lib.ID, shelfLimit); err == nil && len(items) > 0 {
+		shelves[0]["entities"] = minifiedSlice(items, lib, baseURL)
+		shelves[0]["total"] = len(items)
+	}
+
+	if items, err := h.deps.MediaStore.ListRecentlyAdded(r.Context(), lib.ID, shelfLimit); err == nil && len(items) > 0 {
+		shelves[2]["entities"] = minifiedSlice(items, lib, baseURL)
+		shelves[2]["total"] = len(items)
+	}
+
+	libID := audiobookLibraryID(lib)
+	if series, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, shelfLimit); err == nil && len(series) > 0 {
+		recent := make([]map[string]any, 0, len(series))
+		for _, s := range series {
+			recent = append(recent, map[string]any{
+				"id":        s.ID,
+				"name":      s.Name,
+				"numBooks":  s.NumBooks,
+				"libraryId": libID,
+				"books":     []any{},
+			})
+		}
+		shelves[3]["entities"] = recent
+		shelves[3]["total"] = len(recent)
+	}
+
+	if items, err := h.deps.MediaStore.ListDiscover(r.Context(), lib.ID, shelfLimit); err == nil && len(items) > 0 {
+		shelves[4]["entities"] = minifiedSlice(items, lib, baseURL)
+		shelves[4]["total"] = len(items)
+	}
+
+	writeJSON(w, http.StatusOK, shelves)
+}
+
+// minifiedSlice converts a batch of MediaItems into ABS Minified entries.
+func minifiedSlice(items []*models.MediaItem, lib AudiobookLibrary, baseURL string) []MinifiedLibraryItem {
+	out := make([]MinifiedLibraryItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, Minify(siloItemToLibraryItem(it, lib, baseURL)))
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -311,10 +460,12 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 	// extension). Convert from the int field.
 	duration := float64(item.Runtime) // seconds
 
-	coverPath := item.PosterPath
-	if coverPath == "" {
-		coverPath = baseURL + "/abs/api/items/" + item.ContentID + "/cover"
-	}
+	// Always point coverPath at our /api/items/{id}/cover endpoint rather
+	// than the raw silo PosterPath. Storage paths like
+	// "local/audiobooks/.../original.webp" mean nothing to an ABS client;
+	// our cover handler resolves them via the CoverResolver before
+	// redirecting to the real URL.
+	coverPath := baseURL + "/api/items/" + item.ContentID + "/cover"
 
 	addedAtMs := int64(0)
 	if item.AddedAt != nil {
@@ -345,6 +496,10 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 // Authors and narrators are sourced from item.People; series from Studios
 // (silo stores the series name in Studios for audiobooks until a proper
 // series table lands — see scanner Stage 2 notes).
+//
+// Strict 3rd-party clients (Plappa, AudioBookShelfFully) require id on
+// every author/series entry and non-nil tags/genres arrays. We surface
+// IDs from item_people.id (authors) and slugify(name) (series).
 func siloItemToMetadata(item *models.MediaItem) Metadata {
 	authors := make([]AuthorObj, 0)
 	narrators := make([]string, 0)
@@ -364,6 +519,9 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 	// Series: silo's audiobook scanner stores series name in the Studios
 	// field until a dedicated series table is added. Derive an ID by
 	// slugifying the name (same convention as the plugin's translate.go).
+	// Authoritative series IDs will replace these slugs when a series
+	// table lands; client-stored references survive the change because the
+	// slug is stable for a given name.
 	series := make([]SeriesObj, 0, len(item.Studios))
 	for _, s := range item.Studios {
 		s = strings.TrimSpace(s)
@@ -386,6 +544,10 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 		genres = []string{}
 	}
 
+	// silo has no item-level tags concept today; emit an empty array so
+	// clients that branch on tags[] don't see a null and crash.
+	tags := []string{}
+
 	return Metadata{
 		Title:         item.Title,
 		Authors:       authors,
@@ -394,6 +556,7 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 		Description:   item.Overview,
 		PublishedYear: publishedYear,
 		Genres:        genres,
+		Tags:          tags,
 	}
 }
 
