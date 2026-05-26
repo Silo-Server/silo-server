@@ -73,6 +73,27 @@ func (r *PgRepository) ListDownloadedSubtitles(ctx context.Context, mediaFileID 
 	return subs, rows.Err()
 }
 
+func (r *PgRepository) UpdateDownloadedSubtitle(ctx context.Context, id int, update SubtitleMetadataUpdate) (*DownloadedSubtitle, error) {
+	var sub DownloadedSubtitle
+	err := r.pool.QueryRow(ctx,
+		`UPDATE downloaded_subtitles
+		SET language = $1, release_name = $2, hearing_impaired = $3, s3_key = $4
+		WHERE id = $5
+		RETURNING id, media_file_id, provider, language, format, release_name,
+			s3_key, score, hearing_impaired, downloaded_by, created_at`,
+		update.Language, update.ReleaseName, update.HearingImpaired, update.S3Key, id,
+	).Scan(&sub.ID, &sub.MediaFileID, &sub.Provider, &sub.Language, &sub.Format,
+		&sub.ReleaseName, &sub.S3Key, &sub.Score, &sub.HearingImpaired,
+		&sub.DownloadedBy, &sub.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update downloaded subtitle: %w", err)
+	}
+	return &sub, nil
+}
+
 func (r *PgRepository) DeleteDownloadedSubtitle(ctx context.Context, id int) (*DownloadedSubtitle, error) {
 	var sub DownloadedSubtitle
 	err := r.pool.QueryRow(ctx,

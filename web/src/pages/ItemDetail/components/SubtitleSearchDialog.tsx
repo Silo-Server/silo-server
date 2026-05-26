@@ -21,11 +21,14 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   searchSubtitles,
+  detectSubtitleLanguage,
   useDownloadSubtitle,
   useDownloadedSubtitles,
+  useUploadSubtitle,
 } from "@/hooks/queries/subtitles";
 import { cn } from "@/lib/utils";
 import { LANGUAGES, getLanguageName } from "@/player/utils/languageNames";
+import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { buildQualitySummary } from "./VersionFlyout";
 
 interface SubtitleSearchDialogProps {
@@ -39,6 +42,7 @@ const providerInfo: Record<string, { abbr: string; className: string }> = {
   opensubtitles: { abbr: "OS", className: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
   subdl: { abbr: "SDL", className: "bg-sky-500/15 text-sky-700 dark:text-sky-300" },
   subsource: { abbr: "SS", className: "bg-rose-500/15 text-rose-700 dark:text-rose-300" },
+  upload: { abbr: "UP", className: "bg-violet-500/15 text-violet-700 dark:text-violet-300" },
 };
 
 function scoreTone(score: number): { text: string; ring: string; bg: string } {
@@ -77,6 +81,7 @@ export default function SubtitleSearchDialog({
   title,
 }: SubtitleSearchDialogProps) {
   const downloadSubtitleMutation = useDownloadSubtitle();
+  const uploadSubtitleMutation = useUploadSubtitle();
   const downloadedQuery = useDownloadedSubtitles(open ? version?.file_id : undefined);
   const searchAbortRef = useRef<AbortController | null>(null);
 
@@ -190,13 +195,41 @@ export default function SubtitleSearchDialog({
     [downloadSubtitleMutation, downloadedQuery, version],
   );
 
+  const handleUpload = useCallback(
+    async (input: {
+      mediaFileId: number;
+      file: File;
+      language?: string;
+      languageOverride?: boolean;
+      hearingImpaired: boolean;
+    }) => {
+      await uploadSubtitleMutation.mutateAsync({
+        media_file_id: input.mediaFileId,
+        file: input.file,
+        language: input.language,
+        language_override: input.languageOverride,
+        hearing_impaired: input.hearingImpaired,
+      });
+    },
+    [uploadSubtitleMutation],
+  );
+
+  const handleDetectLanguage = useCallback(
+    (file: File, fallbackLanguage?: string) => detectSubtitleLanguage(file, fallbackLanguage),
+    [],
+  );
+
+  const handleUploadSuccess = useCallback(async () => {
+    await downloadedQuery.refetch();
+  }, [downloadedQuery]);
+
   const versionLabel = version ? buildQualitySummary(version) : "";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl overflow-hidden sm:max-w-3xl">
         <DialogHeader className="min-w-0">
-          <DialogTitle>Search Subtitles</DialogTitle>
+          <DialogTitle>Add Subtitles</DialogTitle>
           <DialogDescription className="truncate">
             {title}
             {versionLabel ? ` \u00B7 ${versionLabel}` : ""}
@@ -205,28 +238,42 @@ export default function SubtitleSearchDialog({
 
         <TooltipProvider delayDuration={250}>
           <div className="min-w-0 space-y-4">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
-                <SelectTrigger className="w-full sm:w-[220px]">
-                  <SelectValue placeholder="Language" />
-                </SelectTrigger>
-                <SelectContent>
-                  {LANGUAGES.map((language) => (
-                    <SelectItem key={language.code} value={language.code}>
-                      {language.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {version && (
+              <SubtitleUploadForm
+                mediaFileId={version.file_id}
+                upload={handleUpload}
+                detectLanguage={handleDetectLanguage}
+                onSuccess={handleUploadSuccess}
+                onError={setSearchError}
+                defaultLanguage={selectedLanguage}
+              />
+            )}
 
-              <Button onClick={handleSearch} disabled={!version || searching}>
-                {searching ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Search className="size-4" />
-                )}
-                Search
-              </Button>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Search online</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Select value={selectedLanguage} onValueChange={setSelectedLanguage}>
+                  <SelectTrigger className="w-full sm:w-[220px]">
+                    <SelectValue placeholder="Language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGES.map((language) => (
+                      <SelectItem key={language.code} value={language.code}>
+                        {language.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Button onClick={handleSearch} disabled={!version || searching}>
+                  {searching ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Search className="size-4" />
+                  )}
+                  Search
+                </Button>
+              </div>
             </div>
 
             {searchError && (

@@ -2949,6 +2949,20 @@ export interface SubtitleDownloadRequest {
   hearing_impaired: boolean;
 }
 
+export interface SubtitleUploadRequest {
+  media_file_id: number;
+  file: File;
+  language?: string;
+  language_override?: boolean;
+  release_name?: string;
+  hearing_impaired?: boolean;
+}
+
+export interface SubtitleLanguageDetection {
+  language: string;
+  source: "filename" | "metadata" | "content" | "manual";
+}
+
 export interface DownloadedSubtitle {
   id: number;
   media_file_id: number;
@@ -2959,6 +2973,47 @@ export interface DownloadedSubtitle {
   score: number;
   hearing_impaired: boolean;
   created_at: string;
+}
+
+export interface AdminDownloadedSubtitle {
+  id: number;
+  media_file_id: number;
+  media_content_id?: string;
+  provider: string;
+  language: string;
+  format: string;
+  release_name: string;
+  score: number;
+  hearing_impaired: boolean;
+  created_at: string;
+  downloaded_by?: number;
+  uploader_username: string;
+  media_title: string;
+  media_type: string;
+  file_path: string;
+}
+
+export interface AdminDownloadedSubtitlesResponse {
+  subtitles: AdminDownloadedSubtitle[];
+  total: number;
+  uploads: number;
+  provider_downloads: number;
+}
+
+export interface AdminDownloadedSubtitlesFilters {
+  provider?: string;
+  language?: string;
+  userId?: number;
+  mediaFileId?: number;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AdminUpdateDownloadedSubtitleRequest {
+  language?: string;
+  release_name?: string;
+  hearing_impaired?: boolean;
 }
 
 export interface SubtitleProviderConfig {

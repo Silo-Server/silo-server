@@ -360,6 +360,15 @@ export const adminKeys = {
   operationalLogs: (params: Record<string, unknown>) => ["admin", "logs", "app", params] as const,
   auditLogs: (params: Record<string, unknown>) => ["admin", "logs", "audit", params] as const,
   subtitleProviders: () => ["admin", "subtitleProviders"] as const,
+  downloadedSubtitles: (params: {
+    provider?: string;
+    language?: string;
+    userId?: number;
+    mediaFileId?: number;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }) => ["admin", "downloadedSubtitles", params] as const,
   historyImportSources: () => ["admin", "historyImportSources"] as const,
   historyImportExternalUsers: (sourceId: number) =>
     ["admin", "historyImportSources", sourceId, "users"] as const,

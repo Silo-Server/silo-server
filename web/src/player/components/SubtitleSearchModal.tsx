@@ -2,7 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { playerFetch } from "../player-fetch";
-import type { SubtitleSearchResponse, SubtitleResult } from "@/api/types";
+import type {
+  SubtitleLanguageDetection,
+  SubtitleSearchResponse,
+  SubtitleResult,
+} from "@/api/types";
+import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { LANGUAGES } from "../utils/languageNames";
 
 interface SubtitleSearchModalProps {
@@ -22,6 +27,7 @@ const providerInfo: Record<string, ProviderInfo> = {
   opensubtitles: { abbr: "OS", color: "#eab308" },
   subdl: { abbr: "SDL", color: "#3b82f6" },
   subsource: { abbr: "SS", color: "#ef4444" },
+  upload: { abbr: "UP", color: "#a855f7" },
 };
 
 function scoreColor(score: number): string {
@@ -132,6 +138,56 @@ export function SubtitleSearchModal({
     }
   }, [playerConfig, mediaFileId, selectedLang]);
 
+  const handleUpload = useCallback(
+    async (input: {
+      mediaFileId: number;
+      file: File;
+      language?: string;
+      languageOverride?: boolean;
+      hearingImpaired: boolean;
+    }) => {
+      const form = new FormData();
+      form.set("media_file_id", String(input.mediaFileId));
+      if (input.language) {
+        form.set("language", input.language);
+      }
+      if (input.languageOverride) {
+        form.set("language_override", "true");
+      }
+      form.set("file", input.file);
+      if (input.hearingImpaired) {
+        form.set("hearing_impaired", "true");
+      }
+
+      await playerFetch(playerConfig, "/subtitles/upload", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [playerConfig],
+  );
+
+  const handleDetectLanguage = useCallback(
+    async (file: File, fallbackLanguage?: string): Promise<SubtitleLanguageDetection> => {
+      const form = new FormData();
+      form.set("file", file);
+      if (fallbackLanguage) {
+        form.set("language", fallbackLanguage);
+      }
+
+      return playerFetch<SubtitleLanguageDetection>(playerConfig, "/subtitles/detect-language", {
+        method: "POST",
+        body: form,
+      });
+    },
+    [playerConfig],
+  );
+
+  const handleUploadSuccess = useCallback(() => {
+    onSubtitleDownloaded();
+    handleClose();
+  }, [onSubtitleDownloaded, handleClose]);
+
   const handleDownload = useCallback(
     async (result: SubtitleResult) => {
       const key = `${result.provider}:${result.id}`;
@@ -171,7 +227,7 @@ export function SubtitleSearchModal({
       onClick={handleClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Subtitle Search"
+      aria-label="Add Subtitles"
       onKeyDown={handleFocusTrap}
     >
       <div
@@ -181,7 +237,7 @@ export function SubtitleSearchModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 className="text-sm font-semibold">Search Subtitles</h2>
+          <h2 className="text-sm font-semibold">Add Subtitles</h2>
           <button
             type="button"
             className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
@@ -190,6 +246,20 @@ export function SubtitleSearchModal({
           >
             ✕
           </button>
+        </div>
+
+        <SubtitleUploadForm
+          mediaFileId={mediaFileId}
+          upload={handleUpload}
+          detectLanguage={handleDetectLanguage}
+          onSuccess={handleUploadSuccess}
+          onError={setError}
+          variant="player"
+          defaultLanguage={selectedLang}
+        />
+
+        <div className="border-b border-white/10 px-4 py-2">
+          <p className="text-xs font-medium text-white/60">Search online</p>
         </div>
 
         {/* Search controls */}

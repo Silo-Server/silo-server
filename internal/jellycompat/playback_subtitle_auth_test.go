@@ -33,6 +33,10 @@ func (r fakeSubtitleRepository) ListDownloadedSubtitles(_ context.Context, media
 	return r.downloaded[mediaFileID], nil
 }
 
+func (r fakeSubtitleRepository) UpdateDownloadedSubtitle(context.Context, int, subtitles.SubtitleMetadataUpdate) (*subtitles.DownloadedSubtitle, error) {
+	panic("unused")
+}
+
 func (r fakeSubtitleRepository) DeleteDownloadedSubtitle(context.Context, int) (*subtitles.DownloadedSubtitle, error) {
 	panic("unused")
 }
