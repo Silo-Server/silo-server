@@ -307,3 +307,90 @@ func TestDelete_NonExistentTime_IdempotentReturnsEmptyList(t *testing.T) {
 		t.Errorf("list len = %d, want 0", len(list))
 	}
 }
+
+func TestCreate_TwoAtDifferentTimes_ListOrderedByTime(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"later","time":100}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"earlier","time":50}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+
+	var list []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list) != 2 {
+		t.Fatalf("list len = %d, want 2", len(list))
+	}
+	if list[0]["time"] != float64(50) || list[1]["time"] != float64(100) {
+		t.Errorf("list times = [%v, %v], want [50, 100]", list[0]["time"], list[1]["time"])
+	}
+}
+
+func TestProfileIsolation_BookmarksScopedPerProfile(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+
+	// Profile A inserts.
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"a","time":1}`), "1", "00000000-0000-0000-0000-0000000000aa", hb.H.handleUpsertBookmark("bookmark_created"))
+
+	// Profile B (same user) reads via POST at a different time so we get the
+	// list back. Profile B's POST should return only profile B's bookmarks.
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"b","time":2}`), "1", "00000000-0000-0000-0000-0000000000bb", hb.H.handleUpsertBookmark("bookmark_created"))
+
+	var list []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list) != 1 {
+		t.Fatalf("profile B list len = %d, want 1 (isolation broken)", len(list))
+	}
+	if list[0]["title"] != "b" {
+		t.Errorf("profile B saw profile A's bookmark: %v", list[0])
+	}
+}
+
+func TestDelete_OtherUserBookmark_NoOpAndNoExistenceLeak(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+
+	// User B seeds a bookmark.
+	_ = dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"B's bookmark","time":42.5}`), "2", "", hb.H.handleUpsertBookmark("bookmark_created"))
+
+	// User A tries to DELETE at the same item+time.
+	rec := dispatchBookmark(hb.H, http.MethodDelete, "/api/me/item/book-1/bookmark/42.5", "book-1", "42.5", nil, "1", "", hb.H.handleDeleteBookmark)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (no leak); body=%s", rec.Code, rec.Body.String())
+	}
+	var aList []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &aList)
+	if len(aList) != 0 {
+		t.Errorf("user A response list = %v, want empty", aList)
+	}
+
+	// User B's bookmark must still be there.
+	bList, err := hb.Book.List(context.Background(), "2", "", "book-1")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(bList) != 1 {
+		t.Errorf("user B bookmarks = %d, want 1 (was wrongly deleted)", len(bList))
+	}
+}
+
+func TestMissingItem_404(t *testing.T) {
+	hb := newBookmarksHarness(t /* no known items */)
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/unknown/bookmark", "unknown", "", []byte(`{"title":"x","time":1}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInvalidBody_400(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{not json`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMissingTime_400(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"no time"}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
