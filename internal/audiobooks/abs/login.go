@@ -178,15 +178,53 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	slog.Debug("abs completeLogin: tokens persisted",
 		"user_id", userID, "access_jti", accessJTI, "refresh_jti", refreshJTI)
 
-	// Build user object. displayName falls back to userID when empty.
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, userID, displayName, access, refresh))
+}
+
+// handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
+// matches the continuum-plugin-audiobooks implementation exactly: clients
+// use this to validate the URL before showing the login form, and any
+// other shape causes the official mobile app to reject the server.
+func (h *Handler) handleABSPing(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"server":  "audiobookshelf",
+		"version": ServerVersion,
+		"pong":    true,
+	})
+}
+
+// handleABSInit — GET /init. Real ABS first-run detection probe.
+func (h *Handler) handleABSInit(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"isInit": true})
+}
+
+// handleABSStatus — GET /status. Mobile clients call this on every
+// connection to confirm the server is an ABS install and pull a few
+// global flags. Matches the plugin shape exactly (key order intentional).
+func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"isInit":        true,
+		"language":      "en-us",
+		"app":           "audiobookshelf",
+		"serverVersion": ServerVersion,
+	})
+}
+
+// loginEnvelope builds the response body shared by /login and /authorize.
+// Both endpoints must return the identical shape so the iOS client's
+// resume-on-launch flow validates the same way as fresh login.
+// accessToken/refreshToken may be empty for /authorize (client already has
+// them); in that case the top-level fields are still included as empty
+// strings so the JSON shape stays stable.
+func (h *Handler) loginEnvelope(
+	r *http.Request,
+	userID, displayName, accessToken, refreshToken string,
+) map[string]any {
 	name := displayName
 	if name == "" {
 		name = userID
 	}
 
-	// Resolve the audiobook library list + default ID up front so we can
-	// emit them in the login envelope. ABS clients require these on the
-	// initial login response to seed the library picker before /me lands.
 	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
 	libraryMaps := make([]map[string]any, 0, len(libs))
 	defaultLibraryID := VirtualLibraryID
@@ -197,27 +235,21 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	nowMs := now.UnixMilli()
+	nowMs := time.Now().UnixMilli()
 
-	// Real ABS clients pattern-match on a richer login envelope than the
-	// minimum we previously sent. The added fields (itemTagsAccessible,
-	// itemTagsSelected, lastSeen, createdAt) keep the iOS app off its
-	// "degraded mode" branch. Permissions stays the canonical eight-key
-	// object; setting all relevant flags true matches what real ABS does
-	// for a non-admin user.
 	user := map[string]any{
 		"id":                              userID,
 		"username":                        name,
 		"type":                            "user",
 		"defaultLibraryId":                defaultLibraryID,
-		"librariesAccessible":             []any{}, // empty = "all libraries accessible"
-		"itemTagsAccessible":              []any{}, // empty = "all tags accessible"
+		"librariesAccessible":             []any{},
+		"itemTagsAccessible":              []any{},
 		"itemTagsSelected":                []any{},
 		"mediaProgress":                   []any{},
 		"bookmarks":                       []any{},
 		"seriesHideFromContinueListening": []any{},
 		"isOldToken":                      false,
-		"token":                           access, // legacy field some 2.17- clients still read
+		"token":                           accessToken,
 		"lastSeen":                        nowMs,
 		"createdAt":                       nowMs,
 		"permissions": map[string]any{
@@ -232,16 +264,11 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		},
 	}
 
-	// x-return-tokens opt-in: when set, embed token pair on user object too
-	// (some clients read from the user envelope, others from the top level).
 	if strings.EqualFold(r.Header.Get("x-return-tokens"), "true") {
-		user["accessToken"] = access
-		user["refreshToken"] = refresh
+		user["accessToken"] = accessToken
+		user["refreshToken"] = refreshToken
 	}
 
-	// Server settings: real ABS emits many flags; clients use these to
-	// branch UI. Defaults match the official server's defaults so clients
-	// pick predictable UX paths.
 	serverSettings := map[string]any{
 		"id":                                "server-settings",
 		"version":                           ServerVersion,
@@ -281,48 +308,16 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		"authActiveAuthMethods":             []string{"local"},
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"user":                 user,
 		"userDefaultLibraryId": defaultLibraryID,
 		"serverSettings":       serverSettings,
 		"Source":               "silo",
 		"ereaderDevices":       []any{},
 		"libraries":            libraryMaps,
-		// Legacy top-level token fields for clients that read them
-		// directly (mainline reads from the user object; some third-party
-		// clients still read top-level).
-		"accessToken":  access,
-		"refreshToken": refresh,
-	})
-}
-
-// handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
-// matches the continuum-plugin-audiobooks implementation exactly: clients
-// use this to validate the URL before showing the login form, and any
-// other shape causes the official mobile app to reject the server.
-func (h *Handler) handleABSPing(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"server":  "audiobookshelf",
-		"version": ServerVersion,
-		"pong":    true,
-	})
-}
-
-// handleABSInit — GET /init. Real ABS first-run detection probe.
-func (h *Handler) handleABSInit(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"isInit": true})
-}
-
-// handleABSStatus — GET /status. Mobile clients call this on every
-// connection to confirm the server is an ABS install and pull a few
-// global flags. Matches the plugin shape exactly (key order intentional).
-func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"isInit":        true,
-		"language":      "en-us",
-		"app":           "audiobookshelf",
-		"serverVersion": ServerVersion,
-	})
+		"accessToken":          accessToken,
+		"refreshToken":         refreshToken,
+	}
 }
 
 // handleABSAuthorize — POST /api/authorize. Real ABS uses this to
@@ -339,39 +334,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
-	libraryMaps := make([]map[string]any, 0, len(libs))
-	defaultLibraryID := VirtualLibraryID
-	for i, lib := range libs {
-		if i == 0 {
-			defaultLibraryID = audiobookLibraryID(lib)
-		}
-		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
-	}
-	user := map[string]any{
-		"id":                  a.UserID,
-		"username":            a.UserID,
-		"type":                "user",
-		"defaultLibraryId":    defaultLibraryID,
-		"librariesAccessible": []any{},
-		"mediaProgress":       []any{},
-		"bookmarks":           []any{},
-		"isOldToken":          false,
-		"permissions": map[string]any{
-			"update":                true,
-			"delete":                true,
-			"download":              true,
-			"accessExplicitContent": true,
-		},
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user":                 user,
-		"userDefaultLibraryId": defaultLibraryID,
-		"serverSettings": map[string]any{
-			"version":  ServerVersion,
-			"language": "en-us",
-		},
-		"ereaderDevices": []any{},
-		"libraries":      libraryMaps,
-	})
+	// /authorize re-mints the envelope using the caller's bearer as the
+	// access token (client already has it); refresh isn't rotated here.
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, a.UserID, a.UserID, a.Token, ""))
 }
