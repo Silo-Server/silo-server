@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -15,14 +16,14 @@ type authorSeriesStubMediaStore struct {
 	series Series
 }
 
-func (s *authorSeriesStubMediaStore) GetAuthorByID(_ context.Context, id string) (Author, error) {
+func (s *authorSeriesStubMediaStore) GetAuthorByID(_ context.Context, id string, _ catalog.AccessFilter) (Author, error) {
 	if id != s.author.ID {
 		return Author{}, ErrNotFound
 	}
 	return s.author, nil
 }
 
-func (s *authorSeriesStubMediaStore) GetSeriesByName(_ context.Context, name string) (Series, error) {
+func (s *authorSeriesStubMediaStore) GetSeriesByName(_ context.Context, name string, _ catalog.AccessFilter) (Series, error) {
 	if name != s.series.ID && name != s.series.Name {
 		return Series{}, ErrNotFound
 	}

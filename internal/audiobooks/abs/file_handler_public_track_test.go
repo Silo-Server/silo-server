@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -38,6 +39,9 @@ func (f *fakePlaybackSessionStore) SyncPlaybackSession(context.Context, string, 
 	return nil
 }
 func (f *fakePlaybackSessionStore) ClosePlaybackSession(context.Context, string) error { return nil }
+func (f *fakePlaybackSessionStore) CloseOpenSessionsForPrincipal(context.Context, string, string) error {
+	return nil
+}
 
 func (f *fakePlaybackSessionStore) AggregateStats(_ context.Context, userID, profileID string) (Stats, error) {
 	return Stats{Days: []DayStat{}, Monthly: []MonthStat{}}, nil
@@ -57,7 +61,7 @@ type filesMediaStore struct {
 	files     []*models.MediaFile
 }
 
-func (f *filesMediaStore) GetMediaFiles(_ context.Context, contentID string) ([]*models.MediaFile, error) {
+func (f *filesMediaStore) GetMediaFiles(_ context.Context, contentID string, _ catalog.AccessFilter) ([]*models.MediaFile, error) {
 	if contentID != f.contentID {
 		return nil, nil
 	}

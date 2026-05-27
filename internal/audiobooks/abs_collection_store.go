@@ -16,11 +16,11 @@ import (
 // user_personal_collections + user_personal_collection_items tables
 // (migration 156). Manual ABS collections live in user_personal_collections
 // with collection_type = 'manual'; their member books are rows in
-// user_personal_collection_items with sub_item_id = '' (the empty string
+// user_personal_collection_items with sub_item_id = ” (the empty string
 // distinguishes whole-item membership from playlist podcast-episode rows).
 //
 // abs.Collection.IsPublic maps to user_personal_collections.is_shared.
-// profile_id is a text column (NOT NULL DEFAULT '') in the canonical
+// profile_id is a text column (NOT NULL DEFAULT ”) in the canonical
 // schema, so the empty string stands in for "primary profile".
 type ABSCollectionStore struct {
 	Pool *pgxpool.Pool
@@ -193,7 +193,7 @@ func (s *ABSCollectionStore) AddCollectionItem(ctx context.Context, collectionID
 		       now()
 		FROM user_personal_collections c
 		WHERE c.id = $1 AND c.collection_type = $3
-		ON CONFLICT (user_id, collection_id, media_item_id) DO NOTHING`,
+		ON CONFLICT (user_id, collection_id, media_item_id, sub_item_id) DO NOTHING`,
 		collectionID, libraryItemID, absCollectionTypeManual,
 	); err != nil {
 		return fmt.Errorf("abs_collection_store: add-item: %w", err)

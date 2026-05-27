@@ -28,23 +28,28 @@ func TestSiloItemToMetadata_AuthorsHaveIDs(t *testing.T) {
 	}
 }
 
-func TestSiloItemToMetadata_SeriesHaveSlugIDs(t *testing.T) {
+func TestSiloItemToMetadata_SeriesComeFromAudiobookSeries(t *testing.T) {
+	seq := 3.5
 	item := &models.MediaItem{
-		Title:   "Test Book",
-		Studios: []string{"The Dark Tower"},
+		Title:           "Test Book",
+		Studios:         []string{"Book Publisher"},
+		AudiobookSeries: []models.AudiobookSeriesMembership{{Name: "The Dark Tower", Index: &seq}},
 	}
 	m := siloItemToMetadata(item)
 	if len(m.Series) != 1 {
 		t.Fatalf("series len = %d, want 1", len(m.Series))
 	}
-	if m.Series[0].ID == "" {
-		t.Errorf("series ID is empty; want slugified name")
-	}
-	if m.Series[0].ID != "the-dark-tower" {
-		t.Errorf("series ID = %q, want %q", m.Series[0].ID, "the-dark-tower")
+	if m.Series[0].ID != "The Dark Tower" {
+		t.Errorf("series ID = %q, want %q", m.Series[0].ID, "The Dark Tower")
 	}
 	if m.Series[0].Name != "The Dark Tower" {
 		t.Errorf("series Name = %q, want %q", m.Series[0].Name, "The Dark Tower")
+	}
+	if m.Series[0].Sequence != "3.5" {
+		t.Errorf("series Sequence = %q, want %q", m.Series[0].Sequence, "3.5")
+	}
+	if m.Publisher != "Book Publisher" {
+		t.Errorf("publisher = %q, want %q", m.Publisher, "Book Publisher")
 	}
 }
 

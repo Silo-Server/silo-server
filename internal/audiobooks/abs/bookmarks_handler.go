@@ -55,7 +55,12 @@ func (h *Handler) handleUpsertBookmark(reason string) http.HandlerFunc {
 
 		// Item validation: avoid orphan bookmark rows whose item no
 		// longer exists. Skipped on DELETE (see handleDeleteBookmark).
-		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID)
+		access, err := h.accessFilterForAuth(r.Context(), a)
+		if err != nil {
+			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			return
+		}
+		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
 		if err != nil || item == nil {
 			http.Error(w, "item not found", http.StatusNotFound)
 			return
@@ -170,4 +175,3 @@ func writeBookmarkList(w http.ResponseWriter, r *http.Request, h *Handler, userI
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-

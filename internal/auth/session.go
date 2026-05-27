@@ -27,7 +27,7 @@ func IsSessionNotFound(err error) bool {
 }
 
 // sessionColumns is the list of columns returned by all session SELECT queries.
-const sessionColumns = `id, user_id, device_name, host(ip_address) AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at`
+const sessionColumns = `id, user_id, device_name, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at`
 
 // SessionRepository provides CRUD operations for the auth_sessions table.
 type SessionRepository struct {

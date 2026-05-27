@@ -21,7 +21,7 @@ import (
 // podcast-episode entries).
 //
 // abs.Playlist.IsPublic maps to user_personal_collections.is_shared.
-// profile_id is a text column (NOT NULL DEFAULT '') in the canonical
+// profile_id is a text column (NOT NULL DEFAULT ”) in the canonical
 // schema, so the empty string stands in for "primary profile".
 //
 // abs.Playlist.CoverItem has no canonical column (deferred per
@@ -35,20 +35,6 @@ var _ abs.PlaylistStore = (*ABSPlaylistStore)(nil)
 // absCollectionTypePlaylist is the discriminator value for ABS
 // playlists in the canonical user_personal_collections table.
 const absCollectionTypePlaylist = "playlist"
-
-// NOTE: PK-collision caveat. user_personal_collection_items has
-// PRIMARY KEY (user_id, collection_id, media_item_id) — sub_item_id is
-// NOT part of the PK. The old abs_playlist_items PK included
-// episode_id, so a playlist that referenced two episodes of the same
-// library item would have had two distinct rows. Under the canonical
-// schema the second insert collides on the PK and the ON CONFLICT
-// clause silently drops it.
-//
-// Prod baseline at migration time: the single existing playlist has
-// zero items, so no live data is affected. Multi-episode-of-same-book
-// inside one playlist remains a potential future limitation and would
-// require a schema change (extending the PK to include sub_item_id, or
-// adding a unique index over the four columns) — out of scope here.
 
 func (s *ABSPlaylistStore) ListUserPlaylists(ctx context.Context, userID, profileID string) ([]abs.Playlist, error) {
 	uid, err := strconv.Atoi(userID)
@@ -218,7 +204,7 @@ func (s *ABSPlaylistStore) AddPlaylistItem(ctx context.Context, playlistID, libr
 		       now()
 		FROM user_personal_collections c
 		WHERE c.id = $1 AND c.collection_type = $4
-		ON CONFLICT (user_id, collection_id, media_item_id) DO NOTHING`,
+		ON CONFLICT (user_id, collection_id, media_item_id, sub_item_id) DO NOTHING`,
 		playlistID, libraryItemID, episodeID, absCollectionTypePlaylist,
 	); err != nil {
 		return fmt.Errorf("abs_playlist_store: add-item: %w", err)

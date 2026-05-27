@@ -164,8 +164,8 @@ export function useAudiobookPlayback({
   }, [playing]);
 
   useEffect(() => {
+    const audio = audioRef.current;
     return () => {
-      const audio = audioRef.current;
       if (audio && !audio.paused) {
         audio.pause();
         reportRef.current(audio.currentTime);
@@ -215,6 +215,7 @@ export function useAudiobookPlayback({
 
   const [sleepSetting, setSleepSetting] = useState<SleepSetting>({ kind: "off" });
   const [sleepTargetMs, setSleepTargetMs] = useState<number | null>(null);
+  const [sleepChapterEndSeconds, setSleepChapterEndSeconds] = useState<number | null>(null);
   const [sleepNowMs, setSleepNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
@@ -222,8 +223,21 @@ export function useAudiobookPlayback({
       setSleepTargetMs(null);
       return;
     }
+    setSleepChapterEndSeconds(null);
     setSleepTargetMs(Date.now() + sleepSetting.seconds * 1000);
   }, [sleepSetting]);
+
+  useEffect(() => {
+    if (sleepSetting.kind !== "end-of-chapter") {
+      setSleepChapterEndSeconds(null);
+      return;
+    }
+    setSleepTargetMs(null);
+    setSleepChapterEndSeconds((current) => {
+      if (current != null && current > currentTime) return current;
+      return currentChapter?.end_seconds ?? null;
+    });
+  }, [currentChapter, currentTime, sleepSetting]);
 
   useEffect(() => {
     if (sleepTargetMs == null) return;
@@ -241,12 +255,13 @@ export function useAudiobookPlayback({
   }, [sleepNowMs, sleepTargetMs]);
 
   useEffect(() => {
-    if (sleepSetting.kind !== "end-of-chapter" || !currentChapter) return;
-    if (currentTime < currentChapter.end_seconds) return;
+    if (sleepSetting.kind !== "end-of-chapter" || sleepChapterEndSeconds == null) return;
+    if (currentTime < sleepChapterEndSeconds) return;
     const audio = audioRef.current;
     if (audio && !audio.paused) audio.pause();
     setSleepSetting({ kind: "off" });
-  }, [sleepSetting, currentChapter, currentTime]);
+    setSleepChapterEndSeconds(null);
+  }, [sleepSetting, sleepChapterEndSeconds, currentTime]);
 
   const setSleep = useCallback((next: SleepSetting) => setSleepSetting(next), []);
   const sleepRemainingMs = sleepTargetMs == null ? null : Math.max(0, sleepTargetMs - sleepNowMs);

@@ -32,10 +32,10 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
-	"github.com/Silo-Server/silo-server/internal/audiobooks"
-	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -421,6 +421,13 @@ func main() {
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
 	}
+	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
+	audiobooksEnabled, err := audiobooksService.Enabled(appCtx)
+	if err != nil {
+		slog.Warn("audiobooks feature disabled; failed to read setting", "err", err)
+		audiobooksEnabled = false
+	}
+	deps.AudiobooksEnabled = audiobooksEnabled
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
 		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
@@ -1320,7 +1327,7 @@ func main() {
 		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
-		if audiobookEnricher != nil {
+		if audiobooksEnabled && audiobookEnricher != nil {
 			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
@@ -1339,16 +1346,11 @@ func main() {
 		slog.Info("task manager started")
 	}
 
-	// Scaffold audiobooks service and ABS-compat handler.
-	// audiobooksSettingsAdapter (defined at package level below) bridges
-	// catalog.ServerSettingsRepo.Get to audiobooks.SettingsReader.GetString.
-	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
-
 	// Build the ABS-compatible REST + Socket.io handler when a DB pool is
 	// available. Routes are mounted at the root level by NewRouter (not under
 	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
 	// /abs/socket.io/* without path prefix hacks.
-	if deps.DB != nil {
+	if audiobooksEnabled && deps.DB != nil {
 		absUserRepo := auth.NewUserRepository(deps.DB)
 		absSessionRepo := auth.NewSessionRepository(deps.DB)
 		absJWTService := auth.NewJWTService(
@@ -1386,8 +1388,9 @@ func main() {
 				Auth: absAuthSvc,
 				Pool: deps.DB,
 			},
-			Recs:   recommendations.NewRepo(deps.DB),
-			Detail: absDetailSvc,
+			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider),
+			Recs:           recommendations.NewRepo(deps.DB),
+			Detail:         absDetailSvc,
 		}
 		absH := audiobooksService.BuildABSHandler(absHDeps)
 		deps.ABSHandler = absH

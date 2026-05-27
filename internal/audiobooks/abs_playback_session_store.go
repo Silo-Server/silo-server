@@ -55,12 +55,14 @@ func (s *ABSPlaybackSessionStore) GetPlaybackSession(ctx context.Context, id str
 	var closedAt *time.Time
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, content_id,
-		       time_listening_seconds, current_position_seconds, closed_at
+		       time_listening_seconds, current_position_seconds,
+		       started_at, last_sync_at, closed_at
 		FROM abs_playback_sessions
 		WHERE id = $1`, id)
 	err := row.Scan(
 		&sess.ID, &uid, &profileID, &sess.ContentID,
-		&sess.TimeListeningSeconds, &sess.CurrentPositionSeconds, &closedAt,
+		&sess.TimeListeningSeconds, &sess.CurrentPositionSeconds,
+		&sess.StartedAt, &sess.LastSyncAt, &closedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return abs.ABSPlaybackSession{}, abs.ErrNotFound
@@ -104,6 +106,23 @@ func (s *ABSPlaybackSessionStore) ClosePlaybackSession(ctx context.Context, id s
 	)
 	if err != nil {
 		return fmt.Errorf("abs_playback_session_store: close: %w", err)
+	}
+	return nil
+}
+
+func (s *ABSPlaybackSessionStore) CloseOpenSessionsForPrincipal(ctx context.Context, userID, profileID string) error {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return fmt.Errorf("abs_playback_session_store: invalid user id %q: %w", userID, err)
+	}
+	_, err = s.Pool.Exec(ctx, `
+		UPDATE abs_playback_sessions
+		SET closed_at = now()
+		WHERE user_id = $1 AND profile_id = $2 AND closed_at IS NULL`,
+		uid, profileID,
+	)
+	if err != nil {
+		return fmt.Errorf("abs_playback_session_store: close principal sessions: %w", err)
 	}
 	return nil
 }

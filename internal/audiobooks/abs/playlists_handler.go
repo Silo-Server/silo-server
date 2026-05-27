@@ -79,6 +79,11 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
 	// Add any items the client sent on the same POST — real-ABS mobile
 	// builds the playlist + initial member list in one round-trip
 	// (see audiobookshelf-app components/modals/playlists/
@@ -92,7 +97,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		// audiobook-only-hydration policy. Audiobook items get a
 		// MediaStore lookup so typos don't create orphan rows.
 		if it.EpisodeID == "" {
-			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID); mErr != nil || mi == nil {
+			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); mErr != nil || mi == nil {
 				slog.Debug("abs playlist create-items: skipping unknown audiobook", "id", it.LibraryItemID)
 				continue
 			}
@@ -137,7 +142,8 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		slog.Warn("abs playlist list-items failed", "err", err, "playlist", playlistID)
 		return []map[string]any{}
 	}
-	lib := h.resolveDefaultLibrary(r.Context())
+	access, _, _ := h.accessFilterFromRequest(r)
+	lib := h.resolveDefaultLibrary(r.Context(), access)
 	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
 	out := make([]map[string]any, 0, len(rows))
@@ -148,7 +154,7 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		}
 		if it.EpisodeID != "" {
 			entry["episodeId"] = it.EpisodeID
-		} else if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID); err == nil && item != nil {
+		} else if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); err == nil && item != nil {
 			entry["libraryId"] = libID
 			entry["title"] = item.Title
 			entry["libraryItem"] = siloItemToLibraryItem(item, lib, baseURL)
@@ -169,7 +175,8 @@ func playlistURLID(r *http.Request) string { return chi.URLParam(r, "id") }
 // the existing-playlists picker. It accesses `data.results` on the
 // response (NOT `data.playlists`), and iterates `playlist.items` to
 // check membership, so we emit:
-//   {"results": [Playlist full-shape with items[]]}
+//
+//	{"results": [Playlist full-shape with items[]]}
 //
 // The libraryId URL param is accepted but ignored — silo scopes
 // playlists per (user, profile) globally rather than per-library;
@@ -245,7 +252,7 @@ func (h *Handler) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), playlistURLID(r))
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID && !p.IsPublic) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID) && !p.IsPublic) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
@@ -271,7 +278,7 @@ func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	id := playlistURLID(r)
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
@@ -330,7 +337,7 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 	}
 	id := playlistURLID(r)
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
@@ -352,7 +359,12 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 
 	// Audiobook items validated; episodes skip validation.
 	if body.EpisodeID == "" {
-		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), body.LibraryItemID)
+		access, err := h.accessFilterForAuth(r.Context(), a)
+		if err != nil {
+			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			return
+		}
+		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), body.LibraryItemID, access)
 		if err != nil || item == nil {
 			http.Error(w, "item not found", http.StatusNotFound)
 			return
@@ -388,7 +400,7 @@ func (h *Handler) handleDeletePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	id := playlistURLID(r)
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
@@ -429,7 +441,7 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 	}
 	id := playlistURLID(r)
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
@@ -452,7 +464,12 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 		}
 		// Audiobook validation; episode items skip.
 		if it.EpisodeID == "" {
-			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID)
+			access, accessErr := h.accessFilterForAuth(r.Context(), a)
+			if accessErr != nil {
+				slog.Debug("abs playlist batch-add: skipping access-denied audiobook", "id", it.LibraryItemID, "err", accessErr)
+				continue
+			}
+			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
 			if lookupErr != nil || item == nil {
 				slog.Debug("abs playlist batch-add: skipping unknown audiobook", "id", it.LibraryItemID)
 				continue
@@ -486,7 +503,7 @@ func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.
 	}
 	id := playlistURLID(r)
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}
@@ -555,7 +572,7 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 	}
 
 	p, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && p.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, p.UserID, p.ProfileID)) {
 		http.Error(w, "playlist not found", http.StatusNotFound)
 		return
 	}

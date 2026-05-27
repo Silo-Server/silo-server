@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -19,41 +20,45 @@ import (
 // catalog reads pass this to satisfy the contract.
 type noopMediaStore struct{}
 
-func (noopMediaStore) GetAudiobookByID(context.Context, string) (*models.MediaItem, error) {
+func (noopMediaStore) GetAudiobookByID(context.Context, string, catalog.AccessFilter) (*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int) ([]*models.MediaItem, int, error) {
+func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	return nil, 0, nil
 }
-func (noopMediaStore) GetMediaFiles(context.Context, string) ([]*models.MediaFile, error) {
+func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
 	return nil, nil
 }
 func (noopMediaStore) GetMediaFileByID(context.Context, int) (*models.MediaFile, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListAudiobookLibraries(context.Context) ([]AudiobookLibrary, error) {
+func (noopMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return nil, nil
 }
-func (noopMediaStore) SearchAudiobooks(context.Context, int64, string, int) ([]*models.MediaItem, error) {
+func (noopMediaStore) SearchAudiobooks(context.Context, int64, string, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListContinueListening(context.Context, string, string, int64, int) ([]*models.MediaItem, error) {
+func (noopMediaStore) ListContinueListening(context.Context, string, string, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListRecentlyAdded(context.Context, int64, int) ([]*models.MediaItem, error) {
+func (noopMediaStore) ListRecentlyAdded(context.Context, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListDiscover(context.Context, int64, int) ([]*models.MediaItem, error) {
+func (noopMediaStore) ListDiscover(context.Context, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int) ([]AuthorSummary, error) {
+func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int, catalog.AccessFilter) ([]AuthorSummary, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListLibrarySeries(context.Context, int64, int) ([]SeriesSummary, error) {
+func (noopMediaStore) ListLibrarySeries(context.Context, int64, int, catalog.AccessFilter) ([]SeriesSummary, error) {
 	return nil, nil
 }
-func (noopMediaStore) GetAuthorByID(context.Context, string) (Author, error)   { return Author{}, ErrNotFound }
-func (noopMediaStore) GetSeriesByName(context.Context, string) (Series, error) { return Series{}, ErrNotFound }
+func (noopMediaStore) GetAuthorByID(context.Context, string, catalog.AccessFilter) (Author, error) {
+	return Author{}, ErrNotFound
+}
+func (noopMediaStore) GetSeriesByName(context.Context, string, catalog.AccessFilter) (Series, error) {
+	return Series{}, ErrNotFound
+}
 
 // memTokenStore is an in-memory TokenStore for handleRefresh tests.
 type memTokenStore struct {
@@ -90,14 +95,42 @@ func (m *memTokenStore) RevokeTokenByJTI(_ context.Context, jti string) error {
 	m.tokens[jti] = t
 	return nil
 }
+func (m *memTokenStore) RevokeTokenIfActive(_ context.Context, jti string) (ABSToken, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tokens[jti]
+	if !ok || t.RevokedAt != nil {
+		return ABSToken{}, ErrNotFound
+	}
+	now := time.Now()
+	t.RevokedAt = &now
+	m.tokens[jti] = t
+	return t, nil
+}
+func (m *memTokenStore) RevokeTokensForPrincipal(_ context.Context, userID, profileID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for jti, tok := range m.tokens {
+		if tok.UserID == userID && tok.ProfileID == profileID && tok.RevokedAt == nil {
+			tok.RevokedAt = &now
+			m.tokens[jti] = tok
+		}
+	}
+	return nil
+}
 func (m *memTokenStore) TouchToken(_ context.Context, _ string) error { return nil }
 
 // staticConfig satisfies ConfigProvider with fixed values.
 type staticConfig struct{ secret []byte }
 
-func (s *staticConfig) JWTSecret(_ context.Context) ([]byte, error)            { return s.secret, nil }
-func (s *staticConfig) AccessTTL(_ context.Context) (time.Duration, error)     { return 24 * time.Hour, nil }
-func (s *staticConfig) RefreshTTL(_ context.Context) (time.Duration, error)    { return 30 * 24 * time.Hour, nil }
+func (s *staticConfig) JWTSecret(_ context.Context) ([]byte, error) { return s.secret, nil }
+func (s *staticConfig) AccessTTL(_ context.Context) (time.Duration, error) {
+	return 24 * time.Hour, nil
+}
+func (s *staticConfig) RefreshTTL(_ context.Context) (time.Duration, error) {
+	return 30 * 24 * time.Hour, nil
+}
 func (s *staticConfig) StandaloneLoginEnabled(_ context.Context) (bool, error) { return true, nil }
 
 func newRefreshTestHandler(t *testing.T) (*Handler, *memTokenStore, *staticConfig) {

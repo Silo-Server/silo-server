@@ -126,9 +126,9 @@ func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID
 	return result, nil
 }
 
-// UpsertProgress inserts or updates a user_watch_progress row. All fields in
-// row are written; caller is responsible for merging existing state before
-// calling this (see handleSetItemProgress).
+// UpsertProgress inserts or updates a user_watch_progress row. Conflict
+// updates merge monotonically so concurrent writes cannot un-finish an item or
+// rewind progress with a stale position.
 func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressRow) error {
 	uid, err := strconv.Atoi(row.UserID)
 	if err != nil {
@@ -143,10 +143,10 @@ func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressR
 		  (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
-		  position_seconds = EXCLUDED.position_seconds,
-		  duration_seconds = EXCLUDED.duration_seconds,
-		  completed        = EXCLUDED.completed,
-		  updated_at       = EXCLUDED.updated_at`,
+		  position_seconds = GREATEST(user_watch_progress.position_seconds, EXCLUDED.position_seconds),
+		  duration_seconds = GREATEST(user_watch_progress.duration_seconds, EXCLUDED.duration_seconds),
+		  completed        = user_watch_progress.completed OR EXCLUDED.completed,
+		  updated_at       = GREATEST(user_watch_progress.updated_at, EXCLUDED.updated_at)`,
 		uid, row.ProfileID, row.ContentID,
 		row.CurrentSeconds, row.DurationSeconds, row.IsFinished, updatedAt,
 	)

@@ -55,6 +55,9 @@ type ABSPlaybackSessionStore interface {
 	SyncPlaybackSession(ctx context.Context, id string, currentPositionSeconds float64, timeListeningSeconds int) error
 	// ClosePlaybackSession sets closed_at to now().
 	ClosePlaybackSession(ctx context.Context, id string) error
+	// CloseOpenSessionsForPrincipal closes all active sessions for a user
+	// profile, used when logout revokes that profile's tokens.
+	CloseOpenSessionsForPrincipal(ctx context.Context, userID, profileID string) error
 	// AggregateStats returns aggregated listening stats for (user, profile).
 	AggregateStats(ctx context.Context, userID, profileID string) (Stats, error)
 	// ListClosedSessions returns paginated closed sessions for (user, profile)
@@ -64,10 +67,10 @@ type ABSPlaybackSessionStore interface {
 
 // Stats is the aggregated /me/listening-stats response shape.
 type Stats struct {
-	TotalTime int        // seconds
-	Items     int        // distinct content_ids listened to
-	Days      []DayStat  // recent days (most-recent first)
-	DayOfWeek [7]int     // index 0 = Sunday
+	TotalTime int       // seconds
+	Items     int       // distinct content_ids listened to
+	Days      []DayStat // recent days (most-recent first)
+	DayOfWeek [7]int    // index 0 = Sunday
 	Monthly   []MonthStat
 }
 
@@ -104,6 +107,8 @@ type ABSPlaybackSession struct {
 	MediaFileID            *int
 	TimeListeningSeconds   int
 	CurrentPositionSeconds float64
+	StartedAt              time.Time
+	LastSyncAt             time.Time
 	ClosedAt               *time.Time
 }
 
@@ -129,8 +134,17 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, p := range rows {
+		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), p.ContentID, access)
+		if err != nil || item == nil {
+			continue
+		}
 		out = append(out, progressRowToABS(p))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": out})
@@ -146,6 +160,16 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 	}
 	contentID := chi.URLParam(r, "libraryItemId")
 	if h.deps.ProgressStore == nil {
+		http.Error(w, "progress not found", http.StatusNotFound)
+		return
+	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
+	if err != nil || item == nil {
 		http.Error(w, "progress not found", http.StatusNotFound)
 		return
 	}
@@ -170,12 +194,12 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 // the client write succeeds and the user isn't shown a sync error. They will
 // flow into a dedicated ebook progress column when the ebook scanner lands.
 type progressBody struct {
-	CurrentTime    *float64 `json:"currentTime"`
-	Duration       *float64 `json:"duration"`
-	IsFinished     *bool    `json:"isFinished"`
-	Progress       *float64 `json:"progress"`
-	EbookProgress  *float64 `json:"ebookProgress"`
-	EbookLocation  *string  `json:"ebookLocation"`
+	CurrentTime   *float64 `json:"currentTime"`
+	Duration      *float64 `json:"duration"`
+	IsFinished    *bool    `json:"isFinished"`
+	Progress      *float64 `json:"progress"`
+	EbookProgress *float64 `json:"ebookProgress"`
+	EbookLocation *string  `json:"ebookLocation"`
 }
 
 // handleSetItemProgress — POST /abs/api/me/progress/{libraryItemId}
@@ -200,6 +224,16 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 	}
 	if h.deps.ProgressStore == nil {
 		http.Error(w, "progress store unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
+	if err != nil || item == nil {
+		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
 
@@ -298,7 +332,17 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 
 	// Ownership gate.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || sess.UserID != a.UserID {
+	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), sess.ContentID, access)
+	if err != nil || item == nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -354,7 +398,7 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 
 	// Ownership gate.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || sess.UserID != a.UserID {
+	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}

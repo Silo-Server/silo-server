@@ -22,7 +22,12 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defaultLibID := VirtualLibraryID
-	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
 	if err == nil && len(libs) > 0 {
 		defaultLibID = audiobookLibraryID(libs[0])
 	}

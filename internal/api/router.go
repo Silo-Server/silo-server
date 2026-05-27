@@ -151,6 +151,9 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+	// AudiobooksEnabled gates native audiobook admin/UI routes behind the same
+	// server setting as the ABS compatibility listener.
+	AudiobooksEnabled bool
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -1633,7 +1636,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				r.Get("/sections/recipes/{type}/candidates", recipeHandler.HandleCandidates)
 
 				// Audiobook endpoints (no profile required — catalog-level list/detail).
-				if itemRepo != nil {
+				if deps.AudiobooksEnabled && itemRepo != nil {
 					audiobookHandler := &handlers.AudiobookHandler{
 						Items:         itemRepo,
 						Files:         deps.FileRepo,

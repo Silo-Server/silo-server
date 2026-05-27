@@ -19,31 +19,15 @@ var ErrNotFound = errors.New("abs token not found")
 
 // handleLogin mints ABS access + refresh JWTs for the caller.
 //
-// Two paths:
-//
-//  1. Host-proxied: X-Silo-User-Id header is present. The silo host validated
-//     the session before forwarding, so the header is trusted unconditionally.
-//     ProfileID comes from X-Silo-Profile-Id (may be empty = primary profile).
-//
-//  2. Standalone body-creds: no host header. The handler delegates to
-//     handleStandaloneLogin, which calls CredValidator.Validate and applies
-//     rate limiting.
+// Login always validates body credentials. Public ABS listeners cannot safely
+// trust user/profile headers because clients can spoof them directly.
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if userID := r.Header.Get("X-Silo-User-Id"); userID != "" {
-		profileID := r.Header.Get("X-Silo-Profile-Id")
-		name := r.Header.Get("X-Silo-Profile-Name")
-		if name == "" {
-			name = r.Header.Get("X-Silo-User-Name")
-		}
-		h.completeLogin(w, r, userID, profileID, name)
-		return
-	}
 	h.handleStandaloneLogin(w, r)
 }
 
-// handleStandaloneLogin validates body-credential login when no host-proxy
-// header is present. It checks whether standalone login is enabled, enforces
-// the per-IP rate limit, decodes the JSON body, and calls CredValidator.
+// handleStandaloneLogin validates body-credential login. It checks whether
+// standalone login is enabled, enforces the per-IP rate limit, decodes the JSON
+// body, and calls CredValidator.
 func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Config == nil {
 		http.Error(w, "config not available", http.StatusServiceUnavailable)
@@ -109,8 +93,7 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 }
 
 // completeLogin mints ABS access + refresh JWTs for the validated user and
-// writes the login response. Shared by the host-proxied and body-creds paths
-// so both return the identical response envelope.
+// writes the login response.
 func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, profileID, displayName string) {
 	if h.deps.Config == nil {
 		http.Error(w, "config not available", http.StatusServiceUnavailable)
@@ -155,6 +138,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		ID:        accessJTI,
 		UserID:    userID,
 		ProfileID: profileID,
+		Type:      "access",
 		JTI:       accessJTI,
 		ExpiresAt: now.Add(accessTTL),
 	}); err != nil {
@@ -168,6 +152,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		ID:        refreshJTI,
 		UserID:    userID,
 		ProfileID: profileID,
+		Type:      "refresh",
 		JTI:       refreshJTI,
 		ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
@@ -225,10 +210,8 @@ func (h *Handler) loginEnvelope(
 	now time.Time,
 	userID, displayName, accessToken, refreshToken string,
 ) map[string]any {
-	// displayName falls back to userID when the validator didn't supply one
-	// (host-proxied logins without X-Silo-Profile-Name, /authorize re-mints
-	// that have no name claim in the JWT). ABS clients require a non-empty
-	// username on the user envelope.
+	// displayName falls back to userID when the validator didn't supply one.
+	// ABS clients require a non-empty username on the user envelope.
 	name := displayName
 	if name == "" {
 		name = userID
@@ -236,7 +219,8 @@ func (h *Handler) loginEnvelope(
 
 	libraryMaps := make([]map[string]any, 0)
 	defaultLibraryID := VirtualLibraryID
-	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
+	access, _, _ := h.accessFilterFromRequest(r)
+	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
 	for i, lib := range libs {
 		if i == 0 {
 			defaultLibraryID = audiobookLibraryID(lib)
@@ -367,6 +351,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 					ID:        newJTI,
 					UserID:    a.UserID,
 					ProfileID: a.ProfileID,
+					Type:      "access",
 					JTI:       newJTI,
 					ExpiresAt: time.Now().Add(accessTTL),
 				}); persistErr == nil {
@@ -384,14 +369,12 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 // an empty body; legacy / 3rd-party clients send {refreshToken: "..."} in
 // the JSON body. Accept either; header takes precedence when both are sent.
 //
-// Token rotation semantics (ported from continuum-plugin-audiobooks):
+// Token rotation semantics:
 //  1. Validate the refresh token signature + type.
-//  2. Confirm the JTI is in the store and not revoked.
+//  2. Atomically revoke the old refresh JTI. A concurrent reuse loses here.
 //  3. Mint a NEW access + refresh pair with fresh JTIs.
-//  4. Persist both new JTIs BEFORE revoking the old one. If anything in
-//     step 3-4 fails, the old refresh stays valid and the client can retry.
-//  5. Revoke the old refresh JTI.
-//  6. Return {user:{accessToken, refreshToken}} AND top-level token fields
+//  4. Persist both new JTIs.
+//  5. Return {user:{accessToken, refreshToken}} AND top-level token fields
 //     for client compatibility — mainline app reads from user{}, third-party
 //     readers may read from the top level.
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -428,14 +411,30 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 		return
 	}
-	row, err := h.deps.TokenStore.GetTokenByJTI(r.Context(), claims.JTI)
+	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)
 	if err != nil {
-		slog.Debug("abs refresh: jti lookup failed", "jti", claims.JTI, "err", err)
-		http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+		slog.Debug("abs refresh: jti revoke failed", "jti", claims.JTI, "err", err)
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+		} else {
+			http.Error(w, "token rotation failed", http.StatusInternalServerError)
+		}
 		return
 	}
-	if row.RevokedAt != nil {
-		http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+	if row.UserID != "" && row.UserID != claims.UserID {
+		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+	if row.ProfileID != "" && row.ProfileID != claims.ProfileID {
+		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+	if row.Type != "" && row.Type != "refresh" {
+		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+	if !row.ExpiresAt.IsZero() && time.Now().After(row.ExpiresAt) {
+		http.Error(w, "refresh token expired", http.StatusUnauthorized)
 		return
 	}
 
@@ -465,7 +464,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
 		ID: newAccessJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
-		JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
+		Type: "access", JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
 	}); err != nil {
 		slog.Error("abs refresh: persist access failed", "user", claims.UserID, "jti", newAccessJTI, "err", err)
 		http.Error(w, "token persist failed", http.StatusInternalServerError)
@@ -473,18 +472,12 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
 		ID: newRefreshJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
-		JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
+		Type: "refresh", JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
 		slog.Error("abs refresh: persist refresh failed", "user", claims.UserID, "jti", newRefreshJTI, "err", err)
 		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}
-	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
-		slog.Error("abs refresh: revoke old failed", "user", claims.UserID, "old_jti", claims.JTI, "err", err)
-		http.Error(w, "token rotation failed", http.StatusInternalServerError)
-		return
-	}
-
 	slog.Debug("abs refresh: rotated", "user", claims.UserID,
 		"old_jti", claims.JTI, "new_access_jti", newAccessJTI, "new_refresh_jti", newRefreshJTI)
 
@@ -507,11 +500,9 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 // itself, attempts JTI revoke if parseable, and ALWAYS returns 204. Mirrors
 // continuum-plugin-audiobooks/internal/abs/handler.go:handleLogout.
 //
-// Note: this revokes ONLY the access token. The associated refresh token
-// has its own JTI and stays valid until the client also calls /auth/refresh
-// with a since-revoked access; the refresh endpoint will then deny the
-// rotation. Clients that want a hard "log out everywhere" should iterate
-// the sessions list (added in Phase 3) instead.
+// Logout invalidates every active ABS access/refresh token for the presented
+// user profile so a signed-out client cannot silently mint a new access token
+// with its saved refresh token.
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 	defer w.WriteHeader(http.StatusNoContent)
 
@@ -532,9 +523,14 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("abs logout: parse failed", "err", err)
 		return
 	}
-	if err := h.deps.TokenStore.RevokeTokenByJTI(r.Context(), claims.JTI); err != nil {
-		slog.Warn("abs logout: revoke failed", "jti", claims.JTI, "user", claims.UserID, "err", err)
+	if err := h.deps.TokenStore.RevokeTokensForPrincipal(r.Context(), claims.UserID, claims.ProfileID); err != nil {
+		slog.Warn("abs logout: revoke principal tokens failed", "jti", claims.JTI, "user", claims.UserID, "err", err)
 		return
 	}
-	slog.Debug("abs logout: revoked", "jti", claims.JTI, "user", claims.UserID)
+	if h.deps.PlaybackSessionStore != nil {
+		if err := h.deps.PlaybackSessionStore.CloseOpenSessionsForPrincipal(r.Context(), claims.UserID, claims.ProfileID); err != nil {
+			slog.Warn("abs logout: close sessions failed", "user", claims.UserID, "profile", claims.ProfileID, "err", err)
+		}
+	}
+	slog.Debug("abs logout: revoked principal tokens", "jti", claims.JTI, "user", claims.UserID)
 }

@@ -26,7 +26,12 @@ func (h *Handler) setHideFromContinue(w http.ResponseWriter, r *http.Request, hi
 		http.Error(w, "itemId required", http.StatusBadRequest)
 		return
 	}
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return

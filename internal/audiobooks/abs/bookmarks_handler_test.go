@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -159,7 +160,7 @@ type stubMediaStore struct {
 	known map[string]*models.MediaItem // itemID → row (nil means "exists but no row needed")
 }
 
-func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string) (*models.MediaItem, error) {
+func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalog.AccessFilter) (*models.MediaItem, error) {
 	if it, ok := s.known[id]; ok {
 		if it == nil {
 			return &models.MediaItem{ContentID: id}, nil
@@ -168,10 +169,10 @@ func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string) (*models
 	}
 	return nil, nil
 }
-func (s *stubMediaStore) GetAuthorByID(_ context.Context, id string) (Author, error) {
+func (s *stubMediaStore) GetAuthorByID(_ context.Context, id string, _ catalog.AccessFilter) (Author, error) {
 	return Author{}, ErrNotFound
 }
-func (s *stubMediaStore) GetSeriesByName(_ context.Context, name string) (Series, error) {
+func (s *stubMediaStore) GetSeriesByName(_ context.Context, name string, _ catalog.AccessFilter) (Series, error) {
 	return Series{}, ErrNotFound
 }
 

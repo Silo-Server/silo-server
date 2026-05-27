@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -39,52 +40,52 @@ type AudiobookLibrary struct {
 // Real impl: catalog.ItemRepository + scanner.FileRepository wrapped in
 // a small adapter struct added in a later stage.
 type MediaStore interface {
-	GetAudiobookByID(ctx context.Context, contentID string) (*models.MediaItem, error)
+	GetAudiobookByID(ctx context.Context, contentID string, access catalog.AccessFilter) (*models.MediaItem, error)
 	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
 	// it filters to items in that media_folder; 0 means all audiobook items.
-	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int) ([]*models.MediaItem, int, error)
-	GetMediaFiles(ctx context.Context, contentID string) ([]*models.MediaFile, error)
+	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]*models.MediaItem, int, error)
+	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
 	// GetMediaFileByID fetches a single media file by its integer PK.
 	// Used by the ABS file-streaming handler when a caller supplies a
 	// raw file ID instead of an ino.
 	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
-	ListAudiobookLibraries(ctx context.Context) ([]AudiobookLibrary, error)
+	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
 	// SearchAudiobooks does a fuzzy title/author/narrator match for the ABS
 	// /libraries/{id}/search endpoint. Hydrates People so the mapper has
 	// author/narrator names.
-	SearchAudiobooks(ctx context.Context, libraryID int64, query string, limit int) ([]*models.MediaItem, error)
+	SearchAudiobooks(ctx context.Context, libraryID int64, query string, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListContinueListening returns books that the given user has progress
 	// on but hasn't finished — feeds the Home tab's continue shelf.
-	ListContinueListening(ctx context.Context, userID, profileID string, libraryID int64, limit int) ([]*models.MediaItem, error)
+	ListContinueListening(ctx context.Context, userID, profileID string, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListRecentlyAdded returns the most recently added audiobooks for the
 	// Home tab's recently-added shelf.
-	ListRecentlyAdded(ctx context.Context, libraryID int64, limit int) ([]*models.MediaItem, error)
+	ListRecentlyAdded(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListDiscover returns a randomized sampling of audiobooks for the
 	// Home tab's discover shelf (helps new users browse the library).
-	ListDiscover(ctx context.Context, libraryID int64, limit int) ([]*models.MediaItem, error)
+	ListDiscover(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListLibraryAuthors returns distinct authors of audiobooks in the
 	// library along with each author's book count.
-	ListLibraryAuthors(ctx context.Context, libraryID int64, limit int) ([]AuthorSummary, error)
+	ListLibraryAuthors(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]AuthorSummary, error)
 	// ListLibrarySeries returns distinct series (from audiobook_series)
 	// represented in the library, ordered by name.
-	ListLibrarySeries(ctx context.Context, libraryID int64, limit int) ([]SeriesSummary, error)
+	ListLibrarySeries(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]SeriesSummary, error)
 	// GetAuthorByID returns the author with the given people.id plus
 	// their audiobook list, sorted by title. Returns ErrNotFound when
 	// no people row matches.
-	GetAuthorByID(ctx context.Context, authorID string) (Author, error)
+	GetAuthorByID(ctx context.Context, authorID string, access catalog.AccessFilter) (Author, error)
 	// GetSeriesByName returns the canonical series (case-insensitive
 	// match on audiobook_series.series_name) with its books ordered
 	// by series_index ASC (NULLS LAST), title fallback. Returns
 	// ErrNotFound when no rows match.
-	GetSeriesByName(ctx context.Context, seriesName string) (Series, error)
+	GetSeriesByName(ctx context.Context, seriesName string, access catalog.AccessFilter) (Series, error)
 }
 
 // AuthorSummary is an aggregated author entry for /libraries/{id}/authors.
 type AuthorSummary struct {
-	ID        string
-	Name      string
-	NumBooks  int
+	ID       string
+	Name     string
+	NumBooks int
 }
 
 // SeriesSummary is an aggregated series entry for /libraries/{id}/series.
@@ -113,14 +114,14 @@ type SeriesBookPreview struct {
 type Author struct {
 	ID         string
 	Name       string
-	PosterPath string  // resolved via CoverResolver on emit
+	PosterPath string // resolved via CoverResolver on emit
 	Books      []*models.MediaItem
 }
 
 // Series is the detail-shape series with books ordered by series_index.
 type Series struct {
-	ID    string  // lowercased series_name
-	Name  string  // canonical series_name
+	ID    string // lowercased series_name
+	Name  string // canonical series_name
 	Books []*models.MediaItem
 }
 
@@ -134,6 +135,14 @@ type TokenStore interface {
 	GetTokenByJTI(ctx context.Context, jti string) (ABSToken, error)
 	// RevokeTokenByJTI marks a JTI as revoked (sets revoked_at).
 	RevokeTokenByJTI(ctx context.Context, jti string) error
+	// RevokeTokenIfActive atomically marks an unrevoked token as revoked and
+	// returns its previous row. Returns ErrNotFound when the token is absent or
+	// was already revoked.
+	RevokeTokenIfActive(ctx context.Context, jti string) (ABSToken, error)
+	// RevokeTokensForPrincipal revokes every active access/refresh token for a
+	// user profile. Logout uses this to invalidate refresh tokens as well as the
+	// presented access token.
+	RevokeTokensForPrincipal(ctx context.Context, userID, profileID string) error
 	// TouchToken extends last_seen_at for active-session bookkeeping.
 	TouchToken(ctx context.Context, jti string) error
 }
@@ -143,6 +152,7 @@ type ABSToken struct {
 	ID        string
 	UserID    string
 	ProfileID string
+	Type      string
 	JTI       string
 	ExpiresAt time.Time
 	RevokedAt *time.Time
@@ -153,6 +163,12 @@ type ABSToken struct {
 // later stage.
 type ProfileCredentialValidator interface {
 	Validate(ctx context.Context, username, password string) (userID string, profileID string, displayName string, err error)
+}
+
+// AccessResolver resolves the ABS-authenticated user/profile into the same
+// effective catalog access filter used by silo's native API.
+type AccessResolver interface {
+	ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
 }
 
 // EventPublisher delivers a realtime event to Socket.io clients. May be nil;
@@ -200,13 +216,14 @@ type ConfigProvider interface {
 
 // Dependencies bundles everything the Handler needs at construction time.
 type Dependencies struct {
-	MediaStore    MediaStore
-	TokenStore    TokenStore
-	CredValidator ProfileCredentialValidator
-	Config        ConfigProvider
-	Publisher     EventPublisher   // may be nil
-	Recommender   Recommender      // may be nil
-	LoginLimiter  *LoginLimiter    // may be nil — one is created if absent
+	MediaStore     MediaStore
+	TokenStore     TokenStore
+	CredValidator  ProfileCredentialValidator
+	AccessResolver AccessResolver
+	Config         ConfigProvider
+	Publisher      EventPublisher // may be nil
+	Recommender    Recommender    // may be nil
+	LoginLimiter   *LoginLimiter  // may be nil — one is created if absent
 	// InstallID returns the current plugin install ID for building
 	// host-proxy-routable URLs. Defaults to "silo.audiobooks" when nil.
 	InstallID func() string
@@ -301,7 +318,7 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		r.Get(prefix+"/status", h.handleABSStatus)
 	}
 
-	// Stage 2: login (body-creds + host-proxied paths).
+	// Stage 2: login (body credentials).
 	r.Post("/login", h.handleLogin)
 	r.Post("/abs/api/login", h.handleLogin)
 	// Token rotation — mobile clients call this every ~22h to avoid the
@@ -343,7 +360,7 @@ func (h *Handler) mountRoutes(r chi.Router) {
 	// canonical root so curl-style network probes, the official ABS app's
 	// connect-server flow, and AudioBooth's saved-server liveness check
 	// all land on the same response.
-	for _, prefix := range []string{"", "/abs", "/api", "/abs/api"} {
+	for _, prefix := range []string{"/abs", "/api"} {
 		r.Get(prefix+"/ping", h.handlePing)
 		r.Get(prefix+"/healthcheck", h.handleHealthcheck)
 		r.Get(prefix+"/init", h.handleInit)
@@ -523,6 +540,34 @@ func absAuthFrom(r *http.Request) (ctxAuth, bool) {
 	return a, ok
 }
 
+func (h *Handler) accessFilterForAuth(ctx context.Context, a ctxAuth) (catalog.AccessFilter, error) {
+	if h.deps.AccessResolver != nil {
+		return h.deps.AccessResolver.ResolveABSAccess(ctx, a.UserID, a.ProfileID)
+	}
+	filter := catalog.AccessFilter{ProfileID: a.ProfileID}
+	if uid, err := strconv.Atoi(a.UserID); err == nil {
+		filter.UserID = uid
+	}
+	return filter, nil
+}
+
+func (h *Handler) accessFilterFromRequest(r *http.Request) (catalog.AccessFilter, bool, error) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		return catalog.AccessFilter{}, false, nil
+	}
+	filter, err := h.accessFilterForAuth(r.Context(), a)
+	return filter, true, err
+}
+
+func emptyAccessFilter() catalog.AccessFilter {
+	return catalog.AccessFilter{}
+}
+
+func sameABSPrincipal(a ctxAuth, userID, profileID string) bool {
+	return a.UserID == userID && a.ProfileID == profileID
+}
+
 // bearerAuth is the authentication middleware for protected ABS routes.
 // It reads the bearer token from the Authorization header or ?token= query
 // param, validates the JWT, checks the JTI isn't revoked, and injects
@@ -576,6 +621,26 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 		if row.RevokedAt != nil {
 			slog.Debug("abs bearerAuth: jti revoked", "jti", claims.JTI, "path", r.URL.Path)
 			http.Error(w, "token revoked", http.StatusUnauthorized)
+			return
+		}
+		if row.UserID != "" && row.UserID != claims.UserID {
+			slog.Debug("abs bearerAuth: token user mismatch", "jti", claims.JTI, "path", r.URL.Path)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		if row.ProfileID != "" && row.ProfileID != claims.ProfileID {
+			slog.Debug("abs bearerAuth: token profile mismatch", "jti", claims.JTI, "path", r.URL.Path)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		if row.Type != "" && row.Type != "access" {
+			slog.Debug("abs bearerAuth: persisted token type mismatch", "type", row.Type, "path", r.URL.Path)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		if !row.ExpiresAt.IsZero() && time.Now().After(row.ExpiresAt) {
+			slog.Debug("abs bearerAuth: persisted token expired", "jti", claims.JTI, "path", r.URL.Path)
+			http.Error(w, "token expired", http.StatusUnauthorized)
 			return
 		}
 		_ = h.deps.TokenStore.TouchToken(r.Context(), claims.JTI)

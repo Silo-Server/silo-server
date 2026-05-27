@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,13 +31,16 @@ func (s *ABSSessionStore) InsertToken(ctx context.Context, tok abs.ABSToken) err
 	}
 	_, err = s.Pool.Exec(ctx, `
 		INSERT INTO abs_sessions
-		  (user_id, token, device_id, device_name, client_name, client_version, last_seen_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+		  (user_id, profile_id, token, token_type, expires_at, device_id, device_name, client_name, client_version, last_seen_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 		ON CONFLICT (token) DO NOTHING`,
 		uid,
+		tok.ProfileID,
 		tok.JTI,
-		tok.JTI,   // device_id: use the JTI as a stable device key
-		"",        // device_name: unknown at login time
+		tok.Type,
+		tok.ExpiresAt,
+		tok.JTI, // device_id: use the JTI as a stable device key
+		"",      // device_name: unknown at login time
 		"abs-compat",
 		"",
 	)
@@ -51,14 +55,15 @@ func (s *ABSSessionStore) InsertToken(ctx context.Context, tok abs.ABSToken) err
 func (s *ABSSessionStore) GetTokenByJTI(ctx context.Context, jti string) (abs.ABSToken, error) {
 	var (
 		uid       int
-		profileID *string
+		profileID string
+		expiresAt *time.Time
 		tok       abs.ABSToken
 	)
 	row := s.Pool.QueryRow(ctx, `
-		SELECT user_id, token, revoked_at
+		SELECT user_id, profile_id, token, token_type, expires_at, revoked_at
 		FROM abs_sessions
 		WHERE token = $1`, jti)
-	err := row.Scan(&uid, &tok.JTI, &tok.RevokedAt)
+	err := row.Scan(&uid, &profileID, &tok.JTI, &tok.Type, &expiresAt, &tok.RevokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return abs.ABSToken{}, abs.ErrNotFound
 	}
@@ -67,8 +72,9 @@ func (s *ABSSessionStore) GetTokenByJTI(ctx context.Context, jti string) (abs.AB
 	}
 	tok.ID = tok.JTI
 	tok.UserID = strconv.Itoa(uid)
-	if profileID != nil {
-		tok.ProfileID = *profileID
+	tok.ProfileID = profileID
+	if expiresAt != nil {
+		tok.ExpiresAt = *expiresAt
 	}
 	return tok, nil
 }
@@ -81,6 +87,51 @@ func (s *ABSSessionStore) RevokeTokenByJTI(ctx context.Context, jti string) erro
 		WHERE token = $1 AND revoked_at IS NULL`, jti)
 	if err != nil {
 		return fmt.Errorf("abs_session_store: revoke token: %w", err)
+	}
+	return nil
+}
+
+func (s *ABSSessionStore) RevokeTokenIfActive(ctx context.Context, jti string) (abs.ABSToken, error) {
+	var (
+		uid       int
+		profileID string
+		expiresAt *time.Time
+		tok       abs.ABSToken
+	)
+	row := s.Pool.QueryRow(ctx, `
+		UPDATE abs_sessions
+		SET revoked_at = now()
+		WHERE token = $1 AND revoked_at IS NULL
+		RETURNING user_id, profile_id, token, token_type, expires_at, revoked_at`, jti)
+	err := row.Scan(&uid, &profileID, &tok.JTI, &tok.Type, &expiresAt, &tok.RevokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return abs.ABSToken{}, abs.ErrNotFound
+	}
+	if err != nil {
+		return abs.ABSToken{}, fmt.Errorf("abs_session_store: revoke active token: %w", err)
+	}
+	tok.ID = tok.JTI
+	tok.UserID = strconv.Itoa(uid)
+	tok.ProfileID = profileID
+	if expiresAt != nil {
+		tok.ExpiresAt = *expiresAt
+	}
+	return tok, nil
+}
+
+func (s *ABSSessionStore) RevokeTokensForPrincipal(ctx context.Context, userID, profileID string) error {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return fmt.Errorf("abs_session_store: invalid user id %q: %w", userID, err)
+	}
+	_, err = s.Pool.Exec(ctx, `
+		UPDATE abs_sessions
+		SET revoked_at = now()
+		WHERE user_id = $1 AND profile_id = $2 AND revoked_at IS NULL`,
+		uid, profileID,
+	)
+	if err != nil {
+		return fmt.Errorf("abs_session_store: revoke principal tokens: %w", err)
 	}
 	return nil
 }

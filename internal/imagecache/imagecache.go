@@ -6,7 +6,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -55,12 +58,21 @@ type CacheResult struct {
 
 // Cacher downloads and stores image variants to S3.
 type Cacher struct {
-	s3 ObjectPutter
+	s3                ObjectPutter
+	httpClient        *http.Client
+	enforcePublicURLs bool
 }
 
 // New creates a new Cacher backed by the given ObjectPutter.
 func New(s3 ObjectPutter) *Cacher {
-	return &Cacher{s3: s3}
+	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), enforcePublicURLs: true}
+}
+
+func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &Cacher{s3: s3, httpClient: client}
 }
 
 // CacheImage implements metadata.ImageCacher using the internal Cache method.
@@ -180,7 +192,7 @@ func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, err
 		}
 	}
 
-	data, err := downloadImage(ctx, url)
+	data, err := c.downloadImage(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("imagecache: download %s: %w", url, err)
 	}
@@ -281,8 +293,18 @@ func imageTypeName(t metadata.ImageType) string {
 	}
 }
 
-// downloadImage fetches the image at the given URL, enforcing size and timeout limits.
-func downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
+// downloadImage fetches the image at the given URL, enforcing size, timeout,
+// and public-network limits.
+func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse URL: %w", err)
+	}
+	if c.enforcePublicURLs {
+		if err := validatePublicImageURL(parsed); err != nil {
+			return nil, err
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
@@ -291,7 +313,11 @@ func downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := c.httpClient
+	if client == nil {
+		client = newSecureHTTPClient()
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http get: %w", err)
 	}
@@ -311,4 +337,84 @@ func downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func newSecureHTTPClient() *http.Client {
+	transport := &http.Transport{
+		Proxy:               nil,
+		DialContext:         secureImageDialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+			return validatePublicImageURL(req.URL)
+		},
+	}
+}
+
+func validatePublicImageURL(u *url.URL) error {
+	if u == nil {
+		return fmt.Errorf("empty URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL host is required")
+	}
+	if addr, err := netip.ParseAddr(host); err == nil && !isPublicAddr(addr) {
+		return fmt.Errorf("private image host %q is not allowed", host)
+	}
+	return nil
+}
+
+func secureImageDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	addr, err := resolvePublicAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	dialer := &net.Dialer{Timeout: downloadTimeout}
+	return dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+}
+
+func resolvePublicAddr(ctx context.Context, host string) (netip.Addr, error) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if isPublicAddr(addr) {
+			return addr, nil
+		}
+		return netip.Addr{}, fmt.Errorf("private image host %q is not allowed", host)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("resolve image host %q: %w", host, err)
+	}
+	for _, ip := range ips {
+		addr, ok := netip.AddrFromSlice(ip.IP)
+		if ok && isPublicAddr(addr) {
+			return addr, nil
+		}
+	}
+	return netip.Addr{}, fmt.Errorf("image host %q did not resolve to a public address", host)
+}
+
+func isPublicAddr(addr netip.Addr) bool {
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+	return addr.IsGlobalUnicast() &&
+		!addr.IsPrivate() &&
+		!addr.IsLoopback() &&
+		!addr.IsLinkLocalUnicast() &&
+		!addr.IsLinkLocalMulticast() &&
+		!addr.IsMulticast() &&
+		!addr.IsUnspecified()
 }

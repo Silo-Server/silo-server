@@ -16,7 +16,12 @@ func (h *Handler) handleAuthorDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	author, err := h.deps.MediaStore.GetAuthorByID(r.Context(), id)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	author, err := h.deps.MediaStore.GetAuthorByID(r.Context(), id, access)
 	if errors.Is(err, ErrNotFound) {
 		http.Error(w, "author not found", http.StatusNotFound)
 		return
@@ -40,7 +45,12 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		id = idRaw
 	}
-	series, err := h.deps.MediaStore.GetSeriesByName(r.Context(), id)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	series, err := h.deps.MediaStore.GetSeriesByName(r.Context(), id, access)
 	if errors.Is(err, ErrNotFound) {
 		http.Error(w, "series not found", http.StatusNotFound)
 		return

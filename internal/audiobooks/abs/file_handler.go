@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+const publicTrackSessionTTL = 24 * time.Hour
 
 // trackInoFor derives a stable, ABS-compatible inode string from a content ID
 // and a 0-based file index. Real ABS uses the filesystem inode (a large
@@ -59,7 +62,12 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	contentID := chi.URLParam(r, "libraryItemId")
 	inoStr := chi.URLParam(r, "ino")
 
-	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
 	if err != nil || len(files) == 0 {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
@@ -160,8 +168,17 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session closed", http.StatusGone)
 		return
 	}
+	if publicTrackSessionExpired(sess, time.Now()) {
+		http.Error(w, "session expired", http.StatusGone)
+		return
+	}
 
-	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), sess.ContentID)
+	access, err := h.accessFilterForAuth(r.Context(), ctxAuth{UserID: sess.UserID, ProfileID: sess.ProfileID})
+	if err != nil {
+		http.Error(w, "session access denied", http.StatusForbidden)
+		return
+	}
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), sess.ContentID, access)
 	if err != nil || len(files) == 0 {
 		http.Error(w, "item files not found", http.StatusNotFound)
 		return
@@ -177,6 +194,14 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 	_ = playback.ServeDirectPlay(w, r, mediaFile.FilePath)
+}
+
+func publicTrackSessionExpired(sess ABSPlaybackSession, now time.Time) bool {
+	anchor := sess.StartedAt
+	if sess.LastSyncAt.After(anchor) {
+		anchor = sess.LastSyncAt
+	}
+	return !anchor.IsZero() && now.After(anchor.Add(publicTrackSessionTTL))
 }
 
 // audioContentType returns an audio MIME type for the given file extension

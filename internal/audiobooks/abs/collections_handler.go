@@ -98,9 +98,10 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 	}
 	lib := h.resolveDefaultLibrary(r.Context())
 	baseURL := h.absBaseURL(r)
+	access, _, _ := h.accessFilterFromRequest(r)
 	out := make([]map[string]any, 0, len(rows))
 	for _, it := range rows {
-		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID)
+		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
 		if err != nil || item == nil {
 			// Defensive: include a stub so the client still sees the
 			// item count, but with empty media so it falls through to
@@ -223,7 +224,7 @@ func (h *Handler) handleGetCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := h.deps.CollectionStore.GetCollection(r.Context(), chiURLID(r))
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID && !c.IsPublic) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID) && !c.IsPublic) {
 		http.Error(w, "collection not found", http.StatusNotFound)
 		return
 	}
@@ -250,7 +251,7 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 	}
 	id := chiURLID(r)
 	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID)) {
 		http.Error(w, "collection not found", http.StatusNotFound)
 		return
 	}
@@ -310,7 +311,7 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	}
 
 	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID)) {
 		http.Error(w, "collection not found", http.StatusNotFound)
 		return
 	}
@@ -321,7 +322,12 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	}
 
 	// Item validation — avoid orphan refs.
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), bookID)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), bookID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
@@ -362,7 +368,7 @@ func (h *Handler) handleRemoveCollectionBook(w http.ResponseWriter, r *http.Requ
 	}
 
 	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID)) {
 		http.Error(w, "collection not found", http.StatusNotFound)
 		return
 	}
@@ -400,7 +406,7 @@ func (h *Handler) handleDeleteCollection(w http.ResponseWriter, r *http.Request)
 	}
 	id := chiURLID(r)
 	c, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID)) {
 		http.Error(w, "collection not found", http.StatusNotFound)
 		return
 	}

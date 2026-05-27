@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -109,11 +110,11 @@ type itemListStubMediaStore struct {
 	items []*models.MediaItem
 }
 
-func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, _ int64, _, _ int) ([]*models.MediaItem, int, error) {
+func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, _ int64, _, _ int, _ catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	return s.items, len(s.items), nil
 }
 
-func (s *itemListStubMediaStore) ListAudiobookLibraries(_ context.Context) ([]AudiobookLibrary, error) {
+func (s *itemListStubMediaStore) ListAudiobookLibraries(_ context.Context, _ catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return []AudiobookLibrary{{ID: 9, Name: "Audiobooks", Type: "audiobooks"}}, nil
 }
 

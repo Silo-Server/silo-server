@@ -112,4 +112,10 @@ ALTER TABLE user_personal_collections
     CHECK (collection_type IN ('manual', 'synced'));
 
 -- 5. Drop the sub_item_id column.
+ALTER TABLE user_personal_collection_items
+    DROP CONSTRAINT IF EXISTS user_personal_collection_items_pkey;
+ALTER TABLE user_personal_collection_items
+    ADD CONSTRAINT user_personal_collection_items_pkey
+    PRIMARY KEY (user_id, collection_id, media_item_id);
+
 ALTER TABLE user_personal_collection_items DROP COLUMN sub_item_id;

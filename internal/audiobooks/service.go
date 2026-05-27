@@ -41,11 +41,12 @@ func New(settings SettingsReader) *Service {
 // handler dereferences MediaStore from many request paths and a nil store
 // would panic on the first request. BuildABSHandler validates this at startup.
 type ABSHandlerDeps struct {
-	Pool     *pgxpool.Pool
-	Items    *catalog.ItemRepository
-	Files    *scanner.FileRepository
-	Settings *catalog.ServerSettingsRepo
-	Auth     absAuthAdapter // see BuildABSHandler below
+	Pool           *pgxpool.Pool
+	Items          *catalog.ItemRepository
+	Files          *scanner.FileRepository
+	Settings       *catalog.ServerSettingsRepo
+	Auth           absAuthAdapter // see BuildABSHandler below
+	AccessResolver abs.AccessResolver
 	// Recs is the recommendations repository used to power the
 	// /items/{id}/similar endpoint via embedding nearest-neighbor search.
 	// Optional; when nil, ABSRecommender falls back to the shared-genre
@@ -147,6 +148,7 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		MediaStore:           mediaStore,
 		TokenStore:           tokenStore,
 		CredValidator:        deps.Auth,
+		AccessResolver:       deps.AccessResolver,
 		Config:               configProvider,
 		Publisher:            nil, // EventPublisher: no-op stub; Socket.io handles realtime
 		Recommender:          buildABSRecommender(deps),

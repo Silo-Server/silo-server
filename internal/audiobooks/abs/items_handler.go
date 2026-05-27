@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // resolveDefaultLibrary returns the first audiobook library (the canonical
@@ -12,8 +14,12 @@ import (
 // is empty or errors. Centralizes the snippet that handleItem,
 // handleSimilarItems, and handleItemsInProgress all need so the fallback
 // shape stays consistent across all three response paths.
-func (h *Handler) resolveDefaultLibrary(ctx context.Context) AudiobookLibrary {
-	if libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx); err == nil && len(libs) > 0 {
+func (h *Handler) resolveDefaultLibrary(ctx context.Context, filters ...catalog.AccessFilter) AudiobookLibrary {
+	access := emptyAccessFilter()
+	if len(filters) > 0 {
+		access = filters[0]
+	}
+	if libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx, access); err == nil && len(libs) > 0 {
 		return libs[0]
 	}
 	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
@@ -38,19 +44,24 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
 
-	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID)
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
 	if err != nil {
 		http.Error(w, "load files: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	lib := h.resolveDefaultLibrary(r.Context())
+	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
 	result := siloItemToLibraryItemDetail(item, files, lib, baseURL)
 	writeJSON(w, http.StatusOK, result)
@@ -90,11 +101,16 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lib := h.resolveDefaultLibrary(r.Context())
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
 	out := make([]LibraryItem, 0, len(ids))
 	for _, id := range ids {
-		si, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), id)
+		si, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), id, access)
 		if err != nil || si == nil {
 			continue
 		}
@@ -126,14 +142,19 @@ func (h *Handler) handleItemsInProgress(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	lib := h.resolveDefaultLibrary(r.Context())
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
 	items := make([]any, 0, len(rows))
 	for _, p := range rows {
 		if p.IsFinished || p.CurrentSeconds <= 0 {
 			continue
 		}
-		si, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), p.ContentID)
+		si, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), p.ContentID, access)
 		if err != nil || si == nil {
 			continue
 		}

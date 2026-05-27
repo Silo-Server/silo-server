@@ -129,7 +129,7 @@ func (h *Handler) handleGetSmartCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	c, err := h.deps.SmartCollectionStore.GetSmartCollection(r.Context(), chiURLID(r))
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID && !c.IsPublic) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID) && !c.IsPublic) {
 		http.Error(w, "smart collection not found", http.StatusNotFound)
 		return
 	}
@@ -153,7 +153,7 @@ func (h *Handler) handleUpdateSmartCollection(w http.ResponseWriter, r *http.Req
 	}
 	id := chiURLID(r)
 	c, err := h.deps.SmartCollectionStore.GetSmartCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID)) {
 		http.Error(w, "smart collection not found", http.StatusNotFound)
 		return
 	}
@@ -221,7 +221,7 @@ func (h *Handler) handleDeleteSmartCollection(w http.ResponseWriter, r *http.Req
 	}
 	id := chiURLID(r)
 	c, err := h.deps.SmartCollectionStore.GetSmartCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID)) {
 		http.Error(w, "smart collection not found", http.StatusNotFound)
 		return
 	}
@@ -255,7 +255,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 	}
 	id := chiURLID(r)
 	c, err := h.deps.SmartCollectionStore.GetSmartCollection(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.UserID != a.UserID && !c.IsPublic) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID) && !c.IsPublic) {
 		http.Error(w, "smart collection not found", http.StatusNotFound)
 		return
 	}
@@ -280,7 +280,12 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 		limit = *qd.Limit
 	}
 
-	allLibs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context())
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	allLibs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
 	if err != nil {
 		slog.Warn("abs smart collection libraries fetch failed", "err", err, "id", id)
 		allLibs = nil
@@ -300,7 +305,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 		targetLibs = allLibs
 	}
 
-	owner := c.UserID == a.UserID
+	owner := sameABSPrincipal(a, c.UserID, c.ProfileID)
 	progressByID := map[string]ProgressRow{}
 	bookmarkCountByID := map[string]int{}
 	if owner {
@@ -320,7 +325,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 
 	candidates := make([]smartcoll.Candidate, 0, 256)
 	for _, lib := range targetLibs {
-		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, 5000, 0)
+		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, 0, 0, access)
 		if lerr != nil {
 			slog.Warn("abs smart collection list-audiobooks failed", "err", lerr, "library", lib.ID)
 			continue
@@ -356,7 +361,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 	}
 	pageSlice := matched[start:end]
 
-	libDefault := h.resolveDefaultLibrary(r.Context())
+	libDefault := h.resolveDefaultLibrary(r.Context(), access)
 	libDefaultID := audiobookLibraryID(libDefault)
 	results := make([]map[string]any, 0, len(pageSlice))
 	for _, cand := range pageSlice {
@@ -375,18 +380,31 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 
 // siloItemToSmartcollItem maps a silo *models.MediaItem into the
 // audiobook-domain Item shape the smartcoll evaluator walks.
-// Authors/Narrators/Series/Publisher/DurationSeconds are best-effort
-// (zero-valued in v1); a follow-up wires the people/series/file joins.
 func siloItemToSmartcollItem(mi *models.MediaItem) smartcoll.Item {
 	if mi == nil {
 		return smartcoll.Item{}
 	}
 	it := smartcoll.Item{
-		ID:       mi.ContentID,
-		Title:    mi.Title,
-		Genres:   mi.Genres,
-		Year:     mi.Year,
-		Language: mi.OriginalLanguage,
+		ID:              mi.ContentID,
+		Title:           mi.Title,
+		Genres:          mi.Genres,
+		Year:            mi.Year,
+		Language:        mi.OriginalLanguage,
+		DurationSeconds: mi.Runtime,
+	}
+	for _, p := range mi.People {
+		switch p.Kind {
+		case models.PersonKindAuthor:
+			it.Authors = append(it.Authors, p.Name)
+		case models.PersonKindNarrator:
+			it.Narrators = append(it.Narrators, p.Name)
+		}
+	}
+	for _, s := range mi.AudiobookSeries {
+		it.Series = append(it.Series, s.Name)
+	}
+	if len(mi.Studios) > 0 {
+		it.Publisher = mi.Studios[0]
 	}
 	if mi.RatingIMDB != nil {
 		it.Rating = *mi.RatingIMDB

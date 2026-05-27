@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// barrierStore wraps memTokenStore and gates the FIRST RevokeTokenByJTI
+// barrierStore wraps memTokenStore and gates the FIRST RevokeTokenIfActive
 // call on `release` so both goroutines in the concurrent test can complete
 // their initial GetTokenByJTI lookup before either revoke fires. Without
 // this, the Go scheduler can serialize the test enough that goroutine B's
@@ -25,21 +25,15 @@ type barrierStore struct {
 	gateClosed chan struct{}
 }
 
-func (b *barrierStore) RevokeTokenByJTI(ctx context.Context, jti string) error {
+func (b *barrierStore) RevokeTokenIfActive(ctx context.Context, jti string) (ABSToken, error) {
 	b.gateOnce.Do(func() {
 		<-b.release
 		close(b.gateClosed)
 	})
-	return b.memTokenStore.RevokeTokenByJTI(ctx, jti)
+	return b.memTokenStore.RevokeTokenIfActive(ctx, jti)
 }
 
-// TestHandleRefresh_ConcurrentRotations_BothSucceed exercises the documented
-// race behavior: two clients presenting the same refresh token whose
-// GetTokenByJTI lookups both land before either revoke MUST both receive
-// 200 with a distinct new pair. The old JTI ends up revoked exactly once;
-// both new pairs remain valid until natural TTL expiry. Mirrors
-// continuum-plugin-audiobooks's documented behavior at handler.go:775-852.
-func TestHandleRefresh_ConcurrentRotations_BothSucceed(t *testing.T) {
+func TestHandleRefresh_ConcurrentRotations_OnlyOneSucceeds(t *testing.T) {
 	cfg := &staticConfig{secret: []byte("test-secret-32-bytes-aaaaaaaaaaaaa")}
 	mem := newMemTokenStore()
 	gate := &barrierStore{memTokenStore: mem, release: make(chan struct{}), gateClosed: make(chan struct{})}
@@ -81,24 +75,34 @@ func TestHandleRefresh_ConcurrentRotations_BothSucceed(t *testing.T) {
 		}()
 	}
 
-	// Give both goroutines time to reach the barrier (Get → mint → 2x Insert
-	// → first Revoke), then release the gate so both revokes proceed.
+	// Give both goroutines time to reach the atomic revoke barrier, then
+	// release the gate so one rotation wins and the other sees a revoked JTI.
 	time.Sleep(50 * time.Millisecond)
 	close(gate.release)
 	wg.Wait()
 	close(results)
 
 	tokens := map[string]bool{}
+	successes := 0
+	unauthorized := 0
 	for r := range results {
-		if r.code != http.StatusOK {
-			t.Errorf("concurrent refresh got code %d; want 200", r.code)
+		switch r.code {
+		case http.StatusOK:
+			successes++
+		case http.StatusUnauthorized:
+			unauthorized++
+		default:
+			t.Errorf("concurrent refresh got code %d; want 200 or 401", r.code)
 		}
 		if r.access != "" {
 			tokens[r.access] = true
 		}
 	}
-	if len(tokens) != 2 {
-		t.Errorf("got %d distinct access tokens; want 2", len(tokens))
+	if successes != 1 || unauthorized != 1 {
+		t.Errorf("got successes=%d unauthorized=%d; want 1 each", successes, unauthorized)
+	}
+	if len(tokens) != 1 {
+		t.Errorf("got %d distinct access tokens; want 1", len(tokens))
 	}
 	old, _ := mem.GetTokenByJTI(context.Background(), jti)
 	if old.RevokedAt == nil {
@@ -113,15 +117,15 @@ func TestHandleRefresh_ConcurrentRotations_BothSucceed(t *testing.T) {
 // canonical accepts this trade rather than rolling back partial writes.
 type failingRevokeStore struct{ *memTokenStore }
 
-func (failingRevokeStore) RevokeTokenByJTI(context.Context, string) error {
-	return errors.New("revoke unavailable")
+func (failingRevokeStore) RevokeTokenIfActive(context.Context, string) (ABSToken, error) {
+	return ABSToken{}, errors.New("revoke unavailable")
 }
 
 // TestHandleRefresh_RevokeFailure_OldTokenStillValid covers the documented
 // partial-failure semantics: when revoke errors, handleRefresh returns 500
 // and the OLD refresh JTI is left untouched (still valid). The client can
-// retry with the same old token; the new tokens that were persisted
-// before the revoke fail become orphaned but harmless (TTL'd out).
+// retry with the same old token because no new tokens are persisted before
+// the atomic revoke succeeds.
 func TestHandleRefresh_RevokeFailure_OldTokenStillValid(t *testing.T) {
 	cfg := &staticConfig{secret: []byte("test-secret-32-bytes-aaaaaaaaaaaaa")}
 	mem := newMemTokenStore()

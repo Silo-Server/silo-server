@@ -28,9 +28,8 @@ import (
 //   - Looks up the audiobook via MediaStore.GetAudiobookByID.
 //   - Loads all media files via MediaStore.GetMediaFiles (sorted by ID ASC).
 //   - Synthesises a ULID session ID (in-memory; no play-session table yet).
-//   - Builds contentUrls that point at this handler's sibling handleFileStream
-//     endpoint, qualified by the ABS bearer token in ?token= so the iOS audio
-//     element can load the URL without extra request headers.
+//   - Builds contentUrls that point at the session-scoped public track route,
+//     avoiding bearer tokens in URLs while preserving ABS DirectPlay behavior.
 //   - Returns a JSON playbackSession matching the shape real ABS emits, with
 //     enough fields populated that the official mobile client plays without
 //     entering "spinner forever" mode.
@@ -43,13 +42,18 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 
 	contentID := chi.URLParam(r, "libraryItemId")
 
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
 
-	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID)
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
 	if err != nil {
 		http.Error(w, "load files failed", http.StatusInternalServerError)
 		return
@@ -59,11 +63,6 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	// we want iOS clients to resolve it via the stable MD5 derivation. Emit inos
 	// that handleFileStream can reverse without a database lookup.
 	baseURL := h.absBaseURL(r)
-	// The bearer token from the ABS JWT is re-embedded in the content URL so
-	// that iOS's AVPlayer (which can't add Authorization headers on audio
-	// subrequests) can authenticate via ?token=.
-	accessToken := a.Token
-
 	sessionID := ulid.Make().String()
 
 	// Persist the session row so subsequent PATCH /session/{sid} heartbeats
@@ -89,7 +88,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	audioTracks := buildSiloAudioTracks(contentID, files, baseURL, sessionID, accessToken)
+	audioTracks := buildSiloAudioTracks(contentID, files, baseURL, sessionID)
 
 	totalDuration := float64(0)
 	for _, t := range audioTracks {
@@ -168,15 +167,13 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildSiloAudioTracks converts silo media_files into the ABS AudioTrack
-// slice. Each track's contentUrl points at handleFileStream with the ABS
-// bearer token appended so the iOS audio element can load without extra
-// headers.
+// slice. Each track's contentUrl points at the short-lived session public
+// track route so bearer tokens are never embedded in URLs.
 func buildSiloAudioTracks(
 	contentID string,
 	files []*models.MediaFile,
 	baseURL string,
-	_ string, // sessionID reserved for future /public/session/ path
-	accessToken string,
+	sessionID string,
 ) []AudioTrack {
 	tracks := make([]AudioTrack, 0, len(files))
 
@@ -196,14 +193,7 @@ func buildSiloAudioTracks(
 		// Our ino uses 0-based internally; handleFileStream resolves via ino.
 		wireIndex := i + 1
 
-		// contentUrl: use /abs/api path so both standalone and host-proxied
-		// mounts resolve correctly. The ?token= appended here lets iOS
-		// AVPlayer (which cannot set Authorization headers on media loads)
-		// authenticate via the query param fallback in bearerAuth.
-		contentURL := baseURL + "/abs/api/items/" + contentID + "/file/" + ino
-		if accessToken != "" {
-			contentURL += "?token=" + accessToken
-		}
+		contentURL := baseURL + "/abs/public/session/" + sessionID + "/track/" + strconv.Itoa(wireIndex)
 
 		duration := float64(f.Duration) // f.Duration is in seconds (int)
 
@@ -334,6 +324,24 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 	if genres == nil {
 		genres = []string{}
 	}
+	series := make([]map[string]any, 0, len(item.AudiobookSeries))
+	seriesNames := make([]string, 0, len(item.AudiobookSeries))
+	for _, membership := range item.AudiobookSeries {
+		name := strings.TrimSpace(membership.Name)
+		if name == "" {
+			continue
+		}
+		obj := map[string]any{"id": name, "name": name}
+		if membership.Index != nil {
+			obj["sequence"] = strconv.FormatFloat(*membership.Index, 'f', -1, 64)
+		}
+		series = append(series, obj)
+		seriesNames = append(seriesNames, name)
+	}
+	var publisher any
+	if len(item.Studios) > 0 && strings.TrimSpace(item.Studios[0]) != "" {
+		publisher = strings.TrimSpace(item.Studios[0])
+	}
 
 	return map[string]any{
 		"title":             title,
@@ -344,13 +352,13 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 		"authorNameLF":      authorNameLF,
 		"narrators":         narrators,
 		"narratorName":      strings.Join(narrators, ", "),
-		"series":            []any{},
-		"seriesName":        "",
+		"series":            series,
+		"seriesName":        strings.Join(seriesNames, ", "),
 		"genres":            genres,
 		"tags":              []string{},
 		"publishedYear":     publishedYear,
 		"publishedDate":     nil,
-		"publisher":         nil,
+		"publisher":         publisher,
 		"description":       nilIfEmpty(item.Overview),
 		"descriptionPlain":  nilIfEmpty(stripHTML(item.Overview)),
 		"isbn":              nil,

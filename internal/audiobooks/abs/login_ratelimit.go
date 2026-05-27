@@ -3,7 +3,6 @@ package abs
 import (
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -94,19 +93,8 @@ func (l *LoginLimiter) janitor() {
 }
 
 // clientIP returns the rate-limit key for a request. The standalone listener
-// terminates TCP directly with the client, so r.RemoteAddr is the real client
-// IP. Honors X-Forwarded-For's first hop as a defensive fallback for operators
-// who put their own reverse proxy in front of the standalone listener; only
-// the first hop is trusted (the rest is client-supplied).
+// is public, so spoofable forwarding headers are deliberately ignored.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			xff = xff[:i]
-		}
-		if v := strings.TrimSpace(xff); v != "" {
-			return v
-		}
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

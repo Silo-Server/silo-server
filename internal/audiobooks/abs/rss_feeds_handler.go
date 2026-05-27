@@ -60,7 +60,12 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemID := chi.URLParam(r, "itemId")
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
@@ -115,7 +120,7 @@ func (h *Handler) handleCloseFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	f, err := h.deps.RSSFeedStore.GetFeed(r.Context(), id)
-	if errors.Is(err, ErrNotFound) || (err == nil && f.UserID != a.UserID) {
+	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, f.UserID, f.ProfileID)) {
 		http.Error(w, "feed not found", http.StatusNotFound)
 		return
 	}
@@ -161,12 +166,12 @@ func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), f.LibraryItemID)
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), f.LibraryItemID, emptyAccessFilter())
 	if err != nil || item == nil {
 		http.Error(w, "feed item not found", http.StatusNotFound)
 		return
 	}
-	files, _ := h.deps.MediaStore.GetMediaFiles(r.Context(), f.LibraryItemID)
+	files, _ := h.deps.MediaStore.GetMediaFiles(r.Context(), f.LibraryItemID, emptyAccessFilter())
 
 	base := h.absBaseURL(r)
 	xml := renderFeedXML(f, item, files, base)
