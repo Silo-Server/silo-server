@@ -172,3 +172,63 @@ func TestAudiobookFolderUnchangedMtimeDiffers(t *testing.T) {
 		t.Fatal("expected unchanged=false when mtime differs")
 	}
 }
+
+func TestAudiobookPeopleCreditsEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []models.ItemPerson
+		desired  []audiobookCredit
+		want     bool
+	}{
+		{
+			name: "equal sets in same order",
+			existing: []models.ItemPerson{
+				{Person: models.Person{Name: "Author A"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+				{Person: models.Person{Name: "Narrator N"}, Kind: models.PersonKindNarrator, SortOrder: 1},
+			},
+			desired: []audiobookCredit{
+				{Name: "Author A", Kind: models.PersonKindAuthor},
+				{Name: "Narrator N", Kind: models.PersonKindNarrator},
+			},
+			want: true,
+		},
+		{
+			name: "extra existing credit",
+			existing: []models.ItemPerson{
+				{Person: models.Person{Name: "Author A"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+				{Person: models.Person{Name: "Narrator N"}, Kind: models.PersonKindNarrator, SortOrder: 1},
+			},
+			desired: []audiobookCredit{
+				{Name: "Author A", Kind: models.PersonKindAuthor},
+			},
+			want: false,
+		},
+		{
+			name: "name case differs - still equal",
+			existing: []models.ItemPerson{
+				{Person: models.Person{Name: "AUTHOR A"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+			},
+			desired: []audiobookCredit{
+				{Name: "Author A", Kind: models.PersonKindAuthor},
+			},
+			want: true,
+		},
+		{
+			name: "different kind",
+			existing: []models.ItemPerson{
+				{Person: models.Person{Name: "X"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+			},
+			desired: []audiobookCredit{
+				{Name: "X", Kind: models.PersonKindNarrator},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := audiobookPeopleCreditsEqual(tt.existing, tt.desired); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

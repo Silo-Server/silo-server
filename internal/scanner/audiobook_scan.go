@@ -601,46 +601,82 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 	return nil
 }
 
+// audiobookCredit pairs a person name with a credit kind. Used to compare
+// the desired-from-tags set against the existing item_people set without
+// having to materialize a full []models.ItemPerson (which requires
+// resolved person IDs).
+type audiobookCredit struct {
+	Name string
+	Kind models.PersonKind
+}
+
+// audiobookPeopleCreditsEqual returns true when the existing item_people
+// rows for an audiobook match the desired credit set one-for-one on
+// (case-insensitive name, kind). Order is irrelevant because the upsert
+// path orders by SortOrder.
+//
+// Case-insensitive comparison: audiobook tag casing drifts between rips
+// and we don't want a stylistic re-cap to trigger DELETE+INSERT on every
+// scan.
+func audiobookPeopleCreditsEqual(existing []models.ItemPerson, desired []audiobookCredit) bool {
+	if len(existing) != len(desired) {
+		return false
+	}
+	type key struct {
+		name string
+		kind models.PersonKind
+	}
+	have := make(map[key]struct{}, len(existing))
+	for _, p := range existing {
+		have[key{strings.ToLower(strings.TrimSpace(p.Person.Name)), p.Kind}] = struct{}{}
+	}
+	for _, d := range desired {
+		k := key{strings.ToLower(strings.TrimSpace(d.Name)), d.Kind}
+		if _, ok := have[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // upsertAudiobookPeople upserts author and narrator rows into item_people,
 // using the PersonRepository to find-or-create each person by name.
-// Existing credits are not deleted first — we use ON CONFLICT DO NOTHING
-// (via ReplacePeople-style logic) so manual edits survive re-scans.
+// Skips the DELETE+INSERT entirely when the existing credit set already
+// matches the desired set (case-insensitive on name, exact on kind).
 func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, book *parsedAudiobook) error {
 	if s.personRepo == nil {
 		return fmt.Errorf("personRepo not configured on Scanner")
 	}
 
-	type credit struct {
-		name string
-		kind models.PersonKind
-	}
-	var credits []credit
+	var desired []audiobookCredit
 	if book.Author != "" {
-		credits = append(credits, credit{book.Author, models.PersonKindAuthor})
+		desired = append(desired, audiobookCredit{Name: book.Author, Kind: models.PersonKindAuthor})
 	}
 	if book.Narrator != "" {
-		credits = append(credits, credit{book.Narrator, models.PersonKindNarrator})
+		desired = append(desired, audiobookCredit{Name: book.Narrator, Kind: models.PersonKindNarrator})
 	}
-	if len(credits) == 0 {
+	if len(desired) == 0 {
 		return nil
 	}
 
-	people := make([]models.ItemPerson, 0, len(credits))
-	for i, c := range credits {
-		personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.name})
+	existing, err := s.itemRepo.GetPeople(ctx, contentID)
+	if err == nil && audiobookPeopleCreditsEqual(existing, desired) {
+		return nil
+	}
+
+	people := make([]models.ItemPerson, 0, len(desired))
+	for i, c := range desired {
+		personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.Name})
 		if err != nil {
-			return fmt.Errorf("find-or-create person %q: %w", c.name, err)
+			return fmt.Errorf("find-or-create person %q: %w", c.Name, err)
 		}
 		people = append(people, models.ItemPerson{
 			Person:    models.Person{ID: personID},
-			Kind:      c.kind,
+			Kind:      c.Kind,
 			SortOrder: i,
 		})
 	}
 
-	// ReplacePeople deletes existing credits then inserts the new set.
-	// For audiobook scanning this is acceptable — we re-derive all credits
-	// from the file metadata on every scan, so the set is authoritative.
 	return s.itemRepo.ReplacePeople(ctx, contentID, people)
 }
 
