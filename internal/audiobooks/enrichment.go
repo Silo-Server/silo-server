@@ -25,7 +25,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
+
+// audiobookCoverCacher is a narrow shape matching scanner.audiobookCoverCacher's
+// method set by structural typing. Anything implementing CacheAudiobookCover can
+// be passed to scanner.ExtractAndUploadAudiobookCover via this interface.
+type audiobookCoverCacher interface {
+	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
+}
 
 const (
 	// defaultEnrichBatchSize is the maximum number of audiobook items processed
@@ -53,6 +61,8 @@ type Enricher struct {
 	itemRepo    *catalog.ItemRepository
 	personRepo  *catalog.PersonRepository
 	providerIDs *catalog.ProviderIDRepository
+	imageCacher audiobookCoverCacher
+	ffmpegPath  string
 	batchSize   int
 }
 
@@ -66,6 +76,8 @@ func NewEnricher(
 	itemRepo *catalog.ItemRepository,
 	personRepo *catalog.PersonRepository,
 	providerIDs *catalog.ProviderIDRepository,
+	imageCacher audiobookCoverCacher,
+	ffmpegPath string,
 ) *Enricher {
 	return &Enricher{
 		pool:        pool,
@@ -74,6 +86,8 @@ func NewEnricher(
 		itemRepo:    itemRepo,
 		personRepo:  personRepo,
 		providerIDs: providerIDs,
+		imageCacher: imageCacher,
+		ffmpegPath:  ffmpegPath,
 		batchSize:   defaultEnrichBatchSize,
 	}
 }
@@ -333,6 +347,15 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		"overview", accumulator.Overview != "",
 		"people", len(accumulator.People),
 	)
+
+	if e.imageCacher != nil && e.ffmpegPath != "" {
+		if err := e.applyLocalCoverFallback(ctx, item.ContentID); err != nil {
+			slog.Warn("audiobook enrichment: local cover fallback failed",
+				"content_id", item.ContentID,
+				"error", err,
+			)
+		}
+	}
 	return nil
 }
 
@@ -468,6 +491,45 @@ func (e *Enricher) persistPeople(ctx context.Context, contentID string, people [
 		return nil
 	}
 	return e.itemRepo.ReplacePeople(ctx, contentID, linked)
+}
+
+// applyLocalCoverFallback reads the embedded cover from the audiobook's
+// primary audio file and writes it to poster_path if (and only if) the
+// item still has no poster after provider enrichment. Best-effort; errors
+// are logged by the caller, not returned to fail the sweep.
+func (e *Enricher) applyLocalCoverFallback(ctx context.Context, contentID string) error {
+	var posterPath string
+	var primaryFile string
+	err := e.pool.QueryRow(ctx, `
+		SELECT COALESCE(mi.poster_path, ''), COALESCE(mf.file_path, '')
+		FROM media_items mi
+		LEFT JOIN LATERAL (
+			SELECT file_path FROM media_files
+			WHERE content_id = mi.content_id
+			ORDER BY id ASC
+			LIMIT 1
+		) mf ON TRUE
+		WHERE mi.content_id = $1
+	`, contentID).Scan(&posterPath, &primaryFile)
+	if err != nil {
+		return fmt.Errorf("read item for cover fallback: %w", err)
+	}
+	if posterPath != "" || primaryFile == "" {
+		return nil
+	}
+
+	poster, thumb := scanner.ExtractAndUploadAudiobookCover(ctx, e.ffmpegPath, e.imageCacher, primaryFile, contentID)
+	if poster == "" {
+		return nil
+	}
+	if _, err := e.pool.Exec(ctx, `
+		UPDATE media_items
+		SET poster_path = $1, poster_thumbhash = $2, updated_at = NOW()
+		WHERE content_id = $3 AND (poster_path IS NULL OR poster_path = '')
+	`, poster, thumb, contentID); err != nil {
+		return fmt.Errorf("update poster_path: %w", err)
+	}
+	return nil
 }
 
 // mergeEnrichmentProviderIDs copies new provider IDs from src into dst,
