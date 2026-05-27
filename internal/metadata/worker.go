@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -837,10 +839,21 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				}
 			}
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, representative.ContentID); err != nil {
-				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
-					return 0, updateErr
+				if errors.Is(err, catalog.ErrItemNotFound) {
+					// The series item was concurrently merged into another (provider-ID
+					// dedup moves its seasons+episodes to the survivor, then deletes the
+					// source row). The episodes are already reattached, so there is nothing
+					// to link here — benign; finish normally instead of failing the batch.
+					slog.Info("metadata: series item gone during episode-link ensure (likely concurrent merge); skipping",
+						"content_id", representative.ContentID,
+						"folder_id", job.MediaFolderID,
+						"observed_root_path", job.ObservedRootPath)
+				} else {
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+						return 0, updateErr
+					}
+					return 0, fmt.Errorf("ensuring series episode links for %s: %w", representative.ContentID, err)
 				}
-				return 0, fmt.Errorf("ensuring series episode links for %s: %w", representative.ContentID, err)
 			}
 		}
 		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
@@ -933,10 +946,17 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	}
 	if strings.TrimSpace(finalContentID) != "" {
 		if err := w.service.ensureSeriesEpisodeLinks(ctx, finalContentID); err != nil {
-			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
-				return 0, updateErr
+			if errors.Is(err, catalog.ErrItemNotFound) {
+				slog.Info("metadata: series item gone during episode-link ensure (likely concurrent merge); skipping",
+					"content_id", finalContentID,
+					"folder_id", job.MediaFolderID,
+					"observed_root_path", job.ObservedRootPath)
+			} else {
+				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+					return 0, updateErr
+				}
+				return 0, fmt.Errorf("ensuring series episode links for %s: %w", finalContentID, err)
 			}
-			return 0, fmt.Errorf("ensuring series episode links for %s: %w", finalContentID, err)
 		}
 		if _, ok := w.service.confirmedOwnershipItem(ctx, finalContentID); ok {
 			w.service.claimConfirmedSeriesRootOwnership(ctx, job.MediaFolderID, job.ObservedRootPath, finalContentID, groupFiles)
