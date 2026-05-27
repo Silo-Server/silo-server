@@ -383,15 +383,17 @@ func (r *Repository) nextHomePosition(ctx context.Context) (int, error) {
 	return maxPosition + 1, nil
 }
 
-func (r *Repository) CreateGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName string) ([]*PageSection, error) {
+func (r *Repository) CreateGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
 	existing, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing generated home sections: %w", err)
 	}
 
-	existingByType := make(map[SectionType]*PageSection, len(existing))
+	existingByKind := make(map[string]*PageSection, len(existing))
 	for _, section := range existing {
-		existingByType[section.SectionType] = section
+		if kind := generatedHomeLibraryRecentKindForSection(section); kind != "" {
+			existingByKind[kind] = section
+		}
 	}
 
 	position, err := r.nextHomePosition(ctx)
@@ -400,19 +402,17 @@ func (r *Repository) CreateGeneratedHomeLibraryRecentSections(ctx context.Contex
 	}
 
 	created := make([]*PageSection, 0, 2)
-	for _, sectionType := range []SectionType{SectionRecentlyAdded, SectionRecentlyReleased} {
-		if _, ok := existingByType[sectionType]; ok {
+	for _, section := range generatedHomeLibraryRecentDefaults(libraryID, libraryName, libraryType) {
+		kind := generatedHomeLibraryRecentKindForSection(section)
+		if kind == generatedHomeLibraryRecentKindReleasedEpisodes {
+			if _, ok := existingByKind[generatedHomeLibraryRecentKindReleased]; ok {
+				continue
+			}
+		}
+		if _, ok := existingByKind[kind]; ok {
 			continue
 		}
-		section := &PageSection{
-			Scope:       "home",
-			Position:    position,
-			SectionType: sectionType,
-			Title:       GeneratedHomeLibraryRecentTitle(sectionType, libraryName),
-			ItemLimit:   20,
-			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
-			Enabled:     true,
-		}
+		section.Position = position
 		createdSection, createErr := r.Create(ctx, section)
 		if createErr != nil {
 			return nil, fmt.Errorf("creating generated home section %q: %w", section.Title, createErr)
@@ -434,7 +434,7 @@ func (r *Repository) SyncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 		if !ShouldSyncGeneratedHomeLibraryRecentTitle(section, oldLibraryName) {
 			continue
 		}
-		section.Title = GeneratedHomeLibraryRecentTitle(section.SectionType, newLibraryName)
+		section.Title = GeneratedHomeLibraryRecentSyncedTitle(section, newLibraryName)
 		if err := r.Update(ctx, section); err != nil {
 			return fmt.Errorf("updating generated home section %s: %w", section.ID, err)
 		}

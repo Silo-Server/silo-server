@@ -26,6 +26,7 @@ type SectionHandler struct {
 	repo           *sections.Repository
 	fetcher        *sections.Fetcher
 	previewFetcher sectionPreviewFetcher // set to fetcher at construction; separate for test injection
+	episodeFetcher sectionEpisodeFetcher
 	FolderRepo     *catalog.FolderRepository
 	EpisodeRepo    *catalog.EpisodeRepository
 	StoreProvider  userstore.UserStoreProvider
@@ -37,7 +38,11 @@ type SectionHandler struct {
 
 // NewSectionHandler creates a new SectionHandler.
 func NewSectionHandler(repo *sections.Repository, fetcher *sections.Fetcher) *SectionHandler {
-	return &SectionHandler{repo: repo, fetcher: fetcher, previewFetcher: fetcher}
+	return &SectionHandler{repo: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher}
+}
+
+type sectionEpisodeFetcher interface {
+	FetchEpisodesByContentIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]sections.SectionItemMeta, error)
 }
 
 func (h *SectionHandler) defaultHomeSections(ctx context.Context) ([]*sections.PageSection, error) {
@@ -1169,12 +1174,18 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 	}
 	userStates := h.listSectionItemUserStates(r, allItems)
 	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems)
+	episodeMeta := h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r))
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
 			var meta *sections.SectionItemMeta
 			if s.ItemMeta != nil {
 				if value, ok := s.ItemMeta[item.ContentID]; ok {
+					meta = &value
+				}
+			}
+			if meta == nil {
+				if value, ok := episodeMeta[item.ContentID]; ok {
 					meta = &value
 				}
 			}
@@ -1194,6 +1205,42 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 		})
 	}
 	return resp
+}
+
+func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withItems []sections.SectionWithItems, filter catalog.AccessFilter) map[string]sections.SectionItemMeta {
+	if h == nil || h.episodeFetcher == nil {
+		return map[string]sections.SectionItemMeta{}
+	}
+
+	ids := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, section := range withItems {
+		for _, item := range section.Items {
+			if item == nil || item.Type != "episode" || strings.TrimSpace(item.ContentID) == "" {
+				continue
+			}
+			if section.ItemMeta != nil {
+				if _, ok := section.ItemMeta[item.ContentID]; ok {
+					continue
+				}
+			}
+			if _, ok := seen[item.ContentID]; ok {
+				continue
+			}
+			seen[item.ContentID] = struct{}{}
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return map[string]sections.SectionItemMeta{}
+	}
+
+	_, meta, err := h.episodeFetcher.FetchEpisodesByContentIDs(ctx, ids, filter)
+	if err != nil {
+		slog.Warn("loading section episode metadata", "error", err)
+		return map[string]sections.SectionItemMeta{}
+	}
+	return meta
 }
 
 func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems) map[sectionItemImageKey]sectionItemImageURLs {

@@ -75,7 +75,7 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("The Last of Us");
-    expect(markup).toContain("S1 E1");
+    expect(markup).toContain("S01E01");
     expect(markup).toContain("When You&#x27;re Lost in the Darkness");
   });
 });

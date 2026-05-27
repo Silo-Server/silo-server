@@ -21,8 +21,8 @@ func TestDefaultHomeSectionsWithoutLibraries(t *testing.T) {
 
 func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 	libraries := []*models.MediaFolder{
-		{ID: 7, Name: "Movies", SortOrder: 1},
-		{ID: 9, Name: "Shows", SortOrder: 2},
+		{ID: 7, Name: "Movies", Type: "movies", SortOrder: 1},
+		{ID: 9, Name: "Shows", Type: "series", SortOrder: 2},
 	}
 
 	got := DefaultHomeSections(libraries)
@@ -43,7 +43,7 @@ func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 		{index: 1, id: "default-home-recently_added-library-7", sectionType: SectionRecentlyAdded, title: "Recently Added in Movies", position: 1, libraryID: 7},
 		{index: 2, id: "default-home-recently_released-library-7", sectionType: SectionRecentlyReleased, title: "Recently Released in Movies", position: 2, libraryID: 7},
 		{index: 3, id: "default-home-recently_added-library-9", sectionType: SectionRecentlyAdded, title: "Recently Added in Shows", position: 3, libraryID: 9},
-		{index: 4, id: "default-home-recently_released-library-9", sectionType: SectionRecentlyReleased, title: "Recently Released in Shows", position: 4, libraryID: 9},
+		{index: 4, id: "default-home-recently_released_episodes-library-9", sectionType: SectionCustomFilter, title: "Recently Released Episodes in Shows", position: 4, libraryID: 9},
 	}
 
 	for _, tt := range tests {
@@ -71,6 +71,14 @@ func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 			t.Fatalf("section %d config library id = %d, want %d", tt.index, libraryID, tt.libraryID)
 		}
 	}
+
+	assertQueryDefinition(t, got[4].Config, catalog.QueryDefinition{
+		LibraryIDs: []int{9},
+		MediaScope: "episode",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "release_date", Order: "desc"},
+	})
 }
 
 func TestDefaultLibrarySectionsForTypeMovies(t *testing.T) {
@@ -140,8 +148,8 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 	libraryID := 17
 	got := DefaultLibrarySectionsForType(&libraryID, "series")
 
-	if len(got) != 7 {
-		t.Fatalf("expected 7 series default sections, got %d", len(got))
+	if len(got) != 6 {
+		t.Fatalf("expected 6 series default sections, got %d", len(got))
 	}
 
 	tests := []struct {
@@ -154,10 +162,9 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 		{index: 0, id: "default-continue-watching", sectionType: SectionContinueWatching, title: "Continue Watching", position: 0},
 		{index: 1, id: "default-recently-added-tv", sectionType: SectionRecentlyAdded, title: "Recently Added TV", position: 1},
 		{index: 2, id: "default-recently-released-episodes", sectionType: SectionCustomFilter, title: "Recently Released Episodes", position: 2},
-		{index: 3, id: "default-recently-released-tv-shows", sectionType: SectionCustomFilter, title: "Recently Released TV Shows", position: 3},
-		{index: 4, id: "default-top-rated-tv", sectionType: SectionCustomFilter, title: "Top Rated TV", position: 4},
-		{index: 5, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 5},
-		{index: 6, id: "default-random-tv", sectionType: SectionRandom, title: "Random Picks", position: 6},
+		{index: 3, id: "default-top-rated-tv", sectionType: SectionCustomFilter, title: "Top Rated TV", position: 3},
+		{index: 4, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 4},
+		{index: 5, id: "default-random-tv", sectionType: SectionRandom, title: "Random Picks", position: 5},
 	}
 
 	for _, tt := range tests {
@@ -195,16 +202,10 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 		MediaScope: "series",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
-		Sort:       catalog.QuerySort{Field: "last_air_date", Order: "desc"},
-	})
-	assertQueryDefinition(t, got[4].Config, catalog.QueryDefinition{
-		MediaScope: "series",
-		Match:      "all",
-		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "rating_imdb", Order: "desc"},
 	})
-	assertEmptyJSON(t, got[5].Config)
-	assertQueryDefinition(t, got[6].Config, catalog.QueryDefinition{
+	assertEmptyJSON(t, got[4].Config)
+	assertQueryDefinition(t, got[5].Config, catalog.QueryDefinition{
 		MediaScope: "series",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
