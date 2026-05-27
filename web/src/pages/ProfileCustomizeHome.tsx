@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import PageBack from "@/components/PageBack";
 import ProfileSectionRow from "@/components/ProfileSectionRow";
 import RecipeGalleryModal from "@/components/RecipeGallery/RecipeGalleryModal";
 import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
@@ -207,8 +208,9 @@ export default function ProfileCustomizeHome() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+    <div className="relative mx-auto max-w-3xl p-6">
+      <PageBack />
+      <div className="mt-10 flex items-center justify-between border-b border-white/10 pb-3 sm:mt-12">
         <h1 className="text-base font-semibold">Customize home</h1>
         <div className="flex gap-2">
           <button

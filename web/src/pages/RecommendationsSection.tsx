@@ -1,6 +1,7 @@
-import { Link, useParams } from "react-router";
-import { ArrowLeft, RefreshCw, Sparkles } from "lucide-react";
+import { useParams } from "react-router";
+import { RefreshCw, Sparkles } from "lucide-react";
 
+import PageBack from "@/components/PageBack";
 import SectionItemCard from "@/components/SectionItemCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRecommendationSection } from "@/hooks/queries/recommendations";
@@ -75,23 +76,15 @@ export default function RecommendationsSection() {
   useDocumentTitle(title);
 
   return (
-    <div className="space-y-6 px-4 pt-6 pb-12 sm:px-6 lg:px-10 xl:px-12">
-      <div className="space-y-3">
-        <Link
-          to="/recommendations"
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium tracking-[0.16em] uppercase transition-colors"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Recommendations
-        </Link>
-        <div className="flex flex-col gap-1.5">
-          <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
-          {data && data.items.length > 0 && (
-            <p className="text-muted-foreground text-sm">
-              {data.items.length} {data.items.length === 1 ? "title" : "titles"}
-            </p>
-          )}
-        </div>
+    <div className="relative space-y-6 px-4 pt-6 pb-12 sm:px-6 lg:px-10 xl:px-12">
+      <PageBack to="/recommendations" preferHistory={false} />
+      <div className="mt-10 flex flex-col gap-1.5 sm:mt-12">
+        <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
+        {data && data.items.length > 0 && (
+          <p className="text-muted-foreground text-sm">
+            {data.items.length} {data.items.length === 1 ? "title" : "titles"}
+          </p>
+        )}
       </div>
 
       {isLoading ? (

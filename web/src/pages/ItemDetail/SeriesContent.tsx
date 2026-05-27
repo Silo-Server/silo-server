@@ -14,6 +14,7 @@ import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
+import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
 import SeasonCarousel from "./SeasonCarousel";
@@ -118,6 +119,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
     <div>
       <DetailHero
         title={title}
+        topNav={<PageBack />}
         context="Series"
         studioLabel={firstNetwork}
         backdropUrl={item.backdrop_url}

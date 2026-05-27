@@ -225,7 +225,7 @@ describe("EpisodeContent", () => {
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
   });
 
-  it("links the season breadcrumb and back button to the resolved season page", () => {
+  it("links the season breadcrumb segment to the resolved season page", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/item/episode-1"]}>
         <EpisodeContent item={makeEpisodeItem()} />
@@ -233,7 +233,7 @@ describe("EpisodeContent", () => {
     );
 
     expect(countOccurrences(markup, 'href="/item/series-1"')).toBe(1);
-    expect(countOccurrences(markup, 'href="/item/season-1"')).toBe(2);
+    expect(countOccurrences(markup, 'href="/item/season-1"')).toBe(1);
     expect(markup).toContain(">Season 1<");
   });
 
@@ -258,7 +258,7 @@ describe("EpisodeContent", () => {
       </MemoryRouter>,
     );
 
-    expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(2);
+    expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
     expect(markup).toContain(">Season 99<");
   });
 

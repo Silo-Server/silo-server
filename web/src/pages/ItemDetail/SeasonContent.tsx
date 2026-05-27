@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
+import PageBack from "@/components/PageBack";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ActionBar from "./components/ActionBar";
@@ -84,6 +85,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
       <DetailHero
         variant="compact"
         title={displayTitle}
+        topNav={<PageBack />}
         context={breadcrumb}
         backdropUrl={item.backdrop_url}
         backdropThumbhash={item.backdrop_thumbhash}
