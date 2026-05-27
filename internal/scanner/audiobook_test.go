@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os/exec"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestParseAudiobookFolderSingleM4B(t *testing.T) {
@@ -97,5 +100,75 @@ func TestStripNarratorSuffix(t *testing.T) {
 		if got != c.want {
 			t.Errorf("stripNarratorSuffix(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestAudiobookFolderUnchangedAllMatch(t *testing.T) {
+	now := time.Now().UTC()
+	files := []*models.MediaFile{
+		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
+		{FilePath: "/lib/Author/Book/b.m4b", FileSize: 200, FileModifiedAt: &now},
+	}
+	onDisk := []audiobookDiskFile{
+		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
+		{Path: "/lib/Author/Book/b.m4b", Size: 200, ModTime: now},
+	}
+	if !audiobookFolderUnchanged(files, onDisk) {
+		t.Fatal("expected unchanged=true when sizes+mtimes match")
+	}
+}
+
+func TestAudiobookFolderUnchangedSizeDiffers(t *testing.T) {
+	now := time.Now().UTC()
+	files := []*models.MediaFile{
+		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
+	}
+	onDisk := []audiobookDiskFile{
+		{Path: "/lib/Author/Book/a.m4b", Size: 101, ModTime: now},
+	}
+	if audiobookFolderUnchanged(files, onDisk) {
+		t.Fatal("expected unchanged=false when size differs")
+	}
+}
+
+func TestAudiobookFolderUnchangedNewFileAppeared(t *testing.T) {
+	now := time.Now().UTC()
+	files := []*models.MediaFile{
+		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
+	}
+	onDisk := []audiobookDiskFile{
+		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
+		{Path: "/lib/Author/Book/b.m4b", Size: 200, ModTime: now},
+	}
+	if audiobookFolderUnchanged(files, onDisk) {
+		t.Fatal("expected unchanged=false when a new file appeared")
+	}
+}
+
+func TestAudiobookFolderUnchangedFileDisappeared(t *testing.T) {
+	now := time.Now().UTC()
+	files := []*models.MediaFile{
+		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now},
+		{FilePath: "/lib/Author/Book/b.m4b", FileSize: 200, FileModifiedAt: &now},
+	}
+	onDisk := []audiobookDiskFile{
+		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
+	}
+	if audiobookFolderUnchanged(files, onDisk) {
+		t.Fatal("expected unchanged=false when a file disappeared")
+	}
+}
+
+func TestAudiobookFolderUnchangedMtimeDiffers(t *testing.T) {
+	now := time.Now().UTC()
+	earlier := now.Add(-time.Hour)
+	files := []*models.MediaFile{
+		{FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &earlier},
+	}
+	onDisk := []audiobookDiskFile{
+		{Path: "/lib/Author/Book/a.m4b", Size: 100, ModTime: now},
+	}
+	if audiobookFolderUnchanged(files, onDisk) {
+		t.Fatal("expected unchanged=false when mtime differs")
 	}
 }

@@ -19,6 +19,44 @@ import (
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
 
+// audiobookDiskFile is the on-disk projection used by audiobookFolderUnchanged.
+// Path is the absolute file path; Size and ModTime come from os.Stat.
+type audiobookDiskFile struct {
+	Path    string
+	Size    int64
+	ModTime time.Time
+}
+
+// audiobookFolderUnchanged reports whether the audio files on disk match the
+// existing media_files rows for the same folder one-for-one on path, size,
+// and mtime. A new file, removed file, or any byte-level / mtime drift returns
+// false so the caller falls through to a full reconcile.
+//
+// Comparison uses sameFileModifiedAt for mtime to absorb sub-second precision
+// differences between filesystem reads.
+func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDiskFile) bool {
+	if len(existing) != len(onDisk) {
+		return false
+	}
+	byPath := make(map[string]*models.MediaFile, len(existing))
+	for _, mf := range existing {
+		byPath[mf.FilePath] = mf
+	}
+	for _, d := range onDisk {
+		mf, ok := byPath[d.Path]
+		if !ok {
+			return false
+		}
+		if mf.FileSize != d.Size {
+			return false
+		}
+		if mf.FileModifiedAt == nil || !sameFileModifiedAt(mf.FileModifiedAt, d.ModTime) {
+			return false
+		}
+	}
+	return true
+}
+
 // audiobookScanWorkers returns the configured number of parallel workers
 // for audiobook reconciliation. Defaults to 8 — high enough to keep all
 // cores busy on the ffprobe step (which dominates per-book wall time)
