@@ -301,7 +301,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		}
 	}
 	if len(parsed.Files) > 0 && s.imageCacher != nil {
-		poster, thumb := extractAndUploadAudiobookCover(ctx, ffmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID)
+		poster, thumb := ExtractAndUploadAudiobookCover(ctx, FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID)
 		if poster != "" {
 			if _, err := s.fileRepo.Pool().Exec(ctx, `
 				UPDATE media_items
