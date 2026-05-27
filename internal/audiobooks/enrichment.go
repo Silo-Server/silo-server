@@ -211,6 +211,8 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 
 // enrichItem runs the Search → GetMetadata → persist cycle for a single item.
 func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error {
+	defer e.maybeApplyCoverFallback(ctx, item.ContentID)
+
 	if item.FolderID == 0 {
 		slog.Debug("audiobook enrichment: item has no library folder, skipping",
 			"content_id", item.ContentID,
@@ -348,15 +350,23 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		"people", len(accumulator.People),
 	)
 
-	if e.imageCacher != nil && e.ffmpegPath != "" {
-		if err := e.applyLocalCoverFallback(ctx, item.ContentID); err != nil {
-			slog.Warn("audiobook enrichment: local cover fallback failed",
-				"content_id", item.ContentID,
-				"error", err,
-			)
-		}
-	}
 	return nil
+}
+
+// maybeApplyCoverFallback wraps applyLocalCoverFallback with the nil-guards
+// and warn-logging, suitable for `defer` at the top of enrichItem so every
+// exit path (success and early returns alike) gets a fallback attempt.
+// Idempotent — applyLocalCoverFallback no-ops when poster_path is already set.
+func (e *Enricher) maybeApplyCoverFallback(ctx context.Context, contentID string) {
+	if e.imageCacher == nil || e.ffmpegPath == "" {
+		return
+	}
+	if err := e.applyLocalCoverFallback(ctx, contentID); err != nil {
+		slog.Warn("audiobook enrichment: local cover fallback failed",
+			"content_id", contentID,
+			"error", err,
+		)
+	}
 }
 
 // persist writes the enriched metadata back to the database.
