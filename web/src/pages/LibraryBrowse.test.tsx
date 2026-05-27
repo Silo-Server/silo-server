@@ -152,7 +152,7 @@ describe("LibraryBrowse", () => {
         }),
       }),
       expect.objectContaining({
-        includeTotal: true,
+        includeTotal: false,
       }),
     );
   });

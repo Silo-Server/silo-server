@@ -106,7 +106,7 @@ export default function LibraryBrowse({
 
   const catalogQuery = useCatalogWindow(state, {
     limit,
-    includeTotal: true,
+    includeTotal: false,
     visibleRange,
   });
   const totalItems = catalogQuery.data?.totalItems ?? 0;

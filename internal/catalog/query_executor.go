@@ -42,6 +42,28 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, fmt.Errorf("query executor requires a database pool")
 	}
 
+	if items, total, hasMore, ok, err := e.tryEpisodeCatalogUserStatePreviewPage(
+		ctx,
+		def,
+		access,
+		limit,
+		offset,
+		includeTotal,
+	); ok || err != nil {
+		return items, total, hasMore, err
+	}
+
+	if items, total, hasMore, ok, err := e.tryEpisodeCatalogEntriesPreviewPage(
+		ctx,
+		def,
+		access,
+		limit,
+		offset,
+		includeTotal,
+	); ok || err != nil {
+		return items, total, hasMore, err
+	}
+
 	build, err := e.buildPreviewPagePlan(def, access, limit, offset)
 	if err != nil {
 		return nil, 0, false, err
