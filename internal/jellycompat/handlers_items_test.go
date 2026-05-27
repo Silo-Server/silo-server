@@ -70,11 +70,11 @@ func (s *countingContentService) ListItemFilters(context.Context, *Session, url.
 	panic("unused")
 }
 
-// TestHandleItem_Episode_UsesImageCacheBeforeSeriesDetail verifies that when an
-// episode detail is requested and the series's poster/backdrop are already in
-// the ImageCache (e.g. from a prior browse response), the handler does NOT
-// fetch the parent series detail a second time. Audit 2026-05-01 §3.4.
-func TestHandleItem_Episode_UsesImageCacheBeforeSeriesDetail(t *testing.T) {
+// TestHandleItem_Episode_FetchesSeriesDetailForStableParentImageTags verifies
+// that episode detail responses fetch parent series image metadata even when
+// image URLs are already cached. Cached URLs are not enough to build stable
+// signed tags after Jellycompat restarts.
+func TestHandleItem_Episode_FetchesSeriesDetailForStableParentImageTags(t *testing.T) {
 	codec := NewResourceIDCodec()
 	episodeContentID := "ep1"
 	seriesContentID := "series-1"
@@ -123,8 +123,8 @@ func TestHandleItem_Episode_UsesImageCacheBeforeSeriesDetail(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if contentSvc.getItemDetailCalls != 1 {
-		t.Errorf("expected exactly 1 GetItemDetail (episode only); got %d",
+	if contentSvc.getItemDetailCalls != 2 {
+		t.Errorf("expected episode and series GetItemDetail calls for stable parent image tags; got %d",
 			contentSvc.getItemDetailCalls)
 	}
 }

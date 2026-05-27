@@ -98,7 +98,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Client = deps.S3Client
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
-	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.HTTPClient, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn)
+	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.HTTPClient, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret)
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -227,6 +227,9 @@ func NewRouter(deps Dependencies) chi.Router {
 func withDefaults(deps Dependencies) Dependencies {
 	if deps.Now == nil {
 		deps.Now = timeNow
+	}
+	if deps.JWTSecret == "" && deps.Config != nil {
+		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}
 	if deps.TokenGenerator == nil {
 		deps.TokenGenerator = uuidNewString

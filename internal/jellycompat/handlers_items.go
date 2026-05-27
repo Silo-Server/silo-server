@@ -212,26 +212,8 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if strings.EqualFold(detail.Type, "episode") && detail.SeriesID != "" {
-		seriesRouteID := h.codec.EncodeStringID(EncodedIDItem, detail.SeriesID)
-		cachedPoster, _ := h.images.LookupSized(seriesRouteID, "Primary", "", compatCardImageSize)
-		cachedBackdrop, _ := h.images.LookupSized(seriesRouteID, "Backdrop", "", compatCardImageSize)
-
-		if cachedPoster != "" && cachedBackdrop != "" {
-			// Both poster and backdrop hit — populate from cache and skip the
-			// second GetItemDetail call against the parent series. Cache is
-			// populated by browse/list/recommendation responses for the series.
-			// Audit 2026-05-01 §3.4. We require BOTH because a partial hit
-			// (only one URL cached) would silently degrade the response — the
-			// fallback fetch can populate both.
-			h.mapper.applySeriesImages(&dto, cachedPoster, cachedBackdrop)
-			if h.images != nil {
-				h.images.RememberSized(dto.SeriesID, "Thumb", cachedBackdrop, compatCardImageSize)
-			}
-		} else {
-			// Cache miss or partial — fall back to original series-detail fetch.
-			seriesImgCache := make(map[string]seriesImageURLs)
-			h.enrichEpisodeSeriesImages(r.Context(), session, &dto, detail.SeriesID, seriesImgCache)
-		}
+		seriesImgCache := make(map[string]seriesImageSet)
+		h.enrichEpisodeSeriesImages(r.Context(), session, &dto, detail.SeriesID, seriesImgCache)
 		if detail.SeasonNumber != nil {
 			season, seasonErr := h.content.GetSeason(r.Context(), session, detail.SeriesID, *detail.SeasonNumber, nil)
 			if seasonErr == nil && season != nil {
@@ -1910,22 +1892,22 @@ func (h *ItemsHandler) presignCompatImagePath(ctx context.Context, path, imageTy
 	return compatPresignImage(h.detailSvc, ctx, path, imageType, compatCardImageSize)
 }
 
-func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL, seriesPosterURL, seriesBackdropURL string) {
+func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL string, series seriesImageSet) {
 	if h.images == nil {
 		return
 	}
 	h.images.RememberSized(dto.ID, "Primary", stillURL, compatCardImageSize)
-	h.images.RememberSized(dto.ID, "Backdrop", seriesBackdropURL, compatCardImageSize)
+	h.images.RememberSized(dto.ID, "Backdrop", series.BackdropURL, compatCardImageSize)
 	if dto.SeriesID != "" {
-		h.images.RememberSized(dto.SeriesID, "Primary", seriesPosterURL, compatCardImageSize)
-		h.images.RememberSized(dto.SeriesID, "Backdrop", seriesBackdropURL, compatCardImageSize)
-		h.images.RememberSized(dto.SeriesID, "Thumb", seriesBackdropURL, compatCardImageSize)
+		h.images.RememberSized(dto.SeriesID, "Primary", series.PosterURL, compatCardImageSize)
+		h.images.RememberSized(dto.SeriesID, "Backdrop", series.BackdropURL, compatCardImageSize)
+		h.images.RememberSized(dto.SeriesID, "Thumb", series.BackdropURL, compatCardImageSize)
 	}
 }
 
 func (h *ItemsHandler) applyCompatEpisodeTarget(dto *baseItemDTO, target compatEpisodeTarget) {
-	h.mapper.applySeriesImages(dto, target.SeriesPosterURL, target.SeriesBackdropURL)
-	h.rememberCompatEpisodeImages(*dto, firstNonEmpty(target.Item.StillURL, target.Item.PosterURL), target.SeriesPosterURL, target.SeriesBackdropURL)
+	h.mapper.applySeriesImages(dto, target.SeriesImages)
+	h.rememberCompatEpisodeImages(*dto, firstNonEmpty(target.Item.StillURL, target.Item.PosterURL), target.SeriesImages)
 }
 
 func (h *ItemsHandler) listSeriesEpisodes(ctx context.Context, session *Session, seriesID string, seasons []upstreamSeason, requestedSeasonID string) ([]*models.Episode, error) {
@@ -2164,17 +2146,10 @@ func (h *ItemsHandler) rememberEpisodeImages(episodes []upstreamEpisode) {
 	}
 }
 
-// seriesImageURLs holds poster/backdrop URLs for a series, used to populate
-// series image tags on episode DTOs for clients like Infuse.
-type seriesImageURLs struct {
-	posterURL   string
-	backdropURL string
-}
-
 // enrichEpisodeSeriesImages looks up the parent series poster/backdrop and
 // applies them to an episode DTO. The cache avoids repeated lookups when
 // multiple episodes belong to the same series.
-func (h *ItemsHandler) enrichEpisodeSeriesImages(ctx context.Context, session *Session, dto *baseItemDTO, seriesContentID string, cache map[string]seriesImageURLs) {
+func (h *ItemsHandler) enrichEpisodeSeriesImages(ctx context.Context, session *Session, dto *baseItemDTO, seriesContentID string, cache map[string]seriesImageSet) {
 	if seriesContentID == "" || dto.SeriesID == "" {
 		return
 	}
@@ -2182,14 +2157,23 @@ func (h *ItemsHandler) enrichEpisodeSeriesImages(ctx context.Context, session *S
 	if !ok {
 		detail, err := h.content.GetItemDetail(ctx, session, seriesContentID, nil)
 		if err == nil {
-			imgs = seriesImageURLs{posterURL: detail.PosterURL, backdropURL: detail.BackdropURL}
+			imgs = seriesImageSet{
+				ContentID:         detail.ContentID,
+				PosterURL:         detail.PosterURL,
+				PosterPath:        detail.PosterPath,
+				PosterThumbhash:   detail.PosterThumbhash,
+				BackdropURL:       detail.BackdropURL,
+				BackdropPath:      detail.BackdropPath,
+				BackdropThumbhash: detail.BackdropThumbhash,
+				UpdatedAt:         detail.UpdatedAt,
+			}
 			h.rememberDetailImages(*detail)
 		}
 		cache[seriesContentID] = imgs
 	}
-	h.mapper.applySeriesImages(dto, imgs.posterURL, imgs.backdropURL)
-	if imgs.backdropURL != "" && h.images != nil {
-		h.images.RememberSized(dto.SeriesID, "Thumb", imgs.backdropURL, compatCardImageSize)
+	h.mapper.applySeriesImages(dto, imgs)
+	if imgs.BackdropURL != "" && h.images != nil {
+		h.images.RememberSized(dto.SeriesID, "Thumb", imgs.BackdropURL, compatCardImageSize)
 	}
 }
 
