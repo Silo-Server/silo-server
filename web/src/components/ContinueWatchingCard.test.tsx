@@ -11,7 +11,7 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 }));
 
 describe("ContinueWatchingCard", () => {
-  it("prefers the poster image for episodes (poster_url is the horizontal still)", () => {
+  it("prefers the backdrop image for section episodes (backdrop_url is the horizontal still)", () => {
     const queryClient = new QueryClient();
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
@@ -34,7 +34,7 @@ describe("ContinueWatchingCard", () => {
               position_seconds: 120,
               duration_seconds: 3600,
               progress_updated_at: "2026-03-07T00:00:00Z",
-              poster_url: "/episode-poster.jpg",
+              poster_url: "/season-poster.jpg",
               poster_thumbhash: "",
               backdrop_url: "/episode-backdrop.jpg",
               backdrop_thumbhash: "",
@@ -45,8 +45,8 @@ describe("ContinueWatchingCard", () => {
       </QueryClientProvider>,
     );
 
-    expect(markup).toContain('src="/episode-poster.jpg"');
-    expect(markup).not.toContain('src="/episode-backdrop.jpg"');
+    expect(markup).toContain('src="/episode-backdrop.jpg"');
+    expect(markup).not.toContain('src="/season-poster.jpg"');
   });
 
   it("prefers the backdrop image for movies (poster_url is a vertical poster)", () => {

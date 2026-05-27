@@ -144,19 +144,23 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     ? "w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
     : "w-[260px] shrink-0 sm:w-[315px]";
   const imageAspect = isPoster ? "aspect-[2/3]" : "aspect-video";
-  // Episodes store the horizontal still in poster_url (see episode_catalog_source.go);
-  // wide-variant movies/series/seasons need the backdrop for the 16:9 card.
-  // Poster variant always wants the vertical poster.
+  const isSectionEpisode = "sectionItem" in props && props.sectionItem?.type === "episode";
+  // Section episode payloads use poster_url for vertical season/series artwork
+  // and backdrop_url for the episode still used by wide cards.
   const imagePrimary = isPoster
     ? card.posterUrl
-    : card.type === "episode"
-      ? card.posterUrl
-      : card.backdropUrl;
+    : isSectionEpisode
+      ? card.backdropUrl
+      : card.type === "episode"
+        ? card.posterUrl
+        : card.backdropUrl;
   const imageFallback = isPoster
     ? card.backdropUrl
-    : card.type === "episode"
-      ? card.backdropUrl
-      : card.posterUrl;
+    : isSectionEpisode
+      ? card.posterUrl
+      : card.type === "episode"
+        ? card.backdropUrl
+        : card.posterUrl;
   const imageSrc = imagePrimary || imageFallback;
 
   return (
