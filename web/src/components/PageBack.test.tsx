@@ -52,7 +52,7 @@ describe("PageBack", () => {
     expect(mocks.navigate).toHaveBeenCalledWith(-1);
   });
 
-  it("applies the documented positioning and glass-subtle styling", () => {
+  it("applies the documented positioning and glass styling", () => {
     render(
       <MemoryRouter>
         <PageBack />
@@ -61,13 +61,24 @@ describe("PageBack", () => {
 
     const button = screen.getByRole("button", { name: "Go back" });
     expect(button).toHaveClass(
-      "glass-subtle",
+      "glass",
       "absolute",
       "top-4",
-      "left-4",
+      "left-2",
       "z-20",
       "rounded-full",
       "p-1.5",
     );
+  });
+
+  it("pins to the viewport on lg+ when floating is set", () => {
+    render(
+      <MemoryRouter>
+        <PageBack floating />
+      </MemoryRouter>,
+    );
+
+    const button = screen.getByRole("button", { name: "Go back" });
+    expect(button).toHaveClass("lg:fixed", "lg:left-[268px]");
   });
 });
