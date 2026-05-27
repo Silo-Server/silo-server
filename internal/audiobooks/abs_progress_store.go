@@ -178,6 +178,23 @@ func (s *ABSProgressStore) UpdateProgressPosition(ctx context.Context, userID, p
 	return nil
 }
 
+// DeleteProgress removes the progress row entirely. Idempotent on missing-row.
+// Used by the ABS "Reset Progress" / clear-progress affordance.
+func (s *ABSProgressStore) DeleteProgress(ctx context.Context, userID, profileID, contentID string) error {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return fmt.Errorf("abs_progress_store: invalid user id %q: %w", userID, err)
+	}
+	if _, err := s.Pool.Exec(ctx, `
+		DELETE FROM user_watch_progress
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		uid, profileID, contentID,
+	); err != nil {
+		return fmt.Errorf("abs_progress_store: delete progress: %w", err)
+	}
+	return nil
+}
+
 // SetHideFromContinue sets the hide_from_continue flag for the given
 // progress row. Idempotent on missing-row.
 func (s *ABSProgressStore) SetHideFromContinue(ctx context.Context, userID, profileID, contentID string, hide bool) error {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -446,7 +447,9 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 }
 
 // ListLibrarySeries returns distinct series from audiobook_series for the
-// audiobook library, with per-series book count.
+// audiobook library, with per-series book count and up to 4 book preview
+// rows (content_id + title + updated_at) used by the ABS mobile client
+// to render the LazySeriesCard cover stack.
 func (s *ABSMediaStore) ListLibrarySeries(ctx context.Context, libraryID int64, limit int) ([]abs.SeriesSummary, error) {
 	if s.Pool == nil {
 		return nil, nil
@@ -460,13 +463,37 @@ func (s *ABSMediaStore) ListLibrarySeries(ctx context.Context, libraryID int64, 
 		libFilter = ` AND EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $2)`
 		args = append(args, int(libraryID))
 	}
+	// Two-stage: window-rank books inside each series (lowest series_index
+	// first), then aggregate the top 4 ids/titles/updated_at into parallel
+	// arrays. `book_ids[]` is text because content_id is text in this
+	// schema; parallel `titles[]` and `updated_ats[]` keep iteration
+	// straightforward in Go without composite type plumbing.
 	sql := `
-		SELECT s.series_name, COUNT(DISTINCT s.content_id) AS num_books
-		FROM audiobook_series s
-		JOIN media_items mi ON mi.content_id = s.content_id AND mi.type = 'audiobook'` + libFilter + `
-		GROUP BY s.series_name
-		HAVING COUNT(DISTINCT s.content_id) > 1
-		ORDER BY LOWER(s.series_name)
+		WITH ranked AS (
+			SELECT
+				s.series_name,
+				s.content_id,
+				mi.title,
+				mi.updated_at,
+				ROW_NUMBER() OVER (
+					PARTITION BY s.series_name
+					ORDER BY COALESCE(s.series_index, 999999), s.content_id
+				) AS rn,
+				COUNT(*) OVER (PARTITION BY s.series_name) AS series_count
+			FROM audiobook_series s
+			JOIN media_items mi
+				ON mi.content_id = s.content_id AND mi.type = 'audiobook'` + libFilter + `
+		)
+		SELECT
+			series_name,
+			MAX(series_count)::int AS num_books,
+			array_agg(content_id ORDER BY rn) FILTER (WHERE rn <= 4) AS book_ids,
+			array_agg(title      ORDER BY rn) FILTER (WHERE rn <= 4) AS titles,
+			array_agg(updated_at ORDER BY rn) FILTER (WHERE rn <= 4) AS updated_ats
+		FROM ranked
+		GROUP BY series_name
+		HAVING MAX(series_count) > 1
+		ORDER BY LOWER(series_name)
 		LIMIT $1
 	`
 	rows, err := s.Pool.Query(ctx, sql, args...)
@@ -477,14 +504,29 @@ func (s *ABSMediaStore) ListLibrarySeries(ctx context.Context, libraryID int64, 
 	out := make([]abs.SeriesSummary, 0, limit)
 	for rows.Next() {
 		var (
-			name  string
-			books int
+			name       string
+			books      int
+			ids        []string
+			titles     []string
+			updatedAts []time.Time
 		)
-		if err := rows.Scan(&name, &books); err != nil {
+		if err := rows.Scan(&name, &books, &ids, &titles, &updatedAts); err != nil {
 			return nil, fmt.Errorf("abs_media_store: scan series: %w", err)
 		}
-		// Series ID is a slug of the name — there's no first-class series row yet.
-		out = append(out, abs.SeriesSummary{ID: name, Name: name, NumBooks: books})
+		previews := make([]abs.SeriesBookPreview, 0, len(ids))
+		for i := range ids {
+			p := abs.SeriesBookPreview{ContentID: ids[i]}
+			if i < len(titles) {
+				p.Title = titles[i]
+			}
+			if i < len(updatedAts) {
+				p.UpdatedAt = updatedAts[i]
+			}
+			previews = append(previews, p)
+		}
+		// Series ID is the canonical series name — there's no first-class
+		// series row yet, so the slug is stable for a given name.
+		out = append(out, abs.SeriesSummary{ID: name, Name: name, NumBooks: books, Books: previews})
 	}
 	return out, rows.Err()
 }

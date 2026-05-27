@@ -88,10 +88,25 @@ type AuthorSummary struct {
 }
 
 // SeriesSummary is an aggregated series entry for /libraries/{id}/series.
+//
+// Books carries up to ~4 cover-preview entries for the LazySeriesCard
+// GroupCover stack — the ABS mobile client reads
+// `series.books[i].media.coverPath` to render each cover, and a card
+// with no books renders only the series name as a fallback.
 type SeriesSummary struct {
 	ID       string
 	Name     string
 	NumBooks int
+	Books    []SeriesBookPreview
+}
+
+// SeriesBookPreview is a single book id+title pair returned alongside
+// each SeriesSummary. The /libraries/{id}/series handler expands these
+// into full minified LibraryItem entries (with cover URLs) on the wire.
+type SeriesBookPreview struct {
+	ContentID string
+	Title     string
+	UpdatedAt time.Time
 }
 
 // Author is the detail-shape author with embedded books list.
@@ -322,6 +337,17 @@ func (h *Handler) mountRoutes(r chi.Router) {
 	r.Get("/feed/{slug}", h.handlePublicFeed)
 	r.Get("/feed/{slug}/file/{ino}", h.handlePublicFeedFile)
 
+	// Server discovery — unauthenticated. Mounted at both /api and the
+	// canonical root so curl-style network probes, the official ABS app's
+	// connect-server flow, and AudioBooth's saved-server liveness check
+	// all land on the same response.
+	for _, prefix := range []string{"", "/abs", "/api", "/abs/api"} {
+		r.Get(prefix+"/ping", h.handlePing)
+		r.Get(prefix+"/healthcheck", h.handleHealthcheck)
+		r.Get(prefix+"/init", h.handleInit)
+		r.Get(prefix+"/auth-settings", h.handleAuthSettings)
+	}
+
 	// Stage 3: playback session + file routes, registered under both the
 	// legacy /abs/api prefix and the canonical /api prefix that the official
 	// ABS mobile client builds against (no /abs prefix at server root).
@@ -350,6 +376,14 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Get(prefix+"/me/progress/{libraryItemId}", h.handleGetItemProgress)
 			// POST /me/progress/{id}         — set / update progress (ABS PATCH semantics)
 			r.Post(prefix+"/me/progress/{libraryItemId}", h.handleSetItemProgress)
+			// PATCH alias — AudioBooth and the canonical ABS server use
+			// PATCH for the same write; route both methods to the handler.
+			r.Patch(prefix+"/me/progress/{libraryItemId}", h.handleSetItemProgress)
+			// DELETE /me/progress/{id}       — clear progress (Reset Progress)
+			r.Delete(prefix+"/me/progress/{libraryItemId}", h.handleDeleteItemProgress)
+			// PATCH /me/progress/{id}/{episodeId} — podcast episode
+			// progress; audiobook-only catalog, so this is a stub.
+			r.Patch(prefix+"/me/progress/{libraryItemId}/{episodeId}", h.handleSetEpisodeProgress)
 			// PATCH /session/{sid}           — heartbeat: position + time_listening
 			r.Patch(prefix+"/session/{sid}", h.handleSessionSync)
 			// POST  /session/{sid}/close     — finalise the play session
@@ -360,6 +394,10 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Delete(prefix+"/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)
 			// Collections — owner-gated CRUD with cross-user public reads.
 			r.Get(prefix+"/collections", h.handleListCollections)
+			// Per-library collections list — bookshelf "Collections" tab
+			// hits this. Paged envelope with full-shape entries (books[]
+			// included) so the cover stack renders.
+			r.Get(prefix+"/libraries/{libraryId}/collections", h.handleListLibraryCollections)
 			r.Post(prefix+"/collections", h.handleCreateCollection)
 			r.Get(prefix+"/collections/{id}", h.handleGetCollection)
 			r.Patch(prefix+"/collections/{id}", h.handleUpdateCollection)
@@ -400,6 +438,24 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			r.Get(prefix+"/feeds", h.handleListRSSFeeds)
 			r.Post(prefix+"/feeds/item/{itemId}/open", h.handleOpenItemFeed)
 			r.Post(prefix+"/feeds/{id}/close", h.handleCloseFeed)
+			// Year-in-review stats — AudioBooth's "Year Stats" widget on the
+			// profile screen. Synthesized from AggregateStats today.
+			r.Get(prefix+"/me/stats/year/{year}", h.handleYearStats)
+			// Ebook surface — stubs until the ebook scanner lands.
+			// Mobile clients call these but degrade cleanly on empty/404.
+			r.Get(prefix+"/items/{id}/ebook/{fileid}", h.handleEbookFile)
+			r.Patch(prefix+"/items/{id}/ebook/{fileid}/status", h.handleEbookStatus)
+			// E-reader devices + ebook email delivery — empty list / 503
+			// until SMTP integration is wired.
+			r.Get(prefix+"/me/ereader-devices", h.handleListEreaderDevices)
+			r.Post(prefix+"/emails/send-ebook-to-device", h.handleSendEbookToDevice)
+			// Podcast stubs — audiobook-only catalog in v1. Endpoints
+			// return empty-but-well-formed shapes so the mobile UI doesn't
+			// crash on the podcast surfaces.
+			r.Post(prefix+"/podcasts/feed", h.handlePodcastFeed)
+			r.Post(prefix+"/items/{libraryItemId}/play/{episodeId}", h.handlePlayEpisode)
+			r.Get(prefix+"/libraries/{libraryId}/recent-episodes", h.handleRecentEpisodes)
+			r.Get(prefix+"/search/podcast", h.handleSearchPodcast)
 		}
 	})
 

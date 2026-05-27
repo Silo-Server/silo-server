@@ -82,8 +82,11 @@ func (h *Handler) collectionFullShape(r *http.Request, c Collection) map[string]
 }
 
 // collectionBooks resolves the items in a collection to wire-shape book
-// entries, hydrating titles/authors via MediaStore. Returns a non-nil
-// slice (possibly empty) so collectionToABS emits the books key.
+// entries. Each entry is a full LibraryItem (id, libraryId, mediaType,
+// media{coverPath, metadata...}, ...) — LazyCollectionCard renders the
+// cover stack via CollectionCover, which reads book.media.coverPath
+// through the globals/getLibraryItemCoverSrc getter. Bare {id, title}
+// entries make the cover stack empty.
 func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[string]any {
 	if h.deps.CollectionStore == nil {
 		return []map[string]any{}
@@ -94,23 +97,85 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 		return []map[string]any{}
 	}
 	lib := h.resolveDefaultLibrary(r.Context())
-	libID := audiobookLibraryID(lib)
+	baseURL := h.absBaseURL(r)
 	out := make([]map[string]any, 0, len(rows))
 	for _, it := range rows {
-		entry := map[string]any{
-			"id":        it.LibraryItemID,
-			"libraryId": libID,
+		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID)
+		if err != nil || item == nil {
+			// Defensive: include a stub so the client still sees the
+			// item count, but with empty media so it falls through to
+			// the placeholder cover instead of crashing on
+			// `media.coverPath`.
+			out = append(out, map[string]any{
+				"id":        it.LibraryItemID,
+				"libraryId": audiobookLibraryID(lib),
+				"mediaType": LibraryMediaType,
+				"media":     map[string]any{"metadata": map[string]any{"title": ""}, "coverPath": ""},
+			})
+			continue
 		}
-		if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID); err == nil && item != nil {
-			entry["media"] = map[string]any{
-				"metadata": map[string]any{
-					"title": item.Title,
-				},
-			}
-		}
-		out = append(out, entry)
+		out = append(out, libraryItemToWireMap(siloItemToLibraryItem(item, lib, baseURL)))
 	}
 	return out
+}
+
+// libraryItemToWireMap reuses the json tags on LibraryItem so handlers
+// that need to emit a LibraryItem as part of a heterogeneous map[string]any
+// envelope (collections, playlists) don't have to duplicate the camelCase
+// key set.
+func libraryItemToWireMap(li LibraryItem) map[string]any {
+	b, _ := json.Marshal(li)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+// handleListLibraryCollections — GET /libraries/{libraryId}/collections.
+//
+// LazyBookshelf hits this for the "Collections" tab — it expects the
+// canonical paged envelope {results, total, limit, page, ...} with each
+// entry in full-shape (including books[]) so LazyCollectionCard can
+// render the cover stack from the first few books.
+//
+// silo scopes collections per (user, profile) globally; the libraryId
+// URL param is accepted but ignored (matches our playlist behavior).
+func (h *Handler) handleListLibraryCollections(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	limit, page := readPagedQuery(r, 25)
+	if h.deps.CollectionStore == nil {
+		writeJSON(w, http.StatusOK, pagedEnvelope([]map[string]any{}, 0, limit, page, "name", false, "", false, ""))
+		return
+	}
+	rows, err := h.deps.CollectionStore.ListUserCollections(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		slog.Error("abs library collection list failed", "err", err, "user", a.UserID)
+		http.Error(w, "collection list failed", http.StatusInternalServerError)
+		return
+	}
+	total := len(rows)
+	var pageRows []Collection
+	if limit == 0 {
+		pageRows = rows
+	} else {
+		start := page * limit
+		end := start + limit
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+		pageRows = rows[start:end]
+	}
+	out := make([]map[string]any, 0, len(pageRows))
+	for _, c := range pageRows {
+		out = append(out, h.collectionFullShape(r, c))
+	}
+	writeJSON(w, http.StatusOK, pagedEnvelope(out, total, limit, page, "name", false, "", false, ""))
 }
 
 // handleListCollections — GET /collections.

@@ -45,9 +45,33 @@ func (h *Handler) handleLibraryDetail(w http.ResponseWriter, r *http.Request) {
 	if includeHas(r.URL.Query().Get("include"), "filterdata") {
 		resp["filterdata"] = h.buildFilterData(r, lib)
 		resp["issues"] = 0
-		resp["numUserPlaylists"] = 0
+		// numUserPlaylists drives the bottom-nav "Playlists" tab
+		// visibility on the ABS mobile client (BookshelfNavBar.vue:25
+		// gates the tab on `numUserPlaylists` being truthy). Comment
+		// in plugins/server.js:129 confirms "precise number is not
+		// necessary" — we just need a non-zero count when the caller
+		// has any playlists, so the ListUserPlaylists len suffices.
+		resp["numUserPlaylists"] = h.countUserPlaylists(r)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// countUserPlaylists returns the playlist count for the authenticated
+// caller, or 0 when no auth / no store is wired (open-mode endpoints
+// still serve library detail).
+func (h *Handler) countUserPlaylists(r *http.Request) int {
+	if h.deps.PlaylistStore == nil {
+		return 0
+	}
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		return 0
+	}
+	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		return 0
+	}
+	return len(rows)
 }
 
 // buildFilterData populates the filter sheet payload from the same store
@@ -333,6 +357,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	libID := audiobookLibraryID(lib)
+	baseURL := h.absBaseURL(r)
 	total := len(series)
 	// ABS contract: limit=0 means "return all".
 	var pageSeries []SeriesSummary
@@ -351,12 +376,36 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	}
 	results := make([]map[string]any, 0, len(pageSeries))
 	for _, s := range pageSeries {
+		// books[] is what LazySeriesCard reads to populate the
+		// GroupCover stack. Each entry is a minified LibraryItem with
+		// the cover URL on media.coverPath; the mobile client's
+		// globals/getLibraryItemCoverSrc getter requires this field
+		// to render any cover image, otherwise the card falls back
+		// to a name-only placeholder.
+		books := make([]map[string]any, 0, len(s.Books))
+		for _, bp := range s.Books {
+			updatedMs := int64(0)
+			if !bp.UpdatedAt.IsZero() {
+				updatedMs = bp.UpdatedAt.UnixMilli()
+			}
+			books = append(books, map[string]any{
+				"id":        bp.ContentID,
+				"libraryId": libID,
+				"mediaType": LibraryMediaType,
+				"updatedAt": updatedMs,
+				"media": map[string]any{
+					"coverPath": baseURL + "/api/items/" + bp.ContentID + "/cover",
+					"metadata":  map[string]any{"title": bp.Title},
+				},
+			})
+		}
 		results = append(results, map[string]any{
 			"id":        s.ID,
 			"name":      s.Name,
 			"numBooks":  s.NumBooks,
 			"libraryId": libID,
 			"addedAt":   0,
+			"books":     books,
 		})
 	}
 	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))

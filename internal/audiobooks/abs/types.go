@@ -133,6 +133,29 @@ type LibraryItemMedia struct {
 	// which silently breaks downloads (the downloader's apiHandler
 	// callback receives null and gives up). Always emit []  in v1.
 	Tags []string `json:"tags"`
+	// EbookFile is the optional attached ebook (epub / pdf / mobi / cbz)
+	// reference. nil when no ebook is associated; the ABS web reader and
+	// mobile "Read Ebook" affordance both branch on the field's presence.
+	// Populated when the (future) ebook scanner extends the audiobook
+	// model; until then this is always nil on the wire (omitempty).
+	EbookFile *EbookFile `json:"ebookFile,omitempty"`
+}
+
+// EbookFile is the ABS-shape ebook reference. Mirrors the audiobookshelf
+// server's BookMedia.ebookFile sub-record so the mobile clients accept it
+// without translation. Filled in once silo's scanner detects ebook files
+// alongside audiobooks.
+type EbookFile struct {
+	Ino          string `json:"ino"`
+	EbookFormat  string `json:"ebookFormat"` // "epub", "pdf", "mobi", "cbz"
+	AddedAt      int64  `json:"addedAt"`
+	UpdatedAt    int64  `json:"updatedAt"`
+	MetadataPath string `json:"metadataPath,omitempty"`
+	Metadata     struct {
+		Filename string `json:"filename"`
+		Ext      string `json:"ext"`
+		Size     int64  `json:"size"`
+	} `json:"metadata"`
 }
 
 // CollapsedSeriesV1 is the per-item annotation real ABS attaches when

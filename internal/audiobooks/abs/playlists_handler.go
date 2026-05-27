@@ -121,8 +121,13 @@ func (h *Handler) playlistFullShape(r *http.Request, p Playlist) map[string]any 
 }
 
 // playlistItems resolves items in a playlist to wire-shape entries.
-// Audiobook items (empty episodeId) hydrate title via MediaStore.
-// Episode items are emitted as bare {libraryItemId, episodeId, position}.
+// Each entry embeds a `libraryItem` block with the full LibraryItem
+// shape — the ABS mobile client reads `item.libraryItem.mediaType`
+// in PlaylistCover, LazyBookCard, and pages/playlist/_id.vue before
+// rendering anything, so emitting bare {libraryItemId, title} causes
+// "cannot read properties of undefined (reading mediaType)" on every
+// playlist view. Episode items keep the bare ref shape; the official
+// client treats episode rows separately via `item.episode`.
 func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string]any {
 	if h.deps.PlaylistStore == nil {
 		return []map[string]any{}
@@ -134,6 +139,7 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 	}
 	lib := h.resolveDefaultLibrary(r.Context())
 	libID := audiobookLibraryID(lib)
+	baseURL := h.absBaseURL(r)
 	out := make([]map[string]any, 0, len(rows))
 	for _, it := range rows {
 		entry := map[string]any{
@@ -142,12 +148,10 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		}
 		if it.EpisodeID != "" {
 			entry["episodeId"] = it.EpisodeID
-		} else {
-			// Audiobook hydration.
-			if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID); err == nil && item != nil {
-				entry["libraryId"] = libID
-				entry["title"] = item.Title
-			}
+		} else if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID); err == nil && item != nil {
+			entry["libraryId"] = libID
+			entry["title"] = item.Title
+			entry["libraryItem"] = siloItemToLibraryItem(item, lib, baseURL)
 		}
 		out = append(out, entry)
 	}
@@ -181,7 +185,7 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if h.deps.PlaylistStore == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}, "total": 0})
 		return
 	}
 	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
@@ -196,7 +200,9 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 		// existing-membership via playlist.items.some(...).
 		out = append(out, h.playlistFullShape(r, p))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": out})
+	// LazyBookshelf reads payload.total to compute pagination; emit both
+	// for the bookshelf grid AND the create modal (modal ignores total).
+	writeJSON(w, http.StatusOK, map[string]any{"results": out, "total": len(out)})
 }
 
 // handleListPlaylists — GET /playlists.
@@ -502,6 +508,10 @@ func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.
 		}
 	}
 
+	if h.autoDeleteIfEmpty(w, r, a.UserID, id, p) {
+		return
+	}
+
 	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
 	if err != nil {
 		persisted = p
@@ -561,10 +571,48 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	if h.autoDeleteIfEmpty(w, r, a.UserID, id, p) {
+		return
+	}
+
 	persisted, err := h.deps.PlaylistStore.GetPlaylist(r.Context(), id)
 	if err != nil {
 		persisted = p
 	}
 	h.publish(a.UserID, "playlist_updated", map[string]any{"id": id})
 	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
+}
+
+// autoDeleteIfEmpty mirrors the official audiobookshelf-server behavior
+// where a playlist is destroyed once its final item is removed. After a
+// successful item-remove the caller invokes this; if the playlist is now
+// empty it is deleted and a `playlist_removed` event is fired (mobile
+// client's pages/playlist/_id.vue uses this to navigate the user back to
+// /bookshelf/playlists). Returns true when the handler has fully written
+// the response and the caller should stop.
+//
+// Errors during the empty-check or delete step do not block the original
+// remove from succeeding — we log and fall back to the standard
+// playlist_updated path so the client at minimum sees an empty playlist
+// (consistent with our pre-auto-delete behavior).
+func (h *Handler) autoDeleteIfEmpty(w http.ResponseWriter, r *http.Request, userID, playlistID string, original Playlist) bool {
+	items, err := h.deps.PlaylistStore.ListPlaylistItems(r.Context(), playlistID)
+	if err != nil {
+		slog.Warn("abs playlist auto-delete: count failed", "err", err, "id", playlistID)
+		return false
+	}
+	if len(items) > 0 {
+		return false
+	}
+	if err := h.deps.PlaylistStore.DeletePlaylist(r.Context(), playlistID); err != nil {
+		slog.Warn("abs playlist auto-delete: delete failed", "err", err, "id", playlistID)
+		return false
+	}
+	h.publish(userID, "playlist_removed", map[string]any{"id": playlistID})
+	// Echo the now-deleted playlist as the response body — the official
+	// server returns the playlist (with empty items[]) so the client
+	// reconciles state regardless of whether the socket event arrives
+	// first.
+	writeJSON(w, http.StatusOK, playlistToABS(original, []map[string]any{}))
+	return true
 }

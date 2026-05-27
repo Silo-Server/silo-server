@@ -30,6 +30,9 @@ func (f *fakeProgressStore) UpdateProgressPosition(_ context.Context, _, _, _ st
 func (f *fakeProgressStore) SetHideFromContinue(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
 }
+func (f *fakeProgressStore) DeleteProgress(_ context.Context, _, _, _ string) error {
+	return nil
+}
 
 func TestResumeTimeFromProgressStore_HasRow(t *testing.T) {
 	store := &fakeProgressStore{

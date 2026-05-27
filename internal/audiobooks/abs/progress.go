@@ -35,6 +35,10 @@ type ProgressStore interface {
 	// SetHideFromContinue toggles the hide_from_continue flag on a
 	// progress row. Idempotent — succeeds even when no row matches.
 	SetHideFromContinue(ctx context.Context, userID, profileID, contentID string, hide bool) error
+	// DeleteProgress removes the progress row for (userID, profileID, contentID).
+	// Idempotent — succeeds even when no row matches. Used by the ABS
+	// "Reset Progress" affordance: DELETE /api/me/progress/{libraryItemId}.
+	DeleteProgress(ctx context.Context, userID, profileID, contentID string) error
 }
 
 // ABSPlaybackSessionStore tracks the active /abs/api/items/{id}/play sessions
@@ -157,13 +161,21 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, progressRowToABS(*p))
 }
 
-// progressBody is the JSON body for POST /abs/api/me/progress/{libraryItemId}.
+// progressBody is the JSON body for POST/PATCH /api/me/progress/{libraryItemId}.
 // All fields are optional — only present fields update the row (PATCH semantics).
+//
+// EbookProgress / EbookLocation are emitted by the ABS clients (AudioBooth's
+// BooksService writes them on every page turn). silo's audiobook-first catalog
+// doesn't yet persist ebook position; the fields are accepted-and-ignored so
+// the client write succeeds and the user isn't shown a sync error. They will
+// flow into a dedicated ebook progress column when the ebook scanner lands.
 type progressBody struct {
-	CurrentTime *float64 `json:"currentTime"`
-	Duration    *float64 `json:"duration"`
-	IsFinished  *bool    `json:"isFinished"`
-	Progress    *float64 `json:"progress"`
+	CurrentTime    *float64 `json:"currentTime"`
+	Duration       *float64 `json:"duration"`
+	IsFinished     *bool    `json:"isFinished"`
+	Progress       *float64 `json:"progress"`
+	EbookProgress  *float64 `json:"ebookProgress"`
+	EbookLocation  *string  `json:"ebookLocation"`
 }
 
 // handleSetItemProgress — POST /abs/api/me/progress/{libraryItemId}
