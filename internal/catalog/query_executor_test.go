@@ -167,6 +167,64 @@ func TestEpisodeCatalogBaseRelationForLibraries_UsesEpisodeLibraries(t *testing.
 	}
 }
 
+func TestEpisodeCatalogProjectionIncludesSharedCatalogColumns(t *testing.T) {
+	sql, _, err := (&QueryExecutor{}).buildPreviewPageSQL(
+		QueryDefinition{
+			MediaScope: "episode",
+			LibraryIDs: []int{2},
+			Sort:       QuerySort{Field: "title", Order: "asc"},
+		},
+		AccessFilter{},
+		20,
+		0,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("buildPreviewPageSQL error: %v", err)
+	}
+	if !strings.Contains(sql, "COALESCE(si.show_status, '') AS show_status") {
+		t.Fatalf("expected episode projection to include show_status, got %s", sql)
+	}
+	if !strings.Contains(sql, "mi.show_status") {
+		t.Fatalf("expected outer catalog select to reference show_status, got %s", sql)
+	}
+	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) AS sort_key") {
+		t.Fatalf("expected episode projection to include sort_key, got %s", sql)
+	}
+	if !strings.Contains(sql, "ORDER BY mi.sort_key ASC, mi.content_id ASC") {
+		t.Fatalf("expected episode title sort to use sort_key, got %s", sql)
+	}
+}
+
+func TestEpisodeCatalogSingleLibraryAddedAtUsesDirectMembershipJoin(t *testing.T) {
+	sql, _, err := (&QueryExecutor{}).buildPreviewPageSQL(
+		QueryDefinition{
+			MediaScope: "episode",
+			LibraryIDs: []int{2},
+			Sort:       QuerySort{Field: "added_at", Order: "desc"},
+		},
+		AccessFilter{},
+		20,
+		0,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("buildPreviewPageSQL error: %v", err)
+	}
+	if !strings.Contains(sql, "JOIN episode_libraries sort_added") {
+		t.Fatalf("expected direct episode_libraries join for single-library added_at sort, got %s", sql)
+	}
+	if !strings.Contains(sql, "sort_added.media_folder_id = $2") {
+		t.Fatalf("expected direct added_at join to bind the single library, got %s", sql)
+	}
+	if strings.Contains(sql, "GROUP BY el.episode_id") {
+		t.Fatalf("single-library added_at sort should avoid aggregate membership join, got %s", sql)
+	}
+	if !strings.Contains(sql, "ORDER BY sort_added.first_seen_at DESC, mi.sort_key ASC, mi.content_id ASC") {
+		t.Fatalf("expected added_at order to use first_seen_at without NULLS LAST, got %s", sql)
+	}
+}
+
 func TestRebindSQLPlaceholders(t *testing.T) {
 	got := rebindSQLPlaceholders("mi.created_at <= $1 AND mi.year >= $2", 3)
 	want := "mi.created_at <= $4 AND mi.year >= $5"

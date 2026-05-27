@@ -23,7 +23,7 @@ func TestQueryExecutor_NamePrefix_PushedIntoWHERE(t *testing.T) {
 	}
 
 	// First arm: sort-key expression matching idx_media_items_sort_key.
-	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title),''), mi.title)) LIKE") {
+	if !strings.Contains(sql, "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE") {
 		t.Fatalf("expected sort-key LIKE arm matching idx_media_items_sort_key; got %q", sql)
 	}
 	// Second arm: LOWER(title) matching idx_media_items_search_exact_title;
@@ -50,6 +50,31 @@ func TestQueryExecutor_NamePrefix_PushedIntoWHERE(t *testing.T) {
 	}
 	if !foundArg {
 		t.Fatalf("expected an args entry like \"star%%\" (lowercased, trailing-only wildcard); got args=%v", args)
+	}
+}
+
+func TestQueryExecutor_NamePrefix_UsesEpisodeSortKeyForEpisodeScope(t *testing.T) {
+	exec := &QueryExecutor{}
+	access := AccessFilter{NamePrefix: "Pilot"}
+
+	sql, args, err := exec.buildPreviewPageSQL(
+		QueryDefinition{MediaScope: "episode", LibraryIDs: []int{2}},
+		access,
+		20,
+		0,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("buildPreviewPageSQL returned error: %v", err)
+	}
+	if !strings.Contains(sql, "mi.sort_key LIKE") {
+		t.Fatalf("expected episode prefix to use projected sort_key; got %q", sql)
+	}
+	if strings.Contains(sql, "BTRIM(mi.sort_title)") {
+		t.Fatalf("episode prefix should not recompute sort_title expression; got %q", sql)
+	}
+	if len(args) < 2 || args[1] != "pilot%" {
+		t.Fatalf("expected episode library args followed by prefix arg; got %v", args)
 	}
 }
 

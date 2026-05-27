@@ -69,7 +69,7 @@ describe("LibraryBrowse", () => {
     expect(mocks.useCatalogWindow).toHaveBeenCalled();
   });
 
-  it("shows the filtered item count from the catalog result", () => {
+  it("does not show the estimated item count as an exact result count", () => {
     mocks.useCatalogWindow.mockReturnValue({
       data: {
         totalItems: 1234,
@@ -95,10 +95,11 @@ describe("LibraryBrowse", () => {
       />,
     );
 
-    expect(markup).toContain("1,234 items");
+    expect(markup).toContain("Filters");
+    expect(markup).not.toContain("1,234 items");
   });
 
-  it("shows a loading state for the item count while catalog data loads", () => {
+  it("does not show an item count loading state when exact totals are skipped", () => {
     mocks.useCatalogWindow.mockReturnValue({
       data: {
         totalItems: 0,
@@ -124,7 +125,8 @@ describe("LibraryBrowse", () => {
       />,
     );
 
-    expect(markup).toContain("Loading item count");
+    expect(markup).toContain("Filters");
+    expect(markup).not.toContain("Loading item count");
     expect(markup).not.toContain("0 items");
   });
 
@@ -152,7 +154,7 @@ describe("LibraryBrowse", () => {
         }),
       }),
       expect.objectContaining({
-        includeTotal: true,
+        includeTotal: false,
       }),
     );
   });
