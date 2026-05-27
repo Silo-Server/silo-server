@@ -74,6 +74,27 @@ func TestBuildSortClause_ReleaseDateUsesEpisodeAirDateForEpisodeScope(t *testing
 	}
 }
 
+func TestBuildSortClause_TitleUsesEpisodeSortKeyForEpisodeScope(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").
+		WithMediaScope("episode").
+		BuildSortClause(QuerySort{
+			Field: "title",
+			Order: "asc",
+		})
+	if err != nil {
+		t.Fatalf("BuildSortClause returned error: %v", err)
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %v", args)
+	}
+	if !strings.Contains(clause, "ORDER BY mi.sort_key ASC, mi.content_id ASC") {
+		t.Fatalf("expected episode title sort to use indexed sort_key, got %q", clause)
+	}
+	if strings.Contains(clause, "BTRIM(mi.sort_title)") {
+		t.Fatalf("episode title sort should not recompute sort_title expression, got %q", clause)
+	}
+}
+
 func TestBuildSortClause_AddedAtUsesScopedFirstSeenAt(t *testing.T) {
 	plan, err := NewQueryBuilder("mi").
 		WithLibraryScope([]int{3, 7}).
@@ -201,14 +222,42 @@ func TestBuildSortPlan_AddedAtUsesEpisodeLibraryMembershipForEpisodeScope(t *tes
 	if len(plan.Joins) != 1 {
 		t.Fatalf("expected one join, got %v", plan.Joins)
 	}
-	if !strings.Contains(plan.Joins[0], "FROM episode_libraries el") {
+	if !strings.Contains(plan.Joins[0], "JOIN episode_libraries sort_added") {
 		t.Fatalf("expected episode added_at join to use episode_libraries, got %q", plan.Joins[0])
 	}
-	if !strings.Contains(plan.Joins[0], "GROUP BY el.episode_id") {
-		t.Fatalf("expected episode added_at join to group by episode_id, got %q", plan.Joins[0])
+	if !strings.Contains(plan.Joins[0], "sort_added.media_folder_id = $1") {
+		t.Fatalf("expected direct episode added_at join to bind one library, got %q", plan.Joins[0])
 	}
-	if !strings.Contains(plan.Joins[0], "sort_added.content_id = mi.content_id") {
+	if !strings.Contains(plan.Joins[0], "sort_added.episode_id = mi.content_id") {
 		t.Fatalf("expected episode added_at join to match episode content_id, got %q", plan.Joins[0])
+	}
+	if !strings.Contains(plan.OrderBy, "ORDER BY sort_added.first_seen_at DESC, mi.sort_key ASC, mi.content_id ASC") {
+		t.Fatalf("expected single-library episode added_at sort to use first_seen_at without NULLS LAST, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_AddedAtAggregatesEpisodeLibrariesForMultiLibraryScope(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").
+		WithMediaScope("episode").
+		WithLibraryScope([]int{6, 7}).
+		BuildSortPlan(QuerySort{Field: "added_at", Order: "desc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan returned error: %v", err)
+	}
+	if len(plan.Args) != 2 || plan.Args[0] != 6 || plan.Args[1] != 7 {
+		t.Fatalf("expected scoped library args [6 7], got %v", plan.Args)
+	}
+	if len(plan.Joins) != 1 {
+		t.Fatalf("expected one join, got %v", plan.Joins)
+	}
+	if !strings.Contains(plan.Joins[0], "FROM episode_libraries el") {
+		t.Fatalf("expected episode added_at aggregate to use episode_libraries, got %q", plan.Joins[0])
+	}
+	if !strings.Contains(plan.Joins[0], "GROUP BY el.episode_id") {
+		t.Fatalf("expected multi-library episode added_at join to group by episode_id, got %q", plan.Joins[0])
+	}
+	if !strings.Contains(plan.OrderBy, "sort_added.added_at DESC NULLS LAST") {
+		t.Fatalf("expected multi-library episode added_at sort to keep NULLS LAST, got %q", plan.OrderBy)
 	}
 }
 

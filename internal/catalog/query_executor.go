@@ -47,7 +47,7 @@ func (e *QueryExecutor) PreviewPage(
 		return nil, 0, false, err
 	}
 
-	pagedSQL, pagedArgs := build.pagedSQL(includeTotal)
+	pagedSQL, pagedArgs := build.pagedSQL(false)
 	rows, err := e.Pool.Query(ctx, pagedSQL, pagedArgs...)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("querying preview items: %w", err)
@@ -58,13 +58,14 @@ func (e *QueryExecutor) PreviewPage(
 		items []*models.MediaItem
 		total int
 	)
-	if includeTotal {
-		items, total, err = scanItemsWithTotal(rows)
-	} else {
-		items, err = scanItems(rows)
-	}
+	items, err = scanItems(rows)
 	if err != nil {
 		return nil, 0, false, err
+	}
+	hasMore := false
+	if len(items) > build.limit {
+		hasMore = true
+		items = items[:build.limit]
 	}
 	// The preview path uses itemColumns which scans CreatedAt but not
 	// AddedAt (set only by browse queries via MIN(mil.first_seen_at)).
@@ -76,32 +77,15 @@ func (e *QueryExecutor) PreviewPage(
 		}
 	}
 
-	hasMore := false
 	if includeTotal {
-		// COUNT(*) OVER () emits no rows when the data SELECT is empty, so
-		// total stays 0 even when the broader result set has matching rows
-		// (e.g. OFFSET past the last page). Re-query the count to give
-		// callers the real total. Skip when offset == 0 because in that
-		// case an empty page genuinely means total = 0.
-		//
-		// Use build.offset (normalized in buildPreviewPagePlan) rather than
-		// the raw offset parameter — a caller-supplied negative offset is
-		// floored to 0 in the plan, and the SQL uses the plan's value, so
-		// the fallback condition and HasMore must match.
-		if len(items) == 0 && build.offset > 0 {
-			countSQL, countArgs := build.countSQL()
-			if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-				return nil, 0, false, fmt.Errorf("count fallback for empty page: %w", err)
-			}
+		countSQL, countArgs := build.countSQL()
+		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+			return nil, 0, false, fmt.Errorf("counting preview items: %w", err)
 		}
 		hasMore = total > build.offset+len(items)
 		return items, total, hasMore, nil
 	}
 
-	if len(items) > build.limit {
-		hasMore = true
-		items = items[:build.limit]
-	}
 	return items, 0, hasMore, nil
 }
 
@@ -121,6 +105,9 @@ type previewPagePlan struct {
 	// fromClausePaged is the FROM clause for the paged query (includes any
 	// sort-plan joins).
 	fromClausePaged string
+	// fromClauseCount is the FROM clause for exact totals. It includes filter
+	// joins, but intentionally excludes sort-only joins.
+	fromClauseCount string
 	whereClause     string
 	args            []any
 	orderBy         string
@@ -131,41 +118,33 @@ type previewPagePlan struct {
 }
 
 // countSQL renders a count-only query that returns the total number of rows
-// matching the plan's WHERE clause, ignoring LIMIT/OFFSET/ORDER BY. Used as
-// a fallback when pagedSQL(true) returned an empty page past offset 0:
-// COUNT(*) OVER () emits no rows when the data SELECT is empty, so the
-// caller would otherwise see total=0 even when the broader result set has
-// matching rows. Wraps the inner query in `SELECT COUNT(*) FROM (...) sub`
-// so any GROUP BY in the inner query is preserved (we count groups, matching
-// what COUNT(*) OVER () would compute).
+// matching the plan's WHERE clause, ignoring LIMIT/OFFSET/ORDER BY. PreviewPage
+// uses it when callers need an exact total; keeping the count separate lets the
+// data SELECT use top-N/index plans instead of forcing COUNT(*) OVER () across
+// every matching row. Wraps the inner query in `SELECT COUNT(*) FROM (...) sub`
+// so any GROUP BY in the inner query is preserved.
 //
-// Bind cteArgs + args + sortArgs in the same order as pagedSQL. fromClausePaged
-// embeds sort-plan join clauses (ORDER BY needs them to project the join
-// columns), and those clauses reference $N placeholders for sortArgs; omitting
-// sortArgs here would break sorts that need bound join args (added_at,
-// progress, date_viewed, plays, resolution, bitrate). LIMIT/OFFSET are
-// intentionally dropped — count is over the full filtered set.
+// Bind cteArgs + args only. Sort-only joins and their args are intentionally
+// excluded because ordering does not affect the filtered row count.
 func (p previewPagePlan) countSQL() (string, []any) {
 	args := append([]any{}, p.cteArgs...)
 	args = append(args, p.args...)
-	args = append(args, p.sortArgs...)
 	withClause := ""
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
 	}
 	sql := fmt.Sprintf(
 		"%sSELECT COUNT(*) FROM (SELECT 1 %s %s) sub",
-		withClause, p.fromClausePaged, p.whereClause,
+		withClause, p.fromClauseCount, p.whereClause,
 	)
 	return sql, args
 }
 
 // pagedSQL renders the final paged SELECT and returns it together with the
-// fully-bound arg list. When includeTotal is true the SELECT list is appended
-// with COUNT(*) OVER () AS total_count so the caller can read the total from
-// the first scanned row in a single round trip. When includeTotal is false we
-// ask the database for one extra row to detect more pages without an exact
-// count.
+// fully-bound arg list. When includeTotal is false we ask the database for one
+// extra row to detect more pages without an exact count. Exact totals are
+// handled by countSQL instead of COUNT(*) OVER () so the page query can stop
+// after the requested rows.
 func (p previewPagePlan) pagedSQL(includeTotal bool) (string, []any) {
 	queryLimit := p.limit
 	if !includeTotal {
@@ -182,9 +161,6 @@ func (p previewPagePlan) pagedSQL(includeTotal bool) (string, []any) {
 		args = append(args, p.offset)
 	}
 	selectList := qualifiedListItemColumns("mi")
-	if includeTotal {
-		selectList += ", COUNT(*) OVER () AS total_count"
-	}
 	withClause := ""
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
@@ -257,7 +233,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	builder := NewQueryBuilder("mi").
 		WithArgIdx(len(baseArgs)+1).
 		WithUserScope(access.UserID, access.ProfileID).
-		WithMediaScope(def.MediaScope).
+		WithMediaScope(effectiveScope).
 		WithLibraryScope(libraryIDs)
 	filterWhere, filterArgs, err := builder.Build(def)
 	if err != nil {
@@ -314,16 +290,15 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	}
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		// Dual-column OR matching browse.go and favorites_browse.go: items
-		// where a curated sort_title differs from title (e.g. title="The Office",
-		// sort_title="Office, The") would be silently lost on prefix="the" if
-		// we only checked the COALESCE'd sort-key expression. First arm uses
-		// the idx_media_items_sort_key expression (migration 102); second arm
-		// uses idx_media_items_search_exact_title on LOWER(title) (migration 001).
-		// Both arms are sargable; the planner can BitmapOr them.
+		// Dual-column OR matching browse.go and favorites_browse.go: items where
+		// a curated sort_title differs from title (e.g. title="The Office",
+		// sort_title="Office, The") would be silently lost on prefix="the" if we
+		// only checked the COALESCE'd sort-key expression. The first arm uses the
+		// scope-specific sort key; the second arm keeps literal title prefixes.
+		prefixSortExpr := builder.normalizedTitleExpr()
 		conditions = append(conditions, fmt.Sprintf(
-			"(LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title),''), mi.title)) LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			argIdx, argIdx,
+			"(%s LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
+			prefixSortExpr, argIdx, argIdx,
 		))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
@@ -334,6 +309,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 	fromClauseBase := "FROM " + baseRelation
+	fromClauseCount := fromClauseBase
 
 	if limit <= 0 {
 		limit = 20
@@ -363,9 +339,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		ctes = []string{UserHistoryCTESQL(1)}
 
 		fromClausePaged = rebindSQLPlaceholders(fromClausePaged, cteShift)
+		fromClauseCount = rebindSQLPlaceholders(fromClauseCount, cteShift)
 		whereClause = rebindSQLPlaceholders(whereClause, cteShift)
 		sortPlan.OrderBy = rebindSQLPlaceholders(sortPlan.OrderBy, cteShift)
 		fromClausePaged += " LEFT JOIN user_last_watched uhist ON uhist.media_item_id = mi.content_id"
+		fromClauseCount += " LEFT JOIN user_last_watched uhist ON uhist.media_item_id = mi.content_id"
 		limitArgIdx += cteShift
 	}
 
@@ -373,6 +351,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		ctes:            ctes,
 		cteArgs:         cteArgs,
 		fromClausePaged: fromClausePaged,
+		fromClauseCount: fromClauseCount,
 		whereClause:     whereClause,
 		args:            args,
 		orderBy:         sortPlan.OrderBy,
@@ -385,8 +364,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 
 // buildPreviewPageSQL is a test-friendly facade over buildPreviewPagePlan that
 // returns the rendered paged SELECT plus the bound args. It performs no I/O.
-// When includeTotal is true the emitted SELECT carries COUNT(*) OVER () as a
-// total_count column so PreviewPage can avoid a separate count query.
+// includeTotal only controls whether the page query fetches exactly limit rows
+// or an extra row for has-more detection; exact totals are rendered separately
+// by previewPagePlan.countSQL.
 func (e *QueryExecutor) buildPreviewPageSQL(
 	def QueryDefinition,
 	access AccessFilter,
@@ -413,11 +393,10 @@ func escapePrefixForLike(s string) string {
 }
 
 // buildLibraryScopeJoin returns a WHERE clause that scopes the outer query
-// to items whose membership in media_item_libraries (or episode_libraries for
-// the episode catalog scope) matches the allow/deny lists. The clause is an
-// EXISTS / NOT EXISTS semi-join that uses the (content_id, media_folder_id)
-// PRIMARY KEY index directly without fanning out for items present in
-// multiple libraries — Audit Pattern D (2026-05-01 §3 Pattern D). The prior
+// to items whose library membership matches the allow/deny lists. The clause
+// is an EXISTS / NOT EXISTS semi-join that uses membership indexes
+// directly without fanning out for items present in multiple libraries — Audit
+// Pattern D (2026-05-01 §3 Pattern D). The prior
 // shape wrapped the join in a SELECT DISTINCT subquery to defuse that
 // fanout; the DISTINCT was load-bearing because the PK is on the (content,
 // folder) PAIR, not on content alone. EXISTS is the canonical non-fanout

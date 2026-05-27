@@ -234,10 +234,10 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (QuerySortPlan, erro
 		plan.OrderBy = qb.orderByExpr(qb.releaseDateSortExpr(), dir, true, titleExpr)
 		return plan, nil
 	case "added_at":
-		expr, joins, args := qb.addedAtSortPlan()
+		expr, joins, args, nullsLast := qb.addedAtSortPlan()
 		plan.Joins = joins
 		plan.Args = args
-		plan.OrderBy = qb.orderByExpr(expr, dir, len(joins) > 0, titleExpr)
+		plan.OrderBy = qb.orderByExpr(expr, dir, nullsLast, titleExpr)
 		return plan, nil
 	case "content_rating":
 		rankExpr := qb.contentRatingRankExpr()
@@ -1016,6 +1016,9 @@ func (qb *QueryBuilder) buildTimestampComparisonClause(column, op string, value 
 }
 
 func (qb *QueryBuilder) normalizedTitleExpr() string {
+	if isEpisodeCatalogScope(qb.mediaScope) {
+		return fmt.Sprintf("%s.sort_key", qb.alias)
+	}
 	return fmt.Sprintf(
 		"LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))",
 		qb.alias,
@@ -1039,13 +1042,22 @@ func (qb *QueryBuilder) orderByExpr(expr, dir string, nullsLast bool, titleExpr 
 	return clause
 }
 
-func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any) {
+func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any, bool) {
 	if len(qb.libraryIDs) == 0 {
-		return fmt.Sprintf("%s.created_at", qb.alias), nil, nil
+		return fmt.Sprintf("%s.created_at", qb.alias), nil, nil, false
 	}
 
 	placeholders, args := qb.consumeIntArgs(qb.libraryIDs)
 	if isEpisodeCatalogScope(qb.mediaScope) {
+		if len(qb.libraryIDs) == 1 {
+			joinSQL := fmt.Sprintf(
+				`JOIN episode_libraries sort_added ON sort_added.episode_id = %s.content_id AND sort_added.media_folder_id = %s`,
+				qb.alias,
+				placeholders[0],
+			)
+			return "sort_added.first_seen_at", []string{joinSQL}, args, false
+		}
+
 		joinSQL := fmt.Sprintf(
 			`LEFT JOIN (
 				SELECT el.episode_id AS content_id, MIN(el.first_seen_at) AS added_at
@@ -1056,7 +1068,7 @@ func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any) {
 			strings.Join(placeholders, ", "),
 			qb.alias,
 		)
-		return "sort_added.added_at", []string{joinSQL}, args
+		return "sort_added.added_at", []string{joinSQL}, args, true
 	}
 
 	joinSQL := fmt.Sprintf(
@@ -1069,7 +1081,7 @@ func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any) {
 		strings.Join(placeholders, ", "),
 		qb.libraryContentExpr(),
 	)
-	return "sort_added.added_at", []string{joinSQL}, args
+	return "sort_added.added_at", []string{joinSQL}, args, true
 }
 
 func (qb *QueryBuilder) contentRatingRankExpr() string {
