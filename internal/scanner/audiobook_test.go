@@ -10,6 +10,46 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+func TestPopulateFromTags_SeriesDoesNotFallBackToAlbum(t *testing.T) {
+	// In audiobook tagging the `album` tag holds the book title, not the
+	// series name. populateFromTags must NOT use it as a series fallback,
+	// otherwise every book without an explicit series tag ends up with
+	// series_name = its own title (each becomes a singleton "series",
+	// polluting the Series filter dropdown — see migration 145 history).
+	b := &parsedAudiobook{}
+	b.populateFromTags(map[string]string{
+		"title":  "Project Hail Mary",
+		"album":  "Project Hail Mary",
+		"artist": "Andy Weir",
+	})
+	if b.Series != "" {
+		t.Fatalf("expected Series to stay empty when only `album` is set; got %q", b.Series)
+	}
+}
+
+func TestPopulateFromTags_SeriesPrefersExplicitTag(t *testing.T) {
+	b := &parsedAudiobook{}
+	b.populateFromTags(map[string]string{
+		"title":  "The Way of Kings",
+		"album":  "The Way of Kings",
+		"series": "The Stormlight Archive",
+	})
+	if b.Series != "The Stormlight Archive" {
+		t.Fatalf("expected Series=%q, got %q", "The Stormlight Archive", b.Series)
+	}
+}
+
+func TestPopulateFromTags_SeriesFallsBackToMovementName(t *testing.T) {
+	b := &parsedAudiobook{}
+	b.populateFromTags(map[string]string{
+		"title": "The Way of Kings",
+		"mvnm":  "The Stormlight Archive",
+	})
+	if b.Series != "The Stormlight Archive" {
+		t.Fatalf("expected Series=%q (from mvnm fallback), got %q", "The Stormlight Archive", b.Series)
+	}
+}
+
 func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 	ffprobePath := FFprobePathFromFFmpeg("ffmpeg")
 	if _, err := exec.LookPath(ffprobePath); err != nil {
@@ -30,8 +70,12 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 	if got.Author != "Test Author" {
 		t.Errorf("Author = %q, want %q", got.Author, "Test Author")
 	}
-	if got.Series != "Test Series" {
-		t.Errorf("Series = %q, want %q", got.Series, "Test Series")
+	// The fixture has `album: Test Series` but no real `series` or
+	// `mvnm` tag. Series must stay empty — previously the parser
+	// fell back to album, which polluted audiobook_series with one
+	// fake singleton per book on real libraries.
+	if got.Series != "" {
+		t.Errorf("Series = %q, want %q (album must NOT be used as a fallback)", got.Series, "")
 	}
 	if got.Year != 2024 {
 		t.Errorf("Year = %d, want 2024", got.Year)

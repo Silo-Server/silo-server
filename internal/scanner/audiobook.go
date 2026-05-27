@@ -165,7 +165,12 @@ func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
 	b.Title = firstNonEmpty(tags["title"], tags["album"])
 	b.Author = firstNonEmpty(tags["album_artist"], tags["artist"], tags["composer"])
 	b.Narrator = firstNonEmpty(tags["narrator"], tags["performer"], tags["composer"])
-	b.Series = firstNonEmpty(tags["series"], tags["mvnm"], tags["album"])
+	// Note: do NOT fall back to tags["album"] for Series. In audiobook
+	// tagging, `album` is the book title, not the series name — using it
+	// as the fallback writes series_name = title for every book without
+	// an explicit series tag, producing one fake singleton "series" per
+	// title (~141k of them on this server before this fix).
+	b.Series = firstNonEmpty(tags["series"], tags["mvnm"])
 	b.SeriesPosition = firstNonEmpty(tags["series-part"], tags["mvin"], tags["movement"])
 	b.ASIN = firstNonEmpty(tags["asin"], tags["audible_asin"], tags["com.audible.asin"])
 	b.Overview = firstNonEmpty(tags["description"], tags["summary"], tags["comment"], tags["©cmt"])
