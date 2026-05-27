@@ -20,15 +20,14 @@ describe("SettingsLayout", () => {
     });
   });
 
-  it("includes a back link to the main app shell", () => {
+  it("includes a PageBack control at the top of the page", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/settings/playback"]}>
         <SettingsLayout />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain('href="/"');
-    expect(markup).toContain(">Back<");
+    expect(markup).toContain('aria-label="Go back"');
   });
 
   it("does not include a plugins section in personal settings", () => {

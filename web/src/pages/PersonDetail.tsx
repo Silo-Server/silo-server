@@ -8,6 +8,7 @@ import { createEmptyQueryDefinition } from "@/api/types";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import EditPersonDialog from "@/components/EditPersonDialog";
 import ItemGrid from "@/components/ItemGrid";
+import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { personKeys } from "@/hooks/queries/keys";
@@ -76,7 +77,8 @@ export default function PersonDetail() {
   return (
     <div>
       {/* Person Header */}
-      <section className="page-shell pt-8 pb-6 sm:pt-10 sm:pb-8">
+      <section className="page-shell relative pt-8 pb-6 sm:pt-10 sm:pb-8">
+        <PageBack />
         <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
           {/* Photo */}
           <div className="shrink-0 self-start">

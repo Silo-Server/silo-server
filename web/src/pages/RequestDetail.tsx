@@ -1,7 +1,8 @@
-import { useNavigate, useParams } from "react-router";
-import { ArrowLeft, Check, Clock, Loader2, Plus, Star } from "lucide-react";
+import { useParams } from "react-router";
+import { Check, Clock, Loader2, Plus, Star } from "lucide-react";
 import CastCarousel from "@/components/CastCarousel";
 import MediaCarousel from "@/components/MediaCarousel";
+import PageBack from "@/components/PageBack";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,6 @@ import {
 } from "@/lib/mediaRequests";
 
 export default function RequestDetail() {
-  const navigate = useNavigate();
   const params = useParams<{ mediaType: string; tmdbId: string }>();
   const mediaType = (params.mediaType === "series" ? "series" : "movie") as "movie" | "series";
   const tmdbID = Number(params.tmdbId) || 0;
@@ -39,17 +39,12 @@ export default function RequestDetail() {
 
   if (detail.isError || !detail.data) {
     return (
-      <div className="page-shell space-y-3 py-12 text-center">
+      <div className="page-shell relative space-y-3 py-12 text-center">
+        <PageBack />
         <p className="text-foreground text-base font-semibold">Couldn't load this title.</p>
         <p className="text-muted-foreground text-sm">
           The TMDB record may be temporarily unavailable.
         </p>
-        <div className="pt-4">
-          <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-        </div>
       </div>
     );
   }
@@ -63,6 +58,7 @@ export default function RequestDetail() {
     <div>
       <DetailHero
         title={item.title}
+        topNav={<PageBack />}
         context={<RequestContext mediaType={mediaType} />}
         studioLabel={studioLabel}
         backdropUrl={backdropUrl}
@@ -79,7 +75,6 @@ export default function RequestDetail() {
               createRequest.isPending && createRequest.variables?.tmdb_id === item.tmdb_id
             }
             onRequest={() => createRequest.mutate(requestInputFromMediaResult(item))}
-            onBack={() => navigate(-1)}
           />
         }
       />
@@ -198,12 +193,10 @@ function RequestActions({
   item,
   isSubmitting,
   onRequest,
-  onBack,
 }: {
   item: RequestMediaDetail;
   isSubmitting: boolean;
   onRequest: () => void;
-  onBack: () => void;
 }) {
   const requestable = item.request.requestable;
   const statusLabel = item.request.status ? formatRequestStatus(item.request.status) : null;
@@ -213,16 +206,6 @@ function RequestActions({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onBack}
-        className="text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back
-      </Button>
-
       {requestable ? (
         <Button
           onClick={onRequest}

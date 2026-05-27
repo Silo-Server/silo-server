@@ -1,5 +1,5 @@
-import { Link, useParams, useSearchParams } from "react-router";
-import { ArrowLeft } from "lucide-react";
+import { useParams, useSearchParams } from "react-router";
+import PageBack from "@/components/PageBack";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,29 +83,19 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
 
   if (browse.isError && (browse.error as { status?: number }).status === 404) {
     return (
-      <div className="space-y-4 py-10 text-center">
+      <div className="relative space-y-4 py-10 text-center">
+        <PageBack />
         <p className="text-foreground text-lg font-semibold">
           {kind === "studio" ? "Studio" : kind === "network" ? "Network" : "Genre"} not found.
         </p>
-        <Link
-          to="/requests"
-          className="text-muted-foreground hover:text-foreground text-sm underline"
-        >
-          Back to Requests
-        </Link>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 py-6 sm:py-8">
+    <div className="relative space-y-6 py-6 sm:py-8">
+      <PageBack />
       <div className="space-y-4 px-4 sm:px-6 lg:px-10 xl:px-12">
-        <Link
-          to="/requests"
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to Requests
-        </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
             <BrowseHeaderTile browse={browse.data} kind={kind} fallback={title} />

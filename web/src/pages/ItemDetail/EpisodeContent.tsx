@@ -16,6 +16,7 @@ import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
+import PageBack from "@/components/PageBack";
 import EpisodeCarousel from "./components/EpisodeCarousel";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
@@ -221,6 +222,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     <div>
       <DetailHero
         title={title}
+        topNav={<PageBack />}
         context={
           <div className="space-y-3">
             <DetailBreadcrumb segments={breadcrumbSegments} />

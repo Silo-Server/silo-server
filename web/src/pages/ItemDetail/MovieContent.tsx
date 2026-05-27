@@ -16,6 +16,7 @@ import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
 import MatchItemDialog from "@/components/MatchItemDialog";
+import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
@@ -179,6 +180,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
     <div>
       <DetailHero
         title={title}
+        topNav={<PageBack />}
         context="Movie"
         studioLabel={firstStudio}
         backdropUrl={item.backdrop_url}

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 
 import type {
@@ -15,6 +14,7 @@ import { normalizeQueryDefinition } from "@/api/types";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import { ImageUploadField } from "@/components/ImageUploadField";
 import ItemGrid from "@/components/ItemGrid";
+import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -118,12 +118,12 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
   }, []);
 
   const headerTitle = isEdit ? draft.title || "Edit Collection" : "New Collection";
-  const backHref = wizard.mode === "user" ? "/collections" : adminBackHref(wizard);
   const adminLibraries = wizard.mode === "admin" ? wizard.libraries : [];
 
   return (
-    <div className="page-shell-wide space-y-6 py-4 sm:py-6">
-      <WizardHeader backHref={backHref} title={headerTitle} step={step} isEdit={isEdit} />
+    <div className="page-shell-wide relative space-y-6 py-4 sm:py-6">
+      <PageBack />
+      <WizardHeader title={headerTitle} step={step} isEdit={isEdit} />
 
       {step === 1 ? (
         <Step1FiltersAndPreview
@@ -171,44 +171,28 @@ function smartUserDraft(collection: Collection | null): CollectionBuilderValue {
     : createCollectionBuilderValue({ ...value, collection_type: "smart" });
 }
 
-function adminBackHref(props: AdminModeProps): string {
-  return props.initialLibraryId
-    ? `/admin/collections?libraryId=${props.initialLibraryId}`
-    : "/admin/collections";
-}
-
 function WizardHeader({
-  backHref,
   title,
   step,
   isEdit,
 }: {
-  backHref: string;
   title: string;
   step: WizardStep;
   isEdit: boolean;
 }) {
   return (
-    <div className="space-y-3">
-      <Button asChild variant="ghost" className="w-fit px-0">
-        <Link to={backHref}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Collections
-        </Link>
-      </Button>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="page-title text-[clamp(1.75rem,3vw,2.5rem)]">{title}</h1>
-          <p className="page-subtitle mt-1 text-sm">
-            {step === 1
-              ? "Tune the filters until the cards below show the collection you want."
-              : isEdit
-                ? "Update naming, artwork, and sharing for this collection."
-                : "Give your new collection a name, artwork, and sharing rules."}
-          </p>
-        </div>
-        <StepIndicator step={step} />
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 className="page-title text-[clamp(1.75rem,3vw,2.5rem)]">{title}</h1>
+        <p className="page-subtitle mt-1 text-sm">
+          {step === 1
+            ? "Tune the filters until the cards below show the collection you want."
+            : isEdit
+              ? "Update naming, artwork, and sharing for this collection."
+              : "Give your new collection a name, artwork, and sharing rules."}
+        </p>
       </div>
+      <StepIndicator step={step} />
     </div>
   );
 }
