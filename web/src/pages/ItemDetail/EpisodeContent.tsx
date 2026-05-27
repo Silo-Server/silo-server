@@ -346,7 +346,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       />
 
       <div className="page-shell space-y-12 py-10 sm:space-y-14">
-        {isAdmin && <MediaLocations title="Media locations" versions={item.versions} />}
+        {canCurateMetadata && <MediaLocations title="Media locations" versions={item.versions} />}
 
         {/* More Episodes carousel — most useful, so show first */}
         {siblingsLoading ? (

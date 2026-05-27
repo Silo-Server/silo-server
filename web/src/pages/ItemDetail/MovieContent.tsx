@@ -289,7 +289,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
       />
 
       <div className="page-shell space-y-12 py-10 sm:space-y-14">
-        {isAdmin && <MediaLocations title="Media locations" versions={item.versions} />}
+        {canCurateMetadata && <MediaLocations title="Media locations" versions={item.versions} />}
 
         {item.cast && item.cast.length > 0 && (
           <div>
