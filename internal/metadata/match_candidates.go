@@ -349,6 +349,8 @@ type scoredMatchCandidate struct {
 // a TMDB row that weren't merged because each carries only its own provider's
 // ID). Candidates that share a canonical provider key but carry different values
 // are considered distinct shows and cause the function to return false.
+// Candidates with Year == 0 are treated as year-mismatched (a provider that
+// omitted the year yields false here) — conservative by design.
 func candidatesAreSingleDistinctShow(best MatchCandidate, scored []scoredMatchCandidate) bool {
 	// Year==0 means the provider didn't supply a release year, so we cannot
 	// claim the candidates refer to the *same* show via year-equality. Without
@@ -410,6 +412,9 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 	// year is high-confidence even when the fuzzy title score sits in the 55-69
 	// band (short/numeric/alternate titles). Accept the top-ranked candidate
 	// without lowering the score thresholds.
+	// Residual risk: two different shows with an identical title+year and no
+	// provider IDs would both pass; accepted as low-risk given the title+year+type
+	// corroboration.
 	if hints.Year != 0 && best.candidate.Year == hints.Year &&
 		candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) &&
 		candidatesAreSingleDistinctShow(best.candidate, scoredCandidates) {
