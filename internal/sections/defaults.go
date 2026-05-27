@@ -21,16 +21,17 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 		if library == nil {
 			continue
 		}
-		for _, sectionType := range []SectionType{SectionRecentlyAdded, SectionRecentlyReleased} {
+		for _, section := range generatedHomeLibraryRecentDefaults(library.ID, library.Name, library.Type) {
+			section.Position = position
 			result = append(result, &PageSection{
-				ID:          fmt.Sprintf("default-home-%s-library-%d", sectionType, library.ID),
-				Scope:       "home",
-				Position:    position,
-				SectionType: sectionType,
-				Title:       GeneratedHomeLibraryRecentTitle(sectionType, library.Name),
-				ItemLimit:   20,
-				Config:      GeneratedHomeLibraryRecentConfig(library.ID),
-				Enabled:     true,
+				ID:          generatedHomeLibraryRecentID(section, library.ID),
+				Scope:       section.Scope,
+				Position:    section.Position,
+				SectionType: section.SectionType,
+				Title:       section.Title,
+				ItemLimit:   section.ItemLimit,
+				Config:      section.Config,
+				Enabled:     section.Enabled,
 			})
 			position++
 		}
@@ -60,6 +61,50 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 	)
 
 	return result
+}
+
+func generatedHomeLibraryRecentID(section *PageSection, libraryID int) string {
+	kind := generatedHomeLibraryRecentKindForSection(section)
+	if kind == generatedHomeLibraryRecentKindReleasedEpisodes {
+		return fmt.Sprintf("default-home-%s-library-%d", kind, libraryID)
+	}
+	return fmt.Sprintf("default-home-%s-library-%d", section.SectionType, libraryID)
+}
+
+func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType string) []*PageSection {
+	sections := []*PageSection{
+		{
+			Scope:       "home",
+			SectionType: SectionRecentlyAdded,
+			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyAdded, libraryName),
+			ItemLimit:   20,
+			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
+			Enabled:     true,
+		},
+	}
+
+	switch libraryType {
+	case "series":
+		sections = append(sections, &PageSection{
+			Scope:       "home",
+			SectionType: SectionCustomFilter,
+			Title:       fmt.Sprintf("Recently Released Episodes in %s", libraryName),
+			ItemLimit:   20,
+			Config:      GeneratedHomeLibraryRecentEpisodesConfig(libraryID),
+			Enabled:     true,
+		})
+	default:
+		sections = append(sections, &PageSection{
+			Scope:       "home",
+			SectionType: SectionRecentlyReleased,
+			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyReleased, libraryName),
+			ItemLimit:   20,
+			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
+			Enabled:     true,
+		})
+	}
+
+	return sections
 }
 
 func defaultQueryConfig(def catalog.QueryDefinition) json.RawMessage {
@@ -97,15 +142,6 @@ func defaultRecentEpisodesConfig() json.RawMessage {
 	})
 }
 
-func defaultRecentShowsConfig() json.RawMessage {
-	return defaultQueryConfig(catalog.QueryDefinition{
-		MediaScope: "series",
-		Match:      "all",
-		Groups:     []catalog.QueryGroup{},
-		Sort:       catalog.QuerySort{Field: "last_air_date", Order: "desc"},
-	})
-}
-
 // DefaultLibrarySectionsForType returns the canonical default sections for a
 // library type. These are used when seeding new libraries and restoring
 // library defaults.
@@ -127,10 +163,9 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 			{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: emptyCfg, Enabled: true},
 			{ID: "default-recently-added-tv", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added TV", ItemLimit: 20, Config: defaultMediaScopeConfig("series"), Enabled: true},
 			{ID: "default-recently-released-episodes", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionCustomFilter, Title: "Recently Released Episodes", ItemLimit: 20, Config: defaultRecentEpisodesConfig(), Enabled: true},
-			{ID: "default-recently-released-tv-shows", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionCustomFilter, Title: "Recently Released TV Shows", ItemLimit: 20, Config: defaultRecentShowsConfig(), Enabled: true},
-			{ID: "default-top-rated-tv", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionCustomFilter, Title: "Top Rated TV", ItemLimit: 20, Config: defaultTopRatedConfig("series"), Enabled: true},
-			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 5, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
-			{ID: "default-random-tv", Scope: "library", LibraryID: libraryID, Position: 6, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("series"), Enabled: true},
+			{ID: "default-top-rated-tv", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionCustomFilter, Title: "Top Rated TV", ItemLimit: 20, Config: defaultTopRatedConfig("series"), Enabled: true},
+			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-tv", Scope: "library", LibraryID: libraryID, Position: 5, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("series"), Enabled: true},
 		}
 	default:
 		return DefaultLibrarySections(libraryID)
