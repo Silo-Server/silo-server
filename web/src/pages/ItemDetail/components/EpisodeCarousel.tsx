@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { Check, Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
@@ -48,7 +49,7 @@ export default function EpisodeCarousel({
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport overflow-hidden">
+        <div ref={emblaRef} className="embla__viewport overflow-hidden py-4 pl-4">
           <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
             {episodes.map((ep) => {
               const isCurrent = ep.episode_number === currentEpisodeNumber;
@@ -79,12 +80,16 @@ export default function EpisodeCarousel({
                       <Link
                         to={`/item/${ep.content_id}`}
                         state={episodeLinkState}
+                        aria-current={isCurrent ? "page" : undefined}
                         className="block"
                       >
                         <div
-                          className={`surface-panel-subtle relative aspect-video overflow-hidden rounded-[1.1rem] border ${
-                            isCurrent ? "border-primary/40" : "border-border/30"
-                          }`}
+                          className={cn(
+                            "surface-panel-subtle relative aspect-video overflow-hidden rounded-[1.1rem] border transition-[border-color,box-shadow] duration-200",
+                            isCurrent
+                              ? "border-transparent shadow-[0_0_0_2px_var(--primary)]"
+                              : "border-border/30",
+                          )}
                           style={
                             thumbhashUrl
                               ? { backgroundImage: `url(${thumbhashUrl})`, backgroundSize: "cover" }
@@ -101,6 +106,15 @@ export default function EpisodeCarousel({
                           ) : (
                             <div className="bg-accent/30 flex h-full w-full items-center justify-center">
                               <Play size={28} className="text-muted-foreground/30" />
+                            </div>
+                          )}
+                          {isCurrent && (
+                            <div className="bg-primary text-primary-foreground pointer-events-none absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] leading-none font-semibold tracking-[0.08em] uppercase shadow-[0_2px_8px_rgb(0_0_0/0.28)]">
+                              <span className="relative flex size-1.5">
+                                <span className="bg-primary-foreground absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" />
+                                <span className="bg-primary-foreground relative inline-flex size-1.5 rounded-full" />
+                              </span>
+                              Now Viewing
                             </div>
                           )}
                           {ep.user_data?.played && (
@@ -135,7 +149,12 @@ export default function EpisodeCarousel({
                         hasPartialProgress={progress != null}
                       />
                     </div>
-                    <Link to={`/item/${ep.content_id}`} state={episodeLinkState} className="block">
+                    <Link
+                      to={`/item/${ep.content_id}`}
+                      state={episodeLinkState}
+                      aria-current={isCurrent ? "page" : undefined}
+                      className="block"
+                    >
                       <p className="text-muted-foreground/70 mt-2 text-xs">
                         Episode {ep.episode_number}
                       </p>
