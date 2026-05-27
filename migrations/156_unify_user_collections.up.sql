@@ -15,13 +15,14 @@ ALTER TABLE user_personal_collection_items
     ADD CONSTRAINT user_personal_collection_items_pkey
     PRIMARY KEY (user_id, collection_id, media_item_id, sub_item_id);
 
--- 2. Widen the collection_type domain. The pre-existing CHECK (if any)
---    only admits 'manual' and 'synced'.
+-- 2. Widen the collection_type domain. Personal collections already support
+--    smart and import-backed types; this migration adds ABS playlists without
+--    narrowing existing rows.
 ALTER TABLE user_personal_collections
     DROP CONSTRAINT IF EXISTS user_personal_collections_type_check;
 ALTER TABLE user_personal_collections
     ADD CONSTRAINT user_personal_collections_type_check
-    CHECK (collection_type IN ('manual', 'synced', 'playlist', 'smart'));
+    CHECK (collection_type IN ('manual', 'smart', 'mdblist', 'tmdb', 'trakt', 'synced', 'playlist'));
 
 -- 3. Move existing ABS manual collections into the canonical store.
 INSERT INTO user_personal_collections

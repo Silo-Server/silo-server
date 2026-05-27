@@ -1,5 +1,5 @@
--- Reverse migration 156. Lossy in reverse — playlist/smart rows
--- created after the up migration are deleted, not migrated back.
+-- Reverse migration 156. Lossy in reverse — ABS playlist rows created after
+-- the up migration are deleted, not migrated back.
 
 -- 1. Remove the page_sections column.
 ALTER TABLE page_sections DROP COLUMN media_types;
@@ -95,21 +95,23 @@ CREATE INDEX IF NOT EXISTS abs_smart_collections_user_profile_idx
     );
 -- END inlined
 
--- 3. Remove rows we promoted from abs_playlists during the up.
+-- 3. Remove rows we promoted from abs_playlists during the up. Smart personal
+--    collections predate migration 156, so they must not be deleted here.
 DELETE FROM user_personal_collection_items
     WHERE collection_id IN (
         SELECT id FROM user_personal_collections
-        WHERE collection_type IN ('playlist', 'smart')
+        WHERE collection_type = 'playlist'
     );
 DELETE FROM user_personal_collections
-    WHERE collection_type IN ('playlist', 'smart');
+    WHERE collection_type = 'playlist';
 
--- 4. Restore the narrow CHECK constraint.
+-- 4. Remove the ABS-only playlist type while preserving the pre-156 personal
+--    collection domain, including smart and import-backed collections.
 ALTER TABLE user_personal_collections
     DROP CONSTRAINT IF EXISTS user_personal_collections_type_check;
 ALTER TABLE user_personal_collections
     ADD CONSTRAINT user_personal_collections_type_check
-    CHECK (collection_type IN ('manual', 'synced'));
+    CHECK (collection_type IN ('manual', 'smart', 'mdblist', 'tmdb', 'trakt', 'synced'));
 
 -- 5. Drop the sub_item_id column.
 ALTER TABLE user_personal_collection_items
