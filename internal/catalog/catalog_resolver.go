@@ -467,6 +467,7 @@ func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context
 	} else if collection.LibraryID > 0 {
 		def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
 	}
+	def = ApplySmartCollectionItemLimit(def)
 	return r.resolveQuerySource(ctx, CatalogRequest{
 		Source:    CatalogSourceQuery,
 		Query:     def,
@@ -492,6 +493,7 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 		if err != nil {
 			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
 		}
+		def = ApplySmartCollectionItemLimit(def)
 		return r.resolveQuerySource(ctx, CatalogRequest{
 			Source:    CatalogSourceQuery,
 			Query:     def,
@@ -1147,6 +1149,7 @@ var catalogQueryRuleFields = map[string]bool{
 	"country":           true,
 	"original_language": true,
 	"content_rating":    true,
+	"added_at":          true,
 	"release_date":      true,
 	"status":            true,
 	"actor":             true,
@@ -1179,6 +1182,7 @@ var catalogPersonalRuleFields = map[string]bool{
 	"country":           true,
 	"original_language": true,
 	"content_rating":    true,
+	"added_at":          true,
 	"release_date":      true,
 	"status":            true,
 	"actor":             true,
@@ -1939,6 +1943,12 @@ func catalogRuleMatchesItem(item *models.MediaItem, rule QueryRule) bool {
 			return false
 		}
 		return compareCatalogNumeric(*item.RatingIMDB, rule.Op, rule.Value)
+	case "added_at":
+		addedAt := item.CreatedAt
+		if item.AddedAt != nil {
+			addedAt = *item.AddedAt
+		}
+		return compareCatalogTime(addedAt, rule.Op, rule.Value)
 	case "release_date":
 		releaseDate := catalogItemReleaseDate(item)
 		if releaseDate == "" {
@@ -2019,9 +2029,22 @@ func compareCatalogStringDate(actual, op string, value any) bool {
 	}
 
 	switch op {
-	case "gt", "gte", "lt", "lte", "between", "is", "is_not":
+	case "gt", "gte", "lt", "lte", "between", "is", "is_not", "in_last":
 	default:
 		return false
+	}
+
+	if op == "in_last" {
+		duration, ok := catalogStringValue(value)
+		if !ok {
+			return false
+		}
+		spec, err := parseDurationSpec(duration)
+		if err != nil {
+			return false
+		}
+		cutoff := catalogDateOnly(spec.cutoffTime(time.Now().UTC()))
+		return !actualTime.Before(cutoff)
 	}
 
 	if op == "between" {
@@ -2062,6 +2085,90 @@ func compareCatalogStringDate(actual, op string, value any) bool {
 	default:
 		return false
 	}
+}
+
+func compareCatalogTime(actual time.Time, op string, value any) bool {
+	if actual.IsZero() {
+		return false
+	}
+
+	switch op {
+	case "gt", "gte", "lt", "lte", "between", "in_last":
+	default:
+		return false
+	}
+
+	if op == "in_last" {
+		duration, ok := catalogStringValue(value)
+		if !ok {
+			return false
+		}
+		spec, err := parseDurationSpec(duration)
+		if err != nil {
+			return false
+		}
+		return !actual.Before(spec.cutoffTime(time.Now()))
+	}
+
+	if op == "between" {
+		values, ok := catalogStringRange(value)
+		if !ok {
+			return false
+		}
+		start, ok := catalogTimeValue(values[0])
+		if !ok {
+			return false
+		}
+		end, ok := catalogTimeValue(values[1])
+		if !ok {
+			return false
+		}
+		return !actual.Before(start) && !actual.After(end)
+	}
+
+	expected, ok := catalogTimeValue(value)
+	if !ok {
+		return false
+	}
+
+	switch op {
+	case "gt":
+		return actual.After(expected)
+	case "gte":
+		return actual.After(expected) || actual.Equal(expected)
+	case "lt":
+		return actual.Before(expected)
+	case "lte":
+		return actual.Before(expected) || actual.Equal(expected)
+	default:
+		return false
+	}
+}
+
+func catalogTimeValue(value any) (time.Time, bool) {
+	switch v := value.(type) {
+	case time.Time:
+		return v, !v.IsZero()
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return time.Time{}, false
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+			return parsed, true
+		}
+		if parsed, err := time.Parse("2006-01-02", trimmed); err == nil {
+			return parsed, true
+		}
+		return time.Time{}, false
+	default:
+		return time.Time{}, false
+	}
+}
+
+func catalogDateOnly(value time.Time) time.Time {
+	utc := value.UTC()
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func catalogFloat(value any) (float64, bool) {

@@ -130,6 +130,7 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
 
   const sort = normalizeQuerySortField(readString(searchParams.get("sort")));
   const rawOrder = readString(searchParams.get("order"));
+  const queryLimit = parsePositiveInt(searchParams.get("query_limit")) ?? undefined;
 
   baseState.query_definition = normalizeQueryDefinition({
     library_ids: baseState.library_id ? [baseState.library_id] : [],
@@ -142,6 +143,7 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
           order: rawOrder === "asc" || rawOrder === "desc" ? rawOrder : undefined,
         }
       : undefined,
+    limit: queryLimit,
   });
 
   return baseState;
@@ -313,6 +315,9 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     if (state.query_definition.sort.order) {
       params.set("order", state.query_definition.sort.order);
     }
+  }
+  if (state.query_definition.limit != null && state.query_definition.limit > 0) {
+    params.set("query_limit", String(state.query_definition.limit));
   }
 
   state.query_definition.groups.forEach((group, groupIndex) => {

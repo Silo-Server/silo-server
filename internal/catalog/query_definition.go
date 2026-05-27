@@ -104,6 +104,23 @@ type QueryDefinition struct {
 	Limit      *int         `json:"limit,omitempty"`
 }
 
+const (
+	DefaultSmartCollectionItemLimit = 100
+	MaxSmartCollectionItemLimit     = 500
+)
+
+func ApplySmartCollectionItemLimit(def QueryDefinition) QueryDefinition {
+	limit := DefaultSmartCollectionItemLimit
+	if def.Limit != nil && *def.Limit > 0 {
+		limit = *def.Limit
+	}
+	if limit > MaxSmartCollectionItemLimit {
+		limit = MaxSmartCollectionItemLimit
+	}
+	def.Limit = &limit
+	return def
+}
+
 type QueryGroup struct {
 	Match string      `json:"match"`
 	Rules []QueryRule `json:"rules"`

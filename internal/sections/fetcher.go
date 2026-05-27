@@ -2153,7 +2153,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 
 	effectiveLibraryIDs := effectiveFetchLibraryIDs(libraryIDs, filter)
 
-	fromClause := "episodes e JOIN media_items si ON e.series_id = si.content_id"
+	fromClause := "episodes e JOIN media_items si ON e.series_id = si.content_id LEFT JOIN seasons s ON s.content_id = e.season_id"
 	if libraryID != nil || effectiveLibraryIDs != nil {
 		fromClause += " JOIN media_item_libraries mil ON si.content_id = mil.content_id"
 	}
@@ -2187,16 +2187,16 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			e.overview,
 			e.runtime,
 			e.rating_imdb,
-			e.still_path,
-			e.still_thumbhash,
+			COALESCE(NULLIF(s.poster_path, ''), NULLIF(si.poster_path, ''), NULLIF(e.still_path, ''), '') AS poster_path,
+			COALESCE(NULLIF(s.poster_thumbhash, ''), NULLIF(si.poster_thumbhash, ''), NULLIF(e.still_thumbhash, ''), '') AS poster_thumbhash,
 			e.season_number,
 			e.episode_number,
 			e.air_date,
 			si.title,
 			si.genres,
 			si.content_rating,
-			si.backdrop_path,
-			si.backdrop_thumbhash,
+			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
+			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
 			si.status
 		FROM %s

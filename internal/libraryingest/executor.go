@@ -90,6 +90,11 @@ type Executor struct {
 	realtime        *notifications.Hub
 	now             func() time.Time
 
+	// tvDrainSettleWindow overrides scopedTVDrainSettleWindow when > 0. Kept
+	// injectable so tests can exercise the settle-window shutdown path without
+	// waiting the full production interval.
+	tvDrainSettleWindow time.Duration
+
 	mu      sync.Mutex
 	running []runningClaim
 }
@@ -160,7 +165,8 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		CurrentScope: claim.path,
 	})
 	runStartedAt := time.Now().UTC()
-	drainerCtx, stopDrainers := context.WithCancel(scanCtx)
+	drainerStopCtx, stopDrainers := context.WithCancel(context.Background())
+	defer stopDrainers()
 	drainerErrCh := make(chan error, 1)
 	var drainerWG sync.WaitGroup
 	if len(matchScopes) > 0 {
@@ -175,16 +181,23 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 				ticker := time.NewTicker(scopedDrainInterval)
 				defer ticker.Stop()
 				for {
-					if drainerCtx.Err() != nil {
+					select {
+					case <-scanCtx.Done():
 						return
+					case <-drainerStopCtx.Done():
+						return
+					default:
 					}
 					started := time.Now()
-					processed, err := e.matcher.ProcessBatchByFolderAndPathPrefix(drainerCtx, folder.ID, scopePath, runStartedAt)
+					processed, err := e.matcher.ProcessBatchByFolderAndPathPrefix(scanCtx, folder.ID, scopePath, runStartedAt)
 					concurrentMatchDuration.Add(time.Since(started).Nanoseconds())
 					if processed > 0 {
 						concurrentMatched.Add(int64(processed))
 					}
 					if err != nil {
+						if scanCtx.Err() != nil {
+							return
+						}
 						select {
 						case drainerErrCh <- fmt.Errorf("concurrent match scope %q: %w", scopePath, err):
 						default:
@@ -193,7 +206,9 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 						return
 					}
 					select {
-					case <-drainerCtx.Done():
+					case <-scanCtx.Done():
+						return
+					case <-drainerStopCtx.Done():
 						return
 					case <-ticker.C:
 					}
@@ -219,6 +234,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	scanStarted := time.Now()
 	scanMatchScopes, scanResult, err := e.scan(scanProgressCtx, folder, mode, claim.path)
 	if err != nil {
+		cancel()
 		stopDrainers()
 		drainerWG.Wait()
 		if len(matchScopes) > 0 {
@@ -238,12 +254,16 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	}
 	matchScopes = scanMatchScopes
 	if shouldWaitForTVQueueSettle(folder, scanResult) {
+		settleWindow := e.tvDrainSettleWindow
+		if settleWindow <= 0 {
+			settleWindow = scopedTVDrainSettleWindow
+		}
 		slog.Info("library ingest: waiting for tv queue settle window",
 			"folder_id", folder.ID,
 			"mode", mode,
-			"wait", scopedTVDrainSettleWindow,
+			"wait", settleWindow,
 		)
-		timer := time.NewTimer(scopedTVDrainSettleWindow)
+		timer := time.NewTimer(settleWindow)
 		select {
 		case <-scanCtx.Done():
 			timer.Stop()

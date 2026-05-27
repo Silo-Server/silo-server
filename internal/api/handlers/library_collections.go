@@ -1116,7 +1116,14 @@ func (h *LibraryCollectionHandler) HandleCreateAdminCollection(w http.ResponseWr
 		req.CollectionType = "manual"
 	}
 	queryDefinition := defaultJSON(req.QueryDefinition)
-	if req.CollectionType == "smart" || len(req.QueryDefinition) > 0 {
+	if req.CollectionType == "smart" {
+		var err error
+		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
+			return
+		}
+	} else if len(req.QueryDefinition) > 0 {
 		var err error
 		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false)
 		if err != nil {
@@ -1202,7 +1209,11 @@ func (h *LibraryCollectionHandler) HandleUpdateAdminCollection(w http.ResponseWr
 	queryDefinition := req.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
 		var err error
-		queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
+		if req.CollectionType == nil || *req.CollectionType == "smart" {
+			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false)
+		} else {
+			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
 			return
@@ -3116,6 +3127,7 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, coll
 	if err := def.ValidateWithOptions(false, false); err != nil {
 		return nil, smartCollectionQueryError{fmt.Errorf("validating smart collection query definition: %w", err)}
 	}
+	def = catalog.ApplySmartCollectionItemLimit(def)
 
 	switch {
 	case len(collection.LibraryIDs) > 0:

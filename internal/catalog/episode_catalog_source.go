@@ -12,6 +12,7 @@ const episodeCatalogSelectBody = `(
 		'episode'::text AS type,
 		COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text) AS title,
 		COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text) AS sort_title,
+		LOWER(COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) AS sort_key,
 		COALESCE(NULLIF(BTRIM(e.default_metadata_language), ''), COALESCE(si.default_metadata_language, '')) AS default_metadata_language,
 		''::text AS original_title,
 		COALESCE(si.year, EXTRACT(YEAR FROM e.air_date)::integer, 0) AS year,
@@ -27,8 +28,8 @@ const episodeCatalogSelectBody = `(
 		COALESCE(e.imdb_id, '') AS imdb_id,
 		COALESCE(e.tmdb_id, '') AS tmdb_id,
 		COALESCE(e.tvdb_id, '') AS tvdb_id,
-		COALESCE(e.still_path, '') AS poster_path,
-		COALESCE(e.still_thumbhash, '') AS poster_thumbhash,
+		COALESCE(NULLIF(s.poster_path, ''), NULLIF(si.poster_path, ''), NULLIF(e.still_path, ''), '') AS poster_path,
+		COALESCE(NULLIF(s.poster_thumbhash, ''), NULLIF(si.poster_thumbhash, ''), NULLIF(e.still_thumbhash, ''), '') AS poster_thumbhash,
 		COALESCE(si.backdrop_path, '') AS backdrop_path,
 		COALESCE(si.backdrop_thumbhash, '') AS backdrop_thumbhash,
 		COALESCE(si.logo_path, '') AS logo_path,
@@ -45,6 +46,7 @@ const episodeCatalogSelectBody = `(
 		NULL::text AS last_air_date,
 		e.air_date AS last_air_date_at,
 		si.air_time,
+		COALESCE(si.show_status, '') AS show_status,
 		si.matched_at,
 		si.last_refreshed,
 		si.refresh_failures,
@@ -56,6 +58,7 @@ const episodeCatalogSelectBody = `(
 		e.updated_at
 	FROM episodes e
 	JOIN media_items si ON si.content_id = e.series_id
+	LEFT JOIN seasons s ON s.content_id = e.season_id
 	WHERE %s
 ) mi`
 

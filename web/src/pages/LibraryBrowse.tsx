@@ -48,10 +48,6 @@ function getLibrarySortRelevanceScope(
   return "all";
 }
 
-function formatItemCount(count: number): string {
-  return `${count.toLocaleString()} item${count === 1 ? "" : "s"}`;
-}
-
 export default function LibraryBrowse({
   libraryId,
   libraryType,
@@ -116,13 +112,12 @@ export default function LibraryBrowse({
 
   const catalogQuery = useCatalogWindow(state, {
     limit,
-    includeTotal: true,
+    includeTotal: false,
     visibleRange,
   });
   const totalItems = catalogQuery.data?.totalItems ?? 0;
   const pages = catalogQuery.data?.pages ?? new Map();
   const isLoading = catalogQuery.isLoading;
-  const itemCountLabel = formatItemCount(totalItems);
 
   return (
     <div className="space-y-5 py-2 sm:space-y-6">
@@ -156,8 +151,6 @@ export default function LibraryBrowse({
         allowPersonalizedFilters
         allowPersonalizedSorts
         sortRelevanceScope={sortRelevanceScope}
-        resultCountLabel={itemCountLabel}
-        resultCountLoading={isLoading}
         libraryType={libraryType}
       />
       <ItemGrid

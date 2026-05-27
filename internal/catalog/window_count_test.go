@@ -12,17 +12,18 @@ import (
 // for use in arg-count assertions across countSQL tests.
 var placeholderRE = regexp.MustCompile(`\$(\d+)`)
 
-// TestQueryExecutor_PreviewPage_UsesWindowCount asserts that buildPreviewPageSQL
-// emits a single-pass paged SELECT that includes COUNT(*) OVER () so PreviewPage
-// no longer needs a separate count query when includeTotal is true.
-func TestQueryExecutor_PreviewPage_UsesWindowCount(t *testing.T) {
+// TestQueryExecutor_PreviewPage_ExactTotalOmitsWindowCount asserts that
+// buildPreviewPageSQL keeps the data SELECT free of COUNT(*) OVER (). PreviewPage
+// runs the exact count separately so large ordered catalogs can use top-N/index
+// plans for the page fetch.
+func TestQueryExecutor_PreviewPage_ExactTotalOmitsWindowCount(t *testing.T) {
 	exec := &QueryExecutor{Scope: "movie", BaseRelationSQL: "media_items mi"}
 	sql, _, err := exec.buildPreviewPageSQL(QueryDefinition{}, AccessFilter{}, 20, 0, true /* includeTotal */)
 	if err != nil {
 		t.Fatalf("buildPreviewPageSQL error: %v", err)
 	}
-	if !strings.Contains(sql, "COUNT(*) OVER ()") {
-		t.Fatalf("expected COUNT(*) OVER () for single-pass count; got:\n%s", sql)
+	if strings.Contains(sql, "COUNT(*) OVER ()") {
+		t.Fatalf("PreviewPage exact totals must omit COUNT(*) OVER (); got:\n%s", sql)
 	}
 }
 
@@ -74,16 +75,11 @@ func TestBrowseRepository_browse_SkipTotal_OmitsWindowCount(t *testing.T) {
 	}
 }
 
-// TestQueryExecutor_PreviewPage_CountSQL_BindsSortJoinArgs pins that
-// previewPagePlan.countSQL binds the sort-plan join args (sortArgs) — not
-// just cteArgs+args. fromClausePaged embeds sort-plan join clauses
-// (added_at, progress, date_viewed, plays, resolution, bitrate all need
-// LIBRARY-id-bound joins), so omitting sortArgs would leave bound
-// placeholders inside the FROM clause unfilled and Postgres would error
-// out with "missing argument" at the count fallback path.
-//
-// Regression guard for the post-perf-overhaul code review (macroscope High).
-func TestQueryExecutor_PreviewPage_CountSQL_BindsSortJoinArgs(t *testing.T) {
+// TestQueryExecutor_PreviewPage_CountSQL_OmitsSortOnlyJoins pins that exact
+// totals do not carry ORDER BY-only joins. The page query still needs those
+// joins for sorts such as added_at, but the count query only needs the base
+// relation plus filter joins.
+func TestQueryExecutor_PreviewPage_CountSQL_OmitsSortOnlyJoins(t *testing.T) {
 	exec := &QueryExecutor{Scope: "movie", BaseRelationSQL: "media_items mi"}
 	plan, err := exec.buildPreviewPagePlan(
 		QueryDefinition{
@@ -102,15 +98,15 @@ func TestQueryExecutor_PreviewPage_CountSQL_BindsSortJoinArgs(t *testing.T) {
 
 	sql, args := plan.countSQL()
 
-	// The sort-plan LEFT JOIN must be embedded in the count SQL — that's the
-	// reason sortArgs binding matters at all.
-	if !strings.Contains(sql, "sort_added") {
-		t.Fatalf("countSQL must include addedAtSortPlan's LEFT JOIN; got:\n%s", sql)
+	if strings.Contains(sql, "sort_added") {
+		t.Fatalf("countSQL must omit addedAtSortPlan's LEFT JOIN; got:\n%s", sql)
+	}
+	if len(args) != 1 {
+		t.Fatalf("countSQL must omit sortArgs and bind only the library-scope arg; got %v", args)
 	}
 
-	// Verify args length covers every $N placeholder in the SQL. If we
-	// dropped sortArgs, the highest $N would exceed len(args) and Postgres
-	// would fail with "missing argument".
+	// Verify args still cover every $N placeholder after dropping sort-only
+	// joins and sortArgs.
 	maxIdx := 0
 	for _, m := range placeholderRE.FindAllStringSubmatch(sql, -1) {
 		idx, _ := strconv.Atoi(m[1])
@@ -122,23 +118,20 @@ func TestQueryExecutor_PreviewPage_CountSQL_BindsSortJoinArgs(t *testing.T) {
 		t.Fatalf("expected at least one $N placeholder in countSQL; got:\n%s", sql)
 	}
 	if len(args) < maxIdx {
-		t.Fatalf("countSQL references $%d but only %d args bound (sortArgs likely dropped); sql:\n%s\nargs: %v",
+		t.Fatalf("countSQL references $%d but only %d args bound; sql:\n%s\nargs: %v",
 			maxIdx, len(args), sql, args)
 	}
 }
 
 // TestQueryExecutor_PreviewPage_CountSQL_OmitsLimitOffsetOrderBy pins the
-// empty-page fallback SQL shape on previewPagePlan. When pagedSQL(true)
-// returns an empty page past offset 0, the executor invokes countSQL() to
-// recover the real total — COUNT(*) OVER () would otherwise emit no rows
-// and leave the caller seeing total=0 even when broader matches exist.
+// exact-total SQL shape on previewPagePlan. PreviewPage invokes countSQL()
+// separately instead of making the data SELECT calculate COUNT(*) OVER ().
 //
 // The countSQL must:
 //   - omit LIMIT/OFFSET (we want the unpaginated total)
 //   - omit ORDER BY (irrelevant for a count, and may reference unbound args)
 //   - wrap the inner FROM/WHERE in `SELECT COUNT(*) FROM (SELECT 1 ...) sub`
-//     so any GROUP BY in the inner query counts groups (not rows), matching
-//     what COUNT(*) OVER () would have computed.
+//     so any GROUP BY in the inner query counts groups (not rows).
 func TestQueryExecutor_PreviewPage_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T) {
 	exec := &QueryExecutor{Scope: "movie", BaseRelationSQL: "media_items mi"}
 	plan, err := exec.buildPreviewPagePlan(QueryDefinition{}, AccessFilter{}, 20, 0)
