@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // ImagesHandler serves Jellyfin-compatible image routes.
@@ -18,14 +21,28 @@ type ImagesHandler struct {
 	images       *ImageCache
 	personRepo   *catalog.PersonRepository
 	detailSvc    *catalog.DetailService
-	itemRepo     *catalog.ItemRepository
-	seasonRepo   *catalog.SeasonRepository
-	episodeRepo  *catalog.EpisodeRepository
+	itemRepo     imageItemRepository
+	seasonRepo   imageSeasonRepository
+	episodeRepo  imageEpisodeRepository
 	accessFilter AccessFilterResolver
+	imageTags    *imageTagSigner
+}
+
+type imageItemRepository interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
+	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+}
+
+type imageSeasonRepository interface {
+	GetByID(ctx context.Context, contentID string) (*models.Season, error)
+}
+
+type imageEpisodeRepository interface {
+	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 }
 
 // NewImagesHandler creates an image proxy handler.
-func NewImagesHandler(content ContentService, codec *ResourceIDCodec, httpClient *http.Client, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver) *ImagesHandler {
+func NewImagesHandler(content ContentService, codec *ResourceIDCodec, httpClient *http.Client, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, imageTagSecret string) *ImagesHandler {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -41,6 +58,7 @@ func NewImagesHandler(content ContentService, codec *ResourceIDCodec, httpClient
 		seasonRepo:   seasonRepo,
 		episodeRepo:  episodeRepo,
 		accessFilter: accessFilter,
+		imageTags:    newImageTagSigner(imageTagSecret),
 	}
 }
 
@@ -53,6 +71,14 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	imageSize := compatRequestImageSize(r, imageType)
 	if imageURL, ok := h.images.LookupSized(routeID, imageType, r.URL.Query().Get("tag"), imageSize); ok {
 		h.proxyImageURL(w, r, imageURL)
+		return
+	}
+	if imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, r); ok || err != nil {
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		h.proxyImageURL(w, r, imageURL.URL)
 		return
 	}
 
@@ -200,6 +226,98 @@ func (h *ImagesHandler) resolveItemImageURLFromRepos(ctx context.Context, sessio
 	}
 
 	return catalog.ResolvedImageURL{}, false, nil
+}
+
+func (h *ImagesHandler) resolveItemImageURLFromTag(ctx context.Context, routeID, imageType string, r *http.Request) (catalog.ResolvedImageURL, bool, error) {
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	if tag == "" {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	contentID, err := decodeContentID(h.codec, routeID)
+	if err != nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	return h.resolveItemImageURLFromReposWithoutSession(ctx, contentID, imageType, compatRequestImageSize(r, imageType), tag)
+}
+
+func (h *ImagesHandler) resolveItemImageURLFromReposWithoutSession(ctx context.Context, contentID, imageType, imageSize, tag string) (catalog.ResolvedImageURL, bool, error) {
+	if h.itemRepo != nil {
+		if item, err := h.itemRepo.GetByID(ctx, contentID); err == nil {
+			if !h.signedImageTagMatches(contentID, imageType, tag, item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath, item.UpdatedAt) {
+				return catalog.ResolvedImageURL{}, false, nil
+			}
+			if imageURL := h.imageURLForItem(ctx, item.PosterPath, "poster", item.BackdropPath, item.LogoPath, imageType, imageSize); imageURL.URL != "" {
+				return imageURL, true, nil
+			}
+		} else if !errors.Is(err, catalog.ErrItemNotFound) {
+			return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+		}
+	}
+
+	if h.episodeRepo != nil && h.itemRepo != nil {
+		if episode, err := h.episodeRepo.GetByID(ctx, contentID); err == nil {
+			series, seriesErr := h.itemRepo.GetByID(ctx, episode.SeriesID)
+			if seriesErr != nil {
+				if !errors.Is(seriesErr, catalog.ErrItemNotFound) {
+					return catalog.ResolvedImageURL{}, false, wrapCatalogError(seriesErr)
+				}
+			} else {
+				if !h.signedImageTagMatches(contentID, imageType, tag, episode.StillPath, episode.StillThumbhash, series.BackdropPath, series.BackdropThumbhash, series.LogoPath, episode.UpdatedAt) {
+					return catalog.ResolvedImageURL{}, false, nil
+				}
+				if imageURL := h.imageURLForItem(ctx, episode.StillPath, "still", series.BackdropPath, series.LogoPath, imageType, imageSize); imageURL.URL != "" {
+					return imageURL, true, nil
+				}
+			}
+		} else if !errors.Is(err, catalog.ErrEpisodeNotFound) {
+			return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+		}
+	}
+
+	if h.seasonRepo != nil && h.itemRepo != nil {
+		if season, err := h.seasonRepo.GetByID(ctx, contentID); err == nil {
+			series, seriesErr := h.itemRepo.GetByID(ctx, season.SeriesID)
+			if seriesErr != nil {
+				if errors.Is(seriesErr, catalog.ErrItemNotFound) {
+					return catalog.ResolvedImageURL{}, false, nil
+				}
+				return catalog.ResolvedImageURL{}, false, wrapCatalogError(seriesErr)
+			}
+			if !h.signedImageTagMatches(contentID, imageType, tag, season.PosterPath, season.PosterThumbhash, series.BackdropPath, series.BackdropThumbhash, series.LogoPath, season.UpdatedAt) {
+				return catalog.ResolvedImageURL{}, false, nil
+			}
+			if imageURL := h.imageURLForItem(ctx, season.PosterPath, "poster", series.BackdropPath, series.LogoPath, imageType, imageSize); imageURL.URL != "" {
+				return imageURL, true, nil
+			}
+		} else if !errors.Is(err, catalog.ErrSeasonNotFound) {
+			return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+		}
+	}
+
+	return catalog.ResolvedImageURL{}, false, nil
+}
+
+func (h *ImagesHandler) signedImageTagMatches(contentID, imageType, tag, primaryPath, primaryThumbhash, backdropPath, backdropThumbhash, logoPath string, updatedAt time.Time) bool {
+	var path, thumbhash, tagImageType string
+	switch imageType {
+	case "Primary":
+		path = primaryPath
+		thumbhash = primaryThumbhash
+		tagImageType = "Primary"
+	case "Backdrop", "Thumb":
+		path = backdropPath
+		thumbhash = backdropThumbhash
+		tagImageType = "Backdrop"
+	case "Logo":
+		path = logoPath
+		tagImageType = "Logo"
+	default:
+		return false
+	}
+	if path == "" {
+		return false
+	}
+	return h.imageTags.Equal(imageTagSeed(contentID, tagImageType, compatCardImageSize, path, thumbhash, updatedAt), path, tag)
 }
 
 func (h *ImagesHandler) imageURLForItem(ctx context.Context, primaryPath, primaryImageType, backdropPath, logoPath, imageType, size string) catalog.ResolvedImageURL {

@@ -23,16 +23,19 @@ var allDetailFields = map[string]bool{
 }
 
 type mapper struct {
-	codec    *ResourceIDCodec
-	serverID string
+	codec          *ResourceIDCodec
+	serverID       string
+	imageTagSigner *imageTagSigner
 }
 
 func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
 	serverID := ""
+	imageTagSecret := ""
 	if cfg != nil {
 		serverID = cfg.JellyfinCompat.ServerID
+		imageTagSecret = cfg.Auth.JWTSecret
 	}
-	return &mapper{codec: codec, serverID: serverID}
+	return &mapper{codec: codec, serverID: serverID, imageTagSigner: newImageTagSigner(imageTagSecret)}
 }
 
 func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
@@ -102,13 +105,13 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.ChildCount = *item.SeasonCount
 		dto.RecursiveItemCount = *item.SeasonCount
 	}
-	if tags := imageTagsWithSeed(
+	if tags := imageTagsWithSeed(m.imageTagSigner,
 		imageTagSeed(item.ContentID, "Primary", compatCardImageSize, firstNonEmpty(item.PosterPath, item.StillPath), item.PosterThumbhash, item.UpdatedAt),
 		item.PosterURL,
 	); tags != nil {
 		dto.ImageTags = tags
 	}
-	if tags := backdropTagsWithSeed(
+	if tags := backdropTagsWithSeed(m.imageTagSigner,
 		imageTagSeed(item.ContentID, "Backdrop", compatCardImageSize, item.BackdropPath, item.BackdropThumbhash, item.UpdatedAt),
 		item.BackdropURL,
 	); tags != nil {
@@ -397,7 +400,7 @@ func (m *mapper) seasonFromUpstream(season upstreamSeason, seriesID string, isFa
 		RecursiveItemCount: season.EpisodeCount,
 	}
 	dto.IndexNumber = &season.SeasonNumber
-	if tags := imageTagsWithSeed(
+	if tags := imageTagsWithSeed(m.imageTagSigner,
 		imageTagSeed(season.ContentID, "Primary", compatCardImageSize, season.PosterPath, season.PosterThumbhash, season.UpdatedAt),
 		season.PosterURL,
 	); tags != nil {
@@ -430,7 +433,7 @@ func (m *mapper) episodeFromUpstream(ep upstreamEpisode, isFavorite bool, progre
 		dto.SeasonID = m.codec.EncodeStringID(EncodedIDSeason, ep.SeasonID)
 		dto.ParentID = m.codec.EncodeStringID(EncodedIDSeason, ep.SeasonID)
 	}
-	if tags := imageTagsWithSeed(
+	if tags := imageTagsWithSeed(m.imageTagSigner,
 		imageTagSeed(ep.ContentID, "Primary", compatCardImageSize, ep.StillPath, ep.StillThumbhash, ep.UpdatedAt),
 		ep.StillURL,
 	); tags != nil {
@@ -638,22 +641,22 @@ func resumePositionTicks(position, duration float64, played bool) int64 {
 	return secondsToTicks(position)
 }
 
-func imageTagsWithSeed(seed, imageURL string) map[string]string {
+func imageTagsWithSeed(signer *imageTagSigner, seed, imageURL string) map[string]string {
 	if imageURL == "" {
 		return nil
 	}
-	return map[string]string{"Primary": imageTagValue(seed, imageURL)}
+	return map[string]string{"Primary": signer.Tag(seed, imageURL)}
 }
 
 func backdropTags(imageURL string) []string {
-	return backdropTagsWithSeed("", imageURL)
+	return backdropTagsWithSeed(nil, "", imageURL)
 }
 
-func backdropTagsWithSeed(seed, imageURL string) []string {
+func backdropTagsWithSeed(signer *imageTagSigner, seed, imageURL string) []string {
 	if imageURL == "" {
 		return nil
 	}
-	return []string{imageTagValue(seed, imageURL)}
+	return []string{signer.Tag(seed, imageURL)}
 }
 
 func imageTagSeed(routeID, imageType, size, rawPath, thumbhash string, updatedAt time.Time) string {
@@ -673,13 +676,6 @@ func imageTagSeed(routeID, imageType, size, rawPath, thumbhash string, updatedAt
 		parts = append(parts, updatedAt.UTC().Format(time.RFC3339Nano))
 	}
 	return strings.Join(parts, "\x00")
-}
-
-func imageTagValue(seed, fallbackURL string) string {
-	if seed != "" {
-		return tagValue(seed)
-	}
-	return tagValue(fallbackURL)
 }
 
 func tagValue(raw string) string {

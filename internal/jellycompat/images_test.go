@@ -1,11 +1,19 @@
 package jellycompat
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestProxyImageDefaultsToRevalidatingCachePolicy(t *testing.T) {
@@ -85,4 +93,74 @@ func TestProxyImageURLForwardsConditionalHeaders(t *testing.T) {
 	if rec.Code != http.StatusNotModified {
 		t.Fatalf("status = %d, want 304", rec.Code)
 	}
+}
+
+func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      upstream.URL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:      codec,
+		httpClient: upstream.Client(),
+		itemRepo:   fakeImageItemRepo{item: item},
+		imageTags:  newImageTagSigner(cfg.Auth.JWTSecret),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+tag, nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "image-bytes" {
+		t.Fatalf("body = %q, want image bytes", got)
+	}
+}
+
+type fakeImageItemRepo struct {
+	item *models.MediaItem
+}
+
+func (r fakeImageItemRepo) GetByID(_ context.Context, contentID string) (*models.MediaItem, error) {
+	if r.item != nil && r.item.ContentID == contentID {
+		return r.item, nil
+	}
+	return nil, catalog.ErrItemNotFound
+}
+
+func (r fakeImageItemRepo) EnsureAccessible(context.Context, string, catalog.AccessFilter) error {
+	return nil
+}
+
+func withImageRouteParams(r *http.Request, routeID, imageType string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	routeCtx.URLParams.Add("imageType", imageType)
+	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
 }
