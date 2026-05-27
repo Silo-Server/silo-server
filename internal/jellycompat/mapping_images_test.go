@@ -78,3 +78,31 @@ func TestItemImageTagsUseConfiguredSecret(t *testing.T) {
 		t.Fatalf("signed image tag did not change with configured secret: %q", first.ImageTags["Primary"])
 	}
 }
+
+func TestEpisodeListImageTagsUseStillThumbhash(t *testing.T) {
+	secret := "image-secret"
+	updatedAt := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
+	item := upstreamListItem{
+		ContentID:       "episode-1",
+		Type:            "episode",
+		Title:           "Episode",
+		PosterURL:       "https://cdn.example.test/still.jpg?sig=one",
+		PosterPath:      "metadb://still/episode-1",
+		PosterThumbhash: "poster-thumbhash",
+		StillPath:       "metadb://still/episode-1",
+		StillThumbhash:  "still-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+
+	dto := newMapper(NewResourceIDCodec(), &config.Config{
+		Auth: config.AuthConfig{JWTSecret: secret},
+	}).itemFromList(item, false, nil, nil)
+	expected := newImageTagSigner(secret).Tag(
+		imageTagSeed(item.ContentID, "Primary", compatCardImageSize, item.StillPath, item.StillThumbhash, updatedAt),
+		item.PosterURL,
+	)
+
+	if dto.ImageTags["Primary"] != expected {
+		t.Fatalf("primary tag = %q, want still-thumbhash seed %q", dto.ImageTags["Primary"], expected)
+	}
+}

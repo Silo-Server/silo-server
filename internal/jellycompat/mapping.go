@@ -105,8 +105,9 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.ChildCount = *item.SeasonCount
 		dto.RecursiveItemCount = *item.SeasonCount
 	}
+	primaryPath, primaryThumbhash := listItemPrimaryImageSeedParts(item)
 	if tags := imageTagsWithSeed(m.imageTagSigner,
-		imageTagSeed(item.ContentID, "Primary", compatCardImageSize, firstNonEmpty(item.PosterPath, item.StillPath), item.PosterThumbhash, item.UpdatedAt),
+		imageTagSeed(item.ContentID, "Primary", compatCardImageSize, primaryPath, primaryThumbhash, item.UpdatedAt),
 		item.PosterURL,
 	); tags != nil {
 		dto.ImageTags = tags
@@ -657,6 +658,13 @@ func backdropTagsWithSeed(signer *imageTagSigner, seed, imageURL string) []strin
 		return nil
 	}
 	return []string{signer.Tag(seed, imageURL)}
+}
+
+func listItemPrimaryImageSeedParts(item upstreamListItem) (string, string) {
+	if item.Type == "episode" && item.StillPath != "" {
+		return item.StillPath, item.StillThumbhash
+	}
+	return firstNonEmpty(item.PosterPath, item.StillPath), item.PosterThumbhash
 }
 
 func imageTagSeed(routeID, imageType, size, rawPath, thumbhash string, updatedAt time.Time) string {

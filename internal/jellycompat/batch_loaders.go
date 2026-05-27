@@ -204,6 +204,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			e.rating_tmdb,
 			e.air_date,
 			e.still_path,
+			COALESCE(e.still_thumbhash, ''),
+			e.updated_at,
 			e.season_number,
 			e.episode_number,
 			si.content_id,
@@ -212,6 +214,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			si.content_rating,
 			si.poster_path,
 			si.backdrop_path,
+			COALESCE(si.backdrop_thumbhash, ''),
 			si.logo_path,
 			si.status
 		FROM %s
@@ -236,6 +239,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			ratingTMDB       *float64
 			airDate          *time.Time
 			stillPath        string
+			stillThumbhash   string
+			updatedAt        time.Time
 			seasonNumber     int
 			episodeNumber    int
 			seriesID         string
@@ -244,6 +249,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			contentRating    string
 			seriesPosterPath string
 			seriesBackdrop   string
+			seriesBackdropTH string
 			seriesLogoPath   string
 			status           string
 		)
@@ -256,6 +262,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&ratingTMDB,
 			&airDate,
 			&stillPath,
+			&stillThumbhash,
+			&updatedAt,
 			&seasonNumber,
 			&episodeNumber,
 			&seriesID,
@@ -264,6 +272,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&contentRating,
 			&seriesPosterPath,
 			&seriesBackdrop,
+			&seriesBackdropTH,
 			&seriesLogoPath,
 			&status,
 		); err != nil {
@@ -271,28 +280,31 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 		}
 
 		listItem := upstreamListItem{
-			ContentID:     contentID,
-			Type:          "episode",
-			Title:         title,
-			Genres:        genres,
-			ContentRating: contentRating,
-			Status:        status,
-			RatingIMDB:    ratingIMDB,
-			RatingTMDB:    ratingTMDB,
-			Overview:      overview,
-			PosterURL:     h.presignCompatImagePath(ctx, stillPath, "still"),
-			BackdropURL:   h.presignCompatImagePath(ctx, seriesBackdrop, "backdrop"),
-			LogoURL:       h.presignCompatImagePath(ctx, seriesLogoPath, "logo"),
-			StillURL:      h.presignCompatImagePath(ctx, stillPath, "still"),
-			PosterPath:    stillPath,
-			BackdropPath:  seriesBackdrop,
-			LogoPath:      seriesLogoPath,
-			StillPath:     stillPath,
-			SeriesID:      seriesID,
-			SeriesTitle:   seriesTitle,
-			SeasonNumber:  intPtr(seasonNumber),
-			EpisodeNumber: intPtr(episodeNumber),
-			Runtime:       runtime,
+			ContentID:         contentID,
+			Type:              "episode",
+			Title:             title,
+			Genres:            genres,
+			ContentRating:     contentRating,
+			Status:            status,
+			RatingIMDB:        ratingIMDB,
+			RatingTMDB:        ratingTMDB,
+			Overview:          overview,
+			PosterURL:         h.presignCompatImagePath(ctx, stillPath, "still"),
+			BackdropURL:       h.presignCompatImagePath(ctx, seriesBackdrop, "backdrop"),
+			LogoURL:           h.presignCompatImagePath(ctx, seriesLogoPath, "logo"),
+			StillURL:          h.presignCompatImagePath(ctx, stillPath, "still"),
+			PosterPath:        stillPath,
+			BackdropPath:      seriesBackdrop,
+			BackdropThumbhash: seriesBackdropTH,
+			LogoPath:          seriesLogoPath,
+			StillPath:         stillPath,
+			StillThumbhash:    stillThumbhash,
+			UpdatedAt:         updatedAt,
+			SeriesID:          seriesID,
+			SeriesTitle:       seriesTitle,
+			SeasonNumber:      intPtr(seasonNumber),
+			EpisodeNumber:     intPtr(episodeNumber),
+			Runtime:           runtime,
 		}
 		if airDate != nil {
 			listItem.AirDate = airDate.Format(time.DateOnly)
@@ -385,6 +397,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			BackdropThumbhash: series.BackdropThumbhash,
 			LogoPath:          series.LogoPath,
 			StillPath:         episode.StillPath,
+			StillThumbhash:    episode.StillThumbhash,
 			UpdatedAt:         episode.UpdatedAt,
 			SeriesID:          episode.SeriesID,
 			SeriesTitle:       series.Title,

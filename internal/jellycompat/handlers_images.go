@@ -69,16 +69,20 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	routeID := chiURLParam(r, "id")
 	imageType := chiURLParam(r, "imageType")
 	imageSize := compatRequestImageSize(r, imageType)
-	if imageURL, ok := h.images.LookupSized(routeID, imageType, r.URL.Query().Get("tag"), imageSize); ok {
-		h.proxyImageURL(w, r, imageURL)
-		return
-	}
-	if imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, r); ok || err != nil {
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	if tag != "" {
+		imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, imageSize, tag)
 		if err != nil {
 			writeCompatUpstreamError(w, err)
 			return
 		}
-		h.proxyImageURL(w, r, imageURL.URL)
+		if ok {
+			h.images.RememberSizedUntil(routeID, imageType, imageURL.URL, imageSize, imageURL.ExpiresAt)
+			h.proxyImageURL(w, r, imageURL.URL)
+			return
+		}
+	} else if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
+		h.proxyImageURL(w, r, imageURL)
 		return
 	}
 
@@ -228,16 +232,15 @@ func (h *ImagesHandler) resolveItemImageURLFromRepos(ctx context.Context, sessio
 	return catalog.ResolvedImageURL{}, false, nil
 }
 
-func (h *ImagesHandler) resolveItemImageURLFromTag(ctx context.Context, routeID, imageType string, r *http.Request) (catalog.ResolvedImageURL, bool, error) {
-	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
-	if tag == "" {
+func (h *ImagesHandler) resolveItemImageURLFromTag(ctx context.Context, routeID, imageType, imageSize, tag string) (catalog.ResolvedImageURL, bool, error) {
+	if h.imageTags == nil || tag == "" {
 		return catalog.ResolvedImageURL{}, false, nil
 	}
 	contentID, err := decodeContentID(h.codec, routeID)
 	if err != nil {
 		return catalog.ResolvedImageURL{}, false, nil
 	}
-	return h.resolveItemImageURLFromReposWithoutSession(ctx, contentID, imageType, compatRequestImageSize(r, imageType), tag)
+	return h.resolveItemImageURLFromReposWithoutSession(ctx, contentID, imageType, imageSize, tag)
 }
 
 func (h *ImagesHandler) resolveItemImageURLFromReposWithoutSession(ctx context.Context, contentID, imageType, imageSize, tag string) (catalog.ResolvedImageURL, bool, error) {

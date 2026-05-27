@@ -125,6 +125,7 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	h := &ImagesHandler{
 		codec:      codec,
 		httpClient: upstream.Client(),
+		images:     NewImageCache(time.Hour, func() time.Time { return updatedAt }),
 		itemRepo:   fakeImageItemRepo{item: item},
 		imageTags:  newImageTagSigner(cfg.Auth.JWTSecret),
 	}
@@ -140,6 +141,100 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != "image-bytes" {
 		t.Fatalf("body = %q, want image bytes", got)
+	}
+	if cached, ok := h.images.LookupSized(routeID, "Primary", "", compatRequestImageSize(req, "Primary")); !ok || cached == "" {
+		t.Fatal("signed-tag image URL was not cached after resolution")
+	}
+}
+
+func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      "https://cdn.example.test/poster.jpg",
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	tag := newMapper(codec, &config.Config{}).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:      codec,
+		httpClient: http.DefaultClient,
+		itemRepo:   fakeImageItemRepo{item: item},
+		imageTags:  newImageTagSigner(""),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+tag, nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s; want 401", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte("stale-image"))
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      upstream.URL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cache := NewImageCache(time.Hour, func() time.Time { return updatedAt })
+	cache.RememberSized(routeID, "Primary", upstream.URL, compatCardImageSize)
+	tag := newMapper(codec, &config.Config{
+		Auth: config.AuthConfig{JWTSecret: "old-secret"},
+	}).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:      codec,
+		httpClient: upstream.Client(),
+		images:     cache,
+		itemRepo:   fakeImageItemRepo{item: item},
+		imageTags:  newImageTagSigner("new-secret"),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+tag, nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s; want 401", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("served cached image before validating the signed tag")
 	}
 }
 

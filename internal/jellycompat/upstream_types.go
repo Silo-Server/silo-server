@@ -36,6 +36,7 @@ type upstreamListItem struct {
 	BackdropThumbhash string                  `json:"-"`
 	LogoPath          string                  `json:"-"`
 	StillPath         string                  `json:"-"`
+	StillThumbhash    string                  `json:"-"`
 	UpdatedAt         time.Time               `json:"-"`
 	SeasonCount       *int                    `json:"season_count,omitempty"`
 	SeriesID          string                  `json:"series_id,omitempty"`

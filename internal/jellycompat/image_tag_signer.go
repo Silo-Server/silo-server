@@ -15,6 +15,9 @@ type imageTagSigner struct {
 }
 
 func newImageTagSigner(secret string) *imageTagSigner {
+	if strings.TrimSpace(secret) == "" {
+		return nil
+	}
 	return &imageTagSigner{secret: []byte(secret)}
 }
 
@@ -34,6 +37,9 @@ func (s *imageTagSigner) Tag(seed, fallbackURL string) string {
 }
 
 func (s *imageTagSigner) Equal(seed, fallbackURL, actual string) bool {
+	if s == nil {
+		return false
+	}
 	actual = strings.TrimSpace(actual)
 	expected := s.Tag(seed, fallbackURL)
 	if expected == "" || actual == "" || len(expected) != len(actual) {
