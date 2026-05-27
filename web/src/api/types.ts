@@ -664,6 +664,11 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   audio_languages?: string[];
   subtitle_languages?: string[];
   original_languages?: string[];
+  // Audiobook-native facets — populated when the scope contains audiobook
+  // items, empty otherwise. The UI gates these on libraryType=audiobook[s].
+  authors?: string[];
+  narrators?: string[];
+  series?: string[];
 }
 
 // Item Detail

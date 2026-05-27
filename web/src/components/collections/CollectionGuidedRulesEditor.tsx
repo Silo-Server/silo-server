@@ -51,6 +51,9 @@ export interface GuidedFormState {
   director: string;
   writer: string;
   producer: string;
+  author: string;
+  narrator: string;
+  series: string;
   studio: string;
   network: string;
   country: string;
@@ -103,6 +106,9 @@ export function queryDefinitionToGuidedState(
     director: "",
     writer: "",
     producer: "",
+    author: "",
+    narrator: "",
+    series: "",
     studio: "",
     network: "",
     country: "",
@@ -176,6 +182,15 @@ export function queryDefinitionToGuidedState(
         break;
       case "producer":
         if (rule.op === "is") state.producer = String(rule.value);
+        break;
+      case "author":
+        if (rule.op === "is") state.author = String(rule.value);
+        break;
+      case "narrator":
+        if (rule.op === "is") state.narrator = String(rule.value);
+        break;
+      case "series":
+        if (rule.op === "is") state.series = String(rule.value);
         break;
       case "studio":
         if (rule.op === "is") state.studio = String(rule.value);
@@ -277,6 +292,15 @@ export function guidedStateToQueryDefinition(
   }
   if (state.producer) {
     rules.push({ field: "producer", op: "is", value: state.producer });
+  }
+  if (state.author) {
+    rules.push({ field: "author", op: "is", value: state.author });
+  }
+  if (state.narrator) {
+    rules.push({ field: "narrator", op: "is", value: state.narrator });
+  }
+  if (state.series) {
+    rules.push({ field: "series", op: "is", value: state.series });
   }
   if (state.studio) {
     rules.push({ field: "studio", op: "is", value: state.studio });
@@ -636,6 +660,48 @@ export default function CollectionGuidedRulesEditor({
           </div>
         </>
       )}
+
+      {isAudiobookLibrary ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Author</Label>
+              <SearchableSelect
+                options={filters?.authors ?? []}
+                value={state.author}
+                onChange={(author) => update({ author })}
+                placeholder="Select author..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Narrator</Label>
+              <SearchableSelect
+                options={filters?.narrators ?? []}
+                value={state.narrator}
+                onChange={(narrator) => update({ narrator })}
+                placeholder="Select narrator..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Series</Label>
+              <SearchableSelect
+                options={filters?.series ?? []}
+                value={state.series}
+                onChange={(series) => update({ series })}
+                placeholder="Select series..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">

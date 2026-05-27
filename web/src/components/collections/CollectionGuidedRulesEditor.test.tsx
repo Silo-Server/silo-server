@@ -46,6 +46,9 @@ function emptyState(): GuidedFormState {
     director: "",
     writer: "",
     producer: "",
+    author: "",
+    narrator: "",
+    series: "",
     studio: "",
     network: "",
     country: "",
@@ -150,6 +153,9 @@ describe("guidedStateToQueryDefinition", () => {
       director: "Denis Villeneuve",
       writer: "Tony Gilroy",
       producer: "Emma Thomas",
+      author: "",
+      narrator: "",
+      series: "",
       studio: "",
       originalLanguages: ["Japanese"],
       network: "HBO",
@@ -257,6 +263,36 @@ describe("guidedStateToQueryDefinition", () => {
       { field: "original_language", op: "is", value: "en" },
       { field: "original_language", op: "is", value: "fr" },
     ]);
+  });
+
+  it("round-trips audiobook-native fields (author/narrator/series)", () => {
+    const original: QueryDefinition = {
+      library_ids: [9],
+      media_scope: "audiobook",
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          rules: [
+            { field: "author", op: "is", value: "Brandon Sanderson" },
+            { field: "narrator", op: "is", value: "Michael Kramer" },
+            { field: "series", op: "is", value: "Mistborn" },
+          ],
+        },
+      ],
+      sort: { field: "title", order: "asc" },
+    };
+
+    const state = queryDefinitionToGuidedState(original);
+    expect(state.author).toBe("Brandon Sanderson");
+    expect(state.narrator).toBe("Michael Kramer");
+    expect(state.series).toBe("Mistborn");
+
+    const rebuilt = guidedStateToQueryDefinition(state, original);
+    const rules = rebuilt.groups[0]!.rules;
+    expect(rules).toContainEqual({ field: "author", op: "is", value: "Brandon Sanderson" });
+    expect(rules).toContainEqual({ field: "narrator", op: "is", value: "Michael Kramer" });
+    expect(rules).toContainEqual({ field: "series", op: "is", value: "Mistborn" });
   });
 
   it("round-trips last_air_date sort through parse and serialize", () => {
