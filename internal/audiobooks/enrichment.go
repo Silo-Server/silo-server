@@ -17,6 +17,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,7 +41,28 @@ const (
 	// defaultEnrichBatchSize is the maximum number of audiobook items processed
 	// per sweep invocation. Keeps latency bounded for large libraries.
 	defaultEnrichBatchSize = 50
+	// defaultEnrichWorkers is the default fan-out used by Enricher.Run.
+	// Network-bound: each worker holds one provider HTTP call at a time, so
+	// 4 is enough to mask single-request latency without hammering plugins.
+	// Override with SILO_AUDIOBOOK_ENRICH_WORKERS.
+	defaultEnrichWorkers = 4
 )
+
+// audiobookEnrichWorkers returns the configured number of parallel enrichment
+// workers, capped to defaultEnrichBatchSize so workers never outnumber the
+// batch they drain.
+func audiobookEnrichWorkers() int {
+	n := defaultEnrichWorkers
+	if v := os.Getenv("SILO_AUDIOBOOK_ENRICH_WORKERS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			n = parsed
+		}
+	}
+	if n > defaultEnrichBatchSize {
+		n = defaultEnrichBatchSize
+	}
+	return n
+}
 
 // enrichmentItemRow is a minimal projection of media_items joined to
 // media_item_libraries. We only read what we need to call the provider chain.
@@ -64,6 +87,7 @@ type Enricher struct {
 	imageCacher audiobookCoverCacher
 	ffmpegPath  string
 	batchSize   int
+	workers     int
 }
 
 // NewEnricher constructs an Enricher.  All fields are required; a nil pool or
@@ -85,6 +109,7 @@ func NewEnricher(
 		personRepo:  personRepo,
 		providerIDs: providerIDs,
 		batchSize:   defaultEnrichBatchSize,
+		workers:     audiobookEnrichWorkers(),
 	}
 }
 
