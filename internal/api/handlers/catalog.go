@@ -42,6 +42,9 @@ type catalogFiltersResponse struct {
 	Countries         []string  `json:"countries"`
 	OriginalLanguages []string  `json:"original_languages"`
 	ContentRatings    []string  `json:"content_ratings"`
+	Authors           []string  `json:"authors"`
+	Narrators         []string  `json:"narrators"`
+	Series            []string  `json:"series"`
 	Resolutions       *[]string `json:"resolutions,omitempty"`
 	AudioLanguages    *[]string `json:"audio_languages,omitempty"`
 	SubtitleLanguages *[]string `json:"subtitle_languages,omitempty"`
@@ -151,6 +154,9 @@ func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.
 		Countries:         filters.Countries,
 		OriginalLanguages: filters.OriginalLanguages,
 		ContentRatings:    filters.ContentRatings,
+		Authors:           filters.Authors,
+		Narrators:         filters.Narrators,
+		Series:            filters.Series,
 		Resolutions:       resolutions,
 		AudioLanguages:    audioLanguages,
 		SubtitleLanguages: subtitleLanguages,

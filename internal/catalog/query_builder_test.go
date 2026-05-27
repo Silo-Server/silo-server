@@ -368,6 +368,81 @@ func TestBuild_GroupAllCombinesHDRAndDolbyVisionOnSameFile(t *testing.T) {
 	}
 }
 
+func TestBuild_AuthorClauseUsesPersonKindAuthor(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "author", Op: "is", Value: "Brandon Sanderson"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Brandon Sanderson" {
+		t.Fatalf("expected author arg, got %v", args)
+	}
+	// PersonKindAuthor == 7. We compare against the integer constant so an
+	// accidental kind drift breaks the test rather than silently hitting
+	// the wrong table partition.
+	if !strings.Contains(clause, "ip.kind = 7") {
+		t.Fatalf("expected ip.kind = 7 (PersonKindAuthor) in clause, got %q", clause)
+	}
+}
+
+func TestBuild_NarratorClauseUsesPersonKindNarrator(t *testing.T) {
+	clause, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "narrator", Op: "is", Value: "Michael Kramer"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !strings.Contains(clause, "ip.kind = 8") {
+		t.Fatalf("expected ip.kind = 8 (PersonKindNarrator) in clause, got %q", clause)
+	}
+}
+
+func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is", Value: "Mistborn"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Mistborn" {
+		t.Fatalf("expected series arg, got %v", args)
+	}
+	if !strings.Contains(clause, "FROM audiobook_series s") {
+		t.Fatalf("expected audiobook_series join in series clause, got %q", clause)
+	}
+	// Both sides trimmed + case-folded so user-typed input matches stored
+	// values written by the scanner regardless of incidental whitespace.
+	if !strings.Contains(clause, "LOWER(BTRIM(s.series_name))") || !strings.Contains(clause, "LOWER(BTRIM($1))") {
+		t.Fatalf("expected case+whitespace-insensitive series match, got %q", clause)
+	}
+}
+
+func TestBuild_SeriesClauseNegationWrapsInNOT(t *testing.T) {
+	clause, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is_not", Value: "Mistborn"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clause), "WHERE")), "NOT (") &&
+		!strings.Contains(clause, "NOT (") {
+		t.Fatalf("expected is_not to wrap the EXISTS in NOT(...), got %q", clause)
+	}
+}
+
 func TestBuild_PersonClauseMatchesByResolvedPersonID(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
 		Match: "all",

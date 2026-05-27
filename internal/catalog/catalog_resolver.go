@@ -39,6 +39,13 @@ type CatalogFiltersResult struct {
 	Resolutions       []string
 	AudioLanguages    []string
 	SubtitleLanguages []string
+	// Authors, Narrators and Series are audiobook-native facets. Populated
+	// whenever the scope contains audiobook items; empty for video-only
+	// scopes. They share the item_people / audiobook_series tables so
+	// callers don't need to switch on media type.
+	Authors   []string
+	Narrators []string
+	Series    []string
 }
 
 type CatalogFilterOptions struct {
@@ -54,6 +61,12 @@ type facetFetcher interface {
 	Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
+	// PeopleByKind returns distinct people names for the given PersonKind
+	// across the scoped result set. Used for Authors / Narrators facets.
+	PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
+	// AudiobookSeries returns distinct series_name values from
+	// audiobook_series joined onto the scoped result set.
+	AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 }
 
 // pgxFacetFetcher is the production facetFetcher. It dispatches each method to
@@ -80,6 +93,14 @@ func (f *pgxFacetFetcher) JSONBLanguages(ctx context.Context, column string, fil
 
 func (f *pgxFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
 	return listSubtitleLanguagesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+}
+
+func (f *pgxFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return listDistinctPeopleByKindWithSource(ctx, f.pool, kind, filters, baseRelation, mediaScope)
+}
+
+func (f *pgxFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return listDistinctAudiobookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
 }
 
 // previewExecutor is the seam consumed by previewQuerySource so tests can
@@ -691,6 +712,9 @@ func (r *CatalogResolver) listFiltersForSource(
 		resolutions       []string
 		audioLanguages    []string
 		subtitleLanguages []string
+		authors           []string
+		narrators         []string
+		series            []string
 	)
 
 	eg, gctx := errgroup.WithContext(ctx)
@@ -755,6 +779,30 @@ func (r *CatalogResolver) listFiltersForSource(
 		contentRatings = out
 		return nil
 	}))
+	eg.Go(withLimit(func() error {
+		out, err := facets.PeopleByKind(gctx, models.PersonKindAuthor, filters, baseRelation, mediaScope)
+		if err != nil {
+			return fmt.Errorf("listing catalog authors: %w", err)
+		}
+		authors = out
+		return nil
+	}))
+	eg.Go(withLimit(func() error {
+		out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
+		if err != nil {
+			return fmt.Errorf("listing catalog narrators: %w", err)
+		}
+		narrators = out
+		return nil
+	}))
+	eg.Go(withLimit(func() error {
+		out, err := facets.AudiobookSeries(gctx, filters, baseRelation, mediaScope)
+		if err != nil {
+			return fmt.Errorf("listing catalog audiobook series: %w", err)
+		}
+		series = out
+		return nil
+	}))
 
 	if options.IncludeTechnical {
 		eg.Go(withLimit(func() error {
@@ -794,6 +842,9 @@ func (r *CatalogResolver) listFiltersForSource(
 		Countries:         countries,
 		OriginalLanguages: originalLanguages,
 		ContentRatings:    contentRatings,
+		Authors:           authors,
+		Narrators:         narrators,
+		Series:            series,
 	}
 	if options.IncludeTechnical {
 		result.Resolutions = resolutions
@@ -933,6 +984,9 @@ var catalogQueryRuleFields = map[string]bool{
 	"director":          true,
 	"writer":            true,
 	"producer":          true,
+	"author":            true,
+	"narrator":          true,
+	"series":            true,
 	"watched":           true,
 	"favorited":         true,
 	"in_watchlist":      true,
@@ -962,6 +1016,9 @@ var catalogPersonalRuleFields = map[string]bool{
 	"director":          true,
 	"writer":            true,
 	"producer":          true,
+	"author":            true,
+	"narrator":          true,
+	"series":            true,
 	"watched":           true,
 	"favorited":         true,
 	"in_watchlist":      true,
@@ -990,7 +1047,7 @@ func requiresAdvancedQueryExecution(def QueryDefinition) bool {
 	for _, group := range def.Groups {
 		for _, rule := range group.Rules {
 			switch rule.Field {
-			case "actor", "director", "writer", "producer", "watched", "favorited", "in_watchlist", "in_progress", "last_watched", "resolution", "hdr", "dolby_vision", "bitrate", "audio_language", "subtitle_language":
+			case "actor", "director", "writer", "producer", "author", "narrator", "series", "watched", "favorited", "in_watchlist", "in_progress", "last_watched", "resolution", "hdr", "dolby_vision", "bitrate", "audio_language", "subtitle_language":
 				return true
 			}
 		}

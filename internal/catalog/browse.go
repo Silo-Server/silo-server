@@ -727,6 +727,67 @@ func (r *BrowseRepository) listDistinctJSONBLanguageWithFilters(ctx context.Cont
 	return listDistinctJSONBLanguageWithSource(ctx, r.pool, column, filters, "media_items mi", "")
 }
 
+// listDistinctPeopleByKindWithSource returns distinct people.name values for a
+// PersonKind across the scoped result set. Powers the Authors and Narrators
+// facets — both share item_people, just keyed by `kind`. The from/where
+// clauses from filterWhereClauseForSource gate by library / access / scope,
+// so an audiobook-only library or audiobook media_scope drops video-only
+// content automatically.
+func listDistinctPeopleByKindWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	kind models.PersonKind,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+) ([]string, error) {
+	fromClause, whereClause, args, earlyEmpty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if earlyEmpty {
+		return []string{}, nil
+	}
+	args = append(args, int(kind))
+	kindIdx := len(args)
+	query := fmt.Sprintf(`
+		SELECT DISTINCT p.name
+		FROM %s
+		JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = $%d
+		JOIN people p ON p.id = ip.person_id
+		%s
+		  AND p.name IS NOT NULL
+		  AND BTRIM(p.name) <> ''
+		ORDER BY p.name ASC
+	`, fromClause, kindIdx, browseFilterPrefix(whereClause))
+	return queryDistinctStrings(ctx, pool, query, args)
+}
+
+// listDistinctAudiobookSeriesWithSource returns distinct series_name values
+// from audiobook_series joined onto the scoped result set. Names are trimmed
+// and case-folded in the ORDER BY so the picker doesn't show duplicates that
+// differ only by whitespace or casing — the literal series_name is still
+// returned so existing rules continue to match.
+func listDistinctAudiobookSeriesWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+) ([]string, error) {
+	fromClause, whereClause, args, earlyEmpty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if earlyEmpty {
+		return []string{}, nil
+	}
+	query := fmt.Sprintf(`
+		SELECT DISTINCT BTRIM(s.series_name) AS series_name
+		FROM %s
+		JOIN audiobook_series s ON s.content_id = mi.content_id
+		%s
+		  AND s.series_name IS NOT NULL
+		  AND BTRIM(s.series_name) <> ''
+		ORDER BY LOWER(BTRIM(s.series_name)) ASC
+	`, fromClause, browseFilterPrefix(whereClause))
+	return queryDistinctStrings(ctx, pool, query, args)
+}
+
 func listDistinctJSONBLanguageWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,

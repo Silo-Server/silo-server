@@ -355,6 +355,12 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 		return qb.buildPersonClause(models.PersonKindWriter, rule)
 	case "producer":
 		return qb.buildPersonClause(models.PersonKindProducer, rule)
+	case "author":
+		return qb.buildPersonClause(models.PersonKindAuthor, rule)
+	case "narrator":
+		return qb.buildPersonClause(models.PersonKindNarrator, rule)
+	case "series":
+		return qb.buildAudiobookSeriesClause(rule)
 	case "watched":
 		return qb.buildWatchedClause(rule)
 	case "favorited":
@@ -439,6 +445,21 @@ func (qb *QueryBuilder) buildPersonClause(kind models.PersonKind, rule QueryRule
 			WHERE LOWER(p.name) = LOWER($%d)
 		  )
 	)`, qb.alias, kind, qb.argIdx)
+	qb.argIdx++
+	if rule.Op == "is_not" {
+		return "NOT (" + clause + ")", nil
+	}
+	return clause, nil
+}
+
+func (qb *QueryBuilder) buildAudiobookSeriesClause(rule QueryRule) (string, error) {
+	qb.args = append(qb.args, rule.Value)
+	clause := fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM audiobook_series s
+		WHERE s.content_id = %s.content_id
+		  AND LOWER(BTRIM(s.series_name)) = LOWER(BTRIM($%d))
+	)`, qb.alias, qb.argIdx)
 	qb.argIdx++
 	if rule.Op == "is_not" {
 		return "NOT (" + clause + ")", nil
