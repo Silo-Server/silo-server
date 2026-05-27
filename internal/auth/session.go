@@ -110,11 +110,20 @@ func (r *SessionRepository) createWithQuerier(
 		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
+	// ip_address is a Postgres inet column; an empty string fails the
+	// inet input parser (SQLSTATE 22P02). Pass NULL when the caller
+	// couldn't determine a client IP — e.g. ABS-compat logins that
+	// validate creds in-process without a real request to read from.
+	var ipArg any
+	if session.IPAddress != "" {
+		ipArg = session.IPAddress
+	}
+
 	_, err := db.Exec(ctx, query,
 		session.ID,
 		session.UserID,
 		session.DeviceName,
-		session.IPAddress,
+		ipArg,
 		session.ExpiresAt,
 		session.ImpersonatorUserID,
 		session.ImpersonationStartedAt,
