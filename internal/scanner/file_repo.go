@@ -1207,7 +1207,6 @@ func ptrFloatEqual(a, b *float64) bool {
 	return *a == *b
 }
 
-
 func nextSharedMarkerAttribution(
 	existingSource *string,
 	existingConfidence *float64,
@@ -1438,6 +1437,7 @@ func (r *FileRepository) ClaimUnmatchedMixed(ctx context.Context, limit int) ([]
 			  AND mf.missing_since IS NULL
 			  AND folders.enabled = true
 			  AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+			  AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
 			ORDER BY mf.match_attempted_at ASC NULLS FIRST, mf.id ASC
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
@@ -1695,6 +1695,7 @@ func (r *FileRepository) ClaimUnmatchedMixedByFolderAndPathPrefix(
 			  AND mf.missing_since IS NULL
 			  AND folders.enabled = true
 			  AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+			  AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
 			  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 	`)
 	if !attemptBefore.IsZero() {

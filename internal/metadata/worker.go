@@ -364,7 +364,7 @@ func (w *MatchWorker) ProcessBatch(ctx context.Context) (processed int, err erro
 // ProcessBatchByFolderAndPathPrefix processes unmatched files within a single
 // library subtree immediately instead of waiting for the periodic worker loop.
 func (w *MatchWorker) ProcessBatchByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, attemptBefore time.Time) (processed int, err error) {
-	useSeriesQueue, err := w.useSeriesGroupQueueForFolder(ctx, folderID)
+	useSeriesQueue, useMovieQueue, err := w.queueUsageForFolder(ctx, folderID)
 	if err != nil {
 		return 0, err
 	}
@@ -373,21 +373,29 @@ func (w *MatchWorker) ProcessBatchByFolderAndPathPrefix(ctx context.Context, fol
 		if err != nil {
 			return 0, err
 		}
-		return w.processSeriesRoots(ctx, jobs)
+		processed, err := w.processSeriesRoots(ctx, jobs)
+		if err != nil || processed > 0 {
+			return processed, err
+		}
 	}
-	useMovieQueue, err := w.useMovieQueueForFolder(ctx, folderID)
-	if err != nil {
-		return 0, err
+	if useSeriesQueue && !useMovieQueue {
+		return processed, nil
 	}
 	if useMovieQueue {
 		files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
 		if err != nil {
 			return 0, err
 		}
-		return w.processQueuedMovieFiles(ctx, files), nil
+		processed := w.processQueuedMovieFiles(ctx, files)
+		if processed > 0 {
+			return processed, nil
+		}
+		if !useSeriesQueue {
+			return processed, nil
+		}
 	}
 
-	files, err := w.claimScopedFiles(ctx, folderID, pathPrefix, attemptBefore, false)
+	files, err := w.claimScopedFiles(ctx, folderID, pathPrefix, attemptBefore, scopedFallbackMode(useSeriesQueue, useMovieQueue))
 	if err != nil {
 		return 0, err
 	}
@@ -400,11 +408,7 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 	if attemptBefore.IsZero() {
 		attemptBefore = time.Now().UTC()
 	}
-	useSeriesQueue, err := w.useSeriesGroupQueueForFolder(ctx, folderID)
-	if err != nil {
-		return 0, err
-	}
-	useMovieQueue, err := w.useMovieQueueForFolder(ctx, folderID)
+	useSeriesQueue, useMovieQueue, err := w.queueUsageForFolder(ctx, folderID)
 	if err != nil {
 		return 0, err
 	}
@@ -424,30 +428,31 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 			if err != nil {
 				return processed, err
 			}
-			if len(jobs) == 0 {
-				return processed, nil
+			if len(jobs) > 0 {
+				batchProcessed, err := w.processSeriesRoots(ctx, jobs)
+				if err != nil {
+					return processed, err
+				}
+				processed += batchProcessed
+				continue
 			}
-			batchProcessed, err := w.processSeriesRoots(ctx, jobs)
-			if err != nil {
-				return processed, err
-			}
-			processed += batchProcessed
-			continue
 		}
 		if useMovieQueue {
 			files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
 			if err != nil {
 				return processed, err
 			}
-			if len(files) == 0 {
-				return processed, nil
+			if len(files) > 0 {
+				batchProcessed := w.processQueuedMovieFiles(ctx, files)
+				processed += batchProcessed
+				continue
 			}
-			batchProcessed := w.processQueuedMovieFiles(ctx, files)
-			processed += batchProcessed
-			continue
+		}
+		if useSeriesQueue != useMovieQueue {
+			return processed, nil
 		}
 
-		files, err := w.claimScopedFiles(ctx, folderID, pathPrefix, attemptBefore, w.enableTVSeriesRootQueue)
+		files, err := w.claimScopedFiles(ctx, folderID, pathPrefix, attemptBefore, scopedFallbackMode(useSeriesQueue, useMovieQueue))
 		if err != nil {
 			return processed, err
 		}
@@ -705,6 +710,8 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 
 func scopedMatcherPath(useSeriesQueue bool, useMovieQueue bool) string {
 	switch {
+	case useSeriesQueue && useMovieQueue:
+		return "series_root_queue+movie_file_queue"
 	case useSeriesQueue:
 		return "series_root_queue"
 	case useMovieQueue:
@@ -792,6 +799,43 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	}
 	if !hasUnlinkedGroupFile(groupFiles) {
 		if strings.TrimSpace(representative.ContentID) != "" {
+			if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative); ok && skeleton.ItemStatus != "ambiguous" {
+				req := w.buildProcessRequestForGroup(ctx, representative, skeleton, groupFiles)
+				result, processErr := w.service.Process(ctx, req)
+				if processErr != nil {
+					queueErr := truncateSeriesQueueError(processErr.Error())
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
+						return 0, updateErr
+					}
+					slog.Warn("metadata: enrichment failed",
+						"file_id", representative.ID,
+						"path", representative.FilePath,
+						"error", processErr)
+					w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched",
+						"content_id", skeleton.ContentID,
+						"file_id", representative.ID,
+						"path", representative.FilePath)
+					if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
+						slog.Warn("metadata: fallback episode synthesis failed after series root enrichment error",
+							"content_id", skeleton.ContentID, "error", fbErr)
+					}
+					return 0, nil
+				}
+				if result != nil && !result.Updated {
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(ErrMetadataNotFound.Error())); updateErr != nil {
+						return 0, updateErr
+					}
+					w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched",
+						"content_id", skeleton.ContentID,
+						"file_id", representative.ID,
+						"path", representative.FilePath)
+					if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
+						slog.Warn("metadata: fallback episode synthesis failed for unmatched series root",
+							"content_id", skeleton.ContentID, "error", fbErr)
+					}
+					return 0, nil
+				}
+			}
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, representative.ContentID); err != nil {
 				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
 					return 0, updateErr
@@ -1016,31 +1060,16 @@ func (w *MatchWorker) folderType(ctx context.Context, folderID int) (string, err
 	return strings.ToLower(strings.TrimSpace(folder.Type)), nil
 }
 
-func (w *MatchWorker) useSeriesGroupQueueForFolder(ctx context.Context, folderID int) (bool, error) {
-	if !w.enableTVSeriesRootQueue || w.seriesClaimer == nil {
-		return false, nil
-	}
+func (w *MatchWorker) queueUsageForFolder(ctx context.Context, folderID int) (useSeriesQueue bool, useMovieQueue bool, err error) {
 	folderType, err := w.folderType(ctx, folderID)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return isTVLibraryType(folderType), nil
-}
-
-func (w *MatchWorker) useMovieQueueForFolder(ctx context.Context, folderID int) (bool, error) {
-	if w.movieClaimer == nil {
-		return false, nil
-	}
-	folderType, err := w.folderType(ctx, folderID)
-	if err != nil {
-		return false, err
-	}
-	switch folderType {
-	case "movie", "movies":
-		return true, nil
-	default:
-		return false, nil
-	}
+	useSeriesQueue = w.enableTVSeriesRootQueue &&
+		w.seriesClaimer != nil &&
+		(isTVLibraryType(folderType) || isMixedLibraryType(folderType))
+	useMovieQueue = w.movieClaimer != nil && isMovieLibraryType(folderType)
+	return useSeriesQueue, useMovieQueue, nil
 }
 
 func (w *MatchWorker) claimBackgroundFiles(ctx context.Context) ([]*models.MediaFile, error) {
@@ -1059,14 +1088,40 @@ func (w *MatchWorker) claimBackgroundFiles(ctx context.Context) ([]*models.Media
 	return w.fileLister.ClaimUnmatched(ctx, w.batchSize)
 }
 
-func (w *MatchWorker) claimScopedFiles(ctx context.Context, folderID int, pathPrefix string, attemptBefore time.Time, preferNonSeries bool) ([]*models.MediaFile, error) {
-	if preferNonSeries {
+type scopedFallbackClaimMode int
+
+const (
+	scopedFallbackGeneric scopedFallbackClaimMode = iota
+	scopedFallbackNonSeries
+	scopedFallbackMixed
+)
+
+func scopedFallbackMode(useSeriesQueue bool, useMovieQueue bool) scopedFallbackClaimMode {
+	switch {
+	case useSeriesQueue && useMovieQueue:
+		return scopedFallbackMixed
+	case useSeriesQueue:
+		return scopedFallbackNonSeries
+	default:
+		return scopedFallbackGeneric
+	}
+}
+
+func (w *MatchWorker) claimScopedFiles(ctx context.Context, folderID int, pathPrefix string, attemptBefore time.Time, mode scopedFallbackClaimMode) ([]*models.MediaFile, error) {
+	switch mode {
+	case scopedFallbackMixed:
+		if claimer, ok := w.fileLister.(MixedFileClaimer); ok {
+			return claimer.ClaimUnmatchedMixedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+		}
+		return nil, fmt.Errorf("mixed-library file claimer is not configured")
+	case scopedFallbackNonSeries:
 		if claimer, ok := w.fileLister.(NonSeriesFileClaimer); ok {
 			return claimer.ClaimUnmatchedNonSeriesByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
 		}
 		return nil, fmt.Errorf("non-series file claimer is not configured")
+	default:
+		return w.fileLister.ClaimUnmatchedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
 	}
-	return w.fileLister.ClaimUnmatchedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
 }
 
 func selectRepresentativeGroupFile(groupFiles []*models.MediaFile) *models.MediaFile {
@@ -1111,6 +1166,19 @@ func truncateSeriesQueueError(errText string) string {
 func isTVLibraryType(folderType string) bool {
 	switch strings.ToLower(strings.TrimSpace(folderType)) {
 	case "series", "tv", "show", "tvshows":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMixedLibraryType(folderType string) bool {
+	return strings.ToLower(strings.TrimSpace(folderType)) == "mixed"
+}
+
+func isMovieLibraryType(folderType string) bool {
+	switch strings.ToLower(strings.TrimSpace(folderType)) {
+	case "movie", "movies", "mixed":
 		return true
 	default:
 		return false

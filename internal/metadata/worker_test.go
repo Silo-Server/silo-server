@@ -718,6 +718,74 @@ func TestWorkerProcessAllByFolderAndPathPrefix_MovieFolderUsesMovieQueue(t *test
 	}
 }
 
+func TestWorkerProcessAllByFolderAndPathPrefix_MixedFolderDrainsSeriesAndMovieQueues(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	h.service.folderRepo = &fakeWorkerFolderRepo{
+		folders: map[int]*models.MediaFolder{
+			10: {ID: 10, Type: "mixed", Enabled: true},
+		},
+	}
+
+	seriesFile := &models.MediaFile{
+		ID:               1,
+		MediaFolderID:    10,
+		FilePath:         "/media/mixed/television/Example Show/Season 01/Example.Show.S01E01.mkv",
+		ObservedRootPath: "/media/mixed/television/Example Show",
+		GroupKeyVersion:  1,
+		ContentGroupKey:  "v1|series|example_show|2024",
+		BaseTitle:        "Example Show",
+		BaseType:         "series",
+	}
+	movieFile := &models.MediaFile{
+		ID:            2,
+		MediaFolderID: 10,
+		FilePath:      "/media/mixed/movies/Example Movie (2024)/Example.Movie.mkv",
+		BaseTitle:     "Example Movie",
+		BaseType:      "movie",
+	}
+	h.fileRepo.setGroupFiles(10, 1, "v1|series|example_show|2024", seriesFile)
+	h.fileRepo.setGroupFiles(10, 1, "v1|movie|example_movie|2024", movieFile)
+
+	processedTypes := make([]string, 0, 2)
+	h.service.hooks.process = func(_ context.Context, req ProcessRequest) (*ProcessResult, error) {
+		processedTypes = append(processedTypes, req.Hints.Type)
+		return &ProcessResult{Updated: true}, nil
+	}
+
+	seriesQueueRepo := newFakeSeriesQueueRepo(models.SeriesRootMatchJob{
+		MediaFolderID:     10,
+		ObservedRootPath:  "/media/mixed/television/Example Show",
+		SampleFilePath:    seriesFile.FilePath,
+		ObservedFileCount: 1,
+	})
+	movieQueueRepo := newFakeMovieQueueRepo(movieFile)
+
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+	worker.SetSeriesRootClaimer(seriesQueueRepo, true)
+	worker.SetMovieFileClaimer(movieQueueRepo)
+	processed, err := worker.ProcessAllByFolderAndPathPrefix(ctx, 10, "/media/mixed", time.Time{})
+	if err != nil {
+		t.Fatalf("ProcessAllByFolderAndPathPrefix error = %v", err)
+	}
+
+	if processed != 2 {
+		t.Fatalf("processed = %d, want 2", processed)
+	}
+	if got, want := strings.Join(processedTypes, ","), "series,movie"; got != want {
+		t.Fatalf("processed types = %q, want %q", got, want)
+	}
+	if seriesQueueRepo.scopedClaimCalls == 0 {
+		t.Fatal("expected series queue to be claimed")
+	}
+	if movieQueueRepo.scopedClaimCalls == 0 {
+		t.Fatal("expected movie queue to be claimed")
+	}
+	if h.fileRepo.claimMixedCalls != 1 {
+		t.Fatalf("claimMixedCalls = %d, want 1", h.fileRepo.claimMixedCalls)
+	}
+}
+
 func TestWorkerProcessAllByFolderAndPathPrefix_SeriesRootSkeletonErrorKeepsQueueRow(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -1000,7 +1068,7 @@ func TestWorkerClaimScopedFiles_WithMovieQueueAndTVQueueDisabledUsesScopedGeneri
 	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
 	worker.SetMovieFileClaimer(newFakeMovieQueueRepo())
 
-	files, err := worker.claimScopedFiles(ctx, 10, "/media/shows/Example Show", time.Time{}, false)
+	files, err := worker.claimScopedFiles(ctx, 10, "/media/shows/Example Show", time.Time{}, scopedFallbackGeneric)
 	if err != nil {
 		t.Fatalf("claimScopedFiles error = %v", err)
 	}

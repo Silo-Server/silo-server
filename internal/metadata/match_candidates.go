@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -23,6 +24,7 @@ type MatchCandidate struct {
 	Overview       string            `json:"overview,omitempty"`
 	Sources        []string          `json:"sources"`
 	AgreementHints []string          `json:"agreement_hints"`
+	DetailScore    int               `json:"-"`
 }
 
 var canonicalCandidateIDKeys = []string{"tmdb", "tvdb", "imdb"}
@@ -51,6 +53,106 @@ func providerIDRichness(ids map[string]string) int {
 		}
 	}
 	return score
+}
+
+const (
+	minimumDetailTieBreakScore = 20
+	minimumDetailTieBreakGap   = 12
+)
+
+func duplicateTieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
+	if hints == nil || len(scoredCandidates) < 2 {
+		return nil, false
+	}
+
+	best := scoredCandidates[0]
+	contenders := []scoredMatchCandidate{best}
+	for i := 1; i < len(scoredCandidates); i++ {
+		next := scoredCandidates[i]
+		if best.score-next.score >= 15 {
+			break
+		}
+		if duplicateTieBreakComparable(hints, best.candidate, next.candidate) {
+			contenders = append(contenders, next)
+		}
+	}
+	if len(contenders) < 2 {
+		return nil, false
+	}
+
+	sort.SliceStable(contenders, func(i, j int) bool {
+		return contenders[i].candidate.DetailScore > contenders[j].candidate.DetailScore
+	})
+	if contenders[0].candidate.DetailScore < minimumDetailTieBreakScore {
+		return nil, false
+	}
+	if contenders[0].candidate.DetailScore-contenders[1].candidate.DetailScore < minimumDetailTieBreakGap {
+		return nil, false
+	}
+	return &contenders[0].candidate, true
+}
+
+func duplicateTieBreakComparable(hints *MatchHints, left, right MatchCandidate) bool {
+	if hints == nil {
+		return false
+	}
+	if hints.Year == 0 || left.Year == 0 || right.Year == 0 {
+		return false
+	}
+	if left.Year != hints.Year || right.Year != hints.Year || left.Year != right.Year {
+		return false
+	}
+	if !candidateTypeMatchesHint(hints.Type, left.ContentType) ||
+		!candidateTypeMatchesHint(hints.Type, right.ContentType) {
+		return false
+	}
+	if strings.TrimSpace(left.ContentType) != "" &&
+		strings.TrimSpace(right.ContentType) != "" &&
+		!strings.EqualFold(left.ContentType, right.ContentType) {
+		return false
+	}
+	if inferTitleSimilarity(left.Title, right.Title, hints.Year) != 1 {
+		return false
+	}
+	if inferTitleSimilarity(hints.Title, left.Title, hints.Year) != 1 {
+		return false
+	}
+	if inferTitleSimilarity(hints.Title, right.Title, hints.Year) != 1 {
+		return false
+	}
+	return samePrimaryProvider(left.ProviderIDs, right.ProviderIDs)
+}
+
+func candidateTypeMatchesHint(hintType, candidateType string) bool {
+	hintType = strings.ToLower(strings.TrimSpace(hintType))
+	candidateType = strings.ToLower(strings.TrimSpace(candidateType))
+	if hintType == "" || candidateType == "" {
+		return true
+	}
+	if hintType == candidateType {
+		return true
+	}
+	return isMovieTypeAlias(hintType) && isMovieTypeAlias(candidateType)
+}
+
+func isMovieTypeAlias(value string) bool {
+	switch value {
+	case "movie", "movies":
+		return true
+	default:
+		return false
+	}
+}
+
+func samePrimaryProvider(left, right map[string]string) bool {
+	for _, key := range canonicalCandidateIDKeys {
+		leftValue := strings.TrimSpace(left[key])
+		rightValue := strings.TrimSpace(right[key])
+		if leftValue != "" && rightValue != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizedKey returns a stable grouping key from provider IDs.
@@ -211,13 +313,12 @@ func scoreMatchCandidate(hints *MatchHints, candidate MatchCandidate) float64 {
 
 	score += float64(len(candidate.Sources) * 12)
 
-	hintTitle := normalizeCandidateTitle(hints.Title)
-	candidateTitle := normalizeCandidateTitle(candidate.Title)
-	if hintTitle != "" && candidateTitle != "" {
-		if hintTitle == candidateTitle {
+	if strings.TrimSpace(hints.Title) != "" && strings.TrimSpace(candidate.Title) != "" {
+		titleSimilarity := inferTitleSimilarity(hints.Title, candidate.Title, hints.Year)
+		if titleSimilarity == 1 {
 			score += 45
 		} else {
-			score += inferTitleSimilarity(hints.Title, candidate.Title) * 35
+			score += titleSimilarity * 35
 		}
 	}
 
@@ -236,18 +337,19 @@ func scoreMatchCandidate(hints *MatchHints, candidate MatchCandidate) float64 {
 	return score
 }
 
+type scoredMatchCandidate struct {
+	candidate MatchCandidate
+	score     float64
+}
+
 func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate) (*MatchCandidate, bool) {
 	if len(candidates) == 0 {
 		return nil, false
 	}
 
-	type scored struct {
-		candidate MatchCandidate
-		score     float64
-	}
-	scoredCandidates := make([]scored, 0, len(candidates))
+	scoredCandidates := make([]scoredMatchCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		scoredCandidates = append(scoredCandidates, scored{
+		scoredCandidates = append(scoredCandidates, scoredMatchCandidate{
 			candidate: candidate,
 			score:     scoreMatchCandidate(hints, candidate),
 		})
@@ -274,7 +376,7 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 		return &best.candidate, true
 	}
 	if best.score-scoredCandidates[1].score < 15 {
-		return nil, false
+		return duplicateTieBreakWinner(hints, scoredCandidates)
 	}
 	return &best.candidate, true
 }
@@ -345,17 +447,17 @@ func normalizeCandidateTitle(title string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
 }
 
-func inferTitleSimilarity(left, right string) float64 {
-	leftNorm := normalizeCandidateTitle(left)
-	rightNorm := normalizeCandidateTitle(right)
+func inferTitleSimilarity(left, right string, year int) float64 {
+	leftNorm := normalizeCandidateTitleForYear(left, year)
+	rightNorm := normalizeCandidateTitleForYear(right, year)
 	if leftNorm == "" || rightNorm == "" {
 		return 0
 	}
 	if leftNorm == rightNorm {
 		return 1
 	}
-	leftComparable := strings.Join(strings.Fields(normalizeTitleForScoring(left)), " ")
-	rightComparable := strings.Join(strings.Fields(normalizeTitleForScoring(right)), " ")
+	leftComparable := strings.Join(strings.Fields(normalizeTitleForScoring(leftNorm)), " ")
+	rightComparable := strings.Join(strings.Fields(normalizeTitleForScoring(rightNorm)), " ")
 	if leftComparable == rightComparable {
 		return 1
 	}
@@ -363,6 +465,19 @@ func inferTitleSimilarity(left, right string) float64 {
 		return 0.8
 	}
 	return 0
+}
+
+func normalizeCandidateTitleForYear(title string, year int) string {
+	normalized := normalizeCandidateTitle(title)
+	if normalized == "" || year == 0 {
+		return normalized
+	}
+	yearText := strconv.Itoa(year)
+	fields := strings.Fields(normalized)
+	if len(fields) <= 1 || fields[len(fields)-1] != yearText {
+		return normalized
+	}
+	return strings.Join(fields[:len(fields)-1], " ")
 }
 
 func normalizeTitleForScoring(title string) string {

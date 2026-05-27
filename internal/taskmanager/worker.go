@@ -72,7 +72,7 @@ func (w *taskWorker) info() TaskInfo {
 // setTriggers replaces active triggers. Stops old triggers, starts new ones.
 // Pass lastResult to resume scheduling from the last execution, or nil to
 // start the interval fresh from now (e.g. when the user edits the schedule).
-func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerConfig) Trigger, lastResult *ExecutionResult) {
+func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerConfig) Trigger, lastResult *ExecutionResult, notify bool) {
 	w.mu.Lock()
 
 	for _, tr := range w.triggers {
@@ -90,8 +90,12 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 
 	w.mu.Unlock()
 
-	w.triggerChanged.Store(true)
+	if !notify {
+		w.notify()
+		return
+	}
 
+	w.triggerChanged.Store(true)
 	select {
 	case w.triggerUpdate <- struct{}{}:
 	default:

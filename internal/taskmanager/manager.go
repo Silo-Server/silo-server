@@ -77,7 +77,7 @@ func (m *TaskManager) Start(ctx context.Context) {
 			}
 		}
 
-		w.setTriggers(configs, m.triggerFactory, w.lastResult)
+		w.setTriggers(configs, m.triggerFactory, w.lastResult, false)
 
 		go m.triggerLoop(ctx, w)
 	}
@@ -261,7 +261,7 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 		return err
 	}
 
-	w.setTriggers(triggerConfigs, m.triggerFactory, nil)
+	w.setTriggers(triggerConfigs, m.triggerFactory, nil, true)
 	m.notifyTaskUpdated(w.info())
 	return nil
 }

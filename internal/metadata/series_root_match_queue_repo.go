@@ -115,7 +115,10 @@ func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, 
 			WHERE mf.media_folder_id = q.media_folder_id
 			  AND mf.observed_root_path = q.observed_root_path
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+			  AND (
+				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
@@ -164,7 +167,10 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
 		  AND folders.enabled = true
-		  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+		  AND (
+			lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
+		  )
 		  AND mf.missing_since IS NULL
 		  AND mf.observed_root_path IS NOT NULL
 		  AND mf.observed_root_path <> ''
@@ -191,7 +197,10 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 			WHERE mf.media_folder_id = q.media_folder_id
 			  AND mf.observed_root_path = q.observed_root_path
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+			  AND (
+				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
@@ -238,7 +247,10 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.media_folder_id = $1
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+			  AND (
+				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND mf.observed_root_path IS NOT NULL
 			  AND mf.observed_root_path <> ''
@@ -296,7 +308,10 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 			WHERE mf.media_folder_id = q.media_folder_id
 			  AND mf.observed_root_path = q.observed_root_path
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+			  AND (
+				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
@@ -329,13 +344,17 @@ func (r *SeriesRootMatchQueueRepository) Claim(ctx context.Context, limit int) (
 			JOIN media_folders folders ON folders.id = q.media_folder_id
 			WHERE q.available_at <= NOW()
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows', 'mixed')
 			  AND EXISTS (
 				SELECT 1
 				FROM media_files mf
 				LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 				WHERE mf.media_folder_id = q.media_folder_id
 				  AND mf.observed_root_path = q.observed_root_path
+				  AND (
+					lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+					lower(trim(mf.base_type)) = 'series'
+				  )
 				  AND mf.missing_since IS NULL
 				  AND mf.observed_root_path <> ''
 				  AND (
@@ -412,7 +431,7 @@ func (r *SeriesRootMatchQueueRepository) ClaimByFolderAndPathPrefix(
 			WHERE q.media_folder_id = $1
 			  AND q.available_at <= NOW()
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
+			  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows', 'mixed')
 			  AND (
 				q.observed_root_path = $2 OR q.observed_root_path LIKE $3 ESCAPE '\' OR
 				EXISTS (
@@ -430,6 +449,10 @@ func (r *SeriesRootMatchQueueRepository) ClaimByFolderAndPathPrefix(
 				LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 				WHERE mf.media_folder_id = q.media_folder_id
 				  AND mf.observed_root_path = q.observed_root_path
+				  AND (
+					lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
+					lower(trim(mf.base_type)) = 'series'
+				  )
 				  AND mf.missing_since IS NULL
 				  AND mf.observed_root_path <> ''
 				  AND (

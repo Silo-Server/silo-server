@@ -123,6 +123,28 @@ func TestInferGroupAssignments_SeriesSeasonDirsCollapse(t *testing.T) {
 	}
 }
 
+func TestInferGroupAssignments_SeriesEpisodeTitleNumberDoesNotBecomeTVDBID(t *testing.T) {
+	t.Parallel()
+
+	filePaths := []string{
+		"/sports/television/WWE SmackDown (1999)/Season 01/WWE SmackDown (1999) - S01E01 - SmackDown 01.mkv",
+	}
+
+	rootInference := inferRootAssignments(filePaths, "mixed", 7, nil)
+	groupInference := inferGroupAssignments(filePaths, "mixed", 7, rootInference.Assignments)
+
+	if got, want := len(groupInference.ScannedGroups), 1; got != want {
+		t.Fatalf("len(ScannedGroups) = %d, want %d", got, want)
+	}
+	group := groupInference.ScannedGroups[0]
+	if got, want := group.InferredType, "series"; got != want {
+		t.Fatalf("InferredType = %q, want %q", got, want)
+	}
+	if group.TvdbID != "" {
+		t.Fatalf("TvdbID = %q, want empty", group.TvdbID)
+	}
+}
+
 func TestInferGroupAssignments_MovieEpisodeTokenFolderStaysResolved(t *testing.T) {
 	t.Parallel()
 

@@ -6,12 +6,43 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestTrustedIDValue_UsesMetadbContentID(t *testing.T) {
+func TestSelectInitialMatchCandidate_IgnoresLocalContentIDForTrustedSelection(t *testing.T) {
 	t.Parallel()
 
-	hints := &MatchHints{ContentID: "meta-123"}
-	if got := trustedIDValue(hints, "metadb"); got != "meta-123" {
-		t.Fatalf("trustedIDValue(metadb) = %q, want meta-123", got)
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			ContentID: "local-skeleton-id",
+			Title:     "AEW Worlds End",
+			Year:      2023,
+			Type:      "movie",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "AEW Worlds End",
+				Year:        2023,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1217341"},
+				Sources:     []string{"tmdb"},
+			},
+		},
+	)
+	if !ok || winner == nil {
+		t.Fatal("expected local content_id not to force trusted-ID matching")
+	}
+}
+
+func TestSuppressTitleYearFallbackForTrustedIDs_IgnoresMetadb(t *testing.T) {
+	t.Parallel()
+
+	query := suppressTitleYearFallbackForTrustedIDs(SearchQuery{
+		Title:       "AEW Worlds End",
+		Year:        2023,
+		ContentType: "movie",
+		ProviderIDs: map[string]string{"metadb": "local-skeleton-id"},
+	})
+
+	if query.Title != "AEW Worlds End" || query.Year != 2023 {
+		t.Fatalf("title/year were suppressed for metadb: title=%q year=%d", query.Title, query.Year)
 	}
 }
 
@@ -354,6 +385,194 @@ func TestSelectInitialMatchCandidate_AcceptsSinglePunctuationEquivalentCandidate
 				t.Fatalf("winner.Title = %q, want %q", winner.Title, tt.candidateTitle)
 			}
 		})
+	}
+}
+
+func TestSelectInitialMatchCandidate_AcceptsProviderTitleWithRepeatedYear(t *testing.T) {
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			Title: "AEW Worlds End",
+			Year:  2023,
+			Type:  "movie",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "AEW Worlds End 2023",
+				Year:        2023,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1217341"},
+				Sources:     []string{"tmdb"},
+			},
+			{
+				Title:       "AEW Worlds End 2023: Zero Hour",
+				Year:        2023,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1217342"},
+				Sources:     []string{"tmdb"},
+			},
+		},
+	)
+	if !ok || winner == nil {
+		t.Fatal("expected provider title with repeated release year to be accepted")
+	}
+	if winner.Title != "AEW Worlds End 2023" {
+		t.Fatalf("winner.Title = %q, want AEW Worlds End 2023", winner.Title)
+	}
+}
+
+func TestSelectInitialMatchCandidate_UsesDetailScoreForDuplicateProviderTie(t *testing.T) {
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			Title: "UFC 4 Revenge of the Warriors",
+			Year:  1994,
+			Type:  "movie",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1558410"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 18,
+			},
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "17508", "imdb": "tt0487980"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 46,
+			},
+		},
+	)
+	if !ok || winner == nil {
+		t.Fatal("expected richer duplicate TMDB candidate to be accepted")
+	}
+	if got := winner.ProviderIDs["tmdb"]; got != "17508" {
+		t.Fatalf("winner tmdb = %q, want 17508", got)
+	}
+}
+
+func TestSelectInitialMatchCandidate_RejectsDuplicateTieWithoutClearDetailGap(t *testing.T) {
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			Title: "UFC 4 Revenge of the Warriors",
+			Year:  1994,
+			Type:  "movie",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1558410"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 28,
+			},
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "17508"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 34,
+			},
+		},
+	)
+	if ok || winner != nil {
+		t.Fatal("expected duplicate tie without clear detail gap to remain unmatched")
+	}
+}
+
+func TestSelectInitialMatchCandidate_DetailScoreDoesNotOverrideDifferentTitleTie(t *testing.T) {
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			Title: "UFC 4 Revenge of the Warriors",
+			Year:  1994,
+			Type:  "movie",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "UFC 4: Revenge of the Warriors Event",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "17508"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 22,
+			},
+			{
+				Title:       "UFC 4 Revenge of the Warriors Bonus",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "999999", "imdb": "tt9999999"},
+				Sources:     []string{"imdb", "tmdb"},
+				DetailScore: 80,
+			},
+		},
+	)
+	if ok || winner != nil {
+		t.Fatal("expected richer different-title candidate to be rejected")
+	}
+}
+
+func TestSelectInitialMatchCandidate_DetailScoreRequiresDatedDuplicateCandidates(t *testing.T) {
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			Title: "UFC 4 Revenge of the Warriors",
+			Year:  1994,
+			Type:  "movie",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1558410"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 18,
+			},
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "17508", "imdb": "tt0487980"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 46,
+			},
+		},
+	)
+	if ok || winner != nil {
+		t.Fatal("expected duplicate detail tie-breaker to reject candidates without matching years")
+	}
+}
+
+func TestSelectInitialMatchCandidate_DetailScoreRequiresHintCompatibleType(t *testing.T) {
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{
+			Title: "UFC 4 Revenge of the Warriors",
+			Year:  1994,
+			Type:  "series",
+		},
+		[]MatchCandidate{
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "1558410"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 18,
+			},
+			{
+				Title:       "UFC 4: Revenge of the Warriors",
+				Year:        1994,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "17508", "imdb": "tt0487980"},
+				Sources:     []string{"tmdb"},
+				DetailScore: 46,
+			},
+		},
+	)
+	if ok || winner != nil {
+		t.Fatal("expected duplicate detail tie-breaker to reject candidates with hint-incompatible type")
 	}
 }
 

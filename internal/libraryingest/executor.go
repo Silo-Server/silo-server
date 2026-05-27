@@ -403,7 +403,7 @@ func scopeMatchPaths(folder *models.MediaFolder, mode scopeMode, scopePath strin
 }
 
 func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {
-	if folder == nil || !isTVLibraryType(folder.Type) {
+	if folder == nil || (!isTVLibraryType(folder.Type) && !isMixedLibraryType(folder.Type)) {
 		return false
 	}
 	if scanResult == nil {
@@ -419,6 +419,10 @@ func isTVLibraryType(libraryType string) bool {
 	default:
 		return false
 	}
+}
+
+func isMixedLibraryType(libraryType string) bool {
+	return strings.ToLower(strings.TrimSpace(libraryType)) == "mixed"
 }
 
 func (e *Executor) scan(ctx context.Context, folder *models.MediaFolder, mode scopeMode, scopePath string) ([]string, *scanner.ScanResult, error) {
