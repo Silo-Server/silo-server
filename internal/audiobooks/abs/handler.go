@@ -227,8 +227,10 @@ type Dependencies struct {
 	// PlaylistStore persists ABS playlist rows (migrations 151 + 152).
 	// May be nil; handlers respond 503 when unset.
 	PlaylistStore PlaylistStore
-	// SmartCollectionStore persists abs_smart_collections rows
-	// (migration 153). May be nil; handlers respond 503 when unset.
+	// SmartCollectionStore persists user_personal_collections rows with
+	// collection_type='smart' (migration 156 unified the old
+	// abs_smart_collections table into the canonical store).
+	// May be nil; handlers respond 503 when unset.
 	SmartCollectionStore SmartCollectionStore
 	// RSSFeedStore persists abs_rss_feeds rows (migration 155).
 	// May be nil; handlers respond 503 when unset.

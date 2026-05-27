@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
-// SmartCollectionStore is the narrow slice of abs_smart_collections
-// the handlers need.
+// SmartCollectionStore is the narrow slice of user_personal_collections
+// (collection_type='smart') the handlers need. Post-migration-156 smart
+// collections share the unified canonical table; membership is computed
+// at request time via the smartcoll package (no items table).
 type SmartCollectionStore interface {
 	ListUserSmartCollections(ctx context.Context, userID, profileID string) ([]SmartCollection, error)
 	GetSmartCollection(ctx context.Context, id string) (SmartCollection, error)
@@ -16,9 +18,10 @@ type SmartCollectionStore interface {
 	DeleteSmartCollection(ctx context.Context, id string) error
 }
 
-// SmartCollection mirrors an abs_smart_collections row. QueryDef holds
-// the raw JSONB bytes (decoded only on the /items route where rules
-// are evaluated).
+// SmartCollection mirrors a user_personal_collections row with
+// collection_type='smart'. QueryDef holds the raw JSONB bytes from
+// query_definition (decoded only on the /items route where rules are
+// evaluated).
 type SmartCollection struct {
 	ID          string
 	UserID      string

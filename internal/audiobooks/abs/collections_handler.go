@@ -386,7 +386,7 @@ func (h *Handler) handleRemoveCollectionBook(w http.ResponseWriter, r *http.Requ
 }
 
 // handleDeleteCollection — DELETE /collections/{id}.
-// Owner-only. Cascade drops abs_collection_items via FK CASCADE.
+// Owner-only. Cascade drops user_personal_collection_items via FK CASCADE.
 // 204 on success; 404 for unknown or non-owned.
 func (h *Handler) handleDeleteCollection(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)

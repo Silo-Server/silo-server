@@ -5,9 +5,11 @@ import (
 	"time"
 )
 
-// PlaylistStore is the narrow slice of abs_playlists + abs_playlist_items
-// the playlists handlers need. Implemented by ABSPlaylistStore in
-// internal/audiobooks/abs_playlist_store.go.
+// PlaylistStore is the narrow slice of user_personal_collections
+// (collection_type='playlist') and user_personal_collection_items the
+// playlists handlers need. Implemented by ABSPlaylistStore in
+// internal/audiobooks/abs_playlist_store.go; post-migration-156 it reads
+// the unified canonical tables.
 type PlaylistStore interface {
 	ListUserPlaylists(ctx context.Context, userID, profileID string) ([]Playlist, error)
 	GetPlaylist(ctx context.Context, id string) (Playlist, error)
@@ -19,7 +21,8 @@ type PlaylistStore interface {
 	RemovePlaylistItem(ctx context.Context, playlistID, libraryItemID, episodeID string) error
 }
 
-// Playlist is the in-memory representation of an abs_playlists row.
+// Playlist is the in-memory representation of a user_personal_collections
+// row with collection_type='playlist'.
 type Playlist struct {
 	ID          string
 	UserID      string
@@ -32,7 +35,9 @@ type Playlist struct {
 	UpdatedAt   time.Time
 }
 
-// PlaylistItem is the in-memory representation of an abs_playlist_items row.
+// PlaylistItem is the in-memory representation of a
+// user_personal_collection_items row scoped to a playlist (sub_item_id
+// may be non-empty for podcast-episode entries).
 type PlaylistItem struct {
 	PlaylistID    string
 	LibraryItemID string

@@ -5,10 +5,11 @@ import (
 	"time"
 )
 
-// CollectionStore is the narrow slice of the abs_user_collections +
-// abs_collection_items tables the collections handlers need.
-// Implemented by ABSCollectionStore in
-// internal/audiobooks/abs_collection_store.go.
+// CollectionStore is the narrow slice of user_personal_collections
+// (collection_type='manual') and user_personal_collection_items
+// (sub_item_id='') the collections handlers need. Implemented by
+// ABSCollectionStore in internal/audiobooks/abs_collection_store.go;
+// post-migration-156 it reads the unified canonical tables.
 type CollectionStore interface {
 	// ListUserCollections returns collections owned by (userID, profileID),
 	// ordered by created_at DESC. Empty slice (never nil) when none.
@@ -22,7 +23,8 @@ type CollectionStore interface {
 	// updated_at = now(). Owner check is the caller's responsibility.
 	UpdateCollection(ctx context.Context, c Collection) error
 	// DeleteCollection removes the collection and (via FK CASCADE) all
-	// its abs_collection_items. Returns nil even if no row matched.
+	// its user_personal_collection_items. Returns nil even if no row
+	// matched.
 	DeleteCollection(ctx context.Context, id string) error
 	// ListCollectionItems returns items ordered by added_at ASC.
 	// Empty slice (never nil) when none.
@@ -36,8 +38,8 @@ type CollectionStore interface {
 	RemoveCollectionItem(ctx context.Context, collectionID, libraryItemID string) error
 }
 
-// Collection is the in-memory representation of an
-// abs_user_collections row.
+// Collection is the in-memory representation of a
+// user_personal_collections row with collection_type='manual'.
 type Collection struct {
 	ID          string
 	UserID      string
@@ -49,8 +51,9 @@ type Collection struct {
 	UpdatedAt   time.Time
 }
 
-// CollectionItem is the in-memory representation of an
-// abs_collection_items row.
+// CollectionItem is the in-memory representation of a
+// user_personal_collection_items row scoped to a manual collection
+// (sub_item_id='').
 type CollectionItem struct {
 	CollectionID  string
 	LibraryItemID string

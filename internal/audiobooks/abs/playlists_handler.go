@@ -374,7 +374,7 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleDeletePlaylist — DELETE /playlists/{id}.
-// Owner-only. Cascade drops abs_playlist_items via FK.
+// Owner-only. Cascade drops user_personal_collection_items via FK.
 // Fires playlist_removed.
 func (h *Handler) handleDeletePlaylist(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
