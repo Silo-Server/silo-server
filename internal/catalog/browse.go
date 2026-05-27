@@ -762,9 +762,14 @@ func listDistinctPeopleByKindWithSource(
 
 // listDistinctAudiobookSeriesWithSource returns distinct series_name values
 // from audiobook_series joined onto the scoped result set. Names are trimmed
-// and case-folded in the ORDER BY so the picker doesn't show duplicates that
-// differ only by whitespace or casing — the literal series_name is still
+// and case-folded for sort so the picker doesn't show duplicates that differ
+// only by whitespace or casing — the literal trimmed series_name is still
 // returned so existing rules continue to match.
+//
+// The DISTINCT happens in an inline subquery (rather than directly on the
+// outer SELECT) so the outer ORDER BY can apply LOWER(...) without violating
+// Postgres' "ORDER BY expressions must appear in select list" rule for
+// SELECT DISTINCT.
 func listDistinctAudiobookSeriesWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -777,13 +782,15 @@ func listDistinctAudiobookSeriesWithSource(
 		return []string{}, nil
 	}
 	query := fmt.Sprintf(`
-		SELECT DISTINCT BTRIM(s.series_name) AS series_name
-		FROM %s
-		JOIN audiobook_series s ON s.content_id = mi.content_id
-		%s
-		  AND s.series_name IS NOT NULL
-		  AND BTRIM(s.series_name) <> ''
-		ORDER BY LOWER(BTRIM(s.series_name)) ASC
+		SELECT name FROM (
+			SELECT DISTINCT BTRIM(s.series_name) AS name
+			FROM %s
+			JOIN audiobook_series s ON s.content_id = mi.content_id
+			%s
+			  AND s.series_name IS NOT NULL
+			  AND BTRIM(s.series_name) <> ''
+		) names
+		ORDER BY LOWER(name) ASC
 	`, fromClause, browseFilterPrefix(whereClause))
 	return queryDistinctStrings(ctx, pool, query, args)
 }
