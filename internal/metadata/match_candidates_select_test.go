@@ -77,6 +77,48 @@ func TestSelectInitialMatchCandidate_ConflictingProviderIDsNotAccepted(t *testin
 	}
 }
 
+func TestSelectInitialMatchCandidate_CrossSourceNoHintYearAcceptedByMultiSource(t *testing.T) {
+	// Hint has NO year (0). Both providers return the same show (year 1999), tied.
+	// Multi-source agreement substitutes for the missing hint year.
+	hints := &MatchHints{Title: "100 Deeds for Eddie McDowd", Year: 0, Type: "series"}
+	cands := []MatchCandidate{
+		{Title: "100 Deeds for Eddie McDowd", Year: 1999, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "72450"}},
+		{Title: "100 Deeds for Eddie McDowd", Year: 1999, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "6518"}},
+	}
+	got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb", "tmdb"})
+	if !ok || got == nil || got.ProviderIDs["tvdb"] != "72450" {
+		t.Fatalf("expected tvdb winner via multi-source corroboration, got ok=%v cand=%+v", ok, got)
+	}
+}
+
+func TestSelectInitialMatchCandidate_CrossSourceNoCandidateYearNotAccepted(t *testing.T) {
+	// Both providers return the same title but neither carries a release year.
+	// Year-equality between two 0-years is meaningless, so
+	// candidatesAreSingleDistinctShow must reject and the multi-source
+	// corroboration arm must NOT fire — otherwise two no-year cross-source
+	// results would auto-accept, over-accepting ambiguous matches.
+	hints := &MatchHints{Title: "Untitled Show", Year: 0, Type: "series"}
+	cands := []MatchCandidate{
+		{Title: "Untitled Show", Year: 0, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "111"}},
+		{Title: "Untitled Show", Year: 0, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "222"}},
+	}
+	if got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb", "tmdb"}); ok {
+		t.Fatalf("no-year cross-source candidates must not be auto-accepted, got %+v", got)
+	}
+}
+
+func TestSelectInitialMatchCandidate_LoneNoYearSingleSourceNotAccepted(t *testing.T) {
+	// Single candidate, no hint year, single source: no year corroboration AND only
+	// one source -> must NOT auto-accept (falls to the single-candidate >=70 gate).
+	hints := &MatchHints{Title: "Some Obscure Show", Year: 0, Type: "series"}
+	cands := []MatchCandidate{
+		{Title: "Some Obscure Show", Year: 1999, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "999"}},
+	}
+	if got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb"}); ok {
+		t.Fatalf("lone no-year single-source result must not be auto-accepted, got %+v", got)
+	}
+}
+
 func TestSelectInitialMatchCandidate_CrossSourceTieResolvedByProviderPriority(t *testing.T) {
 	// "100 Days Wild" (2020, series, no shared IDs): TVDB and TMDB each return the correct
 	// show (score 83 each: 45 exact title + 20 year + 12 source + 5 has IDs + 1 richness).

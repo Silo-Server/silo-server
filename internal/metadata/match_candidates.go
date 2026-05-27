@@ -430,6 +430,22 @@ func pickByProviderPriority(group []scoredMatchCandidate, providerPriority []str
 	return &group[0].candidate
 }
 
+// distinctSourceCount returns how many distinct providers (case-insensitive
+// Sources values) appear across the candidate group — i.e. how many independent
+// providers returned this show.
+func distinctSourceCount(group []scoredMatchCandidate) int {
+	seen := make(map[string]struct{})
+	for _, c := range group {
+		for _, s := range c.candidate.Sources {
+			s = strings.ToLower(strings.TrimSpace(s))
+			if s != "" {
+				seen[s] = struct{}{}
+			}
+		}
+	}
+	return len(seen)
+}
+
 func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate, providerPriority []string) (*MatchCandidate, bool) {
 	if len(candidates) == 0 {
 		return nil, false
@@ -495,14 +511,19 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 	// Residual risk: two different shows with an identical title+year and no
 	// provider IDs would both pass; accepted as low-risk given the title+year+type
 	// corroboration.
-	if hints.Year != 0 && best.candidate.Year == hints.Year &&
-		candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) {
+	if candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) {
 		topGroup := topTieGroup(scoredCandidates)
 		if candidatesAreSingleDistinctShow(best.candidate, topGroup) {
-			// One distinct show, possibly returned by several providers and clearly
-			// ahead of any different show below. Accept it, choosing the winner by
-			// the library's metadata-provider priority (falls back to top-scored).
-			return pickByProviderPriority(topGroup, providerPriority), true
+			yearCorroborated := hints.Year != 0 && best.candidate.Year == hints.Year
+			// Cross-source agreement (the same title+year returned by 2+ distinct
+			// providers, which candidatesAreSingleDistinctShow already verified) is
+			// strong independent corroboration — it stands in for a missing hint year
+			// (folders without a "(YYYY)"). A lone single-source no-year result is NOT
+			// accepted here and stays subject to the single-candidate >=70 gate.
+			multiSourceCorroborated := distinctSourceCount(topGroup) >= 2
+			if yearCorroborated || multiSourceCorroborated {
+				return pickByProviderPriority(topGroup, providerPriority), true
+			}
 		}
 	}
 	if len(scoredCandidates) == 1 {
