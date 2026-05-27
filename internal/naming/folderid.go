@@ -69,6 +69,9 @@ func ParseFolderIDs(folderName string, folderType string) *FolderIDHints {
 
 	// A bare trailing number is only an ID when appended to a real title. If the
 	// name has no letters (e.g. "86", "22 7"), it's a numeric title, not an ID.
+	// Trade-off: a folder named ONLY a bare provider id (e.g. "81189") with no
+	// title text now returns nil rather than that id — acceptable because
+	// Sonarr/Radarr never produce bare-number folders.
 	if !containsLetter(trimmed) {
 		return nil
 	}

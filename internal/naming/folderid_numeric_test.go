@@ -22,4 +22,16 @@ func TestParseFolderIDs_NumericTitleIsNotAnID(t *testing.T) {
 	if got == nil || got.TmdbID != "27205" {
 		t.Errorf(`ParseFolderIDs("{tmdb-27205}","movies") = %+v, want TmdbID="27205"`, got)
 	}
+
+	// Non-Latin (CJK) title with a trailing real id must still parse —
+	// unicode.IsLetter covers kana/kanji, so this is treated as title + id.
+	got = ParseFolderIDs("進撃の巨人 73743", "series")
+	if got == nil || got.TvdbID != "73743" {
+		t.Errorf(`ParseFolderIDs("進撃の巨人 73743","series") = %+v, want TvdbID="73743"`, got)
+	}
+
+	// Numeric-only title for a movies library is also not an id.
+	if got := ParseFolderIDs("86", "movies"); got != nil {
+		t.Errorf(`ParseFolderIDs("86","movies") = %+v, want nil`, got)
+	}
 }
