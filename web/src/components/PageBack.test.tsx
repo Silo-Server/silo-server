@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -18,6 +18,11 @@ vi.mock("react-router", async () => {
 import PageBack from "./PageBack";
 
 describe("PageBack", () => {
+  afterEach(() => {
+    mocks.navigate.mockClear();
+    window.history.replaceState(null, "");
+  });
+
   it("renders a button with the default 'Go back' aria-label", () => {
     render(
       <MemoryRouter>
@@ -38,8 +43,21 @@ describe("PageBack", () => {
     expect(screen.getByRole("button", { name: "Return to library" })).toBeInTheDocument();
   });
 
-  it("calls navigate(-1) on click", async () => {
-    mocks.navigate.mockClear();
+  it("falls back to the default route when there is no router history", async () => {
+    render(
+      <MemoryRouter>
+        <PageBack />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(mocks.navigate).toHaveBeenCalledTimes(1);
+    expect(mocks.navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("uses browser history when a router history entry is available", async () => {
+    window.history.replaceState({ idx: 1 }, "");
     render(
       <MemoryRouter>
         <PageBack />
@@ -50,6 +68,20 @@ describe("PageBack", () => {
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
     expect(mocks.navigate).toHaveBeenCalledWith(-1);
+  });
+
+  it("uses the explicit target when history preference is disabled", async () => {
+    window.history.replaceState({ idx: 1 }, "");
+    render(
+      <MemoryRouter>
+        <PageBack to="/collections" preferHistory={false} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(mocks.navigate).toHaveBeenCalledTimes(1);
+    expect(mocks.navigate).toHaveBeenCalledWith("/collections");
   });
 
   it("applies the documented positioning and glass styling", () => {

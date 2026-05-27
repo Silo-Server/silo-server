@@ -79,7 +79,7 @@ export default function PersonDetail() {
       {/* Person Header */}
       <section className="page-shell relative pt-8 pb-6 sm:pt-10 sm:pb-8">
         <PageBack />
-        <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+        <div className="mt-10 flex flex-col gap-6 sm:mt-12 lg:flex-row lg:gap-8">
           {/* Photo */}
           <div className="shrink-0 self-start">
             <div className="media-card-image aspect-[2/3] w-[140px] overflow-hidden rounded-lg sm:w-[180px]">

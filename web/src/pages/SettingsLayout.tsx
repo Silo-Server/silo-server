@@ -156,7 +156,7 @@ export default function SettingsLayout() {
   return (
     <div className="min-h-[100dvh]">
       <main className="page-shell-wide relative flex min-h-[100dvh] flex-col py-4 sm:py-6">
-        <PageBack floating />
+        <PageBack to="/" preferHistory={false} floating />
         <div className="page-header mt-10 gap-5 sm:mt-12">
           <div className="min-w-0 space-y-3">
             <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>

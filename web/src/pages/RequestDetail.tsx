@@ -40,8 +40,10 @@ export default function RequestDetail() {
   if (detail.isError || !detail.data) {
     return (
       <div className="page-shell relative space-y-3 py-12 text-center">
-        <PageBack />
-        <p className="text-foreground text-base font-semibold">Couldn't load this title.</p>
+        <PageBack to="/requests" />
+        <p className="text-foreground mt-10 text-base font-semibold sm:mt-12">
+          Couldn't load this title.
+        </p>
         <p className="text-muted-foreground text-sm">
           The TMDB record may be temporarily unavailable.
         </p>
@@ -58,7 +60,7 @@ export default function RequestDetail() {
     <div>
       <DetailHero
         title={item.title}
-        topNav={<PageBack />}
+        topNav={<PageBack to="/requests" />}
         context={<RequestContext mediaType={mediaType} />}
         studioLabel={studioLabel}
         backdropUrl={backdropUrl}

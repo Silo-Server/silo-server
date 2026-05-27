@@ -118,11 +118,12 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
   }, []);
 
   const headerTitle = isEdit ? draft.title || "Edit Collection" : "New Collection";
+  const backTarget = wizard.mode === "user" ? "/collections" : adminBackHref(wizard);
   const adminLibraries = wizard.mode === "admin" ? wizard.libraries : [];
 
   return (
     <div className="page-shell-wide relative space-y-6 py-4 sm:py-6">
-      <PageBack />
+      <PageBack to={backTarget} preferHistory={false} />
       <WizardHeader title={headerTitle} step={step} isEdit={isEdit} />
 
       {step === 1 ? (
@@ -171,6 +172,12 @@ function smartUserDraft(collection: Collection | null): CollectionBuilderValue {
     : createCollectionBuilderValue({ ...value, collection_type: "smart" });
 }
 
+function adminBackHref(props: AdminModeProps): string {
+  return props.initialLibraryId
+    ? `/admin/collections?libraryId=${props.initialLibraryId}`
+    : "/admin/collections";
+}
+
 function WizardHeader({
   title,
   step,
@@ -181,7 +188,7 @@ function WizardHeader({
   isEdit: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="mt-10 flex flex-wrap items-end justify-between gap-4 sm:mt-12">
       <div>
         <h1 className="page-title text-[clamp(1.75rem,3vw,2.5rem)]">{title}</h1>
         <p className="page-subtitle mt-1 text-sm">

@@ -32,8 +32,8 @@ export default function CollectionEditor() {
   if (id && !collection && !isLoading) {
     return (
       <div className="page-shell relative space-y-4 py-4 sm:py-6">
-        <PageBack />
-        <Card className="surface-panel rounded-[1.7rem] border-0 shadow-none">
+        <PageBack to="/collections" preferHistory={false} />
+        <Card className="surface-panel mt-10 rounded-[1.7rem] border-0 shadow-none sm:mt-12">
           <CardHeader>
             <CardTitle>Collection not found</CardTitle>
             <CardDescription>The selected collection could not be loaded.</CardDescription>
@@ -46,8 +46,8 @@ export default function CollectionEditor() {
   if (collection && isImportedCollection(collection)) {
     return (
       <div className="page-shell relative space-y-6 py-4 sm:py-6">
-        <PageBack />
-        <div>
+        <PageBack to="/collections" preferHistory={false} />
+        <div className="mt-10 sm:mt-12">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{collection.name}</h1>
           <p className="page-subtitle mt-1 text-sm sm:text-base">
             Edit what's local — name, libraries, sharing. Source-managed details (URL, schedule,
@@ -68,8 +68,8 @@ export default function CollectionEditor() {
   if (collection && collection.collection_type === "manual") {
     return (
       <div className="page-shell relative space-y-6 py-4 sm:py-6">
-        <PageBack />
-        <div>
+        <PageBack to="/collections" preferHistory={false} />
+        <div className="mt-10 sm:mt-12">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Edit {collection.name}</h1>
           <p className="page-subtitle mt-1 text-sm sm:text-base">
             Manual collections are curated by adding titles directly.
