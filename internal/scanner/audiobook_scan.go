@@ -300,19 +300,6 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 			return fmt.Errorf("upsert audiobook ASIN provider id: %w", err)
 		}
 	}
-	if len(parsed.Files) > 0 && s.imageCacher != nil {
-		poster, thumb := ExtractAndUploadAudiobookCover(ctx, FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID)
-		if poster != "" {
-			if _, err := s.fileRepo.Pool().Exec(ctx, `
-				UPDATE media_items
-				SET poster_path=$1, poster_thumbhash=$2, updated_at=NOW()
-				WHERE content_id=$3 AND (poster_path='' OR poster_path IS NULL)
-			`, poster, thumb, contentID); err != nil {
-				return fmt.Errorf("update audiobook poster_path: %w", err)
-			}
-		}
-	}
-
 	slog.Info("audiobook scan: indexed",
 		"folder_id", folder.ID,
 		"content_id", contentID,
