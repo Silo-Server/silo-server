@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles/subdl"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SubtitleProviderFactory creates a Provider from a config. Allows testing without real providers.
@@ -21,6 +22,8 @@ type SubtitleProviderFactory func(cfg *subtitles.ProviderConfig) (subtitles.Prov
 // AdminSubtitleHandler handles admin operations for subtitle provider management.
 type AdminSubtitleHandler struct {
 	repo            subtitles.Repository
+	manager         *subtitles.Manager
+	pool            *pgxpool.Pool
 	providerFactory SubtitleProviderFactory
 }
 

@@ -1,8 +1,7 @@
-import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft } from "lucide-react";
+import { useNavigate, useParams } from "react-router";
 
 import type { Collection, UserCollectionType } from "@/api/types";
-import { Button } from "@/components/ui/button";
+import PageBack from "@/components/PageBack";
 import { Card, CardHeader, CardDescription, CardTitle } from "@/components/ui/card";
 import { useCollections } from "@/hooks/queries/collections";
 
@@ -32,14 +31,9 @@ export default function CollectionEditor() {
 
   if (id && !collection && !isLoading) {
     return (
-      <div className="page-shell space-y-4 py-4 sm:py-6">
-        <Button asChild variant="ghost" className="w-fit px-0">
-          <Link to="/collections">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Collections
-          </Link>
-        </Button>
-        <Card className="surface-panel rounded-[1.7rem] border-0 shadow-none">
+      <div className="page-shell relative space-y-4 py-4 sm:py-6">
+        <PageBack to="/collections" preferHistory={false} />
+        <Card className="surface-panel mt-10 rounded-[1.7rem] border-0 shadow-none sm:mt-12">
           <CardHeader>
             <CardTitle>Collection not found</CardTitle>
             <CardDescription>The selected collection could not be loaded.</CardDescription>
@@ -51,21 +45,14 @@ export default function CollectionEditor() {
 
   if (collection && isImportedCollection(collection)) {
     return (
-      <div className="page-shell space-y-6 py-4 sm:py-6">
-        <div className="space-y-3">
-          <Button asChild variant="ghost" className="w-fit px-0">
-            <Link to="/collections">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Collections
-            </Link>
-          </Button>
-          <div>
-            <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{collection.name}</h1>
-            <p className="page-subtitle mt-1 text-sm sm:text-base">
-              Edit what's local — name, libraries, sharing. Source-managed details (URL, schedule,
-              item ordering) are locked.
-            </p>
-          </div>
+      <div className="page-shell relative space-y-6 py-4 sm:py-6">
+        <PageBack to="/collections" preferHistory={false} />
+        <div className="mt-10 sm:mt-12">
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">{collection.name}</h1>
+          <p className="page-subtitle mt-1 text-sm sm:text-base">
+            Edit what's local — name, libraries, sharing. Source-managed details (URL, schedule,
+            item ordering) are locked.
+          </p>
         </div>
         <ImportedCollectionEditor
           key={collection.id}
@@ -80,20 +67,13 @@ export default function CollectionEditor() {
   // the wizard so users can see the live card preview while tuning filters.
   if (collection && collection.collection_type === "manual") {
     return (
-      <div className="page-shell space-y-6 py-4 sm:py-6">
-        <div className="space-y-3">
-          <Button asChild variant="ghost" className="w-fit px-0">
-            <Link to="/collections">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Collections
-            </Link>
-          </Button>
-          <div>
-            <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Edit {collection.name}</h1>
-            <p className="page-subtitle mt-1 text-sm sm:text-base">
-              Manual collections are curated by adding titles directly.
-            </p>
-          </div>
+      <div className="page-shell relative space-y-6 py-4 sm:py-6">
+        <PageBack to="/collections" preferHistory={false} />
+        <div className="mt-10 sm:mt-12">
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Edit {collection.name}</h1>
+          <p className="page-subtitle mt-1 text-sm sm:text-base">
+            Manual collections are curated by adding titles directly.
+          </p>
         </div>
         <UserCollectionForm collection={collection} onClose={() => navigate("/collections")} />
         <section className="space-y-3">

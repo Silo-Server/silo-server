@@ -1058,6 +1058,7 @@ CREATE TABLE public.users (
     username text,
     password_hash text,
     role text,
+    permissions text[] DEFAULT '{}'::text[] NOT NULL,
     enabled boolean DEFAULT true,
     library_ids integer[],
     max_streams integer DEFAULT 6,

@@ -20,11 +20,13 @@ require (
 )
 
 require (
+	github.com/abadojack/whatlanggo v1.0.1
 	github.com/go-chi/cors v1.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/h2non/bimg v1.1.9
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/joho/godotenv v1.5.1
+	github.com/mmcdole/gofeed v1.3.0
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/zishang520/socket.io/v2 v2.5.0
@@ -45,7 +47,6 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
-	github.com/mmcdole/gofeed v1.3.0 // indirect
 	github.com/mmcdole/goxpp v1.1.1-0.20240225020742-a0c311522b23 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect

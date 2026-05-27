@@ -28,6 +28,7 @@ interface DetailHeroProps {
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
   variant?: "full" | "compact";
+  topNav?: ReactNode;
 }
 
 export default function DetailHero({
@@ -52,6 +53,7 @@ export default function DetailHero({
   scoreRow,
   crewLine,
   variant = "full",
+  topNav,
 }: DetailHeroProps) {
   const [backdropLoaded, setBackdropLoaded] = useState(false);
   const [posterLoaded, setPosterLoaded] = useState(false);
@@ -88,6 +90,7 @@ export default function DetailHero({
 
   return (
     <section className="item-detail-hero border-border/10 relative isolate overflow-hidden border-b">
+      {topNav}
       {(backdropUrl || backdropPlaceholder) && (
         <div
           className="absolute inset-0 h-full w-full"

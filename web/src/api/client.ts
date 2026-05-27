@@ -370,6 +370,65 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return JSON.parse(text) as T;
 }
 
+function buildApiHeaders(options: RequestInit = {}): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
+  }
+  if (accessToken) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+  const profileId = getProfileId();
+  if (profileId) {
+    headers["X-Profile-Id"] = profileId;
+  }
+  const profToken = getProfileToken();
+  if (profToken) {
+    headers["X-Profile-Token"] = profToken;
+  }
+  Object.assign(headers, getDeviceHeaders());
+  return headers;
+}
+
+/** Downloads a binary API response and triggers a browser file save. */
+export async function apiDownload(
+  path: string,
+  filename: string,
+  options: RequestInit = {},
+): Promise<void> {
+  let headers = buildApiHeaders(options);
+  let res = await fetch(`/api/v1${path}`, { ...options, headers });
+
+  if (res.status === 401 && getRefreshToken()) {
+    if (!refreshPromise) {
+      refreshPromise = attemptRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const refreshed = await refreshPromise;
+    if (refreshed) {
+      headers = buildApiHeaders(options);
+      headers["Authorization"] = `Bearer ${accessToken}`;
+      res = await fetch(`/api/v1${path}`, { ...options, headers });
+    }
+  }
+
+  if (!res.ok) {
+    const apiErr = await parseApiError(res);
+    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 // People API
 export async function searchPeople(query: string, limit = 20): Promise<import("./types").Person[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });

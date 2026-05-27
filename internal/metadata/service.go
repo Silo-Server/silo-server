@@ -183,7 +183,7 @@ type metadataServiceHooks struct {
 	ensureSeriesEpisodeLinks  func(ctx context.Context, seriesID string) error
 }
 
-var trustedSearchIDKeys = []string{"metadb", "tmdb", "tvdb", "imdb"}
+var trustedSearchIDKeys = []string{"tmdb", "tvdb", "imdb"}
 
 var ErrMetadataNotFound = errors.New("no metadata found from any provider")
 
@@ -829,10 +829,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if req.Hints == nil {
 			return nil, fmt.Errorf("initial match requires hints")
 		}
-		// Seed IDs from hints.
-		if req.Hints.ContentID != "" {
-			accumulatedIDs["metadb"] = req.Hints.ContentID
-		}
+		// Seed external IDs from hints. Hints.ContentID is Silo's local
+		// skeleton item ID, not a searchable provider ID.
 		if req.Hints.FileHash != "" {
 			accumulatedIDs["oshash"] = req.Hints.FileHash
 		}
@@ -962,8 +960,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			return nil, err
 		}
 
-		// Run search providers to resolve the metadb ID from external IDs.
-		// Without this, GetMetadata has no valid metadb ID to fetch from.
+		// Run search providers to refresh provider IDs before fetching full metadata.
 		searchQuery := SearchQuery{
 			Title:       existing.Title,
 			Year:        existing.Year,

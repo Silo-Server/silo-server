@@ -39,6 +39,7 @@ var demoBlockedRoutes = []blockedRoute{
 	{methods: []string{"POST", "DELETE"}, prefix: "/api/v1/downloads"},
 	{methods: []string{"POST"}, prefix: "/api/v1/history-imports"},
 	{methods: []string{"POST"}, prefix: "/api/v1/subtitles/download"},
+	{methods: []string{"POST"}, prefix: "/api/v1/subtitles/upload"},
 	{methods: []string{"DELETE"}, prefix: "/api/v1/subtitles/"},
 }
 

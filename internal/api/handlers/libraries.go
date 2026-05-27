@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -570,10 +571,10 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		initialScanID := ulid.Make().String()
-		h.recordAcceptedScan(initialScanID, &resolvedScanTarget{
-			folder:  folder,
-			mode:    scanModeLibrary,
-			trigger: "library_created",
+		h.recordAcceptedScan(initialScanID, &scantrigger.Target{
+			Folder:  folder,
+			Mode:    scantrigger.ModeLibrary,
+			Trigger: "library_created",
 		})
 		h.runFolderScanAsync(initialScanID, folder, "library_created")
 	}
@@ -660,10 +661,10 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 			}
 		} else {
 			updateScanID := ulid.Make().String()
-			h.recordAcceptedScan(updateScanID, &resolvedScanTarget{
-				folder:  folder,
-				mode:    scanModeLibrary,
-				trigger: "library_paths_changed",
+			h.recordAcceptedScan(updateScanID, &scantrigger.Target{
+				Folder:  folder,
+				Mode:    scantrigger.ModeLibrary,
+				Trigger: "library_paths_changed",
 			})
 			h.runFolderScanAsync(updateScanID, folder, "library_paths_changed")
 		}
@@ -791,29 +792,6 @@ func (h *LibraryHandler) HandleCheckLibraryMount(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, resp)
 }
 
-type scanMode string
-
-const (
-	scanModeLibrary scanMode = "library"
-	scanModeSubtree scanMode = "subtree"
-	scanModeFile    scanMode = "file"
-)
-
-type resolvedScanTarget struct {
-	folder  *models.MediaFolder
-	mode    scanMode
-	path    string
-	trigger string
-}
-
-type scanRequestError struct {
-	status  int
-	code    string
-	message string
-}
-
-func (e *scanRequestError) Error() string { return e.message }
-
 // HandleScan handles POST /scan. It accepts either a library_id, a path, or both
 // and dispatches to full-library, subtree, or single-file scanning.
 func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
@@ -823,11 +801,14 @@ func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target, err := h.resolveScanTarget(r.Context(), req)
+	target, err := scantrigger.NewResolver(h.folderRepo).Resolve(r.Context(), scantrigger.Request{
+		LibraryID: req.LibraryID,
+		Path:      req.Path,
+	})
 	if err != nil {
-		var reqErr *scanRequestError
+		var reqErr *scantrigger.RequestError
 		if errors.As(err, &reqErr) {
-			writeError(w, reqErr.status, reqErr.code, reqErr.message)
+			writeError(w, reqErr.Status, reqErr.Code, reqErr.Message)
 			return
 		}
 		slog.Error("resolving scan target", "error", err)
@@ -836,21 +817,21 @@ func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.ScanQueue != nil {
-		if _, err := h.ScanQueue.EnqueueScan(r.Context(), target.folder.ID, string(target.mode), target.path, target.trigger); err != nil {
-			slog.Error("queueing library scan", "library_id", target.folder.ID, "error", err)
+		if _, err := h.ScanQueue.EnqueueScan(r.Context(), target.Folder.ID, target.Mode, target.Path, target.Trigger); err != nil {
+			slog.Error("queueing library scan", "library_id", target.Folder.ID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue scan")
 			return
 		}
 	} else if h.ingester != nil {
 		scanID := ulid.Make().String()
 		h.recordAcceptedScan(scanID, target)
-		switch target.mode {
-		case scanModeFile:
-			h.runFileScanAsync(scanID, target.folder, target.path, target.trigger)
-		case scanModeSubtree:
-			h.runSubtreeScanAsync(scanID, target.folder, target.path, target.trigger)
+		switch target.Mode {
+		case scantrigger.ModeFile:
+			h.runFileScanAsync(scanID, target.Folder, target.Path, target.Trigger)
+		case scantrigger.ModeSubtree:
+			h.runSubtreeScanAsync(scanID, target.Folder, target.Path, target.Trigger)
 		default:
-			h.runFolderScanAsync(scanID, target.folder, target.trigger)
+			h.runFolderScanAsync(scanID, target.Folder, target.Trigger)
 		}
 	} else {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Scanner not available")
@@ -859,8 +840,8 @@ func (h *LibraryHandler) HandleScan(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusAccepted, scanResponse{
 		Status:    "accepted",
-		Mode:      string(target.mode),
-		LibraryID: target.folder.ID,
+		Mode:      target.Mode,
+		LibraryID: target.Folder.ID,
 	})
 }
 
@@ -906,225 +887,6 @@ func (h *LibraryHandler) HandleScanCancel(w http.ResponseWriter, r *http.Request
 		Cancelled: cancelled,
 		LibraryID: req.LibraryID,
 	})
-}
-
-func (h *LibraryHandler) resolveScanTarget(ctx context.Context, req scanRequest) (*resolvedScanTarget, error) {
-	if req.LibraryID == nil && strings.TrimSpace(req.Path) == "" {
-		return nil, &scanRequestError{
-			status:  http.StatusBadRequest,
-			code:    "bad_request",
-			message: "Either library_id or path is required",
-		}
-	}
-
-	var (
-		folder *models.MediaFolder
-		err    error
-	)
-	if req.LibraryID != nil {
-		folder, err = h.folderRepo.GetByID(ctx, *req.LibraryID)
-		if err != nil {
-			if errors.Is(err, catalog.ErrFolderNotFound) {
-				return nil, &scanRequestError{
-					status:  http.StatusNotFound,
-					code:    "not_found",
-					message: "Library not found",
-				}
-			}
-			return nil, fmt.Errorf("fetching library for scan: %w", err)
-		}
-	}
-
-	if strings.TrimSpace(req.Path) == "" {
-		if folder != nil && !folder.Enabled {
-			return nil, &scanRequestError{
-				status:  http.StatusConflict,
-				code:    "conflict",
-				message: "Library is disabled",
-			}
-		}
-		return &resolvedScanTarget{
-			folder:  folder,
-			mode:    scanModeLibrary,
-			trigger: "manual",
-		}, nil
-	}
-
-	cleanPath := filepath.Clean(req.Path)
-	var matchedRoot string
-	if folder != nil {
-		matchedRoot, err = longestMatchingRoot(cleanPath, folder.Paths)
-		if err != nil {
-			return nil, err
-		}
-		if matchedRoot == "" {
-			return nil, &scanRequestError{
-				status:  http.StatusBadRequest,
-				code:    "bad_request",
-				message: "Path does not belong to the specified library",
-			}
-		}
-	} else {
-		folders, err := h.folderRepo.List(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("listing libraries for scan: %w", err)
-		}
-		folder, matchedRoot, err = matchFolderForPath(cleanPath, folders)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if folder != nil && !folder.Enabled {
-		return nil, &scanRequestError{
-			status:  http.StatusConflict,
-			code:    "conflict",
-			message: "Library is disabled",
-		}
-	}
-
-	mode, err := classifyScanPath(cleanPath, matchedRoot)
-	if err != nil {
-		return nil, err
-	}
-
-	trigger := "path"
-	if req.LibraryID != nil {
-		trigger = "library_id_path"
-	}
-
-	return &resolvedScanTarget{
-		folder:  folder,
-		mode:    mode,
-		path:    cleanPath,
-		trigger: trigger,
-	}, nil
-}
-
-func longestMatchingRoot(targetPath string, roots []string) (string, error) {
-	bestRoot := ""
-	bestLen := -1
-	for _, root := range roots {
-		if !pathWithinRoot(targetPath, root) {
-			continue
-		}
-		cleanRoot := filepath.Clean(root)
-		rootLen := len(cleanRoot)
-		if rootLen > bestLen {
-			bestRoot = cleanRoot
-			bestLen = rootLen
-		}
-	}
-	return bestRoot, nil
-}
-
-func matchFolderForPath(targetPath string, folders []*models.MediaFolder) (*models.MediaFolder, string, error) {
-	var (
-		bestFolder *models.MediaFolder
-		bestRoot   string
-		bestLen    = -1
-		ambiguous  bool
-	)
-
-	for _, folder := range folders {
-		if folder == nil {
-			continue
-		}
-		root, err := longestMatchingRoot(targetPath, folder.Paths)
-		if err != nil {
-			return nil, "", err
-		}
-		if root == "" {
-			continue
-		}
-		rootLen := len(root)
-		if rootLen > bestLen {
-			bestFolder = folder
-			bestRoot = root
-			bestLen = rootLen
-			ambiguous = false
-			continue
-		}
-		if rootLen == bestLen && bestFolder != nil && folder.ID != bestFolder.ID {
-			ambiguous = true
-		}
-	}
-
-	if ambiguous {
-		return nil, "", &scanRequestError{
-			status:  http.StatusBadRequest,
-			code:    "bad_request",
-			message: "Path matches multiple libraries",
-		}
-	}
-	if bestFolder == nil {
-		return nil, "", &scanRequestError{
-			status:  http.StatusBadRequest,
-			code:    "bad_request",
-			message: "No library matches the given path",
-		}
-	}
-	return bestFolder, bestRoot, nil
-}
-
-func classifyScanPath(targetPath, matchedRoot string) (scanMode, error) {
-	if filepath.Clean(targetPath) == filepath.Clean(matchedRoot) {
-		return scanModeLibrary, nil
-	}
-
-	info, err := os.Stat(targetPath)
-	if err != nil {
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			return "", &scanRequestError{
-				status:  http.StatusBadRequest,
-				code:    "bad_request",
-				message: "Path does not exist",
-			}
-		case errors.Is(err, os.ErrPermission):
-			return "", &scanRequestError{
-				status:  http.StatusBadRequest,
-				code:    "bad_request",
-				message: "Permission denied for path",
-			}
-		default:
-			return "", &scanRequestError{
-				status:  http.StatusBadRequest,
-				code:    "bad_request",
-				message: "Path could not be inspected",
-			}
-		}
-	}
-	if info.IsDir() {
-		return scanModeSubtree, nil
-	}
-	if !info.Mode().IsRegular() {
-		return "", &scanRequestError{
-			status:  http.StatusBadRequest,
-			code:    "bad_request",
-			message: "Path must be a file or directory",
-		}
-	}
-	if !scanner.SupportsVideoFile(targetPath) {
-		return "", &scanRequestError{
-			status:  http.StatusBadRequest,
-			code:    "bad_request",
-			message: "Unsupported media file extension",
-		}
-	}
-	return scanModeFile, nil
-}
-
-func pathWithinRoot(targetPath, rootPath string) bool {
-	cleanTarget := filepath.Clean(targetPath)
-	cleanRoot := filepath.Clean(rootPath)
-	rel, err := filepath.Rel(cleanRoot, cleanTarget)
-	if err != nil {
-		return false
-	}
-	if rel == "." || rel == "" {
-		return true
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (h *LibraryHandler) runFolderScanAsync(scanID string, folder *models.MediaFolder, trigger string) {
@@ -1287,16 +1049,16 @@ func (h *LibraryHandler) runFileScanAsync(scanID string, folder *models.MediaFol
 	}()
 }
 
-func (h *LibraryHandler) recordAcceptedScan(scanID string, target *resolvedScanTarget) {
-	if h == nil || h.ScanRegistry == nil || target == nil || target.folder == nil {
+func (h *LibraryHandler) recordAcceptedScan(scanID string, target *scantrigger.Target) {
+	if h == nil || h.ScanRegistry == nil || target == nil || target.Folder == nil {
 		return
 	}
 	h.ScanRegistry.Upsert(evt.ScanRun{
 		ID:        scanID,
-		LibraryID: target.folder.ID,
-		Mode:      string(target.mode),
-		Path:      target.path,
-		Trigger:   target.trigger,
+		LibraryID: target.Folder.ID,
+		Mode:      target.Mode,
+		Path:      target.Path,
+		Trigger:   target.Trigger,
 		Status:    "accepted",
 	})
 }

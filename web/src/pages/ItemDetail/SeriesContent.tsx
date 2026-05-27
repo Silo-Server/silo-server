@@ -14,6 +14,7 @@ import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
+import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
 import SeasonCarousel from "./SeasonCarousel";
@@ -25,12 +26,14 @@ import ActionBar from "./components/ActionBar";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { getWatchedActionLabel } from "./watchedState";
+import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 export default function SeriesContent({ item }: { item: ItemDetail & { type: "series" } }) {
   const navigate = useNavigate();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const canCurateMetadata = canCurateMetadataForUser(user);
 
   const isFavorite = item.user_state?.is_favorite ?? false;
   const inWatchlist = item.user_state?.in_watchlist ?? false;
@@ -116,6 +119,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
     <div>
       <DetailHero
         title={title}
+        topNav={<PageBack />}
         context="Series"
         studioLabel={firstNetwork}
         backdropUrl={item.backdrop_url}
@@ -156,17 +160,21 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
             isFavorite={isFavorite}
             onToggleWatchlist={() => toggleWatchlistMutation.mutate(inWatchlist)}
             inWatchlist={inWatchlist}
-            onRefresh={(mode) =>
-              refreshMetadataMutation.mutate({
-                item,
-                mode,
-                onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-              })
+            onRefresh={
+              canCurateMetadata
+                ? (mode) =>
+                    refreshMetadataMutation.mutate({
+                      item,
+                      mode,
+                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
+                    })
+                : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
             isAdmin={isAdmin}
-            onEditMetadata={isAdmin ? () => setEditOpen(true) : undefined}
-            onMatchItem={isAdmin ? () => setMatchOpen(true) : undefined}
+            canCurateMetadata={canCurateMetadata}
+            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+            onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
             rating={item.user_rating ?? null}
             onRatingChange={handleRatingChange}
           />
@@ -213,8 +221,10 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           )
         )}
       </div>
-      {isAdmin && <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />}
-      {isAdmin && (
+      {canCurateMetadata && (
+        <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
+      )}
+      {canCurateMetadata && (
         <MatchItemDialog
           key={item.content_id}
           item={item}

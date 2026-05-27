@@ -866,23 +866,34 @@ func main() {
 			if err != nil {
 				slog.Warn("failed to seed metadata queues", "error", err)
 			} else {
+				seedMovieQueue := func(folderID int) {
+					if movieQueueRepo == nil {
+						return
+					}
+					if err := movieQueueRepo.SyncForFolder(appCtx, folderID); err != nil {
+						slog.Warn("failed to seed movie match queue", "folder_id", folderID, "error", err)
+					}
+				}
+				seedSeriesQueue := func(folderID int) {
+					if seriesQueueRepo == nil {
+						return
+					}
+					if err := seriesQueueRepo.SyncForFolder(appCtx, folderID); err != nil {
+						slog.Warn("failed to seed series root queue", "folder_id", folderID, "error", err)
+					}
+				}
 				for _, folder := range enabledFolders {
 					if folder == nil {
 						continue
 					}
 					switch strings.ToLower(strings.TrimSpace(folder.Type)) {
 					case "movie", "movies":
-						if movieQueueRepo != nil {
-							if err := movieQueueRepo.SyncForFolder(appCtx, folder.ID); err != nil {
-								slog.Warn("failed to seed movie match queue", "folder_id", folder.ID, "error", err)
-							}
-						}
+						seedMovieQueue(folder.ID)
 					case "series", "tv", "show", "tvshows":
-						if seriesQueueRepo != nil {
-							if err := seriesQueueRepo.SyncForFolder(appCtx, folder.ID); err != nil {
-								slog.Warn("failed to seed series root queue", "folder_id", folder.ID, "error", err)
-							}
-						}
+						seedSeriesQueue(folder.ID)
+					case "mixed":
+						seedSeriesQueue(folder.ID)
+						seedMovieQueue(folder.ID)
 					}
 				}
 			}
@@ -1665,6 +1676,9 @@ func main() {
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)
+			compatDeps.APIKeyValidator = auth.NewAPIKeyRepository(deps.DB)
+			compatDeps.APIKeyUserLoader = userRepo
+			compatDeps.ScanQueue = deps.LibraryScanQueue
 			sessionRepo := auth.NewSessionRepository(deps.DB)
 			jwtService := auth.NewJWTService(
 				cfg.Auth.JWTSecret,

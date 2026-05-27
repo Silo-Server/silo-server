@@ -16,6 +16,7 @@ import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
+import PageBack from "@/components/PageBack";
 import EpisodeCarousel from "./components/EpisodeCarousel";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
@@ -35,6 +36,7 @@ import {
   type EpisodeNavigationState,
 } from "./itemDetailLayout";
 import { getWatchedActionLabel } from "./watchedState";
+import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 function formatDuration(minutes: number): string {
   if (minutes <= 0) return "";
@@ -49,6 +51,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const canCurateMetadata = canCurateMetadataForUser(user);
   const { profile: currentProfile } = useCurrentProfile();
   const [editOpen, setEditOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -221,6 +224,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     <div>
       <DetailHero
         title={title}
+        topNav={<PageBack />}
         context={
           <div className="space-y-3">
             <DetailBreadcrumb segments={breadcrumbSegments} />
@@ -294,12 +298,15 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             watchedLabel={getWatchedActionLabel(item)}
             onToggleWatched={() => watchedMutation.mutate(!(item.user_data?.played ?? false))}
             isUpdatingWatched={watchedMutation.isPending}
-            onRefresh={(mode) =>
-              refreshMetadataMutation.mutate({
-                item,
-                mode,
-                onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-              })
+            onRefresh={
+              canCurateMetadata
+                ? (mode) =>
+                    refreshMetadataMutation.mutate({
+                      item,
+                      mode,
+                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
+                    })
+                : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
             onRedetectIntro={
@@ -307,7 +314,8 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             }
             isRedetectingIntro={redetectIntroMutation.isPending}
             isAdmin={isAdmin}
-            onEditMetadata={isAdmin ? () => setEditOpen(true) : undefined}
+            canCurateMetadata={canCurateMetadata}
+            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             versions={item.versions ?? []}
             playbackVariants={item.playback_variants}
             selectedVersion={selectedVersion}
@@ -340,7 +348,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       />
 
       <div className="page-shell space-y-12 py-10 sm:space-y-14">
-        {isAdmin && <MediaLocations title="Media locations" versions={item.versions} />}
+        {canCurateMetadata && <MediaLocations title="Media locations" versions={item.versions} />}
 
         {/* More Episodes carousel — most useful, so show first */}
         {siblingsLoading ? (
@@ -367,7 +375,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
 
         {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
       </div>
-      {isAdmin && <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />}
+      {canCurateMetadata && (
+        <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
+      )}
       <DownloadVersionPicker
         open={downloadOpen}
         onOpenChange={setDownloadOpen}

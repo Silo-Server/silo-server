@@ -50,6 +50,7 @@ import AdminCollectionEditor from "@/pages/AdminCollectionEditor";
 import AdminPlaybackHistory from "@/pages/AdminPlaybackHistory";
 import AdminMaintenance from "@/pages/AdminMaintenance";
 import AdminApiKeys from "@/pages/AdminApiKeys";
+import AdminSubtitles from "@/pages/AdminSubtitles";
 import AdminUserDetail from "@/pages/AdminUserDetail";
 import AdminTasks from "@/pages/AdminTasks";
 import AdminTaskDetail from "@/pages/AdminTaskDetail";
@@ -385,6 +386,7 @@ function AppRoutes() {
                   <Route path="settings" element={<AdminSettingsLayout />} />
                   <Route path="recommendations" element={<AdminRecommendations />} />
                   <Route path="api-keys" element={<AdminApiKeys />} />
+                  <Route path="subtitles" element={<AdminSubtitles />} />
                   <Route path="tasks" element={<AdminTasks />} />
                   <Route path="tasks/:key" element={<AdminTaskDetail />} />
                   <Route path="stats" element={<Navigate to="/admin" replace />} />

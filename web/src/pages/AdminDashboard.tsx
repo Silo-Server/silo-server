@@ -40,34 +40,15 @@ import type {
 } from "@/api/types";
 
 export default function AdminDashboard() {
-  const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useAdminStats();
-  const {
-    data: sessions = [],
-    isLoading: sessionsLoading,
-    refetch: refreshSessions,
-  } = useAdminSessions();
-  const { data: libraries = [] } = useAdminLibraries();
-  const { data: users = [] } = useAdminUsers();
+  const statsQuery = useAdminStats();
+  const sessionsQuery = useAdminSessions();
+  const librariesQuery = useAdminLibraries();
+  const usersQuery = useAdminUsers();
   const scanAll = useScanAllLibraries();
 
-  const loading = statsLoading || sessionsLoading;
-
-  if (loading)
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-2xl" />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Skeleton key={i} className="h-32 rounded-2xl" />
-          ))}
-        </div>
-        <Skeleton className="h-64 rounded-2xl" />
-      </div>
-    );
+  const sessions = sessionsQuery.data ?? [];
+  const libraries = librariesQuery.data ?? [];
+  const users = usersQuery.data ?? [];
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -84,8 +65,8 @@ export default function AdminDashboard() {
             variant="outline"
             size="sm"
             onClick={() => {
-              refetchStats();
-              void refreshSessions();
+              void statsQuery.refetch();
+              void sessionsQuery.refetch();
             }}
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -99,7 +80,7 @@ export default function AdminDashboard() {
                 scanAll.mutate();
               }
             }}
-            disabled={scanAll.isPending}
+            disabled={scanAll.isPending || libraries.length === 0}
           >
             <ScanLine className="h-3.5 w-3.5" />
             Scan All Libraries
@@ -107,56 +88,67 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Stats row */}
-      {stats && <StatsRow stats={stats} sessionCount={sessions.length} />}
+      <StatsRow
+        stats={statsQuery.data}
+        sessionCount={sessions.length}
+        isLoading={statsQuery.isLoading}
+        error={statsQuery.error}
+      />
 
-      {stats?.watch_provider_activity && (
-        <TraktActivityCard activity={stats.watch_provider_activity} />
+      {statsQuery.data?.watch_provider_activity && (
+        <TraktActivityCard activity={statsQuery.data.watch_provider_activity} />
       )}
 
-      {/* Now Playing */}
-      {sessions.length > 0 && (
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-base font-bold">Now Playing</div>
-            <Link
-              to="/admin/activity"
-              className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
-            >
-              View all {sessions.length} streams ›
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-            {sessions.slice(0, 4).map((session) => (
-              <StreamCard key={session.session_id} session={session} />
-            ))}
-          </div>
-          {sessions.length > 4 && (
-            <Link
-              to="/admin/activity"
-              className="text-muted-foreground hover:text-primary mt-2 block text-center text-[12px] transition-colors"
-            >
-              +{sessions.length - 4} more active streams
-            </Link>
-          )}
-        </div>
-      )}
+      <NowPlayingSection
+        sessions={sessions}
+        isLoading={sessionsQuery.isLoading}
+        error={sessionsQuery.error}
+      />
 
-      {/* Two-column: Libraries + Users */}
       <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-[1.4fr_1fr]">
-        <LibrariesCard libraries={libraries} />
-        <UsersCard users={users} />
+        <LibrariesCard
+          libraries={libraries}
+          isLoading={librariesQuery.isLoading}
+          error={librariesQuery.error}
+        />
+        <UsersCard users={users} isLoading={usersQuery.isLoading} error={usersQuery.error} />
       </div>
 
-      {/* Recent Activity */}
-      <ActivityCard sessions={sessions} />
+      <ActivityCard
+        sessions={sessions}
+        isLoading={sessionsQuery.isLoading}
+        error={sessionsQuery.error}
+      />
     </div>
   );
 }
 
 // --- Sub-components ---
 
-function StatsRow({ stats, sessionCount }: { stats: AdminStats; sessionCount: number }) {
+function StatsRow({
+  stats,
+  sessionCount,
+  isLoading,
+  error,
+}: {
+  stats: AdminStats | undefined;
+  sessionCount: number;
+  isLoading: boolean;
+  error: unknown;
+}) {
+  if (isLoading || !stats) {
+    if (error) {
+      return <SectionError message="Failed to load stats." />;
+    }
+    return (
+      <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-24 rounded-2xl" />
+        ))}
+      </div>
+    );
+  }
+
   const storageGB = stats.total_storage_bytes / (1024 * 1024 * 1024);
   const storageTB = storageGB / 1024;
   const storageDisplay =
@@ -411,7 +403,71 @@ function StreamCard({ session }: { session: AdminSession }) {
   );
 }
 
-function LibrariesCard({ libraries }: { libraries: LibraryType[] }) {
+function NowPlayingSection({
+  sessions,
+  isLoading,
+  error,
+}: {
+  sessions: AdminSession[];
+  isLoading: boolean;
+  error: unknown;
+}) {
+  if (error) return null;
+
+  if (isLoading) {
+    return (
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-base font-bold">Now Playing</div>
+        </div>
+        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Skeleton key={i} className="h-[120px] rounded-2xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (sessions.length === 0) return null;
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-base font-bold">Now Playing</div>
+        <Link
+          to="/admin/activity"
+          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+        >
+          View all {sessions.length} streams ›
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+        {sessions.slice(0, 4).map((session) => (
+          <StreamCard key={session.session_id} session={session} />
+        ))}
+      </div>
+      {sessions.length > 4 && (
+        <Link
+          to="/admin/activity"
+          className="text-muted-foreground hover:text-primary mt-2 block text-center text-[12px] transition-colors"
+        >
+          +{sessions.length - 4} more active streams
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function LibrariesCard({
+  libraries,
+  isLoading,
+  error,
+}: {
+  libraries: LibraryType[];
+  isLoading: boolean;
+  error: unknown;
+}) {
   const scanLibrary = useScanLibrary();
 
   return (
@@ -426,7 +482,11 @@ function LibrariesCard({ libraries }: { libraries: LibraryType[] }) {
         </Link>
       </CardHeader>
       <CardContent className="space-y-2">
-        {libraries.length === 0 ? (
+        {isLoading ? (
+          <LibrarySkeletonRows />
+        ) : error ? (
+          <SectionError message="Failed to load libraries." />
+        ) : libraries.length === 0 ? (
           <div className="text-muted-foreground py-4 text-center text-sm">
             No libraries configured.
           </div>
@@ -478,7 +538,15 @@ function LibrariesCard({ libraries }: { libraries: LibraryType[] }) {
   );
 }
 
-function UsersCard({ users }: { users: AdminUser[] }) {
+function UsersCard({
+  users,
+  isLoading,
+  error,
+}: {
+  users: AdminUser[];
+  isLoading: boolean;
+  error: unknown;
+}) {
   const navigate = useNavigate();
 
   return (
@@ -493,7 +561,11 @@ function UsersCard({ users }: { users: AdminUser[] }) {
         </Link>
       </CardHeader>
       <CardContent>
-        {users.length === 0 ? (
+        {isLoading ? (
+          <UserSkeletonRows />
+        ) : error ? (
+          <SectionError message="Failed to load users." />
+        ) : users.length === 0 ? (
           <div className="text-muted-foreground py-4 text-center text-sm">No users.</div>
         ) : (
           <Table>
@@ -543,8 +615,16 @@ function UsersCard({ users }: { users: AdminUser[] }) {
   );
 }
 
-function ActivityCard({ sessions }: { sessions: AdminSession[] }) {
-  if (sessions.length === 0) return null;
+function ActivityCard({
+  sessions,
+  isLoading,
+  error,
+}: {
+  sessions: AdminSession[];
+  isLoading: boolean;
+  error: unknown;
+}) {
+  if (!isLoading && !error && sessions.length === 0) return null;
 
   return (
     <Card>
@@ -558,43 +638,49 @@ function ActivityCard({ sessions }: { sessions: AdminSession[] }) {
         </Link>
       </CardHeader>
       <CardContent>
-        <div className="space-y-0">
-          {sessions.slice(0, 10).map((s) => {
-            const isEp = s.series_name && s.season_number != null && s.episode_number != null;
-            const title = isEp
-              ? s.episode_name || `S${s.season_number}E${s.episode_number}`
-              : s.media_title || `File #${s.media_file_id}`;
-            const username = s.username || `User #${s.user_id}`;
-            return (
-              <div
-                key={s.session_id}
-                className="border-border/30 flex items-start gap-3 border-b py-2.5"
-              >
-                <div className="text-primary bg-primary/5 border-primary/10 flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-lg border">
-                  <Play className="h-3.5 w-3.5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-muted-foreground text-xs leading-relaxed">
-                    <span className="text-foreground font-semibold">{username}</span>
-                    {" started watching "}
-                    <Link
-                      to={`/admin/history?user_id=${s.user_id}${s.profile_id ? `&profile_id=${encodeURIComponent(s.profile_id)}` : ""}`}
-                      className="text-foreground hover:text-primary font-semibold transition-colors"
-                    >
-                      {title}
-                    </Link>
+        {isLoading ? (
+          <ActivitySkeletonRows />
+        ) : error ? (
+          <SectionError message="Failed to load activity." />
+        ) : (
+          <div className="space-y-0">
+            {sessions.slice(0, 10).map((s) => {
+              const isEp = s.series_name && s.season_number != null && s.episode_number != null;
+              const title = isEp
+                ? s.episode_name || `S${s.season_number}E${s.episode_number}`
+                : s.media_title || `File #${s.media_file_id}`;
+              const username = s.username || `User #${s.user_id}`;
+              return (
+                <div
+                  key={s.session_id}
+                  className="border-border/30 flex items-start gap-3 border-b py-2.5"
+                >
+                  <div className="text-primary bg-primary/5 border-primary/10 flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-lg border">
+                    <Play className="h-3.5 w-3.5" />
                   </div>
-                  <div className="text-muted-foreground mt-0.5 text-[10px]">
-                    {getTimeAgo(s.started_at)}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-muted-foreground text-xs leading-relaxed">
+                      <span className="text-foreground font-semibold">{username}</span>
+                      {" started watching "}
+                      <Link
+                        to={`/admin/history?user_id=${s.user_id}${s.profile_id ? `&profile_id=${encodeURIComponent(s.profile_id)}` : ""}`}
+                        className="text-foreground hover:text-primary font-semibold transition-colors"
+                      >
+                        {title}
+                      </Link>
+                    </div>
+                    <div className="text-muted-foreground mt-0.5 text-[10px]">
+                      {getTimeAgo(s.started_at)}
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <AdminSessionActions session={s} compact />
                   </div>
                 </div>
-                <div className="flex-shrink-0">
-                  <AdminSessionActions session={s} compact />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -613,4 +699,44 @@ function getTimeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function SectionError({ message }: { message: string }) {
+  return <div className="text-destructive py-4 text-center text-sm">{message}</div>;
+}
+
+function LibrarySkeletonRows() {
+  return (
+    <>
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Skeleton key={i} className="h-[60px] rounded-md" />
+      ))}
+    </>
+  );
+}
+
+function UserSkeletonRows() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={i} className="h-10 rounded-md" />
+      ))}
+    </div>
+  );
+}
+
+function ActivitySkeletonRows() {
+  return (
+    <div className="space-y-0">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="border-border/30 flex items-start gap-3 border-b py-2.5">
+          <Skeleton className="h-[30px] w-[30px] rounded-lg" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3 w-3/4 rounded" />
+            <Skeleton className="h-2 w-1/4 rounded" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

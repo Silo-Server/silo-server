@@ -51,7 +51,22 @@ func FileAllowedByAccess(file *models.MediaFile, filter AccessFilter) bool {
 	if file == nil {
 		return false
 	}
+	if filter.AllowedLibraryIDs != nil && !intInSlice(file.MediaFolderID, filter.AllowedLibraryIDs) {
+		return false
+	}
+	if len(filter.DisabledLibraryIDs) > 0 && intInSlice(file.MediaFolderID, filter.DisabledLibraryIDs) {
+		return false
+	}
 	return access.QualityAllowed(file.Resolution, filter.MaxPlaybackQuality)
+}
+
+func intInSlice(value int, values []int) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 // FilterMediaFilesByAccess drops file versions that exceed the viewer's

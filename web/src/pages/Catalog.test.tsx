@@ -10,6 +10,8 @@ let latestNavigateTo: string | null = null;
 const mockUseCatalogWindow = vi.fn();
 const mockUseCatalogFilters = vi.fn();
 const mockItemGrid = vi.fn();
+const mockUseCanRequest = vi.fn();
+const mockUseRequestSearch = vi.fn();
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -36,6 +38,30 @@ vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mockUseCatalogWindow(...args),
   useCatalogFilters: (...args: unknown[]) => mockUseCatalogFilters(...args),
   useCatalogMetadataFilters: (...args: unknown[]) => mockUseCatalogFilters(...args),
+}));
+
+vi.mock("@/hooks/useCanRequest", () => ({
+  useCanRequest: () => mockUseCanRequest(),
+}));
+
+vi.mock("@/hooks/queries/useRequests", () => ({
+  useRequestSearch: (...args: unknown[]) => mockUseRequestSearch(...args),
+}));
+
+vi.mock("@/components/RequestToAddSection", () => ({
+  RequestToAddSection: ({
+    variant,
+    query,
+    libraryHadHits,
+  }: {
+    variant: string;
+    query: string;
+    libraryHadHits: boolean;
+  }) => (
+    <div data-testid="request-section">
+      {`variant="${variant}" query="${query}" libraryHadHits="${String(libraryHadHits)}"`}
+    </div>
+  ),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -89,10 +115,19 @@ vi.mock("@/components/ItemGrid", () => ({
     items?: Array<{ title: string }>;
     totalItems?: number;
     pageSize?: number;
+    loading?: boolean;
     onVisibleRangeChange?: (start: number, end: number) => void;
   }) => {
     mockItemGrid(props);
-    return <div data-kind="item-grid">{props.items?.map((item) => item.title).join(",")}</div>;
+    return (
+      <div
+        data-kind="item-grid"
+        data-loading={String(Boolean(props.loading))}
+        data-total={String(props.totalItems ?? 0)}
+      >
+        {props.items?.map((item) => item.title).join(",")}
+      </div>
+    );
   },
 }));
 
@@ -152,6 +187,14 @@ describe("Catalog page", () => {
     mockUseCatalogWindow.mockReset();
     mockUseCatalogFilters.mockReset();
     mockItemGrid.mockReset();
+    mockUseCanRequest.mockReset();
+    mockUseRequestSearch.mockReset();
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
 
     mockUseCatalogWindow.mockReturnValue({
       data: {
@@ -273,7 +316,7 @@ describe("Catalog page", () => {
     expect(markup).toContain("Settings");
   });
 
-  it("redirects the retired user plugins settings route back to appearance settings", () => {
+  it("redirects the retired user plugins settings route back to playback settings", () => {
     appInitialEntries = ["/settings/plugins"];
 
     renderToStaticMarkup(
@@ -282,6 +325,236 @@ describe("Catalog page", () => {
       </QueryClientProvider>,
     );
 
-    expect(latestNavigateTo).toBe("appearance");
+    expect(latestNavigateTo).toBe("/settings/playback");
+  });
+
+  it("renders the request grid variant when source=query and library has results", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain('data-testid="request-section"');
+    expect(markup).toContain("variant=&quot;grid&quot;");
+    expect(markup).toContain("libraryHadHits=&quot;true&quot;");
+  });
+
+  it("renders the request grid variant with libraryHadHits=false when library has 0 hits", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+    mockUseRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain("libraryHadHits=&quot;false&quot;");
+  });
+
+  it("does not render the request section when source is not query", () => {
+    appInitialEntries = ["/catalog?source=favorites"];
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: "Favorites", totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).not.toContain('data-testid="request-section"');
+  });
+
+  it("does not render the request section when discovery is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).not.toContain('data-testid="request-section"');
+  });
+
+  it("passes enabled=false to useRequestSearch when discoveryEnabled is false", () => {
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    const call = mockUseRequestSearch.mock.calls[mockUseRequestSearch.mock.calls.length - 1];
+    expect(call?.[3]).toEqual({
+      enabled: false,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+    });
+  });
+
+  it("hides ItemGrid when library is empty and TMDB is still loading (request section will rescue)", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+    mockUseRequestSearch.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    // Previously this case forced ItemGrid into loading=true, rendering 24 fake
+    // skeletons forever above the section. Now ItemGrid is hidden entirely.
+    expect(markup).not.toContain('data-kind="item-grid"');
+  });
+
+  it("hides ItemGrid when library is empty and TMDB has missing results", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+    mockUseRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).not.toContain('data-kind="item-grid"');
+    expect(markup).toContain('data-testid="request-section"');
+  });
+
+  it("hides ItemGrid when library is empty and discovery feature status is still resolving", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: false,
+      isResolving: true,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    // Avoids the empty-state flash before the feature status resolves and TMDB
+    // either rescues with results or confirms there are none.
+    expect(markup).not.toContain('data-kind="item-grid"');
+  });
+
+  it("renders the normal ItemGrid empty state when both library and TMDB are empty", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mockUseCatalogWindow.mockReturnValue({
+      data: { title: 'Results for "heat"', totalItems: 0, pages: new Map() },
+      isLoading: false,
+    });
+    mockUseRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 1, total_results: 0, results: [] },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain('data-loading="false"');
+    expect(markup).toContain('data-total="0"');
   });
 });

@@ -4,10 +4,14 @@ import { CheckSquare, Search, Trash2, X } from "lucide-react";
 
 import type { BrowseItem } from "@/api/types";
 import ItemGrid from "@/components/ItemGrid";
+import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { useRemoveHistory } from "@/hooks/queries/history";
+import { useRequestSearch } from "@/hooks/queries/useRequests";
+import { useCanRequest } from "@/hooks/useCanRequest";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -101,6 +105,28 @@ function CatalogResults({
     visibleRange,
     includeTotal: showExactResultCount,
   });
+  const canRequest = useCanRequest();
+  const isQuerySource = state.source === "query" && Boolean(state.q);
+  // Add a 200ms TMDB debounce on top of SearchBar's 200ms input debounce so the
+  // TMDB plugin isn't hit at the same cadence as the local library query.
+  const tmdbDebouncedQ = useDebounce(state.q ?? "", 200);
+  const tmdbQuery = useRequestSearch("all", tmdbDebouncedQ, 1, {
+    enabled: canRequest.discoveryEnabled && isQuerySource,
+    requireProfile: true,
+    staleTime: 5 * 60 * 1000,
+  });
+  const tmdbMissingCount =
+    tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
+  const libraryHasResults = (catalogQuery.data?.totalItems ?? 0) > 0;
+  const libraryEmpty = !catalogQuery.isLoading && !libraryHasResults;
+  // When the library is empty and the request section will (or might) render,
+  // hide ItemGrid entirely. The previous approach pinned ItemGrid's `loading`
+  // prop to true, which renders 24 skeleton tiles forever above the section.
+  const tmdbMayRescueLibrary =
+    isQuerySource &&
+    libraryEmpty &&
+    (canRequest.isResolving ||
+      (canRequest.discoveryEnabled && (tmdbQuery.isLoading || tmdbMissingCount > 0)));
   const loadedHistoryItems = useMemo(() => {
     if (!isHistorySource) {
       return [] as BrowseItem[];
@@ -249,16 +275,26 @@ function CatalogResults({
         </section>
       )}
 
-      <ItemGrid
-        totalItems={catalogQuery.data?.totalItems ?? 0}
-        pages={catalogQuery.data?.pages ?? new Map()}
-        pageSize={limit}
-        loading={catalogQuery.isLoading}
-        onVisibleRangeChange={handleVisibleRangeChange}
-        selectionMode={isHistorySource && selectionMode}
-        selectedIds={selectedIds}
-        onToggleSelect={toggleHistorySelection}
-      />
+      {tmdbMayRescueLibrary ? null : (
+        <ItemGrid
+          totalItems={catalogQuery.data?.totalItems ?? 0}
+          pages={catalogQuery.data?.pages ?? new Map()}
+          pageSize={limit}
+          loading={catalogQuery.isLoading}
+          onVisibleRangeChange={handleVisibleRangeChange}
+          selectionMode={isHistorySource && selectionMode}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleHistorySelection}
+        />
+      )}
+
+      {isQuerySource && canRequest.discoveryEnabled ? (
+        <RequestToAddSection
+          variant="grid"
+          query={tmdbDebouncedQ}
+          libraryHadHits={libraryHasResults}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={removeConfirmOpen}

@@ -1643,6 +1643,28 @@
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
   }
 
+  .caption-empty-state span {
+    display: block;
+    height: 0.35rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--foreground) 18%, transparent);
+  }
+
+  .caption-empty-state span:nth-child(1) {
+    width: 72%;
+    margin-inline: auto;
+  }
+
+  .caption-empty-state span:nth-child(2) {
+    width: 54%;
+    margin-inline: auto;
+  }
+
+  .caption-empty-state span:nth-child(3) {
+    width: 38%;
+    margin-inline: auto;
+  }
+
   /* ── Scan Queue Accent ──────────────────────────────────── */
   /* Animated gradient sweep across the top of the scan queue
      to signal live activity. Only visible when scans are active. */

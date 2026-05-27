@@ -74,7 +74,10 @@ func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.id = $1
 		  AND folders.enabled = true
-		  AND lower(trim(folders.type)) IN ('movie', 'movies')
+		  AND (
+			lower(trim(folders.type)) IN ('movie', 'movies') OR
+			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+		  )
 		  AND mf.missing_since IS NULL
 		  AND (
 			mf.content_id IS NULL OR mf.content_id = '' OR
@@ -98,7 +101,10 @@ func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.id = q.media_file_id
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('movie', 'movies')
+			  AND (
+				lower(trim(folders.type)) IN ('movie', 'movies') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -146,7 +152,10 @@ func (r *MovieMatchQueueRepository) SyncForFolder(ctx context.Context, folderID 
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
 		  AND folders.enabled = true
-		  AND lower(trim(folders.type)) IN ('movie', 'movies')
+		  AND (
+			lower(trim(folders.type)) IN ('movie', 'movies') OR
+			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+		  )
 		  AND mf.missing_since IS NULL
 		  AND (
 			mf.content_id IS NULL OR mf.content_id = '' OR
@@ -170,7 +179,10 @@ func (r *MovieMatchQueueRepository) SyncForFolder(ctx context.Context, folderID 
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.id = q.media_file_id
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('movie', 'movies')
+			  AND (
+				lower(trim(folders.type)) IN ('movie', 'movies') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -223,7 +235,10 @@ func (r *MovieMatchQueueRepository) SyncInScope(ctx context.Context, folderID in
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
 		  AND folders.enabled = true
-		  AND lower(trim(folders.type)) IN ('movie', 'movies')
+		  AND (
+			lower(trim(folders.type)) IN ('movie', 'movies') OR
+			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+		  )
 		  AND mf.missing_since IS NULL
 		  AND (
 			mf.file_path = $2 OR
@@ -267,7 +282,10 @@ func (r *MovieMatchQueueRepository) SyncInScope(ctx context.Context, folderID in
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.id = q.media_file_id
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('movie', 'movies')
+			  AND (
+				lower(trim(folders.type)) IN ('movie', 'movies') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -301,7 +319,10 @@ func (r *MovieMatchQueueRepository) Claim(ctx context.Context, limit int) ([]*mo
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE q.available_at <= NOW()
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('movie', 'movies')
+			  AND (
+				lower(trim(folders.type)) IN ('movie', 'movies') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -369,7 +390,10 @@ func (r *MovieMatchQueueRepository) ClaimByFolderAndPathPrefix(
 			WHERE q.media_folder_id = $1
 			  AND q.available_at <= NOW()
 			  AND folders.enabled = true
-			  AND lower(trim(folders.type)) IN ('movie', 'movies')
+			  AND (
+				lower(trim(folders.type)) IN ('movie', 'movies') OR
+				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+			  )
 			  AND mf.missing_since IS NULL
 			  AND (
 				mf.file_path = $2 OR

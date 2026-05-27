@@ -222,6 +222,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var authHandler *handlers.AuthHandler
 	var authMiddleware *apimw.AuthMiddleware
 	var viewerAccessMiddleware *apimw.ViewerAccessMiddleware
+	var permissionMiddleware *apimw.PermissionMiddleware
 	var viewerResolver *access.Resolver
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
@@ -257,6 +258,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.UserStoreProvider != nil {
 			viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService)
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
+		}
+		if deps.DB != nil {
+			permissionMiddleware = apimw.NewPermissionMiddleware(
+				userRepo,
+				apimw.NewPGMetadataTargetLibraryResolver(deps.DB),
+			)
 		}
 	}
 	if deps.SessionMgr != nil && userRepo != nil {
@@ -727,6 +734,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
 	var adminSubtitleHandler *handlers.AdminSubtitleHandler
+	var subtitleManager *subtitles.Manager
 	if subtitleRepo != nil {
 		adminSubtitleHandler = handlers.NewAdminSubtitleHandler(subtitleRepo)
 	}
@@ -734,7 +742,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build subtitle search handler if we have DB and S3.
 	var subtitleSearchHandler *handlers.SubtitleSearchHandler
 	if deps.DB != nil && deps.S3Public != nil && subtitleRepo != nil {
-		subtitleManager := subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
+		subtitleManager = subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
 
 		// Load provider configs from DB and register enabled providers.
 		providerConfigs, _ := subtitleRepo.ListProviderConfigs(deps.AppContext)
@@ -766,6 +774,10 @@ func NewRouter(deps Dependencies) chi.Router {
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
+	}
+
+	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
+		adminSubtitleHandler.SetDownloadedSubtitleDeps(deps.DB, subtitleManager)
 	}
 
 	// Build section handler if DB is available.
@@ -1530,9 +1542,18 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				// Subtitle search routes.
 				if subtitleSearchHandler != nil {
+					if deps.FileRepo != nil && itemRepo != nil {
+						subtitleSearchHandler.FileAuthorizer = &handlers.MediaFileAuthorizer{
+							FileResolver:  deps.FileRepo,
+							ItemAccess:    itemRepo,
+							EpisodeLookup: episodeRepo,
+						}
+					}
 					r.Route("/subtitles", func(r chi.Router) {
 						r.Post("/search", subtitleSearchHandler.HandleSearch)
 						r.Post("/download", subtitleSearchHandler.HandleDownload)
+						r.Post("/upload", subtitleSearchHandler.HandleUpload)
+						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
 						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
 						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
 					})
@@ -1670,324 +1691,347 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				// Admin routes (admin-only).
+				// Admin routes.
 				if adminHandler != nil {
 					r.Route("/admin", func(r chi.Router) {
-						r.Use(apimw.RequireAdmin)
-
-						r.Get("/users", adminHandler.HandleListUsers)
-						r.Post("/users", adminHandler.HandleCreateUser)
-						r.Get("/users/{id}", adminHandler.HandleGetUser)
-						r.Put("/users/{id}", adminHandler.HandleUpdateUser)
-						r.Delete("/users/{id}", adminHandler.HandleDeleteUser)
-						r.Post("/users/{id}/impersonate", adminHandler.HandleImpersonateUser)
-						r.Get("/users/{id}/profiles", adminHandler.HandleListUserProfiles)
-						r.Get("/users/{id}/settings", adminHandler.HandleListUserSettings)
-						r.Get("/users/{id}/settings/{key}", adminHandler.HandleGetUserSetting)
-						r.Put("/users/{id}/settings/{key}", adminHandler.HandleUpdateUserSetting)
-						r.Delete("/users/{id}/settings/{key}", adminHandler.HandleDeleteUserSetting)
-						r.Get("/users/{id}/device-settings", adminHandler.HandleListUserDeviceSettings)
-						r.Get("/users/{id}/device-settings/{key}", adminHandler.HandleListUserDeviceSettingsByKey)
-						r.Put("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleUpdateUserDeviceSetting)
-						r.Delete("/users/{id}/device-settings/{key}", adminHandler.HandleDeleteUserDeviceSettingsByKey)
-						r.Delete("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleDeleteUserDeviceSetting)
-						r.Delete("/users/{id}/profiles/{profile_id}/devices/{device_id}/settings", adminHandler.HandleDeleteAllUserDeviceSettings)
-						r.Get("/devices", adminHandler.HandleListDevices)
-						r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
-
-						r.Get("/sessions", adminHandler.HandleListSessions)
-						r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
-						r.Get("/unmatched", adminHandler.HandleListUnmatched)
-						r.Get("/stats", adminHandler.HandleGetStats)
-						r.Get("/settings/sensitive-status", adminHandler.HandleGetSensitiveStatus)
-						r.Post("/settings/check/{kind}", adminHandler.HandleCheckSettingsConnection)
-						if sectionSettingsHandler != nil {
-							r.Get("/settings/sections", sectionSettingsHandler.HandleGet)
-							r.Put("/settings/sections", sectionSettingsHandler.HandlePut)
-						}
-						r.Get("/settings/{key}", adminHandler.HandleGetSetting)
-						r.Get("/settings", adminHandler.HandleGetSettings)
-						r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
-						r.Post("/items/{id}/refresh-metadata", adminHandler.HandleRefreshItemMetadata)
-						r.Patch("/items/{id}/metadata", adminHandler.HandleUpdateItemMetadata)
-						if adminIntroHandler != nil {
-							r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
-							r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
-						}
-						if peopleHandler != nil {
-							r.Post("/people/{id}/refresh", peopleHandler.HandleAdminRefreshPerson)
-							r.Patch("/people/{id}", peopleHandler.HandleAdminUpdatePerson)
+						metadataItemAccess := apimw.RequireAdmin
+						if permissionMiddleware != nil {
+							metadataItemAccess = permissionMiddleware.RequireMetadataCurationForItem
 						}
 
-						if adminMatchHandler != nil {
-							r.Post("/items/{id}/match/search", adminMatchHandler.HandleSearchItemMatchCandidates)
-							r.Post("/items/{id}/match/apply", adminMatchHandler.HandleApplyItemMatch)
-						}
-
-						if adminImageHandler != nil {
-							r.Get("/items/{id}/images", adminImageHandler.HandleGetItemImages)
-							r.Post("/items/{id}/images/apply", adminImageHandler.HandleApplyItemImage)
-						}
-
-						filesystemHandler := handlers.NewFilesystemHandler()
-						r.Get("/filesystem/browse", filesystemHandler.HandleBrowse)
-
-						if catalogSeedHandler != nil {
-							r.Route("/catalog", func(r chi.Router) {
-								r.Post("/export", catalogSeedHandler.HandleExport)
-								r.Post("/export-jobs", catalogSeedHandler.HandleCreateExportJob)
-								r.Post("/export-jobs/{id}/publish", catalogSeedHandler.HandlePublishExportJob)
-								r.Post("/import-jobs", catalogSeedHandler.HandleCreateImportJob)
-								r.Get("/import-sources", catalogSeedHandler.HandleListImportSources)
-								r.Get("/local-import-sources", catalogSeedHandler.HandleListLocalImportSources)
-								r.Post("/import", catalogSeedHandler.HandleImport)
-							})
-						}
+						r.Group(func(r chi.Router) {
+							r.Use(metadataItemAccess)
+							r.Post("/items/{id}/refresh-metadata", adminHandler.HandleRefreshItemMetadata)
+							r.Patch("/items/{id}/metadata", adminHandler.HandleUpdateItemMetadata)
+							if adminMatchHandler != nil {
+								r.Post("/items/{id}/match/search", adminMatchHandler.HandleSearchItemMatchCandidates)
+								r.Post("/items/{id}/match/apply", adminMatchHandler.HandleApplyItemMatch)
+							}
+						})
 
 						if adminJobsHandler != nil {
-							r.Route("/jobs", func(r chi.Router) {
-								r.Get("/", adminJobsHandler.HandleList)
-								r.Get("/{id}", adminJobsHandler.HandleGet)
-							})
+							// Curators must poll their own item-refresh jobs, so this stays outside
+							// the admin-only group. HandleGet enforces per-job authorization.
+							r.Get("/jobs/{id}", adminJobsHandler.HandleGet)
 						}
 
-						if deps.PluginService != nil && deps.PluginUserConfig != nil {
-							pluginHandler := handlers.NewPluginHandler(
-								plugins.NewRepositoryStore(deps.DB),
-								plugins.NewInstallationStore(deps.DB),
-								plugins.NewRuntimeConfigStore(deps.DB),
-								deps.PluginService,
-								deps.PluginUserConfig,
-								deps.PluginHTTPProxy,
-								metadata.NewChainRepository(deps.DB),
-								deps.PluginImageResolver,
-							)
-							r.Route("/plugins", func(r chi.Router) {
-								r.Get("/repositories", pluginHandler.HandleListRepositories)
-								r.Post("/repositories", pluginHandler.HandleCreateRepository)
-								r.Put("/repositories/{id}", pluginHandler.HandleUpdateRepository)
-								r.Delete("/repositories/{id}", pluginHandler.HandleDeleteRepository)
-								r.Get("/catalog", pluginHandler.HandleCatalog)
-								r.Get("/installations", pluginHandler.HandleListInstallations)
-								r.Post("/installations", pluginHandler.HandleCreateInstallation)
-								r.Post("/uploads", pluginHandler.HandleUploadInstallation)
-								r.Put("/installations/{id}", pluginHandler.HandleUpdateInstallation)
-								r.Post("/installations/{id}/update", pluginHandler.HandleApplyUpdate)
-								r.Post("/installations/{id}/config/test", pluginHandler.HandleTestInstallationConfig)
-								r.Put("/installations/{id}/config", pluginHandler.HandlePutInstallationConfig)
-								r.Put("/installations/{id}/auth-binding", pluginHandler.HandlePutAuthBinding)
-								r.Put("/installations/{id}/task-bindings/{capability_id}", pluginHandler.HandlePutTaskBinding)
-								r.Delete("/installations/{id}", pluginHandler.HandleDeleteInstallation)
-							})
-						}
+						r.Group(func(r chi.Router) {
+							r.Use(apimw.RequireAdmin)
 
-						if historyImportHandler != nil {
-							r.Route("/history-import-sources", func(r chi.Router) {
-								r.Get("/", historyImportHandler.HandleAdminListSources)
-								r.Post("/", historyImportHandler.HandleAdminCreateSource)
-								r.Put("/{id}", historyImportHandler.HandleAdminUpdateSource)
-								r.Delete("/{id}", historyImportHandler.HandleAdminDeleteSource)
-							})
+							r.Get("/users", adminHandler.HandleListUsers)
+							r.Post("/users", adminHandler.HandleCreateUser)
+							r.Get("/users/{id}", adminHandler.HandleGetUser)
+							r.Put("/users/{id}", adminHandler.HandleUpdateUser)
+							r.Delete("/users/{id}", adminHandler.HandleDeleteUser)
+							r.Post("/users/{id}/impersonate", adminHandler.HandleImpersonateUser)
+							r.Get("/users/{id}/profiles", adminHandler.HandleListUserProfiles)
+							r.Get("/users/{id}/settings", adminHandler.HandleListUserSettings)
+							r.Get("/users/{id}/settings/{key}", adminHandler.HandleGetUserSetting)
+							r.Put("/users/{id}/settings/{key}", adminHandler.HandleUpdateUserSetting)
+							r.Delete("/users/{id}/settings/{key}", adminHandler.HandleDeleteUserSetting)
+							r.Get("/users/{id}/device-settings", adminHandler.HandleListUserDeviceSettings)
+							r.Get("/users/{id}/device-settings/{key}", adminHandler.HandleListUserDeviceSettingsByKey)
+							r.Put("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleUpdateUserDeviceSetting)
+							r.Delete("/users/{id}/device-settings/{key}", adminHandler.HandleDeleteUserDeviceSettingsByKey)
+							r.Delete("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleDeleteUserDeviceSetting)
+							r.Delete("/users/{id}/profiles/{profile_id}/devices/{device_id}/settings", adminHandler.HandleDeleteAllUserDeviceSettings)
+							r.Get("/devices", adminHandler.HandleListDevices)
+							r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
 
-							r.Route("/history-imports", func(r chi.Router) {
-								r.Post("/plex/login", historyImportHandler.HandleAdminPlexLogin)
-								r.Put("/sources/{id}/token", historyImportHandler.HandleAdminSetSourceToken)
-								r.Delete("/sources/{id}/token", historyImportHandler.HandleAdminClearSourceToken)
-								r.Get("/sources/{id}/users", historyImportHandler.HandleAdminDiscoverUsers)
-								r.Post("/sources/{id}/bulk-run", historyImportHandler.HandleAdminBulkRun)
-								r.Get("/mappings", historyImportHandler.HandleAdminListMappings)
-								r.Post("/mappings", historyImportHandler.HandleAdminCreateMapping)
-								r.Put("/mappings/{id}", historyImportHandler.HandleAdminUpdateMapping)
-								r.Delete("/mappings/{id}", historyImportHandler.HandleAdminDeleteMapping)
-								r.Post("/mappings/{id}/run", historyImportHandler.HandleAdminCreateRun)
-								r.Get("/runs", historyImportHandler.HandleAdminListRuns)
-								r.Get("/runs/{id}", historyImportHandler.HandleAdminGetRun)
-								r.Post("/runs/{id}/cancel", historyImportHandler.HandleAdminCancelRun)
-							})
-						}
-
-						if sectionHandler != nil {
-							r.Route("/sections", func(r chi.Router) {
-								r.Get("/", sectionHandler.HandleListSections)
-								r.Post("/", sectionHandler.HandleCreateSection)
-								r.Post("/preview", sectionHandler.HandlePreview)
-								r.Put("/reorder", sectionHandler.HandleReorderSections)
-								r.Post("/restore-defaults", sectionHandler.HandleRestoreDefaults)
-								r.Put("/{id}", sectionHandler.HandleUpdateSection)
-								r.Delete("/{id}", sectionHandler.HandleDeleteSection)
-								if sectionBulkHandler != nil {
-									r.Post("/bulk-create", sectionBulkHandler.HandleBulkCreate)
-								}
-							})
-						}
-
-						if libraryCollectionHandler != nil {
-							collectionTemplateHandler := handlers.NewCollectionTemplateHandler(nil)
-							r.Route("/collections", func(r chi.Router) {
-								r.Get("/", libraryCollectionHandler.HandleListAdminCollections)
-								r.Get("/templates", collectionTemplateHandler.HandleListTemplates)
-								r.Get("/template-bundles", libraryCollectionHandler.HandleListTemplateBundles)
-								r.Post("/template-bundles/{bundleID}/apply", libraryCollectionHandler.HandleApplyTemplateBundle)
-								r.Post("/template-bundles/{bundleID}/apply-job", libraryCollectionHandler.HandleApplyTemplateBundleJob)
-								r.Post("/", libraryCollectionHandler.HandleCreateAdminCollection)
-								r.Post("/preview", libraryCollectionHandler.HandlePreviewAdminCollection)
-								r.Put("/order", libraryCollectionHandler.HandleReorderAdminCollections)
-								r.Put("/{id}", libraryCollectionHandler.HandleUpdateAdminCollection)
-								r.Delete("/{id}", libraryCollectionHandler.HandleDeleteAdminCollection)
-								r.Post("/{id}/sync", libraryCollectionHandler.HandleSyncAdminCollection)
-								r.Delete("/{id}/image", libraryCollectionHandler.HandleDeleteCollectionImage)
-								r.Put("/{id}/items/order", libraryCollectionHandler.HandleReorderAdminCollectionItems)
-								r.Put("/{id}/items/{item_id}", libraryCollectionHandler.HandleAddAdminCollectionItem)
-								r.Delete("/{id}/items/{item_id}", libraryCollectionHandler.HandleRemoveAdminCollectionItem)
-								r.Post("/import/mdblist", libraryCollectionHandler.HandleImportMDBList)
-								r.Post("/import/tmdb", libraryCollectionHandler.HandleImportTMDBCollection)
-								r.Post("/import/trakt", libraryCollectionHandler.HandleImportTraktCollection)
-							})
-						}
-						if libraryCollectionGroupHandler != nil {
-							r.Route("/libraries/{libraryID}/collection-groups", func(r chi.Router) {
-								r.Get("/", libraryCollectionGroupHandler.HandleListGroups)
-								r.Post("/", libraryCollectionGroupHandler.HandleCreateGroup)
-								r.Put("/reorder", libraryCollectionGroupHandler.HandleReorderGroups)
-							})
-							r.Route("/collection-groups", func(r chi.Router) {
-								r.Put("/{id}", libraryCollectionGroupHandler.HandleUpdateGroup)
-								r.Delete("/{id}", libraryCollectionGroupHandler.HandleDeleteGroup)
-								r.Put("/{groupID}/collections/reorder", libraryCollectionGroupHandler.HandleReorderCollectionsInGroup)
-							})
-						}
-
-						if deps.NodeRepo != nil {
-							jwtSecret := ""
-							if deps.Config != nil {
-								jwtSecret = deps.Config.Auth.JWTSecret
+							r.Get("/sessions", adminHandler.HandleListSessions)
+							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
+							r.Get("/unmatched", adminHandler.HandleListUnmatched)
+							r.Get("/stats", adminHandler.HandleGetStats)
+							r.Get("/settings/sensitive-status", adminHandler.HandleGetSensitiveStatus)
+							r.Post("/settings/check/{kind}", adminHandler.HandleCheckSettingsConnection)
+							if sectionSettingsHandler != nil {
+								r.Get("/settings/sections", sectionSettingsHandler.HandleGet)
+								r.Put("/settings/sections", sectionSettingsHandler.HandlePut)
 							}
-							nodeHandler := handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
-							r.Route("/nodes", func(r chi.Router) {
-								r.Get("/", nodeHandler.HandleListNodes)
-								r.Post("/", nodeHandler.HandleCreateNode)
-								r.Put("/{id}", nodeHandler.HandleUpdateNode)
-								r.Delete("/{id}", nodeHandler.HandleDeleteNode)
-								r.Post("/{id}/check", nodeHandler.HandleCheckNode)
-								r.Post("/force-reload", nodeHandler.HandleForceReloadNodes)
-								r.Post("/{id}/force-reload", nodeHandler.HandleForceReloadNode)
-							})
-							// Live node sessions (reads from Redis)
-							// Note: /admin/sessions is already used for playback sessions from PostgreSQL.
-							r.Get("/node-sessions", nodeHandler.HandleListSessions)
-						}
-
-						// System inspection.
-						{
-							sysJWTSecret := ""
-							if deps.Config != nil {
-								sysJWTSecret = deps.Config.Auth.JWTSecret
+							r.Get("/settings/{key}", adminHandler.HandleGetSetting)
+							r.Get("/settings", adminHandler.HandleGetSettings)
+							r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
+							if adminIntroHandler != nil {
+								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
+								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
 							}
-							systemHandler := handlers.NewSystemHandler(deps.TranscodePool, sysJWTSecret)
-							r.Route("/system", func(r chi.Router) {
-								r.Get("/build", systemHandler.HandleBuildInfo)
-								r.Get("/hw-accel", systemHandler.HandleHWAccel)
-							})
-						}
+							if peopleHandler != nil {
+								r.Post("/people/{id}/refresh", peopleHandler.HandleAdminRefreshPerson)
+								r.Patch("/people/{id}", peopleHandler.HandleAdminUpdatePerson)
+							}
 
-						if deps.RecWorker != nil {
-							adminRecsHandler := handlers.NewAdminRecommendationsHandler(deps.RecWorker)
-							r.Route("/recommendations", func(r chi.Router) {
-								r.Get("/status", adminRecsHandler.HandleStatus)
-								r.Post("/trigger/embeddings", adminRecsHandler.HandleTriggerEmbeddings)
-								r.Post("/trigger/taste-profiles", adminRecsHandler.HandleTriggerTasteProfiles)
-								r.Post("/trigger/cowatch", adminRecsHandler.HandleTriggerCowatch)
-								r.Post("/trigger/recommendations", adminRecsHandler.HandleTriggerRecommendations)
-							})
-						}
+							if adminImageHandler != nil {
+								r.Get("/items/{id}/images", adminImageHandler.HandleGetItemImages)
+								r.Post("/items/{id}/images/apply", adminImageHandler.HandleApplyItemImage)
+							}
 
-						if inviteCodeRepo != nil {
-							inviteCodeHandler := handlers.NewInviteCodeHandler(inviteCodeRepo)
-							r.Route("/invite-codes", func(r chi.Router) {
-								r.Get("/", inviteCodeHandler.HandleListInviteCodes)
-								r.Post("/", inviteCodeHandler.HandleCreateInviteCode)
-								r.Put("/{id}", inviteCodeHandler.HandleUpdateInviteCode)
-								r.Post("/{id}/top-up", inviteCodeHandler.HandleTopUpInviteCode)
-								r.Delete("/{id}", inviteCodeHandler.HandleDeleteInviteCode)
-							})
-						}
+							filesystemHandler := handlers.NewFilesystemHandler()
+							r.Get("/filesystem/browse", filesystemHandler.HandleBrowse)
 
-						if adminSubtitleHandler != nil {
-							r.Route("/subtitle-providers", func(r chi.Router) {
-								r.Get("/", adminSubtitleHandler.HandleListProviders)
-								r.Route("/{provider}", func(r chi.Router) {
-									r.Put("/", adminSubtitleHandler.HandleUpdateProvider)
-									r.Post("/test", adminSubtitleHandler.HandleTestProvider)
+							if catalogSeedHandler != nil {
+								r.Route("/catalog", func(r chi.Router) {
+									r.Post("/export", catalogSeedHandler.HandleExport)
+									r.Post("/export-jobs", catalogSeedHandler.HandleCreateExportJob)
+									r.Post("/export-jobs/{id}/publish", catalogSeedHandler.HandlePublishExportJob)
+									r.Post("/import-jobs", catalogSeedHandler.HandleCreateImportJob)
+									r.Get("/import-sources", catalogSeedHandler.HandleListImportSources)
+									r.Get("/local-import-sources", catalogSeedHandler.HandleListLocalImportSources)
+									r.Post("/import", catalogSeedHandler.HandleImport)
 								})
-							})
-						}
+							}
 
-						// Rate limit admin routes
-						if deps.RateLimitMW != nil && settingsRepo != nil {
-							rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus)
-							r.Route("/rate-limits", func(r chi.Router) {
-								r.Get("/config", rateLimitHandler.HandleGetConfig)
-								r.Put("/config", rateLimitHandler.HandleUpdateConfig)
-							})
-						}
+							if adminJobsHandler != nil {
+								r.Route("/jobs", func(r chi.Router) {
+									r.Get("/", adminJobsHandler.HandleList)
+								})
+							}
 
-						if apiKeyRepo != nil {
-							apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepo)
-							r.Get("/users/{userId}/api-keys", apiKeyHandler.HandleAdminListUserAPIKeys)
-							r.Get("/api-keys", apiKeyHandler.HandleAdminListAllAPIKeys)
-							r.Post("/api-keys", apiKeyHandler.HandleAdminCreateAPIKey)
-							r.Delete("/api-keys/{id}", apiKeyHandler.HandleAdminDeleteAPIKey)
-							r.Put("/api-keys/{id}/tier", apiKeyHandler.HandleAdminUpdateTier)
-						}
+							if deps.PluginService != nil && deps.PluginUserConfig != nil {
+								pluginHandler := handlers.NewPluginHandler(
+									plugins.NewRepositoryStore(deps.DB),
+									plugins.NewInstallationStore(deps.DB),
+									plugins.NewRuntimeConfigStore(deps.DB),
+									deps.PluginService,
+									deps.PluginUserConfig,
+									deps.PluginHTTPProxy,
+									metadata.NewChainRepository(deps.DB),
+									deps.PluginImageResolver,
+								)
+								r.Route("/plugins", func(r chi.Router) {
+									r.Get("/repositories", pluginHandler.HandleListRepositories)
+									r.Post("/repositories", pluginHandler.HandleCreateRepository)
+									r.Put("/repositories/{id}", pluginHandler.HandleUpdateRepository)
+									r.Delete("/repositories/{id}", pluginHandler.HandleDeleteRepository)
+									r.Get("/catalog", pluginHandler.HandleCatalog)
+									r.Get("/installations", pluginHandler.HandleListInstallations)
+									r.Post("/installations", pluginHandler.HandleCreateInstallation)
+									r.Post("/uploads", pluginHandler.HandleUploadInstallation)
+									r.Put("/installations/{id}", pluginHandler.HandleUpdateInstallation)
+									r.Post("/installations/{id}/update", pluginHandler.HandleApplyUpdate)
+									r.Post("/installations/{id}/config/test", pluginHandler.HandleTestInstallationConfig)
+									r.Put("/installations/{id}/config", pluginHandler.HandlePutInstallationConfig)
+									r.Put("/installations/{id}/auth-binding", pluginHandler.HandlePutAuthBinding)
+									r.Put("/installations/{id}/task-bindings/{capability_id}", pluginHandler.HandlePutTaskBinding)
+									r.Delete("/installations/{id}", pluginHandler.HandleDeleteInstallation)
+								})
+							}
 
-						if requestHandler != nil {
-							r.Get("/requests", requestHandler.HandleAdminList)
-							r.Post("/requests/{id}/approve", requestHandler.HandleApprove)
-							r.Post("/requests/{id}/decline", requestHandler.HandleDecline)
-							r.Post("/requests/{id}/cancel", requestHandler.HandleCancel)
-							r.Post("/requests/{id}/retry", requestHandler.HandleRetry)
-							r.Get("/request-settings", requestHandler.HandleGetSettings)
-							r.Put("/request-settings", requestHandler.HandleUpdateSettings)
-							r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
-							r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
-							r.Get("/request-integrations", requestHandler.HandleListIntegrations)
-							r.Put("/request-integrations", requestHandler.HandleUpdateIntegrations)
-							r.Post("/request-integrations/{kind}/options", requestHandler.HandleLoadIntegrationOptions)
-						}
+							if historyImportHandler != nil {
+								r.Route("/history-import-sources", func(r chi.Router) {
+									r.Get("/", historyImportHandler.HandleAdminListSources)
+									r.Post("/", historyImportHandler.HandleAdminCreateSource)
+									r.Put("/{id}", historyImportHandler.HandleAdminUpdateSource)
+									r.Delete("/{id}", historyImportHandler.HandleAdminDeleteSource)
+								})
 
-						if deps.ActivityLogRepo != nil {
-							adminIPHandler := handlers.NewAdminIPHandler(deps.ActivityLogRepo)
-							r.Get("/users/{id}/ips", adminIPHandler.HandleGetUserIPs)
-							r.Get("/ips", adminIPHandler.HandleGetIPUsers)
-						}
-						if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil {
-							adminLogsHandler := handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub)
-							r.Get("/logs/app", adminLogsHandler.HandleListOperationalLogs)
-							r.Get("/logs/audit", adminLogsHandler.HandleListAuditLogs)
-							r.Get("/logs/ws", adminLogsHandler.HandleLogStreamWebSocket)
-						}
-						if adminPlaybackControlHandler != nil {
-							r.Post("/sessions/{session_id}/pause", adminPlaybackControlHandler.HandlePauseSession)
-							r.Post("/sessions/{session_id}/resume", adminPlaybackControlHandler.HandleResumeSession)
-							r.Post("/sessions/{session_id}/stop", adminPlaybackControlHandler.HandleStopSession)
-							r.Post("/sessions/{session_id}/terminate", adminPlaybackControlHandler.HandleTerminateSession)
-							r.Post("/sessions/{session_id}/message", adminPlaybackControlHandler.HandleMessageSession)
-						}
+								r.Route("/history-imports", func(r chi.Router) {
+									r.Post("/plex/login", historyImportHandler.HandleAdminPlexLogin)
+									r.Put("/sources/{id}/token", historyImportHandler.HandleAdminSetSourceToken)
+									r.Delete("/sources/{id}/token", historyImportHandler.HandleAdminClearSourceToken)
+									r.Get("/sources/{id}/users", historyImportHandler.HandleAdminDiscoverUsers)
+									r.Post("/sources/{id}/bulk-run", historyImportHandler.HandleAdminBulkRun)
+									r.Get("/mappings", historyImportHandler.HandleAdminListMappings)
+									r.Post("/mappings", historyImportHandler.HandleAdminCreateMapping)
+									r.Put("/mappings/{id}", historyImportHandler.HandleAdminUpdateMapping)
+									r.Delete("/mappings/{id}", historyImportHandler.HandleAdminDeleteMapping)
+									r.Post("/mappings/{id}/run", historyImportHandler.HandleAdminCreateRun)
+									r.Get("/runs", historyImportHandler.HandleAdminListRuns)
+									r.Get("/runs/{id}", historyImportHandler.HandleAdminGetRun)
+									r.Post("/runs/{id}/cancel", historyImportHandler.HandleAdminCancelRun)
+								})
+							}
 
-						if deps.TaskManager != nil {
-							taskHistoryRepo := repository.NewPgExecutionRepository(deps.DB)
-							taskMetrics := handlers.NewTaskMetricsService(metadata.NewRefreshDebtRepository(deps.DB))
-							taskHandler := handlers.NewTaskHandler(deps.TaskManager, taskHistoryRepo, taskMetrics)
-							r.Route("/tasks", func(r chi.Router) {
-								r.Get("/", taskHandler.HandleListTasks)
-								r.Get("/{key}", taskHandler.HandleGetTask)
-								r.Get("/{key}/metrics", taskHandler.HandleGetMetrics)
-								r.Post("/{key}/run", taskHandler.HandleRunTask)
-								r.Post("/{key}/cancel", taskHandler.HandleCancelTask)
-								r.Put("/{key}/triggers", taskHandler.HandleUpdateTriggers)
-								r.Get("/{key}/history", taskHandler.HandleGetHistory)
-							})
-						}
+							if sectionHandler != nil {
+								r.Route("/sections", func(r chi.Router) {
+									r.Get("/", sectionHandler.HandleListSections)
+									r.Post("/", sectionHandler.HandleCreateSection)
+									r.Post("/preview", sectionHandler.HandlePreview)
+									r.Put("/reorder", sectionHandler.HandleReorderSections)
+									r.Post("/restore-defaults", sectionHandler.HandleRestoreDefaults)
+									r.Put("/{id}", sectionHandler.HandleUpdateSection)
+									r.Delete("/{id}", sectionHandler.HandleDeleteSection)
+									if sectionBulkHandler != nil {
+										r.Post("/bulk-create", sectionBulkHandler.HandleBulkCreate)
+									}
+								})
+							}
+
+							if libraryCollectionHandler != nil {
+								collectionTemplateHandler := handlers.NewCollectionTemplateHandler(nil)
+								r.Route("/collections", func(r chi.Router) {
+									r.Get("/", libraryCollectionHandler.HandleListAdminCollections)
+									r.Get("/templates", collectionTemplateHandler.HandleListTemplates)
+									r.Get("/template-bundles", libraryCollectionHandler.HandleListTemplateBundles)
+									r.Post("/template-bundles/{bundleID}/apply", libraryCollectionHandler.HandleApplyTemplateBundle)
+									r.Post("/template-bundles/{bundleID}/apply-job", libraryCollectionHandler.HandleApplyTemplateBundleJob)
+									r.Post("/", libraryCollectionHandler.HandleCreateAdminCollection)
+									r.Post("/preview", libraryCollectionHandler.HandlePreviewAdminCollection)
+									r.Put("/order", libraryCollectionHandler.HandleReorderAdminCollections)
+									r.Put("/{id}", libraryCollectionHandler.HandleUpdateAdminCollection)
+									r.Delete("/{id}", libraryCollectionHandler.HandleDeleteAdminCollection)
+									r.Post("/{id}/sync", libraryCollectionHandler.HandleSyncAdminCollection)
+									r.Delete("/{id}/image", libraryCollectionHandler.HandleDeleteCollectionImage)
+									r.Put("/{id}/items/order", libraryCollectionHandler.HandleReorderAdminCollectionItems)
+									r.Put("/{id}/items/{item_id}", libraryCollectionHandler.HandleAddAdminCollectionItem)
+									r.Delete("/{id}/items/{item_id}", libraryCollectionHandler.HandleRemoveAdminCollectionItem)
+									r.Post("/import/mdblist", libraryCollectionHandler.HandleImportMDBList)
+									r.Post("/import/tmdb", libraryCollectionHandler.HandleImportTMDBCollection)
+									r.Post("/import/trakt", libraryCollectionHandler.HandleImportTraktCollection)
+								})
+							}
+							if libraryCollectionGroupHandler != nil {
+								r.Route("/libraries/{libraryID}/collection-groups", func(r chi.Router) {
+									r.Get("/", libraryCollectionGroupHandler.HandleListGroups)
+									r.Post("/", libraryCollectionGroupHandler.HandleCreateGroup)
+									r.Put("/reorder", libraryCollectionGroupHandler.HandleReorderGroups)
+								})
+								r.Route("/collection-groups", func(r chi.Router) {
+									r.Put("/{id}", libraryCollectionGroupHandler.HandleUpdateGroup)
+									r.Delete("/{id}", libraryCollectionGroupHandler.HandleDeleteGroup)
+									r.Put("/{groupID}/collections/reorder", libraryCollectionGroupHandler.HandleReorderCollectionsInGroup)
+								})
+							}
+
+							if deps.NodeRepo != nil {
+								jwtSecret := ""
+								if deps.Config != nil {
+									jwtSecret = deps.Config.Auth.JWTSecret
+								}
+								nodeHandler := handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
+								r.Route("/nodes", func(r chi.Router) {
+									r.Get("/", nodeHandler.HandleListNodes)
+									r.Post("/", nodeHandler.HandleCreateNode)
+									r.Put("/{id}", nodeHandler.HandleUpdateNode)
+									r.Delete("/{id}", nodeHandler.HandleDeleteNode)
+									r.Post("/{id}/check", nodeHandler.HandleCheckNode)
+									r.Post("/force-reload", nodeHandler.HandleForceReloadNodes)
+									r.Post("/{id}/force-reload", nodeHandler.HandleForceReloadNode)
+								})
+								// Live node sessions (reads from Redis)
+								// Note: /admin/sessions is already used for playback sessions from PostgreSQL.
+								r.Get("/node-sessions", nodeHandler.HandleListSessions)
+							}
+
+							// System inspection.
+							{
+								sysJWTSecret := ""
+								if deps.Config != nil {
+									sysJWTSecret = deps.Config.Auth.JWTSecret
+								}
+								systemHandler := handlers.NewSystemHandler(deps.TranscodePool, sysJWTSecret)
+								r.Route("/system", func(r chi.Router) {
+									r.Get("/build", systemHandler.HandleBuildInfo)
+									r.Get("/hw-accel", systemHandler.HandleHWAccel)
+								})
+							}
+
+							if deps.RecWorker != nil {
+								adminRecsHandler := handlers.NewAdminRecommendationsHandler(deps.RecWorker)
+								r.Route("/recommendations", func(r chi.Router) {
+									r.Get("/status", adminRecsHandler.HandleStatus)
+									r.Post("/trigger/embeddings", adminRecsHandler.HandleTriggerEmbeddings)
+									r.Post("/trigger/taste-profiles", adminRecsHandler.HandleTriggerTasteProfiles)
+									r.Post("/trigger/cowatch", adminRecsHandler.HandleTriggerCowatch)
+									r.Post("/trigger/recommendations", adminRecsHandler.HandleTriggerRecommendations)
+								})
+							}
+
+							if inviteCodeRepo != nil {
+								inviteCodeHandler := handlers.NewInviteCodeHandler(inviteCodeRepo)
+								r.Route("/invite-codes", func(r chi.Router) {
+									r.Get("/", inviteCodeHandler.HandleListInviteCodes)
+									r.Post("/", inviteCodeHandler.HandleCreateInviteCode)
+									r.Put("/{id}", inviteCodeHandler.HandleUpdateInviteCode)
+									r.Post("/{id}/top-up", inviteCodeHandler.HandleTopUpInviteCode)
+									r.Delete("/{id}", inviteCodeHandler.HandleDeleteInviteCode)
+								})
+							}
+
+							if adminSubtitleHandler != nil {
+								r.Route("/subtitle-providers", func(r chi.Router) {
+									r.Get("/", adminSubtitleHandler.HandleListProviders)
+									r.Route("/{provider}", func(r chi.Router) {
+										r.Put("/", adminSubtitleHandler.HandleUpdateProvider)
+										r.Post("/test", adminSubtitleHandler.HandleTestProvider)
+									})
+								})
+								r.Route("/subtitles", func(r chi.Router) {
+									r.Get("/", adminSubtitleHandler.HandleListDownloadedSubtitles)
+									r.Route("/{id}", func(r chi.Router) {
+										r.Patch("/", adminSubtitleHandler.HandlePatchDownloadedSubtitle)
+										r.Get("/download", adminSubtitleHandler.HandleDownloadDownloadedSubtitle)
+										r.Delete("/", adminSubtitleHandler.HandleDeleteDownloadedSubtitle)
+									})
+								})
+							}
+
+							// Rate limit admin routes
+							if deps.RateLimitMW != nil && settingsRepo != nil {
+								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus)
+								r.Route("/rate-limits", func(r chi.Router) {
+									r.Get("/config", rateLimitHandler.HandleGetConfig)
+									r.Put("/config", rateLimitHandler.HandleUpdateConfig)
+								})
+							}
+
+							if apiKeyRepo != nil {
+								apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepo)
+								r.Get("/users/{userId}/api-keys", apiKeyHandler.HandleAdminListUserAPIKeys)
+								r.Get("/api-keys", apiKeyHandler.HandleAdminListAllAPIKeys)
+								r.Post("/api-keys", apiKeyHandler.HandleAdminCreateAPIKey)
+								r.Delete("/api-keys/{id}", apiKeyHandler.HandleAdminDeleteAPIKey)
+								r.Put("/api-keys/{id}/tier", apiKeyHandler.HandleAdminUpdateTier)
+							}
+
+							if requestHandler != nil {
+								r.Get("/requests", requestHandler.HandleAdminList)
+								r.Post("/requests/{id}/approve", requestHandler.HandleApprove)
+								r.Post("/requests/{id}/decline", requestHandler.HandleDecline)
+								r.Post("/requests/{id}/cancel", requestHandler.HandleCancel)
+								r.Post("/requests/{id}/retry", requestHandler.HandleRetry)
+								r.Get("/request-settings", requestHandler.HandleGetSettings)
+								r.Put("/request-settings", requestHandler.HandleUpdateSettings)
+								r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
+								r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
+								r.Get("/request-integrations", requestHandler.HandleListIntegrations)
+								r.Put("/request-integrations", requestHandler.HandleUpdateIntegrations)
+								r.Post("/request-integrations/{kind}/options", requestHandler.HandleLoadIntegrationOptions)
+							}
+
+							if deps.ActivityLogRepo != nil {
+								adminIPHandler := handlers.NewAdminIPHandler(deps.ActivityLogRepo)
+								r.Get("/users/{id}/ips", adminIPHandler.HandleGetUserIPs)
+								r.Get("/ips", adminIPHandler.HandleGetIPUsers)
+							}
+							if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil {
+								adminLogsHandler := handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub)
+								r.Get("/logs/app", adminLogsHandler.HandleListOperationalLogs)
+								r.Get("/logs/audit", adminLogsHandler.HandleListAuditLogs)
+								r.Get("/logs/ws", adminLogsHandler.HandleLogStreamWebSocket)
+							}
+							if adminPlaybackControlHandler != nil {
+								r.Post("/sessions/{session_id}/pause", adminPlaybackControlHandler.HandlePauseSession)
+								r.Post("/sessions/{session_id}/resume", adminPlaybackControlHandler.HandleResumeSession)
+								r.Post("/sessions/{session_id}/stop", adminPlaybackControlHandler.HandleStopSession)
+								r.Post("/sessions/{session_id}/terminate", adminPlaybackControlHandler.HandleTerminateSession)
+								r.Post("/sessions/{session_id}/message", adminPlaybackControlHandler.HandleMessageSession)
+							}
+
+							if deps.TaskManager != nil {
+								taskHistoryRepo := repository.NewPgExecutionRepository(deps.DB)
+								taskMetrics := handlers.NewTaskMetricsService(metadata.NewRefreshDebtRepository(deps.DB))
+								taskHandler := handlers.NewTaskHandler(deps.TaskManager, taskHistoryRepo, taskMetrics)
+								r.Route("/tasks", func(r chi.Router) {
+									r.Get("/", taskHandler.HandleListTasks)
+									r.Get("/{key}", taskHandler.HandleGetTask)
+									r.Get("/{key}/metrics", taskHandler.HandleGetMetrics)
+									r.Post("/{key}/run", taskHandler.HandleRunTask)
+									r.Post("/{key}/cancel", taskHandler.HandleCancelTask)
+									r.Put("/{key}/triggers", taskHandler.HandleUpdateTriggers)
+									r.Get("/{key}/history", taskHandler.HandleGetHistory)
+								})
+							}
+						})
 					})
 				}
 			})

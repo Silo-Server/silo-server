@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type {
   CreateMediaRequestInput,
   DiscoverBrowseKind,
@@ -51,6 +52,9 @@ function buildListQuery(params: RequestListParams = {}) {
 }
 
 function invalidateRequestSurfaces(queryClient: ReturnType<typeof useQueryClient>) {
+  // requestKeys.all = ["requests"], so invalidating it cascades to nested keys,
+  // including requestKeys.search(...). Policy mutations rely on this to refresh
+  // viewer-scoped search results when request eligibility changes.
   queryClient.invalidateQueries({ queryKey: requestKeys.all });
   queryClient.invalidateQueries({ queryKey: adminKeys.requestsRoot() });
 }
@@ -148,20 +152,44 @@ export function useRequestMediaDetail(mediaType: RequestMediaType, tmdbID: numbe
   });
 }
 
-export function useRequestSearch(mediaType: RequestSearchMediaType, query: string, page = 1) {
+export interface UseRequestSearchOptions {
+  /** When false, suppresses the query regardless of the query string. Default: true. */
+  enabled?: boolean;
+  /** When true, suppresses the query until the active profile is loaded. Default: false. */
+  requireProfile?: boolean;
+  /** Cache freshness window for this search surface. Default: existing Requests page timing. */
+  staleTime?: number;
+}
+
+export function useRequestSearch(
+  mediaType: RequestSearchMediaType,
+  query: string,
+  page = 1,
+  options: UseRequestSearchOptions = {},
+) {
   const normalizedQuery = query.trim();
+  const { profile } = useCurrentProfile();
+  // Use a sentinel viewerKey when there is no profile so the cache key is stable,
+  // but suppress the actual fetch — see the `enabled` gate below. This prevents
+  // any anonymous request results from being written into a bucket that could
+  // later be read by a different viewer.
+  const viewerKey = profile?.id ?? "anon";
+  const enabledOverride = options.enabled ?? true;
+  const requireProfile = options.requireProfile ?? false;
+
   return useQuery({
-    queryKey: requestKeys.search(mediaType, normalizedQuery, page),
-    queryFn: () => {
+    queryKey: requestKeys.search(mediaType, normalizedQuery, page, viewerKey),
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         q: normalizedQuery,
         media_type: mediaType,
         page: String(page),
       });
-      return api<RequestMediaPage>(`/requests/search?${params}`);
+      return api<RequestMediaPage>(`/requests/search?${params}`, { signal });
     },
-    enabled: normalizedQuery.length > 1,
-    staleTime: REQUESTS_STALE_TIME,
+    enabled:
+      enabledOverride && normalizedQuery.length > 1 && (!requireProfile || Boolean(profile?.id)),
+    staleTime: options.staleTime ?? REQUESTS_STALE_TIME,
   });
 }
 

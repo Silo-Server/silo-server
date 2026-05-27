@@ -59,7 +59,7 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 		group.TvdbID = ids.TvdbID
 	}
 	if group.TmdbID == "" || group.ImdbID == "" || group.TvdbID == "" {
-		if ids := ParseFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath)), group.BaseType); ids != nil {
+		if ids := ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath))); ids != nil {
 			if group.TmdbID == "" {
 				group.TmdbID = ids.TmdbID
 			}

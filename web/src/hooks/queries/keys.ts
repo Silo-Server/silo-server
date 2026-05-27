@@ -132,8 +132,8 @@ export const requestKeys = {
     sort: string,
     page: number,
   ) => ["requests", "discover", "browse", kind, slug, mediaType ?? "", sort, page] as const,
-  search: (mediaType: string, query: string, page: number) =>
-    ["requests", "search", mediaType, query, page] as const,
+  search: (mediaType: string, query: string, page: number, viewerKey: string) =>
+    ["requests", "search", viewerKey, mediaType, query, page] as const,
   detail: (mediaType: string, tmdbID: number) => ["requests", "detail", mediaType, tmdbID] as const,
   mine: (params: Record<string, unknown>) => ["requests", "mine", params] as const,
 };
@@ -360,6 +360,15 @@ export const adminKeys = {
   operationalLogs: (params: Record<string, unknown>) => ["admin", "logs", "app", params] as const,
   auditLogs: (params: Record<string, unknown>) => ["admin", "logs", "audit", params] as const,
   subtitleProviders: () => ["admin", "subtitleProviders"] as const,
+  downloadedSubtitles: (params: {
+    provider?: string;
+    language?: string;
+    userId?: number;
+    mediaFileId?: number;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }) => ["admin", "downloadedSubtitles", params] as const,
   historyImportSources: () => ["admin", "historyImportSources"] as const,
   historyImportExternalUsers: (sourceId: number) =>
     ["admin", "historyImportSources", sourceId, "users"] as const,

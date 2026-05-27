@@ -142,9 +142,10 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 	libraries := make([]upstreamUserLibrary, 0, len(folders))
 	for _, f := range folders {
 		lib := upstreamUserLibrary{
-			ID:   f.ID,
-			Name: f.Name,
-			Type: f.Type,
+			ID:         f.ID,
+			Name:       f.Name,
+			Type:       f.Type,
+			PosterPath: f.PosterPath,
 		}
 		if f.PosterPath != "" && s.posterPresigner != nil {
 			ttl := s.presignTTL
