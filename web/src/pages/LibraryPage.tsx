@@ -37,6 +37,10 @@ export default function LibraryPage() {
   useDocumentTitle(library?.name ?? "Library");
 
   useEffect(() => {
+    if (!libraryType) {
+      return;
+    }
+
     const normalizedSearchParams = updateLibraryPageSearchParams(
       searchParams,
       { activeTab, browseType, queryDefinition },
