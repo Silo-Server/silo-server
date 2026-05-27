@@ -14,9 +14,8 @@ import (
 )
 
 type compatEpisodeTarget struct {
-	Item              upstreamListItem
-	SeriesPosterURL   string
-	SeriesBackdropURL string
+	Item         upstreamListItem
+	SeriesImages seriesImageSet
 }
 
 type libraryMembershipChecker interface {
@@ -213,10 +212,12 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			si.genres,
 			si.content_rating,
 			si.poster_path,
+			COALESCE(si.poster_thumbhash, ''),
 			si.backdrop_path,
 			COALESCE(si.backdrop_thumbhash, ''),
 			si.logo_path,
-			si.status
+			si.status,
+			si.updated_at
 		FROM %s
 		WHERE %s
 		ORDER BY e.content_id
@@ -248,10 +249,12 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			genres           []string
 			contentRating    string
 			seriesPosterPath string
+			seriesPosterTH   string
 			seriesBackdrop   string
 			seriesBackdropTH string
 			seriesLogoPath   string
 			status           string
+			seriesUpdatedAt  time.Time
 		)
 		if err := rows.Scan(
 			&contentID,
@@ -271,10 +274,12 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&genres,
 			&contentRating,
 			&seriesPosterPath,
+			&seriesPosterTH,
 			&seriesBackdrop,
 			&seriesBackdropTH,
 			&seriesLogoPath,
 			&status,
+			&seriesUpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning compat episode target: %w", err)
 		}
@@ -311,9 +316,17 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 		}
 
 		result[contentID] = compatEpisodeTarget{
-			Item:              listItem,
-			SeriesPosterURL:   h.presignCompatImagePath(ctx, seriesPosterPath, "poster"),
-			SeriesBackdropURL: h.presignCompatImagePath(ctx, seriesBackdrop, "backdrop"),
+			Item: listItem,
+			SeriesImages: seriesImageSet{
+				ContentID:         seriesID,
+				PosterURL:         h.presignCompatImagePath(ctx, seriesPosterPath, "poster"),
+				PosterPath:        seriesPosterPath,
+				PosterThumbhash:   seriesPosterTH,
+				BackdropURL:       h.presignCompatImagePath(ctx, seriesBackdrop, "backdrop"),
+				BackdropPath:      seriesBackdrop,
+				BackdropThumbhash: seriesBackdropTH,
+				UpdatedAt:         seriesUpdatedAt,
+			},
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -409,9 +422,17 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			listItem.AirDate = episode.AirDate.Format(time.DateOnly)
 		}
 		result[episode.ContentID] = compatEpisodeTarget{
-			Item:              listItem,
-			SeriesPosterURL:   h.presignCompatImagePath(ctx, series.PosterPath, "poster"),
-			SeriesBackdropURL: h.presignCompatImagePath(ctx, series.BackdropPath, "backdrop"),
+			Item: listItem,
+			SeriesImages: seriesImageSet{
+				ContentID:         series.ContentID,
+				PosterURL:         h.presignCompatImagePath(ctx, series.PosterPath, "poster"),
+				PosterPath:        series.PosterPath,
+				PosterThumbhash:   series.PosterThumbhash,
+				BackdropURL:       h.presignCompatImagePath(ctx, series.BackdropPath, "backdrop"),
+				BackdropPath:      series.BackdropPath,
+				BackdropThumbhash: series.BackdropThumbhash,
+				UpdatedAt:         series.UpdatedAt,
+			},
 		}
 	}
 

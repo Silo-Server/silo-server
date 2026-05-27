@@ -11,10 +11,11 @@ import (
 // catalog/service layer and the Jellyfin DTO mapping layer.
 
 type upstreamUserLibrary struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	PosterURL string `json:"poster_url,omitempty"`
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	PosterURL  string `json:"poster_url,omitempty"`
+	PosterPath string `json:"-"`
 }
 
 type upstreamListItem struct {

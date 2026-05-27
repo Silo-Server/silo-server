@@ -40,12 +40,16 @@ func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
 
 func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 	imgTags := map[string]string{}
-	if library.PosterURL != "" {
-		imgTags["Primary"] = tagValue(library.PosterURL)
+	routeID := m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID))
+	if library.PosterPath != "" {
+		imgTags["Primary"] = m.imageTagSigner.Tag(
+			imageTagSeed(routeID, "Primary", compatCardImageSize, library.PosterPath, "", time.Time{}),
+			library.PosterURL,
+		)
 	}
 
 	return baseItemDTO{
-		ID:             m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID)),
+		ID:             routeID,
 		Type:           "CollectionFolder",
 		MediaType:      "Unknown",
 		IsFolder:       true,
@@ -55,8 +59,8 @@ func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 		SortName:       strings.ToLower(library.Name),
 		ImageTags:      imgTags,
 		UserData: &itemUserDataDTO{
-			Key:    m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID)),
-			ItemID: m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID)),
+			Key:    routeID,
+			ItemID: routeID,
 		},
 	}
 }
@@ -443,19 +447,37 @@ func (m *mapper) episodeFromUpstream(ep upstreamEpisode, isFavorite bool, progre
 	return dto
 }
 
+type seriesImageSet struct {
+	ContentID         string
+	PosterURL         string
+	PosterPath        string
+	PosterThumbhash   string
+	BackdropURL       string
+	BackdropPath      string
+	BackdropThumbhash string
+	UpdatedAt         time.Time
+}
+
 // applySeriesImages sets series/parent image tags on an episode DTO so clients
 // can display the series poster and backdrop in Continue Watching / Next Up.
-func (m *mapper) applySeriesImages(dto *baseItemDTO, seriesPosterURL, seriesBackdropURL string) {
+func (m *mapper) applySeriesImages(dto *baseItemDTO, series seriesImageSet) {
 	if dto.SeriesID == "" {
 		return
 	}
-	if seriesPosterURL != "" {
-		dto.SeriesPrimaryImageTag = tagValue(seriesPosterURL)
+	if series.PosterURL != "" {
+		dto.SeriesPrimaryImageTag = m.imageTagSigner.Tag(
+			imageTagSeed(series.ContentID, "Primary", compatCardImageSize, series.PosterPath, series.PosterThumbhash, series.UpdatedAt),
+			series.PosterURL,
+		)
 	}
-	if seriesBackdropURL != "" {
-		dto.ParentBackdropImageTags = backdropTags(seriesBackdropURL)
+	if series.BackdropURL != "" {
+		tag := m.imageTagSigner.Tag(
+			imageTagSeed(series.ContentID, "Backdrop", compatCardImageSize, series.BackdropPath, series.BackdropThumbhash, series.UpdatedAt),
+			series.BackdropURL,
+		)
+		dto.ParentBackdropImageTags = []string{tag}
 		dto.ParentBackdropItemID = dto.SeriesID
-		dto.ParentThumbImageTag = tagValue(seriesBackdropURL)
+		dto.ParentThumbImageTag = tag
 		dto.ParentThumbItemID = dto.SeriesID
 	}
 }

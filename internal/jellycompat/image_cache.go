@@ -94,15 +94,21 @@ func (c *ImageCache) LookupSized(routeID, imageType, tag, size string) (string, 
 	}
 
 	if tag = strings.TrimSpace(tag); tag != "" {
-		if url, ok := c.lookupTag(tag); ok {
-			return url, true
-		}
+		return c.LookupTag(tag)
 	}
 
 	if routeID == "" || imageType == "" {
 		return "", false
 	}
 	return c.lookupRoute(routeImageKey(routeID, imageType, size))
+}
+
+// LookupTag resolves a cached image URL only by its legacy URL-derived tag.
+func (c *ImageCache) LookupTag(tag string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	return c.lookupTag(strings.TrimSpace(tag))
 }
 
 // lookupTag resolves a tag without size partitioning. Tags are sha1 of the
