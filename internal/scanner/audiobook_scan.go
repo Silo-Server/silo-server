@@ -57,6 +57,64 @@ func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDi
 	return true
 }
 
+// audiobookFolderShouldSkip returns true when every audio file on disk in
+// folderPath matches an existing media_files row by size + mtime AND the
+// linked media_items row is in a non-unmatched status. False under any
+// drift, missing row, or unmatched status — the caller then falls through
+// to the full reconcile path.
+//
+// Errors are returned but the worker loop treats them as "do not skip".
+func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.MediaFolder, folderPath string) (bool, error) {
+	if s.fileRepo == nil || s.itemRepo == nil {
+		return false, nil
+	}
+
+	entries, err := os.ReadDir(folderPath)
+	if err != nil {
+		return false, fmt.Errorf("read folder: %w", err)
+	}
+	var onDisk []audiobookDiskFile
+	for _, e := range entries {
+		if e.IsDir() || !SupportsAudioFile(e.Name()) {
+			continue
+		}
+		full := filepath.Join(folderPath, e.Name())
+		info, statErr := os.Stat(full)
+		if statErr != nil {
+			return false, fmt.Errorf("stat %s: %w", full, statErr)
+		}
+		onDisk = append(onDisk, audiobookDiskFile{
+			Path:    full,
+			Size:    info.Size(),
+			ModTime: normalizeFileModifiedAt(info.ModTime()),
+		})
+	}
+	if len(onDisk) == 0 {
+		return false, nil
+	}
+
+	existing, err := s.fileRepo.ListByObservedRootPath(ctx, folder.ID, folderPath)
+	if err != nil {
+		return false, fmt.Errorf("list existing files: %w", err)
+	}
+	if !audiobookFolderUnchanged(existing, onDisk) {
+		return false, nil
+	}
+
+	contentID := existing[0].ContentID
+	if contentID == "" {
+		return false, nil
+	}
+	statuses, err := s.itemRepo.GetStatusByIDs(ctx, []string{contentID})
+	if err != nil {
+		return false, fmt.Errorf("get item status: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(statuses[contentID]), "unmatched") {
+		return false, nil
+	}
+	return true, nil
+}
+
 // audiobookScanWorkers returns the configured number of parallel workers
 // for audiobook reconciliation. Defaults to 8 — high enough to keep all
 // cores busy on the ffprobe step (which dominates per-book wall time)
@@ -136,6 +194,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		wg        sync.WaitGroup
 		processed int64
 		failed    int64
+		skipped   int64
 	)
 	start := time.Now()
 	for i := 0; i < workers; i++ {
@@ -146,7 +205,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 				if ctx.Err() != nil {
 					return
 				}
-				if err := s.reconcileAudiobookFolder(ctx, folder, path); err != nil {
+				if err := s.reconcileAudiobookFolder(ctx, folder, path, &skipped); err != nil {
 					atomic.AddInt64(&failed, 1)
 					slog.Warn("audiobook scan: folder failed",
 						"folder_id", folder.ID,
@@ -160,6 +219,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 						"folder_id", folder.ID,
 						"processed", n,
 						"failed", atomic.LoadInt64(&failed),
+						"skipped", atomic.LoadInt64(&skipped),
 						"total", len(candidates),
 						"elapsed_sec", int(time.Since(start).Seconds()),
 					)
@@ -181,12 +241,17 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		"folder_id", folder.ID,
 		"processed", atomic.LoadInt64(&processed),
 		"failed", atomic.LoadInt64(&failed),
+		"skipped", atomic.LoadInt64(&skipped),
 		"elapsed_sec", int(time.Since(start).Seconds()),
 	)
 	return nil
 }
 
-func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string) error {
+func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, skipped *int64) error {
+	if isUnchanged, err := s.audiobookFolderShouldSkip(ctx, folder, folderPath); err == nil && isUnchanged {
+		atomic.AddInt64(skipped, 1)
+		return nil
+	}
 	parsed, err := parseAudiobookFolder(ctx, s.ffprobePath, folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
