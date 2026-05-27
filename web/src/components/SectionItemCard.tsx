@@ -5,6 +5,7 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { overlayDataFromSectionItem } from "@/lib/overlays";
+import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import {
   formatUpcomingDate,
   formatUpcomingSubtitle,
@@ -28,6 +29,7 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
   const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
   const airDateLabel = upcomingEvent ? formatUpcomingDate(upcomingEvent.air_date) : "";
   const airTimeLabel = upcomingEvent ? formatUpcomingTime(upcomingEvent.air_time) : null;
+  const episodeLabels = !upcomingEvent ? buildEpisodeCardLabels(item) : null;
 
   return (
     <div className="media-card group/card">
@@ -93,7 +95,9 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
         />
       </div>
       <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-        <div className="truncate text-[14px] font-semibold tracking-tight">{item.title}</div>
+        <div className="truncate text-[14px] font-semibold tracking-tight">
+          {episodeLabels ? episodeLabels.seriesTitle : item.title}
+        </div>
         {upcomingEvent ? (
           <>
             {subtitle && (
@@ -104,6 +108,17 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium">
               <span className="text-foreground">{airDateLabel}</span>
               {airTimeLabel && <span className="text-muted-foreground">{airTimeLabel}</span>}
+            </div>
+          </>
+        ) : episodeLabels ? (
+          <>
+            {episodeLabels.episodeTitle ? (
+              <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+                {episodeLabels.episodeTitle}
+              </div>
+            ) : null}
+            <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+              {episodeLabels.episodeCode}
             </div>
           </>
         ) : (

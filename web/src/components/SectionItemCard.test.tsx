@@ -21,6 +21,35 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
 }));
 
 describe("SectionItemCard", () => {
+  it("renders episode cards with series title, episode title, and episode code", () => {
+    const markup = renderToStaticMarkup(
+      <SectionItemCard
+        item={{
+          content_id: "episode-1",
+          type: "episode",
+          title: "Dumbston Checks In",
+          series_title: "American Dad!",
+          season_number: 22,
+          episode_number: 10,
+          year: 2025,
+          genres: ["Animation"],
+          status: "matched",
+          rating_imdb: 7.1,
+          overview: "Overview",
+          poster_url: "",
+          poster_thumbhash: "",
+          backdrop_url: "",
+          backdrop_thumbhash: "",
+          logo_url: "",
+        }}
+      />,
+    );
+
+    expect(markup).toContain("American Dad!");
+    expect(markup).toContain("Dumbston Checks In");
+    expect(markup).toContain("S22E10");
+  });
+
   it("renders premiere metadata when an upcoming event is present", () => {
     const markup = renderToStaticMarkup(
       <SectionItemCard

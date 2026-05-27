@@ -7,20 +7,12 @@ import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
+import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
-  if (
-    item.type === "episode" &&
-    item.series_title &&
-    item.season_number != null &&
-    item.episode_number != null
-  ) {
-    return (
-      <>
-        S{item.season_number} E{item.episode_number}
-        {item.title ? ` • ${item.title}` : ""}
-      </>
-    );
+  const episodeLabels = buildEpisodeCardLabels(item);
+  if (episodeLabels) {
+    return <>{episodeLabels.episodeCode}</>;
   }
 
   const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
@@ -90,8 +82,8 @@ export default function ItemCard({
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = `/item/${item.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`;
-  const displayTitle =
-    item.type === "episode" && item.series_title ? item.series_title : item.title;
+  const episodeLabels = buildEpisodeCardLabels(item);
+  const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 
   return (
     <div className="media-card group/card">
@@ -178,6 +170,11 @@ export default function ItemCard({
       </div>
       <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
         <div className="truncate text-[14px] font-semibold tracking-tight">{displayTitle}</div>
+        {episodeLabels?.episodeTitle ? (
+          <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+            {episodeLabels.episodeTitle}
+          </div>
+        ) : null}
         <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
           <SortMeta item={item} sortField={sortField} />
         </div>

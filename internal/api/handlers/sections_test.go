@@ -17,6 +17,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+type stubSectionEpisodeFetcher struct {
+	calls int
+	meta  map[string]sections.SectionItemMeta
+}
+
+func (s *stubSectionEpisodeFetcher) FetchEpisodesByContentIDs(_ context.Context, _ []string, _ catalog.AccessFilter) ([]*models.MediaItem, map[string]sections.SectionItemMeta, error) {
+	s.calls++
+	return nil, s.meta, nil
+}
+
 func TestSectionBackdropPathUsesExpectedVariants(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -62,6 +72,101 @@ func TestSectionBackdropPathUsesExpectedVariants(t *testing.T) {
 				t.Fatalf("sectionBackdropPath(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
+	seasonNumber := 1
+	episodeNumber := 1
+	seriesID := "series-1"
+	fetcher := &stubSectionEpisodeFetcher{
+		meta: map[string]sections.SectionItemMeta{
+			"episode-1": {
+				SeriesID:      &seriesID,
+				SeriesTitle:   "American Dad!",
+				SeasonNumber:  &seasonNumber,
+				EpisodeNumber: &episodeNumber,
+			},
+		},
+	}
+	h := &SectionHandler{episodeFetcher: fetcher}
+	withItems := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "released", SectionType: sections.SectionCustomFilter, Title: "Released"},
+			Items: []*models.MediaItem{{
+				ContentID: "episode-1",
+				Type:      "episode",
+				Title:     "Dumbston Checks In",
+				Status:    "matched",
+			}},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
+	resp := h.buildSectionsResponse(req, withItems)
+
+	if fetcher.calls != 1 {
+		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
+	}
+	item := resp.Sections[0].Items[0]
+	if item.SeriesTitle != "American Dad!" {
+		t.Fatalf("series title = %q, want %q", item.SeriesTitle, "American Dad!")
+	}
+	if item.SeasonNumber == nil || *item.SeasonNumber != 1 {
+		t.Fatalf("season number = %v, want 1", item.SeasonNumber)
+	}
+	if item.EpisodeNumber == nil || *item.EpisodeNumber != 1 {
+		t.Fatalf("episode number = %v, want 1", item.EpisodeNumber)
+	}
+}
+
+func TestBuildSectionsResponseKeepsExistingEpisodeMeta(t *testing.T) {
+	seasonNumber := 2
+	episodeNumber := 6
+	seriesID := "series-existing"
+	fetcher := &stubSectionEpisodeFetcher{
+		meta: map[string]sections.SectionItemMeta{
+			"episode-1": {
+				SeriesTitle: "Fetched Series",
+			},
+		},
+	}
+	h := &SectionHandler{episodeFetcher: fetcher}
+	withItems := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "next", SectionType: sections.SectionNextUp, Title: "Next"},
+			Items: []*models.MediaItem{{
+				ContentID: "episode-1",
+				Type:      "episode",
+				Title:     "Episode 6",
+				Status:    "matched",
+			}},
+			ItemMeta: map[string]sections.SectionItemMeta{
+				"episode-1": {
+					SeriesID:      &seriesID,
+					SeriesTitle:   "Only Child",
+					SeasonNumber:  &seasonNumber,
+					EpisodeNumber: &episodeNumber,
+				},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
+	resp := h.buildSectionsResponse(req, withItems)
+
+	if fetcher.calls != 0 {
+		t.Fatalf("episode metadata fetch calls = %d, want 0", fetcher.calls)
+	}
+	item := resp.Sections[0].Items[0]
+	if item.SeriesTitle != "Only Child" {
+		t.Fatalf("series title = %q, want %q", item.SeriesTitle, "Only Child")
+	}
+	if item.SeasonNumber == nil || *item.SeasonNumber != 2 {
+		t.Fatalf("season number = %v, want 2", item.SeasonNumber)
+	}
+	if item.EpisodeNumber == nil || *item.EpisodeNumber != 6 {
+		t.Fatalf("episode number = %v, want 6", item.EpisodeNumber)
 	}
 }
 
@@ -199,8 +304,8 @@ func TestDropEmptySeasonalSectionsHandlesNilAndEmpty(t *testing.T) {
 func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
 	got := libraryDefaultSections(&models.MediaFolder{Type: "series"}, 12)
 
-	if len(got) != 7 {
-		t.Fatalf("expected 7 series default sections, got %d", len(got))
+	if len(got) != 6 {
+		t.Fatalf("expected 6 series default sections, got %d", len(got))
 	}
 	if got[1].Title != "Recently Added TV" {
 		t.Fatalf("section 1 title = %q, want %q", got[1].Title, "Recently Added TV")
@@ -208,8 +313,8 @@ func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
 	if got[2].Title != "Recently Released Episodes" {
 		t.Fatalf("section 2 title = %q, want %q", got[2].Title, "Recently Released Episodes")
 	}
-	if got[5].SectionType != sections.SectionRecommendedForYou {
-		t.Fatalf("section 5 type = %q, want %q", got[5].SectionType, sections.SectionRecommendedForYou)
+	if got[4].SectionType != sections.SectionRecommendedForYou {
+		t.Fatalf("section 4 type = %q, want %q", got[4].SectionType, sections.SectionRecommendedForYou)
 	}
 }
 
