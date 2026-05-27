@@ -376,9 +376,74 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 		return &best.candidate, true
 	}
 	if best.score-scoredCandidates[1].score < 15 {
-		return duplicateTieBreakWinner(hints, scoredCandidates)
+		if winner, ok := duplicateTieBreakWinner(hints, scoredCandidates); ok {
+			return winner, true
+		}
+		return providerOrderExactTieBreakWinner(hints, scoredCandidates)
 	}
 	return &best.candidate, true
+}
+
+func providerOrderExactTieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
+	if hints == nil || len(scoredCandidates) < 2 {
+		return nil, false
+	}
+
+	best := scoredCandidates[0]
+	contenders := []scoredMatchCandidate{best}
+	for i := 1; i < len(scoredCandidates); i++ {
+		next := scoredCandidates[i]
+		if best.score-next.score >= 15 {
+			break
+		}
+		contenders = append(contenders, next)
+	}
+	if len(contenders) < 2 {
+		return nil, false
+	}
+
+	seenPrimaryProviders := make(map[string]struct{}, len(contenders))
+	for _, contender := range contenders {
+		if !exactTitleYearTypeMatch(hints, contender.candidate) {
+			return nil, false
+		}
+
+		primaryProvider := candidatePrimaryProvider(contender.candidate)
+		if primaryProvider == "" {
+			return nil, false
+		}
+		if _, exists := seenPrimaryProviders[primaryProvider]; exists {
+			return nil, false
+		}
+		seenPrimaryProviders[primaryProvider] = struct{}{}
+	}
+
+	return &best.candidate, true
+}
+
+func exactTitleYearTypeMatch(hints *MatchHints, candidate MatchCandidate) bool {
+	if hints == nil || hints.Year == 0 || candidate.Year == 0 {
+		return false
+	}
+	if candidate.Year != hints.Year {
+		return false
+	}
+	if !candidateTypeMatchesHint(hints.Type, candidate.ContentType) {
+		return false
+	}
+	return inferTitleSimilarity(hints.Title, candidate.Title, hints.Year) == 1
+}
+
+func candidatePrimaryProvider(candidate MatchCandidate) string {
+	for _, key := range canonicalCandidateIDKeys {
+		if strings.TrimSpace(candidate.ProviderIDs[key]) != "" {
+			return key
+		}
+	}
+	if len(candidate.Sources) == 1 {
+		return strings.TrimSpace(candidate.Sources[0])
+	}
+	return ""
 }
 
 func selectRefreshMatchCandidate(existing *models.MediaItem, candidates []MatchCandidate) (*MatchCandidate, bool) {
