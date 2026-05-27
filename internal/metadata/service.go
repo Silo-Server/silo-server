@@ -902,7 +902,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		candidates := NormalizeCandidates(allResults, contentType)
-		if winner, ok := selectInitialMatchCandidate(req.Hints, candidates); ok && winner != nil {
+		providerPriority := make([]string, 0, len(itemChain))
+		for _, p := range itemChain {
+			providerPriority = append(providerPriority, p.Slug())
+		}
+		if winner, ok := selectInitialMatchCandidate(req.Hints, candidates, providerPriority); ok && winner != nil {
 			for k, v := range winner.ProviderIDs {
 				if v != "" {
 					accumulatedIDs[k] = v

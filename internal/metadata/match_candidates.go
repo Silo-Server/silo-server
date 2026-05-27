@@ -397,7 +397,40 @@ func candidatesAreSingleDistinctShow(best MatchCandidate, scored []scoredMatchCa
 	return true
 }
 
-func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate) (*MatchCandidate, bool) {
+// topTieGroup returns the highest-scored candidate plus every candidate within
+// the 15-point tie window of it — i.e. the set of candidates that are not
+// clearly beaten. Assumes scored is sorted descending by score.
+func topTieGroup(scored []scoredMatchCandidate) []scoredMatchCandidate {
+	if len(scored) == 0 {
+		return nil
+	}
+	group := []scoredMatchCandidate{scored[0]}
+	for _, c := range scored[1:] {
+		if scored[0].score-c.score < 15 {
+			group = append(group, c)
+		}
+	}
+	return group
+}
+
+// pickByProviderPriority returns the group candidate whose Sources include the
+// highest-priority provider (providerPriority is ordered highest-first, e.g. the
+// library's chain order). Falls back to the top-scored candidate when there is no
+// priority info or no source matches.
+func pickByProviderPriority(group []scoredMatchCandidate, providerPriority []string) *MatchCandidate {
+	for _, prov := range providerPriority {
+		for i := range group {
+			for _, s := range group[i].candidate.Sources {
+				if strings.EqualFold(s, prov) {
+					return &group[i].candidate
+				}
+			}
+		}
+	}
+	return &group[0].candidate
+}
+
+func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate, providerPriority []string) (*MatchCandidate, bool) {
 	if len(candidates) == 0 {
 		return nil, false
 	}
@@ -455,13 +488,22 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 	// year is high-confidence even when the fuzzy title score sits in the 55-69
 	// band (short/numeric/alternate titles). Accept the top-ranked candidate
 	// without lowering the score thresholds.
+	// We check only the TOP tie-group (candidates within 15 pts of best) so that
+	// low-score noise from unrelated shows below the group does not veto a clear
+	// cross-source agreement. When the top group is one distinct show, pick the
+	// winner by the library's metadata-provider priority (falls back to top-scored).
 	// Residual risk: two different shows with an identical title+year and no
 	// provider IDs would both pass; accepted as low-risk given the title+year+type
 	// corroboration.
 	if hints.Year != 0 && best.candidate.Year == hints.Year &&
-		candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) &&
-		candidatesAreSingleDistinctShow(best.candidate, scoredCandidates) {
-		return &best.candidate, true
+		candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) {
+		topGroup := topTieGroup(scoredCandidates)
+		if candidatesAreSingleDistinctShow(best.candidate, topGroup) {
+			// One distinct show, possibly returned by several providers and clearly
+			// ahead of any different show below. Accept it, choosing the winner by
+			// the library's metadata-provider priority (falls back to top-scored).
+			return pickByProviderPriority(topGroup, providerPriority), true
+		}
 	}
 	if len(scoredCandidates) == 1 {
 		if best.score < 70 {
@@ -553,7 +595,7 @@ func selectRefreshMatchCandidate(existing *models.MediaItem, candidates []MatchC
 		TvdbID: existing.TvdbID,
 		ImdbID: existing.ImdbID,
 	}
-	return selectInitialMatchCandidate(hints, candidates)
+	return selectInitialMatchCandidate(hints, candidates, nil)
 }
 
 func trustedHintIDsPresent(hints *MatchHints) bool {

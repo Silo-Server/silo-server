@@ -1,13 +1,15 @@
 package metadata
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestSelectInitialMatchCandidate_LoneResultYearMatchBelow70(t *testing.T) {
 	// Exact title, matching year, NO sources, NO provider IDs => score 45+20 = 65 (<70).
 	// Old behavior rejected this (single candidate <70); the new rule accepts it.
 	hints := &MatchHints{Title: "1201", Year: 1993, Type: "movie"}
 	cands := []MatchCandidate{{Title: "1201", Year: 1993, ContentType: "movie"}}
-	got, ok := selectInitialMatchCandidate(hints, cands)
+	got, ok := selectInitialMatchCandidate(hints, cands, nil)
 	if !ok || got == nil || got.Title != "1201" {
 		t.Fatalf("expected lone year-matching result to be accepted, got ok=%v cand=%+v", ok, got)
 	}
@@ -21,7 +23,7 @@ func TestSelectInitialMatchCandidate_SameShowAcrossTwoSources(t *testing.T) {
 		{Title: "Blue Lock", Year: 2022, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "404404"}},
 		{Title: "Blue Lock", Year: 2022, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "120089"}},
 	}
-	got, ok := selectInitialMatchCandidate(hints, cands)
+	got, ok := selectInitialMatchCandidate(hints, cands, nil)
 	if !ok || got == nil {
 		t.Fatalf("expected same-show-across-sources to be accepted, got ok=%v cand=%+v", ok, got)
 	}
@@ -32,7 +34,7 @@ func TestSelectInitialMatchCandidate_LoneResultYearMismatchStillRejected(t *test
 	// Year does NOT corroborate, so the new rule must NOT fire; single candidate <70 => reject.
 	hints := &MatchHints{Title: "1201", Year: 1993, Type: "movie"}
 	cands := []MatchCandidate{{Title: "1201", Year: 1990, ContentType: "movie", Sources: []string{"tmdb"}}}
-	if got, ok := selectInitialMatchCandidate(hints, cands); ok {
+	if got, ok := selectInitialMatchCandidate(hints, cands, nil); ok {
 		t.Fatalf("expected year-mismatch lone result to be rejected, got cand=%+v", got)
 	}
 }
@@ -54,7 +56,7 @@ func TestSelectInitialMatchCandidate_TwoDifferentShowsUnchanged(t *testing.T) {
 		{Title: "The Real History of the World War Europe", Year: 2010, ContentType: "series", Sources: []string{"tvdb", "tmdb"}, ProviderIDs: map[string]string{"tvdb": "1"}},
 		{Title: "The Real History of the World War Pacific", Year: 2010, ContentType: "series", Sources: []string{"tvdb", "tmdb"}, ProviderIDs: map[string]string{"tvdb": "2"}},
 	}
-	if _, ok := selectInitialMatchCandidate(hints, cands); ok {
+	if _, ok := selectInitialMatchCandidate(hints, cands, nil); ok {
 		t.Fatalf("two distinct shows must not be auto-accepted by the lone-result rule")
 	}
 }
@@ -70,7 +72,41 @@ func TestSelectInitialMatchCandidate_ConflictingProviderIDsNotAccepted(t *testin
 		{Title: "Alpha", Year: 2022, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "111"}},
 		{Title: "Alpha", Year: 2022, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "222"}},
 	}
-	if _, ok := selectInitialMatchCandidate(hints, cands); ok {
+	if _, ok := selectInitialMatchCandidate(hints, cands, nil); ok {
 		t.Fatal("conflicting tmdb IDs must not be auto-accepted")
+	}
+}
+
+func TestSelectInitialMatchCandidate_CrossSourceTieResolvedByProviderPriority(t *testing.T) {
+	// "100 Days Wild" (2020, series, no shared IDs): TVDB and TMDB each return the correct
+	// show (score 83 each: 45 exact title + 20 year + 12 source + 5 has IDs + 1 richness).
+	// Two noise candidates (unrelated title/year) score 18 — well outside the 15-pt tie
+	// window of 83, so topTieGroup contains only the two correct candidates.
+	// candidatesAreSingleDistinctShow passes (same title/year, no conflicting IDs),
+	// and pickByProviderPriority selects the winner by the library's chain order.
+	hints := &MatchHints{Title: "100 Days Wild", Year: 2020, Type: "series"}
+	cands := []MatchCandidate{
+		{Title: "100 Days Wild", Year: 2020, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "386908"}},
+		{Title: "100 Days Wild", Year: 2020, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "109476"}},
+		{Title: "Some Other Show", Year: 2026, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "476741"}},
+		{Title: "Live to 100", Year: 2023, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "437829"}},
+	}
+
+	// tvdb ranked first in provider chain -> tvdb candidate wins
+	got, ok := selectInitialMatchCandidate(hints, cands, []string{"tvdb", "tmdb"})
+	if !ok || got == nil || got.ProviderIDs["tvdb"] != "386908" {
+		t.Fatalf("expected tvdb winner (386908), got ok=%v cand=%+v", ok, got)
+	}
+
+	// tmdb ranked first in provider chain -> tmdb candidate wins
+	got, ok = selectInitialMatchCandidate(hints, cands, []string{"tmdb", "tvdb"})
+	if !ok || got == nil || got.ProviderIDs["tmdb"] != "109476" {
+		t.Fatalf("expected tmdb winner (109476), got ok=%v cand=%+v", ok, got)
+	}
+
+	// nil priority -> still accepts (fallback to top-scored, i.e. first in sorted order)
+	got, ok = selectInitialMatchCandidate(hints, cands, nil)
+	if !ok || got == nil {
+		t.Fatalf("expected nil-priority to still accept a match, got ok=%v cand=%+v", ok, got)
 	}
 }

@@ -508,6 +508,7 @@ func TestSelectInitialMatchCandidate_UsesProviderOrderForExactCrossProviderTie(t
 				Sources:     []string{"tmdb"},
 			},
 		},
+		nil,
 	)
 	if !ok || winner == nil {
 		t.Fatal("expected exact cross-provider tie to use provider order")
@@ -540,6 +541,7 @@ func TestSelectInitialMatchCandidate_ProviderOrderTieRequiresExactTitleYear(t *t
 				Sources:     []string{"imdb", "metadb", "tmdb", "xattr"},
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatal("expected non-equivalent cross-provider tie to remain unmatched")
