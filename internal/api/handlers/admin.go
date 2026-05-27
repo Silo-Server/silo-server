@@ -112,19 +112,20 @@ func NewAdminHandler(
 
 // createUserRequest represents the JSON body for POST /admin/users.
 type createUserRequest struct {
-	Username                 string `json:"username"`
-	Email                    string `json:"email"`
-	Password                 string `json:"password"`
-	Role                     string `json:"role"`
-	CreateDefaultProfile     bool   `json:"create_default_profile"`
-	DefaultProfileName       string `json:"default_profile_name,omitempty"`
-	LibraryIDs               []int  `json:"library_ids"`
-	MaxPlaybackQuality       string `json:"max_playback_quality"`
-	MaxStreams               *int   `json:"max_streams,omitempty"`
-	MaxTranscodes            *int   `json:"max_transcodes,omitempty"`
-	MaxProfiles              *int   `json:"max_profiles,omitempty"`
-	DownloadAllowed          *bool  `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool  `json:"download_transcode_allowed,omitempty"`
+	Username                 string   `json:"username"`
+	Email                    string   `json:"email"`
+	Password                 string   `json:"password"`
+	Role                     string   `json:"role"`
+	Permissions              []string `json:"permissions"`
+	CreateDefaultProfile     bool     `json:"create_default_profile"`
+	DefaultProfileName       string   `json:"default_profile_name,omitempty"`
+	LibraryIDs               []int    `json:"library_ids"`
+	MaxPlaybackQuality       string   `json:"max_playback_quality"`
+	MaxStreams               *int     `json:"max_streams,omitempty"`
+	MaxTranscodes            *int     `json:"max_transcodes,omitempty"`
+	MaxProfiles              *int     `json:"max_profiles,omitempty"`
+	DownloadAllowed          *bool    `json:"download_allowed,omitempty"`
+	DownloadTranscodeAllowed *bool    `json:"download_transcode_allowed,omitempty"`
 }
 
 type updateLibraryIDsField struct {
@@ -149,20 +150,43 @@ func (f updateLibraryIDsField) Ptr() *[]int {
 	return &value
 }
 
+type updateStringSliceField struct {
+	Set   bool
+	Value []string
+}
+
+func (f *updateStringSliceField) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		f.Value = []string{}
+		return nil
+	}
+	return json.Unmarshal(data, &f.Value)
+}
+
+func (f updateStringSliceField) Ptr() *[]string {
+	if !f.Set {
+		return nil
+	}
+	value := append([]string(nil), f.Value...)
+	return &value
+}
+
 // updateUserRequest represents the JSON body for PUT /admin/users/{id}.
 type updateUserRequest struct {
-	Username                 *string               `json:"username,omitempty"`
-	Email                    *string               `json:"email,omitempty"`
-	Password                 *string               `json:"password,omitempty"`
-	Role                     *string               `json:"role,omitempty"`
-	Enabled                  *bool                 `json:"enabled,omitempty"`
-	LibraryIDs               updateLibraryIDsField `json:"library_ids,omitempty"`
-	MaxPlaybackQuality       *string               `json:"max_playback_quality,omitempty"`
-	MaxStreams               *int                  `json:"max_streams,omitempty"`
-	MaxTranscodes            *int                  `json:"max_transcodes,omitempty"`
-	MaxProfiles              *int                  `json:"max_profiles,omitempty"`
-	DownloadAllowed          *bool                 `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool                 `json:"download_transcode_allowed,omitempty"`
+	Username                 *string                `json:"username,omitempty"`
+	Email                    *string                `json:"email,omitempty"`
+	Password                 *string                `json:"password,omitempty"`
+	Role                     *string                `json:"role,omitempty"`
+	Permissions              updateStringSliceField `json:"permissions,omitempty"`
+	Enabled                  *bool                  `json:"enabled,omitempty"`
+	LibraryIDs               updateLibraryIDsField  `json:"library_ids,omitempty"`
+	MaxPlaybackQuality       *string                `json:"max_playback_quality,omitempty"`
+	MaxStreams               *int                   `json:"max_streams,omitempty"`
+	MaxTranscodes            *int                   `json:"max_transcodes,omitempty"`
+	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
+	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
+	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
 }
 
 // adminUserResponse represents a user in admin JSON responses.
@@ -171,6 +195,7 @@ type adminUserResponse struct {
 	Username                 string     `json:"username"`
 	Email                    string     `json:"email"`
 	Role                     string     `json:"role"`
+	Permissions              []string   `json:"permissions"`
 	Enabled                  bool       `json:"enabled"`
 	LibraryIDs               []int      `json:"library_ids"`
 	MaxPlaybackQuality       string     `json:"max_playback_quality"`
@@ -234,6 +259,7 @@ func toAdminUserResponse(u *models.User) adminUserResponse {
 		Username:                 u.Username,
 		Email:                    u.Email,
 		Role:                     u.Role,
+		Permissions:              append([]string{}, u.Permissions...),
 		Enabled:                  u.Enabled,
 		LibraryIDs:               append([]int(nil), u.LibraryIDs...),
 		MaxPlaybackQuality:       access.NormalizePlaybackQuality(u.MaxPlaybackQuality),
@@ -361,6 +387,11 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
+	permissions, err := auth.NormalizePermissions(req.Permissions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 
 	user, err := h.accountProvisioner.CreateAccount(r.Context(), auth.CreateAccountInput{
 		User: models.CreateUserInput{
@@ -368,6 +399,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 			Email:                    req.Email,
 			Password:                 req.Password,
 			Role:                     req.Role,
+			Permissions:              permissions,
 			LibraryIDs:               req.LibraryIDs,
 			MaxPlaybackQuality:       maxPlaybackQuality,
 			MaxStreams:               req.MaxStreams,
@@ -418,12 +450,22 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
+	var permissions *[]string
+	if req.Permissions.Set {
+		normalized, err := auth.NormalizePermissions(req.Permissions.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		permissions = &normalized
+	}
 
 	err = h.userRepo.Update(r.Context(), id, models.UpdateUserInput{
 		Username:                 req.Username,
 		Email:                    req.Email,
 		Password:                 req.Password,
 		Role:                     req.Role,
+		Permissions:              permissions,
 		Enabled:                  req.Enabled,
 		LibraryIDs:               req.LibraryIDs.Ptr(),
 		MaxPlaybackQuality:       maxPlaybackQuality,
@@ -710,6 +752,7 @@ func updateRequiresSessionRevocation(req updateUserRequest) bool {
 		req.Role != nil ||
 		req.Enabled != nil ||
 		req.LibraryIDs.Set ||
+		req.Permissions.Set ||
 		req.MaxPlaybackQuality != nil
 }
 
@@ -901,7 +944,7 @@ func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.
 		publishEventJob(r.Context(), h.RealtimeHub.EventsHub(), "job.created", job)
 	}
 
-	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, job, nil))
+	writeJSON(w, http.StatusAccepted, adminJobToResponseForClaims(r, job, nil, apimw.GetClaims(r.Context())))
 }
 
 // UpdateItemMetadataRequest contains the fields that can be updated via

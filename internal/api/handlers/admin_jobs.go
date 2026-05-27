@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -110,7 +111,13 @@ func (h *AdminJobsHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, adminJobToResponse(r, job, h.store))
+	claims := apimw.GetClaims(r.Context())
+	if !canReadAdminJob(claims, job) {
+		writeError(w, http.StatusForbidden, "forbidden", "Admin access required")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, adminJobToResponseForClaims(r, job, h.store, claims))
 }
 
 func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArtifactStore) adminJobResponse {
@@ -147,6 +154,96 @@ func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArt
 	return resp
 }
 
+func adminJobToResponseForClaims(
+	r *http.Request,
+	job *models.AdminJob,
+	store AdminJobArtifactStore,
+	claims *auth.Claims,
+) adminJobResponse {
+	response := adminJobToResponse(r, job, store)
+	sanitizeAdminJobResponseForClaims(&response, claims)
+	return response
+}
+
+func sanitizeAdminJobResponseForClaims(response *adminJobResponse, claims *auth.Claims) {
+	if response == nil || (claims != nil && claims.Role == "admin") {
+		return
+	}
+	response.RequestPayload = json.RawMessage(`{}`)
+	response.ResultPayload = sanitizeNonAdminAdminJobResultPayload(response.JobType, response.ResultPayload)
+	response.ErrorMessage = ""
+	response.PublicURL = ""
+	response.DownloadURL = ""
+	response.DownloadExpiresAt = nil
+}
+
+func sanitizeNonAdminAdminJobResultPayload(jobType string, payload json.RawMessage) json.RawMessage {
+	if jobType != adminjob.JobTypeItemRefresh {
+		return json.RawMessage(`{}`)
+	}
+
+	var raw map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &raw) != nil {
+		return json.RawMessage(`{}`)
+	}
+
+	safe := make(map[string]json.RawMessage)
+	copyJSONFields(safe, raw,
+		"requested_content_id",
+		"refresh_content_id",
+		"detail_content_id",
+		"matched_files",
+	)
+	if scanPayload, ok := raw["scan_result"]; ok {
+		if scanSummary := sanitizeScanResultPayload(scanPayload); len(scanSummary) > 0 {
+			safe["scan_result"] = scanSummary
+		}
+	}
+	if len(safe) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	data, err := json.Marshal(safe)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return data
+}
+
+func sanitizeScanResultPayload(payload json.RawMessage) json.RawMessage {
+	var raw map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &raw) != nil {
+		return nil
+	}
+	safe := make(map[string]json.RawMessage)
+	copyJSONFields(safe, raw,
+		"New",
+		"Updated",
+		"Unchanged",
+		"Missing",
+		"FilesDeleted",
+		"MembershipsRemoved",
+		"ItemsDeleted",
+		"Errors",
+		"EmptyRootGuarded",
+	)
+	if len(safe) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(safe)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func copyJSONFields(dst, src map[string]json.RawMessage, keys ...string) {
+	for _, key := range keys {
+		if value, ok := src[key]; ok && len(value) > 0 {
+			dst[key] = value
+		}
+	}
+}
+
 func writeAdminJobConflict(w http.ResponseWriter, message string, job *models.AdminJob, handler *AdminJobsHandler, r *http.Request) {
 	resp := adminJobConflictResponse{
 		Error:   "conflict",
@@ -175,4 +272,14 @@ func currentAdminUserID(r *http.Request) int {
 		return 0
 	}
 	return claims.UserID
+}
+
+func canReadAdminJob(claims *auth.Claims, job *models.AdminJob) bool {
+	if claims == nil || job == nil {
+		return false
+	}
+	if claims.Role == "admin" {
+		return true
+	}
+	return job.JobType == adminjob.JobTypeItemRefresh && job.CreatedByUserID == claims.UserID
 }

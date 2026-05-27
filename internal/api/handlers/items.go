@@ -1258,7 +1258,21 @@ func isNotFound(err error) bool {
 		errors.Is(err, catalog.ErrSeasonNotFound)
 }
 
-func requestIsAdmin(r *http.Request) bool {
+func (h *ItemsHandler) requestCanViewFilePaths(r *http.Request) bool {
 	claims := apimw.GetClaims(r.Context())
-	return claims != nil && claims.Role == "admin"
+	if claims == nil {
+		return false
+	}
+	if claims.Role == "admin" {
+		return true
+	}
+	if h == nil || h.UserRepo == nil {
+		return false
+	}
+	user, err := h.UserRepo.GetByID(r.Context(), claims.UserID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "checking file path visibility permissions", "user_id", claims.UserID, "error", err)
+		return false
+	}
+	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
 }

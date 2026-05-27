@@ -13,6 +13,7 @@ import {
   useRefreshItemMetadata,
   type UpdateItemMetadataRequest,
 } from "@/hooks/queries/items";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 // MetadataField enum values matching internal/metadata/types.go
@@ -92,6 +93,7 @@ function initFormState(item: ItemDetail) {
 }
 
 export default function EditMetadataDialog({ item, open, onOpenChange }: EditMetadataDialogProps) {
+  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [form, setForm] = useState(() => initFormState(item));
   const [lockedFields, setLockedFields] = useState<Set<number>>(
@@ -103,7 +105,13 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const refreshMutation = useRefreshItemMetadata();
 
   const isLockable = item.type === "movie" || item.type === "series";
-  const visibleSections = SECTIONS.filter((s) => s.types.includes(item.type));
+  const canEditImages = user?.role === "admin";
+  const visibleSections = SECTIONS.filter(
+    (s) => s.types.includes(item.type) && (s.key !== "images" || canEditImages),
+  );
+  const effectiveActiveSection = visibleSections.some((section) => section.key === activeSection)
+    ? activeSection
+    : "general";
 
   const originalForm = useMemo(() => initFormState(item), [item]);
 
@@ -261,7 +269,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   onClick={() => setActiveSection(section.key)}
                   className={cn(
                     "px-4 py-2 text-left text-[13px] font-medium whitespace-nowrap transition-colors",
-                    activeSection === section.key
+                    effectiveActiveSection === section.key
                       ? "border-primary bg-primary/8 text-primary max-sm:border-b-2 sm:border-r-2"
                       : "text-muted-foreground hover:text-foreground",
                   )}
@@ -273,7 +281,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-              {activeSection === "general" && (
+              {effectiveActiveSection === "general" && (
                 <div className="space-y-4">
                   <FieldRow label="Title" lockIcon={renderLockIcon("title")}>
                     <Input value={form.title} onChange={(e) => setField("title", e.target.value)} />
@@ -389,7 +397,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                 </div>
               )}
 
-              {activeSection === "dates" && (
+              {effectiveActiveSection === "dates" && (
                 <div className="space-y-4">
                   {(item.type === "movie" || item.type === "series") && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -528,7 +536,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                 </div>
               )}
 
-              {activeSection === "tags" && (
+              {effectiveActiveSection === "tags" && (
                 <div className="space-y-4">
                   <FieldRow label="Genres" lockIcon={renderLockIcon("genres")}>
                     <TagInput
@@ -566,7 +574,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                 </div>
               )}
 
-              {activeSection === "ids" && (
+              {effectiveActiveSection === "ids" && (
                 <div className="space-y-4">
                   <FieldRow label="IMDb ID">
                     <Input
@@ -590,9 +598,15 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                 </div>
               )}
 
-              <div className={activeSection === "images" ? "flex h-full flex-col" : "hidden"}>
-                <ImageSelectorTab item={item} enabled={activeSection === "images"} />
-              </div>
+              {canEditImages && (
+                <div
+                  className={
+                    effectiveActiveSection === "images" ? "flex h-full flex-col" : "hidden"
+                  }
+                >
+                  <ImageSelectorTab item={item} enabled={effectiveActiveSection === "images"} />
+                </div>
+              )}
             </div>
           </div>
 

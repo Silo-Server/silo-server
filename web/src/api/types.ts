@@ -97,6 +97,7 @@ export interface User {
   username: string;
   email: string;
   role: string;
+  permissions: string[];
   download_allowed: boolean;
   impersonation?: ImpersonationInfo | null;
 }
@@ -1631,6 +1632,7 @@ export interface AdminUser {
   username: string;
   email: string;
   role: string;
+  permissions: string[];
   enabled: boolean;
   library_ids: number[] | null;
   max_playback_quality: string;
@@ -1649,6 +1651,7 @@ export interface CreateUserRequest {
   email: string;
   password: string;
   role: string;
+  permissions?: string[];
   create_default_profile?: boolean;
   default_profile_name?: string;
   library_ids?: number[] | null;
@@ -1665,6 +1668,7 @@ export interface UpdateUserRequest {
   email?: string;
   password?: string;
   role?: string;
+  permissions?: string[];
   enabled?: boolean;
   library_ids?: number[] | null;
   max_playback_quality?: string;
