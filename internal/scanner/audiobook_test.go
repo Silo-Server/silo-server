@@ -232,3 +232,27 @@ func TestAudiobookPeopleCreditsEqual(t *testing.T) {
 		})
 	}
 }
+
+func TestFloatPtrEqual(t *testing.T) {
+	a := 1.5
+	b := 1.5
+	c := 2.0
+	cases := []struct {
+		name string
+		x, y *float64
+		want bool
+	}{
+		{"both nil", nil, nil, true},
+		{"left nil", nil, &a, false},
+		{"right nil", &a, nil, false},
+		{"equal", &a, &b, true},
+		{"unequal", &a, &c, false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := floatPtrEqual(tt.x, tt.y); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

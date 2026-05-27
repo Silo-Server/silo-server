@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
+	"github.com/jackc/pgx/v5"
 )
 
 // audiobookDiskFile is the on-disk projection used by audiobookFolderUnchanged.
@@ -689,31 +690,62 @@ func (s *Scanner) upsertAudiobookSeries(ctx context.Context, contentID string, b
 	if s.fileRepo == nil {
 		return fmt.Errorf("fileRepo not configured on Scanner")
 	}
-	name := strings.TrimSpace(book.Series)
-	if name == "" {
-		_, err := s.fileRepo.Pool().Exec(ctx,
-			`DELETE FROM audiobook_series WHERE content_id = $1`, contentID)
-		if err != nil {
-			return fmt.Errorf("delete audiobook_series row: %w", err)
+	desiredName := strings.TrimSpace(book.Series)
+	desiredIdx := parseSeriesIndex(book.SeriesPosition)
+
+	// Read current row.
+	var currentName *string
+	var currentIdx *float64
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT series_name, series_index FROM audiobook_series WHERE content_id = $1
+	`, contentID).Scan(&currentName, &currentIdx)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("query audiobook_series: %w", err)
+	}
+
+	if desiredName == "" {
+		if currentName == nil {
+			return nil // already absent
+		}
+		if _, delErr := s.fileRepo.Pool().Exec(ctx,
+			`DELETE FROM audiobook_series WHERE content_id = $1`, contentID); delErr != nil {
+			return fmt.Errorf("delete audiobook_series row: %w", delErr)
 		}
 		return nil
 	}
-	var idx any
-	if v := parseSeriesIndex(book.SeriesPosition); v != nil {
-		idx = *v
+
+	if currentName != nil && *currentName == desiredName && floatPtrEqual(currentIdx, desiredIdx) {
+		return nil // identical row, skip the write
 	}
-	_, err := s.fileRepo.Pool().Exec(ctx, `
+
+	var idx any
+	if desiredIdx != nil {
+		idx = *desiredIdx
+	}
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO audiobook_series (content_id, series_name, series_index, updated_at)
 		VALUES ($1, $2, $3, NOW())
 		ON CONFLICT (content_id) DO UPDATE SET
 			series_name  = EXCLUDED.series_name,
 			series_index = EXCLUDED.series_index,
 			updated_at   = NOW()
-	`, contentID, name, idx)
-	if err != nil {
+	`, contentID, desiredName, idx); err != nil {
 		return fmt.Errorf("upsert audiobook_series row: %w", err)
 	}
 	return nil
+}
+
+// floatPtrEqual returns true when two *float64 values represent the same
+// state — both nil, or both non-nil and equal. Used to skip audiobook_series
+// re-upserts when only the series_index needs to be NULL=NULL compared.
+func floatPtrEqual(a, b *float64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // parseSeriesIndex extracts a leading numeric value from a freeform tag
