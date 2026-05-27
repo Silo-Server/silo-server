@@ -342,6 +342,42 @@ type scoredMatchCandidate struct {
 	score     float64
 }
 
+// candidatesAreSingleDistinctShow reports whether every scored candidate refers
+// to the same show as best — same year, an exact normalized title match, and no
+// conflicting provider IDs. This is true when the search effectively returned
+// one distinct title, possibly as separate per-source rows (e.g. a TVDB row and
+// a TMDB row that weren't merged because each carries only its own provider's
+// ID). Candidates that share a canonical provider key but carry different values
+// are considered distinct shows and cause the function to return false.
+func candidatesAreSingleDistinctShow(best MatchCandidate, scored []scoredMatchCandidate) bool {
+	// Year==0 means the provider didn't supply a release year, so we cannot
+	// claim the candidates refer to the *same* show via year-equality. Without
+	// this guard, two no-year candidates from different providers would satisfy
+	// the multi-source corroboration arm of the lone-result rule and get
+	// auto-accepted, which over-accepts ambiguous matches.
+	if best.Year == 0 {
+		return false
+	}
+	for _, c := range scored {
+		if c.candidate.Year == 0 || c.candidate.Year != best.Year {
+			return false
+		}
+		if inferTitleSimilarity(best.Title, c.candidate.Title, best.Year) != 1 {
+			return false
+		}
+		// If both candidates carry the same canonical provider key (e.g. both
+		// have a tmdb ID) but different values, they are different shows.
+		for _, key := range canonicalCandidateIDKeys {
+			bv := strings.TrimSpace(best.ProviderIDs[key])
+			cv := strings.TrimSpace(c.candidate.ProviderIDs[key])
+			if bv != "" && cv != "" && bv != cv {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate) (*MatchCandidate, bool) {
 	if len(candidates) == 0 {
 		return nil, false
@@ -368,6 +404,16 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 
 	if best.score < 55 {
 		return nil, false
+	}
+	// A search that resolves to a single distinct show (one candidate, or the
+	// same title+year returned once per source) whose year matches the parsed
+	// year is high-confidence even when the fuzzy title score sits in the 55-69
+	// band (short/numeric/alternate titles). Accept the top-ranked candidate
+	// without lowering the score thresholds.
+	if hints.Year != 0 && best.candidate.Year == hints.Year &&
+		candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) &&
+		candidatesAreSingleDistinctShow(best.candidate, scoredCandidates) {
+		return &best.candidate, true
 	}
 	if len(scoredCandidates) == 1 {
 		if best.score < 70 {
