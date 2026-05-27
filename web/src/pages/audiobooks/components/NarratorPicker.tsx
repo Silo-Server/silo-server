@@ -9,11 +9,7 @@ interface NarratorPickerProps {
   others: AudiobookNarration[];
 }
 
-export function NarratorPicker({
-  currentNarrator,
-  currentContentId,
-  others,
-}: NarratorPickerProps) {
+export function NarratorPicker({ currentNarrator, currentContentId, others }: NarratorPickerProps) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();

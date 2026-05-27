@@ -86,9 +86,7 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
           aria-expanded={expanded}
           className="hover:text-primary flex items-center gap-2 text-xl font-semibold tracking-tight transition-colors"
         >
-          <ChevronDown
-            className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90"}`}
-          />
+          <ChevronDown className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90"}`} />
           Chapters
           <span className="text-muted-foreground text-sm font-normal">({rows.length})</span>
         </button>
