@@ -20,6 +20,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -148,29 +150,66 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	slog.Info("audiobook enrichment: sweep started", "count", len(items))
+	slog.Info("audiobook enrichment: sweep started",
+		"count", len(items),
+		"workers", e.workers,
+	)
 
-	enriched := 0
-	for _, item := range items {
-		if ctx.Err() != nil {
-			break
-		}
-		if err := e.enrichItem(ctx, item); err != nil {
-			slog.Warn("audiobook enrichment: item failed",
-				"content_id", item.ContentID,
-				"title", item.Title,
-				"error", err,
-			)
-			continue
-		}
-		enriched++
-	}
+	enriched := e.runBatch(ctx, items, e.enrichItem)
 
 	slog.Info("audiobook enrichment: sweep complete",
 		"attempted", len(items),
 		"enriched", enriched,
 	)
 	return enriched, nil
+}
+
+// runBatch processes items in parallel using e.workers goroutines. The
+// enrichFn parameter exists for testing: production calls pass e.enrichItem.
+// Returns the count of items where enrichFn returned nil.
+func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enrichFn func(context.Context, enrichmentItemRow) error) int {
+	workers := e.workers
+	if workers <= 0 {
+		workers = 1
+	}
+	if workers > len(items) {
+		workers = len(items)
+	}
+
+	ch := make(chan enrichmentItemRow, workers)
+	var (
+		wg       sync.WaitGroup
+		enriched int64
+	)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range ch {
+				if ctx.Err() != nil {
+					continue // drain
+				}
+				if err := enrichFn(ctx, item); err != nil {
+					slog.Warn("audiobook enrichment: item failed",
+						"content_id", item.ContentID,
+						"title", item.Title,
+						"error", err,
+					)
+					continue
+				}
+				atomic.AddInt64(&enriched, 1)
+			}
+		}()
+	}
+	for _, item := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		ch <- item
+	}
+	close(ch)
+	wg.Wait()
+	return int(enriched)
 }
 
 // claimBatch returns up to batchSize audiobook items that need enrichment.
