@@ -419,6 +419,7 @@ func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context
 	} else if collection.LibraryID > 0 {
 		def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
 	}
+	def = ApplySmartCollectionItemLimit(def)
 	return r.resolveQuerySource(ctx, CatalogRequest{
 		Source:    CatalogSourceQuery,
 		Query:     def,
@@ -444,6 +445,7 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 		if err != nil {
 			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
 		}
+		def = ApplySmartCollectionItemLimit(def)
 		return r.resolveQuerySource(ctx, CatalogRequest{
 			Source:    CatalogSourceQuery,
 			Query:     def,

@@ -231,7 +231,14 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 	}
 
 	queryDefinitionJSON := defaultJSON(req.QueryDefinition)
-	if firstNonEmptyCollection(req.CollectionType, "manual") == "smart" || len(req.QueryDefinition) > 0 {
+	collectionType := firstNonEmptyCollection(req.CollectionType, "manual")
+	if collectionType == "smart" {
+		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
+			return
+		}
+	} else if len(req.QueryDefinition) > 0 {
 		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
@@ -243,7 +250,7 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
 		CreatorProfileID:           profileID,
 		Name:                       req.Name,
-		CollectionType:             firstNonEmptyCollection(req.CollectionType, "manual"),
+		CollectionType:             collectionType,
 		IsShared:                   req.IsShared,
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		QueryDefinition:            queryDefinition,
@@ -300,7 +307,7 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, true, true)
+		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid query_definition")
 			return
@@ -836,6 +843,23 @@ func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPerso
 		return nil, err
 	}
 	return normalized, nil
+}
+
+func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
+	normalized, err := normalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields)
+	if err != nil {
+		return nil, err
+	}
+	var def catalog.QueryDefinition
+	if err := json.Unmarshal(normalized, &def); err != nil {
+		return nil, err
+	}
+	def = catalog.ApplySmartCollectionItemLimit(def)
+	out, err := json.Marshal(def)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func firstNonEmptyCollection(values ...string) string {

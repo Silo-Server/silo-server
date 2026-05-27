@@ -136,6 +136,7 @@ type previewPagePlan struct {
 	sortArgs        []any
 	limit           int
 	offset          int
+	maxResults      int
 	limitArgIdx     int
 }
 
@@ -155,6 +156,15 @@ func (p previewPagePlan) countSQL() (string, []any) {
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
 	}
+	if p.maxResults > 0 {
+		countLimitArgIdx := len(args) + 1
+		args = append(args, p.maxResults)
+		sql := fmt.Sprintf(
+			"%sSELECT COUNT(*) FROM (SELECT 1 %s %s LIMIT $%d) sub",
+			withClause, p.fromClauseCount, p.whereClause, countLimitArgIdx,
+		)
+		return sql, args
+	}
 	sql := fmt.Sprintf(
 		"%sSELECT COUNT(*) FROM (SELECT 1 %s %s) sub",
 		withClause, p.fromClauseCount, p.whereClause,
@@ -169,7 +179,7 @@ func (p previewPagePlan) countSQL() (string, []any) {
 // after the requested rows.
 func (p previewPagePlan) pagedSQL(includeTotal bool) (string, []any) {
 	queryLimit := p.limit
-	if !includeTotal {
+	if !includeTotal && (p.maxResults <= 0 || p.offset+p.limit < p.maxResults) {
 		queryLimit++
 	}
 	args := append([]any{}, p.cteArgs...)
@@ -333,12 +343,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	fromClauseBase := "FROM " + baseRelation
 	fromClauseCount := fromClauseBase
 
-	if limit <= 0 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset, maxResults := normalizePreviewPageBounds(def, limit, offset)
 	sortPlan, err := builder.WithArgIdx(argIdx).BuildSortPlan(def.Sort)
 	if err != nil {
 		return previewPagePlan{}, err
@@ -380,8 +385,31 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		sortArgs:        sortPlan.Args,
 		limit:           limit,
 		offset:          offset,
+		maxResults:      maxResults,
 		limitArgIdx:     limitArgIdx,
 	}, nil
+}
+
+func normalizePreviewPageBounds(def QueryDefinition, limit int, offset int) (int, int, int) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if def.Limit == nil || *def.Limit <= 0 {
+		return limit, offset, 0
+	}
+
+	maxResults := *def.Limit
+	remaining := maxResults - offset
+	if remaining <= 0 {
+		return 0, offset, maxResults
+	}
+	if limit > remaining {
+		limit = remaining
+	}
+	return limit, offset, maxResults
 }
 
 // buildPreviewPageSQL is a test-friendly facade over buildPreviewPagePlan that

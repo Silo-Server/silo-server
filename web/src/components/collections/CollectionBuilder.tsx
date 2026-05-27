@@ -30,6 +30,11 @@ import CollectionGuidedRulesEditor from "./CollectionGuidedRulesEditor";
 import CollectionOrderingEditor from "./CollectionOrderingEditor";
 import CollectionPreviewPane from "./CollectionPreviewPane";
 import CollectionRulesEditor from "./CollectionRulesEditor";
+import {
+  SMART_COLLECTION_DEFAULT_LIMIT,
+  SMART_COLLECTION_MAX_LIMIT,
+  withSmartCollectionLimit,
+} from "./smartCollectionLimits";
 
 export interface CollectionBuilderValue {
   title: string;
@@ -67,15 +72,19 @@ export function createCollectionBuilderValue(
     query_definition?: QueryDefinitionInput | null;
   },
 ): CollectionBuilderValue {
+  const collectionType = overrides?.collection_type ?? "smart";
+  const queryDefinition = normalizeQueryDefinition(
+    overrides?.query_definition ?? createEmptyQueryDefinition(),
+  );
+
   return {
     title: overrides?.title ?? "",
     description: overrides?.description ?? "",
-    collection_type: overrides?.collection_type ?? "smart",
+    collection_type: collectionType,
     visibility: overrides?.visibility ?? "visible",
     featured: overrides?.featured ?? false,
-    query_definition: normalizeQueryDefinition(
-      overrides?.query_definition ?? createEmptyQueryDefinition(),
-    ),
+    query_definition:
+      collectionType === "smart" ? withSmartCollectionLimit(queryDefinition) : queryDefinition,
     sort_config: overrides?.sort_config ?? {},
     access: overrides?.access ?? { is_shared: false, allowed_profile_ids: [] },
     include_in_server_collections: overrides?.include_in_server_collections ?? false,
@@ -170,6 +179,10 @@ export default function CollectionBuilder({
                 onChange({
                   ...value,
                   collection_type: next as "manual" | "smart",
+                  query_definition:
+                    next === "smart"
+                      ? withSmartCollectionLimit(value.query_definition)
+                      : value.query_definition,
                 })
               }
               disabled={readOnly}
@@ -260,6 +273,15 @@ export default function CollectionBuilder({
             )}
           </section>
 
+          <section className="space-y-4">
+            <h2 className="text-lg font-semibold">Limit</h2>
+            <SmartCollectionLimitField
+              query={value.query_definition}
+              onQueryChange={(query_definition) => onChange({ ...value, query_definition })}
+              readOnly={readOnly}
+            />
+          </section>
+
           {advanced ? (
             <section className="space-y-4">
               <h2 className="text-lg font-semibold">Ordering</h2>
@@ -337,6 +359,55 @@ export default function CollectionBuilder({
         </>
       )}
     </form>
+  );
+}
+
+export function SmartCollectionLimitField({
+  query,
+  onQueryChange,
+  readOnly = false,
+}: {
+  query: QueryDefinition;
+  onQueryChange: (query: QueryDefinition) => void;
+  readOnly?: boolean;
+}) {
+  function commit(input: HTMLInputElement) {
+    const parsed = Number.parseInt(input.value, 10);
+    const limit =
+      Number.isFinite(parsed) && parsed > 0
+        ? Math.min(parsed, SMART_COLLECTION_MAX_LIMIT)
+        : SMART_COLLECTION_DEFAULT_LIMIT;
+    input.value = String(limit);
+    if (query.limit !== limit) {
+      onQueryChange({ ...query, limit });
+    }
+  }
+
+  return (
+    <div className="grid gap-3 rounded-lg border px-4 py-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center">
+      <div>
+        <Label htmlFor="smart-collection-limit">Max items</Label>
+        <p className="text-muted-foreground mt-1 text-xs">
+          Caps saved collection results. Use 1-{SMART_COLLECTION_MAX_LIMIT}.
+        </p>
+      </div>
+      <Input
+        key={query.limit ?? SMART_COLLECTION_DEFAULT_LIMIT}
+        id="smart-collection-limit"
+        type="number"
+        min={1}
+        max={SMART_COLLECTION_MAX_LIMIT}
+        step={1}
+        defaultValue={query.limit ?? SMART_COLLECTION_DEFAULT_LIMIT}
+        disabled={readOnly}
+        onBlur={(event) => commit(event.currentTarget)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </div>
   );
 }
 

@@ -68,12 +68,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 		return []*models.MediaItem{}, 0, false, true, nil
 	}
 
-	if limit <= 0 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset, maxResults := normalizePreviewPageBounds(def, limit, offset)
 
 	ctes := []string{episodeCatalogUserStateCTE(plan)}
 	args := []any{access.UserID, access.ProfileID, libraryID}
@@ -129,7 +124,10 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	}
 	whereClause := "WHERE " + strings.Join(whereParts, " AND ")
 
-	pageLimit := limit + 1
+	pageLimit := limit
+	if maxResults <= 0 || offset+limit < maxResults {
+		pageLimit++
+	}
 	pageArgs := append([]any{}, args...)
 	limitArgIdx := argIdx
 	pageArgs = append(pageArgs, pageLimit)
@@ -180,16 +178,14 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 
 	total := 0
 	if includeTotal {
-		countSQL := fmt.Sprintf(
-			`WITH %s
-			SELECT COUNT(*)
-			%s
-			%s`,
+		countSQL, countArgs := episodeCatalogCountSQL(
 			strings.Join(ctes, ",\n"),
 			fromClause,
 			whereClause,
+			args,
+			maxResults,
 		)
-		if err := e.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 			if episodeCatalogEntriesUnavailable(err) {
 				return nil, 0, false, false, nil
 			}
@@ -231,12 +227,7 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 		return []*models.MediaItem{}, 0, false, true, nil
 	}
 
-	if limit <= 0 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset, maxResults := normalizePreviewPageBounds(def, limit, offset)
 
 	whereParts := []string{"ece.media_folder_id = $1"}
 	args := []any{libraryID}
@@ -288,7 +279,10 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 	}
 
 	whereClause := "WHERE " + strings.Join(whereParts, " AND ")
-	pageLimit := limit + 1
+	pageLimit := limit
+	if maxResults <= 0 || offset+limit < maxResults {
+		pageLimit++
+	}
 	pageArgs := append([]any{}, args...)
 	limitArgIdx := argIdx
 	pageArgs = append(pageArgs, pageLimit)
@@ -333,13 +327,14 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 
 	total := 0
 	if includeTotal {
-		countSQL := fmt.Sprintf(
-			`SELECT COUNT(*)
-			FROM episode_catalog_entries ece
-			%s`,
+		countSQL, countArgs := episodeCatalogCountSQL(
+			"",
+			"FROM episode_catalog_entries ece",
 			whereClause,
+			args,
+			maxResults,
 		)
-		if err := e.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		if err := e.Pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 			if episodeCatalogEntriesUnavailable(err) {
 				return nil, 0, false, false, nil
 			}
@@ -349,6 +344,40 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 	}
 
 	return items, total, hasMore, true, nil
+}
+
+func episodeCatalogCountSQL(
+	withCTEs string,
+	fromClause string,
+	whereClause string,
+	args []any,
+	maxResults int,
+) (string, []any) {
+	countArgs := append([]any{}, args...)
+	withClause := ""
+	if strings.TrimSpace(withCTEs) != "" {
+		withClause = "WITH " + withCTEs + "\n"
+	}
+	if maxResults > 0 {
+		limitArgIdx := len(countArgs) + 1
+		countArgs = append(countArgs, maxResults)
+		return fmt.Sprintf(
+			`%sSELECT COUNT(*)
+			FROM (SELECT 1 %s %s LIMIT $%d) sub`,
+			withClause,
+			fromClause,
+			whereClause,
+			limitArgIdx,
+		), countArgs
+	}
+	return fmt.Sprintf(
+		`%sSELECT COUNT(*)
+		%s
+		%s`,
+		withClause,
+		fromClause,
+		whereClause,
+	), countArgs
 }
 
 func extractEpisodeCatalogUserStatePlan(def QueryDefinition) (episodeCatalogUserStatePlan, bool, error) {

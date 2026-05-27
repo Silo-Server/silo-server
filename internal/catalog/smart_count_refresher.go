@@ -83,6 +83,7 @@ func (r *SmartCountRefresher) refreshOne(ctx context.Context, id string, defJSON
 	if err := json.Unmarshal(defJSON, &def); err != nil {
 		return fmt.Errorf("unmarshal query_definition: %w", err)
 	}
+	def = ApplySmartCollectionItemLimit(def.Normalize())
 	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	_, total, err := r.Executor.Preview(queryCtx, def, AccessFilter{}, 1)

@@ -162,6 +162,9 @@ func parseCatalogOverlay(values url.Values) (catalogOverlay, error) {
 	if mediaScope := parseCatalogMediaScope(values.Get("type")); mediaScope != "" {
 		def.MediaScope = mediaScope
 	}
+	if queryLimit := ParseIntParam(values.Get("query_limit")); queryLimit > 0 {
+		def.Limit = &queryLimit
+	}
 
 	implicitRules := make([]QueryRule, 0, 4)
 	if genre := strings.TrimSpace(values.Get("genre")); genre != "" {
@@ -370,7 +373,7 @@ func hasCatalogOverlayParams(values url.Values, ignoreLibraryID bool) bool {
 				continue
 			}
 			return true
-		case "q", "name_prefix", "match", "type", "genre", "year_min", "year_max", "content_rating", "status", "sort", "order":
+		case "q", "name_prefix", "match", "type", "genre", "year_min", "year_max", "content_rating", "status", "sort", "order", "query_limit":
 			return true
 		}
 	}

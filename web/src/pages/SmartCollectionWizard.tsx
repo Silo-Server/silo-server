@@ -28,8 +28,10 @@ import {
 } from "@/components/ui/select";
 import {
   createCollectionBuilderValue,
+  SmartCollectionLimitField,
   type CollectionBuilderValue,
 } from "@/components/collections/CollectionBuilder";
+import { withSmartCollectionLimit } from "@/components/collections/smartCollectionLimits";
 import CollectionAccessEditor from "@/components/collections/CollectionAccessEditor";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import {
@@ -114,7 +116,7 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
   useDocumentTitle(isEdit ? `Edit ${draft.title || "Collection"}` : "New Collection");
 
   const handleQueryDefinitionChange = useCallback((next: QueryDefinition) => {
-    setDraft((current) => ({ ...current, query_definition: next }));
+    setDraft((current) => ({ ...current, query_definition: withSmartCollectionLimit(next) }));
   }, []);
 
   const headerTitle = isEdit ? draft.title || "Edit Collection" : "New Collection";
@@ -326,6 +328,8 @@ function Step1FiltersAndPreview({
         resultCountLabel={itemCountLabel}
         resultCountLoading={isLoading}
       />
+
+      <SmartCollectionLimitField query={queryDefinition} onQueryChange={onQueryDefinitionChange} />
 
       {totalItems === 0 && !isLoading ? (
         <div className="text-muted-foreground flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed py-16 text-center">
