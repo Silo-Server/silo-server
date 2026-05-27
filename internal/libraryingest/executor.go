@@ -165,7 +165,8 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		CurrentScope: claim.path,
 	})
 	runStartedAt := time.Now().UTC()
-	drainerCtx, stopDrainers := context.WithCancel(scanCtx)
+	drainerStopCtx, stopDrainers := context.WithCancel(context.Background())
+	defer stopDrainers()
 	drainerErrCh := make(chan error, 1)
 	var drainerWG sync.WaitGroup
 	if len(matchScopes) > 0 {
@@ -180,24 +181,21 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 				ticker := time.NewTicker(scopedDrainInterval)
 				defer ticker.Stop()
 				for {
-					if drainerCtx.Err() != nil {
+					select {
+					case <-scanCtx.Done():
 						return
+					case <-drainerStopCtx.Done():
+						return
+					default:
 					}
 					started := time.Now()
-					processed, err := e.matcher.ProcessBatchByFolderAndPathPrefix(drainerCtx, folder.ID, scopePath, runStartedAt)
+					processed, err := e.matcher.ProcessBatchByFolderAndPathPrefix(scanCtx, folder.ID, scopePath, runStartedAt)
 					concurrentMatchDuration.Add(time.Since(started).Nanoseconds())
 					if processed > 0 {
 						concurrentMatched.Add(int64(processed))
 					}
 					if err != nil {
-						// A cancelled drainer context means this is a deliberate
-						// shutdown (the settle window ended and stopDrainers ran, or
-						// the whole scan is being torn down), not a real failure. The
-						// in-flight ProcessBatch call returns context.Canceled here, so
-						// exit cleanly without escalating. Genuine external
-						// cancellation still reaches the run via the scanCtx checks in
-						// the main goroutine, so this does not swallow real cancels.
-						if drainerCtx.Err() != nil {
+						if scanCtx.Err() != nil {
 							return
 						}
 						select {
@@ -208,7 +206,9 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 						return
 					}
 					select {
-					case <-drainerCtx.Done():
+					case <-scanCtx.Done():
+						return
+					case <-drainerStopCtx.Done():
 						return
 					case <-ticker.C:
 					}
@@ -234,6 +234,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	scanStarted := time.Now()
 	scanMatchScopes, scanResult, err := e.scan(scanProgressCtx, folder, mode, claim.path)
 	if err != nil {
+		cancel()
 		stopDrainers()
 		drainerWG.Wait()
 		if len(matchScopes) > 0 {
