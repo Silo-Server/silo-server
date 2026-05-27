@@ -825,6 +825,9 @@ func searchDistinctArrayColumnWithSource(
 	}
 	args = append(args, prefix+"%")
 	prefixIdx := len(args)
+	// LOWER() in ORDER BY: this query is already wrapped in a subquery
+	// (the DISTINCT UNNEST), so the outer ORDER BY can reference any
+	// expression freely.
 	query := fmt.Sprintf(`
 		SELECT name FROM (
 			SELECT DISTINCT UNNEST(mi.%s) AS name
@@ -862,16 +865,20 @@ func searchDistinctScalarColumnWithSource(
 	}
 	args = append(args, prefix+"%")
 	prefixIdx := len(args)
+	// DISTINCT in an inline subquery so the outer ORDER BY can apply
+	// LOWER() without violating the SELECT DISTINCT rule.
 	query := fmt.Sprintf(`
-		SELECT DISTINCT mi.%s AS name
-		FROM %s
-		%s
-		  AND mi.%s IS NOT NULL
-		  AND BTRIM(mi.%s) <> ''
-		  AND LOWER(mi.%s) LIKE LOWER($%d)
-		ORDER BY LOWER(mi.%s) ASC
+		SELECT name FROM (
+			SELECT DISTINCT mi.%s AS name
+			FROM %s
+			%s
+			  AND mi.%s IS NOT NULL
+			  AND BTRIM(mi.%s) <> ''
+			  AND LOWER(mi.%s) LIKE LOWER($%d)
+		) matches
+		ORDER BY LOWER(name) ASC
 		LIMIT %d
-	`, column, fromClause, browseFilterPrefix(whereClause), column, column, column, prefixIdx, column, limit+1)
+	`, column, fromClause, browseFilterPrefix(whereClause), column, column, column, prefixIdx, limit+1)
 	return queryFacetSearchResults(ctx, pool, query, args, limit)
 }
 
@@ -900,16 +907,21 @@ func searchDistinctPeopleByKindWithSource(
 	kindIdx := len(args)
 	args = append(args, prefix+"%")
 	prefixIdx := len(args)
+	// DISTINCT in an inline subquery so the outer ORDER BY can apply
+	// LOWER() without violating Postgres' "ORDER BY expressions must
+	// appear in select list" rule for SELECT DISTINCT.
 	query := fmt.Sprintf(`
-		SELECT DISTINCT p.name
-		FROM %s
-		JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = $%d
-		JOIN people p ON p.id = ip.person_id
-		%s
-		  AND p.name IS NOT NULL
-		  AND BTRIM(p.name) <> ''
-		  AND LOWER(p.name) LIKE LOWER($%d)
-		ORDER BY LOWER(p.name) ASC
+		SELECT name FROM (
+			SELECT DISTINCT p.name AS name
+			FROM %s
+			JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = $%d
+			JOIN people p ON p.id = ip.person_id
+			%s
+			  AND p.name IS NOT NULL
+			  AND BTRIM(p.name) <> ''
+			  AND LOWER(p.name) LIKE LOWER($%d)
+		) matches
+		ORDER BY LOWER(name) ASC
 		LIMIT %d
 	`, fromClause, kindIdx, browseFilterPrefix(whereClause), prefixIdx, limit+1)
 	return queryFacetSearchResults(ctx, pool, query, args, limit)
