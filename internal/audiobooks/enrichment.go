@@ -76,8 +76,6 @@ func NewEnricher(
 	itemRepo *catalog.ItemRepository,
 	personRepo *catalog.PersonRepository,
 	providerIDs *catalog.ProviderIDRepository,
-	imageCacher audiobookCoverCacher,
-	ffmpegPath string,
 ) *Enricher {
 	return &Enricher{
 		pool:        pool,
@@ -86,10 +84,27 @@ func NewEnricher(
 		itemRepo:    itemRepo,
 		personRepo:  personRepo,
 		providerIDs: providerIDs,
-		imageCacher: imageCacher,
-		ffmpegPath:  ffmpegPath,
 		batchSize:   defaultEnrichBatchSize,
 	}
+}
+
+// SetImageCacher installs the audiobook-cover cacher used by the deferred
+// local-cover fallback. Safe to call once after construction; nil disables
+// the fallback. Mirrors MetadataService.SetImageCacher / Scanner.SetImageCacher.
+func (e *Enricher) SetImageCacher(cacher audiobookCoverCacher) {
+	if e == nil {
+		return
+	}
+	e.imageCacher = cacher
+}
+
+// SetFFmpegPath installs the ffmpeg binary path used by the deferred
+// local-cover fallback. Empty string disables the fallback.
+func (e *Enricher) SetFFmpegPath(path string) {
+	if e == nil {
+		return
+	}
+	e.ffmpegPath = path
 }
 
 // Run executes one sweep. It is safe to call concurrently (each call does its
