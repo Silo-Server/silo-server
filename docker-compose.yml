@@ -43,6 +43,7 @@ services:
     ports:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
+      - "${ABS_PORT:-13378}:13378"
     volumes:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
       - ${MEDIA_BOOKS_ROOT:-${MEDIA_ROOT}}:${MEDIA_BOOKS_CONTAINER_ROOT:-${MEDIA_CONTAINER_ROOT:-/mnt/media}}:ro

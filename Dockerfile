@@ -54,7 +54,7 @@ RUN apt-get update && \
 RUN mkdir -p /tmp/silo-transcode
 COPY --from=build /silo /usr/local/bin/silo
 COPY third_party/jellyfin-web/ /srv/jellyfin-web/
-EXPOSE 8080 8096
+EXPOSE 8080 8096 13378
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || exit 1
 ENTRYPOINT ["silo"]

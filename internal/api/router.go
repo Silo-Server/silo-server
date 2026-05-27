@@ -1022,12 +1022,10 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
-	// ABS-compat routes live at the root, outside the /api/v1 prefix.
-	// Mount after middleware so r.Use() calls have all been registered first
-	// (chi panics if routes are registered before Use() calls on the same mux).
-	if deps.ABSHandler != nil {
-		deps.ABSHandler.Mount(r)
-	}
+	// ABS-compat routes are NOT mounted here — they live on a dedicated
+	// http.Server (see absCompatSrv in cmd/silo/main.go) so the discovery
+	// probes (/ping, /healthcheck, /status, etc.) don't collide with the
+	// SPA fallback. Same pattern as the Jellyfin compat listener on 8096.
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)

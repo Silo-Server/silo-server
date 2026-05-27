@@ -355,6 +355,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Auth.RefreshTokenExpiry = refreshTokenExpiry
 
+	// AudiobookshelfCompat — dedicated listener for ABS client apps.
+	// Default :13378 mirrors the real Audiobookshelf server convention.
+	cfg.AudiobookshelfCompat.Listen = stringOr(m, "audiobookshelf_compat.listen", ":13378")
+	cfg.AudiobookshelfCompat.PublicURL = stringOr(m, "audiobookshelf_compat.public_url", "http://127.0.0.1:13378")
+
 	// JellyfinCompat
 	cfg.JellyfinCompat.Listen = stringOr(m, "jellyfin_compat.listen", ":8096")
 	cfg.JellyfinCompat.PublicURL = stringOr(m, "jellyfin_compat.public_url", "http://127.0.0.1:8096")

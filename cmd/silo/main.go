@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5"
@@ -1353,6 +1355,17 @@ func main() {
 			nil, // user store: not needed here
 		)
 		absItemRepo := catalog.NewItemRepository(deps.DB)
+		absEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
+		absSeasonRepo := catalog.NewSeasonRepository(deps.DB)
+		absPersonRepo := catalog.NewPersonRepository(deps.DB)
+		var absFileFetcher catalog.FileVersionFetcher
+		if deps.FileRepo != nil {
+			absFileFetcher = deps.FileRepo
+		}
+		absDetailSvc := catalog.NewDetailService(absItemRepo, absEpisodeRepo, absSeasonRepo, absPersonRepo, absFileFetcher)
+		if deps.ImageResolver != nil {
+			absDetailSvc.SetImageResolver(deps.ImageResolver)
+		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -1362,6 +1375,8 @@ func main() {
 				Auth: absAuthSvc,
 				Pool: deps.DB,
 			},
+			Recs:   recommendations.NewRepo(deps.DB),
+			Detail: absDetailSvc,
 		}
 		absH := audiobooksService.BuildABSHandler(absHDeps)
 		deps.ABSHandler = absH
@@ -1489,14 +1504,11 @@ func main() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	metricsMux.Handle("/api/", router)
-	// ABS-compat routes live outside /api/ — register them explicitly so they
-	// don't fall through to the SPA fallback handler. The chi router handles
-	// them internally via absHandler.Mount(r).
-	if deps.ABSHandler != nil {
-		metricsMux.Handle("/abs/", router)
-		metricsMux.Handle("/login", router)
-		metricsMux.Handle("/socket.io/", router)
-	}
+	// ABS-compat is NOT mounted on the main listener — see the "ABS compat
+	// listener" block below. It binds its own port so the discovery probes
+	// (/ping, /healthcheck, /status, /init, /login, /socket.io) own the URL
+	// space without collision with silo's SPA fallback. Mirrors how the
+	// Jellyfin compat server is set up at :8096.
 	metricsMux.Handle("/", server.FrontendHandler())
 
 	// Step 9: Start background workers (if needed).
@@ -1715,7 +1727,29 @@ func main() {
 		compatSrv.IdleTimeout = 120 * time.Second
 	}
 
-	errCh := make(chan error, 2)
+	// ABS-compat listener — dedicated http.Server bound to its own port
+	// (default :13378) that hosts the Audiobookshelf-compatible API.
+	// Mirrors the Jellyfin compat layout above. The ABS handler mounts
+	// onto a fresh chi router here so /ping, /healthcheck, /status, /login,
+	// /socket.io, etc. own the URL space at the root — no SPA fallback,
+	// no collision with silo's /api/v1.
+	var absSrv *http.Server
+	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
+		absRouter := chi.NewRouter()
+		absRouter.Use(chimiddleware.Recoverer)
+		absRouter.Use(chimiddleware.Compress(5))
+		deps.ABSHandler.Mount(absRouter)
+		absSrv = &http.Server{
+			Addr:              cfg.AudiobookshelfCompat.Listen,
+			Handler:           absRouter,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      0,
+			IdleTimeout:       120 * time.Second,
+		}
+	}
+
+	errCh := make(chan error, 3)
 	go func() {
 		slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
 		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
@@ -1727,6 +1761,14 @@ func main() {
 			slog.Info("Jellyfin compat server listening", "addr", compatSrv.Addr)
 			if listenErr := compatSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
 				errCh <- fmt.Errorf("jellyfin compat server error: %w", listenErr)
+			}
+		}()
+	}
+	if absSrv != nil {
+		go func() {
+			slog.Info("ABS compat server listening", "addr", absSrv.Addr)
+			if listenErr := absSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
+				errCh <- fmt.Errorf("abs compat server error: %w", listenErr)
 			}
 		}()
 	}
@@ -1757,6 +1799,11 @@ func main() {
 	if compatSrv != nil {
 		if shutdownErr := compatSrv.Shutdown(shutdownCtx); shutdownErr != nil {
 			slog.Error("jellyfin compat shutdown error", "error", shutdownErr)
+		}
+	}
+	if absSrv != nil {
+		if shutdownErr := absSrv.Shutdown(shutdownCtx); shutdownErr != nil {
+			slog.Error("abs compat shutdown error", "error", shutdownErr)
 		}
 	}
 
