@@ -358,6 +358,11 @@ interface CollectionGuidedRulesEditorProps {
   showSortControls?: boolean;
   filters?: CatalogFiltersResponse;
   filtersLoading?: boolean;
+  // When the editor is scoped to a single library (e.g. on the library
+  // browse page) pass its type so video-only filter sections (Director,
+  // Studio, Network, Content Rating, Video Quality, etc.) can be hidden
+  // for audiobook libraries.
+  libraryType?: string;
 }
 
 export default function CollectionGuidedRulesEditor({
@@ -373,11 +378,16 @@ export default function CollectionGuidedRulesEditor({
   showSortControls = true,
   filters: providedFilters,
   filtersLoading: providedFiltersLoading,
+  libraryType,
 }: CollectionGuidedRulesEditorProps) {
   const state = useMemo(() => queryDefinitionToGuidedState(value), [value]);
   const metadataFiltersQuery = useCatalogMetadataFilters();
   const filters = providedFilters ?? metadataFiltersQuery.data;
   const filtersLoading = providedFiltersLoading ?? metadataFiltersQuery.isLoading;
+  // Audiobook-only libraries should hide video-only filter sections.
+  // Backend stores type as the plural "audiobooks"; the singular form
+  // shows up in some API surfaces — accept either.
+  const isAudiobookLibrary = libraryType === "audiobook" || libraryType === "audiobooks";
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
@@ -518,32 +528,34 @@ export default function CollectionGuidedRulesEditor({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Minimum IMDb Rating</Label>
-          <Input
-            type="number"
-            min={0}
-            max={10}
-            step={0.1}
-            value={state.minRating}
-            onChange={(e) => update({ minRating: e.target.value })}
-            placeholder="e.g. 7.0"
-            disabled={readOnly}
-          />
+      {isAudiobookLibrary ? null : (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Minimum IMDb Rating</Label>
+            <Input
+              type="number"
+              min={0}
+              max={10}
+              step={0.1}
+              value={state.minRating}
+              onChange={(e) => update({ minRating: e.target.value })}
+              placeholder="e.g. 7.0"
+              disabled={readOnly}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Content Rating</Label>
+            <SearchableSelect
+              options={filters?.content_ratings ?? []}
+              value={state.contentRating}
+              onChange={(contentRating) => update({ contentRating })}
+              placeholder="Select rating..."
+              disabled={readOnly}
+              isLoading={filtersLoading}
+            />
+          </div>
         </div>
-        <div className="space-y-2">
-          <Label>Content Rating</Label>
-          <SearchableSelect
-            options={filters?.content_ratings ?? []}
-            value={state.contentRating}
-            onChange={(contentRating) => update({ contentRating })}
-            placeholder="Select rating..."
-            disabled={readOnly}
-            isLoading={filtersLoading}
-          />
-        </div>
-      </div>
+      )}
 
       <div className="space-y-2">
         <Label>Original Language</Label>
@@ -558,68 +570,72 @@ export default function CollectionGuidedRulesEditor({
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Actor</Label>
-          <PersonSearchSelect
-            value={state.actor}
-            onChange={(actor) => update({ actor })}
-            disabled={readOnly}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Director</Label>
-          <PersonSearchSelect
-            value={state.director}
-            onChange={(director) => update({ director })}
-            disabled={readOnly}
-          />
-        </div>
-      </div>
+      {isAudiobookLibrary ? null : (
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Actor</Label>
+              <PersonSearchSelect
+                value={state.actor}
+                onChange={(actor) => update({ actor })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Director</Label>
+              <PersonSearchSelect
+                value={state.director}
+                onChange={(director) => update({ director })}
+                disabled={readOnly}
+              />
+            </div>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Writer</Label>
-          <PersonSearchSelect
-            value={state.writer}
-            onChange={(writer) => update({ writer })}
-            disabled={readOnly}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Producer</Label>
-          <PersonSearchSelect
-            value={state.producer}
-            onChange={(producer) => update({ producer })}
-            disabled={readOnly}
-          />
-        </div>
-      </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Writer</Label>
+              <PersonSearchSelect
+                value={state.writer}
+                onChange={(writer) => update({ writer })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Producer</Label>
+              <PersonSearchSelect
+                value={state.producer}
+                onChange={(producer) => update({ producer })}
+                disabled={readOnly}
+              />
+            </div>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Studio</Label>
-          <SearchableSelect
-            options={filters?.studios ?? []}
-            value={state.studio}
-            onChange={(studio) => update({ studio })}
-            placeholder="Select studio..."
-            disabled={readOnly}
-            isLoading={filtersLoading}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Network</Label>
-          <SearchableSelect
-            options={filters?.networks ?? []}
-            value={state.network}
-            onChange={(network) => update({ network })}
-            placeholder="Select network..."
-            disabled={readOnly}
-            isLoading={filtersLoading}
-          />
-        </div>
-      </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Studio</Label>
+              <SearchableSelect
+                options={filters?.studios ?? []}
+                value={state.studio}
+                onChange={(studio) => update({ studio })}
+                placeholder="Select studio..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Network</Label>
+              <SearchableSelect
+                options={filters?.networks ?? []}
+                value={state.network}
+                onChange={(network) => update({ network })}
+                placeholder="Select network..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
@@ -681,34 +697,36 @@ export default function CollectionGuidedRulesEditor({
         ) : null}
       </div>
 
-      <div className="space-y-2">
-        <Label>Video Quality</Label>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { key: "fourK", label: "4K" },
-            { key: "hdr", label: "HDR" },
-            { key: "dolbyVision", label: "DOVI" },
-          ].map((option) => {
-            const selected = state[option.key as keyof GuidedFormState] === true;
-            return (
-              <Button
-                key={option.key}
-                type="button"
-                variant={selected ? "default" : "outline"}
-                size="sm"
-                onClick={() =>
-                  update({
-                    [option.key]: !selected,
-                  } as Partial<GuidedFormState>)
-                }
-                disabled={readOnly}
-              >
-                {option.label}
-              </Button>
-            );
-          })}
+      {isAudiobookLibrary ? null : (
+        <div className="space-y-2">
+          <Label>Video Quality</Label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: "fourK", label: "4K" },
+              { key: "hdr", label: "HDR" },
+              { key: "dolbyVision", label: "DOVI" },
+            ].map((option) => {
+              const selected = state[option.key as keyof GuidedFormState] === true;
+              return (
+                <Button
+                  key={option.key}
+                  type="button"
+                  variant={selected ? "default" : "outline"}
+                  size="sm"
+                  onClick={() =>
+                    update({
+                      [option.key]: !selected,
+                    } as Partial<GuidedFormState>)
+                  }
+                  disabled={readOnly}
+                >
+                  {option.label}
+                </Button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">

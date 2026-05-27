@@ -62,6 +62,7 @@ interface CatalogFilterSheetProps {
   onQueryDefinitionChange: (qd: QueryDefinition) => void;
   filters?: CatalogFiltersResponse;
   filtersLoading?: boolean;
+  libraryType?: string;
 }
 
 export default function CatalogFilterSheet({
@@ -80,6 +81,7 @@ export default function CatalogFilterSheet({
   onQueryDefinitionChange,
   filters,
   filtersLoading = false,
+  libraryType,
 }: CatalogFilterSheetProps) {
   // Portal container inside the Sheet's DOM so that react-remove-scroll
   // (activated by the Dialog/Sheet) does not block scroll events inside
@@ -152,6 +154,7 @@ export default function CatalogFilterSheet({
                   showSortControls={false}
                   filters={filters}
                   filtersLoading={filtersLoading}
+                  libraryType={libraryType}
                 />
               )}
             </div>
