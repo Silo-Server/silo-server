@@ -1256,6 +1256,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				if itemsHandler != nil {
 					r.Get("/catalog", catalogHandler.HandleGetCatalog)
 					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
+					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
 					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)

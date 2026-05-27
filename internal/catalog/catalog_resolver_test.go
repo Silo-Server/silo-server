@@ -180,6 +180,26 @@ func (s *stubFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFi
 	return nil, nil
 }
 
+func (s *stubFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
 // countingExecutor is a previewExecutor stub that records the number of
 // PreviewPage calls and the AccessFilter passed in (so tests can confirm
 // NamePrefix made it through). It returns an empty result set so the resolver
