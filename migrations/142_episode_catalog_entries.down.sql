@@ -1,5 +1,7 @@
 DROP TRIGGER IF EXISTS trg_episode_catalog_entries_series ON public.media_items;
 DROP TRIGGER IF EXISTS trg_episode_catalog_entries_episodes ON public.episodes;
+DROP TRIGGER IF EXISTS trg_episode_catalog_entries_media_files_update ON public.media_files;
+DROP TRIGGER IF EXISTS trg_episode_catalog_entries_media_files_insert_delete ON public.media_files;
 DROP TRIGGER IF EXISTS trg_episode_catalog_entries_media_files ON public.media_files;
 DROP TRIGGER IF EXISTS trg_episode_catalog_entries_episode_libraries ON public.episode_libraries;
 

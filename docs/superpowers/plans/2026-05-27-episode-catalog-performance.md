@@ -512,6 +512,9 @@ For each case, capture:
 - API response changes around count modes may require Android and Apple follow-up. Keeping the existing `total_exact=false` behavior avoids most client churn.
 - Person filters may need fallback initially unless episode-level people data is available and indexed.
 - Array GIN filters should be checked with real plans. If separate GIN indexes do too much post-filtering by library, use `btree_gin` multi-column indexes or add selective partial indexes for common libraries.
+- Index maintenance, disk, and write amplification should be tracked explicitly. The btree indexes such as `idx_episode_catalog_entries_title`, `idx_episode_catalog_entries_added`, and `idx_episode_catalog_entries_air_date`, plus GIN indexes such as `idx_episode_catalog_entries_genres_gin`, trade scanner write cost and disk growth for browse latency. Measure `episode_catalog_entries` table and index size before rollout, and watch trigger update latency during large scanner runs.
+- Backfill safety needs a production runbook. Treat the `episode_catalog_entries` backfill as idempotent work that can be chunked or retried with low-locking settings, capture a production-sized duration estimate before enabling it broadly, and document rollback to dropping the read model plus its triggers.
+- Read-model health should be observable. Alert when `episode_catalog_entries.updated_at` lags source table changes beyond a stale threshold or refresh errors appear, fall back to the generic executor when health checks fail, and provide a remediation command to rebuild stale entries.
 
 ## Recommended Decision
 

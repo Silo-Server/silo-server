@@ -183,8 +183,8 @@ BEGIN
             ) AS resolution_codes,
             MAX(mf.bitrate) FILTER (WHERE mf.bitrate IS NOT NULL AND mf.bitrate > 0) AS max_bitrate,
             MIN(mf.bitrate) FILTER (WHERE mf.bitrate IS NOT NULL AND mf.bitrate > 0) AS min_bitrate,
-            BOOL_OR(COALESCE(mf.hdr, false)) AS has_hdr,
-            BOOL_OR(NOT COALESCE(mf.hdr, false)) AS has_non_hdr,
+            BOOL_OR(mf.hdr IS TRUE) AS has_hdr,
+            BOOL_OR(mf.hdr IS FALSE) AS has_non_hdr,
             BOOL_OR(EXISTS (
                 SELECT 1
                 FROM jsonb_array_elements(COALESCE(mf.video_tracks, '[]'::jsonb)) AS vt
@@ -376,7 +376,7 @@ WITH active_episode_files AS (
         public.episode_catalog_normalized_resolution(mf.resolution) AS normalized_resolution,
         public.episode_catalog_resolution_rank(mf.resolution) AS resolution_rank,
         mf.bitrate,
-        COALESCE(mf.hdr, false) AS hdr,
+        mf.hdr,
         EXISTS (
             SELECT 1
             FROM jsonb_array_elements(COALESCE(mf.video_tracks, '[]'::jsonb)) AS vt
@@ -398,8 +398,8 @@ file_stats AS (
             FILTER (WHERE normalized_resolution IS NOT NULL) AS resolution_codes,
         MAX(bitrate) FILTER (WHERE bitrate IS NOT NULL AND bitrate > 0) AS max_bitrate,
         MIN(bitrate) FILTER (WHERE bitrate IS NOT NULL AND bitrate > 0) AS min_bitrate,
-        BOOL_OR(hdr) AS has_hdr,
-        BOOL_OR(NOT hdr) AS has_non_hdr,
+        BOOL_OR(hdr IS TRUE) AS has_hdr,
+        BOOL_OR(hdr IS FALSE) AS has_non_hdr,
         BOOL_OR(has_dolby_vision) AS has_dolby_vision,
         BOOL_OR(NOT has_dolby_vision) AS has_non_dolby_vision
     FROM active_episode_files
@@ -595,14 +595,32 @@ AFTER INSERT OR UPDATE OR DELETE ON public.episode_libraries
 FOR EACH ROW EXECUTE FUNCTION public.episode_catalog_entries_episode_libraries_trigger();
 
 DROP TRIGGER IF EXISTS trg_episode_catalog_entries_media_files ON public.media_files;
-CREATE TRIGGER trg_episode_catalog_entries_media_files
-AFTER INSERT OR UPDATE OF episode_id, media_folder_id, missing_since, resolution, bitrate, hdr, video_tracks, audio_tracks, subtitle_tracks, external_subtitles, created_at OR DELETE
-ON public.media_files
+DROP TRIGGER IF EXISTS trg_episode_catalog_entries_media_files_insert_delete ON public.media_files;
+DROP TRIGGER IF EXISTS trg_episode_catalog_entries_media_files_update ON public.media_files;
+CREATE TRIGGER trg_episode_catalog_entries_media_files_insert_delete
+AFTER INSERT OR DELETE ON public.media_files
 FOR EACH ROW EXECUTE FUNCTION public.episode_catalog_entries_media_files_trigger();
+
+CREATE TRIGGER trg_episode_catalog_entries_media_files_update
+AFTER UPDATE ON public.media_files
+FOR EACH ROW
+WHEN (
+    OLD.episode_id IS DISTINCT FROM NEW.episode_id OR
+    OLD.media_folder_id IS DISTINCT FROM NEW.media_folder_id OR
+    OLD.missing_since IS DISTINCT FROM NEW.missing_since OR
+    OLD.resolution IS DISTINCT FROM NEW.resolution OR
+    OLD.bitrate IS DISTINCT FROM NEW.bitrate OR
+    OLD.hdr IS DISTINCT FROM NEW.hdr OR
+    OLD.video_tracks IS DISTINCT FROM NEW.video_tracks OR
+    OLD.external_subtitles IS DISTINCT FROM NEW.external_subtitles OR
+    OLD.audio_language_codes IS DISTINCT FROM NEW.audio_language_codes OR
+    OLD.subtitle_language_codes IS DISTINCT FROM NEW.subtitle_language_codes
+)
+EXECUTE FUNCTION public.episode_catalog_entries_media_files_trigger();
 
 DROP TRIGGER IF EXISTS trg_episode_catalog_entries_episodes ON public.episodes;
 CREATE TRIGGER trg_episode_catalog_entries_episodes
-AFTER INSERT OR UPDATE OF content_id, series_id, title, air_date, runtime, rating_imdb, rating_tmdb, still_path, still_thumbhash, created_at OR DELETE
+AFTER INSERT OR UPDATE OF content_id, series_id, title, episode_number, air_date, runtime, rating_imdb, rating_tmdb, still_path, still_thumbhash, created_at OR DELETE
 ON public.episodes
 FOR EACH ROW EXECUTE FUNCTION public.episode_catalog_entries_episodes_trigger();
 
@@ -639,6 +657,15 @@ changed_entries AS (
     CROSS JOIN migration_clock mc
     WHERE si.updated_at >= mc.started_at
       AND si.type = 'series'
+    UNION
+    SELECT DISTINCT ece.episode_id, ece.media_folder_id
+    FROM public.episode_catalog_entries ece
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM public.episode_libraries el
+        WHERE el.episode_id = ece.episode_id
+          AND el.media_folder_id = ece.media_folder_id
+    )
 )
 SELECT COUNT(*)
 FROM (

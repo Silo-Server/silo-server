@@ -126,7 +126,14 @@ def getenv_required(name: str) -> str:
     return value
 
 
+def validate_base_url(base_url: str) -> None:
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("SILO_BASE_URL must be an http or https URL")
+
+
 def build_url(config: Config, params: dict[str, str], include_total: bool) -> str:
+    validate_base_url(config.base_url)
     query = {
         "source": "query",
         "type": "episode",
@@ -137,7 +144,8 @@ def build_url(config: Config, params: dict[str, str], include_total: bool) -> st
     }
     if not include_total:
         query["include_total"] = "false"
-    return urllib.parse.urljoin(config.base_url.rstrip("/") + "/", "api/v1/catalog") + "?" + urllib.parse.urlencode(query)
+    api_url = urllib.parse.urljoin(config.base_url.rstrip("/") + "/", "api/v1/catalog")
+    return api_url + "?" + urllib.parse.urlencode(query)
 
 
 def fetch_case(config: Config, case: str, params: dict[str, str], include_total: bool) -> CaseResult:
@@ -151,16 +159,31 @@ def fetch_case(config: Config, case: str, params: dict[str, str], include_total:
         },
     )
     started = time.perf_counter()
+    status = 0
     try:
         with urllib.request.urlopen(request, timeout=config.timeout) as response:
+            status = response.status
             body = response.read()
             elapsed_ms = (time.perf_counter() - started) * 1000
-            payload = json.loads(body)
-            items = payload.get("items")
+            try:
+                payload = json.loads(body)
+                items = payload.get("items")
+            except (json.JSONDecodeError, AttributeError, TypeError) as err:
+                return CaseResult(
+                    case,
+                    include_total,
+                    status,
+                    elapsed_ms,
+                    None,
+                    None,
+                    None,
+                    None,
+                    str(err),
+                )
             return CaseResult(
                 case=case,
                 include_total=include_total,
-                status=response.status,
+                status=status,
                 elapsed_ms=elapsed_ms,
                 total=payload.get("total"),
                 total_exact=payload.get("total_exact"),
@@ -225,6 +248,10 @@ def main() -> int:
         offset=args.offset,
         timeout=args.timeout,
     )
+    try:
+        validate_base_url(config.base_url)
+    except ValueError as err:
+        raise SystemExit(str(err)) from err
 
     cases = DEFAULT_SORT_CASES + DEFAULT_FILTER_CASES
     include_total_values = [False, True] if args.include_exact else [False]

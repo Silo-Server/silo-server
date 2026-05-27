@@ -29,6 +29,7 @@ type episodeCatalogUserStatePlan struct {
 	sortOrder            string
 	sortOnly             bool
 	requiresFullPageGate bool
+	requireProgressRatio bool
 }
 
 func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
@@ -74,7 +75,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 		offset = 0
 	}
 
-	ctes := []string{episodeCatalogUserStateCTE(plan.source)}
+	ctes := []string{episodeCatalogUserStateCTE(plan)}
 	args := []any{access.UserID, access.ProfileID, libraryID}
 	argIdx := 4
 	whereParts := []string{"ece.media_folder_id = $3"}
@@ -375,6 +376,7 @@ func extractEpisodeCatalogUserStatePlan(def QueryDefinition) (episodeCatalogUser
 		if plan.source == "" {
 			return episodeCatalogUserStatePlan{}, false, nil
 		}
+		plan.requireProgressRatio = plan.source == "progress" && plan.sortOnly
 		return plan, true, nil
 	}
 	if def.Match != "all" {
@@ -423,6 +425,7 @@ func extractEpisodeCatalogUserStatePlan(def QueryDefinition) (episodeCatalogUser
 		return episodeCatalogUserStatePlan{}, false, nil
 	}
 	plan.entryDef.Groups = filteredGroups
+	plan.requireProgressRatio = plan.source == "progress" && plan.sortOnly
 	return plan, true, nil
 }
 
@@ -513,24 +516,28 @@ func rebindUserStateClauses(clauses []string, argIdx int) []string {
 	return out
 }
 
-func episodeCatalogUserStateCTE(source string) string {
-	switch source {
+func episodeCatalogUserStateCTE(plan episodeCatalogUserStatePlan) string {
+	switch plan.source {
 	case "progress":
-		return `user_progress AS (
-			SELECT uwp.media_item_id AS episode_id,
-				uwp.position_seconds::double precision / NULLIF(uwp.duration_seconds, 0) AS progress_ratio
-			FROM user_watch_progress uwp
+		progressRatioGate := ""
+		if plan.requireProgressRatio {
+			progressRatioGate = `
+				  AND COALESCE(uwp.duration_seconds, 0) > 0`
+		}
+		return fmt.Sprintf(`user_progress AS (
+				SELECT uwp.media_item_id AS episode_id,
+					uwp.position_seconds::double precision / NULLIF(uwp.duration_seconds, 0) AS progress_ratio
+				FROM user_watch_progress uwp
 			LEFT JOIN user_history_hidden_items hhi
 				ON hhi.user_id = $1
 			   AND hhi.profile_id = $2
 			   AND hhi.media_item_id = uwp.media_item_id
 			WHERE uwp.user_id = $1
-			  AND uwp.profile_id = $2
-			  AND uwp.completed = FALSE
-			  AND uwp.position_seconds > 0
-			  AND COALESCE(uwp.duration_seconds, 0) > 0
-			  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
-		)`
+				  AND uwp.profile_id = $2
+				  AND uwp.completed = FALSE
+				  AND uwp.position_seconds > 0%s
+				  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
+			)`, progressRatioGate)
 	default:
 		return `user_viewed AS (
 			SELECT src.episode_id,
@@ -810,7 +817,7 @@ func buildEpisodeCatalogEntryRuleWhere(rule QueryRule, argIdx int) (string, []an
 	case "content_rating":
 		return buildEpisodeCatalogEqualityClause("ece.content_rating", rule, argIdx)
 	case "added_at":
-		return buildEpisodeCatalogComparisonClause("ece.added_at", rule, argIdx, "timestamptz")
+		return buildEpisodeCatalogComparisonClause("ece.episode_created_at", rule, argIdx, "timestamptz")
 	case "release_date":
 		return buildEpisodeCatalogComparisonClause("ece.episode_air_date", rule, argIdx, "date")
 	case "status":

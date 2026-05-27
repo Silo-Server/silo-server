@@ -80,6 +80,32 @@ func TestBuildEpisodeCatalogEntryQueryWhereUsesReadModelFilters(t *testing.T) {
 	}
 }
 
+func TestEpisodeCatalogAddedAtFilterUsesEpisodeCreatedAt(t *testing.T) {
+	def := QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{
+				{Field: "added_at", Op: "in_last", Value: "30d"},
+			},
+		}},
+	}.Normalize()
+
+	where, _, _, ok, err := buildEpisodeCatalogEntryQueryWhere(def, 2)
+	if err != nil {
+		t.Fatalf("buildEpisodeCatalogEntryQueryWhere returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("buildEpisodeCatalogEntryQueryWhere unexpectedly fell back")
+	}
+	if !strings.Contains(where, "ece.episode_created_at >= NOW() - INTERVAL '30 days'") {
+		t.Fatalf("expected added_at filter to use episode_created_at, got %q", where)
+	}
+	if strings.Contains(where, "ece.added_at") {
+		t.Fatalf("added_at filter must not use library first_seen_at, got %q", where)
+	}
+}
+
 func TestEpisodeCatalogEntryQueryFallsBackForSameFileTechnicalAnd(t *testing.T) {
 	group := QueryGroup{
 		Match: "all",
@@ -95,6 +121,56 @@ func TestEpisodeCatalogEntryQueryFallsBackForSameFileTechnicalAnd(t *testing.T) 
 	}
 	if ok {
 		t.Fatal("same-file technical AND should fall back to the generic media_files EXISTS path")
+	}
+}
+
+func TestEpisodeCatalogInProgressPlanKeepsUnknownDurationRows(t *testing.T) {
+	def := QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{
+				{Field: "in_progress", Op: "is", Value: true},
+			},
+		}},
+		Sort: QuerySort{Field: "title", Order: "asc"},
+	}.Normalize()
+
+	plan, ok, err := extractEpisodeCatalogUserStatePlan(def)
+	if err != nil {
+		t.Fatalf("extractEpisodeCatalogUserStatePlan returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected in_progress filter to use a user-state plan")
+	}
+	sql := episodeCatalogUserStateCTE(plan)
+	if strings.Contains(sql, "COALESCE(uwp.duration_seconds, 0) > 0") {
+		t.Fatalf("in_progress filter must keep unknown-duration rows, got CTE:\n%s", sql)
+	}
+}
+
+func TestEpisodeCatalogProgressSortRequiresProgressRatio(t *testing.T) {
+	def := QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{
+				{Field: "genre", Op: "is", Value: "Comedy"},
+			},
+		}},
+		Sort: QuerySort{Field: "progress", Order: "desc"},
+	}.Normalize()
+
+	plan, ok, err := extractEpisodeCatalogUserStatePlan(def)
+	if err != nil {
+		t.Fatalf("extractEpisodeCatalogUserStatePlan returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected progress sort to use a user-state plan")
+	}
+	sql := episodeCatalogUserStateCTE(plan)
+	if !strings.Contains(sql, "COALESCE(uwp.duration_seconds, 0) > 0") {
+		t.Fatalf("progress sort must require a computable ratio before falling back, got CTE:\n%s", sql)
 	}
 }
 
