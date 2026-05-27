@@ -49,7 +49,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 
 // allColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanUser stays in sync.
-const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, enabled,
+const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_profiles, download_allowed,
 	download_transcode_allowed, created_at, updated_at`
@@ -64,6 +64,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.PasswordHash,
 		&u.LocalPasswordLoginEnabled,
 		&u.Role,
+		&u.Permissions,
 		&u.Enabled,
 		&u.LibraryIDs,
 		&u.MaxPlaybackQuality,
@@ -97,6 +98,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.PasswordHash,
 			&u.LocalPasswordLoginEnabled,
 			&u.Role,
+			&u.Permissions,
 			&u.Enabled,
 			&u.LibraryIDs,
 			&u.MaxPlaybackQuality,
@@ -133,13 +135,19 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
 	}
 
-	cols := []string{"email", "username", "password_hash", "local_password_login_enabled", "role", "library_ids", "max_playback_quality"}
+	permissions, err := NormalizePermissions(input.Permissions)
+	if err != nil {
+		return nil, err
+	}
+
+	cols := []string{"email", "username", "password_hash", "local_password_login_enabled", "role", "permissions", "library_ids", "max_playback_quality"}
 	args := []any{
 		input.Email,
 		input.Username,
 		string(hash),
 		localPasswordLoginEnabled,
 		input.Role,
+		permissions,
 		input.LibraryIDs,
 		input.MaxPlaybackQuality,
 	}
@@ -245,6 +253,15 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 		args = append(args, *input.Role)
 		argIndex++
 	}
+	if input.Permissions != nil {
+		permissions, err := NormalizePermissions(*input.Permissions)
+		if err != nil {
+			return err
+		}
+		setClauses = append(setClauses, fmt.Sprintf("permissions = $%d", argIndex))
+		args = append(args, permissions)
+		argIndex++
+	}
 	if input.Enabled != nil {
 		setClauses = append(setClauses, fmt.Sprintf("enabled = $%d", argIndex))
 		args = append(args, *input.Enabled)
@@ -290,6 +307,14 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 		// Nothing to update; still verify the user exists.
 		_, err := r.GetByID(ctx, id)
 		return err
+	}
+
+	if input.Role != nil ||
+		input.Enabled != nil ||
+		input.LibraryIDs != nil ||
+		input.MaxPlaybackQuality != nil ||
+		input.Permissions != nil {
+		setClauses = append(setClauses, "access_policy_revision = access_policy_revision + 1")
 	}
 
 	// Always bump updated_at.

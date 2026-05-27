@@ -40,6 +40,7 @@ describe("initializeAuthSession", () => {
       username: "admin",
       email: "admin@example.com",
       role: "admin",
+      permissions: [],
       download_allowed: true,
       impersonation: null,
     });

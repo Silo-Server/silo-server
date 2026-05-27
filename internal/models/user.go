@@ -10,6 +10,7 @@ type User struct {
 	PasswordHash              string
 	LocalPasswordLoginEnabled bool
 	Role                      string
+	Permissions               []string
 	Enabled                   bool
 	LibraryIDs                []int // nullable in PG (nil = all libraries)
 	MaxPlaybackQuality        string
@@ -30,6 +31,7 @@ type CreateUserInput struct {
 	Password                  string // plaintext, will be bcrypt-hashed
 	LocalPasswordLoginEnabled *bool
 	Role                      string // e.g. "admin", "user"
+	Permissions               []string
 	LibraryIDs                []int
 	MaxPlaybackQuality        string
 	MaxStreams                *int  // nil = use DB default (6)
@@ -47,6 +49,7 @@ type UpdateUserInput struct {
 	Password                  *string // plaintext, will be bcrypt-hashed if provided
 	LocalPasswordLoginEnabled *bool
 	Role                      *string
+	Permissions               *[]string
 	Enabled                   *bool
 	LibraryIDs                *[]int
 	MaxPlaybackQuality        *string

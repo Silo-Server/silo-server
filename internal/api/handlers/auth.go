@@ -106,6 +106,7 @@ type userResponse struct {
 	Username        string                 `json:"username"`
 	Email           string                 `json:"email"`
 	Role            string                 `json:"role"`
+	Permissions     []string               `json:"permissions"`
 	DownloadAllowed bool                   `json:"download_allowed"`
 	Impersonation   *impersonationResponse `json:"impersonation,omitempty"`
 }
@@ -510,6 +511,7 @@ func buildUserResponse(user *models.User, impersonatorUserID *int, impersonator 
 		Username:        user.Username,
 		Email:           user.Email,
 		Role:            user.Role,
+		Permissions:     auth.EffectivePermissions(user),
 		DownloadAllowed: user.DownloadAllowed,
 	}
 	if impersonatorUserID != nil {

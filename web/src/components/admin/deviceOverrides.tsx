@@ -535,17 +535,18 @@ export function DeviceProfileTabs({
 }: DeviceProfileTabsProps) {
   const [activeId, setActiveId] = useState<string | null>(initialProfileId ?? null);
 
-  if (profiles.length === 0) return null;
-
-  const active: DeviceProfileTabEntry =
-    profiles.find((p) => p.profileId === activeId) ?? profiles[0]!;
-  const accent = profileAccent(active.profileId);
-  const rows = buildRenderedRows(active, showAllSettings, device);
-  const overrideCount = active.settings.length;
+  const active = useMemo(
+    () => profiles.find((p) => p.profileId === activeId) ?? profiles[0] ?? null,
+    [activeId, profiles],
+  );
+  const rows = useMemo(
+    () => (active ? buildRenderedRows(active, showAllSettings, device) : []),
+    [active, device, showAllSettings],
+  );
   // Conflicts depend on the active profile's settings as a whole. Memoize
   // by the active profile's reference + a content hash via the rendered
   // row keys/values — recomputes on profile switch and on save.
-  const conflictMap = useMemo(() => detectSettingConflicts(active.settings), [active.settings]);
+  const conflictMap = useMemo(() => detectSettingConflicts(active?.settings ?? []), [active]);
   const anomaliesByKey = useMemo(() => {
     const out = new Map<string, SettingAnomaly>();
     for (const { setting, isOverride } of rows) {
@@ -557,6 +558,11 @@ export function DeviceProfileTabs({
     }
     return out;
   }, [rows, deviceStaleDays, conflictMap]);
+
+  if (!active) return null;
+
+  const accent = profileAccent(active.profileId);
+  const overrideCount = active.settings.length;
   const anomalyCountInProfile = anomaliesByKey.size;
 
   return (

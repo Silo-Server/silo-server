@@ -78,7 +78,7 @@ func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r 
 		return
 	}
 
-	if !requestIsAdmin(r) {
+	if !h.items.requestCanViewFilePaths(r) {
 		for i := range detail.Versions {
 			detail.Versions[i].FilePath = ""
 		}
@@ -502,7 +502,7 @@ func (h *CatalogResourceHandler) enrichItemDetail(r *http.Request, detail *catal
 		applyEffectiveEditionPreference(detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
 	}
 
-	if !requestIsAdmin(r) {
+	if !h.items.requestCanViewFilePaths(r) {
 		for i := range detail.Versions {
 			detail.Versions[i].FilePath = ""
 		}

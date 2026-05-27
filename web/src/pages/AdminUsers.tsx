@@ -59,6 +59,11 @@ import {
   playbackQualityValueFromPreset,
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
+import {
+  PERMISSION_METADATA_CURATION,
+  hasAssignedPermission,
+  setAssignedPermission,
+} from "@/lib/permissions";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -522,6 +527,7 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(user?.role ?? "user");
   const [enabled, setEnabled] = useState(user?.enabled ?? true);
+  const [permissions, setPermissions] = useState<string[]>(user?.permissions ?? []);
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user?.library_ids ?? null);
   const [maxStreams, setMaxStreams] = useState<number>(
     user?.max_streams ?? Number(settings?.["defaults.max_streams"] ?? "6"),
@@ -549,6 +555,7 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   const passwordId = useId();
   const roleId = useId();
   const enabledId = useId();
+  const metadataCurationId = useId();
   const downloadAllowedId = useId();
   const downloadTranscodeAllowedId = useId();
   const maxStreamsId = useId();
@@ -566,6 +573,7 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
         username,
         email,
         role,
+        permissions,
         enabled,
         library_ids: libraryIDs,
         max_streams: maxStreams,
@@ -583,6 +591,7 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
         email,
         password,
         role,
+        permissions,
         create_default_profile: true,
         max_streams: maxStreams,
         max_transcodes: maxTranscodes,
@@ -682,6 +691,23 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
               value={libraryIDs}
               onChange={setLibraryIDs}
             />
+            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <Label htmlFor={metadataCurationId}>Metadata Curation</Label>
+                <p className="text-muted-foreground text-xs">
+                  Edit, refresh, and rematch metadata within assigned libraries.
+                </p>
+              </div>
+              <Switch
+                id={metadataCurationId}
+                checked={hasAssignedPermission(permissions, PERMISSION_METADATA_CURATION)}
+                onCheckedChange={(checked) =>
+                  setPermissions((current) =>
+                    setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
+                  )
+                }
+              />
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
                 <Label htmlFor={downloadAllowedId}>Downloads Allowed</Label>

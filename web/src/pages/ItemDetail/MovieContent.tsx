@@ -29,6 +29,7 @@ import { selectDefaultPlaybackVariantVersion } from "./components/versionRanking
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { resolveLeafPrimaryAction } from "./itemDetailLayout";
 import { getWatchedActionLabel } from "./watchedState";
+import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 function formatDuration(minutes: number): string {
   if (minutes <= 0) return "";
@@ -42,6 +43,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const canCurateMetadata = canCurateMetadataForUser(user);
   const { profile: currentProfile } = useCurrentProfile();
 
   const isFavorite = item.user_state?.is_favorite ?? false;
@@ -238,17 +240,21 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             isFavorite={isFavorite}
             onToggleWatchlist={() => toggleWatchlistMutation.mutate(inWatchlist)}
             inWatchlist={inWatchlist}
-            onRefresh={(mode) =>
-              refreshMetadataMutation.mutate({
-                item,
-                mode,
-                onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
-              })
+            onRefresh={
+              canCurateMetadata
+                ? (mode) =>
+                    refreshMetadataMutation.mutate({
+                      item,
+                      mode,
+                      onReplaced: (contentID) => navigate(`/item/${contentID}`, { replace: true }),
+                    })
+                : undefined
             }
             isRefreshing={refreshMetadataMutation.isPending}
             isAdmin={isAdmin}
-            onEditMetadata={isAdmin ? () => setEditOpen(true) : undefined}
-            onMatchItem={isAdmin ? () => setMatchOpen(true) : undefined}
+            canCurateMetadata={canCurateMetadata}
+            onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
+            onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
             versions={item.versions}
             playbackVariants={item.playback_variants}
             selectedVersion={selectedVersion}
@@ -283,7 +289,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
       />
 
       <div className="page-shell space-y-12 py-10 sm:space-y-14">
-        {isAdmin && <MediaLocations title="Media locations" versions={item.versions} />}
+        {canCurateMetadata && <MediaLocations title="Media locations" versions={item.versions} />}
 
         {item.cast && item.cast.length > 0 && (
           <div>
@@ -307,8 +313,10 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
           )
         )}
       </div>
-      {isAdmin && <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />}
-      {isAdmin && (
+      {canCurateMetadata && (
+        <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
+      )}
+      {canCurateMetadata && (
         <MatchItemDialog
           key={item.content_id}
           item={item}
