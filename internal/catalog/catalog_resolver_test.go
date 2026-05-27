@@ -39,6 +39,24 @@ func TestValidateCatalogQueryRequest_AllowsEpisodeMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidateCatalogQueryRequest_AllowsAddedAtFilter(t *testing.T) {
+	req := CatalogRequest{
+		Source: CatalogSourceQuery,
+		Query: QueryDefinition{
+			Match: "all",
+			Groups: []QueryGroup{{
+				Match: "all",
+				Rules: []QueryRule{{Field: "added_at", Op: "in_last", Value: "1y"}},
+			}},
+			Sort: QuerySort{Field: "title", Order: "asc"},
+		},
+	}
+
+	if err := validateCatalogQueryRequest(req, true); err != nil {
+		t.Fatalf("expected added_at filter to be accepted, got %v", err)
+	}
+}
+
 func TestValidateCatalogQueryRequest_RejectsPersonalizedSortWithoutProfileScopedSurface(t *testing.T) {
 	req := CatalogRequest{
 		Source: CatalogSourceQuery,
@@ -64,6 +82,32 @@ func TestValidateCatalogQueryRequest_AllowsPersonalizedSortWithProfileScopedSurf
 
 	if err := validateCatalogQueryRequest(req, true); err != nil {
 		t.Fatalf("expected progress sort to be accepted for profile-scoped query source, got %v", err)
+	}
+}
+
+func TestCatalogRuleMatchesItem_InLastDateFields(t *testing.T) {
+	recentRelease := time.Now().UTC().AddDate(0, 0, -10).Format("2006-01-02")
+	oldRelease := time.Now().UTC().AddDate(-2, 0, 0).Format("2006-01-02")
+	recentItem := &models.MediaItem{
+		CreatedAt:   time.Now().AddDate(0, 0, -10),
+		ReleaseDate: &recentRelease,
+	}
+	oldItem := &models.MediaItem{
+		CreatedAt:   time.Now().AddDate(-2, 0, 0),
+		ReleaseDate: &oldRelease,
+	}
+
+	if !catalogRuleMatchesItem(recentItem, QueryRule{Field: "added_at", Op: "in_last", Value: "1y"}) {
+		t.Fatal("expected recent added_at to match 1y in_last")
+	}
+	if catalogRuleMatchesItem(oldItem, QueryRule{Field: "added_at", Op: "in_last", Value: "1y"}) {
+		t.Fatal("expected old added_at not to match 1y in_last")
+	}
+	if !catalogRuleMatchesItem(recentItem, QueryRule{Field: "release_date", Op: "in_last", Value: "1y"}) {
+		t.Fatal("expected recent release_date to match 1y in_last")
+	}
+	if catalogRuleMatchesItem(oldItem, QueryRule{Field: "release_date", Op: "in_last", Value: "1y"}) {
+		t.Fatal("expected old release_date not to match 1y in_last")
 	}
 }
 

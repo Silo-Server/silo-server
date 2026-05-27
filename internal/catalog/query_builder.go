@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -365,6 +366,10 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 		return qb.buildInProgressClause(rule)
 	case "last_watched":
 		return qb.buildLastWatchedClause(rule)
+	case "added_at":
+		return qb.buildAddedAtClause(rule)
+	case "release_date":
+		return qb.buildReleaseDateClause(rule)
 	case "resolution":
 		return qb.buildResolutionClause(rule)
 	case "hdr":
@@ -940,6 +945,64 @@ func (qb *QueryBuilder) buildLastWatchedClause(rule QueryRule) (string, error) {
 	}
 }
 
+func (qb *QueryBuilder) buildAddedAtClause(rule QueryRule) (string, error) {
+	column := qb.addedAtFilterExpr()
+
+	switch rule.Op {
+	case "gt":
+		return qb.buildTypedComparisonClause(column, ">", rule.Value, "timestamptz"), nil
+	case "gte":
+		return qb.buildTypedComparisonClause(column, ">=", rule.Value, "timestamptz"), nil
+	case "lt":
+		return qb.buildTypedComparisonClause(column, "<", rule.Value, "timestamptz"), nil
+	case "lte":
+		return qb.buildTypedComparisonClause(column, "<=", rule.Value, "timestamptz"), nil
+	case "between":
+		return qb.buildTypedBetweenClause(column, rule.Value, "timestamptz")
+	case "in_last":
+		duration, ok := rule.Value.(string)
+		if !ok {
+			return "", fmt.Errorf("in_last requires a duration string like '30d'")
+		}
+		interval, err := parseDuration(duration)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s >= NOW() - INTERVAL '%s'", column, interval), nil
+	default:
+		return "", fmt.Errorf("unsupported operator %q for added_at", rule.Op)
+	}
+}
+
+func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
+	column := qb.releaseDateFilterExpr()
+
+	switch rule.Op {
+	case "gt":
+		return qb.buildTypedComparisonClause(column, ">", rule.Value, "date"), nil
+	case "gte":
+		return qb.buildTypedComparisonClause(column, ">=", rule.Value, "date"), nil
+	case "lt":
+		return qb.buildTypedComparisonClause(column, "<", rule.Value, "date"), nil
+	case "lte":
+		return qb.buildTypedComparisonClause(column, "<=", rule.Value, "date"), nil
+	case "between":
+		return qb.buildTypedBetweenClause(column, rule.Value, "date")
+	case "in_last":
+		duration, ok := rule.Value.(string)
+		if !ok {
+			return "", fmt.Errorf("in_last requires a duration string like '30d'")
+		}
+		interval, err := parseDuration(duration)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s >= (CURRENT_DATE - INTERVAL '%s')::date", column, interval), nil
+	default:
+		return "", fmt.Errorf("unsupported operator %q for release_date", rule.Op)
+	}
+}
+
 func (qb *QueryBuilder) userStateCompletionClause() string {
 	qb.args = append(qb.args, qb.userID, qb.profileID)
 	clause := fmt.Sprintf(`(
@@ -1015,6 +1078,34 @@ func (qb *QueryBuilder) buildTimestampComparisonClause(column, op string, value 
 	return clause
 }
 
+func (qb *QueryBuilder) buildTypedComparisonClause(column, op string, value any, cast string) string {
+	qb.args = append(qb.args, value)
+	placeholder := fmt.Sprintf("$%d", qb.argIdx)
+	if cast != "" {
+		placeholder += "::" + cast
+	}
+	clause := fmt.Sprintf("%s %s %s", column, op, placeholder)
+	qb.argIdx++
+	return clause
+}
+
+func (qb *QueryBuilder) buildTypedBetweenClause(column string, value any, cast string) (string, error) {
+	values, err := toBetweenValues(value)
+	if err != nil {
+		return "", fmt.Errorf("between requires [min, max] array: %w", err)
+	}
+	qb.args = append(qb.args, values[0], values[1])
+	left := fmt.Sprintf("$%d", qb.argIdx)
+	right := fmt.Sprintf("$%d", qb.argIdx+1)
+	if cast != "" {
+		left += "::" + cast
+		right += "::" + cast
+	}
+	clause := fmt.Sprintf("%s >= %s AND %s <= %s", column, left, column, right)
+	qb.argIdx += 2
+	return clause, nil
+}
+
 func (qb *QueryBuilder) normalizedTitleExpr() string {
 	if isEpisodeCatalogScope(qb.mediaScope) {
 		return fmt.Sprintf("%s.sort_key", qb.alias)
@@ -1031,6 +1122,26 @@ func (qb *QueryBuilder) releaseDateSortExpr() string {
 		return fmt.Sprintf("%s.episode_air_date", qb.alias)
 	}
 	return queryColumnSQL(qb.alias, querySortDefs["release_date"].columnSQL)
+}
+
+func (qb *QueryBuilder) releaseDateFilterExpr() string {
+	if isEpisodeCatalogScope(qb.mediaScope) {
+		return fmt.Sprintf("%s.episode_air_date", qb.alias)
+	}
+	firstAirDate := fmt.Sprintf("NULLIF(BTRIM(%s.first_air_date), '')", qb.alias)
+	return fmt.Sprintf(
+		`COALESCE(%s.release_date, CASE WHEN %s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN %s::date ELSE NULL END)`,
+		qb.alias,
+		firstAirDate,
+		firstAirDate,
+	)
+}
+
+func (qb *QueryBuilder) addedAtFilterExpr() string {
+	if isEpisodeCatalogScope(qb.mediaScope) {
+		return fmt.Sprintf("%s.episode_created_at", qb.alias)
+	}
+	return fmt.Sprintf("%s.created_at", qb.alias)
 }
 
 func (qb *QueryBuilder) orderByExpr(expr, dir string, nullsLast bool, titleExpr string) string {
@@ -1349,24 +1460,70 @@ func toBetweenValues(v any) ([2]any, error) {
 	}
 }
 
+type relativeDuration struct {
+	amount int
+	unit   byte
+}
+
 func parseDuration(s string) (string, error) {
-	if len(s) < 2 {
-		return "", fmt.Errorf("invalid duration: %q", s)
+	spec, err := parseDurationSpec(s)
+	if err != nil {
+		return "", err
+	}
+	return spec.sqlInterval(), nil
+}
+
+func parseDurationSpec(s string) (relativeDuration, error) {
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	if len(normalized) < 2 {
+		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
 	}
 
-	value := s[:len(s)-1]
-	unit := s[len(s)-1]
+	value := strings.TrimSpace(normalized[:len(normalized)-1])
+	unit := normalized[len(normalized)-1]
+	amount, err := strconv.Atoi(value)
+	if err != nil || amount <= 0 {
+		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
+	}
 
 	switch unit {
-	case 'h':
-		return value + " hours", nil
-	case 'd':
-		return value + " days", nil
-	case 'w':
-		return value + " weeks", nil
-	case 'm':
-		return value + " months", nil
+	case 'h', 'd', 'w', 'm', 'y':
+		return relativeDuration{amount: amount, unit: unit}, nil
 	default:
-		return "", fmt.Errorf("unsupported duration unit %q", unit)
+		return relativeDuration{}, fmt.Errorf("unsupported duration unit %q", unit)
+	}
+}
+
+func (d relativeDuration) sqlInterval() string {
+	switch d.unit {
+	case 'h':
+		return fmt.Sprintf("%d hours", d.amount)
+	case 'd':
+		return fmt.Sprintf("%d days", d.amount)
+	case 'w':
+		return fmt.Sprintf("%d weeks", d.amount)
+	case 'm':
+		return fmt.Sprintf("%d months", d.amount)
+	case 'y':
+		return fmt.Sprintf("%d years", d.amount)
+	default:
+		return ""
+	}
+}
+
+func (d relativeDuration) cutoffTime(now time.Time) time.Time {
+	switch d.unit {
+	case 'h':
+		return now.Add(-time.Duration(d.amount) * time.Hour)
+	case 'd':
+		return now.AddDate(0, 0, -d.amount)
+	case 'w':
+		return now.AddDate(0, 0, -7*d.amount)
+	case 'm':
+		return now.AddDate(0, -d.amount, 0)
+	case 'y':
+		return now.AddDate(-d.amount, 0, 0)
+	default:
+		return now
 	}
 }

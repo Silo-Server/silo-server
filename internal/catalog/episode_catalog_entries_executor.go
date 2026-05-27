@@ -935,7 +935,11 @@ func buildEpisodeCatalogComparisonClause(column string, rule QueryRule, argIdx i
 		if err != nil {
 			return "", nil, argIdx, true, err
 		}
-		return fmt.Sprintf("%s >= NOW() - INTERVAL '%s'", column, interval), nil, argIdx, true, nil
+		cutoff := fmt.Sprintf("NOW() - INTERVAL '%s'", interval)
+		if cast == "date" {
+			cutoff = fmt.Sprintf("(CURRENT_DATE - INTERVAL '%s')::date", interval)
+		}
+		return fmt.Sprintf("%s >= %s", column, cutoff), nil, argIdx, true, nil
 	default:
 		return "", nil, argIdx, true, fmt.Errorf("unsupported comparison operator %q", rule.Op)
 	}

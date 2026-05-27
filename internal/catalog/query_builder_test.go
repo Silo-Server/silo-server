@@ -135,6 +135,61 @@ func TestBuildSortClause_AddedAtFallsBackToCreatedAtWithoutLibraryScope(t *testi
 	}
 }
 
+func TestBuild_AddedAtInLastAcceptsYears(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{{Field: "added_at", Op: "in_last", Value: "1y"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %v", args)
+	}
+	if !strings.Contains(clause, "mi.created_at >= NOW() - INTERVAL '1 years'") {
+		t.Fatalf("expected added_at in_last to use created_at and years interval, got %q", clause)
+	}
+}
+
+func TestBuild_ReleaseDateInLastComparesDateExpression(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{{Field: "release_date", Op: "in_last", Value: "1y"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %v", args)
+	}
+	for _, want := range []string{
+		"COALESCE(mi.release_date, CASE WHEN NULLIF(BTRIM(mi.first_air_date), '') ~",
+		">= (CURRENT_DATE - INTERVAL '1 years')::date",
+	} {
+		if !strings.Contains(clause, want) {
+			t.Fatalf("expected release_date in_last clause to contain %q, got %q", want, clause)
+		}
+	}
+	if strings.Contains(clause, "release_date::text") || strings.Contains(clause, "NOW() - INTERVAL") {
+		t.Fatalf("release_date in_last must not compare text to timestamp, got %q", clause)
+	}
+}
+
+func TestParseDurationRejectsMalformedInput(t *testing.T) {
+	if _, err := parseDuration("1'; SELECT 1; --d"); err == nil {
+		t.Fatal("expected malformed duration to be rejected")
+	}
+	if got, err := parseDuration("2Y"); err != nil || got != "2 years" {
+		t.Fatalf("parseDuration(2Y) = %q, %v; want 2 years", got, err)
+	}
+}
+
 func TestBuildSortClause_ContentRatingUsesRankedOrdering(t *testing.T) {
 	clause, _, err := NewQueryBuilder("mi").BuildSortClause(QuerySort{
 		Field: "content_rating",

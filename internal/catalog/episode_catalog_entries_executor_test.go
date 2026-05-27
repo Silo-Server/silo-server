@@ -106,6 +106,32 @@ func TestEpisodeCatalogAddedAtFilterUsesEpisodeCreatedAt(t *testing.T) {
 	}
 }
 
+func TestEpisodeCatalogReleaseDateInLastUsesDateCutoff(t *testing.T) {
+	def := QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{
+				{Field: "release_date", Op: "in_last", Value: "1y"},
+			},
+		}},
+	}.Normalize()
+
+	where, _, _, ok, err := buildEpisodeCatalogEntryQueryWhere(def, 2)
+	if err != nil {
+		t.Fatalf("buildEpisodeCatalogEntryQueryWhere returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("buildEpisodeCatalogEntryQueryWhere unexpectedly fell back")
+	}
+	if !strings.Contains(where, "ece.episode_air_date >= (CURRENT_DATE - INTERVAL '1 years')::date") {
+		t.Fatalf("expected release_date filter to use date cutoff, got %q", where)
+	}
+	if strings.Contains(where, "NOW() - INTERVAL") {
+		t.Fatalf("release_date filter must not compare a date to NOW(), got %q", where)
+	}
+}
+
 func TestEpisodeCatalogEntryQueryFallsBackForSameFileTechnicalAnd(t *testing.T) {
 	group := QueryGroup{
 		Match: "all",
