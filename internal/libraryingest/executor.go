@@ -90,6 +90,11 @@ type Executor struct {
 	realtime        *notifications.Hub
 	now             func() time.Time
 
+	// tvDrainSettleWindow overrides scopedTVDrainSettleWindow when > 0. Kept
+	// injectable so tests can exercise the settle-window shutdown path without
+	// waiting the full production interval.
+	tvDrainSettleWindow time.Duration
+
 	mu      sync.Mutex
 	running []runningClaim
 }
@@ -185,6 +190,16 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 						concurrentMatched.Add(int64(processed))
 					}
 					if err != nil {
+						// A cancelled drainer context means this is a deliberate
+						// shutdown (the settle window ended and stopDrainers ran, or
+						// the whole scan is being torn down), not a real failure. The
+						// in-flight ProcessBatch call returns context.Canceled here, so
+						// exit cleanly without escalating. Genuine external
+						// cancellation still reaches the run via the scanCtx checks in
+						// the main goroutine, so this does not swallow real cancels.
+						if drainerCtx.Err() != nil {
+							return
+						}
 						select {
 						case drainerErrCh <- fmt.Errorf("concurrent match scope %q: %w", scopePath, err):
 						default:
@@ -238,12 +253,16 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	}
 	matchScopes = scanMatchScopes
 	if shouldWaitForTVQueueSettle(folder, scanResult) {
+		settleWindow := e.tvDrainSettleWindow
+		if settleWindow <= 0 {
+			settleWindow = scopedTVDrainSettleWindow
+		}
 		slog.Info("library ingest: waiting for tv queue settle window",
 			"folder_id", folder.ID,
 			"mode", mode,
-			"wait", scopedTVDrainSettleWindow,
+			"wait", settleWindow,
 		)
-		timer := time.NewTimer(scopedTVDrainSettleWindow)
+		timer := time.NewTimer(settleWindow)
 		select {
 		case <-scanCtx.Done():
 			timer.Stop()
