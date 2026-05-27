@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -360,6 +362,17 @@ func candidatesAreSingleDistinctShow(best MatchCandidate, scored []scoredMatchCa
 	if best.Year == 0 {
 		return false
 	}
+	// Track the first non-empty value seen per canonical provider key across
+	// best AND every scored candidate. If any key ends up with more than one
+	// distinct value, the tie group spans multiple shows — including the case
+	// where `best` lacks a key but two non-best candidates carry conflicting
+	// values for it.
+	seenIDs := make(map[string]string, len(canonicalCandidateIDKeys))
+	for _, key := range canonicalCandidateIDKeys {
+		if v := strings.TrimSpace(best.ProviderIDs[key]); v != "" {
+			seenIDs[key] = v
+		}
+	}
 	for _, c := range scored {
 		if c.candidate.Year == 0 || c.candidate.Year != best.Year {
 			return false
@@ -367,13 +380,17 @@ func candidatesAreSingleDistinctShow(best MatchCandidate, scored []scoredMatchCa
 		if inferTitleSimilarity(best.Title, c.candidate.Title, best.Year) != 1 {
 			return false
 		}
-		// If both candidates carry the same canonical provider key (e.g. both
-		// have a tmdb ID) but different values, they are different shows.
 		for _, key := range canonicalCandidateIDKeys {
-			bv := strings.TrimSpace(best.ProviderIDs[key])
 			cv := strings.TrimSpace(c.candidate.ProviderIDs[key])
-			if bv != "" && cv != "" && bv != cv {
-				return false
+			if cv == "" {
+				continue
+			}
+			if existing, ok := seenIDs[key]; ok {
+				if existing != cv {
+					return false
+				}
+			} else {
+				seenIDs[key] = cv
 			}
 		}
 	}
@@ -395,6 +412,32 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 	sort.SliceStable(scoredCandidates, func(i, j int) bool {
 		return scoredCandidates[i].score > scoredCandidates[j].score
 	})
+
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		// hints can be nil on some callers (scoreMatchCandidate tolerates it).
+		// Guard the debug log so DEBUG-enabled runs don't panic on a nil deref.
+		hintTitle, hintType := "", ""
+		hintYear := 0
+		if hints != nil {
+			hintTitle = hints.Title
+			hintYear = hints.Year
+			hintType = hints.Type
+		}
+		for rank, sc := range scoredCandidates {
+			slog.Debug("match candidate scoring",
+				"hint_title", hintTitle,
+				"hint_year", hintYear,
+				"hint_type", hintType,
+				"rank", rank,
+				"candidate_title", sc.candidate.Title,
+				"candidate_year", sc.candidate.Year,
+				"candidate_type", sc.candidate.ContentType,
+				"sources", strings.Join(sc.candidate.Sources, ","),
+				"provider_ids", fmt.Sprintf("%v", sc.candidate.ProviderIDs),
+				"score", sc.score,
+			)
+		}
+	}
 
 	best := scoredCandidates[0]
 	if trustedHintIDsPresent(hints) {
