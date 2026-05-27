@@ -690,6 +690,16 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 // headroom for other concurrent work and avoids saturating the pool.
 const catalogFacetConcurrency = 6
 
+// catalogFacetMaxValues caps how many distinct values each facet query
+// returns. Above ~1000 entries a typeahead UI is the only sensible way to
+// present a dropdown — and the audiobook library on this server has
+// >88k distinct authors / >92k narrators / >161k series, which produced
+// an 11.7 MB /api/v1/catalog/filters response before this cap landed.
+// The SearchableSelect dropdown stays responsive at 1000 client-side
+// entries; beyond that, the filter response should switch to a server-
+// side typeahead surface (out of scope for the cap-only fix).
+const catalogFacetMaxValues = 1000
+
 func (r *CatalogResolver) listFiltersForSource(
 	ctx context.Context,
 	filters BrowseFilters,

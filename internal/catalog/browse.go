@@ -523,7 +523,8 @@ func listDistinctArrayColumnWithSource(
 		) vals
 		WHERE val <> ''
 		ORDER BY val ASC
-	`, column, fromClause, whereClause)
+		LIMIT %d
+	`, column, fromClause, whereClause, catalogFacetMaxValues)
 
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
@@ -576,7 +577,8 @@ func listDistinctScalarColumnWithSource(
 		%s
 		  AND mi.%s <> ''
 		ORDER BY mi.%s ASC
-	`, column, fromClause, whereClause, column, column)
+		LIMIT %d
+	`, column, fromClause, whereClause, column, column, catalogFacetMaxValues)
 
 	// When there are no WHERE conditions, the extra AND is invalid — prepend WHERE instead.
 	if whereClause == "" {
@@ -585,7 +587,8 @@ func listDistinctScalarColumnWithSource(
 			FROM %s
 			WHERE mi.%s <> ''
 			ORDER BY mi.%s ASC
-		`, column, fromClause, column, column)
+			LIMIT %d
+		`, column, fromClause, column, column, catalogFacetMaxValues)
 	}
 
 	rows, err := pool.Query(ctx, query, args...)
@@ -756,7 +759,8 @@ func listDistinctPeopleByKindWithSource(
 		  AND p.name IS NOT NULL
 		  AND BTRIM(p.name) <> ''
 		ORDER BY p.name ASC
-	`, fromClause, kindIdx, browseFilterPrefix(whereClause))
+		LIMIT %d
+	`, fromClause, kindIdx, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
@@ -791,7 +795,8 @@ func listDistinctAudiobookSeriesWithSource(
 			  AND BTRIM(s.series_name) <> ''
 		) names
 		ORDER BY LOWER(name) ASC
-	`, fromClause, browseFilterPrefix(whereClause))
+		LIMIT %d
+	`, fromClause, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
@@ -825,7 +830,8 @@ func listDistinctJSONBLanguageWithSource(
 			  AND lang IS NOT NULL
 			  AND lang <> ''
 			ORDER BY value ASC
-		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause))
+			LIMIT %d
+		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 		return queryDistinctStrings(ctx, pool, query, args)
 	}
 
@@ -838,7 +844,8 @@ func listDistinctJSONBLanguageWithSource(
 		  AND mf.missing_since IS NULL
 		  AND COALESCE(track->>'language', '') <> ''
 		ORDER BY value ASC
-	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause))
+		LIMIT %d
+	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
