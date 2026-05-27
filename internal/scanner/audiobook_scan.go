@@ -248,7 +248,14 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 }
 
 func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, skipped *int64) error {
-	if isUnchanged, err := s.audiobookFolderShouldSkip(ctx, folder, folderPath); err == nil && isUnchanged {
+	isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath)
+	if skipErr != nil {
+		slog.Warn("audiobook scan: skip-check failed, falling through",
+			"folder_id", folder.ID,
+			"path", folderPath,
+			"error", skipErr,
+		)
+	} else if isUnchanged {
 		atomic.AddInt64(skipped, 1)
 		return nil
 	}
