@@ -517,7 +517,7 @@ func (s *Scanner) scanPaths(
 	for _, f := range existingFiles {
 		existingByPath[f.FilePath] = f
 	}
-	existingContentStatuses, err := s.loadItemStatuses(ctx, collectScanStateContentIDs(existingFiles))
+	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs(existingFiles))
 	if err != nil {
 		return nil, fmt.Errorf("loading item statuses for folder %d: %w", folder.ID, err)
 	}
@@ -1029,7 +1029,7 @@ func (s *Scanner) scanScope(
 	for _, f := range existingFiles {
 		existingByPath[f.FilePath] = f
 	}
-	existingContentStatuses, err := s.loadItemStatuses(ctx, collectScanStateContentIDs(existingFiles))
+	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs(existingFiles))
 	if err != nil {
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
@@ -1364,37 +1364,6 @@ func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int)
 	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID)
 }
 
-func (s *Scanner) loadItemStatuses(ctx context.Context, contentIDs []string) (map[string]string, error) {
-	statuses := make(map[string]string)
-	if s == nil || s.fileRepo == nil || len(contentIDs) == 0 {
-		return statuses, nil
-	}
-
-	rows, err := s.fileRepo.Pool().Query(ctx, `
-		SELECT content_id, status
-		FROM media_items
-		WHERE content_id = ANY($1)
-	`, contentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying item statuses: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var contentID string
-		var status string
-		if err := rows.Scan(&contentID, &status); err != nil {
-			return nil, fmt.Errorf("scanning item status: %w", err)
-		}
-		statuses[contentID] = status
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating item statuses: %w", err)
-	}
-
-	return statuses, nil
-}
-
 func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []int {
 	ids := make([]int, 0)
 	for _, existing := range existingFiles {
@@ -1464,7 +1433,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err == nil {
 		existingByPath[filePath] = scanStateFromMediaFile(existing)
 	}
-	existingContentStatuses, err := s.loadItemStatuses(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
+	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
 	}
