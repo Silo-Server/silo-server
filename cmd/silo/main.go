@@ -841,6 +841,10 @@ func main() {
 				personRefreshService.SetImageCacher(imageCacher)
 				slog.Info("metadata image caching enabled")
 			}
+			if audiobookEnricher != nil {
+				audiobookEnricher.SetImageCacher(imageCacher)
+				audiobookEnricher.SetFFmpegPath(scanner.FFmpegPathFromFFprobe(scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)))
+			}
 		}
 
 		matchWorker = metadata.NewMatchWorker(metadataService, deps.FileRepo, cfg.Matcher.Workers, cfg.Matcher.BatchSize, 30*time.Second)
