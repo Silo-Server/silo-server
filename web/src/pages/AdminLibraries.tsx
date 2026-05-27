@@ -1150,6 +1150,8 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
     );
   }, [roots, search]);
 
+  const pag = usePagination(filteredRoots);
+
   if (libraries.length === 0) {
     return null;
   }
@@ -1177,7 +1179,10 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             value={
               effectiveSelectedLibraryId != null ? String(effectiveSelectedLibraryId) : undefined
             }
-            onValueChange={(value) => setSelectedLibraryId(Number.parseInt(value, 10))}
+            onValueChange={(value) => {
+              setSelectedLibraryId(Number.parseInt(value, 10));
+              pag.setPage(0);
+            }}
           >
             <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
               <SelectValue placeholder="Select library" />
@@ -1195,7 +1200,10 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             <Input
               placeholder="Filter by path, title, or sample file..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                pag.setPage(0);
+              }}
               className="h-8 pl-8 text-xs"
             />
           </div>
@@ -1220,7 +1228,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredRoots.map((root) => (
+                pag.rows.map((root) => (
                   <TableRow key={`${root.library_id}:${root.root_path}`}>
                     <TableCell className="max-w-[28rem]">
                       <div className="space-y-1">
@@ -1262,6 +1270,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
             </TableBody>
           </Table>
         </div>
+        <PaginationBar {...pag} />
       </div>
 
       {editingRoot ? (
