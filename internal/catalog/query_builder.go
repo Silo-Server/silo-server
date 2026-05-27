@@ -287,6 +287,30 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (QuerySortPlan, erro
 		plan.Joins = joins
 		plan.OrderBy = qb.orderByExpr(expr, dir, true, titleExpr)
 		return plan, nil
+	case "author":
+		plan.Joins = []string{qb.personKindSortJoin(models.PersonKindAuthor, "sort_author")}
+		plan.OrderBy = qb.orderByExpr("sort_author.name", dir, true, titleExpr)
+		return plan, nil
+	case "narrator":
+		plan.Joins = []string{qb.personKindSortJoin(models.PersonKindNarrator, "sort_narrator")}
+		plan.OrderBy = qb.orderByExpr("sort_narrator.name", dir, true, titleExpr)
+		return plan, nil
+	case "series":
+		plan.Joins = []string{fmt.Sprintf(
+			"LEFT JOIN audiobook_series sort_series ON sort_series.content_id = %s.content_id",
+			qb.alias,
+		)}
+		// Sort by series name primarily, then by series_index so books
+		// within the same series come back in narrative order. Title
+		// breaks ties for books that don't have a series_index.
+		clause := fmt.Sprintf(
+			"ORDER BY sort_series.series_name %s NULLS LAST, sort_series.series_index ASC NULLS LAST, %s ASC, %s.content_id ASC",
+			dir,
+			titleExpr,
+			qb.alias,
+		)
+		plan.OrderBy = clause
+		return plan, nil
 	}
 
 	plan.OrderBy = qb.orderByExpr(queryColumnSQL(qb.alias, sortDef.columnSQL), dir, sortDef.nullsLast, titleExpr)
@@ -450,6 +474,27 @@ func (qb *QueryBuilder) buildPersonClause(kind models.PersonKind, rule QueryRule
 		return "NOT (" + clause + ")", nil
 	}
 	return clause, nil
+}
+
+// personKindSortJoin emits a LEFT JOIN LATERAL that resolves the
+// alphabetically-first person name of the given kind per item, exposed
+// as <alias>.name. Used to power Author / Narrator sort plans without
+// a heavyweight aggregate over the whole join.
+func (qb *QueryBuilder) personKindSortJoin(kind models.PersonKind, alias string) string {
+	return fmt.Sprintf(
+		`LEFT JOIN LATERAL (
+			SELECT p.name
+			FROM item_people ip
+			JOIN people p ON p.id = ip.person_id
+			WHERE ip.content_id = %s.content_id
+			  AND ip.kind = %d
+			  AND p.name IS NOT NULL
+			  AND BTRIM(p.name) <> ''
+			ORDER BY p.name ASC
+			LIMIT 1
+		) %s ON TRUE`,
+		qb.alias, kind, alias,
+	)
 }
 
 func (qb *QueryBuilder) buildAudiobookSeriesClause(rule QueryRule) (string, error) {

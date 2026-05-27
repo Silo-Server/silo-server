@@ -1048,6 +1048,9 @@ export interface QuerySort {
     | "progress"
     | "date_viewed"
     | "plays"
+    | "author"
+    | "narrator"
+    | "series"
     | "relevance";
   order: "asc" | "desc";
 }

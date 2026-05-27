@@ -427,6 +427,51 @@ func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
 	}
 }
 
+func TestBuildSortPlan_AuthorJoinsLateralOnPersonKindAuthor(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "author", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(author) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 {
+		t.Fatalf("expected exactly one join, got %d: %v", len(plan.Joins), plan.Joins)
+	}
+	if !strings.Contains(plan.Joins[0], "LEFT JOIN LATERAL") || !strings.Contains(plan.Joins[0], "ip.kind = 7") {
+		t.Fatalf("expected LATERAL on item_people with kind=7, got %q", plan.Joins[0])
+	}
+	if !strings.Contains(plan.OrderBy, "sort_author.name") {
+		t.Fatalf("expected ORDER BY on sort_author.name, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_NarratorJoinsLateralOnPersonKindNarrator(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "narrator", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(narrator) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "ip.kind = 8") {
+		t.Fatalf("expected LATERAL on item_people with kind=8, got %v", plan.Joins)
+	}
+	if !strings.Contains(plan.OrderBy, "sort_narrator.name") {
+		t.Fatalf("expected ORDER BY on sort_narrator.name, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_SeriesOrdersByNameThenIndex(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "series", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(series) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "audiobook_series sort_series") {
+		t.Fatalf("expected LEFT JOIN audiobook_series, got %v", plan.Joins)
+	}
+	// Series name primary, series_index secondary; both nulls last so
+	// books without a series_index still appear under their series.
+	if !strings.Contains(plan.OrderBy, "sort_series.series_name ASC NULLS LAST") ||
+		!strings.Contains(plan.OrderBy, "sort_series.series_index ASC NULLS LAST") {
+		t.Fatalf("expected name+index ordering with NULLS LAST, got %q", plan.OrderBy)
+	}
+}
+
 func TestBuild_SeriesClauseNegationWrapsInNOT(t *testing.T) {
 	clause, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
 		Match: "all",

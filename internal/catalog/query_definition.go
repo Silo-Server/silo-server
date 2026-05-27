@@ -88,6 +88,11 @@ var querySortDefs = map[string]querySortDef{
 	"progress":           {defaultOrder: "desc", nullsLast: true, personalized: true},
 	"date_viewed":        {defaultOrder: "desc", nullsLast: true, personalized: true},
 	"plays":              {defaultOrder: "desc", nullsLast: true, personalized: true},
+	// Audiobook-native sorts. nullsLast so items without an author /
+	// narrator / series association still appear (sorted to the end).
+	"author":   {defaultOrder: "asc", nullsLast: true},
+	"narrator": {defaultOrder: "asc", nullsLast: true},
+	"series":   {defaultOrder: "asc", nullsLast: true},
 }
 
 type QueryDefinition struct {

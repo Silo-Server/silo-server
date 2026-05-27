@@ -16,7 +16,10 @@ export type QuerySortField =
   | "bitrate"
   | "progress"
   | "date_viewed"
-  | "plays";
+  | "plays"
+  | "author"
+  | "narrator"
+  | "series";
 
 type ApplicableMediaScope = Exclude<QuerySortRelevanceScope, "all">;
 
@@ -169,6 +172,31 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     defaultOrder: "desc",
     personalized: true,
     applicableMediaScopes: ALL_MEDIA_SCOPES,
+  },
+  // Audiobook-native sorts. Author / Narrator use alphabetically-first
+  // person name per item; Series uses audiobook_series.series_name with
+  // series_index breaking ties so books within a series come back in
+  // narrative order.
+  {
+    value: "author",
+    label: "Author",
+    defaultOrder: "asc",
+    personalized: false,
+    applicableMediaScopes: ["audiobook"],
+  },
+  {
+    value: "narrator",
+    label: "Narrator",
+    defaultOrder: "asc",
+    personalized: false,
+    applicableMediaScopes: ["audiobook"],
+  },
+  {
+    value: "series",
+    label: "Series",
+    defaultOrder: "asc",
+    personalized: false,
+    applicableMediaScopes: ["audiobook"],
   },
 ];
 
