@@ -175,6 +175,7 @@ export function CatalogFilterSheetContainer({
       filters={filtersQuery.data}
       filtersLoading={filtersQuery.isLoading}
       libraryType={libraryType}
+      catalogState={state}
     />
   );
 }

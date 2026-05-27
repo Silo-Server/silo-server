@@ -10,6 +10,7 @@ import {
 } from "@/api/types";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { Button } from "@/components/ui/button";
+import { FacetSearchSelect } from "@/components/ui/facet-search-select";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCatalogMetadataFilters } from "@/hooks/queries/catalog";
+import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import {
   getDefaultQuerySortOrder,
   normalizeQuerySortForScope,
@@ -387,6 +389,11 @@ interface CollectionGuidedRulesEditorProps {
   // Studio, Network, Content Rating, Video Quality, etc.) can be hidden
   // for audiobook libraries.
   libraryType?: string;
+  // When set, the audiobook-native facet sections (Author / Narrator /
+  // Series) switch to typeahead-backed FacetSearchSelect, querying
+  // /api/v1/catalog/filters/search scoped to this state. Without it
+  // they fall back to the bulk filters payload (top 1000 alphabetical).
+  catalogState?: CatalogSearchState;
 }
 
 export default function CollectionGuidedRulesEditor({
@@ -403,6 +410,7 @@ export default function CollectionGuidedRulesEditor({
   filters: providedFilters,
   filtersLoading: providedFiltersLoading,
   libraryType,
+  catalogState,
 }: CollectionGuidedRulesEditorProps) {
   const state = useMemo(() => queryDefinitionToGuidedState(value), [value]);
   const metadataFiltersQuery = useCatalogMetadataFilters();
@@ -666,38 +674,71 @@ export default function CollectionGuidedRulesEditor({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Author</Label>
-              <SearchableSelect
-                options={filters?.authors ?? []}
-                value={state.author}
-                onChange={(author) => update({ author })}
-                placeholder="Select author..."
-                disabled={readOnly}
-                isLoading={filtersLoading}
-              />
+              {catalogState ? (
+                <FacetSearchSelect
+                  facet="author"
+                  state={catalogState}
+                  value={state.author}
+                  onChange={(author) => update({ author })}
+                  placeholder="Search authors..."
+                  disabled={readOnly}
+                />
+              ) : (
+                <SearchableSelect
+                  options={filters?.authors ?? []}
+                  value={state.author}
+                  onChange={(author) => update({ author })}
+                  placeholder="Select author..."
+                  disabled={readOnly}
+                  isLoading={filtersLoading}
+                />
+              )}
             </div>
             <div className="space-y-2">
               <Label>Narrator</Label>
-              <SearchableSelect
-                options={filters?.narrators ?? []}
-                value={state.narrator}
-                onChange={(narrator) => update({ narrator })}
-                placeholder="Select narrator..."
-                disabled={readOnly}
-                isLoading={filtersLoading}
-              />
+              {catalogState ? (
+                <FacetSearchSelect
+                  facet="narrator"
+                  state={catalogState}
+                  value={state.narrator}
+                  onChange={(narrator) => update({ narrator })}
+                  placeholder="Search narrators..."
+                  disabled={readOnly}
+                />
+              ) : (
+                <SearchableSelect
+                  options={filters?.narrators ?? []}
+                  value={state.narrator}
+                  onChange={(narrator) => update({ narrator })}
+                  placeholder="Select narrator..."
+                  disabled={readOnly}
+                  isLoading={filtersLoading}
+                />
+              )}
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Series</Label>
-              <SearchableSelect
-                options={filters?.series ?? []}
-                value={state.series}
-                onChange={(series) => update({ series })}
-                placeholder="Select series..."
-                disabled={readOnly}
-                isLoading={filtersLoading}
-              />
+              {catalogState ? (
+                <FacetSearchSelect
+                  facet="series"
+                  state={catalogState}
+                  value={state.series}
+                  onChange={(series) => update({ series })}
+                  placeholder="Search series..."
+                  disabled={readOnly}
+                />
+              ) : (
+                <SearchableSelect
+                  options={filters?.series ?? []}
+                  value={state.series}
+                  onChange={(series) => update({ series })}
+                  placeholder="Select series..."
+                  disabled={readOnly}
+                  isLoading={filtersLoading}
+                />
+              )}
             </div>
           </div>
         </>
