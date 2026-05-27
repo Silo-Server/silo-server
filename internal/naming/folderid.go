@@ -3,6 +3,7 @@ package naming
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // folderIDPattern matches patterns like [tmdbid-27205], {tmdb-27205},
@@ -66,10 +67,25 @@ func ParseFolderIDs(folderName string, folderType string) *FolderIDHints {
 		return nil
 	}
 
+	// A bare trailing number is only an ID when appended to a real title. If the
+	// name has no letters (e.g. "86", "22 7"), it's a numeric title, not an ID.
+	if !containsLetter(trimmed) {
+		return nil
+	}
+
 	if strings.EqualFold(strings.TrimSpace(folderType), "series") {
 		return &FolderIDHints{TvdbID: id}
 	}
 	return &FolderIDHints{TmdbID: id}
+}
+
+func containsLetter(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeYear(value string) bool {
