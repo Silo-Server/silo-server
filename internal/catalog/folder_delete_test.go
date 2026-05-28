@@ -77,6 +77,8 @@ func TestRetryOnDeadlockStopsOnCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
+	// op always runs once at the top of the loop before the canceled ctx is
+	// observed in the select, so exactly one call is expected.
 	err := retryOnDeadlock(ctx, func() error {
 		calls++
 		return &pgconn.PgError{Code: "40P01"}
