@@ -1666,12 +1666,6 @@ function UnmatchedItemsSection() {
   const rangeEnd = Math.min((clamped + 1) * UNMATCHED_PAGE_SIZE, total);
   const items = data?.items ?? [];
 
-  // The search is applied server-side (spans the whole table, not just this
-  // page); reset to the first page whenever the debounced query changes.
-  useEffect(() => {
-    setPage(0);
-  }, [debouncedSearch]);
-
   // Hide the section only when there are genuinely no unmatched items and no
   // active search — keep it mounted while searching so the box and the
   // "no matches" state stay visible even when a query returns nothing.
@@ -1700,7 +1694,12 @@ function UnmatchedItemsSection() {
           <Input
             placeholder="Search all unmatched items by title, library, or type..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              // Search is server-side and spans the whole table; jump back to
+              // the first page so results start at the top as the query changes.
+              setSearch(e.target.value);
+              setPage(0);
+            }}
             className="h-8 pl-8 text-xs"
           />
         </div>

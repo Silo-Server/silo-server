@@ -172,69 +172,69 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
               <Label className="shrink-0">Results</Label>
               <TooltipProvider delayDuration={150}>
-              <div className="overlay-scroll min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 pb-1">
-                {candidates.map((candidate, index) => {
-                  const candidateKey = Object.entries(candidate.provider_ids)
-                    .map(([k, v]) => `${k}-${v}`)
-                    .join("_");
-                  return (
-                    <button
-                      key={`${candidateKey}-${index}`}
-                      type="button"
-                      className={cn(
-                        "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                        selectedCandidate === candidate
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted/50",
-                      )}
-                      onClick={() => setSelectedCandidate(candidate)}
-                      data-testid="match-candidate"
-                    >
-                      {candidate.image_url ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <img
-                              src={candidate.image_url}
-                              alt=""
-                              className="h-24 w-16 shrink-0 cursor-zoom-in rounded object-cover"
-                            />
-                          </TooltipTrigger>
-                          <TooltipContent
-                            side="right"
-                            className="border-border/60 overflow-hidden border bg-transparent p-0 shadow-xl"
-                          >
-                            <img
-                              src={candidate.image_url}
-                              alt={candidate.title}
-                              className="h-72 w-48 rounded-md object-cover"
-                            />
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <div className="bg-muted h-24 w-16 shrink-0 rounded" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{candidate.title}</div>
-                        <div className="text-muted-foreground text-xs">
-                          {candidate.year ? candidate.year : ""}
+                <div className="overlay-scroll min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 pb-1">
+                  {candidates.map((candidate, index) => {
+                    const candidateKey = Object.entries(candidate.provider_ids)
+                      .map(([k, v]) => `${k}-${v}`)
+                      .join("_");
+                    return (
+                      <button
+                        key={`${candidateKey}-${index}`}
+                        type="button"
+                        className={cn(
+                          "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+                          selectedCandidate === candidate
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted/50",
+                        )}
+                        onClick={() => setSelectedCandidate(candidate)}
+                        data-testid="match-candidate"
+                      >
+                        {candidate.image_url ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <img
+                                src={candidate.image_url}
+                                alt=""
+                                className="h-24 w-16 shrink-0 cursor-zoom-in rounded object-cover"
+                              />
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="right"
+                              className="border-border/60 overflow-hidden border bg-transparent p-0 shadow-xl"
+                            >
+                              <img
+                                src={candidate.image_url}
+                                alt={candidate.title}
+                                className="h-72 w-48 rounded-md object-cover"
+                              />
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <div className="bg-muted h-24 w-16 shrink-0 rounded" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{candidate.title}</div>
+                          <div className="text-muted-foreground text-xs">
+                            {candidate.year ? candidate.year : ""}
+                          </div>
+                          <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+                            {candidate.sources.map((source) => (
+                              <Badge key={source} variant="outline" className="text-[10px]">
+                                {source}
+                              </Badge>
+                            ))}
+                            {candidate.sources.length > 1 && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                {candidate.sources.length} sources agree
+                              </Badge>
+                            )}
+                          </div>
                         </div>
-                        <div className="mt-1 flex min-w-0 flex-wrap gap-1">
-                          {candidate.sources.map((source) => (
-                            <Badge key={source} variant="outline" className="text-[10px]">
-                              {source}
-                            </Badge>
-                          ))}
-                          {candidate.sources.length > 1 && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              {candidate.sources.length} sources agree
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </TooltipProvider>
             </div>
           )}
