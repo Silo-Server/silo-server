@@ -303,27 +303,29 @@ export default function AdminUsers() {
                             to={`/admin/history?user_id=${u.id}`}
                             aria-label={`View ${u.username} playback history`}
                           >
-                            <History className="h-3 w-3" />
+                            <History className="h-3 w-3" aria-hidden="true" />
                           </Link>
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
+                          aria-label={`Edit ${u.username}`}
                           onClick={() => {
                             setEditingUser(u);
                             setDialogOpen(true);
                           }}
                         >
-                          <Pencil className="h-3 w-3" />
+                          <Pencil className="h-3 w-3" aria-hidden="true" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
+                          aria-label={`Delete ${u.username}`}
                           onClick={() => handleDelete(u)}
                         >
-                          <Trash2 className="h-3 w-3" />
+                          <Trash2 className="h-3 w-3" aria-hidden="true" />
                         </Button>
                       </div>
                     </TableCell>

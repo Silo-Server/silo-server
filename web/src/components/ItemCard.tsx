@@ -88,7 +88,11 @@ export default function ItemCard({
   return (
     <div className="media-card group/card">
       <div className="relative">
-        <ViewTransitionLink to={itemHref} className="block overflow-hidden rounded-xl">
+        <ViewTransitionLink
+          to={itemHref}
+          aria-label={displayTitle}
+          className="block overflow-hidden rounded-xl"
+        >
           <div
             className="media-card-image relative aspect-[2/3]"
             style={

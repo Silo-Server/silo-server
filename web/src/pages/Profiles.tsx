@@ -119,18 +119,23 @@ export default function Profiles() {
           <div key={profile.id} className="group relative">
             <button
               onClick={() => handleSelect(profile)}
+              aria-label={profile.has_pin ? `${profile.name} (PIN protected)` : profile.name}
               className="surface-panel hover:border-primary flex w-[148px] flex-col items-center gap-3 rounded-[1.75rem] p-5 transition-all duration-150 hover:-translate-y-1"
             >
-              <Avatar className="ring-border group-hover:ring-primary/30 h-20 w-20 ring-2 transition-colors">
-                {profile.avatar_url ? (
-                  <AvatarImage src={profile.avatar_url} alt={profile.name} />
+              <div className="relative">
+                <Avatar className="ring-border group-hover:ring-primary/30 h-20 w-20 ring-2 transition-colors">
+                  {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
+                  <AvatarFallback className="bg-surface text-primary text-2xl font-bold">
+                    {profile.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                {profile.has_pin ? (
+                  <span className="bg-surface border-border text-muted-foreground absolute -right-0.5 -bottom-0.5 flex h-6 w-6 items-center justify-center rounded-full border">
+                    <Lock className="h-3 w-3" aria-hidden="true" />
+                  </span>
                 ) : null}
-                <AvatarFallback className="bg-surface text-primary text-2xl font-bold">
-                  {profile.name.charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+              </div>
               <span className="text-sm font-medium">{profile.name}</span>
-              {profile.has_pin ? <Lock className="text-muted-foreground h-3 w-3" /> : null}
             </button>
           </div>
         ))}

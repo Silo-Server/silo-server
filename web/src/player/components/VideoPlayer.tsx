@@ -1937,8 +1937,13 @@ export function VideoPlayer({
 
       {/* Loading overlay — stays up until the first frame renders */}
       {!isDetached && (awaitingFirstFrame || !isPlayerReady) && !error && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
+        <div
+          role="status"
+          aria-label="Loading video"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black"
+        >
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          <span className="sr-only">Loading video</span>
         </div>
       )}
 

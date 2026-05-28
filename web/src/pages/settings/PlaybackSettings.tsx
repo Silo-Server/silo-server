@@ -58,21 +58,20 @@ function AutoPlayNextSetting({ profileId }: { profileId: string }) {
       label="Auto-play next episode"
       description="Start the next episode automatically after the current one ends."
       control={(id) => (
-        <div id={id}>
-          <Switch
-            checked={autoplay}
-            disabled={setDeviceSetting.isPending}
-            onCheckedChange={(checked) =>
-              setDeviceSetting.mutate(
-                { key: AUTO_PLAY_NEXT_KEY, value: checked ? "true" : "false" },
-                {
-                  onSuccess: () => toast.success("Auto-play preference saved"),
-                  onError: () => toast.error("Failed to save auto-play preference"),
-                },
-              )
-            }
-          />
-        </div>
+        <Switch
+          id={id}
+          checked={autoplay}
+          disabled={setDeviceSetting.isPending}
+          onCheckedChange={(checked) =>
+            setDeviceSetting.mutate(
+              { key: AUTO_PLAY_NEXT_KEY, value: checked ? "true" : "false" },
+              {
+                onSuccess: () => toast.success("Auto-play preference saved"),
+                onError: () => toast.error("Failed to save auto-play preference"),
+              },
+            )
+          }
+        />
       )}
     />
   );
@@ -89,7 +88,7 @@ function NextUpSetting() {
       label="Next up episodes"
       description="Choose whether upcoming episodes stay with Continue Watching or get their own row."
       control={(id) => (
-        <div id={id} className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <Select
             value={currentValue}
             onValueChange={(value) =>
@@ -100,7 +99,7 @@ function NextUpSetting() {
             }
             disabled={isLoading || setSetting.isPending}
           >
-            <SelectTrigger className="w-full sm:w-[240px]">
+            <SelectTrigger id={id} className="w-full sm:w-[240px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -172,12 +171,16 @@ export default function PlaybackSettings() {
           label="Video quality"
           description="Choose the quality your profile should request when playback begins."
           control={(id) => (
-            <div id={id} className="w-full">
+            <div className="w-full">
               <Select
                 value={qualityPreference}
                 onValueChange={(value) => saveProfileField({ quality_preference: value })}
               >
-                <SelectTrigger className="w-full sm:w-[220px]" disabled={updateMutation.isPending}>
+                <SelectTrigger
+                  id={id}
+                  className="w-full sm:w-[220px]"
+                  disabled={updateMutation.isPending}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -197,14 +200,18 @@ export default function PlaybackSettings() {
           label="Spoken language"
           description="Prefer a spoken language for this profile when multiple tracks are available."
           control={(id) => (
-            <div id={id} className="w-full">
+            <div className="w-full">
               <Select
                 value={profile.language || "none"}
                 onValueChange={(value) =>
                   saveProfileField({ language: value === "none" ? "" : value })
                 }
               >
-                <SelectTrigger className="w-full sm:w-[220px]" disabled={updateMutation.isPending}>
+                <SelectTrigger
+                  id={id}
+                  className="w-full sm:w-[220px]"
+                  disabled={updateMutation.isPending}
+                >
                   <SelectValue placeholder="No preference" />
                 </SelectTrigger>
                 <SelectContent>
@@ -224,13 +231,12 @@ export default function PlaybackSettings() {
           label="Auto-skip intros"
           description="Jump past intros automatically when Silo can detect them."
           control={(id) => (
-            <div id={id}>
-              <Switch
-                checked={profile.auto_skip_intro ?? false}
-                disabled={updateMutation.isPending}
-                onCheckedChange={(checked) => saveProfileField({ auto_skip_intro: checked })}
-              />
-            </div>
+            <Switch
+              id={id}
+              checked={profile.auto_skip_intro ?? false}
+              disabled={updateMutation.isPending}
+              onCheckedChange={(checked) => saveProfileField({ auto_skip_intro: checked })}
+            />
           )}
         />
 
@@ -238,13 +244,12 @@ export default function PlaybackSettings() {
           label="Auto-skip credits"
           description="Move through end credits automatically when a skip is available."
           control={(id) => (
-            <div id={id}>
-              <Switch
-                checked={profile.auto_skip_credits ?? false}
-                disabled={updateMutation.isPending}
-                onCheckedChange={(checked) => saveProfileField({ auto_skip_credits: checked })}
-              />
-            </div>
+            <Switch
+              id={id}
+              checked={profile.auto_skip_credits ?? false}
+              disabled={updateMutation.isPending}
+              onCheckedChange={(checked) => saveProfileField({ auto_skip_credits: checked })}
+            />
           )}
         />
 
@@ -252,13 +257,12 @@ export default function PlaybackSettings() {
           label="Auto-skip recaps"
           description="Skip 'previously on…' recaps automatically when Silo can detect them."
           control={(id) => (
-            <div id={id}>
-              <Switch
-                checked={profile.auto_skip_recap ?? false}
-                disabled={updateMutation.isPending}
-                onCheckedChange={(checked) => saveProfileField({ auto_skip_recap: checked })}
-              />
-            </div>
+            <Switch
+              id={id}
+              checked={profile.auto_skip_recap ?? false}
+              disabled={updateMutation.isPending}
+              onCheckedChange={(checked) => saveProfileField({ auto_skip_recap: checked })}
+            />
           )}
         />
 
@@ -266,15 +270,12 @@ export default function PlaybackSettings() {
           label="Start next at preview"
           description="Begin the next episode when the current one reaches its next-episode preview teaser, rather than waiting for the end credits."
           control={(id) => (
-            <div id={id}>
-              <Switch
-                checked={profile.auto_play_next_preview ?? false}
-                disabled={updateMutation.isPending}
-                onCheckedChange={(checked) =>
-                  saveProfileField({ auto_play_next_preview: checked })
-                }
-              />
-            </div>
+            <Switch
+              id={id}
+              checked={profile.auto_play_next_preview ?? false}
+              disabled={updateMutation.isPending}
+              onCheckedChange={(checked) => saveProfileField({ auto_play_next_preview: checked })}
+            />
           )}
         />
 

@@ -138,25 +138,31 @@ function NodeSection({
                           size="icon"
                           className="h-7 w-7"
                           disabled={isChecking}
+                          aria-label={`Check health of ${node.name}`}
                           onClick={() => onCheckHealth(node)}
                         >
-                          <RefreshCw className={`h-3 w-3 ${isChecking ? "animate-spin" : ""}`} />
+                          <RefreshCw
+                            className={`h-3 w-3 ${isChecking ? "animate-spin" : ""}`}
+                            aria-hidden="true"
+                          />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
+                          aria-label={`Edit ${node.name}`}
                           onClick={() => onEdit(node)}
                         >
-                          <Pencil className="h-3 w-3" />
+                          <Pencil className="h-3 w-3" aria-hidden="true" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
+                          aria-label={`Delete ${node.name}`}
                           onClick={() => onDelete(node)}
                         >
-                          <Trash2 className="h-3 w-3" />
+                          <Trash2 className="h-3 w-3" aria-hidden="true" />
                         </Button>
                       </div>
                     </TableCell>
@@ -297,7 +303,7 @@ export default function AdminNodes() {
     <div className="page-shell space-y-8 py-4 sm:py-6">
       <div className="page-header gap-5">
         <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Stream nodes</h1>
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Stream Nodes</h1>
           <p className="page-subtitle text-sm sm:text-base">
             Manage proxy and transcode workers that distribute playback load across your
             infrastructure.

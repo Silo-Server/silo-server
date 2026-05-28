@@ -31,6 +31,13 @@ function defaultCatalogTitle(source: string, searchQuery?: string) {
   return "Catalog";
 }
 
+function defaultCatalogSubtitle(source: string): string {
+  if (source === "favorites") return "Movies and shows you've marked as favorites.";
+  if (source === "watchlist") return "Things you've saved to watch later.";
+  if (source === "history") return "Everything you've recently watched.";
+  return "Refine the archive by type, era, rating, or genre.";
+}
+
 export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useMemo(() => parseCatalogSearchParams(searchParams), [searchParams]);
@@ -175,28 +182,34 @@ function CatalogResults({
     });
   }, []);
 
+  const totalItems = catalogQuery.data?.totalItems ?? 0;
+  // For an in-app search the count reflects local library hits only; requestable
+  // matches live in a separate section, so scope the label to avoid a "0 results"
+  // reading while an outside-library result is visible.
+  const resultNoun =
+    state.source === "query" ? "in library" : `result${totalItems === 1 ? "" : "s"}`;
+
   return (
     <div className="page-shell space-y-6 py-4 sm:py-6">
       <header className="page-header">
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
           <p className="page-subtitle text-sm sm:text-base">
-            Refine the archive by type, era, rating, or genre.
+            {defaultCatalogSubtitle(state.source)}
           </p>
         </div>
         <div className="items-baseline gap-3 sm:flex">
           <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
           {showExactResultCount ? (
-            <div className="text-right tabular-nums">
+            <div className="text-right tabular-nums" role="status" aria-live="polite">
               <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
-                {catalogQuery.data?.totalItems ?? 0}
+                {totalItems}
               </span>
               <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
-                result{(catalogQuery.data?.totalItems ?? 0) === 1 ? "" : "s"}
+                {resultNoun}
               </span>
               <span className="text-muted-foreground text-xs sm:hidden">
-                {catalogQuery.data?.totalItems ?? 0} result
-                {(catalogQuery.data?.totalItems ?? 0) === 1 ? "" : "s"}
+                {totalItems} {resultNoun}
               </span>
             </div>
           ) : null}

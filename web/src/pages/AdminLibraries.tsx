@@ -513,20 +513,22 @@ export default function AdminLibraries() {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"
+                            aria-label={`Edit ${lib.name}`}
                             onClick={() => {
                               setEditingLib(lib);
                               setDialogOpen(true);
                             }}
                           >
-                            <Pencil className="h-3 w-3" />
+                            <Pencil className="h-3 w-3" aria-hidden="true" />
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"
+                            aria-label={`Delete ${lib.name}`}
                             onClick={() => handleDelete(lib)}
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 className="h-3 w-3" aria-hidden="true" />
                           </Button>
                         </div>
                         {mountCheck ? (

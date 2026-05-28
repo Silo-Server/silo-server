@@ -27,6 +27,8 @@ export interface AdminLogStreamResult<TEntry> {
   isLive: boolean;
   error?: string;
   connectionState: ConnectionState;
+  /** Force a fresh connection attempt (the stream does not auto-retry on drop). */
+  reconnect: () => void;
 }
 
 export function buildAdminLogStreamQuery(params: AdminLogQuery) {
@@ -83,6 +85,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
   const [nextCursor, setNextCursor] = useState<string>();
   const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
   const [error, setError] = useState<string>();
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
   const deferredParams = useDeferredValue(params);
   const queryString = useMemo(() => buildAdminLogStreamQuery(deferredParams), [deferredParams]);
@@ -126,6 +129,8 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
       flushTimer = window.setTimeout(flushAppends, APPEND_FLUSH_MS);
     };
 
+    // Debounce the initial attempt; an explicit reconnect() retries immediately.
+    const connectDelay = reconnectNonce === 0 ? 250 : 0;
     const connectTimer = window.setTimeout(() => {
       const url = buildAdminLogStreamUrl(stream, deferredParams, getAccessToken(), window.location);
       try {
@@ -177,7 +182,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
       ws.onclose = () => {
         setConnectionState("disconnected");
       };
-    }, 250);
+    }, connectDelay);
 
     return () => {
       window.clearTimeout(connectTimer);
@@ -186,7 +191,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
         ws.close();
       }
     };
-  }, [stream, queryString, limit, enabled, deferredParams]);
+  }, [stream, queryString, limit, enabled, deferredParams, reconnectNonce]);
 
   return {
     rows,
@@ -195,6 +200,7 @@ export function useAdminLogStream<TStream extends AdminLogStream>(
     isLive: connectionState === "live",
     error,
     connectionState,
+    reconnect: () => setReconnectNonce((n) => n + 1),
   };
 }
 
