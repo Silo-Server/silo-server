@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -1198,5 +1199,278 @@ func TestWorkerProcessBatchByFolderAndPathPrefix_MovieQueueClaimsOnlyOncePerScan
 	}
 	if movieQueueRepo.errors[file.ID] == "" {
 		t.Fatal("expected queue error to be recorded")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for concurrent-merge ErrItemNotFound tolerance (hotfix 2026-05-27)
+// ---------------------------------------------------------------------------
+
+// TestProcessSeriesRoot_Site1_ErrItemNotFoundIsToleratedNotFailed verifies that
+// when ensureSeriesEpisodeLinks returns catalog.ErrItemNotFound at Site 1
+// (the "all files already linked" fast path), the batch succeeds instead of
+// failing. This covers the concurrent-merge case where the source series row
+// was deleted after its episodes were moved to the survivor.
+func TestProcessSeriesRoot_Site1_ErrItemNotFoundIsToleratedNotFailed(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+
+	// Need a series-type folder so queueUsageForFolder enables the series queue.
+	h.service.folderRepo = &fakeWorkerFolderRepo{
+		folders: map[int]*models.MediaFolder{
+			10: {ID: 10, Type: "series", Enabled: true},
+		},
+	}
+
+	// Pre-populate the item as "matched" so reusableQueuedMovieSkeleton
+	// returns false (matched is not skeleton-like), bypassing the re-process
+	// block and falling through directly to ensureSeriesEpisodeLinks.
+	const contentID = "series-gone-after-merge"
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID,
+		Status:    "matched",
+		Title:     "Example Show",
+		Type:      "series",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}); err != nil {
+		t.Fatalf("upsert item: %v", err)
+	}
+
+	// All files are already linked — hasUnlinkedGroupFile returns false.
+	file := &models.MediaFile{
+		ID:               1,
+		MediaFolderID:    10,
+		FilePath:         "/media/shows/Example Show/Season 01/Example.Show.S01E01.mkv",
+		ObservedRootPath: "/media/shows/Example Show",
+		GroupKeyVersion:  1,
+		ContentGroupKey:  "v1|series|example_show|2024",
+		ContentID:        contentID,
+	}
+	h.fileRepo.setGroupFiles(10, 1, "v1|series|example_show|2024", file)
+	h.fileRepo.contentIDs[file.ID] = contentID
+
+	// Hook ensureSeriesEpisodeLinks to simulate the source row being gone.
+	h.service.hooks.ensureSeriesEpisodeLinks = func(_ context.Context, _ string) error {
+		return fmt.Errorf("loading series item: %w", catalog.ErrItemNotFound)
+	}
+
+	queueRepo := newFakeSeriesQueueRepo(models.SeriesRootMatchJob{
+		MediaFolderID:     10,
+		ObservedRootPath:  "/media/shows/Example Show",
+		SampleFilePath:    file.FilePath,
+		ObservedFileCount: 1,
+	})
+
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+	worker.SetSeriesRootClaimer(queueRepo, true)
+	processed, err := worker.ProcessAllByFolderAndPathPrefix(ctx, 10, "/media/shows/Example Show", time.Time{})
+	if err != nil {
+		t.Fatalf("expected no error for ErrItemNotFound (benign concurrent merge), got: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("processed = %d, want 1", processed)
+	}
+	// Queue row must be deleted on normal completion.
+	if _, ok := queueRepo.deleted["10:/media/shows/Example Show"]; !ok {
+		t.Fatal("expected queue row to be deleted on normal completion")
+	}
+	// No error must have been recorded in the queue.
+	if queueRepo.errors["10:/media/shows/Example Show"] != "" {
+		t.Fatalf("expected no queue error, got %q", queueRepo.errors["10:/media/shows/Example Show"])
+	}
+}
+
+// TestProcessSeriesRoot_Site1_NonNotFoundErrorStillFails verifies that a
+// genuine (non-ErrItemNotFound) error from ensureSeriesEpisodeLinks at Site 1
+// still fails the batch — the fix must not swallow real errors.
+func TestProcessSeriesRoot_Site1_NonNotFoundErrorStillFails(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+
+	h.service.folderRepo = &fakeWorkerFolderRepo{
+		folders: map[int]*models.MediaFolder{
+			10: {ID: 10, Type: "series", Enabled: true},
+		},
+	}
+
+	const contentID = "series-link-failure"
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID,
+		Status:    "matched",
+		Title:     "Example Show",
+		Type:      "series",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}); err != nil {
+		t.Fatalf("upsert item: %v", err)
+	}
+
+	file := &models.MediaFile{
+		ID:               1,
+		MediaFolderID:    10,
+		FilePath:         "/media/shows/Example Show/Season 01/Example.Show.S01E01.mkv",
+		ObservedRootPath: "/media/shows/Example Show",
+		GroupKeyVersion:  1,
+		ContentGroupKey:  "v1|series|example_show|2024",
+		ContentID:        contentID,
+	}
+	h.fileRepo.setGroupFiles(10, 1, "v1|series|example_show|2024", file)
+	h.fileRepo.contentIDs[file.ID] = contentID
+
+	// Return a genuine (non-not-found) error.
+	linkErr := errors.New("database connection reset")
+	h.service.hooks.ensureSeriesEpisodeLinks = func(_ context.Context, _ string) error {
+		return linkErr
+	}
+
+	queueRepo := newFakeSeriesQueueRepo(models.SeriesRootMatchJob{
+		MediaFolderID:     10,
+		ObservedRootPath:  "/media/shows/Example Show",
+		SampleFilePath:    file.FilePath,
+		ObservedFileCount: 1,
+	})
+
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+	worker.SetSeriesRootClaimer(queueRepo, true)
+	_, err := worker.ProcessAllByFolderAndPathPrefix(ctx, 10, "/media/shows/Example Show", time.Time{})
+	if err == nil {
+		t.Fatal("expected error for genuine link failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "ensuring series episode links") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+// TestProcessSeriesRoot_Site2_ErrItemNotFoundIsToleratedNotFailed verifies that
+// when ensureSeriesEpisodeLinks returns catalog.ErrItemNotFound at Site 2
+// (the new-skeleton / enrichment path), the batch succeeds.
+func TestProcessSeriesRoot_Site2_ErrItemNotFoundIsToleratedNotFailed(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+
+	h.service.folderRepo = &fakeWorkerFolderRepo{
+		folders: map[int]*models.MediaFolder{
+			10: {ID: 10, Type: "series", Enabled: true},
+		},
+	}
+
+	// File has no ContentID yet → hasUnlinkedGroupFile returns true →
+	// proceeds through createOrFindSkeleton + enrichment path (Site 2).
+	file := &models.MediaFile{
+		ID:               1,
+		MediaFolderID:    10,
+		FilePath:         "/media/shows/Example Show/Season 01/Example.Show.S01E01.mkv",
+		ObservedRootPath: "/media/shows/Example Show",
+		GroupKeyVersion:  1,
+		ContentGroupKey:  "v1|series|example_show|2024",
+		BaseTitle:        "Example Show",
+		BaseType:         "series",
+	}
+	h.fileRepo.setGroupFiles(10, 1, "v1|series|example_show|2024", file)
+
+	const skeletonID = "skeleton-series-id"
+
+	h.service.hooks.createOrFindSkeleton = func(_ context.Context, _ *models.MediaFile, _ int) (*skeletonResult, error) {
+		return &skeletonResult{
+			ContentID:  skeletonID,
+			IsNew:      true,
+			ItemStatus: "pending",
+			Type:       "series",
+		}, nil
+	}
+	h.service.hooks.process = func(_ context.Context, _ ProcessRequest) (*ProcessResult, error) {
+		return &ProcessResult{Updated: true}, nil
+	}
+	// Simulate the concurrent-merge: ensureSeriesEpisodeLinks finds the source gone.
+	h.service.hooks.ensureSeriesEpisodeLinks = func(_ context.Context, _ string) error {
+		return fmt.Errorf("loading series item: %w", catalog.ErrItemNotFound)
+	}
+
+	queueRepo := newFakeSeriesQueueRepo(models.SeriesRootMatchJob{
+		MediaFolderID:     10,
+		ObservedRootPath:  "/media/shows/Example Show",
+		SampleFilePath:    file.FilePath,
+		ObservedFileCount: 1,
+	})
+
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+	worker.SetSeriesRootClaimer(queueRepo, true)
+	processed, err := worker.ProcessAllByFolderAndPathPrefix(ctx, 10, "/media/shows/Example Show", time.Time{})
+	if err != nil {
+		t.Fatalf("expected no error for ErrItemNotFound (benign concurrent merge), got: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("processed = %d, want 1", processed)
+	}
+	if _, ok := queueRepo.deleted["10:/media/shows/Example Show"]; !ok {
+		t.Fatal("expected queue row to be deleted on normal completion")
+	}
+	if queueRepo.errors["10:/media/shows/Example Show"] != "" {
+		t.Fatalf("expected no queue error, got %q", queueRepo.errors["10:/media/shows/Example Show"])
+	}
+}
+
+// TestProcessSeriesRoot_Site2_NonNotFoundErrorStillFails verifies that a genuine
+// error from ensureSeriesEpisodeLinks at Site 2 still fails the batch.
+func TestProcessSeriesRoot_Site2_NonNotFoundErrorStillFails(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+
+	h.service.folderRepo = &fakeWorkerFolderRepo{
+		folders: map[int]*models.MediaFolder{
+			10: {ID: 10, Type: "series", Enabled: true},
+		},
+	}
+
+	file := &models.MediaFile{
+		ID:               1,
+		MediaFolderID:    10,
+		FilePath:         "/media/shows/Example Show/Season 01/Example.Show.S01E01.mkv",
+		ObservedRootPath: "/media/shows/Example Show",
+		GroupKeyVersion:  1,
+		ContentGroupKey:  "v1|series|example_show|2024",
+		BaseTitle:        "Example Show",
+		BaseType:         "series",
+	}
+	h.fileRepo.setGroupFiles(10, 1, "v1|series|example_show|2024", file)
+
+	const skeletonID = "skeleton-series-id-2"
+
+	h.service.hooks.createOrFindSkeleton = func(_ context.Context, _ *models.MediaFile, _ int) (*skeletonResult, error) {
+		return &skeletonResult{
+			ContentID:  skeletonID,
+			IsNew:      true,
+			ItemStatus: "pending",
+			Type:       "series",
+		}, nil
+	}
+	h.service.hooks.process = func(_ context.Context, _ ProcessRequest) (*ProcessResult, error) {
+		return &ProcessResult{Updated: true}, nil
+	}
+	linkErr := errors.New("db timeout")
+	h.service.hooks.ensureSeriesEpisodeLinks = func(_ context.Context, _ string) error {
+		return linkErr
+	}
+
+	queueRepo := newFakeSeriesQueueRepo(models.SeriesRootMatchJob{
+		MediaFolderID:     10,
+		ObservedRootPath:  "/media/shows/Example Show",
+		SampleFilePath:    file.FilePath,
+		ObservedFileCount: 1,
+	})
+
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
+	worker.SetSeriesRootClaimer(queueRepo, true)
+	_, err := worker.ProcessAllByFolderAndPathPrefix(ctx, 10, "/media/shows/Example Show", time.Time{})
+	if err == nil {
+		t.Fatal("expected error for genuine link failure at site 2, got nil")
+	}
+	if !strings.Contains(err.Error(), "ensuring series episode links") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }

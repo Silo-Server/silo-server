@@ -18,7 +18,10 @@ var (
 	inferSeasonDirRe       = regexp.MustCompile(`(?i)^Season\s+(\d{1,4})(?:\s.*)?$`)
 	inferNumericSeasonRe   = regexp.MustCompile(`^\d{1,4}$`)
 	inferSpecialsDirRe     = regexp.MustCompile(`(?i)^(?:specials?|extras?)$`)
-	inferProviderTagRe     = regexp.MustCompile(`\s*[{\[](?:tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-[\w]+[}\]]`)
+	// Matches a well-formed tag ([tvdb-81189]), an unsubstituted Sonarr token
+	// ([tvdb-{TvdbId}]), or an empty token ({imdb-}). The id part is either a
+	// {...} placeholder or zero-or-more word chars.
+	inferProviderTagRe = regexp.MustCompile(`\s*[{\[](?:tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-(?:\{[^}]*\}|[\w]*)[}\]]`)
 )
 
 type RootAssignment struct {

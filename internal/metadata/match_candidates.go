@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -342,7 +344,117 @@ type scoredMatchCandidate struct {
 	score     float64
 }
 
-func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate) (*MatchCandidate, bool) {
+// candidatesAreSingleDistinctShow reports whether every scored candidate refers
+// to the same show as best — same year, an exact normalized title match, and no
+// conflicting provider IDs. This is true when the search effectively returned
+// one distinct title, possibly as separate per-source rows (e.g. a TVDB row and
+// a TMDB row that weren't merged because each carries only its own provider's
+// ID). Candidates that share a canonical provider key but carry different values
+// are considered distinct shows and cause the function to return false.
+// Candidates with Year == 0 are treated as year-mismatched (a provider that
+// omitted the year yields false here) — conservative by design.
+func candidatesAreSingleDistinctShow(best MatchCandidate, scored []scoredMatchCandidate) bool {
+	// Year==0 means the provider didn't supply a release year, so we cannot
+	// claim the candidates refer to the *same* show via year-equality. Without
+	// this guard, two no-year candidates from different providers would satisfy
+	// the multi-source corroboration arm of the lone-result rule and get
+	// auto-accepted, which over-accepts ambiguous matches.
+	if best.Year == 0 {
+		return false
+	}
+	// Track the first non-empty value seen per canonical provider key across
+	// best AND every scored candidate. If any key ends up with more than one
+	// distinct value, the tie group spans multiple shows — including the case
+	// where `best` lacks a key but two non-best candidates carry conflicting
+	// values for it.
+	seenIDs := make(map[string]string, len(canonicalCandidateIDKeys))
+	for _, key := range canonicalCandidateIDKeys {
+		if v := strings.TrimSpace(best.ProviderIDs[key]); v != "" {
+			seenIDs[key] = v
+		}
+	}
+	for _, c := range scored {
+		if c.candidate.Year == 0 || c.candidate.Year != best.Year {
+			return false
+		}
+		if inferTitleSimilarity(best.Title, c.candidate.Title, best.Year) != 1 {
+			return false
+		}
+		for _, key := range canonicalCandidateIDKeys {
+			cv := strings.TrimSpace(c.candidate.ProviderIDs[key])
+			if cv == "" {
+				continue
+			}
+			if existing, ok := seenIDs[key]; ok {
+				if existing != cv {
+					return false
+				}
+			} else {
+				seenIDs[key] = cv
+			}
+		}
+	}
+	return true
+}
+
+// topTieGroup returns the highest-scored candidate plus every candidate within
+// the 15-point tie window of it — i.e. the set of candidates that are not
+// clearly beaten. Assumes scored is sorted descending by score.
+func topTieGroup(scored []scoredMatchCandidate) []scoredMatchCandidate {
+	if len(scored) == 0 {
+		return nil
+	}
+	group := []scoredMatchCandidate{scored[0]}
+	for _, c := range scored[1:] {
+		if scored[0].score-c.score < 15 {
+			group = append(group, c)
+		}
+	}
+	return group
+}
+
+// pickByProviderPriority returns the group candidate whose Sources include the
+// highest-priority provider (providerPriority is ordered highest-first, e.g. the
+// library's chain order). Falls back to the top-scored candidate when there is no
+// priority info or no source matches.
+func pickByProviderPriority(group []scoredMatchCandidate, providerPriority []string) *MatchCandidate {
+	for _, prov := range providerPriority {
+		for i := range group {
+			for _, s := range group[i].candidate.Sources {
+				if strings.EqualFold(s, prov) {
+					return &group[i].candidate
+				}
+			}
+		}
+	}
+	return &group[0].candidate
+}
+
+// distinctSourceCount returns how many distinct providers (case-insensitive
+// Sources values) appear across the candidate group — i.e. how many independent
+// providers returned this show.
+func distinctSourceCount(group []scoredMatchCandidate) int {
+	seen := make(map[string]struct{})
+	for _, c := range group {
+		for _, s := range c.candidate.Sources {
+			s = strings.ToLower(strings.TrimSpace(s))
+			if s != "" {
+				seen[s] = struct{}{}
+			}
+		}
+	}
+	return len(seen)
+}
+
+// absYearDelta returns the absolute difference between two release years.
+func absYearDelta(a, b int) int {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}
+
+func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate, providerPriority []string) (*MatchCandidate, bool) {
 	if len(candidates) == 0 {
 		return nil, false
 	}
@@ -358,6 +470,32 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 		return scoredCandidates[i].score > scoredCandidates[j].score
 	})
 
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		// hints can be nil on some callers (scoreMatchCandidate tolerates it).
+		// Guard the debug log so DEBUG-enabled runs don't panic on a nil deref.
+		hintTitle, hintType := "", ""
+		hintYear := 0
+		if hints != nil {
+			hintTitle = hints.Title
+			hintYear = hints.Year
+			hintType = hints.Type
+		}
+		for rank, sc := range scoredCandidates {
+			slog.Debug("match candidate scoring",
+				"hint_title", hintTitle,
+				"hint_year", hintYear,
+				"hint_type", hintType,
+				"rank", rank,
+				"candidate_title", sc.candidate.Title,
+				"candidate_year", sc.candidate.Year,
+				"candidate_type", sc.candidate.ContentType,
+				"sources", strings.Join(sc.candidate.Sources, ","),
+				"provider_ids", fmt.Sprintf("%v", sc.candidate.ProviderIDs),
+				"score", sc.score,
+			)
+		}
+	}
+
 	best := scoredCandidates[0]
 	if trustedHintIDsPresent(hints) {
 		if candidateMatchesTrustedIDs(hints, best.candidate) {
@@ -368,6 +506,47 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate)
 
 	if best.score < 55 {
 		return nil, false
+	}
+	// A search that resolves to a single distinct show (one candidate, or the
+	// same title+year returned once per source) whose year matches the parsed
+	// year is high-confidence even when the fuzzy title score sits in the 55-69
+	// band (short/numeric/alternate titles). Accept the top-ranked candidate
+	// without lowering the score thresholds.
+	// We check only the TOP tie-group (candidates within 15 pts of best) so that
+	// low-score noise from unrelated shows below the group does not veto a clear
+	// cross-source agreement. When the top group is one distinct show, pick the
+	// winner by the library's metadata-provider priority (falls back to top-scored).
+	// Residual risk: two different shows with an identical title+year and no
+	// provider IDs would both pass; accepted as low-risk given the title+year+type
+	// corroboration.
+	if candidateTypeMatchesHint(hints.Type, best.candidate.ContentType) {
+		topGroup := topTieGroup(scoredCandidates)
+		if candidatesAreSingleDistinctShow(best.candidate, topGroup) {
+			yearCorroborated := hints.Year != 0 && best.candidate.Year == hints.Year
+			// Cross-source agreement (the same title+year returned by 2+ distinct
+			// providers, which candidatesAreSingleDistinctShow already verified) is
+			// strong independent corroboration — it stands in for a missing hint year
+			// (folders without a "(YYYY)"). A lone single-source no-year result is NOT
+			// accepted here and stays subject to the single-candidate >=70 gate.
+			multiSourceCorroborated := distinctSourceCount(topGroup) >= 2
+			// An exact normalized-title match on a sole distinct show is strong
+			// corroboration on its own, even when the folder year is off by a year
+			// or two (festival vs wide-release date, regional release) — e.g.
+			// "Dead Reckoning (1947)" vs TMDB's 1946, "17 Blocks (2021)" vs 2019.
+			// Bounded to ±2 years so same-title remakes decades apart still require
+			// a year or multi-source match. Uses the same normalizer as title scoring
+			// so "exact" here means a perfect title-similarity component.
+			titleCorroborated := hints.Year != 0 && best.candidate.Year != 0 &&
+				absYearDelta(best.candidate.Year, hints.Year) <= 2 &&
+				normalizeTitleForScoring(best.candidate.Title) == normalizeTitleForScoring(hints.Title)
+			// Year or source-count corroboration is only meaningful when the winning
+			// candidate is at least title-coherent with the scanner hint. Otherwise a
+			// high source/provider score can auto-accept an unrelated same-year result.
+			hintTitleCoherent := inferTitleSimilarity(hints.Title, best.candidate.Title, hints.Year) > 0
+			if (hintTitleCoherent && (yearCorroborated || multiSourceCorroborated)) || titleCorroborated {
+				return pickByProviderPriority(topGroup, providerPriority), true
+			}
+		}
 	}
 	if len(scoredCandidates) == 1 {
 		if best.score < 70 {
@@ -459,7 +638,7 @@ func selectRefreshMatchCandidate(existing *models.MediaItem, candidates []MatchC
 		TvdbID: existing.TvdbID,
 		ImdbID: existing.ImdbID,
 	}
-	return selectInitialMatchCandidate(hints, candidates)
+	return selectInitialMatchCandidate(hints, candidates, nil)
 }
 
 func trustedHintIDsPresent(hints *MatchHints) bool {
