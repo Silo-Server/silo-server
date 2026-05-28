@@ -14,6 +14,40 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// Retry parameters for transient serialization/deadlock failures. They are
+// package vars (not consts) only so tests can shrink them; production code
+// never mutates them.
+var (
+	deadlockMaxAttempts = 5
+	deadlockBaseBackoff = 50 * time.Millisecond
+)
+
+// retryOnDeadlock runs op, retrying when Postgres reports a deadlock (40P01) or
+// serialization failure (40001), with exponential backoff. It returns
+// immediately for any other error, and honors context cancellation between
+// attempts.
+func retryOnDeadlock(ctx context.Context, op func() error) error {
+	backoff := deadlockBaseBackoff
+	for attempt := 1; ; attempt++ {
+		err := op()
+		if err == nil {
+			return nil
+		}
+		var pgErr *pgconn.PgError
+		if attempt < deadlockMaxAttempts && errors.As(err, &pgErr) &&
+			(pgErr.Code == "40P01" || pgErr.Code == "40001") {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			continue
+		}
+		return err
+	}
+}
+
 // Sentinel errors for folder repository operations.
 var (
 	ErrFolderNotFound = errors.New("folder not found")
