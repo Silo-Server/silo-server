@@ -56,6 +56,8 @@ services:
     env_file:
       - path: .env
         required: false
+    devices:
+      - /dev/dri:/dev/dri
 
   # Optional distributed-mode example. Most single-host installs should
   # just use the integrated service above.
