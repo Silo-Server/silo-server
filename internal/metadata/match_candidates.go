@@ -446,6 +446,14 @@ func distinctSourceCount(group []scoredMatchCandidate) int {
 	return len(seen)
 }
 
+// absYearDelta returns the absolute difference between two release years.
+func absYearDelta(a, b int) int {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}
+
 func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate, providerPriority []string) (*MatchCandidate, bool) {
 	if len(candidates) == 0 {
 		return nil, false
@@ -521,7 +529,17 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 			// (folders without a "(YYYY)"). A lone single-source no-year result is NOT
 			// accepted here and stays subject to the single-candidate >=70 gate.
 			multiSourceCorroborated := distinctSourceCount(topGroup) >= 2
-			if yearCorroborated || multiSourceCorroborated {
+			// An exact normalized-title match on a sole distinct show is strong
+			// corroboration on its own, even when the folder year is off by a year
+			// or two (festival vs wide-release date, regional release) — e.g.
+			// "Dead Reckoning (1947)" vs TMDB's 1946, "17 Blocks (2021)" vs 2019.
+			// Bounded to ±2 years so same-title remakes decades apart still require
+			// a year or multi-source match. Uses the same normalizer as title scoring
+			// so "exact" here means a perfect title-similarity component.
+			titleCorroborated := hints.Year != 0 && best.candidate.Year != 0 &&
+				absYearDelta(best.candidate.Year, hints.Year) <= 2 &&
+				normalizeTitleForScoring(best.candidate.Title) == normalizeTitleForScoring(hints.Title)
+			if yearCorroborated || multiSourceCorroborated || titleCorroborated {
 				return pickByProviderPriority(topGroup, providerPriority), true
 			}
 		}
