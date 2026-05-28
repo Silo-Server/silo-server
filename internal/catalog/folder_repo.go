@@ -579,6 +579,12 @@ func pathDir(path string) string {
 	return path[:idx+1]
 }
 
+// rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, letting read
+// helpers run inside or outside an explicit transaction.
+type rowQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // collectOrphanIDs returns content IDs from the given set that have no
 // remaining library memberships. Must be called within a transaction.
 func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]string, error) {
@@ -603,10 +609,21 @@ func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 	return ids, rows.Err()
 }
 
-// collectImageDirs returns S3 directory prefixes for all images belonging to
-// the given content IDs (items, seasons, and episodes).
-func collectImageDirs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]string, error) {
-	imgRows, err := tx.Query(ctx, `
+// collectImageDirs returns S3 directory prefixes for images belonging to the
+// given content IDs that are not still referenced by other surviving content.
+func collectImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
+	dirs, err := collectRawImageDirs(ctx, q, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	return filterUnreferencedImageDirs(ctx, q, dirs, contentIDs)
+}
+
+// collectRawImageDirs returns the deduped S3 directory prefixes referenced by
+// the given content IDs (items, their seasons, and their episodes), without
+// filtering out dirs still used by other content.
+func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
+	imgRows, err := q.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = ANY($1)
 		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
@@ -634,20 +651,19 @@ func collectImageDirs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 	if err := imgRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating image paths: %w", err)
 	}
-
 	dirs := make([]string, 0, len(dirSet))
 	for dir := range dirSet {
 		dirs = append(dirs, dir)
 	}
-	return filterUnreferencedImageDirs(ctx, tx, dirs, contentIDs)
+	return dirs, nil
 }
 
-func filterUnreferencedImageDirs(ctx context.Context, tx pgx.Tx, dirs, deletingContentIDs []string) ([]string, error) {
+func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deletingContentIDs []string) ([]string, error) {
 	if len(dirs) == 0 {
 		return nil, nil
 	}
 
-	rows, err := tx.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT candidate.dir
 		FROM unnest($1::text[]) AS candidate(dir)
 		WHERE NOT EXISTS (
