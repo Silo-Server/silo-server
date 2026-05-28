@@ -18,15 +18,11 @@ var trailingNumericIDPattern = regexp.MustCompile(`(?:^|\s)(\d+)$`)
 // tt-prefixed number is unambiguously IMDb.
 var bracketedBareImdbPattern = regexp.MustCompile(`(?i)[{\[](tt\d{7,8})[}\]]`)
 
-// ParseStructuredFolderIDs extracts only explicit structured provider IDs from
-// a folder or file name, such as {tmdb-27205} or [imdbid-tt1375666}. It does
+// ParseStructuredFolderIDs extracts only explicit provider IDs from a folder or
+// file name, such as {tmdb-27205}, [imdbid-tt1375666], or [tt1375666]. It does
 // not consider trailing bare IDs or folderType-based heuristics.
 func ParseStructuredFolderIDs(name string) *FolderIDHints {
 	matches := folderIDPattern.FindAllStringSubmatch(name, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
 	hints := &FolderIDHints{}
 	for _, m := range matches {
 		provider := strings.ToLower(m[1])
@@ -42,6 +38,10 @@ func ParseStructuredFolderIDs(name string) *FolderIDHints {
 		}
 	}
 
+	if m := bracketedBareImdbPattern.FindStringSubmatch(name); m != nil && hints.ImdbID == "" {
+		hints.ImdbID = strings.ToLower(m[1])
+	}
+
 	if hints.TmdbID == "" && hints.ImdbID == "" && hints.TvdbID == "" {
 		return nil
 	}
@@ -55,10 +55,6 @@ func ParseStructuredFolderIDs(name string) *FolderIDHints {
 func ParseFolderIDs(folderName string, folderType string) *FolderIDHints {
 	if hints := ParseStructuredFolderIDs(folderName); hints != nil {
 		return hints
-	}
-
-	if m := bracketedBareImdbPattern.FindStringSubmatch(folderName); m != nil {
-		return &FolderIDHints{ImdbID: strings.ToLower(m[1])}
 	}
 
 	trimmed := strings.TrimSpace(folderName)

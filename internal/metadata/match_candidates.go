@@ -539,7 +539,11 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 			titleCorroborated := hints.Year != 0 && best.candidate.Year != 0 &&
 				absYearDelta(best.candidate.Year, hints.Year) <= 2 &&
 				normalizeTitleForScoring(best.candidate.Title) == normalizeTitleForScoring(hints.Title)
-			if yearCorroborated || multiSourceCorroborated || titleCorroborated {
+			// Year or source-count corroboration is only meaningful when the winning
+			// candidate is at least title-coherent with the scanner hint. Otherwise a
+			// high source/provider score can auto-accept an unrelated same-year result.
+			hintTitleCoherent := inferTitleSimilarity(hints.Title, best.candidate.Title, hints.Year) > 0
+			if (hintTitleCoherent && (yearCorroborated || multiSourceCorroborated)) || titleCorroborated {
 				return pickByProviderPriority(topGroup, providerPriority), true
 			}
 		}

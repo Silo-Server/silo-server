@@ -27,3 +27,20 @@ func TestParseFolderIDs_BracketedBareImdb(t *testing.T) {
 		t.Errorf("no-id folder must return nil, got %+v", got)
 	}
 }
+
+func TestParseStructuredFolderIDs_BracketedBareImdb(t *testing.T) {
+	got := ParseStructuredFolderIDs("17 Blocks (2021) [tt10011226]")
+	if got == nil || got.ImdbID != "tt10011226" {
+		t.Fatalf("ParseStructuredFolderIDs bare imdb = %+v, want ImdbID tt10011226", got)
+	}
+
+	got = ParseStructuredFolderIDs("Some Movie {tmdb-12345} [tt7654321]")
+	if got == nil || got.TmdbID != "12345" || got.ImdbID != "tt7654321" {
+		t.Fatalf("ParseStructuredFolderIDs mixed ids = %+v, want tmdb+imdb", got)
+	}
+
+	got = ParseStructuredFolderIDs("Some Movie [imdb-tt1375666] [tt7654321]")
+	if got == nil || got.ImdbID != "tt1375666" {
+		t.Fatalf("structured imdb should win over bare imdb, got %+v", got)
+	}
+}

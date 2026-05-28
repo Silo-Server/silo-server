@@ -39,6 +39,26 @@ func TestSelectInitialMatchCandidate_LoneResultYearMismatchStillRejected(t *test
 	}
 }
 
+func TestSelectInitialMatchCandidate_CorroborationRequiresHintTitleCoherence(t *testing.T) {
+	// Same-year, multi-source candidate scores above the 55 floor via provider
+	// evidence, but the title is not coherent with the scanner hint. The lone
+	// result rule must not rescue it just because the year/source evidence is
+	// strong enough to reach the corroboration branch.
+	hints := &MatchHints{Title: "Hotel Transylvania Puppy!", Year: 2017, Type: "movie"}
+	cands := []MatchCandidate{
+		{
+			Title:       "Puppy!",
+			Year:        2017,
+			ContentType: "movie",
+			Sources:     []string{"tmdb", "tvdb", "imdb"},
+			ProviderIDs: map[string]string{"tmdb": "222"},
+		},
+	}
+	if got, ok := selectInitialMatchCandidate(hints, cands, []string{"tmdb", "tvdb", "imdb"}); ok {
+		t.Fatalf("unrelated same-year candidate must not be auto-accepted, got %+v", got)
+	}
+}
+
 func TestSelectInitialMatchCandidate_TwoDifferentShowsUnchanged(t *testing.T) {
 	// Two genuinely different shows that BOTH score >=55 (so the new rule IS evaluated,
 	// not short-circuited by the <55 floor): candidatesAreSingleDistinctShow must return
