@@ -633,7 +633,10 @@ func (r *FolderRepository) collectOrphanBatch(ctx context.Context, folderID, lim
 		}
 		ids = append(ids, contentID)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating orphan rows: %w", err)
+	}
+	return ids, nil
 }
 
 // dirSetToSlice returns the keys of set as a slice (nil if empty).
