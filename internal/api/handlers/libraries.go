@@ -2060,37 +2060,33 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 
 	// Optional case-insensitive search across title, library name, type, and
 	// status. Applied server-side so it spans the whole table, not just the
-	// current page. The folder name comes from the lateral join, so both the
-	// count and list queries carry the join (and the filter) when searching.
+	// current page. The displayed folder still comes from the lateral join below,
+	// but the search predicate checks every membership so multi-library items are
+	// found when any linked library name matches.
 	search := strings.TrimSpace(q.Get("q"))
 	filter := ""
 	filterArgs := []any{}
 	if search != "" {
 		filterArgs = append(filterArgs, "%"+search+"%")
-		filter = ` AND (mi.title ILIKE $1 OR mi.type ILIKE $1 OR mi.status ILIKE $1 OR COALESCE(lib.folder_name, '') ILIKE $1)`
+		filter = ` AND (
+			mi.title ILIKE $1
+			OR mi.type ILIKE $1
+			OR mi.status ILIKE $1
+			OR EXISTS (
+				SELECT 1
+				FROM media_item_libraries search_mil
+				JOIN media_folders search_f ON search_f.id = search_mil.media_folder_id
+				WHERE search_mil.content_id = mi.content_id
+				  AND search_f.name ILIKE $1
+			)
+		)`
 	}
 
-	// Only pay for the lateral folder lookup when the search filter actually
-	// references lib.folder_name; the no-search count is the hot path on every
-	// admin-page load and shouldn't carry an unnecessary join over the whole
-	// unmatched set.
 	countSQL := `
 		SELECT COUNT(*)
 		FROM media_items mi
 		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')`
-	if search != "" {
-		countSQL = `
-			SELECT COUNT(*)
-			FROM media_items mi
-			LEFT JOIN LATERAL (
-				SELECT f.name AS folder_name
-				FROM media_item_libraries mil
-				JOIN media_folders f ON f.id = mil.media_folder_id
-				WHERE mil.content_id = mi.content_id
-				LIMIT 1
-			) lib ON true
-			WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + filter
-	}
+	countSQL += filter
 
 	var total int
 	if err := h.pool.QueryRow(r.Context(), countSQL, filterArgs...).Scan(&total); err != nil {
