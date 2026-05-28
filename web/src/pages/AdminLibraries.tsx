@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import type { FormEvent } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
   AdminJob,
@@ -1655,27 +1656,26 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
 function UnmatchedItemsSection() {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 250);
   const [matchItem, setMatchItem] = useState<UnmatchedLibraryItem | null>(null);
-  const { data } = useUnmatchedLibraryItems(page);
+  const { data } = useUnmatchedLibraryItems(page, debouncedSearch);
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / UNMATCHED_PAGE_SIZE));
   const clamped = Math.min(page, totalPages - 1);
   const rangeStart = total === 0 ? 0 : clamped * UNMATCHED_PAGE_SIZE + 1;
   const rangeEnd = Math.min((clamped + 1) * UNMATCHED_PAGE_SIZE, total);
-  const filteredItems = useMemo(() => {
-    const items = data?.items ?? [];
-    if (!search) return items;
-    const q = search.toLowerCase();
-    return items.filter(
-      (item) =>
-        item.title.toLowerCase().includes(q) ||
-        item.library_name.toLowerCase().includes(q) ||
-        item.content_type.toLowerCase().includes(q) ||
-        item.status.toLowerCase().includes(q),
-    );
-  }, [data?.items, search]);
+  const items = data?.items ?? [];
 
-  if (total === 0 && page === 0) return null;
+  // The search is applied server-side (spans the whole table, not just this
+  // page); reset to the first page whenever the debounced query changes.
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch]);
+
+  // Hide the section only when there are genuinely no unmatched items and no
+  // active search — keep it mounted while searching so the box and the
+  // "no matches" state stay visible even when a query returns nothing.
+  if (total === 0 && page === 0 && search.trim() === "") return null;
 
   return (
     <section className="surface-panel-subtle overflow-hidden rounded-2xl">
@@ -1698,7 +1698,7 @@ function UnmatchedItemsSection() {
         <div className="relative mb-2">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
-            placeholder="Filter this page by title, library, or type..."
+            placeholder="Search all unmatched items by title, library, or type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 pl-8 text-xs"
@@ -1716,14 +1716,14 @@ function UnmatchedItemsSection() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredItems.length === 0 ? (
+              {items.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                    No unmatched items on this page match your filter.
+                    No unmatched items match your search.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredItems.map((u) => (
+                items.map((u) => (
                   <TableRow key={u.content_id}>
                     <TableCell className="font-medium">
                       <Link

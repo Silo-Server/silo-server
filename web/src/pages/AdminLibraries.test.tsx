@@ -114,7 +114,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useUnmatchedLibraryItems.mockReturnValue({
-      data: [],
+      data: { items: [], total: 0 },
       isLoading: false,
     });
   });
@@ -210,17 +210,20 @@ describe("AdminLibraries", () => {
 
   it("renders an unmatched items section when unmatched items exist", () => {
     mocks.useUnmatchedLibraryItems.mockReturnValue({
-      data: [
-        {
-          content_id: "movie-99",
-          title: "Unknown Film",
-          year: 0,
-          content_type: "movie",
-          library_id: 1,
-          library_name: "Movies",
-          status: "unmatched",
-        },
-      ],
+      data: {
+        items: [
+          {
+            content_id: "movie-99",
+            title: "Unknown Film",
+            year: 0,
+            content_type: "movie",
+            library_id: 1,
+            library_name: "Movies",
+            status: "unmatched",
+          },
+        ],
+        total: 1,
+      },
       isLoading: false,
     });
 
