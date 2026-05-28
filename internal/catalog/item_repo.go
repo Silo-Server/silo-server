@@ -52,7 +52,7 @@ const itemColumns = `content_id, type, title, sort_title, default_metadata_langu
 	imdb_id, tmdb_id, tvdb_id,
 	poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 	metadata_s3_path, metadata_etag, season_count,
-	studios, networks, countries, keywords, original_language, release_date::text, first_air_date, last_air_date, air_time,
+	studios, networks, countries, keywords, original_language, release_date::text, first_air_date, last_air_date, air_time, air_timezone,
 	show_status,
 	matched_at, last_refreshed, refresh_failures,
 	episode_metadata_incomplete, episode_metadata_last_checked_at, locked_fields, status, created_at, updated_at`
@@ -65,7 +65,7 @@ func qualifiedItemColumns(alias string) string {
 		"imdb_id", "tmdb_id", "tvdb_id",
 		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
 		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time",
+		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 		"show_status",
 		"matched_at", "last_refreshed", "refresh_failures",
 		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
@@ -85,7 +85,7 @@ func qualifiedListItemColumns(alias string) string {
 		"imdb_id", "tmdb_id", "tvdb_id",
 		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
 		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time",
+		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 		"show_status",
 		"matched_at", "last_refreshed", "refresh_failures",
 		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
@@ -141,6 +141,7 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.FirstAirDate,
 		&item.LastAirDate,
 		&item.AirTime,
+		&item.AirTimezone,
 		&item.ShowStatus,
 		&item.MatchedAt,
 		&item.LastRefreshed,
@@ -203,6 +204,7 @@ func scanItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.FirstAirDate,
 			&item.LastAirDate,
 			&item.AirTime,
+			&item.AirTimezone,
 			&item.ShowStatus,
 			&item.MatchedAt,
 			&item.LastRefreshed,
@@ -326,7 +328,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			imdb_id, tmdb_id, tvdb_id,
 			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 			metadata_s3_path, metadata_etag, season_count,
-			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time,
+			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			show_status,
 			matched_at, last_refreshed, refresh_failures,
 			episode_metadata_incomplete, episode_metadata_last_checked_at, status
@@ -337,10 +339,10 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			$17, $18, $19,
 			$20, $21, $22, $23, $24,
 			$25, $26, $27,
-			$28, $29, $30, $31, $32, $33, $34, $35, $36,
-			$37,
-			$38, $39, $40,
-			$41, $42, $43
+			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
+			$38,
+			$39, $40, $41,
+			$42, $43, $44
 		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
@@ -378,6 +380,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			first_air_date = EXCLUDED.first_air_date,
 			last_air_date = EXCLUDED.last_air_date,
 			air_time = EXCLUDED.air_time,
+			air_timezone = EXCLUDED.air_timezone,
 			show_status = EXCLUDED.show_status,
 			matched_at = EXCLUDED.matched_at,
 			last_refreshed = EXCLUDED.last_refreshed,
@@ -424,6 +427,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 		item.FirstAirDate,
 		item.LastAirDate,
 		item.AirTime,
+		item.AirTimezone,
 		item.ShowStatus,
 		item.MatchedAt,
 		item.LastRefreshed,
@@ -1285,6 +1289,7 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	addString("first_air_date", upd.FirstAirDate)
 	addString("last_air_date", upd.LastAirDate)
 	addString("air_time", upd.AirTime)
+	addString("air_timezone", upd.AirTimezone)
 	addString("status", upd.Status)
 	addString("show_status", upd.ShowStatus)
 	addString("imdb_id", upd.ImdbID)

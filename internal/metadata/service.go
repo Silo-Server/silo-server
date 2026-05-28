@@ -4746,6 +4746,9 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 	if item.AirTime != nil {
 		result.AirTime = *item.AirTime
 	}
+	if item.AirTimezone != nil {
+		result.AirTimezone = *item.AirTimezone
+	}
 	if item.ReleaseDate != nil {
 		result.ReleaseDate = *item.ReleaseDate
 	}
@@ -4809,6 +4812,12 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	}
 	if r.AirTime != "" {
 		item.AirTime = &r.AirTime
+	}
+	if r.AirTime != "" && r.AirTimezone == "" {
+		r.AirTimezone = catalog.InferAirTimezone(r.Networks, r.Countries)
+	}
+	if r.AirTimezone != "" {
+		item.AirTimezone = &r.AirTimezone
 	}
 	if r.ReleaseDate != "" {
 		item.ReleaseDate = &r.ReleaseDate

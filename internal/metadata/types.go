@@ -39,6 +39,7 @@ const (
 	FieldTags
 	FieldContentRating
 	FieldImages
+	FieldAirSchedule
 )
 
 // RefreshPriority controls queue ordering.
@@ -178,6 +179,7 @@ type MetadataResult struct {
 	FirstAirDate string
 	LastAirDate  string
 	AirTime      string
+	AirTimezone  string
 }
 
 // Ratings holds ratings from multiple sources.

@@ -94,6 +94,7 @@ type ItemDetail struct {
 	LastAirDate      *string      `json:"last_air_date,omitempty"`
 	ReleaseDate      *string      `json:"release_date,omitempty"`
 	AirTime          *string      `json:"air_time,omitempty"`
+	AirTimezone      *string      `json:"air_timezone,omitempty"`
 	ShowStatus       string       `json:"show_status,omitempty"`
 
 	// Presigned image URLs.
@@ -806,6 +807,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		LastAirDate:       item.LastAirDate,
 		ReleaseDate:       item.ReleaseDate,
 		AirTime:           item.AirTime,
+		AirTimezone:       item.AirTimezone,
 		ShowStatus:        item.ShowStatus,
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropThumbhash: item.BackdropThumbhash,

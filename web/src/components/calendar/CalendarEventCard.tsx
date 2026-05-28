@@ -19,7 +19,7 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
       : `/item/${event.series_id ?? event.content_id}`;
 
   const subtitle = formatUpcomingSubtitle(event);
-  const airTime = formatUpcomingTime(event.air_time);
+  const airTime = formatUpcomingTime(event.air_time, event.air_at);
 
   return (
     <div className="media-card group/card">

@@ -966,6 +966,7 @@ type UpdateItemMetadataRequest struct {
 	FirstAirDate     *string   `json:"first_air_date"`
 	LastAirDate      *string   `json:"last_air_date"`
 	AirTime          *string   `json:"air_time"`
+	AirTimezone      *string   `json:"air_timezone"`
 	AirDate          *string   `json:"air_date"`
 	Status           *string   `json:"status"`
 	RatingIMDB       *float64  `json:"rating_imdb"`
@@ -993,6 +994,14 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	if req.AirTimezone != nil {
+		trimmed := strings.TrimSpace(*req.AirTimezone)
+		req.AirTimezone = &trimmed
+		if !catalog.ValidateAirTimezone(trimmed) {
+			writeError(w, http.StatusBadRequest, "bad_request", "air_timezone must be a valid IANA timezone")
+			return
+		}
+	}
 
 	upd := catalog.MetadataUpdate{
 		Title: req.Title, SortTitle: req.SortTitle, OriginalTitle: req.OriginalTitle,
@@ -1000,7 +1009,7 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 		Year: req.Year, Runtime: req.Runtime,
 		Genres: req.Genres, Studios: req.Studios, Networks: req.Networks, Countries: req.Countries,
 		ReleaseDate: req.ReleaseDate, FirstAirDate: req.FirstAirDate, LastAirDate: req.LastAirDate,
-		AirTime: req.AirTime,
+		AirTime: req.AirTime, AirTimezone: req.AirTimezone,
 		AirDate: req.AirDate, Status: req.Status,
 		RatingIMDB: req.RatingIMDB, RatingTMDB: req.RatingTMDB,
 		RatingRTCritic: req.RatingRTCritic, RatingRTAudience: req.RatingRTAudience,

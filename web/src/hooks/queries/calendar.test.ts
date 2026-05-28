@@ -14,6 +14,9 @@ vi.mock("@/api/client", () => ({
 import { useCalendarWeek } from "./calendar";
 
 describe("useCalendarWeek", () => {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const encodedTimezone = encodeURIComponent(timezone);
+
   beforeEach(() => {
     mockUseQuery.mockReset();
     mockApi.mockReset();
@@ -29,11 +32,13 @@ describe("useCalendarWeek", () => {
 
     expect(mockUseQuery).toHaveBeenCalledWith(
       expect.objectContaining({
-        queryKey: ["calendar", "week", "2026-04-06", "all", "all"],
+        queryKey: ["calendar", "week", "2026-04-06", "all", "all", timezone],
         staleTime: 10 * 60 * 1000,
       }),
     );
-    expect(mockApi).toHaveBeenCalledWith("/calendar?start=2026-04-06&end=2026-04-12&filter=all");
+    expect(mockApi).toHaveBeenCalledWith(
+      `/calendar?start=2026-04-06&end=2026-04-12&filter=all&timezone=${encodedTimezone}`,
+    );
   });
 
   it("includes the selected library in the request", async () => {
@@ -43,7 +48,7 @@ describe("useCalendarWeek", () => {
     await queryOptions.queryFn();
 
     expect(mockApi).toHaveBeenCalledWith(
-      "/calendar?start=2026-04-06&end=2026-04-12&filter=favorites&library_id=7",
+      `/calendar?start=2026-04-06&end=2026-04-12&filter=favorites&timezone=${encodedTimezone}&library_id=7`,
     );
   });
 });

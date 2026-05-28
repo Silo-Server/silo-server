@@ -110,6 +110,62 @@ func TestHandleGetCalendar_ReturnsEmptyEvents(t *testing.T) {
 	}
 }
 
+func TestHandleGetCalendar_ExpandsRepoRangeAndGroupsByViewerLocalDate(t *testing.T) {
+	t.Parallel()
+
+	airTime := "00:30"
+	airTimezone := "Asia/Tokyo"
+	repo := &stubCalendarRepo{
+		events: []catalog.CalendarEvent{
+			{
+				ContentID:   "episode-1",
+				Type:        "episode",
+				Title:       "Series",
+				SeriesID:    ptrString("series-1"),
+				AirDate:     time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
+				AirTime:     &airTime,
+				AirTimezone: &airTimezone,
+			},
+		},
+	}
+	handler := &CalendarHandler{repo: repo}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-01-01&end=2026-01-01&timezone=America/New_York", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := repo.last.Start.Format("2006-01-02"); got != "2025-12-30" {
+		t.Fatalf("repo start = %s, want expanded 2025-12-30", got)
+	}
+	if got := repo.last.End.Format("2006-01-02"); got != "2026-01-03" {
+		t.Fatalf("repo end = %s, want expanded 2026-01-03", got)
+	}
+
+	var resp calendarResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Events) != 1 {
+		t.Fatalf("days len = %d, want 1", len(resp.Events))
+	}
+	if resp.Events[0].Date != "2026-01-01" {
+		t.Fatalf("day = %q, want viewer-local 2026-01-01", resp.Events[0].Date)
+	}
+	item := resp.Events[0].Items[0]
+	if item.AirDate != "2026-01-02" {
+		t.Fatalf("air_date = %q, want source date 2026-01-02", item.AirDate)
+	}
+	if item.LocalAirDate != "2026-01-01" {
+		t.Fatalf("local_air_date = %q, want 2026-01-01", item.LocalAirDate)
+	}
+	if item.AirAt == nil || *item.AirAt != "2026-01-01T15:30:00Z" {
+		t.Fatalf("air_at = %v, want 2026-01-01T15:30:00Z", item.AirAt)
+	}
+}
+
 func TestHandleGetCalendar_GroupsEventsAndBatchResolvesCardPosters(t *testing.T) {
 	t.Parallel()
 

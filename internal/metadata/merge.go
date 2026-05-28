@@ -49,7 +49,10 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 	mergeInt(&target.SeasonCount, source.SeasonCount, mode)
 	mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
 	mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
-	mergeScalar(&target.AirTime, source.AirTime, mode)
+	if !isLocked(FieldAirSchedule) {
+		mergeScalar(&target.AirTime, source.AirTime, mode)
+		mergeScalar(&target.AirTimezone, source.AirTimezone, mode)
+	}
 
 	// Genres follow provider priority during FillEmpty instead of unioning tags
 	// from later providers, which can create noisy hybrid classifications.
@@ -114,7 +117,10 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	mergeInt(&target.SeasonCount, source.SeasonCount, mode)
 	mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
 	mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
-	mergeScalar(&target.AirTime, source.AirTime, mode)
+	if !isLocked(FieldAirSchedule) {
+		mergeScalar(&target.AirTime, source.AirTime, mode)
+		mergeScalar(&target.AirTimezone, source.AirTimezone, mode)
+	}
 
 	if !isLocked(FieldGenres) {
 		mergePrioritizedStringSlice(&target.Genres, source.Genres, mode)
