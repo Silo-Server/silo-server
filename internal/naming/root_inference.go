@@ -21,7 +21,7 @@ var (
 	// Matches a well-formed tag ([tvdb-81189]), an unsubstituted Sonarr token
 	// ([tvdb-{TvdbId}]), or an empty token ({imdb-}). The id part is either a
 	// {...} placeholder or zero-or-more word chars.
-	inferProviderTagRe     = regexp.MustCompile(`\s*[{\[](?:tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-(?:\{[^}]*\}|[\w]*)[}\]]`)
+	inferProviderTagRe = regexp.MustCompile(`\s*[{\[](?:tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-(?:\{[^}]*\}|[\w]*)[}\]]`)
 )
 
 type RootAssignment struct {
