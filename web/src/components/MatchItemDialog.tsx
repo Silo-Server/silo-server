@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { FileVersion, ItemDetail, MatchCandidate } from "@/api/types";
 import MediaLocations from "@/components/MediaLocations";
 import { useSearchItemMatchCandidates, useApplyItemMatch } from "@/hooks/queries/items";
@@ -170,6 +171,7 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
           {candidates.length > 0 && (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
               <Label className="shrink-0">Results</Label>
+              <TooltipProvider delayDuration={150}>
               <div className="overlay-scroll min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 pb-1">
                 {candidates.map((candidate, index) => {
                   const candidateKey = Object.entries(candidate.provider_ids)
@@ -189,13 +191,27 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
                       data-testid="match-candidate"
                     >
                       {candidate.image_url ? (
-                        <img
-                          src={candidate.image_url}
-                          alt=""
-                          className="h-16 w-11 shrink-0 rounded object-cover"
-                        />
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <img
+                              src={candidate.image_url}
+                              alt=""
+                              className="h-24 w-16 shrink-0 cursor-zoom-in rounded object-cover"
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="right"
+                            className="border-border/60 overflow-hidden border bg-transparent p-0 shadow-xl"
+                          >
+                            <img
+                              src={candidate.image_url}
+                              alt={candidate.title}
+                              className="h-72 w-48 rounded-md object-cover"
+                            />
+                          </TooltipContent>
+                        </Tooltip>
                       ) : (
-                        <div className="bg-muted h-16 w-11 shrink-0 rounded" />
+                        <div className="bg-muted h-24 w-16 shrink-0 rounded" />
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{candidate.title}</div>
@@ -219,6 +235,7 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
                   );
                 })}
               </div>
+              </TooltipProvider>
             </div>
           )}
 
