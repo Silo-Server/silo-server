@@ -90,3 +90,49 @@ func TestRetryOnDeadlockStopsOnCanceledContext(t *testing.T) {
 		t.Fatalf("expected 1 call before cancel, got %d", calls)
 	}
 }
+
+func TestDeleteInBatchesLoopsUntilUnderBatchSize(t *testing.T) {
+	withFastDeadlockRetry(t, 5)
+	counts := []int64{5, 5, 2}
+	idx := 0
+	total, err := deleteInBatches(context.Background(), 5, func(context.Context) (int64, error) {
+		n := counts[idx]
+		idx++
+		return n, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 12 {
+		t.Fatalf("expected total 12, got %d", total)
+	}
+	if idx != 3 {
+		t.Fatalf("expected 3 batches, got %d", idx)
+	}
+}
+
+func TestDeleteInBatchesStopsImmediatelyWhenFirstBatchUnderSize(t *testing.T) {
+	withFastDeadlockRetry(t, 5)
+	calls := 0
+	total, err := deleteInBatches(context.Background(), 5, func(context.Context) (int64, error) {
+		calls++
+		return 0, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 0 || calls != 1 {
+		t.Fatalf("expected total 0 and 1 call, got total=%d calls=%d", total, calls)
+	}
+}
+
+func TestDeleteInBatchesReturnsError(t *testing.T) {
+	withFastDeadlockRetry(t, 5)
+	sentinel := errors.New("delete failed")
+	_, err := deleteInBatches(context.Background(), 5, func(context.Context) (int64, error) {
+		return 0, sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel, got %v", err)
+	}
+}

@@ -48,6 +48,31 @@ func retryOnDeadlock(ctx context.Context, op func() error) error {
 	}
 }
 
+// deleteInBatches repeatedly runs deleteBatch (each a single autocommit
+// statement) until a batch removes fewer than batchSize rows. Each batch is
+// retried on deadlock. It returns the total number of rows deleted.
+func deleteInBatches(
+	ctx context.Context,
+	batchSize int,
+	deleteBatch func(ctx context.Context) (int64, error),
+) (int64, error) {
+	var total int64
+	for {
+		var affected int64
+		if err := retryOnDeadlock(ctx, func() error {
+			n, e := deleteBatch(ctx)
+			affected = n
+			return e
+		}); err != nil {
+			return total, err
+		}
+		total += affected
+		if affected < int64(batchSize) {
+			return total, nil
+		}
+	}
+}
+
 // Sentinel errors for folder repository operations.
 var (
 	ErrFolderNotFound = errors.New("folder not found")
