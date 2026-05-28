@@ -40,6 +40,8 @@ type audiobookCoverCacher interface {
 }
 
 const (
+	audiobookMetadataImageProviderID = "audiobook-metadata"
+
 	// defaultEnrichBatchSize is the maximum number of audiobook items processed
 	// per sweep invocation. Keeps latency bounded for large libraries.
 	defaultEnrichBatchSize = 50
@@ -416,6 +418,8 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
+	e.cacheRemotePoster(ctx, item.ContentID, accumulator)
+
 	// Phase 3: Persist.
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
@@ -446,6 +450,59 @@ func (e *Enricher) maybeApplyCoverFallback(ctx context.Context, contentID string
 			"error", err,
 		)
 	}
+}
+
+// cacheRemotePoster stores provider-hosted audiobook posters in the same S3
+// image cache used by movie/TV metadata. Failures are non-fatal: keeping the
+// provider URL is better than dropping the poster.
+func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, result *metadata.MetadataResult) {
+	if e == nil || result == nil || result.PosterPath == "" {
+		return
+	}
+	if !strings.HasPrefix(result.PosterPath, "http://") && !strings.HasPrefix(result.PosterPath, "https://") {
+		return
+	}
+
+	imageCacher, ok := e.imageCacher.(metadata.ImageCacher)
+	if !ok || imageCacher == nil {
+		return
+	}
+
+	cached, err := imageCacher.CacheImage(ctx, metadata.CacheImageRequest{
+		SourceURL:   result.PosterPath,
+		ProviderID:  audiobookMetadataImageProviderID,
+		ContentType: "audiobooks",
+		ContentID:   contentID,
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		slog.Warn("audiobook enrichment: poster cache failed, keeping provider URL",
+			"content_id", contentID,
+			"url", result.PosterPath,
+			"error", err,
+		)
+		return
+	}
+
+	if storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext); storedPath != "" {
+		result.PosterPath = storedPath
+	}
+	if cached.Thumbhash != "" {
+		result.PosterThumbhash = cached.Thumbhash
+	}
+}
+
+func cachedOriginalImagePath(basePath, ext string) string {
+	if basePath == "" {
+		return ""
+	}
+	if strings.Contains(basePath, "/original.") {
+		return basePath
+	}
+	if ext == "" {
+		ext = ".jpg"
+	}
+	return strings.TrimRight(basePath, "/") + "/original" + ext
 }
 
 // persist writes the enriched metadata back to the database.
