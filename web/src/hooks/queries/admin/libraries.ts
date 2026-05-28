@@ -510,13 +510,16 @@ export function useRefreshLibraryMetadata() {
 
 const UNMATCHED_PAGE_SIZE = 10;
 
-export function useUnmatchedLibraryItems(page = 0) {
+export function useUnmatchedLibraryItems(page = 0, search = "") {
   const offset = page * UNMATCHED_PAGE_SIZE;
+  const trimmed = search.trim();
   return useQuery({
-    queryKey: adminKeys.unmatchedItems(page),
+    queryKey: adminKeys.unmatchedItems(page, trimmed),
     queryFn: () =>
       api<UnmatchedLibraryItemsResponse>(
-        `/libraries/unmatched-items?limit=${UNMATCHED_PAGE_SIZE}&offset=${offset}`,
+        `/libraries/unmatched-items?limit=${UNMATCHED_PAGE_SIZE}&offset=${offset}${
+          trimmed ? `&q=${encodeURIComponent(trimmed)}` : ""
+        }`,
       ).then((d) => d ?? { items: [], total: 0 }),
     staleTime: ADMIN_STALE_TIME,
     placeholderData: (prev) => prev,

@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -23,6 +24,11 @@ const mocks = vi.hoisted(() => ({
   useDeleteLibraryPoster: vi.fn(),
   useUnmatchedLibraryItems: vi.fn(),
   useAdminPlugins: vi.fn(),
+  useCancelLibraryScans: vi.fn(),
+  useLibraryRoots: vi.fn(),
+  useUpsertLibraryRootOverride: vi.fn(),
+  useDeleteLibraryRootOverride: vi.fn(),
+  useActiveScans: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
@@ -45,13 +51,37 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useUploadLibraryPoster: (...args: unknown[]) => mocks.useUploadLibraryPoster(...args),
   useDeleteLibraryPoster: (...args: unknown[]) => mocks.useDeleteLibraryPoster(...args),
   useUnmatchedLibraryItems: (...args: unknown[]) => mocks.useUnmatchedLibraryItems(...args),
+  useCancelLibraryScans: (...args: unknown[]) => mocks.useCancelLibraryScans(...args),
+  useLibraryRoots: (...args: unknown[]) => mocks.useLibraryRoots(...args),
+  useUpsertLibraryRootOverride: (...args: unknown[]) => mocks.useUpsertLibraryRootOverride(...args),
+  useDeleteLibraryRootOverride: (...args: unknown[]) => mocks.useDeleteLibraryRootOverride(...args),
+  UNMATCHED_PAGE_SIZE: 10,
 }));
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPlugins: (...args: unknown[]) => mocks.useAdminPlugins(...args),
 }));
 
+vi.mock("@/hooks/queries/admin/scans", () => ({
+  useActiveScans: (...args: unknown[]) => mocks.useActiveScans(...args),
+}));
+
 import AdminLibraries from "./AdminLibraries";
+
+// renderPage wraps the page in the providers it needs at runtime: a
+// QueryClientProvider for the (mocked) TanStack hooks, and a MemoryRouter for
+// the <Link>s inside AdminLibraries. Without QueryClientProvider, even fully
+// mocked useQuery hooks throw "No QueryClient set" during render.
+const renderPage = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AdminLibraries />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+};
 
 describe("AdminLibraries", () => {
   beforeEach(() => {
@@ -114,17 +144,18 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useUnmatchedLibraryItems.mockReturnValue({
-      data: [],
+      data: { items: [], total: 0 },
       isLoading: false,
     });
+    mocks.useCancelLibraryScans.mockReturnValue(queryState);
+    mocks.useLibraryRoots.mockReturnValue({ data: [], isLoading: false });
+    mocks.useUpsertLibraryRootOverride.mockReturnValue(queryState);
+    mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
+    mocks.useActiveScans.mockReturnValue({ data: [], isLoading: false });
   });
 
   it("uses scan language instead of metadata refresh language on the admin libraries page", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>,
-    );
+    const markup = renderPage();
 
     expect(markup).toContain(
       "Manage library roots and scans. Catalog import/export now lives under Maintenance.",
@@ -137,16 +168,20 @@ describe("AdminLibraries", () => {
     );
   });
 
-  it("renders a low-key troubleshooting section only when skipped roots exist", () => {
-    mocks.useSkippedLibraryRoots.mockReturnValue({
+  it("renders the Ambiguous Roots section with a populated row", () => {
+    mocks.useLibraryRoots.mockReturnValue({
       data: [
         {
           library_id: 1,
           library_name: "Movies",
           root_path: "/media/movies/Inception (2010)",
-          reason: "missing_folder_ids",
+          state: "ambiguous",
+          inferred_type: "movie",
+          type_confidence: "low",
+          title: "Inception",
+          year: 2010,
+          observed_file_count: 1,
           sample_file_path: "/media/movies/Inception (2010)/Inception (2010).mkv",
-          file_count: 1,
           first_seen_at: "2026-03-23T20:00:00Z",
           last_seen_at: "2026-03-23T21:00:00Z",
         },
@@ -154,29 +189,21 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
 
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>,
-    );
+    const markup = renderPage();
 
-    expect(markup).toContain("Troubleshooting");
-    expect(markup).toContain("Root path");
-    expect(markup).toContain("Movies");
+    expect(markup).toContain("Ambiguous Roots");
+    expect(markup).toContain("Inception");
     expect(markup).toContain("/media/movies/Inception (2010)");
-    expect(markup).toContain("missing_folder_ids");
-    expect(markup).toContain("First seen");
-    expect(markup).toContain("Last seen");
   });
 
-  it("hides the troubleshooting section when no skipped roots exist", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>,
-    );
+  it("renders the empty-state inside Ambiguous Roots when no roots exist", () => {
+    // Default useLibraryRoots mock returns { data: [], isLoading: false }. The
+    // section itself still renders (it's gated on libraries.length, not on the
+    // root list), and the table body shows the empty-state copy.
+    const markup = renderPage();
 
-    expect(markup).not.toContain("Root path");
+    expect(markup).toContain("Ambiguous Roots");
+    expect(markup).toContain("No ambiguous roots for this library");
   });
 
   it("renders Match instead of Re-match for stale IDs", () => {
@@ -198,11 +225,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
 
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>,
-    );
+    const markup = renderPage();
 
     expect(markup).toContain("Match");
     expect(markup).not.toContain("Re-match");
@@ -210,25 +233,24 @@ describe("AdminLibraries", () => {
 
   it("renders an unmatched items section when unmatched items exist", () => {
     mocks.useUnmatchedLibraryItems.mockReturnValue({
-      data: [
-        {
-          content_id: "movie-99",
-          title: "Unknown Film",
-          year: 0,
-          content_type: "movie",
-          library_id: 1,
-          library_name: "Movies",
-          status: "unmatched",
-        },
-      ],
+      data: {
+        items: [
+          {
+            content_id: "movie-99",
+            title: "Unknown Film",
+            year: 0,
+            content_type: "movie",
+            library_id: 1,
+            library_name: "Movies",
+            status: "unmatched",
+          },
+        ],
+        total: 1,
+      },
       isLoading: false,
     });
 
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>,
-    );
+    const markup = renderPage();
 
     expect(markup).toContain("Unmatched Items");
     expect(markup).toContain("Unknown Film");
@@ -236,11 +258,7 @@ describe("AdminLibraries", () => {
   });
 
   it("hides unmatched items section when no unmatched items exist", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>,
-    );
+    const markup = renderPage();
 
     expect(markup).not.toContain("Unmatched Items");
   });
