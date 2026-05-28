@@ -1359,15 +1359,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 // uses the cached w1280 backdrop for Continue Watching / Next Up rows.
 func sectionBackdropPath(sectionType sections.SectionType, path string) string {
 	if sectionType == sections.SectionContinueWatching || sectionType == sections.SectionNextUp {
-		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-			return path
-		}
-		// Plugin-prefixed paths pass through; the resolver still receives the
-		// existing "featured" semantic variant.
-		if strings.Contains(path, "://") {
-			return path
-		}
-		return strings.Replace(path, "/original.", "/w1280.", 1)
+		return catalog.BackdropVariantPath(path, "w1280")
 	}
 	return featuredBackdropPath(path)
 }

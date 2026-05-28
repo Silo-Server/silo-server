@@ -996,16 +996,11 @@ func featuredPosterPath(path string) string {
 }
 
 // featuredBackdropPath converts an S3 backdrop path from original to w1920 for
-// featured/hero contexts (displayed at full viewport width).
-// Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned as-is.
+// featured/hero contexts (displayed at full viewport width). Episode stills
+// used as backdrops lack a w1920 variant and clamp to their largest cached
+// size. Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned as-is.
 func featuredBackdropPath(path string) string {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.Contains(path, "://") {
-		return path
-	}
-	return strings.Replace(path, "/original.", "/w1920.", 1)
+	return catalog.BackdropVariantPath(path, "w1920")
 }
 
 // presignURL resolves an image path to a usable URL, delegating to the

@@ -2189,6 +2189,43 @@ func cachedImageVariantPath(path, imageType, size string) string {
 	return path
 }
 
+// imageTypeFromCachedPath returns the image type segment ("poster", "backdrop",
+// "logo", "still") encoded in a cached S3 image path of the form
+// ".../{imageType}/{variant}.{ext}". It returns "" for full URLs,
+// plugin-prefixed paths, or paths with no directory segment.
+func imageTypeFromCachedPath(path string) string {
+	if path == "" || strings.Contains(path, "://") {
+		return ""
+	}
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash <= 0 {
+		return ""
+	}
+	dir := path[:lastSlash]
+	return dir[strings.LastIndex(dir, "/")+1:]
+}
+
+// BackdropVariantPath rewrites a cached "/original." image path to the
+// requested backdrop variant (e.g. "w1280" or "w1920"). Episode "backdrops"
+// are frequently the episode still, which the cache only generates at
+// w500/w300 — so requesting a backdrop width 404s. For still/poster/logo
+// paths this clamps to that type's largest cached variant instead. Full URLs,
+// plugin-prefixed paths, and non-"/original." paths pass through unchanged.
+func BackdropVariantPath(path, desiredVariant string) string {
+	if path == "" || strings.Contains(path, "://") || !strings.Contains(path, "/original.") {
+		return path
+	}
+	variant := desiredVariant
+	switch imageType := imageTypeFromCachedPath(path); imageType {
+	case "still", "poster", "logo":
+		variant = cachedImageVariantKey(imageType, "")
+	}
+	if variant == "" {
+		return path
+	}
+	return strings.Replace(path, "/original.", "/"+variant+".", 1)
+}
+
 func cachedImageVariantKey(imageType, size string) string {
 	if size == "original" {
 		return "original"
