@@ -886,6 +886,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 					"provider", p.Slug(), "error", err)
 				continue
 			}
+			slog.Debug("metadata: provider search result",
+				"provider", p.Slug(),
+				"query_title", searchQuery.Title,
+				"query_year", searchQuery.Year,
+				"result_count", len(results),
+			)
 			for _, result := range results {
 				if searchResultConflictsWithTrustedIDs(accumulatedIDs, result.ProviderIDs) {
 					slog.Warn("metadata: skipping conflicting search result",
@@ -902,7 +908,17 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		candidates := NormalizeCandidates(allResults, contentType)
-		if winner, ok := selectInitialMatchCandidate(req.Hints, candidates); ok && winner != nil {
+		slog.Debug("metadata: search candidates assembled",
+			"query_title", searchQuery.Title,
+			"query_year", searchQuery.Year,
+			"raw_results", len(allResults),
+			"candidates", len(candidates),
+		)
+		providerPriority := make([]string, 0, len(itemChain))
+		for _, p := range itemChain {
+			providerPriority = append(providerPriority, p.Slug())
+		}
+		if winner, ok := selectInitialMatchCandidate(req.Hints, candidates, providerPriority); ok && winner != nil {
 			for k, v := range winner.ProviderIDs {
 				if v != "" {
 					accumulatedIDs[k] = v
