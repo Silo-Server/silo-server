@@ -386,9 +386,9 @@ export const adminKeys = {
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
-  unmatchedItems: (page?: number) =>
+  unmatchedItems: (page?: number, search?: string) =>
     page != null
-      ? (["admin", "libraries", "unmatchedItems", page] as const)
+      ? (["admin", "libraries", "unmatchedItems", page, search ?? ""] as const)
       : (["admin", "libraries", "unmatchedItems"] as const),
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,

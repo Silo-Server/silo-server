@@ -2058,16 +2058,45 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 		}
 	}
 
+	// Optional case-insensitive search across title, library name, type, and
+	// status. Applied server-side so it spans the whole table, not just the
+	// current page. The displayed folder still comes from the lateral join below,
+	// but the search predicate checks every membership so multi-library items are
+	// found when any linked library name matches.
+	search := strings.TrimSpace(q.Get("q"))
+	filter := ""
+	filterArgs := []any{}
+	if search != "" {
+		filterArgs = append(filterArgs, "%"+search+"%")
+		filter = ` AND (
+			mi.title ILIKE $1
+			OR mi.type ILIKE $1
+			OR mi.status ILIKE $1
+			OR EXISTS (
+				SELECT 1
+				FROM media_item_libraries search_mil
+				JOIN media_folders search_f ON search_f.id = search_mil.media_folder_id
+				WHERE search_mil.content_id = mi.content_id
+				  AND search_f.name ILIKE $1
+			)
+		)`
+	}
+
+	countSQL := `
+		SELECT COUNT(*)
+		FROM media_items mi
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')`
+	countSQL += filter
+
 	var total int
-	if err := h.pool.QueryRow(r.Context(),
-		`SELECT COUNT(*) FROM media_items WHERE status IN ('unmatched', 'pending', 'ambiguous')`,
-	).Scan(&total); err != nil {
+	if err := h.pool.QueryRow(r.Context(), countSQL, filterArgs...).Scan(&total); err != nil {
 		slog.Error("counting unmatched items", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to count unmatched items")
 		return
 	}
 
-	rows, err := h.pool.Query(r.Context(), `
+	listArgs := append(append([]any{}, filterArgs...), limit, offset)
+	listSQL := fmt.Sprintf(`
 		SELECT mi.content_id, mi.title, mi.year, mi.type, mi.status,
 		       COALESCE(lib.folder_id, 0),
 		       COALESCE(lib.folder_name, '')
@@ -2079,10 +2108,12 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			WHERE mil.content_id = mi.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s
 		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $%d OFFSET $%d
+	`, filter, len(filterArgs)+1, len(filterArgs)+2)
+
+	rows, err := h.pool.Query(r.Context(), listSQL, listArgs...)
 	if err != nil {
 		slog.Error("listing unmatched items", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list unmatched items")
