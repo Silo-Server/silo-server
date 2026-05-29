@@ -245,6 +245,176 @@ func TestHandleGetCalendar_GroupsEventsAndBatchResolvesCardPosters(t *testing.T)
 	}
 }
 
+func TestHandleGetCalendar_OrdersEventsWithoutTimezoneByWallClock(t *testing.T) {
+	t.Parallel()
+
+	late := "22:00"
+	early := "10:00"
+	repo := &stubCalendarRepo{
+		events: []catalog.CalendarEvent{
+			{
+				ContentID: "ep-late",
+				Type:      "episode",
+				Title:     "Aaa Show", // alphabetically first, but airs late
+				SeriesID:  ptrString("series-late"),
+				AirDate:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+				AirTime:   &late,
+				// no AirTimezone -> air_at is nil
+			},
+			{
+				ContentID: "ep-early",
+				Type:      "episode",
+				Title:     "Zzz Show", // alphabetically last, but airs early
+				SeriesID:  ptrString("series-early"),
+				AirDate:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+				AirTime:   &early,
+			},
+		},
+	}
+	handler := &CalendarHandler{repo: repo}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-01-01&end=2026-01-01&timezone=America/New_York", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp calendarResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Events) != 1 {
+		t.Fatalf("days len = %d, want 1", len(resp.Events))
+	}
+	items := resp.Events[0].Items
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(items))
+	}
+	if items[0].ContentID != "ep-early" || items[1].ContentID != "ep-late" {
+		t.Fatalf("order = [%s, %s], want [ep-early, ep-late] (ascending by air_time)",
+			items[0].ContentID, items[1].ContentID)
+	}
+}
+
+func TestHandleGetCalendar_InterleavesZonedAndUnzonedByViewerLocalTime(t *testing.T) {
+	t.Parallel()
+
+	eightPM := "20:00"
+	sixPM := "18:00"
+	londonNine := "21:00"
+	london := "Europe/London"
+	repo := &stubCalendarRepo{
+		events: []catalog.CalendarEvent{
+			{
+				ContentID: "alpha-8pm",
+				Type:      "episode",
+				Title:     "Alpha", // would sort first alphabetically
+				SeriesID:  ptrString("series-alpha"),
+				AirDate:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+				AirTime:   &eightPM, // displays 8:00 PM ET
+			},
+			{
+				ContentID:   "bravo-4pm",
+				Type:        "episode",
+				Title:       "Bravo",
+				SeriesID:    ptrString("series-bravo"),
+				AirDate:     time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+				AirTime:     &londonNine, // 21:00 GMT -> 16:00 ET (4:00 PM)
+				AirTimezone: &london,
+			},
+			{
+				ContentID: "charlie-6pm",
+				Type:      "episode",
+				Title:     "Charlie",
+				SeriesID:  ptrString("series-charlie"),
+				AirDate:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+				AirTime:   &sixPM, // displays 6:00 PM ET
+			},
+		},
+	}
+	handler := &CalendarHandler{repo: repo}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-01-01&end=2026-01-01&timezone=America/New_York", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp calendarResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Events) != 1 {
+		t.Fatalf("days len = %d, want 1", len(resp.Events))
+	}
+	got := make([]string, 0, len(resp.Events[0].Items))
+	for _, item := range resp.Events[0].Items {
+		got = append(got, item.ContentID)
+	}
+	want := []string{"bravo-4pm", "charlie-6pm", "alpha-8pm"}
+	if len(got) != len(want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v (ascending by viewer-local time)", got, want)
+		}
+	}
+}
+
+func TestHandleGetCalendar_DateOnlyEntriesSortAfterTimedEntries(t *testing.T) {
+	t.Parallel()
+
+	noon := "12:00"
+	repo := &stubCalendarRepo{
+		events: []catalog.CalendarEvent{
+			{
+				ContentID: "movie-1",
+				Type:      "movie",
+				Title:     "Aaa Movie", // alphabetically first, but has no air_time
+				AirDate:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+			},
+			{
+				ContentID: "ep-noon",
+				Type:      "episode",
+				Title:     "Zzz Show",
+				SeriesID:  ptrString("series-z"),
+				AirDate:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+				AirTime:   &noon,
+			},
+		},
+	}
+	handler := &CalendarHandler{repo: repo}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-01-01&end=2026-01-01&timezone=America/New_York", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp calendarResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Events) != 1 {
+		t.Fatalf("days len = %d, want 1", len(resp.Events))
+	}
+	items := resp.Events[0].Items
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(items))
+	}
+	if items[0].ContentID != "ep-noon" || items[1].ContentID != "movie-1" {
+		t.Fatalf("order = [%s, %s], want [ep-noon, movie-1] (timed before date-only)",
+			items[0].ContentID, items[1].ContentID)
+	}
+}
+
 func ptrString(value string) *string {
 	return &value
 }

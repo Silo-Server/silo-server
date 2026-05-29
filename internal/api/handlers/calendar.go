@@ -154,23 +154,23 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 		event       catalog.CalendarEvent
 		localDate   string
 		sourceDate  string
-		airAt       *time.Time
+		localTime   time.Time
+		hasTime     bool
 		airAtString *string
 	}
 
+	startDate := start.Format("2006-01-02")
+	endDate := end.Format("2006-01-02")
+
 	prepared := make([]preparedCalendarEvent, 0, len(events))
 	for _, ev := range events {
-		airAt := catalog.CalendarEventAirAt(ev.AirDate, ev.AirTime, ev.AirTimezone)
-		localDateTime := ev.AirDate
-		if airAt != nil {
-			localDateTime = airAt.In(viewerLocation)
-		}
-		localDate := localDateTime.Format("2006-01-02")
-		if localDate < start.Format("2006-01-02") || localDate > end.Format("2006-01-02") {
+		localTime, hasTime := catalog.CalendarEventLocalTime(ev.AirDate, ev.AirTime, ev.AirTimezone, viewerLocation)
+		localDate := localTime.Format("2006-01-02")
+		if localDate < startDate || localDate > endDate {
 			continue
 		}
 		var airAtString *string
-		if airAt != nil {
+		if airAt := catalog.CalendarEventAirAt(ev.AirDate, ev.AirTime, ev.AirTimezone); airAt != nil {
 			formatted := airAt.Format(time.RFC3339)
 			airAtString = &formatted
 		}
@@ -178,7 +178,8 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 			event:       ev,
 			localDate:   localDate,
 			sourceDate:  ev.AirDate.Format("2006-01-02"),
-			airAt:       airAt,
+			localTime:   localTime,
+			hasTime:     hasTime,
 			airAtString: airAtString,
 		})
 	}
@@ -186,16 +187,18 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 		return []calendarDayResponse{}
 	}
 
+	// Order each local day by the wall-clock time the viewer actually sees,
+	// then place date-only entries (no air_time) after timed entries.
 	sort.SliceStable(prepared, func(i, j int) bool {
 		left, right := prepared[i], prepared[j]
 		if left.localDate != right.localDate {
 			return left.localDate < right.localDate
 		}
-		if left.airAt != nil && right.airAt != nil && !left.airAt.Equal(*right.airAt) {
-			return left.airAt.Before(*right.airAt)
+		if left.hasTime != right.hasTime {
+			return left.hasTime
 		}
-		if (left.airAt != nil) != (right.airAt != nil) {
-			return left.airAt != nil
+		if left.hasTime && !left.localTime.Equal(right.localTime) {
+			return left.localTime.Before(right.localTime)
 		}
 		if left.event.Title != right.event.Title {
 			return left.event.Title < right.event.Title

@@ -87,6 +87,34 @@ func CalendarEventAirAt(airDate time.Time, airTime, airTimezone *string) *time.T
 	return &utc
 }
 
+// CalendarEventLocalTime returns the wall-clock moment used to display and
+// order a calendar event for a viewer in loc, plus whether the event has a
+// known time of day.
+//
+// When the event's source timezone is known, the absolute instant is converted
+// into loc. When it is not, the stored wall-clock air_time is interpreted
+// directly in loc — mirroring the client, which renders the raw air_time when
+// air_at is absent. Date-only entries (no air_time, e.g. movie releases) return
+// the start of the source day with hasTime=false so they sort after timed
+// entries within the same local day.
+func CalendarEventLocalTime(airDate time.Time, airTime, airTimezone *string, loc *time.Location) (time.Time, bool) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	if at := CalendarEventAirAt(airDate, airTime, airTimezone); at != nil {
+		return at.In(loc), true
+	}
+	if airTime != nil {
+		if parsed, ok := parseAirTime(*airTime); ok {
+			return time.Date(
+				airDate.Year(), airDate.Month(), airDate.Day(),
+				parsed.Hour(), parsed.Minute(), parsed.Second(), 0, loc,
+			), true
+		}
+	}
+	return time.Date(airDate.Year(), airDate.Month(), airDate.Day(), 0, 0, 0, 0, loc), false
+}
+
 func CalendarLocation(name string) *time.Location {
 	if strings.TrimSpace(name) == "" {
 		return time.UTC
