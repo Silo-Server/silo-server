@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -1677,7 +1678,15 @@ func main() {
 				if appCtx.Err() != nil {
 					return
 				}
-				step(appCtx)
+				func() {
+					defer func() {
+						if p := recover(); p != nil {
+							slog.Error("deferred startup init step panicked; continuing",
+								"panic", p, "stack", string(debug.Stack()))
+						}
+					}()
+					step(appCtx)
+				}()
 			}
 			slog.Info("deferred startup init completed", "steps", len(backgroundInit), "duration", time.Since(start))
 		}()
