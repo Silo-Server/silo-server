@@ -16,6 +16,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import WeekNavigator from "@/components/calendar/WeekNavigator";
 import DayGroup from "@/components/calendar/DayGroup";
 import { addWeeks, formatDayHeading, getWeekDays, getWeekStart } from "@/lib/calendarWeek";
+import { storage } from "@/utils/storage";
 
 type CalendarFilter = "following" | "popular" | "trending" | "everything";
 
@@ -29,13 +30,10 @@ const PRESET_OPTIONS: { value: CalendarFilter; label: string }[] = [
 ];
 
 const DEFAULT_PRESET: CalendarFilter = "following";
-const PRESET_STORAGE_KEY = "calendar:preset";
 
-// Accept the four presets plus legacy server values so old shared links keep working.
+// The selectable presets plus legacy server values so old shared links keep working.
 const KNOWN_FILTERS = new Set<string>([
-  "following",
-  "trending",
-  "everything",
+  ...PRESET_OPTIONS.map((o) => o.value),
   "all",
   "favorites",
   "watchlist",
@@ -46,16 +44,14 @@ const CALENDAR_SKELETON_DAY_ROWS = 7;
 const CALENDAR_SKELETON_ITEMS_PER_ROW = 18;
 
 function readStoredPreset(): CalendarFilter {
-  if (typeof window === "undefined") return DEFAULT_PRESET;
-  const stored = window.localStorage.getItem(PRESET_STORAGE_KEY);
+  const stored = storage.get(storage.KEYS.CALENDAR_PRESET);
   return stored && PRESET_OPTIONS.some((o) => o.value === stored)
     ? (stored as CalendarFilter)
     : DEFAULT_PRESET;
 }
 
 function writeStoredPreset(value: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(PRESET_STORAGE_KEY, value);
+  storage.set(storage.KEYS.CALENDAR_PRESET, value);
 }
 
 function parseCalendarParams(searchParams: URLSearchParams) {

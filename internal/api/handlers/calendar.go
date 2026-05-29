@@ -45,6 +45,13 @@ const (
 	calendarFilterTrending   = "trending"
 )
 
+// The Trending preset reads this canonical external-trending snapshot
+// (see internal/sections trending snapshots).
+const (
+	calendarTrendingSnapshotSource = "tmdb"
+	calendarTrendingSnapshotWindow = "week"
+)
+
 // CalendarHandler handles the calendar endpoint.
 type CalendarHandler struct {
 	repo      calendarRepository
@@ -179,23 +186,18 @@ func (h *CalendarHandler) resolveCalendarRestriction(ctx context.Context, filter
 	switch filter {
 	case calendarFilterAll, calendarFilterEverything:
 		return false, nil, nil
-	case calendarFilterFollowing:
+	case calendarFilterFollowing, calendarFilterFavorites, calendarFilterWatchlist:
 		if h.personal == nil {
 			return true, nil, nil
 		}
-		ids, err = h.personal.ListFollowedItemIDs(ctx, af.UserID, af.ProfileID)
-		return true, ids, err
-	case calendarFilterFavorites:
-		if h.personal == nil {
-			return true, nil, nil
+		switch filter {
+		case calendarFilterFavorites:
+			ids, err = h.personal.ListFavoriteItemIDs(ctx, af.UserID, af.ProfileID)
+		case calendarFilterWatchlist:
+			ids, err = h.personal.ListWatchlistItemIDs(ctx, af.UserID, af.ProfileID)
+		default: // following
+			ids, err = h.personal.ListFollowedItemIDs(ctx, af.UserID, af.ProfileID)
 		}
-		ids, err = h.personal.ListFavoriteItemIDs(ctx, af.UserID, af.ProfileID)
-		return true, ids, err
-	case calendarFilterWatchlist:
-		if h.personal == nil {
-			return true, nil, nil
-		}
-		ids, err = h.personal.ListWatchlistItemIDs(ctx, af.UserID, af.ProfileID)
 		return true, ids, err
 	case calendarFilterPopular:
 		if h.popular == nil {
@@ -214,7 +216,7 @@ func (h *CalendarHandler) resolveCalendarRestriction(ctx context.Context, filter
 		if h.trending == nil {
 			return true, nil, nil
 		}
-		snap, ok, err := h.trending.Get(ctx, "tmdb", "week")
+		snap, ok, err := h.trending.Get(ctx, calendarTrendingSnapshotSource, calendarTrendingSnapshotWindow)
 		if err != nil {
 			return true, nil, err
 		}
