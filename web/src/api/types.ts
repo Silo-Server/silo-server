@@ -596,6 +596,16 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
 }
 
+export interface BrowseItemSortMetrics {
+  release_date?: string;
+  runtime_minutes?: number;
+  resolution?: string;
+  bitrate_kbps?: number;
+  progress_ratio?: number;
+  viewed_at?: string;
+  play_count?: number;
+}
+
 export interface BrowseItem {
   content_id: string;
   type: "movie" | "series" | "season" | "episode";
@@ -625,6 +635,7 @@ export interface BrowseItem {
   release_date?: string | null;
   last_air_date?: string | null;
   overlay_summary?: OverlaySummary | null;
+  sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
 }
 

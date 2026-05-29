@@ -34,6 +34,10 @@ type EpisodeFileProvider interface {
 	ListByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error)
 }
 
+type batchEpisodeFileProvider interface {
+	ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
+}
+
 type MetadataRefreshRequester interface {
 	RequestStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error
 }
@@ -209,7 +213,18 @@ type itemListResponse struct {
 	LastAirDate       *string                `json:"last_air_date,omitempty"`
 	AddedAt           *time.Time             `json:"added_at,omitempty"`
 	OverlaySummary    *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	SortMetrics       *sortMetricsResponse   `json:"sort_metrics,omitempty"`
 	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
+}
+
+type sortMetricsResponse struct {
+	ReleaseDate    *string  `json:"release_date,omitempty"`
+	RuntimeMinutes *int     `json:"runtime_minutes,omitempty"`
+	Resolution     string   `json:"resolution,omitempty"`
+	BitrateKbps    *int     `json:"bitrate_kbps,omitempty"`
+	ProgressRatio  *float64 `json:"progress_ratio,omitempty"`
+	ViewedAt       string   `json:"viewed_at,omitempty"`
+	PlayCount      *int     `json:"play_count,omitempty"`
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -817,7 +832,71 @@ func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models
 		return summaries
 	}
 
+	groupedFiles := h.listBrowseItemFiles(ctx, items, filter)
+	for contentID, files := range groupedFiles {
+		if summary := overlays.BuildSummary(files); summary != nil {
+			summaries[contentID] = summary
+		}
+	}
+	return summaries
+}
+
+func (h *ItemsHandler) listSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	sortField string,
+	filter catalog.AccessFilter,
+	overlaySummaries map[string]*models.OverlaySummary,
+) map[string]*sortMetricsResponse {
+	metrics := make(map[string]*sortMetricsResponse, len(items))
+	switch sortField {
+	case "release_date":
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			releaseDate := firstNonBlankPtr(item.ReleaseDate, item.FirstAirDate)
+			if releaseDate != nil {
+				metrics[item.ContentID] = &sortMetricsResponse{ReleaseDate: releaseDate}
+			}
+		}
+	case "runtime":
+		for _, item := range items {
+			if item == nil || item.Runtime <= 0 {
+				continue
+			}
+			runtimeMinutes := item.Runtime
+			metrics[item.ContentID] = &sortMetricsResponse{RuntimeMinutes: &runtimeMinutes}
+		}
+	case "resolution":
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			if summary := overlaySummaries[item.ContentID]; summary != nil && strings.TrimSpace(summary.Resolution) != "" {
+				metrics[item.ContentID] = &sortMetricsResponse{Resolution: summary.Resolution}
+			}
+		}
+	case "bitrate":
+		groupedFiles := h.listBrowseItemFiles(ctx, items, filter)
+		for contentID, files := range groupedFiles {
+			if bitrate := maxFileBitrate(files); bitrate > 0 {
+				value := bitrate
+				metrics[contentID] = &sortMetricsResponse{BitrateKbps: &value}
+			}
+		}
+	}
+	return metrics
+}
+
+func (h *ItemsHandler) listBrowseItemFiles(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string][]*models.MediaFile {
+	grouped := make(map[string][]*models.MediaFile, len(items))
+	if h.fileRepo == nil || len(items) == 0 {
+		return grouped
+	}
+
 	contentIDs := make([]string, 0, len(items))
+	episodeIDs := make([]string, 0)
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if item == nil || item.ContentID == "" {
@@ -827,23 +906,55 @@ func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models
 			continue
 		}
 		seen[item.ContentID] = struct{}{}
-		contentIDs = append(contentIDs, item.ContentID)
-	}
-	if len(contentIDs) == 0 {
-		return summaries
-	}
-
-	groupedFiles, err := h.fileRepo.ListByContentIDs(ctx, contentIDs)
-	if err != nil {
-		return summaries
-	}
-	for contentID, files := range groupedFiles {
-		files = catalog.FilterMediaFilesByAccess(files, filter)
-		if summary := overlays.BuildSummary(files); summary != nil {
-			summaries[contentID] = summary
+		if item.Type == "episode" {
+			episodeIDs = append(episodeIDs, item.ContentID)
+		} else {
+			contentIDs = append(contentIDs, item.ContentID)
 		}
 	}
-	return summaries
+
+	if len(contentIDs) > 0 {
+		contentFiles, err := h.fileRepo.ListByContentIDs(ctx, contentIDs)
+		if err == nil {
+			for contentID, files := range contentFiles {
+				grouped[contentID] = catalog.FilterMediaFilesByAccess(files, filter)
+			}
+		}
+	}
+
+	if len(episodeIDs) > 0 {
+		if batchProvider, ok := h.fileRepo.(batchEpisodeFileProvider); ok {
+			episodeFiles, err := batchProvider.ListByEpisodeIDs(ctx, episodeIDs)
+			if err == nil {
+				for episodeID, files := range episodeFiles {
+					grouped[episodeID] = catalog.FilterMediaFilesByAccess(files, filter)
+				}
+			}
+		}
+	}
+
+	return grouped
+}
+
+func firstNonBlankPtr(values ...*string) *string {
+	for _, value := range values {
+		if value == nil || strings.TrimSpace(*value) == "" {
+			continue
+		}
+		copyValue := *value
+		return &copyValue
+	}
+	return nil
+}
+
+func maxFileBitrate(files []*models.MediaFile) int {
+	maxBitrate := 0
+	for _, file := range files {
+		if file != nil && file.Bitrate > maxBitrate {
+			maxBitrate = file.Bitrate
+		}
+	}
+	return maxBitrate
 }
 
 // toSeasonResponse converts a Season model to an API response.
