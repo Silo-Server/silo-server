@@ -19,9 +19,11 @@ import { addWeeks, formatDayHeading, getWeekDays, getWeekStart } from "@/lib/cal
 
 type CalendarFilter = "following" | "popular" | "trending" | "everything";
 
+// "popular" (server-wide most-watched) is hidden for now — it's sparse until the
+// server has enough watch history. Re-add the entry here and in KNOWN_FILTERS to
+// surface it; the backend filter remains supported.
 const PRESET_OPTIONS: { value: CalendarFilter; label: string }[] = [
   { value: "following", label: "Following" },
-  { value: "popular", label: "Popular" },
   { value: "trending", label: "Trending" },
   { value: "everything", label: "All" },
 ];
@@ -32,7 +34,6 @@ const PRESET_STORAGE_KEY = "calendar:preset";
 // Accept the four presets plus legacy server values so old shared links keep working.
 const KNOWN_FILTERS = new Set<string>([
   "following",
-  "popular",
   "trending",
   "everything",
   "all",
@@ -276,14 +277,6 @@ function CalendarEmpty({
       </p>
       {!isEverything && (
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button
-            variant="link"
-            size="sm"
-            className="text-primary text-sm"
-            onClick={() => onSelectPreset("popular")}
-          >
-            Popular
-          </Button>
           <Button
             variant="link"
             size="sm"
