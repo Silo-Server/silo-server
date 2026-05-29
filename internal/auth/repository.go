@@ -142,8 +142,8 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 
 	cols := []string{"email", "username", "password_hash", "local_password_login_enabled", "role", "permissions", "library_ids", "max_playback_quality"}
 	args := []any{
-		input.Email,
-		input.Username,
+		NormalizeEmail(input.Email),
+		NormalizeUsername(input.Username),
 		string(hash),
 		localPasswordLoginEnabled,
 		input.Role,
@@ -205,16 +205,16 @@ func (r *UserRepository) GetByID(ctx context.Context, id int) (*models.User, err
 	return scanUser(r.pool.QueryRow(ctx, query, id))
 }
 
-// GetByUsername retrieves a user by their username.
+// GetByUsername retrieves a user by their username (case-insensitive).
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*models.User, error) {
 	query := `SELECT ` + allColumns + ` FROM users WHERE username = $1`
-	return scanUser(r.pool.QueryRow(ctx, query, username))
+	return scanUser(r.pool.QueryRow(ctx, query, NormalizeUsername(username)))
 }
 
-// GetByEmail retrieves a user by their email address.
+// GetByEmail retrieves a user by their email address (case-insensitive).
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*models.User, error) {
 	query := `SELECT ` + allColumns + ` FROM users WHERE email = $1`
-	return scanUser(r.pool.QueryRow(ctx, query, email))
+	return scanUser(r.pool.QueryRow(ctx, query, NormalizeEmail(email)))
 }
 
 // Update modifies a user's fields. Only non-nil fields in the input are updated.
@@ -226,12 +226,12 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 
 	if input.Email != nil {
 		setClauses = append(setClauses, fmt.Sprintf("email = $%d", argIndex))
-		args = append(args, *input.Email)
+		args = append(args, NormalizeEmail(*input.Email))
 		argIndex++
 	}
 	if input.Username != nil {
 		setClauses = append(setClauses, fmt.Sprintf("username = $%d", argIndex))
-		args = append(args, *input.Username)
+		args = append(args, NormalizeUsername(*input.Username))
 		argIndex++
 	}
 	if input.Password != nil {
