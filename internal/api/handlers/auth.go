@@ -214,6 +214,9 @@ func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Username = auth.NormalizeUsername(req.Username)
+	req.Email = auth.NormalizeEmail(req.Email)
+
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, and password are required")
 		return
@@ -446,6 +449,9 @@ func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+
+	req.Username = auth.NormalizeUsername(req.Username)
+	req.Email = auth.NormalizeEmail(req.Email)
 
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.InviteCode == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and invite code are required")

@@ -373,6 +373,9 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	req.Username = auth.NormalizeUsername(req.Username)
+	req.Email = auth.NormalizeEmail(req.Email)
+
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
 		return
