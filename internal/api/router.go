@@ -141,6 +141,11 @@ type Dependencies struct {
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
 
+	// TrendingRefresher refreshes the persisted trending_discover snapshots.
+	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
+	// router.go once the Trakt adapter exists (mirrors UserCollectionSync).
+	TrendingRefresher *sections.TrendingRefresher
+
 	// MDBListClient is used by user-facing list discovery endpoints
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
@@ -877,6 +882,18 @@ func NewRouter(deps Dependencies) chi.Router {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
 			}
 		}
+
+		// Propagate the now-wired Trakt fetcher to the trending refresher (built
+		// in main.go with TMDB only, before the Trakt adapter existed).
+		if deps.TrendingRefresher != nil && deps.TrendingRefresher.TraktTrending == nil {
+			deps.TrendingRefresher.TraktTrending = libraryCollectionService.TraktCollections
+		}
+
+		// Wire the trending snapshot reader into the section fetcher. The
+		// trending_discover home section reads its list from the persisted
+		// snapshot table; the upstream fetch happens out-of-band in the refresh
+		// task, so the read path never calls the provider.
+		sectionFetcher.TrendingSnapshots = sections.NewTrendingSnapshotRepository(deps.DB)
 
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,

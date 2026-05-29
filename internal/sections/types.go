@@ -40,6 +40,8 @@ const (
 	SectionNewToLibrary        SectionType = "new_to_library"
 	SectionMostWatched         SectionType = "most_watched"
 
+	SectionTrendingDiscover SectionType = "trending_discover"
+
 	SectionAdminCuratedList SectionType = "admin_curated_list"
 )
 
@@ -71,6 +73,7 @@ var ValidSectionTypes = map[SectionType]bool{
 	SectionProfileActivityFeed: true,
 	SectionNewToLibrary:        true,
 	SectionMostWatched:         true,
+	SectionTrendingDiscover:    true,
 	SectionAdminCuratedList:    true,
 }
 

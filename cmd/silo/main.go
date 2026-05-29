@@ -1234,6 +1234,7 @@ func main() {
 	// Construct collection service for both the router and the collection sync scheduler.
 	var collectionSyncScheduler *catalog.CollectionSyncScheduler
 	var userCollectionScheduler *usercollections.Scheduler
+	var trendingRefresher *sections.TrendingRefresher
 	if needsWorkers && deps.DB != nil {
 		collectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
 		collItemRepo := catalog.NewItemRepository(deps.DB)
@@ -1242,6 +1243,19 @@ func main() {
 		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(cfg.TMDBAPIKey)
 		deps.CollectionService = collectionService
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
+
+		// The trending refresher reuses the section repo (to find used source/
+		// window combos), a snapshot repo, an item repo (external-ID matching),
+		// and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
+		// propagated onto deps.TrendingRefresher later in router.go.
+		trendingRefresher = sections.NewTrendingRefresher(
+			sectionRepo,
+			sections.NewTrendingSnapshotRepository(pool),
+			catalog.NewItemRepository(deps.DB),
+			collectionService.TMDBCollections,
+			collectionService.TraktCollections,
+		)
+		deps.TrendingRefresher = trendingRefresher
 
 		if deps.UserStoreProvider != nil {
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, nil, slog.Default())
@@ -1286,6 +1300,9 @@ func main() {
 		}
 		if collectionSyncScheduler != nil {
 			taskMgr.Register(tasks.NewSyncCollectionsTask(collectionSyncScheduler))
+		}
+		if trendingRefresher != nil {
+			taskMgr.Register(tasks.NewRefreshTrendingDiscoverTask(trendingRefresher))
 		}
 		if userCollectionScheduler != nil {
 			taskMgr.Register(tasks.NewSyncUserCollectionsTask(userCollectionScheduler))
