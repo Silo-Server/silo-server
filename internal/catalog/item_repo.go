@@ -1240,6 +1240,15 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 			argIdx++
 		}
 	}
+	// addNullableString behaves like addString but stores an empty string as SQL
+	// NULL (via NULLIF), so clearing a nullable column persists as NULL.
+	addNullableString := func(col string, val *string) {
+		if val != nil {
+			setClauses = append(setClauses, fmt.Sprintf("%s = NULLIF($%d, '')", col, argIdx))
+			args = append(args, *val)
+			argIdx++
+		}
+	}
 	addInt := func(col string, val *int) {
 		if val != nil {
 			setClauses = append(setClauses, fmt.Sprintf("%s = $%d", col, argIdx))
@@ -1289,7 +1298,7 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	addString("first_air_date", upd.FirstAirDate)
 	addString("last_air_date", upd.LastAirDate)
 	addString("air_time", upd.AirTime)
-	addString("air_timezone", upd.AirTimezone)
+	addNullableString("air_timezone", upd.AirTimezone)
 	addString("status", upd.Status)
 	addString("show_status", upd.ShowStatus)
 	addString("imdb_id", upd.ImdbID)

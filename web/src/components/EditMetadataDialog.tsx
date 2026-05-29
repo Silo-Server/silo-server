@@ -185,7 +185,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
       data.last_air_date = form.last_air_date || null;
     if (form.air_time !== originalForm.air_time) data.air_time = form.air_time || null;
     if (form.air_timezone !== originalForm.air_timezone)
-      data.air_timezone = form.air_timezone || null;
+      // Send "" (not null) when cleared: the server treats null as "skip", so
+      // clearing a previously-set timezone would not persist. "" is accepted by
+      // validation and normalized to NULL server-side.
+      data.air_timezone = form.air_timezone;
     if (form.air_date !== originalForm.air_date) data.air_date = form.air_date || null;
     if (form.status !== originalForm.status) data.status = form.status;
     if (form.rating_imdb !== originalForm.rating_imdb) data.rating_imdb = form.rating_imdb;
