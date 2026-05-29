@@ -132,6 +132,43 @@ describe("useCatalogWindow", () => {
     expect(markup).toContain('data-total="360"');
   });
 
+  it("does not count empty buffered pages as loaded items when total is omitted", () => {
+    const state = createCatalogSearchState("query", { library_id: 7 });
+    const limit = 60;
+
+    function Harness() {
+      const result = useCatalogWindow(state, { limit, includeTotal: false });
+      return <div data-total={result.data.totalItems} />;
+    }
+
+    mocks.useQuery.mockReturnValue({
+      data: {
+        ...makePage(0, 3),
+        total: 0,
+        total_exact: false,
+        has_more: false,
+        snapshot: "2026-01-01T00:00:00Z",
+      },
+      isLoading: false,
+    });
+    mocks.useQueries.mockReturnValue([
+      {
+        data: {
+          ...makePage(60, 0),
+          total: 0,
+          total_exact: false,
+          has_more: false,
+          items: [],
+        },
+        isLoading: false,
+      },
+    ]);
+
+    const markup = renderToStaticMarkup(<Harness />);
+
+    expect(markup).toContain('data-total="3"');
+  });
+
   it("requests follow-on pages for non-snapshot sources after page 0 loads", () => {
     const state = createCatalogSearchState("history");
     const limit = 60;
