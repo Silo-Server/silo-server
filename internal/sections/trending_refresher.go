@@ -3,6 +3,7 @@ package sections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -189,19 +190,18 @@ func (r *TrendingRefresher) fetchEntries(ctx context.Context, source, window str
 		if r.TraktTrending == nil {
 			return nil, nil
 		}
+		// Trakt has no mixed endpoint; fetch movies + shows separately. Treat ANY
+		// failure as fatal so a partial result never overwrites the last-good
+		// snapshot with one media type missing.
 		movies, movieErr := r.TraktTrending.GetCollectionPreset(ctx, "trending", "movie", fetchLimit, "")
 		shows, showErr := r.TraktTrending.GetCollectionPreset(ctx, "trending", "tv", fetchLimit, "")
-		if movieErr != nil && showErr != nil {
-			return nil, fmt.Errorf("trakt trending: %w / %w", movieErr, showErr)
+		if movieErr != nil || showErr != nil {
+			return nil, fmt.Errorf("trakt trending: %w", errors.Join(movieErr, showErr))
 		}
-		out := make([]trendingDiscoverEntry, 0, len(movies)+len(shows))
-		for _, e := range movies {
-			out = append(out, newTrendingEntry(e.TMDBID, e.TVDBID, e.IMDbID, e.MediaType))
-		}
-		for _, e := range shows {
-			out = append(out, newTrendingEntry(e.TMDBID, e.TVDBID, e.IMDbID, e.MediaType))
-		}
-		return out, nil
+		// Interleave by rank so the mixed row actually shows both movies and
+		// series; plain concatenation would bury all series past the display
+		// limit whenever enough movies match the library.
+		return interleaveTraktEntries(movies, shows), nil
 	}
 
 	if r.TMDBTrending == nil {
@@ -218,6 +218,24 @@ func (r *TrendingRefresher) fetchEntries(ctx context.Context, source, window str
 	return out, nil
 }
 
+// interleaveTraktEntries alternates rank-ordered movies and shows so the mixed
+// trending row surfaces both media types. Each input list is already in trending
+// order; alternating preserves that order within each type while mixing them.
+func interleaveTraktEntries(movies, shows []catalog.TraktCollectionEntry) []trendingDiscoverEntry {
+	out := make([]trendingDiscoverEntry, 0, len(movies)+len(shows))
+	for i := 0; i < len(movies) || i < len(shows); i++ {
+		if i < len(movies) {
+			m := movies[i]
+			out = append(out, newTrendingEntry(m.TMDBID, m.TVDBID, m.IMDbID, m.MediaType))
+		}
+		if i < len(shows) {
+			s := shows[i]
+			out = append(out, newTrendingEntry(s.TMDBID, s.TVDBID, s.IMDbID, s.MediaType))
+		}
+	}
+	return out
+}
+
 // resolveIDs matches trending entries to library content IDs via two batched
 // external-ID lookups (movies, series), preserving trending order.
 func (r *TrendingRefresher) resolveIDs(ctx context.Context, entries []trendingDiscoverEntry) ([]string, error) {
@@ -226,9 +244,16 @@ func (r *TrendingRefresher) resolveIDs(ctx context.Context, entries []trendingDi
 	}
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
 	for _, e := range entries {
-		batch := &movieBatch
-		if e.mediaType == "tv" {
+		var batch *catalog.ExternalIDBatch
+		switch e.mediaType {
+		case "movie":
+			batch = &movieBatch
+		case "tv":
 			batch = &seriesBatch
+		default:
+			// Skip non-title entries (TMDB trending/all can return "person") so
+			// they never match an unrelated library title by shared external ID.
+			continue
 		}
 		if e.tmdbID != "" {
 			batch.TMDBIDs = append(batch.TMDBIDs, e.tmdbID)

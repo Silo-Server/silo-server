@@ -2,6 +2,7 @@ package sections
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -48,5 +49,17 @@ func TestLoadTrendingDiscoverContentIDsNotFound(t *testing.T) {
 	}
 	if ids != nil {
 		t.Fatalf("ids = %v; want nil when no snapshot exists", ids)
+	}
+}
+
+func TestLoadTrendingDiscoverContentIDsPropagatesError(t *testing.T) {
+	boom := errors.New("boom")
+	f := &Fetcher{TrendingSnapshots: fakeSnapshotGetter{err: boom}}
+	ids, err := f.loadTrendingDiscoverContentIDs(context.Background(), "tmdb", "week")
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v; want boom", err)
+	}
+	if ids != nil {
+		t.Fatalf("ids = %v; want nil on error", ids)
 	}
 }

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -46,6 +47,10 @@ func (t *RefreshTrendingDiscoverTask) DefaultTriggers() []taskmanager.TriggerCon
 
 func (t *RefreshTrendingDiscoverTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Refreshing trending discover")
+
+	if t.refresher == nil {
+		return errors.New("trending discover refresh: refresher not configured")
+	}
 
 	resultData, err := t.refresher.RunOnce(ctx)
 	if err != nil {

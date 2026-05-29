@@ -2432,10 +2432,17 @@ func orderedTrendingContentIDs(entries []trendingDiscoverEntry, movieLookup, ser
 	seen := make(map[string]struct{}, len(entries))
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		lookup := movieLookup
+		// Only movies and series are resolvable; skip anything else (TMDB
+		// trending/all also returns media_type "person").
+		var lookup *catalog.ExternalIDLookup
 		isSeries := e.mediaType == "tv"
-		if isSeries {
+		switch e.mediaType {
+		case "movie":
+			lookup = movieLookup
+		case "tv":
 			lookup = seriesLookup
+		default:
+			continue
 		}
 		if lookup == nil {
 			continue
