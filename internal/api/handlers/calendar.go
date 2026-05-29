@@ -2,27 +2,69 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 type calendarRepository interface {
 	ListEvents(ctx context.Context, f catalog.CalendarFilter) ([]catalog.CalendarEvent, error)
 }
 
+// calendarPersonalRepo resolves per-profile id-sets and watched status.
+type calendarPersonalRepo interface {
+	ListFollowedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
+	ListFavoriteItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
+	ListWatchlistItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
+	ListWatchedItemIDs(ctx context.Context, userID int, profileID string, contentIDs []string) (map[string]bool, error)
+}
+
+// calendarPopularSource reads the cached server-wide popular id-set.
+type calendarPopularSource interface {
+	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]recommendations.ScoredItem, error)
+}
+
+// calendarTrendingSource reads the external-trending snapshot.
+type calendarTrendingSource interface {
+	Get(ctx context.Context, source, window string) (sections.TrendingSnapshot, bool, error)
+}
+
+const (
+	calendarFilterAll        = "all"
+	calendarFilterEverything = "everything"
+	calendarFilterFollowing  = "following"
+	calendarFilterFavorites  = "favorites"
+	calendarFilterWatchlist  = "watchlist"
+	calendarFilterPopular    = "popular"
+	calendarFilterTrending   = "trending"
+)
+
+// The Trending preset reads this canonical external-trending snapshot
+// (see internal/sections trending snapshots).
+const (
+	calendarTrendingSnapshotSource = "tmdb"
+	calendarTrendingSnapshotWindow = "week"
+)
+
 // CalendarHandler handles the calendar endpoint.
 type CalendarHandler struct {
 	repo      calendarRepository
 	detailSvc *catalog.DetailService
+	personal  calendarPersonalRepo   // nil-tolerant (per-profile presets degrade to empty)
+	popular   calendarPopularSource  // nil when recommendations disabled
+	trending  calendarTrendingSource // nil when trending disabled
 }
 
-// NewCalendarHandler creates a new CalendarHandler.
-func NewCalendarHandler(repo *catalog.CalendarRepository, detailSvc *catalog.DetailService) *CalendarHandler {
-	return &CalendarHandler{repo: repo, detailSvc: detailSvc}
+// NewCalendarHandler creates a new CalendarHandler. The repo doubles as the
+// per-profile resolver since *catalog.CalendarRepository implements both.
+func NewCalendarHandler(repo *catalog.CalendarRepository, detailSvc *catalog.DetailService, popular calendarPopularSource, trending calendarTrendingSource) *CalendarHandler {
+	return &CalendarHandler{repo: repo, detailSvc: detailSvc, personal: repo, popular: popular, trending: trending}
 }
 
 // --- Response types ---
@@ -42,6 +84,7 @@ type calendarEventResponse struct {
 	LocalAirDate    string   `json:"local_air_date"`
 	PosterURL       string   `json:"poster_url,omitempty"`
 	PosterThumbhash string   `json:"poster_thumbhash,omitempty"`
+	Watched         bool     `json:"watched"`
 	Badges          []string `json:"badges"`
 }
 
@@ -79,33 +122,39 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 
 	filter := q.Get("filter")
 	if filter == "" {
-		filter = "all"
+		filter = calendarFilterAll
 	}
 	switch filter {
-	case "all", "favorites", "watchlist":
+	case calendarFilterAll, calendarFilterEverything, calendarFilterFollowing,
+		calendarFilterFavorites, calendarFilterWatchlist, calendarFilterPopular, calendarFilterTrending:
 	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "filter must be all, favorites, or watchlist")
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid filter")
 		return
 	}
 
 	af := requestAccessFilter(r)
 
-	if (filter == "favorites" || filter == "watchlist") && af.ProfileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "profile required for favorites/watchlist filter")
+	viewerLocation := catalog.CalendarLocation(q.Get("timezone"))
+
+	restrict, ids, err := h.resolveCalendarRestriction(r.Context(), filter, af)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to resolve calendar filter")
 		return
 	}
-
-	viewerLocation := catalog.CalendarLocation(q.Get("timezone"))
+	// A restricting preset with no ids can never match — skip the windowed query.
+	if restrict && len(ids) == 0 {
+		writeJSON(w, http.StatusOK, calendarResponse{Events: []calendarDayResponse{}})
+		return
+	}
 
 	cf := catalog.CalendarFilter{
 		Start:              start.AddDate(0, 0, -2),
 		End:                end.AddDate(0, 0, 2),
-		Filter:             filter,
 		AllowedLibraryIDs:  af.AllowedLibraryIDs,
 		DisabledLibraryIDs: af.DisabledLibraryIDs,
 		MaxContentRating:   af.MaxContentRating,
-		UserID:             af.UserID,
-		ProfileID:          af.ProfileID,
+		RestrictByIDs:      restrict,
+		RestrictToIDs:      ids,
 	}
 
 	if v := q.Get("library_id"); v != "" {
@@ -123,12 +172,82 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	watched := h.resolveWatched(r.Context(), af, events)
+
 	// Group events by date and build response.
-	days := groupEventsByDate(events, r, h.detailSvc, start, end, viewerLocation)
+	days := groupEventsByDate(events, r, h.detailSvc, start, end, viewerLocation, watched)
 	writeJSON(w, http.StatusOK, calendarResponse{Events: days})
 }
 
-func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSvc *catalog.DetailService, start, end time.Time, viewerLocation *time.Location) []calendarDayResponse {
+// resolveCalendarRestriction maps a preset to an id-set restriction. restrict=false
+// means no restriction (everything/all). A nil/missing source degrades that preset
+// to an empty id-set (which the caller renders as an empty calendar).
+func (h *CalendarHandler) resolveCalendarRestriction(ctx context.Context, filter string, af catalog.AccessFilter) (restrict bool, ids []string, err error) {
+	switch filter {
+	case calendarFilterAll, calendarFilterEverything:
+		return false, nil, nil
+	case calendarFilterFollowing, calendarFilterFavorites, calendarFilterWatchlist:
+		if h.personal == nil {
+			return true, nil, nil
+		}
+		switch filter {
+		case calendarFilterFavorites:
+			ids, err = h.personal.ListFavoriteItemIDs(ctx, af.UserID, af.ProfileID)
+		case calendarFilterWatchlist:
+			ids, err = h.personal.ListWatchlistItemIDs(ctx, af.UserID, af.ProfileID)
+		default: // following
+			ids, err = h.personal.ListFollowedItemIDs(ctx, af.UserID, af.ProfileID)
+		}
+		return true, ids, err
+	case calendarFilterPopular:
+		if h.popular == nil {
+			return true, nil, nil
+		}
+		items, err := h.popular.GetRecommendationCache(ctx, recommendations.GlobalCacheUserID, recommendations.GlobalCacheProfileID, recommendations.RecTypePopular, "")
+		if err != nil {
+			return true, nil, err
+		}
+		ids = make([]string, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.MediaItemID)
+		}
+		return true, ids, nil
+	case calendarFilterTrending:
+		if h.trending == nil {
+			return true, nil, nil
+		}
+		snap, ok, err := h.trending.Get(ctx, calendarTrendingSnapshotSource, calendarTrendingSnapshotWindow)
+		if err != nil {
+			return true, nil, err
+		}
+		if !ok {
+			return true, nil, nil
+		}
+		return true, snap.ContentIDs, nil
+	default:
+		return false, nil, nil
+	}
+}
+
+// resolveWatched decorates events with the profile's completed status. Best-effort:
+// a lookup failure logs and returns no watched marks rather than failing the page.
+func (h *CalendarHandler) resolveWatched(ctx context.Context, af catalog.AccessFilter, events []catalog.CalendarEvent) map[string]bool {
+	if h.personal == nil || len(events) == 0 {
+		return map[string]bool{}
+	}
+	ids := make([]string, 0, len(events))
+	for _, ev := range events {
+		ids = append(ids, ev.ContentID)
+	}
+	watched, err := h.personal.ListWatchedItemIDs(ctx, af.UserID, af.ProfileID, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "calendar watched overlay failed", "error", err)
+		return map[string]bool{}
+	}
+	return watched
+}
+
+func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSvc *catalog.DetailService, start, end time.Time, viewerLocation *time.Location, watched map[string]bool) []calendarDayResponse {
 	if len(events) == 0 {
 		return []calendarDayResponse{}
 	}
@@ -241,6 +360,7 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 			LocalAirDate:    item.localDate,
 			PosterURL:       posterURLs[ev.PosterPath],
 			PosterThumbhash: ev.PosterThumbhash,
+			Watched:         watched[ev.ContentID],
 			Badges:          badges,
 		})
 	}

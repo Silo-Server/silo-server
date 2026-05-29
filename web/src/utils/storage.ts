@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   UI_HIGH_CONTRAST: "silo-ui-high-contrast",
   UI_CUSTOM_THEME_VARS: "silo-custom-theme-vars",
   UI_CUSTOM_CSS: "silo-custom-css",
+  CALENDAR_PRESET: "calendar:preset",
 } as const;
 
 type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
