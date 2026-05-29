@@ -135,6 +135,30 @@ func (r *Repository) ListByScopeAll(ctx context.Context, scope string, libraryID
 	return scanSections(rows)
 }
 
+// ListTrendingDiscoverConfigs returns the config JSON of every enabled
+// trending_discover section across all scopes and libraries. The trending
+// refresh task uses this to discover which (source, window) combinations need a
+// snapshot, so dormant configs (no enabled sections) trigger zero upstream work.
+func (r *Repository) ListTrendingDiscoverConfigs(ctx context.Context) ([]json.RawMessage, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT config FROM page_sections
+		WHERE section_type = $1 AND enabled = true`, string(SectionTrendingDiscover))
+	if err != nil {
+		return nil, fmt.Errorf("listing trending_discover configs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []json.RawMessage
+	for rows.Next() {
+		var cfg json.RawMessage
+		if err := rows.Scan(&cfg); err != nil {
+			return nil, fmt.Errorf("scanning trending_discover config: %w", err)
+		}
+		out = append(out, cfg)
+	}
+	return out, rows.Err()
+}
+
 // Update modifies an existing section.
 func (r *Repository) Update(ctx context.Context, s *PageSection) error {
 	query := `UPDATE page_sections SET
