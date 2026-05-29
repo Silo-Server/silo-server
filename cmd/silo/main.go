@@ -1023,11 +1023,6 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider)
-		backgroundInit = append(backgroundInit, func(ctx context.Context) {
-			if err := watchProviderService.SweepOpenScrobbles(ctx); err != nil {
-				slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
-			}
-		})
 	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
@@ -1681,6 +1676,19 @@ func main() {
 			}
 			slog.Info("deferred startup init completed", "steps", len(backgroundInit), "duration", time.Since(start))
 		}()
+	}
+
+	// Stop scrobble sessions left open by the previous process BEFORE the
+	// listener accepts playback requests, so a resume immediately after a
+	// restart doesn't create overlapping/stale scrobbles on remote providers.
+	// Bounded by a timeout so an unreachable provider can't hang startup (which
+	// is why the rest of non-critical init stays deferred below).
+	if watchProviderService != nil {
+		sweepCtx, cancelSweep := context.WithTimeout(appCtx, 30*time.Second)
+		if err := watchProviderService.SweepOpenScrobbles(sweepCtx); err != nil {
+			slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
+		}
+		cancelSweep()
 	}
 
 	errCh := make(chan error, 2)
