@@ -25,22 +25,30 @@ type TrendingSnapshot struct {
 	LastError     string
 }
 
+// Canonical trending source and window values used as snapshot keys.
+const (
+	sourceTMDB  = "tmdb"
+	sourceTrakt = "trakt"
+	windowDay   = "day"
+	windowWeek  = "week"
+)
+
 // canonicalTrendingKey normalizes a section's configured source/window into the
 // snapshot key space. Source is "trakt" only when explicitly set; everything
 // else collapses to "tmdb". Trakt ignores the time window, so it is pinned to
 // "week" to avoid duplicate identical rows. For TMDB, "day" is honored only
 // when explicitly set; anything else is "week".
 func canonicalTrendingKey(source, window string) (string, string) {
-	if source != "trakt" {
-		source = "tmdb"
+	if source != sourceTrakt {
+		source = sourceTMDB
 	}
-	if source == "trakt" {
-		return "trakt", "week"
+	if source == sourceTrakt {
+		return sourceTrakt, windowWeek
 	}
-	if window != "day" {
-		window = "week"
+	if window != windowDay {
+		window = windowWeek
 	}
-	return "tmdb", window
+	return sourceTMDB, window
 }
 
 // TrendingSnapshotRepository persists and reads trending_discover_snapshots.

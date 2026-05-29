@@ -185,14 +185,14 @@ func (r *TrendingRefresher) refreshCombo(ctx context.Context, source, window str
 // fetchEntries pulls the raw trending list from the configured provider. A
 // nil/unconfigured provider yields an empty list (no error).
 func (r *TrendingRefresher) fetchEntries(ctx context.Context, source, window string, fetchLimit int) ([]trendingDiscoverEntry, error) {
-	if source == "trakt" {
+	if source == sourceTrakt {
 		if r.TraktTrending == nil {
 			return nil, nil
 		}
 		movies, movieErr := r.TraktTrending.GetCollectionPreset(ctx, "trending", "movie", fetchLimit, "")
 		shows, showErr := r.TraktTrending.GetCollectionPreset(ctx, "trending", "tv", fetchLimit, "")
 		if movieErr != nil && showErr != nil {
-			return nil, fmt.Errorf("trakt trending: %v / %v", movieErr, showErr)
+			return nil, fmt.Errorf("trakt trending: %w / %w", movieErr, showErr)
 		}
 		out := make([]trendingDiscoverEntry, 0, len(movies)+len(shows))
 		for _, e := range movies {
