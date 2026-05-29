@@ -2353,6 +2353,19 @@ type trendingDiscoverEntry struct {
 	mediaType string // "movie" | "tv"
 }
 
+// newTrendingEntry normalizes a provider entry into a trendingDiscoverEntry,
+// stringifying the numeric external IDs and dropping any that are unset (<= 0).
+func newTrendingEntry(tmdbID, tvdbID int, imdbID, mediaType string) trendingDiscoverEntry {
+	e := trendingDiscoverEntry{imdbID: imdbID, mediaType: mediaType}
+	if tmdbID > 0 {
+		e.tmdbID = strconv.Itoa(tmdbID)
+	}
+	if tvdbID > 0 {
+		e.tvdbID = strconv.Itoa(tvdbID)
+	}
+	return e
+}
+
 // fetchTrendingDiscover surfaces external global trending (TMDB or Trakt),
 // mixing movies + series, matched to titles in the viewer's enabled libraries.
 // The external fetch + ID resolution are cached briefly so it does not hit the
@@ -2400,20 +2413,9 @@ func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, 
 
 	// Re-order to trending rank (fetchItemsByContentIDs returns DB order) and
 	// truncate to the section's display limit.
-	byID := make(map[string]*models.MediaItem, len(items))
-	for _, item := range items {
-		byID[item.ContentID] = item
-	}
-	ordered := make([]*models.MediaItem, 0, len(orderedIDs))
-	for _, id := range orderedIDs {
-		item, ok := byID[id]
-		if !ok {
-			continue
-		}
-		ordered = append(ordered, item)
-		if len(ordered) >= limit {
-			break
-		}
+	ordered := orderMediaItems(items, orderedIDs)
+	if len(ordered) > limit {
+		ordered = ordered[:limit]
 	}
 	return ordered, len(ordered), nil
 }
@@ -2423,27 +2425,42 @@ func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, 
 func (f *Fetcher) loadTrendingDiscoverContentIDs(ctx context.Context, source, window string, fetchLimit int) ([]string, error) {
 	cache := f.ensureEditorialCandidateCache()
 	cacheKey := fmt.Sprintf("trending_discover|%s|%s|%d", source, window, fetchLimit)
-	now := f.Clock.Now()
-	if cached, ok := cache.get(cacheKey, now); ok {
+	if cached, ok := cache.get(cacheKey, f.now()); ok {
 		return cached, nil
 	}
 
-	entries, err := f.fetchTrendingDiscoverEntries(ctx, source, window, fetchLimit)
-	if err != nil {
-		return nil, err
-	}
-	// Don't cache when the provider is unconfigured/empty, so a newly-configured
-	// provider takes effect immediately rather than after the TTL.
-	if len(entries) == 0 {
-		return []string{}, nil
-	}
+	// Collapse concurrent cache-miss loads (e.g. many home-page requests at TTL
+	// expiry) into a single upstream fetch + ID resolution, as
+	// cachedEditorialCandidates does for editorial sections.
+	value, err, _ := f.candidateGroup.Do(cacheKey, func() (any, error) {
+		now := f.now()
+		if cached, ok := cache.get(cacheKey, now); ok {
+			return cached, nil
+		}
 
-	contentIDs, err := f.resolveTrendingDiscoverIDs(ctx, entries)
+		entries, err := f.fetchTrendingDiscoverEntries(ctx, source, window, fetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		// Don't cache when the provider is unconfigured/empty, so a
+		// newly-configured provider takes effect immediately rather than after
+		// the TTL.
+		if len(entries) == 0 {
+			return []string{}, nil
+		}
+
+		contentIDs, err := f.resolveTrendingDiscoverIDs(ctx, entries)
+		if err != nil {
+			return nil, err
+		}
+		cache.set(cacheKey, contentIDs, now.Add(time.Hour))
+		return contentIDs, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	cache.set(cacheKey, contentIDs, now.Add(time.Hour))
-	return contentIDs, nil
+	contentIDs, _ := value.([]string)
+	return append([]string(nil), contentIDs...), nil
 }
 
 // fetchTrendingDiscoverEntries pulls the raw trending list from the configured
@@ -2460,17 +2477,12 @@ func (f *Fetcher) fetchTrendingDiscoverEntries(ctx context.Context, source, wind
 		if movieErr != nil && showErr != nil {
 			return nil, fmt.Errorf("trakt trending: %v / %v", movieErr, showErr)
 		}
-		merged := append(append([]catalog.TraktCollectionEntry{}, movies...), shows...)
-		out := make([]trendingDiscoverEntry, 0, len(merged))
-		for _, e := range merged {
-			entry := trendingDiscoverEntry{imdbID: e.IMDbID, mediaType: e.MediaType}
-			if e.TMDBID > 0 {
-				entry.tmdbID = strconv.Itoa(e.TMDBID)
-			}
-			if e.TVDBID > 0 {
-				entry.tvdbID = strconv.Itoa(e.TVDBID)
-			}
-			out = append(out, entry)
+		out := make([]trendingDiscoverEntry, 0, len(movies)+len(shows))
+		for _, e := range movies {
+			out = append(out, newTrendingEntry(e.TMDBID, e.TVDBID, e.IMDbID, e.MediaType))
+		}
+		for _, e := range shows {
+			out = append(out, newTrendingEntry(e.TMDBID, e.TVDBID, e.IMDbID, e.MediaType))
 		}
 		return out, nil
 	}
@@ -2485,14 +2497,7 @@ func (f *Fetcher) fetchTrendingDiscoverEntries(ctx context.Context, source, wind
 	}
 	out := make([]trendingDiscoverEntry, 0, len(entries))
 	for _, e := range entries {
-		entry := trendingDiscoverEntry{imdbID: e.IMDbID, mediaType: e.MediaType}
-		if e.ID > 0 {
-			entry.tmdbID = strconv.Itoa(e.ID)
-		}
-		if e.TVDBID > 0 {
-			entry.tvdbID = strconv.Itoa(e.TVDBID)
-		}
-		out = append(out, entry)
+		out = append(out, newTrendingEntry(e.ID, e.TVDBID, e.IMDbID, e.MediaType))
 	}
 	return out, nil
 }
