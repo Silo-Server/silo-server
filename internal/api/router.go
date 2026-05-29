@@ -1268,7 +1268,9 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 
 				if calendarRepo != nil {
-					calendarHandler := handlers.NewCalendarHandler(calendarRepo, detailSvc)
+					calendarPopular := recommendations.NewRepo(deps.DB)
+					calendarTrending := sections.NewTrendingSnapshotRepository(deps.DB)
+					calendarHandler := handlers.NewCalendarHandler(calendarRepo, detailSvc, calendarPopular, calendarTrending)
 					r.With(apimw.RequireProfile).Get("/calendar", calendarHandler.HandleGetCalendar)
 				}
 
