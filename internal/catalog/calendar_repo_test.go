@@ -102,3 +102,47 @@ func TestBuildListEventsQuery_RejectsExplicitLibraryOutsideAllowedScope(t *testi
 		t.Fatalf("expected season branch to short-circuit inaccessible library selection, got:\n%s", query)
 	}
 }
+
+func TestBuildListEventsQuery_AppliesIDRestriction(t *testing.T) {
+	t.Parallel()
+
+	repo := &CalendarRepository{}
+	query, args := repo.buildListEventsQuery(CalendarFilter{
+		Start:         time.Date(2026, time.April, 6, 0, 0, 0, 0, time.UTC),
+		End:           time.Date(2026, time.April, 12, 0, 0, 0, 0, time.UTC),
+		RestrictByIDs: true,
+		RestrictToIDs: []string{"series-1", "movie-2"},
+	})
+
+	for _, fragment := range []string{
+		"mi.content_id = ANY($3)",
+		"e.series_id = ANY($3)",
+		"s.series_id = ANY($3)",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("expected query to contain %q, got:\n%s", fragment, query)
+		}
+	}
+	if len(args) != 3 {
+		t.Fatalf("expected start/end/ids args, got %d", len(args))
+	}
+}
+
+func TestBuildListEventsQuery_EmptyRestrictionMatchesNothing(t *testing.T) {
+	t.Parallel()
+
+	repo := &CalendarRepository{}
+	query, args := repo.buildListEventsQuery(CalendarFilter{
+		Start:         time.Date(2026, time.April, 6, 0, 0, 0, 0, time.UTC),
+		End:           time.Date(2026, time.April, 12, 0, 0, 0, 0, time.UTC),
+		RestrictByIDs: true,
+		RestrictToIDs: nil,
+	})
+
+	if strings.Count(query, "1 = 0") != 3 {
+		t.Fatalf("expected each branch to short-circuit with 1 = 0, got:\n%s", query)
+	}
+	if len(args) != 2 {
+		t.Fatalf("expected only start/end args, got %d", len(args))
+	}
+}
