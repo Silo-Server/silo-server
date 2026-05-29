@@ -211,9 +211,13 @@ export default function Login() {
 
   if (loading || setupLoading) {
     return (
-      <div className="auth-shell">
-        <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
-      </div>
+      <main className="auth-shell">
+        <div
+          className="border-primary h-8 w-8 animate-spin rounded-full border-b-2"
+          role="status"
+          aria-label="Loading"
+        />
+      </main>
     );
   }
 
@@ -260,7 +264,8 @@ export default function Login() {
     : "/signup";
 
   return (
-    <div className="auth-shell">
+    <main className="auth-shell">
+      <h1 className="sr-only">Sign in to {serverName}</h1>
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
@@ -423,6 +428,6 @@ export default function Login() {
           </p>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

@@ -14,6 +14,74 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// Retry parameters for transient serialization/deadlock failures. They are
+// package vars (not consts) only so tests can shrink them; production code
+// never mutates them.
+var (
+	deadlockMaxAttempts = 5
+	deadlockBaseBackoff = 50 * time.Millisecond
+)
+
+const (
+	// orphanDeleteBatch is small because each media_items row cascades across
+	// ~15 child tables.
+	orphanDeleteBatch = 1000
+	// folderChildDeleteBatch covers the lighter folder-scoped media_files and
+	// junction deletes.
+	folderChildDeleteBatch = 5000
+)
+
+// retryOnDeadlock runs op, retrying when Postgres reports a deadlock (40P01) or
+// serialization failure (40001), with exponential backoff. It returns
+// immediately for any other error, and honors context cancellation between
+// attempts.
+func retryOnDeadlock(ctx context.Context, op func() error) error {
+	backoff := deadlockBaseBackoff
+	for attempt := 1; ; attempt++ {
+		err := op()
+		if err == nil {
+			return nil
+		}
+		var pgErr *pgconn.PgError
+		if attempt < deadlockMaxAttempts && errors.As(err, &pgErr) &&
+			(pgErr.Code == "40P01" || pgErr.Code == "40001") {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			continue
+		}
+		return err
+	}
+}
+
+// deleteInBatches repeatedly runs deleteBatch (each a single autocommit
+// statement) until a batch removes fewer than batchSize rows. Each batch is
+// retried on deadlock. It returns the total number of rows deleted.
+func deleteInBatches(
+	ctx context.Context,
+	batchSize int,
+	deleteBatch func(ctx context.Context) (int64, error),
+) (int64, error) {
+	var total int64
+	for {
+		var affected int64
+		if err := retryOnDeadlock(ctx, func() error {
+			n, e := deleteBatch(ctx)
+			affected = n
+			return e
+		}); err != nil {
+			return total, err
+		}
+		total += affected
+		if affected < int64(batchSize) {
+			return total, nil
+		}
+	}
+}
+
 // Sentinel errors for folder repository operations.
 var (
 	ErrFolderNotFound = errors.New("folder not found")
@@ -417,97 +485,187 @@ func (r *FolderRepository) DeleteWithStats(
 	id int,
 	progress func(current, total int, message string),
 ) (*DeleteFolderStats, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("beginning delete transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
 	stats := &DeleteFolderStats{}
-	if err := tx.QueryRow(ctx, `SELECT name FROM media_folders WHERE id = $1`, id).Scan(&stats.LibraryName); err != nil {
+
+	// Phase 0: preflight reads (no long-lived transaction).
+	if err := r.pool.QueryRow(ctx, `SELECT name FROM media_folders WHERE id = $1`, id).Scan(&stats.LibraryName); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrFolderNotFound
 		}
 		return nil, fmt.Errorf("loading folder before delete: %w", err)
 	}
-
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM media_files WHERE media_folder_id = $1`, id).Scan(&stats.MediaFiles); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_files WHERE media_folder_id = $1`, id).Scan(&stats.MediaFiles); err != nil {
 		return nil, fmt.Errorf("counting media files: %w", err)
 	}
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM media_item_libraries WHERE media_folder_id = $1`, id).Scan(&stats.MediaItemLinks); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_item_libraries WHERE media_folder_id = $1`, id).Scan(&stats.MediaItemLinks); err != nil {
 		return nil, fmt.Errorf("counting media item links: %w", err)
 	}
+	var orphanTotal int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM media_item_libraries mil
+		WHERE mil.media_folder_id = $1
+		AND NOT EXISTS (
+			SELECT 1 FROM media_item_libraries other
+			WHERE other.content_id = mil.content_id
+			AND other.media_folder_id <> $1
+		)`, id).Scan(&orphanTotal); err != nil {
+		return nil, fmt.Errorf("counting orphaned items: %w", err)
+	}
 
-	// Collect items that exist ONLY in this library before cascade removes the
-	// junction rows, so we know which media_items to clean up.
-	rows, err := tx.Query(ctx, `
+	// Phase 1: delete orphaned media_items in detect-then-delete batches.
+	// Cascade removes their junctions, provider IDs, episodes, seasons, etc.
+	if progress != nil {
+		progress(0, orphanTotal, "Deleting orphaned items")
+	}
+	rawDirs := make(map[string]struct{})
+	for {
+		ids, err := r.collectOrphanBatch(ctx, id, orphanDeleteBatch)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		dirs, err := collectRawImageDirs(ctx, r.pool, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range dirs {
+			rawDirs[d] = struct{}{}
+		}
+		var deleted int64
+		if err := retryOnDeadlock(ctx, func() error {
+			// Re-check the orphan invariant inside the delete. A concurrent
+			// scan/import may have attached one of these content IDs to another
+			// library after collectOrphanBatch returned; without this guard the
+			// cascade would delete the shared media_items row (and the
+			// newly-added membership), dropping the item from the other library.
+			tag, e := r.pool.Exec(ctx, `
+				DELETE FROM media_items
+				WHERE content_id = ANY($1)
+				AND NOT EXISTS (
+					SELECT 1 FROM media_item_libraries other
+					WHERE other.content_id = media_items.content_id
+					AND other.media_folder_id <> $2
+				)`, ids, id)
+			if e != nil {
+				return e
+			}
+			deleted = tag.RowsAffected()
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("deleting orphaned items: %w", err)
+		}
+		stats.OrphanedItems += int(deleted)
+		if progress != nil {
+			progress(stats.OrphanedItems, orphanTotal, "Deleting orphaned items")
+		}
+	}
+
+	// Filter accumulated image dirs once, now that orphans are gone, against
+	// any surviving content. Empty deleting-set means "exclude nothing".
+	if len(rawDirs) > 0 {
+		filtered, err := filterUnreferencedImageDirs(ctx, r.pool, dirSetToSlice(rawDirs), []string{})
+		if err != nil {
+			return nil, err
+		}
+		stats.OrphanedImageDirs = filtered
+	}
+
+	// Phase 2: delete this folder's media_files (folder-tied, not item-tied).
+	if progress != nil {
+		progress(orphanTotal, orphanTotal, "Deleting media files")
+	}
+	if _, err := deleteInBatches(ctx, folderChildDeleteBatch, func(ctx context.Context) (int64, error) {
+		tag, e := r.pool.Exec(ctx, `
+			DELETE FROM media_files
+			WHERE id IN (
+				SELECT id FROM media_files WHERE media_folder_id = $1 LIMIT $2
+			)`, id, folderChildDeleteBatch)
+		if e != nil {
+			return 0, e
+		}
+		return tag.RowsAffected(), nil
+	}); err != nil {
+		return nil, fmt.Errorf("deleting media files: %w", err)
+	}
+
+	// Phase 3: delete remaining folder memberships (shared items kept; only the
+	// membership in this folder is removed).
+	if progress != nil {
+		progress(orphanTotal, orphanTotal, "Removing library memberships")
+	}
+	if _, err := deleteInBatches(ctx, folderChildDeleteBatch, func(ctx context.Context) (int64, error) {
+		tag, e := r.pool.Exec(ctx, `
+			DELETE FROM media_item_libraries
+			WHERE ctid IN (
+				SELECT ctid FROM media_item_libraries WHERE media_folder_id = $1 LIMIT $2
+			)`, id, folderChildDeleteBatch)
+		if e != nil {
+			return 0, e
+		}
+		return tag.RowsAffected(), nil
+	}); err != nil {
+		return nil, fmt.Errorf("deleting media item links: %w", err)
+	}
+
+	// Phase 4: delete the now-lightweight folder row. Tolerate 0 rows so a
+	// resumed run that already removed it still succeeds.
+	if err := retryOnDeadlock(ctx, func() error {
+		_, e := r.pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id)
+		return e
+	}); err != nil {
+		return nil, fmt.Errorf("deleting folder: %w", err)
+	}
+
+	if progress != nil {
+		progress(orphanTotal, orphanTotal, "Library deletion completed")
+	}
+	return stats, nil
+}
+
+// collectOrphanBatch returns up to limit content IDs whose only library
+// membership is the given folder.
+func (r *FolderRepository) collectOrphanBatch(ctx context.Context, folderID, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
 		SELECT mil.content_id
 		FROM media_item_libraries mil
 		WHERE mil.media_folder_id = $1
 		AND NOT EXISTS (
 			SELECT 1 FROM media_item_libraries other
 			WHERE other.content_id = mil.content_id
-			AND other.media_folder_id != $1
-		)`, id)
+			AND other.media_folder_id <> $1
+		)
+		LIMIT $2`, folderID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("finding orphaned items: %w", err)
 	}
-
-	var orphanIDs []string
+	defer rows.Close()
+	var ids []string
 	for rows.Next() {
 		var contentID string
 		if err := rows.Scan(&contentID); err != nil {
-			rows.Close()
 			return nil, fmt.Errorf("scanning orphan content_id: %w", err)
 		}
-		orphanIDs = append(orphanIDs, contentID)
+		ids = append(ids, contentID)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating orphan rows: %w", err)
 	}
-	stats.OrphanedItems = len(orphanIDs)
+	return ids, nil
+}
 
-	// Collect S3 image paths from orphaned items (and their seasons/episodes)
-	// before deletion so the caller can clean up S3 objects afterward.
-	if len(orphanIDs) > 0 {
-		stats.OrphanedImageDirs, err = collectImageDirs(ctx, tx, orphanIDs)
-		if err != nil {
-			return nil, err
-		}
+// dirSetToSlice returns the keys of set as a slice (nil if empty).
+func dirSetToSlice(set map[string]struct{}) []string {
+	if len(set) == 0 {
+		return nil
 	}
-
-	// Delete the folder; CASCADE removes junction rows, media_files, and
-	// library_provider_chains automatically.
-	if progress != nil {
-		progress(1, 3, "Deleting library folder data")
+	dirs := make([]string, 0, len(set))
+	for d := range set {
+		dirs = append(dirs, d)
 	}
-	tag, err := tx.Exec(ctx, "DELETE FROM media_folders WHERE id = $1", id)
-	if err != nil {
-		return nil, fmt.Errorf("deleting folder: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrFolderNotFound
-	}
-
-	// Remove orphaned media items (episodes CASCADE from media_items).
-	if len(orphanIDs) > 0 {
-		if progress != nil {
-			progress(2, 3, "Deleting orphaned items")
-		}
-		_, err = tx.Exec(ctx, "DELETE FROM media_items WHERE content_id = ANY($1)", orphanIDs)
-		if err != nil {
-			return nil, fmt.Errorf("deleting orphaned items: %w", err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing delete transaction: %w", err)
-	}
-	if progress != nil {
-		progress(3, 3, "Library deletion completed")
-	}
-	return stats, nil
+	return dirs
 }
 
 // pathDir extracts the directory portion of an S3 image path.
@@ -518,6 +676,12 @@ func pathDir(path string) string {
 		return ""
 	}
 	return path[:idx+1]
+}
+
+// rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, letting read
+// helpers run inside or outside an explicit transaction.
+type rowQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // collectOrphanIDs returns content IDs from the given set that have no
@@ -544,10 +708,21 @@ func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 	return ids, rows.Err()
 }
 
-// collectImageDirs returns S3 directory prefixes for all images belonging to
-// the given content IDs (items, seasons, and episodes).
-func collectImageDirs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]string, error) {
-	imgRows, err := tx.Query(ctx, `
+// collectImageDirs returns S3 directory prefixes for images belonging to the
+// given content IDs that are not still referenced by other surviving content.
+func collectImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
+	dirs, err := collectRawImageDirs(ctx, q, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	return filterUnreferencedImageDirs(ctx, q, dirs, contentIDs)
+}
+
+// collectRawImageDirs returns the deduped S3 directory prefixes referenced by
+// the given content IDs (items, their seasons, and their episodes), without
+// filtering out dirs still used by other content.
+func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
+	imgRows, err := q.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = ANY($1)
 		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
@@ -575,20 +750,19 @@ func collectImageDirs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 	if err := imgRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating image paths: %w", err)
 	}
-
 	dirs := make([]string, 0, len(dirSet))
 	for dir := range dirSet {
 		dirs = append(dirs, dir)
 	}
-	return filterUnreferencedImageDirs(ctx, tx, dirs, contentIDs)
+	return dirs, nil
 }
 
-func filterUnreferencedImageDirs(ctx context.Context, tx pgx.Tx, dirs, deletingContentIDs []string) ([]string, error) {
+func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deletingContentIDs []string) ([]string, error) {
 	if len(dirs) == 0 {
 		return nil, nil
 	}
 
-	rows, err := tx.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT candidate.dir
 		FROM unnest($1::text[]) AS candidate(dir)
 		WHERE NOT EXISTS (

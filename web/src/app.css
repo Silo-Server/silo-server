@@ -343,7 +343,9 @@
     --secondary: #232328;
     --secondary-foreground: #d0d0d6;
     --muted: #1c1c20;
-    --muted-foreground: #6e6e78;
+    /* Lightened from #6e6e78 (~3.4:1) to meet WCAG AA: ~6.3:1 on --background,
+       ~5.3:1 even on the lightest chip surface (#232328). */
+    --muted-foreground: #9696a0;
     --accent: #232328;
     --accent-foreground: #e8e8ec;
 
@@ -403,7 +405,9 @@
     --secondary: #e8e8ec;
     --secondary-foreground: #3a3a42;
     --muted: #ebebef;
-    --muted-foreground: #78787f;
+    /* Darkened from #78787f (~4.0:1) to meet WCAG AA on light surfaces
+       (~4.9:1 on the #e8e8ec chip, ~5.4:1 on --background). */
+    --muted-foreground: #63636b;
     --accent: #e8e8ec;
     --accent-foreground: #1a1a1e;
 

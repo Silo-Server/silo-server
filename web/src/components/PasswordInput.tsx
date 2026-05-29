@@ -15,9 +15,14 @@ export const PasswordInput = forwardRef<HTMLInputElement, React.ComponentProps<t
           size="icon"
           className="text-muted-foreground hover:text-foreground absolute top-0 right-0 h-full w-10"
           onClick={() => setVisible((v) => !v)}
-          tabIndex={-1}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
         >
-          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {visible ? (
+            <EyeOff className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Eye className="h-4 w-4" aria-hidden="true" />
+          )}
         </Button>
       </div>
     );

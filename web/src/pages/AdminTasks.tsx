@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
-import { Play, Square } from "lucide-react";
+import { AlertTriangle, Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -64,6 +64,10 @@ function describeTrigger(t: TriggerConfig): string {
 function describeSchedule(triggers: TriggerConfig[]): string | null {
   if (triggers.length === 0) return null;
   return triggers.map(describeTrigger).join(", ");
+}
+
+function isOverdue(dateStr: string): boolean {
+  return new Date(dateStr).getTime() < Date.now();
 }
 
 function formatNextRun(dateStr: string): string {
@@ -160,9 +164,15 @@ function TaskRow({
               {!task.last_execution && !describeSchedule(task.triggers) && (
                 <span> · Never run</span>
               )}
-              {task.next_run_at && (
-                <span className="ml-2">· Next: {formatNextRun(task.next_run_at)}</span>
-              )}
+              {task.next_run_at &&
+                (isOverdue(task.next_run_at) ? (
+                  <span className="text-warning ml-2 inline-flex items-center gap-1 font-medium">
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                    Overdue
+                  </span>
+                ) : (
+                  <span className="ml-2">· Next: {formatNextRun(task.next_run_at)}</span>
+                ))}
             </>
           )}
         </div>
@@ -241,7 +251,7 @@ export default function AdminTasks() {
     <div className="page-shell space-y-6 py-4 sm:py-6">
       <div className="page-header gap-5">
         <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Scheduled tasks</h1>
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Scheduled Tasks</h1>
           <p className="page-subtitle text-sm sm:text-base">
             View and manage background tasks. You can trigger tasks manually or adjust their
             schedules, including whether a task runs on server startup.

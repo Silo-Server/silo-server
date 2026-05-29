@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -86,6 +87,16 @@ export default function AdminLogs() {
           <div className="text-sm">{formatConnectionState(activeStream.connectionState)}</div>
           {activeStream.error && (
             <div className="text-muted-foreground text-xs">{activeStream.error}</div>
+          )}
+          {activeStream.connectionState === "disconnected" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 h-7 px-2 text-xs"
+              onClick={activeStream.reconnect}
+            >
+              Reconnect
+            </Button>
           )}
         </div>
       </div>

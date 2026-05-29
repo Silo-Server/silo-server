@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -36,6 +37,9 @@ type calendarEventResponse struct {
 	EpisodeNumber   *int     `json:"episode_number,omitempty"`
 	AirDate         string   `json:"air_date"`
 	AirTime         *string  `json:"air_time,omitempty"`
+	AirAt           *string  `json:"air_at,omitempty"`
+	AirTimezone     *string  `json:"air_timezone,omitempty"`
+	LocalAirDate    string   `json:"local_air_date"`
 	PosterURL       string   `json:"poster_url,omitempty"`
 	PosterThumbhash string   `json:"poster_thumbhash,omitempty"`
 	Badges          []string `json:"badges"`
@@ -91,9 +95,11 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	viewerLocation := catalog.CalendarLocation(q.Get("timezone"))
+
 	cf := catalog.CalendarFilter{
-		Start:              start,
-		End:                end,
+		Start:              start.AddDate(0, 0, -2),
+		End:                end.AddDate(0, 0, 2),
 		Filter:             filter,
 		AllowedLibraryIDs:  af.AllowedLibraryIDs,
 		DisabledLibraryIDs: af.DisabledLibraryIDs,
@@ -118,11 +124,11 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Group events by date and build response.
-	days := groupEventsByDate(events, r, h.detailSvc)
+	days := groupEventsByDate(events, r, h.detailSvc, start, end, viewerLocation)
 	writeJSON(w, http.StatusOK, calendarResponse{Events: days})
 }
 
-func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSvc *catalog.DetailService) []calendarDayResponse {
+func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSvc *catalog.DetailService, start, end time.Time, viewerLocation *time.Location) []calendarDayResponse {
 	if len(events) == 0 {
 		return []calendarDayResponse{}
 	}
@@ -144,17 +150,75 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 		posterURLs = detailSvc.PresignImageURLs(r.Context(), posterPaths, "poster", "small")
 	}
 
+	type preparedCalendarEvent struct {
+		event       catalog.CalendarEvent
+		localDate   string
+		sourceDate  string
+		airAt       *time.Time
+		airAtString *string
+	}
+
+	prepared := make([]preparedCalendarEvent, 0, len(events))
+	for _, ev := range events {
+		airAt := catalog.CalendarEventAirAt(ev.AirDate, ev.AirTime, ev.AirTimezone)
+		localDateTime := ev.AirDate
+		if airAt != nil {
+			localDateTime = airAt.In(viewerLocation)
+		}
+		localDate := localDateTime.Format("2006-01-02")
+		if localDate < start.Format("2006-01-02") || localDate > end.Format("2006-01-02") {
+			continue
+		}
+		var airAtString *string
+		if airAt != nil {
+			formatted := airAt.Format(time.RFC3339)
+			airAtString = &formatted
+		}
+		prepared = append(prepared, preparedCalendarEvent{
+			event:       ev,
+			localDate:   localDate,
+			sourceDate:  ev.AirDate.Format("2006-01-02"),
+			airAt:       airAt,
+			airAtString: airAtString,
+		})
+	}
+	if len(prepared) == 0 {
+		return []calendarDayResponse{}
+	}
+
+	sort.SliceStable(prepared, func(i, j int) bool {
+		left, right := prepared[i], prepared[j]
+		if left.localDate != right.localDate {
+			return left.localDate < right.localDate
+		}
+		if left.airAt != nil && right.airAt != nil && !left.airAt.Equal(*right.airAt) {
+			return left.airAt.Before(*right.airAt)
+		}
+		if (left.airAt != nil) != (right.airAt != nil) {
+			return left.airAt != nil
+		}
+		if left.event.Title != right.event.Title {
+			return left.event.Title < right.event.Title
+		}
+		if left.event.SeasonNumber != nil && right.event.SeasonNumber != nil && *left.event.SeasonNumber != *right.event.SeasonNumber {
+			return *left.event.SeasonNumber < *right.event.SeasonNumber
+		}
+		if left.event.EpisodeNumber != nil && right.event.EpisodeNumber != nil && *left.event.EpisodeNumber != *right.event.EpisodeNumber {
+			return *left.event.EpisodeNumber < *right.event.EpisodeNumber
+		}
+		return left.event.ContentID < right.event.ContentID
+	})
+
 	var days []calendarDayResponse
 	var currentDay *calendarDayResponse
 
-	for _, ev := range events {
-		dateStr := ev.AirDate.Format("2006-01-02")
-
-		if currentDay == nil || currentDay.Date != dateStr {
+	for _, item := range prepared {
+		ev := item.event
+		if currentDay == nil || currentDay.Date != item.localDate {
 			if currentDay != nil {
 				days = append(days, *currentDay)
 			}
-			currentDay = &calendarDayResponse{Date: dateStr}
+			currentDay = &calendarDayResponse{Date: item.localDate}
 		}
 
 		badges := buildBadges(ev)
@@ -167,8 +231,11 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 			SeriesID:        ev.SeriesID,
 			SeasonNumber:    ev.SeasonNumber,
 			EpisodeNumber:   ev.EpisodeNumber,
-			AirDate:         dateStr,
+			AirDate:         item.sourceDate,
 			AirTime:         ev.AirTime,
+			AirAt:           item.airAtString,
+			AirTimezone:     ev.AirTimezone,
+			LocalAirDate:    item.localDate,
 			PosterURL:       posterURLs[ev.PosterPath],
 			PosterThumbhash: ev.PosterThumbhash,
 			Badges:          badges,

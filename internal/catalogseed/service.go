@@ -166,7 +166,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				item.ImdbID, item.TmdbID, item.TvdbID,
 				item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
 				item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-				studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate,
+				studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
 				item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 				item.CreatedAt, item.UpdatedAt,
 			})
@@ -179,7 +179,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"imdb_id", "tmdb_id", "tvdb_id",
 				"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
 				"metadata_s3_path", "metadata_etag", "season_count",
-				"studios", "networks", "countries", "keywords", "original_language", "release_date", "first_air_date", "last_air_date",
+				"studios", "networks", "countries", "keywords", "original_language", "release_date", "first_air_date", "last_air_date", "air_time", "air_timezone",
 				"matched_at", "last_refreshed", "refresh_failures", "locked_fields", "status",
 				"created_at", "updated_at",
 			},
@@ -1044,7 +1044,7 @@ func bulkInsertItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, onBatch
 			item.ImdbID, item.TmdbID, item.TvdbID,
 			item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
 			item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-			item.Studios, item.Networks, item.Countries, item.Keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate,
+			item.Studios, item.Networks, item.Countries, item.Keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
 			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 			item.CreatedAt, item.UpdatedAt,
 		})
@@ -1058,12 +1058,12 @@ func bulkInsertItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, onBatch
 			imdb_id, tmdb_id, tvdb_id,
 			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 			metadata_s3_path, metadata_etag, season_count,
-			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date,
+			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			matched_at, last_refreshed, refresh_failures, locked_fields, status,
 			created_at, updated_at
 		) VALUES `,
 		rows,
-		41,
+		43,
 		nil,
 		"",
 		onBatch,
@@ -1904,13 +1904,13 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			item.ImdbID, item.TmdbID, item.TvdbID,
 			item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
 			item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-			studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate,
+			studios, networks, countries, keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
 			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 			item.CreatedAt, item.UpdatedAt,
 		})
 	}
 
-	const colCount = 41
+	const colCount = 43
 	prefix := `
 		INSERT INTO media_items (
 			content_id, type, title, sort_title, original_title, year, genres,
@@ -1919,7 +1919,7 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			imdb_id, tmdb_id, tvdb_id,
 			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 			metadata_s3_path, metadata_etag, season_count,
-			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date,
+			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			matched_at, last_refreshed, refresh_failures, locked_fields, status,
 			created_at, updated_at
 		) VALUES `
@@ -1963,6 +1963,8 @@ func batchImportItems(ctx context.Context, tx pgx.Tx, items []ItemRecord, mode C
 			release_date = EXCLUDED.release_date,
 			first_air_date = EXCLUDED.first_air_date,
 			last_air_date = EXCLUDED.last_air_date,
+			air_time = EXCLUDED.air_time,
+			air_timezone = EXCLUDED.air_timezone,
 			matched_at = EXCLUDED.matched_at,
 			last_refreshed = EXCLUDED.last_refreshed,
 			refresh_failures = EXCLUDED.refresh_failures,
@@ -2055,7 +2057,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 				imdb_id, tmdb_id, tvdb_id,
 				poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 				metadata_s3_path, metadata_etag, season_count,
-				studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date,
+				studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 				matched_at, last_refreshed, refresh_failures, locked_fields, status,
 				created_at, updated_at
 			) VALUES (
@@ -2065,9 +2067,9 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 				$16, $17, $18,
 				$19, $20, $21, $22, $23,
 				$24, $25, $26,
-				$27, $28, $29, $30, $31, $32, $33, $34,
-				$35, $36, $37, $38, $39,
-				$40, $41
+				$27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
+				$37, $38, $39, $40, $41,
+				$42, $43
 			)
 			ON CONFLICT (content_id) DO NOTHING`,
 			item.ContentID, item.Type, item.Title, item.SortTitle, item.OriginalTitle, item.Year, item.Genres,
@@ -2076,7 +2078,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			item.ImdbID, item.TmdbID, item.TvdbID,
 			item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
 			item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-			item.Studios, item.Networks, item.Countries, item.Keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate,
+			item.Studios, item.Networks, item.Countries, item.Keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
 			item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 			item.CreatedAt, item.UpdatedAt,
 		)
@@ -2094,7 +2096,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			imdb_id, tmdb_id, tvdb_id,
 			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 			metadata_s3_path, metadata_etag, season_count,
-			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date,
+			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			matched_at, last_refreshed, refresh_failures, locked_fields, status,
 			created_at, updated_at
 		) VALUES (
@@ -2104,9 +2106,9 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			$16, $17, $18,
 			$19, $20, $21, $22, $23,
 			$24, $25, $26,
-			$27, $28, $29, $30, $31, $32, $33, $34,
-			$35, $36, $37, $38, $39,
-			$40, $41
+			$27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
+			$37, $38, $39, $40, $41,
+			$42, $43
 		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
@@ -2142,6 +2144,8 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 			release_date = EXCLUDED.release_date,
 			first_air_date = EXCLUDED.first_air_date,
 			last_air_date = EXCLUDED.last_air_date,
+			air_time = EXCLUDED.air_time,
+			air_timezone = EXCLUDED.air_timezone,
 			matched_at = EXCLUDED.matched_at,
 			last_refreshed = EXCLUDED.last_refreshed,
 			refresh_failures = EXCLUDED.refresh_failures,
@@ -2155,7 +2159,7 @@ func importItem(ctx context.Context, tx pgx.Tx, item ItemRecord, mode ConflictMo
 		item.ImdbID, item.TmdbID, item.TvdbID,
 		item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash, item.LogoPath,
 		item.MetadataS3Path, item.MetadataEtag, item.SeasonCount,
-		item.Studios, item.Networks, item.Countries, item.Keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate,
+		item.Studios, item.Networks, item.Countries, item.Keywords, item.OriginalLanguage, item.ReleaseDate, item.FirstAirDate, item.LastAirDate, item.AirTime, item.AirTimezone,
 		item.MatchedAt, item.LastRefreshed, item.RefreshFailures, item.LockedFields, item.Status,
 		item.CreatedAt, item.UpdatedAt,
 	).Scan(&created)

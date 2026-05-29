@@ -291,8 +291,8 @@ export const recKeys = {
 
 export const calendarKeys = {
   all: ["calendar"] as const,
-  week: (weekStart: string, filter: string, libraryId?: number) =>
-    ["calendar", "week", weekStart, filter, libraryId ?? "all"] as const,
+  week: (weekStart: string, filter: string, libraryId?: number, timezone?: string) =>
+    ["calendar", "week", weekStart, filter, libraryId ?? "all", timezone ?? "UTC"] as const,
 };
 
 export const downloadKeys = {

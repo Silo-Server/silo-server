@@ -59,7 +59,10 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   const location = useLocation();
   const sessionCount = useSessionCount();
   const buildInfo = useBuildInfo();
-  let buildDisplay = "unavailable";
+  // Falls back to "dev build" when the binary carries no VCS/ldflags revision
+  // (e.g. `go run` or an image built without BUILD_REVISION) rather than a stark
+  // "unavailable".
+  let buildDisplay = "dev build";
   if (buildInfo.isPending && !buildInfo.data) {
     buildDisplay = "loading...";
   } else if (buildInfo.isError) {

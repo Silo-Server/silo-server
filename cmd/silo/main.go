@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -724,6 +725,12 @@ func main() {
 		pluginService.OnLifecycleChange(appCtx)
 	}
 
+	// backgroundInit collects non-critical startup work (catalog-size-dependent
+	// seeding, network-bound reconciliation) that must not block the HTTP
+	// listener. The steps run sequentially in a background goroutine once the
+	// server is ready to serve. Failures are logged, never fatal.
+	var backgroundInit []func(context.Context)
+
 	// Step 4b: Create metadata service and match worker (if needed).
 	var metadataService *metadata.MetadataService
 	var personRefreshService *metadata.PersonRefreshService
@@ -830,23 +837,28 @@ func main() {
 			matchWorker.SetMovieFileClaimer(movieQueueRepo)
 		}
 		if seriesQueueRepo != nil {
-			if cleaned, err := seriesQueueRepo.CleanupLegacySeriesGroupQueue(appCtx); err != nil {
-				slog.Warn("failed to clean legacy series group queue rows", "error", err)
-			} else if cleaned > 0 {
-				slog.Info("cleaned legacy series group queue rows", "count", cleaned)
-			}
 			matchWorker.SetSeriesRootClaimer(seriesQueueRepo, cfg.Matcher.TVSeriesRootQueueEnabled())
+			backgroundInit = append(backgroundInit, func(ctx context.Context) {
+				if cleaned, err := seriesQueueRepo.CleanupLegacySeriesGroupQueue(ctx); err != nil {
+					slog.Warn("failed to clean legacy series group queue rows", "error", err)
+				} else if cleaned > 0 {
+					slog.Info("cleaned legacy series group queue rows", "count", cleaned)
+				}
+			})
 		}
 		if deps.FolderRepo != nil {
-			enabledFolders, err := deps.FolderRepo.GetEnabled(appCtx)
-			if err != nil {
-				slog.Warn("failed to seed metadata queues", "error", err)
-			} else {
+			backgroundInit = append(backgroundInit, func(ctx context.Context) {
+				start := time.Now()
+				enabledFolders, err := deps.FolderRepo.GetEnabled(ctx)
+				if err != nil {
+					slog.Warn("failed to seed metadata queues", "error", err)
+					return
+				}
 				seedMovieQueue := func(folderID int) {
 					if movieQueueRepo == nil {
 						return
 					}
-					if err := movieQueueRepo.SyncForFolder(appCtx, folderID); err != nil {
+					if err := movieQueueRepo.SyncForFolder(ctx, folderID); err != nil {
 						slog.Warn("failed to seed movie match queue", "folder_id", folderID, "error", err)
 					}
 				}
@@ -854,7 +866,7 @@ func main() {
 					if seriesQueueRepo == nil {
 						return
 					}
-					if err := seriesQueueRepo.SyncForFolder(appCtx, folderID); err != nil {
+					if err := seriesQueueRepo.SyncForFolder(ctx, folderID); err != nil {
 						slog.Warn("failed to seed series root queue", "folder_id", folderID, "error", err)
 					}
 				}
@@ -872,7 +884,8 @@ func main() {
 						seedMovieQueue(folder.ID)
 					}
 				}
-			}
+				slog.Info("deferred init: metadata match queues seeded", "folders", len(enabledFolders), "duration", time.Since(start))
+			})
 		}
 
 		deps.SkippedRootRepo = skippedRootRepo
@@ -1011,9 +1024,11 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider)
-		if err := watchProviderService.SweepOpenScrobbles(appCtx); err != nil {
-			slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
-		}
+		backgroundInit = append(backgroundInit, func(ctx context.Context) {
+			if err := watchProviderService.SweepOpenScrobbles(ctx); err != nil {
+				slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
+			}
+		})
 	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
@@ -1651,6 +1666,30 @@ func main() {
 		compatSrv.ReadTimeout = 30 * time.Second
 		compatSrv.WriteTimeout = 0
 		compatSrv.IdleTimeout = 120 * time.Second
+	}
+
+	// Run non-critical startup work in the background so it doesn't delay the
+	// HTTP listener from accepting connections. Steps run sequentially and stop
+	// early if the app context is cancelled (shutdown).
+	if len(backgroundInit) > 0 {
+		go func() {
+			start := time.Now()
+			for _, step := range backgroundInit {
+				if appCtx.Err() != nil {
+					return
+				}
+				func() {
+					defer func() {
+						if p := recover(); p != nil {
+							slog.Error("deferred startup init step panicked; continuing",
+								"panic", p, "stack", string(debug.Stack()))
+						}
+					}()
+					step(appCtx)
+				}()
+			}
+			slog.Info("deferred startup init completed", "steps", len(backgroundInit), "duration", time.Since(start))
+		}()
 	}
 
 	errCh := make(chan error, 2)

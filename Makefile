@@ -14,13 +14,20 @@ endif
 
 JELLYFIN_WEB_OUTPUT_DIR ?= third_party/jellyfin-web
 
+# Build version stamping: inject the git revision so the admin Build panel shows a
+# version even when Go's VCS metadata isn't embedded (mirrors the Dockerfile ldflags).
+BUILDINFO_PKG := github.com/Silo-Server/silo-server/internal/buildinfo
+BUILD_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)
+BUILD_DIRTY ?= $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo true || echo false)
+GO_LDFLAGS := -X $(BUILDINFO_PKG).revisionOverride=$(BUILD_REVISION) -X $(BUILDINFO_PKG).dirtyOverride=$(BUILD_DIRTY)
+
 # Build the frontend (requires pnpm)
 frontend:
 	cd web && pnpm install --frozen-lockfile && pnpm run build
 
 # Build the Go binary (depends on frontend)
 build: frontend
-	go build -o silo ./cmd/silo/
+	go build -ldflags "$(GO_LDFLAGS)" -o silo ./cmd/silo/
 
 # Run frontend dev server (proxies API to localhost:8080)
 dev-frontend:

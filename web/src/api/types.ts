@@ -831,6 +831,7 @@ export interface ItemDetail {
   first_air_date: string | null;
   last_air_date: string | null;
   air_time?: string | null;
+  air_timezone?: string | null;
 
   // Presigned image URLs.
   poster_url: string;
@@ -2505,6 +2506,9 @@ export interface SectionItemUpcomingEvent {
   type: "movie" | "episode" | "season_premiere";
   air_date: string;
   air_time?: string;
+  air_at?: string | null;
+  air_timezone?: string | null;
+  local_air_date?: string;
   episode_title?: string | null;
   season_number?: number | null;
   episode_number?: number | null;

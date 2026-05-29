@@ -24,6 +24,19 @@ const FIELD_STUDIOS = 3;
 const FIELD_RATING = 6;
 const FIELD_RUNTIME = 7;
 const FIELD_CONTENT_RATING = 9;
+const FIELD_AIR_SCHEDULE = 11;
+
+const AIR_TIMEZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Paris",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Sydney",
+];
 
 type Section = "general" | "dates" | "tags" | "ids" | "images";
 
@@ -52,6 +65,8 @@ const FIELD_LOCK_MAP: Record<string, number> = {
   rating_rt_audience: FIELD_RATING,
   runtime: FIELD_RUNTIME,
   content_rating: FIELD_CONTENT_RATING,
+  air_time: FIELD_AIR_SCHEDULE,
+  air_timezone: FIELD_AIR_SCHEDULE,
 };
 
 interface EditMetadataDialogProps {
@@ -78,6 +93,7 @@ function initFormState(item: ItemDetail) {
     first_air_date: item.first_air_date ?? "",
     last_air_date: item.last_air_date ?? "",
     air_time: item.air_time ?? "",
+    air_timezone: item.air_timezone ?? "",
     air_date: item.air_date ?? "",
     status: item.status ?? "",
     rating_imdb: item.rating_imdb,
@@ -168,6 +184,11 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     if (form.last_air_date !== originalForm.last_air_date)
       data.last_air_date = form.last_air_date || null;
     if (form.air_time !== originalForm.air_time) data.air_time = form.air_time || null;
+    if (form.air_timezone !== originalForm.air_timezone)
+      // Send "" (not null) when cleared: the server treats null as "skip", so
+      // clearing a previously-set timezone would not persist. "" is accepted by
+      // validation and normalized to NULL server-side.
+      data.air_timezone = form.air_timezone;
     if (form.air_date !== originalForm.air_date) data.air_date = form.air_date || null;
     if (form.status !== originalForm.status) data.status = form.status;
     if (form.rating_imdb !== originalForm.rating_imdb) data.rating_imdb = form.rating_imdb;
@@ -432,7 +453,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   )}
 
                   {item.type === "series" && (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                       <FieldRow label="Last Air Date">
                         <Input
                           type="date"
@@ -440,12 +461,25 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                           onChange={(e) => setField("last_air_date", e.target.value)}
                         />
                       </FieldRow>
-                      <FieldRow label="Air Time">
+                      <FieldRow label="Air Time" lockIcon={renderLockIcon("air_time")}>
                         <Input
                           type="time"
                           value={form.air_time}
                           onChange={(e) => setField("air_time", e.target.value)}
                         />
+                      </FieldRow>
+                      <FieldRow label="Air Timezone" lockIcon={renderLockIcon("air_timezone")}>
+                        <Input
+                          list="air-timezone-options"
+                          value={form.air_timezone}
+                          placeholder="America/New_York"
+                          onChange={(e) => setField("air_timezone", e.target.value)}
+                        />
+                        <datalist id="air-timezone-options">
+                          {AIR_TIMEZONES.map((timezone) => (
+                            <option key={timezone} value={timezone} />
+                          ))}
+                        </datalist>
                       </FieldRow>
                     </div>
                   )}

@@ -53,6 +53,18 @@ func TestSectionBackdropPathUsesExpectedVariants(t *testing.T) {
 			want:        "/tmdb/shows/1399/backdrop/w1920.jpg",
 		},
 		{
+			name:        "continue watching episode still clamps to w500",
+			sectionType: sections.SectionContinueWatching,
+			path:        "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
+			want:        "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp",
+		},
+		{
+			name:        "featured section episode still clamps to w500",
+			sectionType: sections.SectionRecentlyAdded,
+			path:        "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
+			want:        "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp",
+		},
+		{
 			name:        "http paths pass through",
 			sectionType: sections.SectionContinueWatching,
 			path:        "https://images.example.com/backdrop/original.jpg",
