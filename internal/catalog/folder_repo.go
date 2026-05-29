@@ -534,13 +534,30 @@ func (r *FolderRepository) DeleteWithStats(
 		for _, d := range dirs {
 			rawDirs[d] = struct{}{}
 		}
+		var deleted int64
 		if err := retryOnDeadlock(ctx, func() error {
-			_, e := r.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
-			return e
+			// Re-check the orphan invariant inside the delete. A concurrent
+			// scan/import may have attached one of these content IDs to another
+			// library after collectOrphanBatch returned; without this guard the
+			// cascade would delete the shared media_items row (and the
+			// newly-added membership), dropping the item from the other library.
+			tag, e := r.pool.Exec(ctx, `
+				DELETE FROM media_items
+				WHERE content_id = ANY($1)
+				AND NOT EXISTS (
+					SELECT 1 FROM media_item_libraries other
+					WHERE other.content_id = media_items.content_id
+					AND other.media_folder_id <> $2
+				)`, ids, id)
+			if e != nil {
+				return e
+			}
+			deleted = tag.RowsAffected()
+			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("deleting orphaned items: %w", err)
 		}
-		stats.OrphanedItems += len(ids)
+		stats.OrphanedItems += int(deleted)
 		if progress != nil {
 			progress(stats.OrphanedItems, orphanTotal, "Deleting orphaned items")
 		}
