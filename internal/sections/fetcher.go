@@ -67,9 +67,18 @@ type Fetcher struct {
 	RecommendationRepo   *recommendations.Repo // retained for non-reader call sites
 	RecommendationReader recommendationReader
 	NextUpRepo           *catalog.NextUpRepository
-	candidateCacheMu     sync.Mutex
-	candidateCache       *editorialCandidateCache
-	candidateGroup       singleflight.Group
+
+	// ItemRepo resolves external IDs (TMDB/Trakt) to library content IDs for
+	// the trending_discover section. Nil disables external-trending matching.
+	ItemRepo *catalog.ItemRepository
+	// TMDBTrending and TraktTrending fetch external global trending lists. Each
+	// is nil when that provider is not configured.
+	TMDBTrending  catalog.TMDBCollectionFetcher
+	TraktTrending catalog.TraktCollectionFetcher
+
+	candidateCacheMu sync.Mutex
+	candidateCache   *editorialCandidateCache
+	candidateGroup   singleflight.Group
 
 	// Clock returns the current time. Defaults to recipes.RealClock{}.
 	// Tests inject recipes.FixedClock for deterministic seasonal/editorial behavior.
@@ -1070,6 +1079,8 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 		return f.fetchNewToLibrary(ctx, s, libraryID, libraryIDs, filter)
 	case SectionMostWatched:
 		return f.fetchMostWatched(ctx, s, libraryID, libraryIDs, filter)
+	case SectionTrendingDiscover:
+		return f.fetchTrendingDiscover(ctx, s, libraryID, libraryIDs, filter)
 	case SectionAdminCuratedList:
 		return f.fetchAdminCuratedList(ctx, s, libraryID, libraryIDs, filter)
 	default:
@@ -2332,6 +2343,227 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 		items = append(items, &item)
 	}
 	return items, rows.Err()
+}
+
+// trendingDiscoverEntry is a provider-agnostic external trending result.
+type trendingDiscoverEntry struct {
+	tmdbID    string
+	imdbID    string
+	tvdbID    string
+	mediaType string // "movie" | "tv"
+}
+
+// fetchTrendingDiscover surfaces external global trending (TMDB or Trakt),
+// mixing movies + series, matched to titles in the viewer's enabled libraries.
+// The external fetch + ID resolution are cached briefly so it does not hit the
+// upstream API on every home-page load.
+func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	var p recipes.TrendingDiscoverParams
+	if len(s.Config) > 0 {
+		_ = json.Unmarshal(s.Config, &p)
+	}
+	source := p.Source
+	if source != "trakt" {
+		source = "tmdb"
+	}
+	window := p.Window
+	if window != "day" {
+		window = "week"
+	}
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+	// Over-fetch: library-only matching drops globally-trending titles the
+	// server does not own, so request more candidates than the display limit.
+	fetchLimit := limit * 5
+	if fetchLimit < 50 {
+		fetchLimit = 50
+	}
+	if fetchLimit > 200 {
+		fetchLimit = 200
+	}
+
+	orderedIDs, err := f.loadTrendingDiscoverContentIDs(ctx, source, window, fetchLimit)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(orderedIDs) == 0 {
+		return []*models.MediaItem{}, 0, nil
+	}
+
+	items, err := f.fetchItemsByContentIDs(ctx, orderedIDs, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Re-order to trending rank (fetchItemsByContentIDs returns DB order) and
+	// truncate to the section's display limit.
+	byID := make(map[string]*models.MediaItem, len(items))
+	for _, item := range items {
+		byID[item.ContentID] = item
+	}
+	ordered := make([]*models.MediaItem, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		item, ok := byID[id]
+		if !ok {
+			continue
+		}
+		ordered = append(ordered, item)
+		if len(ordered) >= limit {
+			break
+		}
+	}
+	return ordered, len(ordered), nil
+}
+
+// loadTrendingDiscoverContentIDs fetches the external trending list and resolves
+// it to ordered library content IDs, cached for an hour per (source, window).
+func (f *Fetcher) loadTrendingDiscoverContentIDs(ctx context.Context, source, window string, fetchLimit int) ([]string, error) {
+	cache := f.ensureEditorialCandidateCache()
+	cacheKey := fmt.Sprintf("trending_discover|%s|%s|%d", source, window, fetchLimit)
+	now := f.Clock.Now()
+	if cached, ok := cache.get(cacheKey, now); ok {
+		return cached, nil
+	}
+
+	entries, err := f.fetchTrendingDiscoverEntries(ctx, source, window, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+	// Don't cache when the provider is unconfigured/empty, so a newly-configured
+	// provider takes effect immediately rather than after the TTL.
+	if len(entries) == 0 {
+		return []string{}, nil
+	}
+
+	contentIDs, err := f.resolveTrendingDiscoverIDs(ctx, entries)
+	if err != nil {
+		return nil, err
+	}
+	cache.set(cacheKey, contentIDs, now.Add(time.Hour))
+	return contentIDs, nil
+}
+
+// fetchTrendingDiscoverEntries pulls the raw trending list from the configured
+// provider. A nil/unconfigured provider yields an empty list (no error) so the
+// section simply renders empty.
+func (f *Fetcher) fetchTrendingDiscoverEntries(ctx context.Context, source, window string, fetchLimit int) ([]trendingDiscoverEntry, error) {
+	if source == "trakt" {
+		if f.TraktTrending == nil {
+			return nil, nil
+		}
+		// Trakt has no mixed endpoint; fetch movies + shows and concatenate.
+		movies, movieErr := f.TraktTrending.GetCollectionPreset(ctx, "trending", "movie", fetchLimit, "")
+		shows, showErr := f.TraktTrending.GetCollectionPreset(ctx, "trending", "tv", fetchLimit, "")
+		if movieErr != nil && showErr != nil {
+			return nil, fmt.Errorf("trakt trending: %v / %v", movieErr, showErr)
+		}
+		merged := append(append([]catalog.TraktCollectionEntry{}, movies...), shows...)
+		out := make([]trendingDiscoverEntry, 0, len(merged))
+		for _, e := range merged {
+			entry := trendingDiscoverEntry{imdbID: e.IMDbID, mediaType: e.MediaType}
+			if e.TMDBID > 0 {
+				entry.tmdbID = strconv.Itoa(e.TMDBID)
+			}
+			if e.TVDBID > 0 {
+				entry.tvdbID = strconv.Itoa(e.TVDBID)
+			}
+			out = append(out, entry)
+		}
+		return out, nil
+	}
+
+	// Default: TMDB /trending/all/{window} — natively mixed movies + series.
+	if f.TMDBTrending == nil {
+		return nil, nil
+	}
+	entries, err := f.TMDBTrending.GetCollectionPreset(ctx, "trending", "all", window, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]trendingDiscoverEntry, 0, len(entries))
+	for _, e := range entries {
+		entry := trendingDiscoverEntry{imdbID: e.IMDbID, mediaType: e.MediaType}
+		if e.ID > 0 {
+			entry.tmdbID = strconv.Itoa(e.ID)
+		}
+		if e.TVDBID > 0 {
+			entry.tvdbID = strconv.Itoa(e.TVDBID)
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// resolveTrendingDiscoverIDs matches trending entries to library content IDs via
+// two batched external-ID lookups (movies, series), preserving trending order.
+func (f *Fetcher) resolveTrendingDiscoverIDs(ctx context.Context, entries []trendingDiscoverEntry) ([]string, error) {
+	if f.ItemRepo == nil {
+		return nil, fmt.Errorf("trending_discover: item repository not configured")
+	}
+	var movieBatch, seriesBatch catalog.ExternalIDBatch
+	for _, e := range entries {
+		batch := &movieBatch
+		if e.mediaType == "tv" {
+			batch = &seriesBatch
+		}
+		if e.tmdbID != "" {
+			batch.TMDBIDs = append(batch.TMDBIDs, e.tmdbID)
+		}
+		if e.imdbID != "" {
+			batch.IMDbIDs = append(batch.IMDbIDs, e.imdbID)
+		}
+		if e.tvdbID != "" {
+			batch.TVDBIDs = append(batch.TVDBIDs, e.tvdbID)
+		}
+	}
+	movieLookup, err := f.ItemRepo.GetByExternalIDs(ctx, movieBatch, "movie")
+	if err != nil {
+		return nil, err
+	}
+	seriesLookup, err := f.ItemRepo.GetByExternalIDs(ctx, seriesBatch, "series")
+	if err != nil {
+		return nil, err
+	}
+	return orderedTrendingContentIDs(entries, movieLookup, seriesLookup), nil
+}
+
+// orderedTrendingContentIDs maps trending entries to library content IDs in
+// trending order, preferring TVDB (series) > TMDB > IMDb, de-duplicated.
+func orderedTrendingContentIDs(entries []trendingDiscoverEntry, movieLookup, seriesLookup *catalog.ExternalIDLookup) []string {
+	seen := make(map[string]struct{}, len(entries))
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		lookup := movieLookup
+		isSeries := e.mediaType == "tv"
+		if isSeries {
+			lookup = seriesLookup
+		}
+		if lookup == nil {
+			continue
+		}
+		var id string
+		if isSeries && e.tvdbID != "" {
+			id = lookup.ByTVDB[e.tvdbID]
+		}
+		if id == "" && e.tmdbID != "" {
+			id = lookup.ByTMDB[e.tmdbID]
+		}
+		if id == "" && e.imdbID != "" {
+			id = lookup.ByIMDb[e.imdbID]
+		}
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {

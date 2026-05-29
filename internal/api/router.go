@@ -878,6 +878,12 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 		}
 
+		// Wire external-trending fetchers into the section fetcher so the
+		// trending_discover home section can pull TMDB/Trakt trending.
+		sectionFetcher.ItemRepo = itemRepo
+		sectionFetcher.TMDBTrending = libraryCollectionService.TMDBCollections
+		sectionFetcher.TraktTrending = libraryCollectionService.TraktCollections
+
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,
 			libraryCollectionService,
