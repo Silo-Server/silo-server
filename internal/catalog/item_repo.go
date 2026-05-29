@@ -277,6 +277,7 @@ func scanItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
 			&item.FirstAirDate,
 			&item.LastAirDate,
 			&item.AirTime,
+			&item.AirTimezone,
 			&item.ShowStatus,
 			&item.MatchedAt,
 			&item.LastRefreshed,
