@@ -59,6 +59,12 @@ type recommendationReader interface {
 	GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
 }
 
+// trendingSnapshotGetter is the read side of the trending snapshot table.
+// Satisfied by *TrendingSnapshotRepository.
+type trendingSnapshotGetter interface {
+	Get(ctx context.Context, source, window string) (TrendingSnapshot, bool, error)
+}
+
 // Fetcher runs section queries against the database.
 type Fetcher struct {
 	pool                 *pgxpool.Pool
@@ -68,13 +74,11 @@ type Fetcher struct {
 	RecommendationReader recommendationReader
 	NextUpRepo           *catalog.NextUpRepository
 
-	// ItemRepo resolves external IDs (TMDB/Trakt) to library content IDs for
-	// the trending_discover section. Nil disables external-trending matching.
-	ItemRepo *catalog.ItemRepository
-	// TMDBTrending and TraktTrending fetch external global trending lists. Each
-	// is nil when that provider is not configured.
-	TMDBTrending  catalog.TMDBCollectionFetcher
-	TraktTrending catalog.TraktCollectionFetcher
+	// TrendingSnapshots reads the persisted external-trending snapshots that
+	// back the trending_discover section. Nil renders that section empty.
+	// Snapshots are produced out-of-band by TrendingRefresher, so the read path
+	// never calls the upstream provider.
+	TrendingSnapshots trendingSnapshotGetter
 
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
@@ -2375,30 +2379,14 @@ func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, 
 	if len(s.Config) > 0 {
 		_ = json.Unmarshal(s.Config, &p)
 	}
-	source := p.Source
-	if source != "trakt" {
-		source = "tmdb"
-	}
-	window := p.Window
-	if window != "day" {
-		window = "week"
-	}
+	source, window := canonicalTrendingKey(p.Source, p.Window)
 
 	limit := s.ItemLimit
 	if limit <= 0 {
 		limit = 20
 	}
-	// Over-fetch: library-only matching drops globally-trending titles the
-	// server does not own, so request more candidates than the display limit.
-	fetchLimit := limit * 5
-	if fetchLimit < 50 {
-		fetchLimit = 50
-	}
-	if fetchLimit > 200 {
-		fetchLimit = 200
-	}
 
-	orderedIDs, err := f.loadTrendingDiscoverContentIDs(ctx, source, window, fetchLimit)
+	orderedIDs, err := f.loadTrendingDiscoverContentIDs(ctx, source, window)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2420,119 +2408,22 @@ func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, 
 	return ordered, len(ordered), nil
 }
 
-// loadTrendingDiscoverContentIDs fetches the external trending list and resolves
-// it to ordered library content IDs, cached for an hour per (source, window).
-func (f *Fetcher) loadTrendingDiscoverContentIDs(ctx context.Context, source, window string, fetchLimit int) ([]string, error) {
-	cache := f.ensureEditorialCandidateCache()
-	cacheKey := fmt.Sprintf("trending_discover|%s|%s|%d", source, window, fetchLimit)
-	if cached, ok := cache.get(cacheKey, f.now()); ok {
-		return cached, nil
-	}
-
-	// Collapse concurrent cache-miss loads (e.g. many home-page requests at TTL
-	// expiry) into a single upstream fetch + ID resolution, as
-	// cachedEditorialCandidates does for editorial sections.
-	value, err, _ := f.candidateGroup.Do(cacheKey, func() (any, error) {
-		now := f.now()
-		if cached, ok := cache.get(cacheKey, now); ok {
-			return cached, nil
-		}
-
-		entries, err := f.fetchTrendingDiscoverEntries(ctx, source, window, fetchLimit)
-		if err != nil {
-			return nil, err
-		}
-		// Don't cache when the provider is unconfigured/empty, so a
-		// newly-configured provider takes effect immediately rather than after
-		// the TTL.
-		if len(entries) == 0 {
-			return []string{}, nil
-		}
-
-		contentIDs, err := f.resolveTrendingDiscoverIDs(ctx, entries)
-		if err != nil {
-			return nil, err
-		}
-		cache.set(cacheKey, contentIDs, now.Add(time.Hour))
-		return contentIDs, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	contentIDs, _ := value.([]string)
-	return append([]string(nil), contentIDs...), nil
-}
-
-// fetchTrendingDiscoverEntries pulls the raw trending list from the configured
-// provider. A nil/unconfigured provider yields an empty list (no error) so the
-// section simply renders empty.
-func (f *Fetcher) fetchTrendingDiscoverEntries(ctx context.Context, source, window string, fetchLimit int) ([]trendingDiscoverEntry, error) {
-	if source == "trakt" {
-		if f.TraktTrending == nil {
-			return nil, nil
-		}
-		// Trakt has no mixed endpoint; fetch movies + shows and concatenate.
-		movies, movieErr := f.TraktTrending.GetCollectionPreset(ctx, "trending", "movie", fetchLimit, "")
-		shows, showErr := f.TraktTrending.GetCollectionPreset(ctx, "trending", "tv", fetchLimit, "")
-		if movieErr != nil && showErr != nil {
-			return nil, fmt.Errorf("trakt trending: %v / %v", movieErr, showErr)
-		}
-		out := make([]trendingDiscoverEntry, 0, len(movies)+len(shows))
-		for _, e := range movies {
-			out = append(out, newTrendingEntry(e.TMDBID, e.TVDBID, e.IMDbID, e.MediaType))
-		}
-		for _, e := range shows {
-			out = append(out, newTrendingEntry(e.TMDBID, e.TVDBID, e.IMDbID, e.MediaType))
-		}
-		return out, nil
-	}
-
-	// Default: TMDB /trending/all/{window} — natively mixed movies + series.
-	if f.TMDBTrending == nil {
+// loadTrendingDiscoverContentIDs returns the persisted, catalog-resolved content
+// IDs for the canonical (source, window). It reads only the snapshot table; the
+// upstream fetch happens out-of-band in TrendingRefresher. Returns nil when no
+// snapshot reader is configured or no snapshot exists yet.
+func (f *Fetcher) loadTrendingDiscoverContentIDs(ctx context.Context, source, window string) ([]string, error) {
+	if f.TrendingSnapshots == nil {
 		return nil, nil
 	}
-	entries, err := f.TMDBTrending.GetCollectionPreset(ctx, "trending", "all", window, fetchLimit)
+	snap, found, err := f.TrendingSnapshots.Get(ctx, source, window)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]trendingDiscoverEntry, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, newTrendingEntry(e.ID, e.TVDBID, e.IMDbID, e.MediaType))
+	if !found {
+		return nil, nil
 	}
-	return out, nil
-}
-
-// resolveTrendingDiscoverIDs matches trending entries to library content IDs via
-// two batched external-ID lookups (movies, series), preserving trending order.
-func (f *Fetcher) resolveTrendingDiscoverIDs(ctx context.Context, entries []trendingDiscoverEntry) ([]string, error) {
-	if f.ItemRepo == nil {
-		return nil, fmt.Errorf("trending_discover: item repository not configured")
-	}
-	var movieBatch, seriesBatch catalog.ExternalIDBatch
-	for _, e := range entries {
-		batch := &movieBatch
-		if e.mediaType == "tv" {
-			batch = &seriesBatch
-		}
-		if e.tmdbID != "" {
-			batch.TMDBIDs = append(batch.TMDBIDs, e.tmdbID)
-		}
-		if e.imdbID != "" {
-			batch.IMDbIDs = append(batch.IMDbIDs, e.imdbID)
-		}
-		if e.tvdbID != "" {
-			batch.TVDBIDs = append(batch.TVDBIDs, e.tvdbID)
-		}
-	}
-	movieLookup, err := f.ItemRepo.GetByExternalIDs(ctx, movieBatch, "movie")
-	if err != nil {
-		return nil, err
-	}
-	seriesLookup, err := f.ItemRepo.GetByExternalIDs(ctx, seriesBatch, "series")
-	if err != nil {
-		return nil, err
-	}
-	return orderedTrendingContentIDs(entries, movieLookup, seriesLookup), nil
+	return snap.ContentIDs, nil
 }
 
 // orderedTrendingContentIDs maps trending entries to library content IDs in
