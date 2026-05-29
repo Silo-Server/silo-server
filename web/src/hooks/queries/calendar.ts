@@ -18,6 +18,7 @@ export interface CalendarEvent {
   local_air_date: string;
   poster_url?: string;
   poster_thumbhash?: string;
+  watched?: boolean;
   badges: string[];
 }
 
