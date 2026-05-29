@@ -16,6 +16,10 @@ import (
 )
 
 const subtitleAppearanceSettingKey = "subtitle_appearance"
+const (
+	libraryPageStateSettingKey         = "ui.library_page_state"
+	rememberLibraryPageStateSettingKey = "ui.remember_library_page_state"
+)
 
 const (
 	deviceIDHeader       = "X-Silo-Device-Id"
@@ -155,6 +159,16 @@ var settingsRegistry = map[string]settingSpec{
 		Scope:        scopeDevice,
 		DefaultValue: "",
 		Validate:     validateJSONSetting(subtitleAppearanceSettingKey),
+	},
+	libraryPageStateSettingKey: {
+		Scope:        scopeDevice,
+		DefaultValue: "",
+		Validate:     validateJSONSetting(libraryPageStateSettingKey),
+	},
+	rememberLibraryPageStateSettingKey: {
+		Scope:        scopeDevice,
+		DefaultValue: "true",
+		Validate:     validateBoolSetting(rememberLibraryPageStateSettingKey),
 	},
 	"player.hdr_enabled": {
 		Scope:        scopeDevice,

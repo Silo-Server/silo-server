@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { QueryDefinition } from "@/api/types";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -9,16 +9,35 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import LibraryRecommended from "./LibraryRecommended";
 import LibraryBrowse from "./LibraryBrowse";
 import LibraryCollections from "./LibraryCollections";
-import { parseLibraryPageState, updateLibraryPageSearchParams } from "./libraryPageSearchParams";
+import { useLibraryPageStatePreference } from "@/hooks/queries/libraryPageState";
+import {
+  applySavedLibraryPageSearchParams,
+  hasLibraryPageSearchParams,
+  parseLibraryPageState,
+  serializeLibraryPageSearchParams,
+  updateLibraryPageSearchParams,
+} from "./libraryPageSearchParams";
 
 export default function LibraryPage() {
   const { libraryId } = useParams<{ libraryId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries, isLoading } = useUserLibraries();
+  const {
+    isLoading: libraryPageStateLoading,
+    preference: libraryPageStatePreference,
+    rememberEnabled: rememberLibraryPageState,
+    saveLibrarySearch,
+  } = useLibraryPageStatePreference();
+  const savedStateHydratedLibraryIdRef = useRef<number | null>(null);
+  const applyingSavedSearchParamsRef = useRef<string | null>(null);
 
   const id = Number(libraryId);
   const library = libraries?.find((l) => l.id === id);
   const libraryType = library?.type ?? "";
+  const savedLibrarySearch =
+    Number.isFinite(id) && id > 0
+      ? libraryPageStatePreference.libraries[String(id)]?.search
+      : undefined;
   const { activeTab, browseType, queryDefinition } = parseLibraryPageState(
     searchParams,
     libraryType,
@@ -37,6 +56,42 @@ export default function LibraryPage() {
   useDocumentTitle(library?.name ?? "Library");
 
   useEffect(() => {
+    if (
+      !libraryType ||
+      !Number.isFinite(id) ||
+      id <= 0 ||
+      libraryPageStateLoading ||
+      !rememberLibraryPageState ||
+      savedStateHydratedLibraryIdRef.current === id
+    ) {
+      return;
+    }
+
+    savedStateHydratedLibraryIdRef.current = id;
+    if (
+      savedLibrarySearch == null ||
+      hasLibraryPageSearchParams(searchParams) ||
+      savedLibrarySearch === serializeLibraryPageSearchParams(searchParams)
+    ) {
+      return;
+    }
+
+    const nextSearchParams = applySavedLibraryPageSearchParams(searchParams, savedLibrarySearch);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      applyingSavedSearchParamsRef.current = nextSearchParams.toString();
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [
+    id,
+    libraryPageStateLoading,
+    libraryType,
+    rememberLibraryPageState,
+    savedLibrarySearch,
+    searchParams,
+    setSearchParams,
+  ]);
+
+  useEffect(() => {
     if (!libraryType) {
       return;
     }
@@ -51,6 +106,49 @@ export default function LibraryPage() {
       setSearchParams(normalizedSearchParams, { replace: true });
     }
   }, [activeTab, browseType, queryDefinition, libraryType, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (
+      !libraryType ||
+      !Number.isFinite(id) ||
+      id <= 0 ||
+      libraryPageStateLoading ||
+      !rememberLibraryPageState
+    ) {
+      return;
+    }
+
+    const normalizedSearchParams = updateLibraryPageSearchParams(
+      searchParams,
+      { activeTab, browseType, queryDefinition },
+      libraryType,
+    );
+    if (normalizedSearchParams.toString() !== searchParams.toString()) {
+      return;
+    }
+
+    const search = serializeLibraryPageSearchParams(normalizedSearchParams);
+    if (applyingSavedSearchParamsRef.current != null) {
+      if (applyingSavedSearchParamsRef.current === normalizedSearchParams.toString()) {
+        applyingSavedSearchParamsRef.current = null;
+      }
+      return;
+    }
+    if (savedLibrarySearch !== search) {
+      saveLibrarySearch(id, search);
+    }
+  }, [
+    activeTab,
+    browseType,
+    id,
+    libraryPageStateLoading,
+    libraryType,
+    queryDefinition,
+    rememberLibraryPageState,
+    saveLibrarySearch,
+    savedLibrarySearch,
+    searchParams,
+  ]);
 
   const handleTabChange = (value: string) => {
     const nextSearchParams = updateLibraryPageSearchParams(

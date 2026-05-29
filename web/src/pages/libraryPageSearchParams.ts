@@ -258,9 +258,7 @@ export function parseLibraryPageState(
   const mediaScopeParam = readString(searchParams.get("type"));
   const mediaScope =
     libraryType === "mixed" &&
-    (mediaScopeParam === "movie" ||
-      mediaScopeParam === "series" ||
-      mediaScopeParam === "episode")
+    (mediaScopeParam === "movie" || mediaScopeParam === "series" || mediaScopeParam === "episode")
       ? mediaScopeParam
       : undefined;
   const sortRelevanceScope =
@@ -290,6 +288,20 @@ export function parseLibraryPageState(
   };
 }
 
+export function hasLibraryPageSearchParams(searchParams: URLSearchParams): boolean {
+  for (const key of searchParams.keys()) {
+    if (
+      LIBRARY_QUERY_KEYS.has(key) ||
+      GROUP_MATCH_PATTERN.test(key) ||
+      GROUP_RULE_PATTERN.test(key) ||
+      GROUP_RULE_VALUE_PATTERN.test(key)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function deleteLibraryQueryParams(nextSearchParams: URLSearchParams) {
   for (const key of Array.from(nextSearchParams.keys())) {
     if (
@@ -301,6 +313,34 @@ function deleteLibraryQueryParams(nextSearchParams: URLSearchParams) {
       nextSearchParams.delete(key);
     }
   }
+}
+
+export function serializeLibraryPageSearchParams(searchParams: URLSearchParams): string {
+  const librarySearchParams = new URLSearchParams(searchParams);
+  for (const key of Array.from(librarySearchParams.keys())) {
+    if (
+      !LIBRARY_QUERY_KEYS.has(key) &&
+      !GROUP_MATCH_PATTERN.test(key) &&
+      !GROUP_RULE_PATTERN.test(key) &&
+      !GROUP_RULE_VALUE_PATTERN.test(key)
+    ) {
+      librarySearchParams.delete(key);
+    }
+  }
+  return librarySearchParams.toString();
+}
+
+export function applySavedLibraryPageSearchParams(
+  currentSearchParams: URLSearchParams,
+  savedSearch: string,
+): URLSearchParams {
+  const nextSearchParams = new URLSearchParams(currentSearchParams);
+  deleteLibraryQueryParams(nextSearchParams);
+  const savedSearchParams = new URLSearchParams(savedSearch);
+  savedSearchParams.forEach((value, key) => {
+    nextSearchParams.append(key, value);
+  });
+  return nextSearchParams;
 }
 
 export function updateLibraryPageSearchParams(
