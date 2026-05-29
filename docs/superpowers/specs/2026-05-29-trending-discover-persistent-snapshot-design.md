@@ -57,8 +57,10 @@ The change cleanly separates **read** from **refresh**:
 
 ## Data model
 
-New migration `166_trending_discover_snapshots` (next free number is 166; 165 is
-the current max).
+New migration `167_trending_discover_snapshots`. (Originally numbered 166, but
+the shared dev DB had already recorded version 166 from another branch's
+`166_trending_blend_collection_type`; the migration runner dedupes by integer
+version, so 166 was silently skipped. Renumbered to 167, the next free version.)
 
 ```
 trending_discover_snapshots
