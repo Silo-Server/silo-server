@@ -133,9 +133,9 @@ func (h *PeopleHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	personValue := h.refreshPersonOnViewIfDue(r.Context(), *person)
+	h.enqueuePersonRefreshIfDue(*person)
 
-	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), personValue))
+	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), *person))
 }
 
 // HandleRefreshPerson serves POST /api/v1/people/:id/refresh.
@@ -369,42 +369,12 @@ func (h *PeopleHandler) enqueuePersonRefreshIfDue(person models.Person) {
 	}
 
 	if personMetadataIncomplete(person) {
-		h.refreshQueue.Enqueue(person.ID)
 		return
 	}
 
 	if person.UpdatedAt.Before(time.Now().Add(-personMetadataStaleAfter)) {
 		h.refreshQueue.Enqueue(person.ID)
 	}
-}
-
-func (h *PeopleHandler) refreshPersonOnViewIfDue(ctx context.Context, person models.Person) models.Person {
-	if !personHasRefreshableProviderID(person) {
-		return person
-	}
-
-	if !personMetadataIncomplete(person) {
-		h.enqueuePersonRefreshIfDue(person)
-		return person
-	}
-
-	if h.refresher == nil {
-		h.enqueuePersonRefreshIfDue(person)
-		return person
-	}
-
-	refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
-	refreshed, err := h.refresher.RefreshPerson(refreshCtx, person.ID)
-	if err != nil {
-		slog.Warn("people: automatic person refresh failed", "id", person.ID, "error", err)
-		return person
-	}
-	if refreshed == nil {
-		return person
-	}
-	return *refreshed
 }
 
 func personHasRefreshableProviderID(person models.Person) bool {

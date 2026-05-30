@@ -26,6 +26,7 @@ export default function PersonDetail() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [editOpen, setEditOpen] = useState(false);
   const autoRefreshWindowRef = useRef<{ personId: number; until: number } | null>(null);
+  const autoRefreshRequestedPersonIdRef = useRef<number | null>(null);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const refreshMutation = useRefreshPerson(id, isAdmin);
@@ -52,6 +53,17 @@ export default function PersonDetail() {
   });
 
   useDocumentTitle(person?.name ?? "Person");
+
+  useEffect(() => {
+    if (!person || !user || !isPersonMetadataIncomplete(person)) {
+      return;
+    }
+    if (autoRefreshRequestedPersonIdRef.current === person.id || refreshMutation.isPending) {
+      return;
+    }
+    autoRefreshRequestedPersonIdRef.current = person.id;
+    refreshMutation.mutate();
+  }, [person, refreshMutation, user]);
 
   const catalogState: CatalogSearchState = useMemo(
     () => ({
