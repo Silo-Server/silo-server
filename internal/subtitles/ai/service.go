@@ -279,6 +279,14 @@ func (s *Service) dispatch(job Job) {
 			cancel()
 		}()
 
+		// Heartbeat for the whole lifetime — crucially including while queued
+		// behind the semaphore — so the stale-job reaper never reaps a job that is
+		// alive but merely waiting for a slot (which would otherwise mark it failed
+		// and let it resurrect itself on acquire, or admit a duplicate).
+		stopHeartbeat := make(chan struct{})
+		defer close(stopHeartbeat)
+		go s.heartbeatLoop(runCtx, job.ID, stopHeartbeat)
+
 		// Bound concurrency so translation never starves transcodes.
 		select {
 		case s.sem <- struct{}{}:
@@ -292,27 +300,25 @@ func (s *Service) dispatch(job Job) {
 	}()
 }
 
-func (s *Service) run(ctx context.Context, job *Job) {
-	// Keep heartbeat_at fresh while the job runs (progress updates also bump it),
-	// so the stale-job reaper never resets a job that is still alive during a long
-	// single LLM call.
-	stopHeartbeat := make(chan struct{})
-	defer close(stopHeartbeat)
-	go func() {
-		ticker := time.NewTicker(heartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopHeartbeat:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				_ = s.repo.Heartbeat(context.WithoutCancel(ctx), job.ID)
-			}
+// heartbeatLoop keeps a job's heartbeat_at fresh until the job ends or the
+// context is cancelled, so the stale-job reaper only ever reaps jobs orphaned by
+// a crashed worker.
+func (s *Service) heartbeatLoop(ctx context.Context, jobID int64, stop <-chan struct{}) {
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = s.repo.Heartbeat(context.WithoutCancel(ctx), jobID)
 		}
-	}()
+	}
+}
 
+func (s *Service) run(ctx context.Context, job *Job) {
 	if err := s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0, "Loading subtitle"); err != nil {
 		s.logger.Warn("failed to mark subtitle ai job running", "job", job.ID, "error", err)
 	}

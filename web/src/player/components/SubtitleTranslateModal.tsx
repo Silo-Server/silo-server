@@ -1,9 +1,28 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerSubtitleInfo } from "../types";
 import { playerFetch } from "../player-fetch";
 import { LANGUAGES, getLanguageName } from "../utils/languageNames";
+
+// Formats the server can parse directly from an external/downloaded file.
+const TRANSLATABLE_TEXT_CODECS = new Set(["srt", "subrip", "vtt", "webvtt"]);
+// Bitmap codecs the server can't extract as text (it would burn them in).
+const BITMAP_CODECS = new Set(["pgs", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]);
+
+// Mirror the server's loadSource acceptance: embedded non-bitmap tracks are
+// extracted to text via ffmpeg, while external/downloaded sources must already
+// be a parseable text format. Offering anything else starts a job that fails
+// asynchronously instead of preventing the choice up front.
+export function isTranslatableSource(track: PlayerSubtitleInfo): boolean {
+  if (track.live) return false;
+  const codec = (track.codec ?? "").toLowerCase();
+  if (track.source === "embedded") {
+    return !BITMAP_CODECS.has(codec);
+  }
+  return TRANSLATABLE_TEXT_CODECS.has(codec);
+}
 
 interface SubtitleTranslateModalProps {
   mediaFileId: number;
@@ -30,8 +49,9 @@ export function SubtitleTranslateModal({
   getStartPosition,
   onClose,
 }: SubtitleTranslateModalProps) {
-  // Live (in-progress) tracks can't be a translation source.
-  const sourceTracks = useMemo(() => tracks.filter((t) => !t.live), [tracks]);
+  // Only offer sources the server can actually translate (excludes live tracks,
+  // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
+  const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
   const [sourceIndex, setSourceIndex] = useState<number | null>(null);
   const [targetLang, setTargetLang] = useState("en");
   const [submitting, setSubmitting] = useState(false);
@@ -54,18 +74,30 @@ export function SubtitleTranslateModal({
     setSubmitting(true);
     setError(null);
     try {
-      await playerFetch(playerConfig, "/subtitles/ai/translate", {
-        method: "POST",
-        body: JSON.stringify({
-          media_file_id: mediaFileId,
-          source_index: effectiveSourceIndex,
-          source_language: source?.language ?? "",
-          target_language: targetLang,
-          session_id: sessionId ?? "",
-          start_position: getStartPosition?.() ?? 0,
-        }),
-      });
-      // The player takes over from here: it pauses, streams cues in as they're
+      const res = await playerFetch<{ job?: { status?: string } }>(
+        playerConfig,
+        "/subtitles/ai/translate",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            media_file_id: mediaFileId,
+            source_index: effectiveSourceIndex,
+            source_language: source?.language ?? "",
+            target_language: targetLang,
+            session_id: sessionId ?? "",
+            start_position: getStartPosition?.() ?? 0,
+          }),
+        },
+      );
+      // A request that collapses onto an already-running job (e.g. after a
+      // reload, or a second viewer) won't get its own live stream — tell the
+      // user it's underway; it'll appear via the subtitle-ready refresh.
+      if (res?.job?.status === "running") {
+        toast.info(
+          "A translation for this track is already in progress — it'll appear when it's ready.",
+        );
+      }
+      // Otherwise the player takes over: it pauses, streams cues in as they're
       // translated, then resumes once your position is covered.
       onClose();
     } catch (err) {
