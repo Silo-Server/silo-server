@@ -101,11 +101,15 @@ func (r *PgJobRepository) ListJobsByMediaFile(ctx context.Context, mediaFileID i
 	return jobs, rows.Err()
 }
 
+// UpdateProgress, CompleteJob, and FailJob only transition a job that is still
+// active ("pending"/"running"). The guard makes them no-ops on an already
+// terminal row, so a job that was cancelled or reaped as stale can never be
+// resurrected by a late write from its own worker goroutine.
 func (r *PgJobRepository) UpdateProgress(ctx context.Context, id int64, status JobStatus, progress float64, message string) error {
 	_, err := r.pool.Exec(ctx,
 		`UPDATE subtitle_ai_jobs
 		SET status = $2, progress = $3, progress_message = $4, updated_at = now(), heartbeat_at = now()
-		WHERE id = $1`, id, status, progress, message)
+		WHERE id = $1 AND status IN ('pending', 'running')`, id, status, progress, message)
 	if err != nil {
 		return fmt.Errorf("update subtitle ai job progress: %w", err)
 	}
@@ -117,7 +121,7 @@ func (r *PgJobRepository) CompleteJob(ctx context.Context, id int64, subtitleID 
 		`UPDATE subtitle_ai_jobs
 		SET status = 'completed', progress = 1, result_subtitle_id = $2,
 			error_message = '', updated_at = now(), heartbeat_at = now()
-		WHERE id = $1`, id, subtitleID)
+		WHERE id = $1 AND status IN ('pending', 'running')`, id, subtitleID)
 	if err != nil {
 		return fmt.Errorf("complete subtitle ai job: %w", err)
 	}
@@ -128,7 +132,7 @@ func (r *PgJobRepository) FailJob(ctx context.Context, id int64, status JobStatu
 	_, err := r.pool.Exec(ctx,
 		`UPDATE subtitle_ai_jobs
 		SET status = $2, error_message = $3, updated_at = now(), heartbeat_at = now()
-		WHERE id = $1`, id, status, message)
+		WHERE id = $1 AND status IN ('pending', 'running')`, id, status, message)
 	if err != nil {
 		return fmt.Errorf("fail subtitle ai job: %w", err)
 	}
