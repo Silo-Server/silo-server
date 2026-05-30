@@ -1082,6 +1082,7 @@ var sensitiveSettingKeys = map[string]bool{
 	"mdblist.api_key":                      true,
 	"requests.radarr.api_key":              true,
 	"requests.sonarr.api_key":              true,
+	"subtitle_ai.api_key":                  true,
 	"watchsync.trakt.client_id":            true,
 	"watchsync.trakt.client_secret":        true,
 	"watchsync.simkl.client_id":            true,

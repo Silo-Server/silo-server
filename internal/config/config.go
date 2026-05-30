@@ -238,6 +238,20 @@ type RecommendationsConfig struct {
 	CowatchCron            string  `yaml:"-"`
 }
 
+// SubtitleAIConfig holds settings for on-demand AI subtitle translation (and,
+// in a follow-up, Whisper ASR generation) via a single OpenAI-compatible
+// endpoint — the operator can point it at OpenAI, Groq, a local Ollama server,
+// etc. Mirrors the recommendations embedding client's configuration style.
+type SubtitleAIConfig struct {
+	Enabled           bool   `yaml:"-"`
+	BaseURL           string `yaml:"-"`
+	APIKey            string `yaml:"-"`
+	ChatModel         string `yaml:"-"`
+	MaxConcurrentJobs int    `yaml:"-"`
+	BatchSize         int    `yaml:"-"`
+	ContextNeighbors  int    `yaml:"-"`
+}
+
 // DownloadConfig holds server-wide download policy settings.
 type DownloadConfig struct {
 	Enabled              bool          `yaml:"-"`
@@ -268,6 +282,7 @@ type Config struct {
 	Auth            AuthConfig            `yaml:"-"`
 	JellyfinCompat  JellyfinCompatConfig  `yaml:"-"`
 	Recommendations RecommendationsConfig `yaml:"-"`
+	SubtitleAI      SubtitleAIConfig      `yaml:"-"`
 	Download        DownloadConfig        `yaml:"-"`
 	TMDBAPIKey      string                `yaml:"-"`
 	MDBListAPIKey   string                `yaml:"-"`
