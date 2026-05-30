@@ -279,6 +279,12 @@ export function VideoPlayer({
   // Drop any live translation when the media changes so a stale track from the
   // previous file never lingers.
   useEffect(() => {
+    // Disarm any pending resume timeout so a translation from the previous file
+    // can't fire its 30s callback against the new playback state.
+    if (translationResumeTimerRef.current !== null) {
+      window.clearTimeout(translationResumeTimerRef.current);
+      translationResumeTimerRef.current = null;
+    }
     setLiveTranslation(null);
     setLiveCues([]);
     setTranslationBuffering(false);

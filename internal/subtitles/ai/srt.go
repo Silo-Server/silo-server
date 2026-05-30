@@ -92,6 +92,9 @@ func parseTimingLine(line string) (time.Duration, time.Duration, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	if start < 0 || end < 0 || end < start {
+		return 0, 0, fmt.Errorf("invalid cue range")
+	}
 	return start, end, nil
 }
 

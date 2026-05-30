@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   useSubtitleProviders,
   useUpdateSubtitleProvider,
@@ -471,11 +472,29 @@ function AISubtitleTranslationCard() {
   }, [settings]);
 
   function save() {
+    const trimmedBaseUrl = baseUrl.trim();
+    const trimmedChatModel = chatModel.trim();
+    const parsedMaxConcurrent = Number.parseInt(maxConcurrent, 10);
+
+    // Don't let an admin persist a config that would break translation for
+    // everyone (a blank endpoint/model when enabled, or a bad concurrency value).
+    if (enabled === "true" && (trimmedBaseUrl === "" || trimmedChatModel === "")) {
+      toast.error("Base URL and chat model are required to enable AI translation.");
+      return;
+    }
+    if (!Number.isInteger(parsedMaxConcurrent) || parsedMaxConcurrent < 1) {
+      toast.error("Max concurrent jobs must be a positive whole number.");
+      return;
+    }
+
     const updates = [
       updateSetting.mutateAsync({ key: "subtitle_ai.enabled", value: enabled }),
-      updateSetting.mutateAsync({ key: "subtitle_ai.base_url", value: baseUrl }),
-      updateSetting.mutateAsync({ key: "subtitle_ai.chat_model", value: chatModel }),
-      updateSetting.mutateAsync({ key: "subtitle_ai.max_concurrent_jobs", value: maxConcurrent }),
+      updateSetting.mutateAsync({ key: "subtitle_ai.base_url", value: trimmedBaseUrl }),
+      updateSetting.mutateAsync({ key: "subtitle_ai.chat_model", value: trimmedChatModel }),
+      updateSetting.mutateAsync({
+        key: "subtitle_ai.max_concurrent_jobs",
+        value: String(parsedMaxConcurrent),
+      }),
     ];
     if (apiKey.trim() !== "") {
       updates.push(updateSetting.mutateAsync({ key: "subtitle_ai.api_key", value: apiKey }));

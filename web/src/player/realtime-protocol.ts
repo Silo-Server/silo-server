@@ -249,13 +249,19 @@ function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdate
   );
 }
 
+/** An optional string field is valid only when absent or actually a string. */
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
 function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyPayload {
   return (
     isRecord(value) &&
     typeof value.session_id === "string" &&
     typeof value.file_id === "number" &&
     typeof value.subtitle_id === "number" &&
-    typeof value.language === "string"
+    typeof value.language === "string" &&
+    isOptionalString(value.label)
   );
 }
 
@@ -278,7 +284,8 @@ function isTranslationStartedPayload(
     typeof value.job_id === "number" &&
     typeof value.track_key === "string" &&
     typeof value.language === "string" &&
-    typeof value.total_cues === "number"
+    typeof value.total_cues === "number" &&
+    isOptionalString(value.label)
   );
 }
 
@@ -306,7 +313,8 @@ function isTranslationCompletedPayload(
     typeof value.job_id === "number" &&
     typeof value.track_key === "string" &&
     typeof value.subtitle_id === "number" &&
-    typeof value.language === "string"
+    typeof value.language === "string" &&
+    isOptionalString(value.label)
   );
 }
 
@@ -318,7 +326,8 @@ function isTranslationFailedPayload(
     typeof value.session_id === "string" &&
     typeof value.file_id === "number" &&
     typeof value.job_id === "number" &&
-    typeof value.track_key === "string"
+    typeof value.track_key === "string" &&
+    isOptionalString(value.message)
   );
 }
 

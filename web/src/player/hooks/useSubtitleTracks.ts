@@ -39,7 +39,10 @@ function addCuesToTrack(
     const startTime = Math.max(0, parsed.start - origin + delaySec);
     const endTime = parsed.end - origin + delaySec;
     if (endTime <= 0) continue;
-    const key = `${startTime}|${endTime}|${parsed.text}`;
+    // Key on the source cue times, not the delay-shifted display times: the
+    // delay can change between overlapping fetch windows, and a delay-relative
+    // key would let the same source cue re-add itself after a shift.
+    const key = `${parsed.start}|${parsed.end}|${parsed.text}`;
     if (seen.has(key)) continue;
     seen.add(key);
     track.addCue(new VTTCue(startTime, endTime, parsed.text));

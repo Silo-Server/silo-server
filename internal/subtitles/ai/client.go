@@ -98,8 +98,17 @@ func (c *Client) chat(ctx context.Context, messages []chatMessage, jsonObject bo
 			continue
 		}
 
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if readErr != nil {
+			// A truncated/failed read could otherwise be misparsed as a valid
+			// (empty) response; treat it as a retryable transport error.
+			lastErr = fmt.Errorf("read chat response: %w", readErr)
+			if waitErr := sleepCtx(ctx, time.Duration(attempt+1)*time.Second); waitErr != nil {
+				return "", waitErr
+			}
+			continue
+		}
 
 		switch {
 		case resp.StatusCode == http.StatusTooManyRequests:
@@ -130,7 +139,7 @@ func (c *Client) chat(ctx context.Context, messages []chatMessage, jsonObject bo
 		} else if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 			lastErr = fmt.Errorf("chat API returned no choices")
 			slog.Warn("subtitle AI chat returned no choices, retrying",
-				"attempt", attempt+1, "model", c.cfg.ChatModel, "body", truncate(string(respBody), 300))
+				"attempt", attempt+1, "model", c.cfg.ChatModel, "response_bytes", len(respBody))
 		} else {
 			return parsed.Choices[0].Message.Content, nil
 		}

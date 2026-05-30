@@ -42,6 +42,15 @@ func NewLLMTranslator(client *Client, batchSize, contextNeighbors int) *LLMTrans
 
 // Translate implements Translator.
 func (t *LLMTranslator) Translate(ctx context.Context, req TranslateRequest, onBatch func(batch []SubtitleCue, done, total int)) ([]SubtitleCue, error) {
+	if t.client == nil {
+		return nil, fmt.Errorf("translator client is nil")
+	}
+	if t.batchSize <= 0 {
+		return nil, fmt.Errorf("invalid batch size: %d", t.batchSize)
+	}
+	if strings.TrimSpace(req.TargetLanguage) == "" {
+		return nil, fmt.Errorf("target language is required")
+	}
 	total := len(req.Cues)
 	if total == 0 {
 		return nil, fmt.Errorf("no cues to translate")
