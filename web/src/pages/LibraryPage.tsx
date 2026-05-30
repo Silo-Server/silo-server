@@ -38,6 +38,23 @@ export default function LibraryPage() {
     Number.isFinite(id) && id > 0
       ? libraryPageStatePreference.libraries[String(id)]?.search
       : undefined;
+  const shouldApplySavedLibrarySearch =
+    Boolean(libraryType) &&
+    Number.isFinite(id) &&
+    id > 0 &&
+    !libraryPageStateLoading &&
+    rememberLibraryPageState &&
+    savedStateHydratedLibraryIdRef.current !== id &&
+    savedLibrarySearch != null &&
+    !hasLibraryPageSearchParams(searchParams) &&
+    savedLibrarySearch !== serializeLibraryPageSearchParams(searchParams);
+  const shouldWaitForSavedLibrarySearch =
+    Boolean(libraryType) &&
+    Number.isFinite(id) &&
+    id > 0 &&
+    libraryPageStateLoading &&
+    savedStateHydratedLibraryIdRef.current !== id &&
+    !hasLibraryPageSearchParams(searchParams);
   const { activeTab, browseType, queryDefinition } = parseLibraryPageState(
     searchParams,
     libraryType,
@@ -62,20 +79,13 @@ export default function LibraryPage() {
       id <= 0 ||
       libraryPageStateLoading ||
       !rememberLibraryPageState ||
-      savedStateHydratedLibraryIdRef.current === id
+      savedStateHydratedLibraryIdRef.current === id ||
+      !shouldApplySavedLibrarySearch
     ) {
       return;
     }
 
     savedStateHydratedLibraryIdRef.current = id;
-    if (
-      savedLibrarySearch == null ||
-      hasLibraryPageSearchParams(searchParams) ||
-      savedLibrarySearch === serializeLibraryPageSearchParams(searchParams)
-    ) {
-      return;
-    }
-
     const nextSearchParams = applySavedLibraryPageSearchParams(searchParams, savedLibrarySearch);
     if (nextSearchParams.toString() !== searchParams.toString()) {
       applyingSavedSearchParamsRef.current = nextSearchParams.toString();
@@ -89,10 +99,11 @@ export default function LibraryPage() {
     savedLibrarySearch,
     searchParams,
     setSearchParams,
+    shouldApplySavedLibrarySearch,
   ]);
 
   useEffect(() => {
-    if (!libraryType) {
+    if (!libraryType || shouldApplySavedLibrarySearch) {
       return;
     }
 
@@ -105,7 +116,15 @@ export default function LibraryPage() {
     if (normalizedSearchParams.toString() !== searchParams.toString()) {
       setSearchParams(normalizedSearchParams, { replace: true });
     }
-  }, [activeTab, browseType, queryDefinition, libraryType, searchParams, setSearchParams]);
+  }, [
+    activeTab,
+    browseType,
+    queryDefinition,
+    libraryType,
+    searchParams,
+    setSearchParams,
+    shouldApplySavedLibrarySearch,
+  ]);
 
   useEffect(() => {
     if (
@@ -113,7 +132,8 @@ export default function LibraryPage() {
       !Number.isFinite(id) ||
       id <= 0 ||
       libraryPageStateLoading ||
-      !rememberLibraryPageState
+      !rememberLibraryPageState ||
+      shouldApplySavedLibrarySearch
     ) {
       return;
     }
@@ -148,6 +168,7 @@ export default function LibraryPage() {
     saveLibrarySearch,
     savedLibrarySearch,
     searchParams,
+    shouldApplySavedLibrarySearch,
   ]);
 
   const handleTabChange = (value: string) => {
@@ -190,7 +211,7 @@ export default function LibraryPage() {
     setSearchParams(nextSearchParams);
   };
 
-  if (isLoading) {
+  if (isLoading || shouldWaitForSavedLibrarySearch || shouldApplySavedLibrarySearch) {
     return (
       <div className="h-full px-4 py-4 sm:px-6 sm:py-6 lg:px-10 xl:px-12">
         <Skeleton className="mb-6 h-10 w-48" />
