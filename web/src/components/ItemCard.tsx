@@ -9,11 +9,14 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 function formatDate(value?: string | null) {
   if (!value) {
     return null;
   }
-  return new Date(value).toLocaleDateString(undefined, {
+  const date = new Date(DATE_ONLY_PATTERN.test(value) ? `${value}T00:00:00` : value);
+  return date.toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
