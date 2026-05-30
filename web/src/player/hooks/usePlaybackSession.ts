@@ -316,6 +316,9 @@ export function usePlaybackSession(
         subtitleUrls: (session.subtitle_urls ?? []).map((s) => ({
           ...s,
           url: buildStreamUrl(config.apiBaseUrl, s.url, token, "direct", 0),
+          font_bundle_url: s.font_bundle_url
+            ? buildStreamUrl(config.apiBaseUrl, s.font_bundle_url, token, "direct", 0)
+            : undefined,
         })),
         playbackInfo: session.playback_info ?? null,
         loading: false,

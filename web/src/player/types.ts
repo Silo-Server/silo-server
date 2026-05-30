@@ -124,6 +124,12 @@ export interface PlayerSubtitleInfo {
   hearing_impaired?: boolean;
   url: string;
   /**
+   * Optional endpoint returning base64-encoded container font attachments for
+   * ASS/SSA rendering. Present for embedded ASS tracks when the backend can
+   * extract attachments from the source media file.
+   */
+  font_bundle_url?: string;
+  /**
    * When true, this is an in-progress AI translation whose cues arrive over the
    * realtime websocket rather than from `url`. `useSubtitleTracks` feeds it from
    * the `liveCues` source instead of fetching.

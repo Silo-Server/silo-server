@@ -305,6 +305,7 @@ type subtitleURL struct {
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	URL             string `json:"url"`
+	FontBundleURL   string `json:"font_bundle_url,omitempty"`
 }
 
 // changeAudioRequest represents the JSON body for PATCH /playback/{session_id}/audio.
@@ -1459,6 +1460,7 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 			Forced:          track.Forced,
 			HearingImpaired: track.HearingImpaired,
 			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, embeddedOffset+i, subtitleURLExt(track.Codec)),
+			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec),
 		})
 	}
 
@@ -1476,6 +1478,13 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 	}
 
 	return urls
+}
+
+func subtitleFontBundleURL(sessionID string, trackIndex int, codec string) string {
+	if !playback.IsASS(codec) {
+		return ""
+	}
+	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts", sessionID, trackIndex)
 }
 
 func firstNonEmptyString(values ...string) string {
