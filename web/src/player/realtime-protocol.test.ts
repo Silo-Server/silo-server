@@ -104,6 +104,49 @@ describe("realtime protocol", () => {
     });
   });
 
+  it("parses subtitle ready events", () => {
+    const event = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_ready",
+        payload: {
+          session_id: "session-1",
+          file_id: 42,
+          subtitle_id: 7,
+          language: "es",
+          label: "English → Spanish (AI)",
+        },
+      }),
+    );
+
+    expect(event).toEqual({
+      type: "event",
+      session_id: "session-1",
+      name: "subtitle_ready",
+      payload: {
+        session_id: "session-1",
+        file_id: 42,
+        subtitle_id: 7,
+        language: "es",
+        label: "English → Spanish (AI)",
+      },
+    });
+  });
+
+  it("rejects subtitle ready events missing the subtitle id", () => {
+    const event = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_ready",
+        payload: { session_id: "session-1", file_id: 42, language: "es" },
+      }),
+    );
+
+    expect(event).toBeNull();
+  });
+
   it("builds hello, ack, and result envelopes", () => {
     expect(buildPlaybackRealtimeHello("session-1")).toEqual({
       type: "hello",

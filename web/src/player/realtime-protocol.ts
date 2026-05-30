@@ -17,7 +17,14 @@ export type PlaybackCommandName =
 
 export type PlaybackRealtimeAckStatus = "accepted";
 export type PlaybackRealtimeResultStatus = "completed" | "rejected";
-export type PlaybackRealtimeEventName = "chapter_thumbnail_ready" | "markers_updated";
+export type PlaybackRealtimeEventName =
+  | "chapter_thumbnail_ready"
+  | "markers_updated"
+  | "subtitle_ready"
+  | "subtitle_translation_started"
+  | "subtitle_translation_cues"
+  | "subtitle_translation_completed"
+  | "subtitle_translation_failed";
 
 export interface PlaybackRealtimeCommandEnvelope {
   type: "command";
@@ -66,6 +73,64 @@ export interface PlaybackMarkersUpdatedPayload {
   preview?: PlaybackTimeRangePayload | null;
 }
 
+/**
+ * Broadcast to every session watching a file when a newly generated subtitle
+ * track (AI translation, later ASR) has been persisted, so players can refresh
+ * their track list and pick it up without a manual reload.
+ */
+export interface PlaybackSubtitleReadyPayload {
+  session_id: string;
+  file_id: number;
+  subtitle_id: number;
+  language: string;
+  label?: string;
+}
+
+/** One translated subtitle cue pushed during a live translation (media seconds). */
+export interface PlaybackStreamCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface PlaybackSubtitleTranslationStartedPayload {
+  session_id: string;
+  file_id: number;
+  job_id: number;
+  track_key: string;
+  language: string;
+  label?: string;
+  total_cues: number;
+}
+
+export interface PlaybackSubtitleTranslationCuesPayload {
+  session_id: string;
+  file_id: number;
+  job_id: number;
+  track_key: string;
+  cues: PlaybackStreamCue[];
+  done: number;
+  total: number;
+}
+
+export interface PlaybackSubtitleTranslationCompletedPayload {
+  session_id: string;
+  file_id: number;
+  job_id: number;
+  track_key: string;
+  subtitle_id: number;
+  language: string;
+  label?: string;
+}
+
+export interface PlaybackSubtitleTranslationFailedPayload {
+  session_id: string;
+  file_id: number;
+  job_id: number;
+  track_key: string;
+  message?: string;
+}
+
 export interface PlaybackRealtimeEventEnvelopeBase {
   type: "event";
   session_id: string;
@@ -79,6 +144,26 @@ export type PlaybackRealtimeEventEnvelope =
   | (PlaybackRealtimeEventEnvelopeBase & {
       name: "markers_updated";
       payload: PlaybackMarkersUpdatedPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_ready";
+      payload: PlaybackSubtitleReadyPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_translation_started";
+      payload: PlaybackSubtitleTranslationStartedPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_translation_cues";
+      payload: PlaybackSubtitleTranslationCuesPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_translation_completed";
+      payload: PlaybackSubtitleTranslationCompletedPayload;
+    })
+  | (PlaybackRealtimeEventEnvelopeBase & {
+      name: "subtitle_translation_failed";
+      payload: PlaybackSubtitleTranslationFailedPayload;
     });
 
 export interface PlaybackRealtimeAckEnvelope {
@@ -164,6 +249,79 @@ function isMarkersUpdatedPayload(value: unknown): value is PlaybackMarkersUpdate
   );
 }
 
+function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.subtitle_id === "number" &&
+    typeof value.language === "string"
+  );
+}
+
+function isStreamCue(value: unknown): value is PlaybackStreamCue {
+  return (
+    isRecord(value) &&
+    typeof value.start === "number" &&
+    typeof value.end === "number" &&
+    typeof value.text === "string"
+  );
+}
+
+function isTranslationStartedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTranslationStartedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.job_id === "number" &&
+    typeof value.track_key === "string" &&
+    typeof value.language === "string" &&
+    typeof value.total_cues === "number"
+  );
+}
+
+function isTranslationCuesPayload(value: unknown): value is PlaybackSubtitleTranslationCuesPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.job_id === "number" &&
+    typeof value.track_key === "string" &&
+    Array.isArray(value.cues) &&
+    value.cues.every(isStreamCue) &&
+    typeof value.done === "number" &&
+    typeof value.total === "number"
+  );
+}
+
+function isTranslationCompletedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTranslationCompletedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.job_id === "number" &&
+    typeof value.track_key === "string" &&
+    typeof value.subtitle_id === "number" &&
+    typeof value.language === "string"
+  );
+}
+
+function isTranslationFailedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTranslationFailedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.job_id === "number" &&
+    typeof value.track_key === "string"
+  );
+}
+
 export function parsePlaybackRealtimeMessage(
   data: string,
 ): PlaybackRealtimeCommandEnvelope | PlaybackRealtimeEventEnvelope | null {
@@ -206,7 +364,56 @@ export function parsePlaybackRealtimeMessage(
           payload: value.payload,
         };
       }
+      if (value.name === "subtitle_ready" && isSubtitleReadyPayload(value.payload)) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
       if (value.name === "markers_updated" && isMarkersUpdatedPayload(value.payload)) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
+      if (
+        value.name === "subtitle_translation_started" &&
+        isTranslationStartedPayload(value.payload)
+      ) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
+      if (value.name === "subtitle_translation_cues" && isTranslationCuesPayload(value.payload)) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
+      if (
+        value.name === "subtitle_translation_completed" &&
+        isTranslationCompletedPayload(value.payload)
+      ) {
+        return {
+          type: "event",
+          session_id: value.session_id,
+          name: value.name,
+          payload: value.payload,
+        };
+      }
+      if (
+        value.name === "subtitle_translation_failed" &&
+        isTranslationFailedPayload(value.payload)
+      ) {
         return {
           type: "event",
           session_id: value.session_id,

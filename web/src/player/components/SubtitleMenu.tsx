@@ -1,10 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { Captions, CaptionsOff, Minus, Plus, SlidersHorizontal } from "lucide-react";
+import { Captions, CaptionsOff, Languages, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import type { PlayerSubtitleInfo } from "../types";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
+import { SubtitleTranslateModal } from "./SubtitleTranslateModal";
 import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
+import { playerFetch } from "../player-fetch";
 import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
 import { getSubtitleFormatLabel } from "../utils/assSubtitles";
@@ -18,6 +20,8 @@ interface SubtitleMenuProps {
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
+  sessionId?: string;
+  getSubtitleStartPosition?: () => number;
 }
 
 const DELAY_STEP_MS = 100;
@@ -44,13 +48,36 @@ export function SubtitleMenu({
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
+  sessionId,
+  getSubtitleStartPosition,
 }: SubtitleMenuProps) {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [translateOpen, setTranslateOpen] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const sortedTracks = useMemo(() => sortSubtitlesBySource(tracks), [tracks]);
+
+  // Discover whether the server has AI subtitle translation configured, so we
+  // only surface the entry point when it can actually do something. This is a
+  // server-wide capability, so we fetch it once per session (keyed on the stable
+  // playerConfig) rather than re-checking on every file change.
+  useEffect(() => {
+    if (!playerConfig) return;
+    let cancelled = false;
+    playerFetch<{ enabled: boolean }>(playerConfig, "/subtitles/ai/status")
+      .then((res) => {
+        if (!cancelled) setAiEnabled(Boolean(res?.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setAiEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [playerConfig]);
 
   const clampedDelay = useCallback(
     (ms: number) => Math.max(-DELAY_MAX_MS, Math.min(DELAY_MAX_MS, ms)),
@@ -274,9 +301,26 @@ export function SubtitleMenu({
                 Search Online…
               </button>
             )}
+            {aiEnabled && mediaFileId && playerConfig && tracks.length > 0 && (
+              <button
+                ref={(el) => {
+                  menuItemsRef.current[menuItemIndex + 2] = el;
+                }}
+                role="menuitem"
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                onClick={() => {
+                  setTranslateOpen(true);
+                  setOpen(false);
+                }}
+              >
+                <Languages className="h-3.5 w-3.5 text-white/50" />
+                Translate with AI…
+              </button>
+            )}
             <button
               ref={(el) => {
-                menuItemsRef.current[menuItemIndex + 2] = el;
+                menuItemsRef.current[menuItemIndex + 3] = el;
               }}
               role="menuitem"
               type="button"
@@ -311,6 +355,18 @@ export function SubtitleMenu({
           />,
           document.body,
         )}
+
+      {translateOpen && mediaFileId && playerConfig && (
+        <SubtitleTranslateModal
+          mediaFileId={mediaFileId}
+          playerConfig={playerConfig}
+          tracks={tracks}
+          isOpen={translateOpen}
+          sessionId={sessionId}
+          getStartPosition={getSubtitleStartPosition}
+          onClose={() => setTranslateOpen(false)}
+        />
+      )}
     </div>
   );
 }
