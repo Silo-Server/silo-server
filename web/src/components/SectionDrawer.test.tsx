@@ -81,4 +81,21 @@ describe("SectionDrawer helpers", () => {
       config: expect.objectContaining({ media_scope: "movie" }),
     });
   });
+
+  it("uses the section type label when an admin title is left blank", () => {
+    const payload = buildAdminSectionPayload({
+      section: null,
+      scope: "home",
+      currentLibraryId: null,
+      sectionType: "recently_added",
+      title: "   ",
+      itemLimit: 20,
+      featured: false,
+      enabled: true,
+      queryDefinition: queryDefinitionFromSectionConfig(),
+      selectedCollectionId: "",
+    });
+
+    expect(payload.title).toBe("Recently Added");
+  });
 });

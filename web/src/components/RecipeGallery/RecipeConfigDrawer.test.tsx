@@ -1,7 +1,19 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import RecipeConfigDrawer from "./RecipeConfigDrawer";
+
+vi.mock("@/api/client", () => ({
+  api: vi.fn(async (path: string) => {
+    if (path === "/libraries") {
+      return [
+        { id: 1, name: "Movies" },
+        { id: 2, name: "Shows" },
+      ];
+    }
+    return {};
+  }),
+}));
 
 vi.mock("@/hooks/queries/useAllUserCollections", () => ({
   useAllUserCollections: () => ({ collections: [], isLoading: false }),
@@ -124,5 +136,28 @@ describe("RecipeConfigDrawer", () => {
         }),
       }),
     );
+  });
+
+  it("delegates manually selected bulk libraries to onAdd", async () => {
+    const onAdd = vi.fn().mockResolvedValue(undefined);
+    render(<RecipeConfigDrawer def={def} preset={preset} onCancel={() => {}} onAdd={onAdd} />);
+
+    await userEvent.click(screen.getByLabelText(/apply to all libraries/i));
+    await userEvent.click(screen.getByRole("button", { name: /add section/i }));
+
+    await screen.findByLabelText("Movies");
+    await userEvent.click(screen.getByLabelText("Shows"));
+    await userEvent.click(screen.getByRole("button", { name: /apply \(1\)/i }));
+
+    await waitFor(() => {
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apply_to_all_libraries: true,
+          library_ids: [1],
+          section_type: "recently_added",
+          title: "Recently Added",
+        }),
+      );
+    });
   });
 });
