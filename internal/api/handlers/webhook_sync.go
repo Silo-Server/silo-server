@@ -547,8 +547,8 @@ func requestBaseURL(r *http.Request) string {
 		scheme = forwarded
 	}
 	host := r.Host
-	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
-		host = forwardedHost
+	if forwarded := forwardedHost(r); forwarded != "" {
+		host = forwarded
 	}
 	return scheme + "://" + host
 }
