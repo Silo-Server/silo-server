@@ -39,6 +39,8 @@ var personRefreshRate = ratelimit.Rate{
 	Burst:             10,
 }
 
+const personMetadataStaleAfter = 90 * 24 * time.Hour
+
 // PeopleHandler serves person-related API endpoints.
 type PeopleHandler struct {
 	personRepo      peopleRepository
@@ -130,6 +132,8 @@ func (h *PeopleHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "not_found", "person not found")
 		return
 	}
+
+	h.enqueuePersonRefreshIfDue(*person)
 
 	writeJSON(w, http.StatusOK, h.toResponse(r.Context(), *person))
 }
@@ -357,6 +361,28 @@ func (h *PeopleHandler) toResponse(ctx context.Context, p models.Person) personR
 		resp.PhotoThumbhash = p.PhotoThumbhash
 	}
 	return resp
+}
+
+func (h *PeopleHandler) enqueuePersonRefreshIfDue(person models.Person) {
+	if h.refreshQueue == nil || !personHasRefreshableProviderID(person) {
+		return
+	}
+
+	if personMetadataIncomplete(person) {
+		return
+	}
+
+	if person.UpdatedAt.Before(time.Now().Add(-personMetadataStaleAfter)) {
+		h.refreshQueue.Enqueue(person.ID)
+	}
+}
+
+func personHasRefreshableProviderID(person models.Person) bool {
+	return person.TmdbID != "" || person.ImdbID != "" || person.TvdbID != ""
+}
+
+func personMetadataIncomplete(person models.Person) bool {
+	return person.Bio == "" || person.PhotoPath == "" || person.PhotoPath == "-" || person.BirthDate == nil
 }
 
 func parseOptionalPersonDate(raw string) (*time.Time, error) {

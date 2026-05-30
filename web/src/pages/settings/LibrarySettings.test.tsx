@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +14,10 @@ const mocks = vi.hoisted(() => ({
   useAvailableUserLibraries: vi.fn(),
   useCurrentProfile: vi.fn(),
   useLibraryPlaybackPreferences: vi.fn(),
+  useDeleteDeviceSetting: vi.fn(),
+  useEffectiveSettings: vi.fn(),
   useSetting: vi.fn(),
+  useSetDeviceSetting: vi.fn(),
   useSetSetting: vi.fn(),
 }));
 
@@ -34,7 +39,10 @@ vi.mock("@/hooks/queries/settings", async () => {
 
   return {
     ...actual,
+    useDeleteDeviceSetting: (...args: unknown[]) => mocks.useDeleteDeviceSetting(...args),
+    useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
     useSetting: (...args: unknown[]) => mocks.useSetting(...args),
+    useSetDeviceSetting: (...args: unknown[]) => mocks.useSetDeviceSetting(...args),
     useSetSetting: (...args: unknown[]) => mocks.useSetSetting(...args),
   };
 });
@@ -183,7 +191,10 @@ describe("LibrarySettings", () => {
     mocks.useAvailableUserLibraries.mockReset();
     mocks.useCurrentProfile.mockReset();
     mocks.useLibraryPlaybackPreferences.mockReset();
+    mocks.useDeleteDeviceSetting.mockReset();
+    mocks.useEffectiveSettings.mockReset();
     mocks.useSetting.mockReset();
+    mocks.useSetDeviceSetting.mockReset();
     mocks.useSetSetting.mockReset();
 
     mocks.useAvailableUserLibraries.mockReturnValue({
@@ -198,9 +209,21 @@ describe("LibrarySettings", () => {
       data: [],
       isLoading: false,
     });
+    mocks.useDeleteDeviceSetting.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    });
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: {},
+      isLoading: false,
+    });
     mocks.useSetting.mockReturnValue({
       data: null,
       isLoading: false,
+    });
+    mocks.useSetDeviceSetting.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
     });
     mocks.useSetSetting.mockReturnValue({
       isPending: false,
@@ -212,7 +235,8 @@ describe("LibrarySettings", () => {
     const markup = renderToStaticMarkup(<LibrarySettings />);
 
     expect(markup).toContain("Uses profile defaults");
-    expect(markup).toContain("Playback");
+    expect(markup).toContain("Remember library pages");
+    expect(markup).toContain("Edit playback overrides");
   });
 
   it("renders the playback override summary for libraries with saved defaults", () => {

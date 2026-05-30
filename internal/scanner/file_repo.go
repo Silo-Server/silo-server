@@ -1963,6 +1963,33 @@ func (r *FileRepository) ListByContentIDs(ctx context.Context, contentIDs []stri
 	return grouped, nil
 }
 
+// ListByEpisodeIDs returns media files grouped by episode ID for the given
+// episode IDs, excluding files that are marked missing.
+func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
+	if len(episodeIDs) == 0 {
+		return grouped, nil
+	}
+
+	query := `SELECT ` + fileColumns + ` FROM media_files
+		WHERE episode_id = ANY($1) AND missing_since IS NULL
+		ORDER BY episode_id ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, episodeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying files by episode_ids: %w", err)
+	}
+	defer rows.Close()
+
+	files, err := scanMediaFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		grouped[file.EpisodeID] = append(grouped[file.EpisodeID], file)
+	}
+	return grouped, nil
+}
+
 // UpdateContentID sets the content_id on a media file, linking it to a matched
 // media item. This is called by the matcher after a successful resolution.
 func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, contentID string) error {

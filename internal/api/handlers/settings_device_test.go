@@ -176,7 +176,7 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	handler := NewSettingsHandler(testUserStoreProvider{store: store})
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/settings/effective?keys=playback.preferred_quality,player.playback_speed,player.hdr_enabled",
+		"/settings/effective?keys=playback.preferred_quality,player.playback_speed,player.hdr_enabled,ui.remember_library_page_state",
 		nil,
 	)
 	req.Header.Set(deviceIDHeader, "apple-tv")
@@ -192,7 +192,7 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Settings) != 3 {
+	if len(resp.Settings) != 4 {
 		t.Fatalf("settings len = %d", len(resp.Settings))
 	}
 	byKey := make(map[string]effectiveSettingResponse, len(resp.Settings))
@@ -207,6 +207,9 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	}
 	if got := byKey["player.hdr_enabled"]; got.EffectiveValue != "true" || got.Source != "default" {
 		t.Fatalf("hdr_enabled = %#v", got)
+	}
+	if got := byKey[rememberLibraryPageStateSettingKey]; got.EffectiveValue != "true" || got.Source != "default" {
+		t.Fatalf("remember_library_page_state = %#v", got)
 	}
 }
 
@@ -227,6 +230,129 @@ func TestGenericSettingsRejectInvalidRegisteredValues(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLibraryPageStateIsDeviceScopedJSONSetting(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.library_page_state",
+		bytes.NewBufferString(`{"value":"{\"version\":1,\"libraries\":{\"7\":{\"search\":\"tab=library\"}}}"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "browser", libraryPageStateSettingKey)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting: %v", err)
+	}
+	if entry == nil || !strings.Contains(entry.Value, `"tab=library"`) {
+		t.Fatalf("entry = %#v", entry)
+	}
+}
+
+func TestLibraryPageStateRejectsInvalidJSONAndUserScope(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.library_page_state",
+		bytes.NewBufferString(`{"value":"not json"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/settings/ui.library_page_state",
+		bytes.NewBufferString(`{"value":"{\"version\":1,\"libraries\":{}}"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}))
+	rec = httptest.NewRecorder()
+
+	handler.HandleSetSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("user-scope status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRememberLibraryPageStateIsDeviceScopedBoolSetting(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.remember_library_page_state",
+		bytes.NewBufferString(`{"value":"false"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": rememberLibraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "browser", rememberLibraryPageStateSettingKey)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting: %v", err)
+	}
+	if entry == nil || entry.Value != "false" {
+		t.Fatalf("entry = %#v", entry)
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.remember_library_page_state",
+		bytes.NewBufferString(`{"value":"maybe"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": rememberLibraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec = httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid bool status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/settings/ui.remember_library_page_state",
+		bytes.NewBufferString(`{"value":"false"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": rememberLibraryPageStateSettingKey})
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}))
+	rec = httptest.NewRecorder()
+
+	handler.HandleSetSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("user-scope status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
