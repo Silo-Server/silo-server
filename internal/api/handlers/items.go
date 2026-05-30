@@ -847,6 +847,8 @@ func (h *ItemsHandler) listSortMetrics(
 	sortField string,
 	filter catalog.AccessFilter,
 	overlaySummaries map[string]*models.OverlaySummary,
+	store userstore.UserStore,
+	profileID string,
 ) map[string]*sortMetricsResponse {
 	metrics := make(map[string]*sortMetricsResponse, len(items))
 	switch sortField {
@@ -885,8 +887,130 @@ func (h *ItemsHandler) listSortMetrics(
 				metrics[contentID] = &sortMetricsResponse{BitrateKbps: &value}
 			}
 		}
+	case "progress", "date_viewed", "plays":
+		h.listUserSortMetrics(ctx, items, sortField, store, profileID, metrics)
 	}
 	return metrics
+}
+
+func (h *ItemsHandler) listUserSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	sortField string,
+	store userstore.UserStore,
+	profileID string,
+	metrics map[string]*sortMetricsResponse,
+) {
+	if store == nil || profileID == "" || len(items) == 0 {
+		return
+	}
+	contentIDs := uniqueItemContentIDs(items)
+	if len(contentIDs) == 0 {
+		return
+	}
+
+	progressMap, err := store.ListProgressByMediaItems(ctx, profileID, contentIDs)
+	if err != nil {
+		return
+	}
+
+	switch sortField {
+	case "progress":
+		for _, item := range items {
+			if item == nil || item.ContentID == "" {
+				continue
+			}
+			progress, ok := progressMap[item.ContentID]
+			if !ok || progress.Completed || progress.PositionSeconds <= 0 || progress.DurationSeconds <= 0 {
+				continue
+			}
+			ratio := progress.PositionSeconds / progress.DurationSeconds
+			metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
+		}
+	case "date_viewed", "plays":
+		history, err := listCompletedHistoryForItems(ctx, store, profileID, contentIDs)
+		if err != nil {
+			return
+		}
+		historyCounts := make(map[string]int, len(contentIDs))
+		historyViewedAt := make(map[string]string, len(contentIDs))
+		for _, entry := range history {
+			if entry.MediaItemID == "" {
+				continue
+			}
+			historyCounts[entry.MediaItemID]++
+			if entry.WatchedAt > historyViewedAt[entry.MediaItemID] {
+				historyViewedAt[entry.MediaItemID] = entry.WatchedAt
+			}
+		}
+		for _, item := range items {
+			if item == nil || item.ContentID == "" {
+				continue
+			}
+			resp := &sortMetricsResponse{}
+			if sortField == "date_viewed" {
+				viewedAt := historyViewedAt[item.ContentID]
+				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
+					viewedAt = progress.UpdatedAt
+				}
+				if viewedAt == "" {
+					continue
+				}
+				resp.ViewedAt = viewedAt
+			} else {
+				playCount := historyCounts[item.ContentID]
+				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
+					playCount = 1
+				}
+				if playCount <= 0 {
+					continue
+				}
+				resp.PlayCount = &playCount
+			}
+			metrics[item.ContentID] = resp
+		}
+	}
+}
+
+func uniqueItemContentIDs(items []*models.MediaItem) []string {
+	contentIDs := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		contentIDs = append(contentIDs, item.ContentID)
+	}
+	return contentIDs
+}
+
+func listCompletedHistoryForItems(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	contentIDs []string,
+) ([]userstore.WatchHistoryEntry, error) {
+	const pageSize = 500
+	var all []userstore.WatchHistoryEntry
+	for offset := 0; ; offset += pageSize {
+		page, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
+			ProfileID:    profileID,
+			MediaItemIDs: contentIDs,
+			Limit:        pageSize,
+			Offset:       offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < pageSize {
+			return all, nil
+		}
+	}
 }
 
 func (h *ItemsHandler) listBrowseItemFiles(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string][]*models.MediaFile {

@@ -78,12 +78,15 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 	userStates := h.itemsH.listItemUserStates(r, result.Items)
 	episodeMetadata := h.itemsH.listEpisodeBrowseMetadata(r.Context(), result.Items)
 	sortField := catalog.NormalizeQuerySort(req.Query.Sort).Field
+	store, profileID, _ := h.itemsH.userStoreForRequest(r)
 	sortMetrics := h.itemsH.listSortMetrics(
 		r.Context(),
 		result.Items,
 		sortField,
 		h.itemsH.accessFilter(r),
 		overlaySummaries,
+		store,
+		profileID,
 	)
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
