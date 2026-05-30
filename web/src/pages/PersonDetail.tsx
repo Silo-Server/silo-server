@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pencil, RefreshCw } from "lucide-react";
 
 import { getPerson } from "@/api/client";
-import { createEmptyQueryDefinition } from "@/api/types";
+import { createEmptyQueryDefinition, type Person } from "@/api/types";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import EditPersonDialog from "@/components/EditPersonDialog";
 import ItemGrid from "@/components/ItemGrid";
@@ -25,6 +25,7 @@ export default function PersonDetail() {
   const { id } = useParams<{ id: string }>();
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [editOpen, setEditOpen] = useState(false);
+  const autoRefreshWindowRef = useRef<{ personId: number; until: number } | null>(null);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const refreshMutation = useRefreshPerson(id, isAdmin);
@@ -33,6 +34,21 @@ export default function PersonDetail() {
     queryKey: personKeys.detail(id!),
     queryFn: () => getPerson(id!),
     enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data || !isPersonMetadataIncomplete(data)) {
+        autoRefreshWindowRef.current = null;
+        return false;
+      }
+
+      const current = autoRefreshWindowRef.current;
+      if (!current || current.personId !== data.id) {
+        autoRefreshWindowRef.current = { personId: data.id, until: Date.now() + 30_000 };
+        return 3_000;
+      }
+
+      return Date.now() < current.until ? 3_000 : false;
+    },
   });
 
   useDocumentTitle(person?.name ?? "Person");
@@ -210,6 +226,10 @@ export default function PersonDetail() {
       ) : null}
     </div>
   );
+}
+
+function isPersonMetadataIncomplete(person: Person) {
+  return !person.bio || !person.photo_url || !person.birth_date;
 }
 
 function PersonDetailSkeleton() {
