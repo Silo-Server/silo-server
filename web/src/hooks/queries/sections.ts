@@ -141,6 +141,35 @@ export function useCreateSection() {
   });
 }
 
+export interface BulkCreateSectionsRequest {
+  scope: "home" | "library";
+  library_ids?: number[];
+  section_type: string;
+  title: string;
+  featured: boolean;
+  item_limit: number;
+  config: Record<string, unknown>;
+  enabled: boolean;
+}
+
+export interface BulkCreateSectionsResponse {
+  created: number;
+}
+
+export function useBulkCreateSections() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: BulkCreateSectionsRequest) =>
+      api<BulkCreateSectionsResponse>("/admin/sections/bulk-create", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: sectionKeys.all });
+    },
+  });
+}
+
 export function useUpdateSection() {
   const qc = useQueryClient();
   return useMutation({

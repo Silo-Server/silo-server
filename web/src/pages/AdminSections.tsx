@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Library, PageSectionConfig } from "@/api/types";
 import {
   useAdminSections,
+  useBulkCreateSections,
   useCreateSection,
   useUpdateSection,
   useDeleteSection,
@@ -194,6 +195,7 @@ export default function AdminSections() {
   const createFromGalleryMutation = useCreateSection();
   const importTraktMutation = useImportTraktCollection();
   const createMutation = useCreateSection();
+  const bulkCreateMutation = useBulkCreateSections();
   const updateMutation = useUpdateSection();
 
   const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
@@ -262,7 +264,93 @@ export default function AdminSections() {
 
   const activeSection = activeId ? (orderedSections.find((s) => s.id === activeId) ?? null) : null;
 
+  function normalizeLibraryIDs(ids: number[] | undefined): number[] {
+    if (!ids || ids.length === 0) return [];
+    return Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
+  }
+
+  async function ensureTraktSectionCollection(
+    payload: AddPayload,
+    traktRecipe: TraktPublicRecipeConfig,
+    libraryID: number,
+  ): Promise<LibraryCollection> {
+    const existing = collectionsData.find((collection) =>
+      isMatchingTraktCollection(collection, traktRecipe.preset, traktRecipe.mediaType, libraryID),
+    );
+    if (existing) return existing;
+
+    const managementKey = buildTraktSectionManagedCollectionKey(
+      traktRecipe.preset,
+      traktRecipe.mediaType,
+      libraryID,
+    );
+    const imported = await importTraktMutation.mutateAsync({
+      body: {
+        library_id: libraryID,
+        title: payload.title,
+        description: "",
+        preset: traktRecipe.preset,
+        media_type: traktRecipe.mediaType,
+        limit: payload.item_limit,
+        featured: payload.featured,
+        management_mode: "section",
+        management_source: "recipe_gallery",
+        management_key: managementKey,
+      },
+    });
+    return imported.collection;
+  }
+
+  async function createBulkSectionsFromGallery(
+    payload: AddPayload,
+    libraryIDs: number[],
+  ): Promise<void> {
+    if (libraryIDs.length === 0) {
+      throw new Error("Choose at least one library before applying this section");
+    }
+
+    const config = payload.config;
+    const traktRecipe = getTraktRecipeConfig(config);
+    const selectedCollectionID =
+      typeof config.library_collection_id === "string" ? config.library_collection_id.trim() : "";
+    if (traktRecipe && selectedCollectionID === "") {
+      for (const libraryID of libraryIDs) {
+        const collection = await ensureTraktSectionCollection(payload, traktRecipe, libraryID);
+        await createMutation.mutateAsync({
+          scope: "library",
+          library_id: libraryID,
+          section_type: payload.section_type,
+          title: payload.title,
+          item_limit: payload.item_limit,
+          featured: payload.featured,
+          enabled: payload.enabled,
+          config: { ...config, library_collection_id: collection.id },
+        });
+      }
+      toast.success(`Created ${libraryIDs.length} section${libraryIDs.length === 1 ? "" : "s"}`);
+      return;
+    }
+
+    const result = await bulkCreateMutation.mutateAsync({
+      scope: "library",
+      library_ids: libraryIDs,
+      section_type: payload.section_type,
+      title: payload.title,
+      item_limit: payload.item_limit,
+      featured: payload.featured,
+      enabled: payload.enabled,
+      config,
+    });
+    toast.success(`Created ${result.created} section${result.created === 1 ? "" : "s"}`);
+  }
+
   async function createSectionFromGallery(payload: AddPayload) {
+    const bulkLibraryIDs = normalizeLibraryIDs(payload.library_ids);
+    if (payload.apply_to_all_libraries || bulkLibraryIDs.length > 0) {
+      await createBulkSectionsFromGallery(payload, bulkLibraryIDs);
+      return;
+    }
+
     let config = payload.config;
     const traktRecipe = getTraktRecipeConfig(config);
     const selectedCollectionID =
@@ -271,40 +359,9 @@ export default function AdminSections() {
       const targetLibraryID =
         activeLibraryId ?? findDefaultTraktLibrary(librariesList, traktRecipe.mediaType);
       if (!targetLibraryID) {
-        toast.error("Choose a library before adding this Trakt section");
-        return;
+        throw new Error("Choose a library before adding this Trakt section");
       }
-      const managementKey = buildTraktSectionManagedCollectionKey(
-        traktRecipe.preset,
-        traktRecipe.mediaType,
-        targetLibraryID,
-      );
-      const existing = collectionsData.find((collection) =>
-        isMatchingTraktCollection(
-          collection,
-          traktRecipe.preset,
-          traktRecipe.mediaType,
-          targetLibraryID,
-        ),
-      );
-      const collection =
-        existing ??
-        (
-          await importTraktMutation.mutateAsync({
-            body: {
-              library_id: targetLibraryID,
-              title: payload.title,
-              description: "",
-              preset: traktRecipe.preset,
-              media_type: traktRecipe.mediaType,
-              limit: payload.item_limit,
-              featured: payload.featured,
-              management_mode: "section",
-              management_source: "recipe_gallery",
-              management_key: managementKey,
-            },
-          })
-        ).collection;
+      const collection = await ensureTraktSectionCollection(payload, traktRecipe, targetLibraryID);
       config = { ...config, library_collection_id: collection.id };
     }
 
@@ -541,7 +598,9 @@ export default function AdminSections() {
         currentLibraryId={activeLibraryId}
         libraries={librariesList}
         recipeCatalog={recipeCatalog}
-        isSubmitting={createMutation.isPending || updateMutation.isPending}
+        isSubmitting={
+          createMutation.isPending || updateMutation.isPending || bulkCreateMutation.isPending
+        }
         onSave={(section) => {
           if (section.id) {
             updateMutation.mutate(
@@ -551,6 +610,9 @@ export default function AdminSections() {
                   setDialogOpen(false);
                   setEditingSection(null);
                 },
+                onError: (error) => {
+                  toast.error(error instanceof Error ? error.message : "Failed to update section");
+                },
               },
             );
           } else {
@@ -558,6 +620,9 @@ export default function AdminSections() {
               onSuccess: () => {
                 setDialogOpen(false);
                 setEditingSection(null);
+              },
+              onError: (error) => {
+                toast.error(error instanceof Error ? error.message : "Failed to create section");
               },
             });
           }
@@ -584,8 +649,13 @@ export default function AdminSections() {
               setGalleryOpen(true);
             }}
             onAdd={async (payload) => {
-              await createSectionFromGallery(payload);
-              setPickedRecipe(null);
+              try {
+                await createSectionFromGallery(payload);
+                setPickedRecipe(null);
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Failed to create section");
+                throw error;
+              }
             }}
           />
         </div>

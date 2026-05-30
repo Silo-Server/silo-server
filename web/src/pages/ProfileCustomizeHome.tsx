@@ -265,6 +265,7 @@ export default function ProfileCustomizeHome() {
         <RecipeConfigDrawer
           def={picked.def}
           preset={picked.preset}
+          showBulkApply={false}
           onCancel={() => setPicked(null)}
           onBackToGallery={() => {
             setPicked(null);

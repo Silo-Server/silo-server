@@ -197,11 +197,13 @@ export function buildAdminSectionPayload({
     config = recipeParams ?? {};
   }
 
+  const safeTitle = title.trim() || sectionTypeLabel(sectionType);
+
   return {
     ...(section ? { id: section.id } : {}),
     scope,
     ...(scope === "library" && currentLibraryId != null ? { library_id: currentLibraryId } : {}),
-    title,
+    title: safeTitle,
     section_type: sectionType,
     item_limit: itemLimit,
     featured,
@@ -327,6 +329,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
           collections,
         }),
       );
+      props.onOpenChange(false);
     } else {
       props.onSave(
         buildAdminSectionPayload({
@@ -345,7 +348,6 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
         }),
       );
     }
-    props.onOpenChange(false);
   }
 
   const saveDisabled =
@@ -475,9 +477,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                       setQueryDefinition({
                         ...queryDefinition,
                         media_scope:
-                          value === "all"
-                            ? undefined
-                            : (value as "movie" | "series" | "episode"),
+                          value === "all" ? undefined : (value as "movie" | "series" | "episode"),
                       })
                     }
                   >
