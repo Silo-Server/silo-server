@@ -30,6 +30,7 @@ export default function LibraryPage() {
   } = useLibraryPageStatePreference();
   const savedStateHydratedLibraryIdRef = useRef<number | null>(null);
   const applyingSavedSearchParamsRef = useRef<string | null>(null);
+  const applyingSavedSearchParamsLibraryIdRef = useRef<number | null>(null);
 
   const id = Number(libraryId);
   const library = libraries?.find((l) => l.id === id);
@@ -88,7 +89,8 @@ export default function LibraryPage() {
     savedStateHydratedLibraryIdRef.current = id;
     const nextSearchParams = applySavedLibraryPageSearchParams(searchParams, savedLibrarySearch);
     if (nextSearchParams.toString() !== searchParams.toString()) {
-      applyingSavedSearchParamsRef.current = nextSearchParams.toString();
+      applyingSavedSearchParamsRef.current = serializeLibraryPageSearchParams(nextSearchParams);
+      applyingSavedSearchParamsLibraryIdRef.current = id;
       setSearchParams(nextSearchParams, { replace: true });
     }
   }, [
@@ -105,6 +107,11 @@ export default function LibraryPage() {
   useEffect(() => {
     if (!libraryType || shouldApplySavedLibrarySearch) {
       return;
+    }
+
+    if (applyingSavedSearchParamsLibraryIdRef.current !== id) {
+      applyingSavedSearchParamsRef.current = null;
+      applyingSavedSearchParamsLibraryIdRef.current = id;
     }
 
     const normalizedSearchParams = updateLibraryPageSearchParams(
@@ -147,15 +154,15 @@ export default function LibraryPage() {
       return;
     }
 
-    const search = serializeLibraryPageSearchParams(normalizedSearchParams);
+    const canonicalSearch = serializeLibraryPageSearchParams(normalizedSearchParams);
     if (applyingSavedSearchParamsRef.current != null) {
-      if (applyingSavedSearchParamsRef.current === normalizedSearchParams.toString()) {
+      if (applyingSavedSearchParamsRef.current === canonicalSearch) {
         applyingSavedSearchParamsRef.current = null;
       }
       return;
     }
-    if (savedLibrarySearch !== search) {
-      saveLibrarySearch(id, search);
+    if (savedLibrarySearch !== canonicalSearch) {
+      saveLibrarySearch(id, canonicalSearch);
     }
   }, [
     activeTab,
