@@ -54,6 +54,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subdl"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
@@ -515,6 +516,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB)
 	}
 
+	// Notifier that pushes "subtitle ready" events to active sessions when an AI
+	// translation completes. Assigned inside the playback handler block where the
+	// realtime hub and session manager are in scope; nil when playback is off.
+	var subtitleAINotifier *playback.SubtitleReadyNotifier
+
 	// Build playback handler if session manager is available.
 	var playbackHandler *handlers.PlaybackHandler
 	var adminPlaybackControlHandler *handlers.AdminPlaybackControlHandler
@@ -609,6 +615,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.MarkerUpserter = deps.FileRepo
 		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
+		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub)
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
@@ -770,6 +777,40 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
 		adminSubtitleHandler.SetDownloadedSubtitleDeps(deps.DB, subtitleManager)
+	}
+
+	// Build the AI subtitle handler (on-demand translation). Generated tracks are
+	// stored as ordinary downloaded subtitles, so they reach every client through
+	// the existing subtitle pipeline with no client changes.
+	var subtitleAIHandler *handlers.SubtitleAIHandler
+	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
+		aiCfg := subtitleai.Config{
+			Enabled:           deps.Config.SubtitleAI.Enabled,
+			BaseURL:           deps.Config.SubtitleAI.BaseURL,
+			APIKey:            deps.Config.SubtitleAI.APIKey,
+			ChatModel:         deps.Config.SubtitleAI.ChatModel,
+			MaxConcurrentJobs: deps.Config.SubtitleAI.MaxConcurrentJobs,
+			BatchSize:         deps.Config.SubtitleAI.BatchSize,
+			ContextNeighbors:  deps.Config.SubtitleAI.ContextNeighbors,
+		}
+		var aiNotifier subtitleai.Notifier
+		if subtitleAINotifier != nil {
+			aiNotifier = subtitleAINotifier
+		}
+		aiService := subtitleai.NewService(
+			deps.AppContext,
+			aiCfg,
+			subtitleai.NewPgJobRepository(deps.DB),
+			subtitleai.NewLLMTranslator(subtitleai.NewClient(aiCfg), aiCfg.BatchSize, aiCfg.ContextNeighbors),
+			subtitleManager,
+			subtitleRepo,
+			deps.FileRepo,
+			aiNotifier,
+			deps.Config.Playback.FFmpegPath,
+			slog.Default(),
+		)
+		aiService.Recover()
+		subtitleAIHandler = handlers.NewSubtitleAIHandler(aiService)
 	}
 
 	// Build section handler if DB is available.
@@ -1541,13 +1582,17 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				// Subtitle search routes.
+				// Subtitle search + AI translation routes.
 				if subtitleSearchHandler != nil {
 					if deps.FileRepo != nil && itemRepo != nil {
-						subtitleSearchHandler.FileAuthorizer = &handlers.MediaFileAuthorizer{
+						fileAuthorizer := &handlers.MediaFileAuthorizer{
 							FileResolver:  deps.FileRepo,
 							ItemAccess:    itemRepo,
 							EpisodeLookup: episodeRepo,
+						}
+						subtitleSearchHandler.FileAuthorizer = fileAuthorizer
+						if subtitleAIHandler != nil {
+							subtitleAIHandler.FileAuthorizer = fileAuthorizer
 						}
 					}
 					r.Route("/subtitles", func(r chi.Router) {
@@ -1555,6 +1600,18 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Post("/download", subtitleSearchHandler.HandleDownload)
 						r.Post("/upload", subtitleSearchHandler.HandleUpload)
 						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
+						if subtitleAIHandler != nil {
+							r.Get("/ai/status", subtitleAIHandler.HandleStatus)
+							r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
+							r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
+							r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
+							r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
+						} else {
+							// Answer the capability probe with 200 {"enabled": false}
+							// when AI translation isn't wired, so the client gets a
+							// clean negative instead of a 404.
+							r.Get("/ai/status", handlers.WriteSubtitleAIDisabledStatus)
+						}
 						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
 						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
 					})
