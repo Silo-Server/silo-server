@@ -1,10 +1,12 @@
 package playback
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -20,6 +22,12 @@ const (
 type SubtitleFontAttachment struct {
 	Name string
 	Data []byte
+}
+
+// SubtitleFontBundleItem is the JSON-safe representation sent to web players.
+type SubtitleFontBundleItem struct {
+	Name string `json:"name"`
+	Data string `json:"data"`
 }
 
 type attachmentProbeOutput struct {
@@ -53,56 +61,98 @@ func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegP
 		streams = streams[:maxSubtitleFontAttachments]
 	}
 
-	tmpDir, err := os.MkdirTemp("", "silo-subtitle-fonts-*")
-	if err != nil {
-		return nil, fmt.Errorf("subtitle fonts: create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	args := []string{"-hide_banner", "-nostats", "-loglevel", "error"}
-	outputNames := make([]string, 0, len(streams))
-	for i, stream := range streams {
-		name := fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))
-		outputNames = append(outputNames, name)
-		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), name)
-	}
-	args = append(args, "-i", inputPath, "-map", "0:t?", "-c", "copy", "-f", "null", "-")
-
 	bin := ffmpegPath
 	if strings.TrimSpace(bin) == "" {
 		bin = "ffmpeg"
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = tmpDir
-	stderr, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("subtitle fonts: extract attachments: %w (stderr: %s)", err, truncateStderr(string(stderr)))
-	}
 
 	var total int64
 	fonts := make([]SubtitleFontAttachment, 0, len(streams))
-	for i, name := range outputNames {
-		path := filepath.Join(tmpDir, name)
-		info, err := os.Stat(path)
+	for i, stream := range streams {
+		fallbackName := fmt.Sprintf("attachment-%d%s", i, fontAttachmentExt(stream))
+		remaining := maxSubtitleFontBytes - total
+		data, err := extractFontAttachment(ctx, inputPath, bin, stream, fallbackName, remaining)
 		if err != nil {
-			return nil, fmt.Errorf("subtitle fonts: read extracted attachment %q: %w", name, err)
+			return nil, err
 		}
-		total += info.Size()
+		total += int64(len(data))
 		if total > maxSubtitleFontBytes {
 			return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxSubtitleFontBytes)
 		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("subtitle fonts: read extracted attachment %q: %w", name, err)
-		}
 		fonts = append(fonts, SubtitleFontAttachment{
-			Name: safeAttachmentDisplayName(streams[i], name),
+			Name: safeAttachmentDisplayName(stream, fallbackName),
 			Data: data,
 		})
 	}
 
 	return fonts, nil
+}
+
+// EncodeSubtitleFontBundle converts raw font attachments to base64 JSON items.
+func EncodeSubtitleFontBundle(fonts []SubtitleFontAttachment) []SubtitleFontBundleItem {
+	items := make([]SubtitleFontBundleItem, 0, len(fonts))
+	for _, font := range fonts {
+		items = append(items, SubtitleFontBundleItem{
+			Name: font.Name,
+			Data: base64.StdEncoding.EncodeToString(font.Data),
+		})
+	}
+	return items
+}
+
+func extractFontAttachment(ctx context.Context, inputPath string, ffmpegPath string, stream attachmentProbeStream, name string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxSubtitleFontBytes)
+	}
+
+	cmdCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	args := []string{
+		"-hide_banner", "-nostats", "-loglevel", "error",
+		fmt.Sprintf("-dump_attachment:%d", stream.Index), "pipe:1",
+		"-i", inputPath,
+		"-map", "0:t?",
+		"-c", "copy",
+		"-f", "null", "-",
+	}
+	cmd := exec.CommandContext(cmdCtx, ffmpegPath, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("subtitle fonts: open attachment pipe %q: %w", name, err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("subtitle fonts: start attachment extract %q: %w", name, err)
+	}
+
+	var buf bytes.Buffer
+	_, copyErr := io.Copy(&buf, &io.LimitedReader{R: stdout, N: maxBytes + 1})
+	tooLarge := int64(buf.Len()) > maxBytes
+	if tooLarge {
+		cancel()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}
+
+	waitErr := cmd.Wait()
+	if tooLarge {
+		return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxSubtitleFontBytes)
+	}
+	if copyErr != nil {
+		return nil, fmt.Errorf("subtitle fonts: read attachment %q: %w", name, copyErr)
+	}
+	if waitErr != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("subtitle fonts: extract attachment %q: %w (stderr: %s)",
+			name, waitErr, truncateStderr(stderr.String()))
+	}
+	return buf.Bytes(), nil
 }
 
 func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePath string) ([]attachmentProbeStream, error) {

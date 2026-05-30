@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	r.Head("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
 	r.Get("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
 	r.Get("/stream/transcode/{token}/segment/{name}", s.handleTranscodeSegment)
+	r.Get("/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts)
 	r.Get("/stream/subtitles/{token}/{track}", s.handleSubtitle)
 
 	// Admin routes — bearer-auth protected.
@@ -201,6 +202,33 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playback.ServeSubtitle(w, vtt, "vtt")
+}
+
+func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
+	claims := s.verifyToken(w, r)
+	if claims == nil {
+		return
+	}
+	cfg := s.watcher.Config()
+	trackParam := chi.URLParam(r, "track")
+	trackIndex, _, err := playback.ParseSubtitleTrackParam(trackParam)
+	if err != nil {
+		http.Error(w, "invalid subtitle index", http.StatusBadRequest)
+		return
+	}
+
+	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), claims.MediaPath, cfg.Playback.FFmpegPath)
+	if err != nil {
+		slog.Error("extract subtitle fonts", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
+		http.Error(w, "subtitle font extraction failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(playback.EncodeSubtitleFontBundle(fonts)); err != nil {
+		slog.Warn("subtitle font response encode failed", "error", err, "playback_session_id", claims.SessionID)
+	}
 }
 
 // proxyToTranscodeNode forwards the request to the transcode node specified in the claims.

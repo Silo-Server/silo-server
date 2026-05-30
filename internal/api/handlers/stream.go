@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -18,11 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
-
-type subtitleFontResponse struct {
-	Name string `json:"name"`
-	Data string `json:"data"`
-}
 
 // FilePathResolver looks up a media file by its ID.
 type FilePathResolver interface {
@@ -334,17 +328,10 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp := make([]subtitleFontResponse, 0, len(fonts))
-	for _, font := range fonts {
-		resp = append(resp, subtitleFontResponse{
-			Name: font.Name,
-			Data: base64.StdEncoding.EncodeToString(font.Data),
-		})
-	}
-
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := json.NewEncoder(w).Encode(playback.EncodeSubtitleFontBundle(fonts)); err != nil {
 		slog.WarnContext(r.Context(), "subtitle font response encode failed", "error", err)
 	}
 }

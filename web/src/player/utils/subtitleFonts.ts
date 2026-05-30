@@ -76,7 +76,15 @@ export function fallbackFontForSubtitle(
 }
 
 const fontDataCache = new Map<string, Promise<Uint8Array[]>>();
-const fontBundleCache = new Map<string, Promise<Uint8Array[]>>();
+const MAX_FONT_BUNDLE_CACHE_ENTRIES = 4;
+const MAX_FONT_BUNDLE_CACHE_BYTES = 64 * 1024 * 1024;
+
+interface FontBundleCacheEntry {
+  promise: Promise<Uint8Array[]>;
+  bytes: number;
+}
+
+const fontBundleCache = new Map<string, FontBundleCacheEntry>();
 
 interface SubtitleFontBundleItem {
   name: string;
@@ -105,8 +113,16 @@ export function loadSubtitleFallbackFontData(font: SubtitleFallbackFont): Promis
 
 export function loadSubtitleFontBundle(url: string, signal?: AbortSignal): Promise<Uint8Array[]> {
   const cached = fontBundleCache.get(url);
-  if (cached) return cached;
+  if (cached) {
+    fontBundleCache.delete(url);
+    fontBundleCache.set(url, cached);
+    return cached.promise;
+  }
 
+  const entry: FontBundleCacheEntry = {
+    promise: Promise.resolve([]),
+    bytes: 0,
+  };
   const promise = fetch(url, { signal })
     .then(async (response) => {
       if (!response.ok) {
@@ -114,15 +130,51 @@ export function loadSubtitleFontBundle(url: string, signal?: AbortSignal): Promi
       }
       return (await response.json()) as SubtitleFontBundleItem[];
     })
-    .then((items) => items.map((item) => base64ToBytes(item.data)));
+    .then((items) => items.map((item) => base64ToBytes(item.data)))
+    .then((fonts) => {
+      entry.bytes = totalByteLength(fonts);
+      if (entry.bytes > MAX_FONT_BUNDLE_CACHE_BYTES) {
+        fontBundleCache.delete(url);
+      } else {
+        evictFontBundleCache();
+      }
+      return fonts;
+    });
 
   // Do not poison the cache with transient network errors or aborted requests.
   const cachedPromise = promise.catch((err) => {
     fontBundleCache.delete(url);
     throw err;
   });
-  fontBundleCache.set(url, cachedPromise);
+  entry.promise = cachedPromise;
+  fontBundleCache.set(url, entry);
+  evictFontBundleCache();
   return cachedPromise;
+}
+
+function totalByteLength(chunks: Uint8Array[]): number {
+  return chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+}
+
+function evictFontBundleCache(): void {
+  while (fontBundleCache.size > MAX_FONT_BUNDLE_CACHE_ENTRIES) {
+    const oldest = fontBundleCache.keys().next().value;
+    if (!oldest) return;
+    fontBundleCache.delete(oldest);
+  }
+
+  let total = 0;
+  for (const entry of fontBundleCache.values()) {
+    total += entry.bytes;
+  }
+
+  while (total > MAX_FONT_BUNDLE_CACHE_BYTES) {
+    const oldest = fontBundleCache.entries().next().value;
+    if (!oldest) return;
+    const [url, entry] = oldest;
+    fontBundleCache.delete(url);
+    total -= entry.bytes;
+  }
 }
 
 function base64ToBytes(value: string): Uint8Array {

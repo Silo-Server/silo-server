@@ -1404,7 +1404,11 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 					if resp.SubtitleURLs[i].Source == "embedded" {
 						// Pass the ffmpeg-relative subtitle stream index to the proxy.
 						embeddedIdx := resp.SubtitleURLs[i].Index - embeddedOffset
-						resp.SubtitleURLs[i].URL = proxyNode.URL + "/stream/subtitles/" + token + "/" + strconv.Itoa(embeddedIdx) + subtitleURLExt(resp.SubtitleURLs[i].Codec)
+						proxySubtitleURL := proxyNode.URL + "/stream/subtitles/" + token + "/" + strconv.Itoa(embeddedIdx)
+						resp.SubtitleURLs[i].URL = proxySubtitleURL + subtitleURLExt(resp.SubtitleURLs[i].Codec)
+						if resp.SubtitleURLs[i].FontBundleURL != "" {
+							resp.SubtitleURLs[i].FontBundleURL = proxySubtitleURL + "/fonts"
+						}
 					}
 				}
 			}
