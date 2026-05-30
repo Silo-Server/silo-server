@@ -247,11 +247,13 @@ func safeAttachmentDisplayName(stream attachmentProbeStream, fallback string) st
 }
 
 func ffprobePathFromFFmpeg(ffmpegPath string) string {
-	if strings.TrimSpace(ffmpegPath) == "" {
+	ffmpegPath = strings.TrimSpace(ffmpegPath)
+	if ffmpegPath == "" {
 		return "ffprobe"
 	}
-	if i := strings.LastIndex(ffmpegPath, "ffmpeg"); i >= 0 {
-		return ffmpegPath[:i] + "ffprobe" + ffmpegPath[i+len("ffmpeg"):]
+	base := filepath.Base(ffmpegPath)
+	if i := strings.LastIndex(base, "ffmpeg"); i >= 0 {
+		return filepath.Join(filepath.Dir(ffmpegPath), base[:i]+"ffprobe"+base[i+len("ffmpeg"):])
 	}
 	return "ffprobe"
 }

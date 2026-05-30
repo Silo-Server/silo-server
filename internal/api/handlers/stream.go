@@ -299,6 +299,13 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
+	if err := preflightPlaybackFile(r.Context(), file, h.MissingMarker, h.EventsHub); err != nil {
+		if isPlaybackFileMissing(err) {
+			h.abortPlaybackSession(r.Context(), session)
+		}
+		writePlaybackFilePreflightError(w, err)
+		return
+	}
 
 	trackParam := chi.URLParam(r, "track")
 	trackIndex, _, err := playback.ParseSubtitleTrackParam(trackParam)

@@ -67,6 +67,19 @@ printf '12345'
 	}
 }
 
+func TestFFprobePathFromFFmpegRewritesOnlyBasename(t *testing.T) {
+	got := ffprobePathFromFFmpeg(filepath.Join("tmp", "ffmpeg-tools", "ffmpeg"))
+	want := filepath.Join("tmp", "ffmpeg-tools", "ffprobe")
+	if got != want {
+		t.Fatalf("ffprobePathFromFFmpeg basename path = %q, want %q", got, want)
+	}
+
+	got = ffprobePathFromFFmpeg(filepath.Join("tmp", "ffmpeg-tools", "custom"))
+	if got != "ffprobe" {
+		t.Fatalf("ffprobePathFromFFmpeg custom basename = %q, want ffprobe", got)
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
