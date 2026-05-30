@@ -4,7 +4,7 @@ import { Captions, CaptionsOff, Languages, Minus, Plus, SlidersHorizontal } from
 import type { PlayerSubtitleInfo } from "../types";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
-import { SubtitleTranslateModal } from "./SubtitleTranslateModal";
+import { SubtitleTranslateModal, isTranslatableSource } from "./SubtitleTranslateModal";
 import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
 import { playerFetch } from "../player-fetch";
 import { getLanguageName } from "../utils/languageNames";
@@ -301,7 +301,7 @@ export function SubtitleMenu({
                 Search Online…
               </button>
             )}
-            {aiEnabled && mediaFileId && playerConfig && tracks.length > 0 && (
+            {aiEnabled && mediaFileId && playerConfig && tracks.some(isTranslatableSource) && (
               <button
                 ref={(el) => {
                   menuItemsRef.current[menuItemIndex + 2] = el;

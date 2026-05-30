@@ -147,6 +147,110 @@ describe("realtime protocol", () => {
     expect(event).toBeNull();
   });
 
+  it("parses subtitle translation started/completed/failed events", () => {
+    const started = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        name: "subtitle_translation_started",
+        payload: {
+          session_id: "s1",
+          file_id: 42,
+          job_id: 99,
+          track_key: "ai-99",
+          language: "es",
+          total_cues: 120,
+        },
+      }),
+    );
+    expect(started?.name).toBe("subtitle_translation_started");
+
+    const completed = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        name: "subtitle_translation_completed",
+        payload: {
+          session_id: "s1",
+          file_id: 42,
+          job_id: 99,
+          track_key: "ai-99",
+          subtitle_id: 7,
+          language: "es",
+        },
+      }),
+    );
+    expect(completed?.name).toBe("subtitle_translation_completed");
+
+    const failed = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        name: "subtitle_translation_failed",
+        payload: { session_id: "s1", file_id: 42, job_id: 99, track_key: "ai-99" },
+      }),
+    );
+    expect(failed?.name).toBe("subtitle_translation_failed");
+  });
+
+  it("parses translation cues and rejects malformed ones", () => {
+    const ok = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        name: "subtitle_translation_cues",
+        payload: {
+          session_id: "s1",
+          file_id: 42,
+          job_id: 99,
+          track_key: "ai-99",
+          cues: [{ start: 1, end: 2, text: "hola" }],
+          done: 1,
+          total: 120,
+        },
+      }),
+    );
+    expect(ok?.name).toBe("subtitle_translation_cues");
+
+    // A cue missing `text` must fail the guard (every-cue validation).
+    const bad = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        name: "subtitle_translation_cues",
+        payload: {
+          session_id: "s1",
+          file_id: 42,
+          job_id: 99,
+          track_key: "ai-99",
+          cues: [{ start: 1, end: 2 }],
+          done: 1,
+          total: 120,
+        },
+      }),
+    );
+    expect(bad).toBeNull();
+
+    // A non-string label must fail the started guard.
+    const badLabel = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        name: "subtitle_translation_started",
+        payload: {
+          session_id: "s1",
+          file_id: 42,
+          job_id: 99,
+          track_key: "ai-99",
+          language: "es",
+          total_cues: 1,
+          label: 5,
+        },
+      }),
+    );
+    expect(badLabel).toBeNull();
+  });
+
   it("builds hello, ack, and result envelopes", () => {
     expect(buildPlaybackRealtimeHello("session-1")).toEqual({
       type: "hello",
