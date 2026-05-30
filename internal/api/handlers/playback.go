@@ -305,6 +305,7 @@ type subtitleURL struct {
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	URL             string `json:"url"`
+	FontBundleURL   string `json:"font_bundle_url,omitempty"`
 }
 
 // changeAudioRequest represents the JSON body for PATCH /playback/{session_id}/audio.
@@ -1403,7 +1404,11 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 					if resp.SubtitleURLs[i].Source == "embedded" {
 						// Pass the ffmpeg-relative subtitle stream index to the proxy.
 						embeddedIdx := resp.SubtitleURLs[i].Index - embeddedOffset
-						resp.SubtitleURLs[i].URL = proxyNode.URL + "/stream/subtitles/" + token + "/" + strconv.Itoa(embeddedIdx) + subtitleURLExt(resp.SubtitleURLs[i].Codec)
+						proxySubtitleURL := proxyNode.URL + "/stream/subtitles/" + token + "/" + strconv.Itoa(embeddedIdx)
+						resp.SubtitleURLs[i].URL = proxySubtitleURL + subtitleURLExt(resp.SubtitleURLs[i].Codec)
+						if resp.SubtitleURLs[i].FontBundleURL != "" {
+							resp.SubtitleURLs[i].FontBundleURL = proxySubtitleURL + "/fonts"
+						}
 					}
 				}
 			}
@@ -1459,6 +1464,7 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 			Forced:          track.Forced,
 			HearingImpaired: track.HearingImpaired,
 			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, embeddedOffset+i, subtitleURLExt(track.Codec)),
+			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec),
 		})
 	}
 
@@ -1476,6 +1482,13 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 	}
 
 	return urls
+}
+
+func subtitleFontBundleURL(sessionID string, trackIndex int, codec string) string {
+	if !playback.IsASS(codec) {
+		return ""
+	}
+	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts", sessionID, trackIndex)
 }
 
 func firstNonEmptyString(values ...string) string {

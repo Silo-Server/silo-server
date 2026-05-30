@@ -2,6 +2,12 @@ import { useEffect, useRef } from "react";
 import type JASSUB from "jassub";
 import type { PlayerSubtitleInfo } from "../types";
 import { isASSCodec } from "../utils/assSubtitles";
+import {
+  fallbackFontForSubtitle,
+  forceASSFontFamily,
+  loadSubtitleFontBundle,
+  loadSubtitleFallbackFontData,
+} from "../utils/subtitleFonts";
 
 /**
  * Manages client-side ASS/SSA subtitle rendering via JASSUB (libass WASM).
@@ -40,6 +46,8 @@ export function useASSSubtitles(
 
   const isASS = activeSub !== null && isASSCodec(activeSub.codec);
   const activeUrl = isASS ? activeSub.url : null;
+  const activeLanguage = isASS ? activeSub.language : "";
+  const activeFontBundleUrl = isASS ? activeSub.font_bundle_url : undefined;
 
   // Main effect: create/destroy JASSUB based on active track.
   useEffect(() => {
@@ -56,6 +64,7 @@ export function useASSSubtitles(
     }
 
     let cancelled = false;
+    const controller = new AbortController();
 
     async function initJASSUB() {
       if (!video || cancelled) return;
@@ -68,25 +77,81 @@ export function useASSSubtitles(
       const JASSUBClass = await jassubImportRef.current;
       if (cancelled) return;
 
-      // If an existing instance is already attached, reuse it by switching
-      // the track URL. Snapshot to a local variable to avoid null deref if
-      // the ref is cleared between awaits.
-      const existing = jassubRef.current;
-      if (existing) {
-        existing.timeOffset = streamOriginRef.current;
-        await existing.ready;
-        if (!cancelled) {
-          await existing.renderer.setTrackByUrl(activeUrl!);
+      let subContent: string;
+      let attachedFontData: Uint8Array[] = [];
+      try {
+        const [response, loadedAttachedFontData] = await Promise.all([
+          fetch(activeUrl!, { signal: controller.signal }),
+          activeFontBundleUrl
+            ? loadSubtitleFontBundle(activeFontBundleUrl, controller.signal).catch((err) => {
+                if ((err as Error).name !== "AbortError") {
+                  console.error(
+                    `[useASSSubtitles] Failed to load subtitle font bundle ${activeFontBundleUrl}:`,
+                    err,
+                  );
+                }
+                return [];
+              })
+            : Promise.resolve([]),
+        ]);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        subContent = await response.text();
+        attachedFontData = loadedAttachedFontData;
+      } catch (err) {
+        if (!cancelled && (err as Error).name !== "AbortError") {
+          console.error(`[useASSSubtitles] Failed to fetch ${activeUrl}:`, err);
         }
         return;
       }
 
       if (cancelled) return;
 
+      // libass renders missing glyphs with its *default* font — it does not
+      // search other loaded fonts for coverage. JASSUB's built-in default
+      // (Liberation Sans) lacks many non-Latin glyphs, so for those scripts we
+      // point `defaultFont` at a font that covers them, chosen by track metadata
+      // first and subtitle text as a fallback. Each track switch destroys and
+      // rebuilds the instance, so this stays in sync per track.
+      const fallbackFont = fallbackFontForSubtitle(activeLanguage, subContent);
+
+      let fallbackFontData: Uint8Array[] | null = null;
+      if (fallbackFont) {
+        try {
+          fallbackFontData = await loadSubtitleFallbackFontData(fallbackFont);
+        } catch (err) {
+          if (!cancelled) {
+            console.error(
+              `[useASSSubtitles] Failed to load fallback font ${fallbackFont.family}:`,
+              err,
+            );
+          }
+        }
+      }
+
+      if (cancelled) return;
+
+      const renderedSubContent =
+        fallbackFont && fallbackFontData
+          ? forceASSFontFamily(subContent, fallbackFont.family)
+          : subContent;
+      const fonts = [...attachedFontData, ...(fallbackFontData ?? [])];
+
       const instance = new JASSUBClass({
         video,
-        subUrl: activeUrl!,
+        subContent: renderedSubContent,
         timeOffset: streamOriginRef.current,
+        // The browser Local Font Access API is inconsistent and permissioned.
+        // Letting JASSUB probe it produces noisy console warnings for common ASS
+        // style fonts without making playback reliable across clients.
+        queryFonts: false,
+        ...(fonts.length > 0
+          ? {
+              fonts,
+              ...(fallbackFont && { defaultFont: fallbackFont.family }),
+            }
+          : {}),
       });
 
       // Guard against the effect being cleaned up while the constructor ran.
@@ -102,6 +167,7 @@ export function useASSSubtitles(
 
     return () => {
       cancelled = true;
+      controller.abort();
       // Destroy the current instance if the effect is being torn down
       // (e.g. track switch or unmount). This covers the common case where
       // initJASSUB has already completed and stored the instance.
@@ -113,7 +179,7 @@ export function useASSSubtitles(
     // videoRef is a stable ref object. streamOriginSeconds is read from
     // streamOriginRef inside the async function to always get the latest value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, isDetached]);
+  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached]);
 
   // Update JASSUB's time offset when either the media timeline remaps or
   // the user nudges subtitle sync. Avoids destroying and recreating the
