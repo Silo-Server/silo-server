@@ -536,6 +536,9 @@ function AISubtitleTranslationCard() {
         <Button type="button" onClick={save} disabled={updateSetting.isPending}>
           {updateSetting.isPending ? "Saving..." : "Save AI Translation Settings"}
         </Button>
+        <p className="text-muted-foreground mt-2 text-xs">
+          Changes take effect after a server restart.
+        </p>
       </div>
     </div>
   );
