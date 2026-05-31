@@ -792,8 +792,13 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
 		return true
 	}
-	if input.LibraryIDs != nil && !slices.Equal(*input.LibraryIDs, current.LibraryIDs) {
-		return true
+	if input.LibraryIDs != nil {
+		if (*input.LibraryIDs == nil) != (current.LibraryIDs == nil) {
+			return true
+		}
+		if *input.LibraryIDs != nil && !slices.Equal(*input.LibraryIDs, current.LibraryIDs) {
+			return true
+		}
 	}
 	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
 		return true
