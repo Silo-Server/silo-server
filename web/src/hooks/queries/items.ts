@@ -14,7 +14,7 @@ import type {
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
 import { getCachedWatchedInvalidationKeys } from "@/pages/ItemDetail/watchedState";
-import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
+import { invalidateMediaSurfaceQueries, setCachedItemDetail } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 export async function fetchWatchDetail(
@@ -231,8 +231,10 @@ export function useUpdateItemMetadata(contentId: string) {
         body: JSON.stringify(data),
       }),
     onSuccess: (updatedItem) => {
-      queryClient.setQueryData(catalogKeys.itemDetail(contentId), updatedItem);
-      queryClient.invalidateQueries({ queryKey: ["items", "detail", contentId] });
+      setCachedItemDetail(queryClient, contentId, updatedItem);
+      void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
+        bumpHomeRefreshSignal(queryClient);
+      });
       toast.success("Metadata saved");
     },
     onError: (err) => {

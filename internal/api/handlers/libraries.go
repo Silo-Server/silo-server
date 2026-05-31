@@ -1061,6 +1061,9 @@ func (h *LibraryHandler) recordAcceptedScan(scanID string, target *scantrigger.T
 		Trigger:   target.Trigger,
 		Status:    "accepted",
 	})
+	if run, ok := h.ScanRegistry.Get(scanID); ok {
+		h.publishScanEvent(context.Background(), "scan.accepted", run)
+	}
 }
 
 func (h *LibraryHandler) markScanRunning(scanID string) {

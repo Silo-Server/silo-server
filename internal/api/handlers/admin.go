@@ -875,6 +875,9 @@ func (h *AdminHandler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	var resp AdminStats
 
 	if h.StatsSource != nil {
+		if isTruthyQuery(r.URL.Query().Get("refresh")) {
+			h.StatsSource.Invalidate()
+		}
 		stats, err := h.StatsSource.Get(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get stats")
@@ -899,6 +902,15 @@ func (h *AdminHandler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func isTruthyQuery(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *AdminHandler) invalidateStats(ctx context.Context, channel, eventType, payload string) {

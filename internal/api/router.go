@@ -476,6 +476,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
+		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
 		libraryPlaybackPrefHandler = handlers.NewLibraryPlaybackPrefHandler(deps.UserStoreProvider)

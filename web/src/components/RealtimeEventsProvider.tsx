@@ -19,6 +19,7 @@ import {
   type RealtimeEventsContextValue,
 } from "@/components/realtimeEventsContext";
 import { useAuth } from "@/hooks/useAuth";
+import { usePageActivity } from "@/hooks/usePageActivity";
 import { adminKeys, catalogKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
   invalidateMediaSurfaceQueries,
@@ -38,7 +39,7 @@ interface UserStatePayload {
   profile_id: string;
   content_id?: string;
   series_id?: string;
-  change: "progress" | "favorite" | "watchlist" | "history" | "watched";
+  change: "progress" | "favorite" | "watchlist" | "history" | "watched" | "home_dismissal";
   played?: boolean;
   is_favorite?: boolean;
   in_watchlist?: boolean;
@@ -290,6 +291,7 @@ function handleUserStateEvent(
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { user, profile } = useAuth();
+  const pageActivity = usePageActivity();
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
   const reconnectTimerRef = useRef<number | undefined>(undefined);
   const closingRef = useRef(false);
@@ -301,8 +303,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const nextHandlerIDRef = useRef(1);
   const waitersRef = useRef(new Map<string, JobWaiter>());
   const activeProfileIDRef = useRef<string | null | undefined>(profile?.id);
+  const canApplyRealtimeUpdatesRef = useRef(pageActivity.canApplyRealtimeUpdates);
+  const shouldCatchUpOnFocusRef = useRef(!pageActivity.canApplyRealtimeUpdates);
 
   activeProfileIDRef.current = profile?.id;
+  canApplyRealtimeUpdatesRef.current = pageActivity.canApplyRealtimeUpdates;
 
   const settleWaiterRef = useRef<(job: AdminJob) => void>(() => {});
   settleWaiterRef.current = (job: AdminJob) => {
@@ -438,6 +443,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     if (!user) {
       return;
     }
+    if (!pageActivity.canApplyRealtimeUpdates) {
+      shouldCatchUpOnFocusRef.current = true;
+      return;
+    }
+    if (!shouldCatchUpOnFocusRef.current) {
+      return;
+    }
+
+    shouldCatchUpOnFocusRef.current = false;
+    void queryClient.refetchQueries({
+      type: "active",
+      predicate: (query) => !isDashboardQueryKey(query.queryKey),
+    });
+  }, [pageActivity.canApplyRealtimeUpdates, queryClient, user]);
+
+  useEffect(() => {
+    if (!user || !pageActivity.canApplyRealtimeUpdates) {
+      setConnectionState("disconnected");
+      return;
+    }
 
     closingRef.current = false;
 
@@ -478,6 +503,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       };
 
       socket.onmessage = (event) => {
+        if (!canApplyRealtimeUpdatesRef.current) {
+          return;
+        }
         const message = parseEventsMessage(event.data);
         if (!message) {
           return;
@@ -533,7 +561,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         socket.close();
       }
     };
-  }, [queryClient, user]);
+  }, [pageActivity.canApplyRealtimeUpdates, queryClient, user]);
 
   const value = useMemo<RealtimeEventsContextValue>(
     () => ({
@@ -610,3 +638,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 }
 
 export { buildEventsUrl };
+
+function isDashboardQueryKey(queryKey: unknown) {
+  return (
+    Array.isArray(queryKey) &&
+    queryKey[0] === "admin" &&
+    (queryKey[1] === "stats" ||
+      queryKey[1] === "sessions" ||
+      queryKey[1] === "libraries" ||
+      queryKey[1] === "users")
+  );
+}

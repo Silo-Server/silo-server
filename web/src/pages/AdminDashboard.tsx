@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
-import { useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
+import { fetchAdminStats, useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminLibraries,
@@ -38,17 +39,133 @@ import type {
   AdminUser,
   WatchProviderActivity,
 } from "@/api/types";
+import { useQueryClient } from "@tanstack/react-query";
+import { adminKeys } from "@/hooks/queries/keys";
+import { usePageActivity } from "@/hooks/usePageActivity";
+
+const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+const DASHBOARD_AUTO_REFRESH_MS = 60_000;
+const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
 
 export default function AdminDashboard() {
+  const queryClient = useQueryClient();
   const statsQuery = useAdminStats();
   const sessionsQuery = useAdminSessions();
   const librariesQuery = useAdminLibraries();
   const usersQuery = useAdminUsers();
   const scanAll = useScanAllLibraries();
+  const pageActivity = usePageActivity();
+  const manualRefreshStartedAtRef = useRef<number | null>(null);
+  const wasDashboardPollingPausedRef = useRef(!pageActivity.canPollDashboard);
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState<number | null>(null);
+  const [relativeUpdatedNow, setRelativeUpdatedNow] = useState(() => Date.now());
 
   const sessions = sessionsQuery.data ?? [];
   const libraries = librariesQuery.data ?? [];
   const users = usersQuery.data ?? [];
+  const { refetch: refetchSessions } = sessionsQuery;
+  const { refetch: refetchLibraries } = librariesQuery;
+  const { refetch: refetchUsers } = usersQuery;
+  const hasDashboardData =
+    statsQuery.data !== undefined &&
+    sessionsQuery.data !== undefined &&
+    librariesQuery.data !== undefined &&
+    usersQuery.data !== undefined;
+  const dashboardDataUpdatedAt = Math.max(
+    statsQuery.dataUpdatedAt,
+    sessionsQuery.dataUpdatedAt,
+    librariesQuery.dataUpdatedAt,
+    usersQuery.dataUpdatedAt,
+  );
+  const lastUpdatedLabel = lastDashboardUpdatedAt
+    ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
+    : null;
+
+  useEffect(() => {
+    if (!lastDashboardUpdatedAt) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setRelativeUpdatedNow(Date.now());
+    }, RELATIVE_UPDATED_LABEL_TICK_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [lastDashboardUpdatedAt]);
+
+  useEffect(() => {
+    if (hasDashboardData && dashboardDataUpdatedAt > 0) {
+      setLastDashboardUpdatedAt(dashboardDataUpdatedAt);
+    }
+  }, [dashboardDataUpdatedAt, hasDashboardData]);
+
+  const refreshDashboard = useCallback(async ({ manual }: { manual: boolean }) => {
+    if (manual) {
+      manualRefreshStartedAtRef.current = Date.now();
+      setIsManualRefreshPending(true);
+    }
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.libraries(), refetchType: "none" }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.users(), refetchType: "none" }),
+      ]);
+      const nextStats = await fetchAdminStats({ refresh: true });
+      queryClient.setQueryData(adminKeys.stats(), nextStats);
+      await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
+      const refreshedAt = Date.now();
+      setLastDashboardUpdatedAt(refreshedAt);
+      setRelativeUpdatedNow(refreshedAt);
+    } finally {
+      if (manual) {
+        const startedAt = manualRefreshStartedAtRef.current;
+        if (startedAt !== null) {
+          const elapsed = Date.now() - startedAt;
+          const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
+          if (remaining > 0) {
+            await delay(remaining);
+          }
+        }
+        manualRefreshStartedAtRef.current = null;
+        setIsManualRefreshPending(false);
+      }
+    }
+  }, [queryClient, refetchLibraries, refetchSessions, refetchUsers]);
+
+  useEffect(() => {
+    if (!pageActivity.canPollDashboard) {
+      wasDashboardPollingPausedRef.current = true;
+      return;
+    }
+    if (isManualRefreshPending) {
+      return;
+    }
+    const resumedPolling = wasDashboardPollingPausedRef.current;
+    wasDashboardPollingPausedRef.current = false;
+    if (
+      lastDashboardUpdatedAt &&
+      Date.now() - lastDashboardUpdatedAt >= DASHBOARD_AUTO_REFRESH_MS
+    ) {
+      void refreshDashboard({ manual: resumedPolling });
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshDashboard({ manual: false });
+    }, DASHBOARD_AUTO_REFRESH_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    isManualRefreshPending,
+    lastDashboardUpdatedAt,
+    pageActivity.canPollDashboard,
+    refreshDashboard,
+  ]);
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -60,18 +177,29 @@ export default function AdminDashboard() {
             Live sessions, content health, and server activity in one view.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void statsQuery.refetch();
-              void sessionsQuery.refetch();
-            }}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            {lastUpdatedLabel && (
+              <span className="text-muted-foreground text-xs whitespace-nowrap">
+                Updated {lastUpdatedLabel}
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[8.25rem] justify-center"
+              onClick={() => {
+                void refreshDashboard({ manual: true });
+              }}
+              disabled={isManualRefreshPending}
+              aria-busy={isManualRefreshPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
+              />
+              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
           <Button
             variant="default"
             size="sm"
@@ -699,6 +827,23 @@ function getTimeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function formatRelativeUpdatedLabel(now: number, updatedAt: number) {
+  const elapsedMinutes = Math.floor(Math.max(0, now - updatedAt) / 60_000);
+  if (elapsedMinutes < 1) {
+    return "less than 1 minute ago";
+  }
+  if (elapsedMinutes === 1) {
+    return "1 minute ago";
+  }
+  return `${elapsedMinutes.toLocaleString()} minutes ago`;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function SectionError({ message }: { message: string }) {
