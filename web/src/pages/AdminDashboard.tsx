@@ -28,6 +28,7 @@ import {
   HardDrive,
   RefreshCw,
   Play,
+  Pause,
   Library,
   ScanLine,
 } from "lucide-react";
@@ -446,18 +447,26 @@ function StreamCard({ session }: { session: AdminSession }) {
     <div className="surface-panel flex gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
       {/* Poster */}
       <div
-        className="bg-surface border-border flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
+        className="bg-surface border-border relative flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
         style={{ aspectRatio: "2/3" }}
       >
         {session.poster_url ? (
           <img
             src={session.poster_url}
             alt={session.media_title}
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover transition-opacity ${session.is_paused ? "opacity-45" : ""}`}
           />
         ) : (
-          <Play className="text-primary/40 h-5 w-5" />
+          <Play className={`text-primary/40 h-5 w-5 ${session.is_paused ? "opacity-45" : ""}`} />
         )}
+        {session.is_paused ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+            <div className="border-border/40 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm backdrop-blur">
+              <Pause className="h-3 w-3" />
+              Paused
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Info */}
@@ -534,7 +543,7 @@ function StreamCard({ session }: { session: AdminSession }) {
 
 function SessionProfilePill({ label }: { label: string }) {
   return (
-    <span className="border-primary/30 bg-primary/15 text-primary inline-flex max-w-full rounded border px-1.5 py-0.5 text-[9px] leading-none font-semibold">
+    <span className="border-primary/30 bg-primary/15 text-primary inline-flex max-w-full shrink-0 items-center rounded border px-1.5 py-0.5 align-middle text-[9px] leading-[1.1] font-semibold whitespace-nowrap">
       {label}
     </span>
   );

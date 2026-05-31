@@ -10,6 +10,8 @@ import {
   formatTranscodeModeSummary,
   formatVideoDetail,
   formatVideoSummary,
+  normalizeContainerDecision,
+  normalizeStreamDecision,
 } from "./adminActivityPresentation";
 
 function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
@@ -38,10 +40,13 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     source_bitrate_kbps: overrides.source_bitrate_kbps ?? 9000,
     source_video_codec: overrides.source_video_codec ?? "h264",
     source_video_resolution: overrides.source_video_resolution ?? "1080p",
+    video_decision: overrides.video_decision,
     target_video_codec: overrides.target_video_codec ?? "h264",
     target_resolution: overrides.target_resolution ?? "1080p",
     source_audio_codec: overrides.source_audio_codec ?? "aac",
     source_audio_channels: overrides.source_audio_channels ?? 2,
+    audio_decision: overrides.audio_decision,
+    target_audio_codec: overrides.target_audio_codec,
     requested_video_codec: overrides.requested_video_codec ?? "hevc",
     requested_video_resolution: overrides.requested_video_resolution ?? "2160p",
   };
@@ -75,6 +80,15 @@ describe("adminActivityPresentation", () => {
     });
 
     expect(formatPlaybackDecisionSummary(session)).toBe("transcode");
+    expect(normalizeContainerDecision(session.play_method)).toBe("hls");
+    expect(normalizeStreamDecision(session.video_decision || session.play_method)).toBe(
+      "transcode",
+    );
+    expect(
+      normalizeStreamDecision(
+        session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+      ),
+    ).toBe("transcode");
     expect(formatSourceContainerSummary(session)).toBe("MKV");
     expect(formatDeliveredContainerSummary(session)).toBe("HLS");
     expect(formatContainerDetail(session)).toBe("MKV → HLS");
@@ -99,6 +113,9 @@ describe("adminActivityPresentation", () => {
     });
 
     expect(formatPlaybackDecisionSummary(session)).toBe("direct");
+    expect(normalizeContainerDecision(session.play_method)).toBe("direct");
+    expect(normalizeStreamDecision(session.video_decision)).toBe("direct");
+    expect(normalizeStreamDecision(session.audio_decision)).toBe("direct");
     expect(formatDeliveredContainerSummary(session)).toBe("MKV");
     expect(formatContainerDetail(session)).toBe("Original container");
     expect(formatDeliveredVideoSummary(session)).toBe("HEVC · 2160p");
@@ -120,5 +137,22 @@ describe("adminActivityPresentation", () => {
         }),
       ),
     ).toBe("Audio SW");
+  });
+
+  it("labels HLS copy-original sessions as container HLS with copied video", () => {
+    const session = makeSession({
+      play_method: "transcode",
+      video_decision: "remux",
+      audio_decision: "transcode",
+      target_video_codec: "copy",
+      target_audio_codec: "aac",
+      transcode_audio: true,
+    });
+
+    expect(normalizeContainerDecision(session.play_method)).toBe("hls");
+    expect(normalizeStreamDecision(session.video_decision)).toBe("copy");
+    expect(normalizeStreamDecision(session.audio_decision)).toBe("transcode");
+    expect(formatDeliveredContainerSummary(session)).toBe("HLS");
+    expect(formatVideoDetail(session)).toBe("Video stream copied");
   });
 });

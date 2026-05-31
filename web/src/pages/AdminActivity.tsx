@@ -24,6 +24,8 @@ import {
   formatTranscodeModeSummary,
   formatVideoDetail,
   formatVideoSummary,
+  normalizeContainerDecision,
+  normalizeStreamDecision,
 } from "@/pages/adminActivityPresentation";
 import {
   Table,
@@ -199,7 +201,7 @@ export default function AdminActivity() {
       <div className="page-header">
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Activity</h1>
+            <h1 className="page-title text-[clamp(2rem,4vw,3.25rem)]">Activity</h1>
             {sessions.length > 0 && (
               <span className="live-badge flex items-center gap-1.5">
                 <Radio className="h-3 w-3" />
@@ -207,7 +209,7 @@ export default function AdminActivity() {
               </span>
             )}
           </div>
-          <p className="text-muted-foreground mt-1 text-[13px]">
+          <p className="page-subtitle text-sm sm:text-base">
             {sessions.length === 0
               ? "No active streams"
               : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${Object.keys(nodes).length} node${Object.keys(nodes).length !== 1 ? "s" : ""}`}
@@ -516,10 +518,11 @@ function StreamRow({
   const clientIP = session.client_ip?.trim() || "";
   const playbackPosition = formatPlaybackPosition(session);
   const transcodeMode = formatTranscodeModeSummary(session);
-  const containerDecision = session.play_method || "";
-  const videoDecision = session.video_decision || session.play_method;
-  const audioDecision =
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method);
+  const containerDecision = normalizeContainerDecision(session.play_method);
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  const audioDecision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
   const ffmpegLogsHref = `${logsHref}&component=ffmpeg`;
   const ffmpegLogs = useOperationalLogs(
@@ -588,7 +591,7 @@ function StreamRow({
             <button
               type="button"
               onClick={() => onIPLookup(clientIP)}
-              className="text-muted-foreground hover:text-primary min-w-0 truncate text-[10px] transition-colors"
+              className="text-muted-foreground hover:text-primary min-w-0 cursor-pointer truncate text-[10px] transition-colors"
             >
               {clientIP}
             </button>
@@ -774,7 +777,7 @@ function StreamRow({
                 <button
                   type="button"
                   onClick={() => onIPLookup(clientIP)}
-                  className="hover:text-primary shrink-0 transition-colors"
+                  className="hover:text-primary shrink-0 cursor-pointer transition-colors"
                 >
                   {clientIP}
                 </button>
@@ -926,10 +929,20 @@ function PlaybackSummaryLine({
 
 function TranscodeModeBadge({ label }: { label: string }) {
   return (
-    <span className="inline-flex rounded border border-cyan-400/20 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-semibold text-cyan-200">
+    <span
+      className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${transcodeModeBadgeColor(label)}`}
+    >
       {label}
     </span>
   );
+}
+
+function transcodeModeBadgeColor(label: string): string {
+  const normalized = label.trim().toLowerCase();
+  if (normalized === "sw" || normalized === "audio sw") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  return "border-cyan-400/20 bg-cyan-400/10 text-cyan-200";
 }
 
 function PlaybackExpandedPanel({
@@ -971,19 +984,9 @@ function PlaybackExpandedPanel({
           </div>
           <div className="text-muted-foreground mt-1 font-mono text-[10px]">{sessionID}</div>
         </div>
-        <div className="flex items-center gap-3">
-          {showFFmpeg && isFetching ? (
-            <div className="text-muted-foreground text-[10px]">Refreshing…</div>
-          ) : null}
-          {showFFmpeg ? (
-            <Link
-              to={logsHref}
-              className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
-            >
-              Open full ffmpeg logs
-            </Link>
-          ) : null}
-        </div>
+        {showFFmpeg && isFetching ? (
+          <div className="text-muted-foreground text-[10px]">Refreshing…</div>
+        ) : null}
       </div>
 
       <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1015,52 +1018,62 @@ function PlaybackExpandedPanel({
       </div>
 
       {showFFmpeg ? (
-        <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-          {isLoading ? (
-            <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-              Loading ffmpeg output…
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-              No ffmpeg rows yet for this session. If the session is direct play or remux without a
-              transcode worker, nothing will appear here.
-            </div>
-          ) : (
-            <div className="max-h-64 overflow-y-auto">
-              {rows.map((row) => (
-                <div
-                  key={row.id}
-                  className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
-                >
-                  <div className="space-y-1">
-                    <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
-                      {formatTimeOnly(row.timestamp)}
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Link
+              to={logsHref}
+              className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
+            >
+              Open full FFmpeg logs
+            </Link>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+            {isLoading ? (
+              <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+                Loading ffmpeg output…
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+                No ffmpeg rows yet for this session. If the session is direct play or remux without
+                a transcode worker, nothing will appear here.
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
+                  >
+                    <div className="space-y-1">
+                      <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
+                        {formatTimeOnly(row.timestamp)}
+                      </div>
+                      <div className="text-[10px] tracking-[0.18em] text-[var(--terminal-muted)]/60 uppercase">
+                        {row.message.includes("stderr") ? "stderr" : "event"}
+                      </div>
                     </div>
-                    <div className="text-[10px] tracking-[0.18em] text-[var(--terminal-muted)]/60 uppercase">
-                      {row.message.includes("stderr") ? "stderr" : "event"}
+                    <div className="min-w-0">
+                      <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
+                        {ffmpegRowText(row)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
+                        {row.node_id && <span>{row.node_id}</span>}
+                        {stringAttr(row, "target_resolution") !== "-" && (
+                          <span>{stringAttr(row, "target_resolution")}</span>
+                        )}
+                        {stringAttr(row, "hw_accel") !== "-" && (
+                          <span>{stringAttr(row, "hw_accel")}</span>
+                        )}
+                        {stringAttr(row, "restart_count") !== "-" && (
+                          <span>restart {stringAttr(row, "restart_count")}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="min-w-0">
-                    <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
-                      {ffmpegRowText(row)}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
-                      {row.node_id && <span>{row.node_id}</span>}
-                      {stringAttr(row, "target_resolution") !== "-" && (
-                        <span>{stringAttr(row, "target_resolution")}</span>
-                      )}
-                      {stringAttr(row, "hw_accel") !== "-" && (
-                        <span>{stringAttr(row, "hw_accel")}</span>
-                      )}
-                      {stringAttr(row, "restart_count") !== "-" && (
-                        <span>restart {stringAttr(row, "restart_count")}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
@@ -1264,7 +1277,9 @@ function methodBadgeColor(method: string): string {
   switch (method) {
     case "direct":
       return "bg-success/10 text-success border-success/15";
+    case "copy":
     case "remux":
+    case "hls":
       return "bg-info/10 text-info border-info/15";
     case "transcode":
       return "bg-warning/10 text-warning border-warning/15";
@@ -1277,7 +1292,9 @@ function methodBarColor(method: string): string {
   switch (method) {
     case "direct":
       return "bg-success";
+    case "copy":
     case "remux":
+    case "hls":
       return "bg-info";
     case "transcode":
       return "bg-warning";

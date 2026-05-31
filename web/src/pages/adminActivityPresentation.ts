@@ -5,12 +5,44 @@ export function formatDecisionLabel(decision?: string): string {
   switch (decision) {
     case "direct":
       return "Direct";
+    case "copy":
+      return "Copy";
     case "remux":
       return "Remux";
+    case "hls":
+      return "HLS";
     case "transcode":
       return "Transcode";
     default:
       return "Unknown";
+  }
+}
+
+export function normalizeContainerDecision(playMethod?: string): string {
+  switch (playMethod?.trim()) {
+    case "direct":
+      return "direct";
+    case "remux":
+      return "remux";
+    case "transcode":
+    case "hls":
+      return "hls";
+    default:
+      return "";
+  }
+}
+
+export function normalizeStreamDecision(decision?: string): string {
+  switch (decision?.trim()) {
+    case "direct":
+      return "direct";
+    case "copy":
+    case "remux":
+      return "copy";
+    case "transcode":
+      return "transcode";
+    default:
+      return "";
   }
 }
 
@@ -75,11 +107,12 @@ export function formatSourceContainerSummary(session: AdminSession): string {
 }
 
 export function formatDeliveredContainerSummary(session: AdminSession): string {
-  switch (session.play_method?.trim()) {
+  switch (normalizeContainerDecision(session.play_method)) {
     case "direct":
       return formatSourceContainerSummary(session);
     case "remux":
-    case "transcode":
+      return "Remux";
+    case "hls":
       return "HLS";
     default:
       return formatSourceContainerSummary(session);
@@ -88,12 +121,12 @@ export function formatDeliveredContainerSummary(session: AdminSession): string {
 
 export function formatContainerDetail(session: AdminSession): string {
   const source = formatSourceContainerSummary(session);
-  switch (session.play_method?.trim()) {
+  switch (normalizeContainerDecision(session.play_method)) {
     case "direct":
       return "Original container";
     case "remux":
-      return `${source} → HLS`;
-    case "transcode":
+      return `${source} → Remux`;
+    case "hls":
       return `${source} → HLS`;
     default:
       return "—";
@@ -142,7 +175,7 @@ export function formatVideoDetail(session: AdminSession): string {
     return target ? `Output → ${target}` : "Transcoding";
   }
   if (decision === "remux") {
-    return "Container remux";
+    return "Video stream copied";
   }
   if (decision === "direct") {
     return "No video conversion";
@@ -191,7 +224,7 @@ export function formatAudioDetail(session: AdminSession): string {
     return target ? `→ ${target}` : "Audio transcode";
   }
   if (decision === "remux") {
-    return "Container remux";
+    return "Audio stream copied";
   }
   if (decision === "direct") {
     return "No audio conversion";
