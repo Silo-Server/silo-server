@@ -19,7 +19,7 @@ import {
   type RealtimeEventsContextValue,
 } from "@/components/realtimeEventsContext";
 import { useAuth } from "@/hooks/useAuth";
-import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
+import { adminKeys, catalogKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
   invalidateMediaSurfaceQueries,
   updateCatalogItemDetail,
@@ -157,6 +157,7 @@ function invalidateCatalogState(queryClient: QueryClient, itemId?: string) {
   void invalidateMediaSurfaceQueries(queryClient, itemId ? { itemId } : {}).then(() => {
     bumpHomeRefreshSignal(queryClient);
   });
+  void queryClient.refetchQueries({ queryKey: catalogKeys.all, type: "active" });
   void queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
   void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
   void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
