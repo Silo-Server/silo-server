@@ -67,9 +67,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "library ids",
+			name: "library ids does not revoke session",
 			in:   models.UpdateUserInput{LibraryIDs: &libraryIDs},
-			want: true,
+			want: false,
 		},
 		{
 			name: "library ids unchanged",
@@ -77,9 +77,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "library ids nil differs from restricted",
+			name: "library ids nil does not revoke session",
 			in:   models.UpdateUserInput{LibraryIDs: &allLibraryIDs},
-			want: true,
+			want: false,
 		},
 		{
 			name: "max playback quality",
@@ -118,9 +118,9 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 
 	unrestrictedCurrent := *current
 	unrestrictedCurrent.LibraryIDs = nil
-	t.Run("library ids empty differs from nil", func(t *testing.T) {
-		if got := updateRequiresSessionRevocation(&unrestrictedCurrent, models.UpdateUserInput{LibraryIDs: &emptyLibraryIDs}); !got {
-			t.Fatalf("updateRequiresSessionRevocation() = %v, want true", got)
+	t.Run("library ids empty does not revoke session", func(t *testing.T) {
+		if got := updateRequiresSessionRevocation(&unrestrictedCurrent, models.UpdateUserInput{LibraryIDs: &emptyLibraryIDs}); got {
+			t.Fatalf("updateRequiresSessionRevocation() = %v, want false", got)
 		}
 	})
 
