@@ -13,6 +13,8 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 	disabled := false
 	libraryIDs := []int{1, 2}
 	sameLibraryIDs := []int{1}
+	emptyLibraryIDs := []int{}
+	var allLibraryIDs []int
 	maxPlaybackQuality := "1080p"
 	sameMaxPlaybackQuality := "original"
 	password := "new-password"
@@ -75,6 +77,11 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "library ids nil differs from restricted",
+			in:   models.UpdateUserInput{LibraryIDs: &allLibraryIDs},
+			want: true,
+		},
+		{
 			name: "max playback quality",
 			in:   models.UpdateUserInput{MaxPlaybackQuality: &maxPlaybackQuality},
 			want: true,
@@ -108,4 +115,18 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			}
 		})
 	}
+
+	unrestrictedCurrent := *current
+	unrestrictedCurrent.LibraryIDs = nil
+	t.Run("library ids empty differs from nil", func(t *testing.T) {
+		if got := updateRequiresSessionRevocation(&unrestrictedCurrent, models.UpdateUserInput{LibraryIDs: &emptyLibraryIDs}); !got {
+			t.Fatalf("updateRequiresSessionRevocation() = %v, want true", got)
+		}
+	})
+
+	t.Run("library ids nil unchanged", func(t *testing.T) {
+		if got := updateRequiresSessionRevocation(&unrestrictedCurrent, models.UpdateUserInput{LibraryIDs: &allLibraryIDs}); got {
+			t.Fatalf("updateRequiresSessionRevocation() = %v, want false", got)
+		}
+	})
 }
