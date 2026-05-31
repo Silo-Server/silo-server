@@ -20,7 +20,10 @@ import {
 } from "@/components/realtimeEventsContext";
 import { useAuth } from "@/hooks/useAuth";
 import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
-import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
+import {
+  invalidateMediaSurfaceQueries,
+  updateCatalogItemDetail,
+} from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +39,9 @@ interface UserStatePayload {
   content_id?: string;
   series_id?: string;
   change: "progress" | "favorite" | "watchlist" | "history" | "watched";
+  played?: boolean;
+  is_favorite?: boolean;
+  in_watchlist?: boolean;
 }
 
 const CATALOG_ITEM_CHANGED_EVENTS = new Set(["metadata.updated", "catalog.item.changed"]);
@@ -258,6 +264,17 @@ function handleUserStateEvent(
 ) {
   if (payload.profile_id && activeProfileID && payload.profile_id !== activeProfileID) {
     return;
+  }
+
+  if (payload.content_id) {
+    updateCatalogItemDetail(queryClient, payload.content_id, (detail) => ({
+      ...detail,
+      user_state: {
+        played: payload.played ?? detail.user_state?.played ?? false,
+        is_favorite: payload.is_favorite ?? detail.user_state?.is_favorite ?? false,
+        in_watchlist: payload.in_watchlist ?? detail.user_state?.in_watchlist ?? false,
+      },
+    }));
   }
 
   void invalidateMediaSurfaceQueries(
