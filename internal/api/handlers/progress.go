@@ -258,7 +258,6 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 				item.MediaItemID,
 				"",
 				"progress",
-				"progress.updated",
 			)
 		}
 	}

@@ -13,16 +13,18 @@ type userStateEventPayload struct {
 	Change    string `json:"change"`
 }
 
+const userStateChangedEvent = "user_state.changed"
+
 func publishUserStateEvent(
 	ctx context.Context,
 	hub *evt.Hub,
 	userID int,
-	profileID, contentID, seriesID, change, eventName string,
+	profileID, contentID, seriesID, change string,
 ) {
-	if hub == nil || userID == 0 || profileID == "" || change == "" || eventName == "" {
+	if hub == nil || userID == 0 || profileID == "" || change == "" {
 		return
 	}
-	_ = hub.PublishJSON(ctx, evt.ChannelUserState, eventName, userStateEventPayload{
+	_ = hub.PublishJSON(ctx, evt.ChannelUserState, userStateChangedEvent, userStateEventPayload{
 		ProfileID: profileID,
 		ContentID: contentID,
 		SeriesID:  seriesID,

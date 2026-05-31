@@ -216,7 +216,7 @@ func (h *PersonalDataHandler) HandleAddFavorite(w http.ResponseWriter, r *http.R
 
 	h.dispatchLocalFavoriteEvent(r.Context(), watchsync.LocalFavoriteEventAdded, userID, profileID, itemID)
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite", "favorite.updated")
+	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -244,7 +244,7 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 
 	h.dispatchLocalFavoriteEvent(r.Context(), watchsync.LocalFavoriteEventRemoved, userID, profileID, itemID)
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite", "favorite.updated")
+	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -366,7 +366,7 @@ func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *htt
 	}
 
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", "watchlist.updated")
+	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -393,7 +393,7 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 	}
 
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", "watchlist.updated")
+	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -492,7 +492,6 @@ func (h *PersonalDataHandler) HandleRemoveHistory(w http.ResponseWriter, r *http
 			mediaItemID,
 			"",
 			"history",
-			"history.updated",
 		)
 	}
 	w.WriteHeader(http.StatusNoContent)
