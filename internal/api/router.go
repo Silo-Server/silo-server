@@ -1161,6 +1161,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					StateTTL:        10 * time.Minute,
 				})
 			}
+			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
 
 			r.Route("/auth", func(r chi.Router) {
 				if deps.RateLimitMW != nil {
