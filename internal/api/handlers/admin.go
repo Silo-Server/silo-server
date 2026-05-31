@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -463,7 +464,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		permissions = &normalized
 	}
 
-	err = h.userRepo.Update(r.Context(), id, models.UpdateUserInput{
+	updateInput := models.UpdateUserInput{
 		Username:                 req.Username,
 		Email:                    req.Email,
 		Password:                 req.Password,
@@ -477,12 +478,31 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		MaxProfiles:              req.MaxProfiles,
 		DownloadAllowed:          req.DownloadAllowed,
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
-	})
+	}
+
+	var currentUser *models.User
+	if updateMayRequireSessionRevocation(updateInput) {
+		currentUser, err = h.userRepo.GetByID(r.Context(), id)
+		if err != nil {
+			if auth.IsNotFound(err) {
+				writeError(w, http.StatusNotFound, "not_found", "User not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+			return
+		}
+	}
+
+	err = h.userRepo.Update(r.Context(), id, updateInput)
 	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(req) {
+	if updateRequiresSessionRevocation(currentUser, updateInput) {
 		if err := h.revokeUserSessions(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
 			return
@@ -750,13 +770,35 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func updateRequiresSessionRevocation(req updateUserRequest) bool {
-	return req.Password != nil ||
-		req.Role != nil ||
-		req.Enabled != nil ||
-		req.LibraryIDs.Set ||
-		req.Permissions.Set ||
-		req.MaxPlaybackQuality != nil
+func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
+	return input.Password != nil ||
+		input.Role != nil ||
+		input.Enabled != nil ||
+		input.Permissions != nil ||
+		input.MaxPlaybackQuality != nil
+}
+
+func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
+	if input.Password != nil {
+		return true
+	}
+	if current == nil {
+		return updateMayRequireSessionRevocation(input)
+	}
+	if input.Role != nil && *input.Role != current.Role {
+		return true
+	}
+	if input.Enabled != nil && *input.Enabled != current.Enabled {
+		return true
+	}
+	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
+		return true
+	}
+	if input.MaxPlaybackQuality != nil &&
+		access.NormalizePlaybackQuality(*input.MaxPlaybackQuality) != access.NormalizePlaybackQuality(current.MaxPlaybackQuality) {
+		return true
+	}
+	return false
 }
 
 func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
