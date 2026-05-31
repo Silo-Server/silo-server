@@ -273,7 +273,8 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	}
 	if input.LibraryIDs != nil {
 		setClauses = append(setClauses, fmt.Sprintf("library_ids = $%d", argIndex))
-		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("library_ids IS DISTINCT FROM $%d", argIndex))
+		// Library scope is resolved from users.library_ids on each request, so
+		// changing it must not invalidate durable profile/session tokens.
 		args = append(args, *input.LibraryIDs)
 		argIndex++
 	}
