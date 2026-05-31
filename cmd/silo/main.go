@@ -899,6 +899,7 @@ func main() {
 		}
 
 		matchWorker = metadata.NewMatchWorker(metadataService, deps.FileRepo, cfg.Matcher.Workers, cfg.Matcher.BatchSize, 30*time.Second)
+		matchWorker.SetRealtimeHub(deps.RealtimeHub)
 		if movieQueueRepo != nil {
 			matchWorker.SetMovieFileClaimer(movieQueueRepo)
 		}
