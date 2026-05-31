@@ -38,6 +38,8 @@ interface UserStatePayload {
   change: "progress" | "favorite" | "watchlist" | "history" | "watched";
 }
 
+const CATALOG_ITEM_CHANGED_EVENTS = new Set(["metadata.updated", "catalog.item.changed"]);
+
 function buildEventsUrl(token: string | null, location: Pick<Location, "protocol" | "host">) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const search = new URLSearchParams();
@@ -249,7 +251,15 @@ function updateHistoryImportCaches(queryClient: QueryClient, run?: HistoryImport
   });
 }
 
-function handleUserStateEvent(queryClient: QueryClient, payload: UserStatePayload) {
+function handleUserStateEvent(
+  queryClient: QueryClient,
+  payload: UserStatePayload,
+  activeProfileID: string | null | undefined,
+) {
+  if (payload.profile_id && activeProfileID && payload.profile_id !== activeProfileID) {
+    return;
+  }
+
   void invalidateMediaSurfaceQueries(
     queryClient,
     payload.content_id ? { itemId: payload.content_id } : {},
@@ -261,7 +271,7 @@ function handleUserStateEvent(queryClient: QueryClient, payload: UserStatePayloa
 
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
   const reconnectTimerRef = useRef<number | undefined>(undefined);
   const closingRef = useRef(false);
@@ -272,6 +282,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const channelHandlersRef = useRef(new Map<EventChannel, Map<number, EventChannelHandlers>>());
   const nextHandlerIDRef = useRef(1);
   const waitersRef = useRef(new Map<string, JobWaiter>());
+  const activeProfileIDRef = useRef<string | null | undefined>(profile?.id);
+
+  activeProfileIDRef.current = profile?.id;
 
   const settleWaiterRef = useRef<(job: AdminJob) => void>(() => {});
   settleWaiterRef.current = (job: AdminJob) => {
@@ -358,7 +371,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   function handleEvent(message: EventsEventMessage) {
     switch (message.channel) {
       case "catalog":
-        if (message.event === "metadata.updated") {
+        if (CATALOG_ITEM_CHANGED_EVENTS.has(message.event)) {
           invalidateCatalogState(
             queryClient,
             typeof message.data === "object" && message.data && "content_id" in message.data
@@ -391,7 +404,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         updateHistoryImportCaches(queryClient, message.data as HistoryImportRun);
         break;
       case "user_state":
-        handleUserStateEvent(queryClient, message.data as UserStatePayload);
+        handleUserStateEvent(
+          queryClient,
+          message.data as UserStatePayload,
+          activeProfileIDRef.current,
+        );
         break;
       default:
         break;
