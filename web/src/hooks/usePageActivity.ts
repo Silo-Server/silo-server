@@ -9,8 +9,7 @@ export interface PageActivityState {
 }
 
 function readPageActivity(): PageActivityState {
-  const isVisible =
-    typeof document === "undefined" ? true : document.visibilityState === "visible";
+  const isVisible = typeof document === "undefined" ? true : document.visibilityState === "visible";
   const isFocused = typeof document === "undefined" ? true : document.hasFocus();
   const isFrozen = false;
 
@@ -19,7 +18,7 @@ function readPageActivity(): PageActivityState {
     isFocused,
     isFrozen,
     canPollDashboard: isVisible && isFocused && !isFrozen,
-    canApplyRealtimeUpdates: isVisible && isFocused && !isFrozen,
+    canApplyRealtimeUpdates: isVisible && !isFrozen,
   };
 }
 
@@ -35,7 +34,7 @@ export function usePageActivity() {
         ...next,
         isFrozen: frozen,
         canPollDashboard: next.isVisible && next.isFocused && !frozen,
-        canApplyRealtimeUpdates: next.isVisible && next.isFocused && !frozen,
+        canApplyRealtimeUpdates: next.isVisible && !frozen,
       });
     };
 

@@ -102,39 +102,42 @@ export default function AdminDashboard() {
     }
   }, [dashboardDataUpdatedAt, hasDashboardData]);
 
-  const refreshDashboard = useCallback(async ({ manual }: { manual: boolean }) => {
-    if (manual) {
-      manualRefreshStartedAtRef.current = Date.now();
-      setIsManualRefreshPending(true);
-    }
-    try {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.libraries(), refetchType: "none" }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.users(), refetchType: "none" }),
-      ]);
-      const nextStats = await fetchAdminStats({ refresh: true });
-      queryClient.setQueryData(adminKeys.stats(), nextStats);
-      await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
-      const refreshedAt = Date.now();
-      setLastDashboardUpdatedAt(refreshedAt);
-      setRelativeUpdatedNow(refreshedAt);
-    } finally {
+  const refreshDashboard = useCallback(
+    async ({ manual }: { manual: boolean }) => {
       if (manual) {
-        const startedAt = manualRefreshStartedAtRef.current;
-        if (startedAt !== null) {
-          const elapsed = Date.now() - startedAt;
-          const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
-          if (remaining > 0) {
-            await delay(remaining);
-          }
-        }
-        manualRefreshStartedAtRef.current = null;
-        setIsManualRefreshPending(false);
+        manualRefreshStartedAtRef.current = Date.now();
+        setIsManualRefreshPending(true);
       }
-    }
-  }, [queryClient, refetchLibraries, refetchSessions, refetchUsers]);
+      try {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.libraries(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.users(), refetchType: "none" }),
+        ]);
+        const nextStats = await fetchAdminStats({ refresh: true });
+        queryClient.setQueryData(adminKeys.stats(), nextStats);
+        await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
+        const refreshedAt = Date.now();
+        setLastDashboardUpdatedAt(refreshedAt);
+        setRelativeUpdatedNow(refreshedAt);
+      } finally {
+        if (manual) {
+          const startedAt = manualRefreshStartedAtRef.current;
+          if (startedAt !== null) {
+            const elapsed = Date.now() - startedAt;
+            const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
+            if (remaining > 0) {
+              await delay(remaining);
+            }
+          }
+          manualRefreshStartedAtRef.current = null;
+          setIsManualRefreshPending(false);
+        }
+      }
+    },
+    [queryClient, refetchLibraries, refetchSessions, refetchUsers],
+  );
 
   useEffect(() => {
     if (!pageActivity.canPollDashboard) {
@@ -509,9 +512,7 @@ function StreamCard({ session }: { session: AdminSession }) {
             </span>
           )}
           {(session.profile_name || session.profile_id) && (
-            <span className="border-border bg-surface text-muted-foreground inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold">
-              {session.profile_name || session.profile_id}
-            </span>
+            <SessionProfilePill label={session.profile_name || session.profile_id} />
           )}
         </div>
 
@@ -528,6 +529,14 @@ function StreamCard({ session }: { session: AdminSession }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SessionProfilePill({ label }: { label: string }) {
+  return (
+    <span className="border-primary/30 bg-primary/15 text-primary inline-flex max-w-full rounded border px-1.5 py-0.5 text-[9px] leading-none font-semibold">
+      {label}
+    </span>
   );
 }
 
@@ -778,6 +787,7 @@ function ActivityCard({
                 ? s.episode_name || `S${s.season_number}E${s.episode_number}`
                 : s.media_title || `File #${s.media_file_id}`;
               const username = s.username || `User #${s.user_id}`;
+              const profileDisplay = s.profile_name || s.profile_id || "";
               return (
                 <div
                   key={s.session_id}
@@ -789,6 +799,12 @@ function ActivityCard({
                   <div className="min-w-0 flex-1">
                     <div className="text-muted-foreground text-xs leading-relaxed">
                       <span className="text-foreground font-semibold">{username}</span>
+                      {profileDisplay ? (
+                        <>
+                          {" "}
+                          <SessionProfilePill label={profileDisplay} />
+                        </>
+                      ) : null}
                       {" started watching "}
                       <Link
                         to={`/admin/history?user_id=${s.user_id}${s.profile_id ? `&profile_id=${encodeURIComponent(s.profile_id)}` : ""}`}

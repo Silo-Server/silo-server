@@ -120,6 +120,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
+	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 
 	// Ensure output directory exists.
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
@@ -219,18 +220,10 @@ func IsMPEG4Part2VideoCodec(codec string) bool {
 func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// Resolve "auto" into a concrete accel method once so all downstream
 	// helpers (appendHWAccelArgs, appendVideoArgs, etc.) see the real value.
-	opts.HWAccel = ResolveHWAccel(opts.HWAccel)
+	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 
 	isVideoCopy := opts.TargetCodecVideo == "copy"
 	isAudioCopy := opts.TargetCodecAudio == "copy"
-	if !isVideoCopy && IsMPEG4Part2VideoCodec(opts.SourceVideoCodec) && opts.HWAccel != "none" {
-		slog.Info("disabling hardware video transcode for MPEG-4 Part 2 source",
-			"source_video_codec", opts.SourceVideoCodec,
-			"requested_hw_accel", opts.HWAccel,
-			"playback_session_id", opts.SessionID,
-		)
-		opts.HWAccel = "none"
-	}
 
 	args := []string{
 		"-hide_banner",
@@ -353,6 +346,20 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	args = append(args, manifestPath)
 
 	return args
+}
+
+func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
+	hwAccel := ResolveHWAccel(opts.HWAccel)
+	if hwAccel == "" {
+		return ""
+	}
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+		return "none"
+	}
+	if IsMPEG4Part2VideoCodec(opts.SourceVideoCodec) {
+		return "none"
+	}
+	return hwAccel
 }
 
 // appendStreamSelectionArgs limits output to primary video/audio streams.

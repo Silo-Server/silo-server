@@ -1770,6 +1770,7 @@ export interface AdminSession {
   file_duration: number | null;
   started_at: string;
   updated_at: string;
+  position_seconds: number;
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
@@ -1780,6 +1781,7 @@ export interface AdminSession {
   target_video_codec?: string;
   target_audio_codec?: string;
   target_bitrate_kbps: number | null;
+  transcode_hw_accel?: string;
   source_container?: string;
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
