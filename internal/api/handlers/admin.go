@@ -484,13 +484,21 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	if updateMayRequireSessionRevocation(updateInput) {
 		currentUser, err = h.userRepo.GetByID(r.Context(), id)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			if auth.IsNotFound(err) {
+				writeError(w, http.StatusNotFound, "not_found", "User not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
 			return
 		}
 	}
 
 	err = h.userRepo.Update(r.Context(), id, updateInput)
 	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
