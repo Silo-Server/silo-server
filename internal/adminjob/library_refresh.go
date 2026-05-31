@@ -251,8 +251,9 @@ func (e *LibraryRefreshExecutor) Execute(
 	if result.RefreshedOK > 0 || result.PipelineOK > 0 {
 		e.publish(cache.EventMetadataUpdated, strconv.Itoa(req.LibraryID))
 		if e.realtimeHub != nil {
-			_ = e.realtimeHub.PublishMetadataUpdated(ctx, notifications.MetadataUpdateEvent{
+			_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
 				LibraryID: req.LibraryID,
+				Change:    "metadata_updated",
 			})
 		}
 	}
