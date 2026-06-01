@@ -2,6 +2,8 @@
 
 A self-hosted media streaming server with a React frontend and Go backend. Supports direct play, remuxing, and hardware-accelerated transcoding. Compatible with Jellyfin/Emby clients (VidHub, Findroid) via a built-in compatibility layer.
 
+Join the community on [Discord](https://discord.gg/4RxuUQAEnW).
+
 ## Deploy with Docker (recommended)
 
 The easiest way to run Silo is with Docker Compose. The default stack assumes you do not already have PostgreSQL and Redis available, so it bundles PostgreSQL, Redis, FFmpeg, and the application for a one-command start.
