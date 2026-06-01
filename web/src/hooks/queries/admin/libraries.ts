@@ -12,6 +12,9 @@ import type {
   CreateLibraryRequest,
   DeleteLibraryRootOverrideRequest,
   Library,
+  LibraryMetadataMatchQueueActionResponse,
+  LibraryMetadataMatchQueueDetail,
+  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibraryRootsResponse,
@@ -388,6 +391,7 @@ export function useScanAllLibraries() {
 }
 
 export function useCancelLibraryScans() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) =>
       api<{ cancelled: number; library_id: number }>("/scan/cancel", {
@@ -396,9 +400,72 @@ export function useCancelLibraryScans() {
       }),
     onSuccess: () => {
       toast.success("Scan cancellation requested");
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to cancel scans");
+    },
+  });
+}
+
+export function useLibraryMetadataMatchQueues() {
+  return useQuery({
+    queryKey: adminKeys.libraryMatchQueueStatuses(),
+    queryFn: () =>
+      api<LibraryMetadataMatchQueueStatus[]>("/libraries/metadata-match-queue").then(
+        (data) => data ?? [],
+      ),
+    staleTime: 0,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useLibraryMetadataMatchQueueDetail(libraryId: number | null) {
+  return useQuery({
+    queryKey: adminKeys.libraryMatchQueueDetail(libraryId ?? 0),
+    queryFn: () =>
+      api<LibraryMetadataMatchQueueDetail>(
+        `/libraries/${encodeURIComponent(String(libraryId))}/metadata-match-queue?limit=10`,
+      ),
+    enabled: libraryId !== null,
+    staleTime: 0,
+  });
+}
+
+export function useRetryLibraryMetadataMatchQueue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<LibraryMetadataMatchQueueActionResponse>(`/libraries/${id}/metadata-match-queue/retry`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, id) => {
+      toast.success("Metadata matcher backlog queued");
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to rebuild metadata matcher backlog",
+      );
+    },
+  });
+}
+
+export function useCancelLibraryMetadataMatchQueue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<LibraryMetadataMatchQueueActionResponse>(`/libraries/${id}/metadata-match-queue/cancel`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, id) => {
+      toast.success("Metadata matcher backlog cancelled");
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel metadata matcher backlog");
     },
   });
 }

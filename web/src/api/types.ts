@@ -2050,6 +2050,66 @@ export interface LibraryMountCheckResponse {
   roots: LibraryMountCheckRoot[];
 }
 
+export interface LibraryMetadataMatchQueueStatus {
+  library_id: number;
+  movie_count: number;
+  series_count: number;
+  raw_file_count: number;
+  total_count: number;
+}
+
+export interface LibraryMovieMatchQueueEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibrarySeriesMatchQueueEntry {
+  media_folder_id: number;
+  observed_root_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibraryRawMatchBacklogEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  base_title?: string;
+  base_year?: number;
+  base_type?: string;
+  last_attempted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryMetadataMatchQueueDetail extends LibraryMetadataMatchQueueStatus {
+  movies: LibraryMovieMatchQueueEntry[];
+  series: LibrarySeriesMatchQueueEntry[];
+  raw_files: LibraryRawMatchBacklogEntry[];
+}
+
+export interface LibraryMetadataMatchQueueActionResponse {
+  status: "queued" | "cancelled";
+  library_id: number;
+  movie_cancelled?: number;
+  series_cancelled?: number;
+  raw_file_cancelled?: number;
+  raw_file_retried?: number;
+  total_cancelled?: number;
+  queue: LibraryMetadataMatchQueueStatus;
+}
+
 export interface LibrarySkippedRoot {
   library_id: number;
   library_name: string;

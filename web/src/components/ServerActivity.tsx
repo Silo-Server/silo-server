@@ -8,10 +8,13 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import {
   useAdminLibraries,
   useCancelAdminJob,
+  useCancelLibraryMetadataMatchQueue,
+  useLibraryMetadataMatchQueues,
   useLibraryRefreshJobs,
+  useRetryLibraryMetadataMatchQueue,
 } from "@/hooks/queries/admin/libraries";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
-import type { AdminJob, TaskInfo, ScanRun } from "@/api/types";
+import type { AdminJob, LibraryMetadataMatchQueueStatus, TaskInfo, ScanRun } from "@/api/types";
 import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
 import {
   getLibraryRefreshLibraryID,
@@ -33,6 +36,7 @@ function useServerActivityData() {
   const { data: scans } = useActiveScans();
   const { data: libraries = [] } = useAdminLibraries();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
+  const { data: metadataMatchQueues = [] } = useLibraryMetadataMatchQueues();
   const { connectionState } = useRealtimeEvents();
 
   const activeScans = useMemo(
@@ -45,6 +49,10 @@ function useServerActivityData() {
     () => libraryRefreshJobs.filter(isActiveAdminJob),
     [libraryRefreshJobs],
   );
+  const activeMetadataMatchQueues = useMemo(
+    () => metadataMatchQueues.filter((queue) => queue.total_count > 0),
+    [metadataMatchQueues],
+  );
 
   const streamCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -56,7 +64,11 @@ function useServerActivityData() {
   }, [sessions]);
 
   const totalActive =
-    sessions.length + runningTasks.length + activeLibraryRefreshJobs.length + activeScans.length;
+    sessions.length +
+    runningTasks.length +
+    activeLibraryRefreshJobs.length +
+    activeMetadataMatchQueues.length +
+    activeScans.length;
 
   const libraryName = (id: number) => libraries.find((l) => l.id === id)?.name ?? `Library #${id}`;
 
@@ -64,6 +76,7 @@ function useServerActivityData() {
     sessions,
     runningTasks,
     activeLibraryRefreshJobs,
+    activeMetadataMatchQueues,
     activeScans,
     streamCounts,
     totalActive,
@@ -83,6 +96,7 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
     sessions,
     runningTasks,
     activeLibraryRefreshJobs,
+    activeMetadataMatchQueues,
     activeScans,
     streamCounts,
     totalActive,
@@ -91,6 +105,8 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
     scansLoaded,
   } = useServerActivityData();
   const cancelJob = useCancelAdminJob();
+  const cancelMatchQueue = useCancelLibraryMetadataMatchQueue();
+  const retryMatchQueue = useRetryLibraryMetadataMatchQueue();
 
   // Keep mounted while popover is open so Radix can animate closed
   if (hideWhenEmpty && totalActive === 0 && !open) return null;
@@ -202,6 +218,37 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
                     </div>
                   ) : (
                     <EmptyRow>No active metadata refresh</EmptyRow>
+                  )}
+                </ActivitySection>
+
+                <ActivitySection
+                  title="Matcher"
+                  count={activeMetadataMatchQueues.length}
+                  href="/admin/libraries"
+                  onNavigate={() => setOpen(false)}
+                >
+                  {activeMetadataMatchQueues.length > 0 ? (
+                    <div className="space-y-2">
+                      {activeMetadataMatchQueues.map((queue) => (
+                        <MetadataMatchQueueRow
+                          key={queue.library_id}
+                          cancelling={
+                            cancelMatchQueue.isPending &&
+                            cancelMatchQueue.variables === queue.library_id
+                          }
+                          libraryName={libraryName(queue.library_id)}
+                          queue={queue}
+                          retrying={
+                            retryMatchQueue.isPending &&
+                            retryMatchQueue.variables === queue.library_id
+                          }
+                          onCancel={() => cancelMatchQueue.mutate(queue.library_id)}
+                          onRetry={() => retryMatchQueue.mutate(queue.library_id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyRow>No queued matcher work</EmptyRow>
                   )}
                 </ActivitySection>
 
@@ -362,6 +409,58 @@ function MetadataJobRow({
           {job.message || "Library metadata refresh"}
         </div>
         <div className="text-muted-foreground/80 truncate text-[10px]">{progress}</div>
+      </div>
+    </div>
+  );
+}
+
+function MetadataMatchQueueRow({
+  queue,
+  libraryName,
+  cancelling,
+  retrying,
+  onCancel,
+  onRetry,
+}: {
+  queue: LibraryMetadataMatchQueueStatus;
+  libraryName: string;
+  cancelling: boolean;
+  retrying: boolean;
+  onCancel: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <button
+        type="button"
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-ring mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label={`Cancel metadata matcher backlog for ${libraryName}`}
+        title={`Cancel metadata matcher backlog for ${libraryName}`}
+        disabled={cancelling}
+        onClick={onCancel}
+      >
+        <Square className="h-2.5 w-2.5 fill-current" />
+      </button>
+      <DatabaseBackup className="text-primary mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[12px] font-medium">{libraryName}</span>
+          <button
+            type="button"
+            className="text-primary hover:text-primary/80 ml-auto shrink-0 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={retrying}
+            onClick={onRetry}
+          >
+            {retrying ? "Retrying..." : "Retry"}
+          </button>
+        </div>
+        <div className="text-muted-foreground truncate text-[10px]">
+          {queue.total_count.toLocaleString()} pending metadata matches
+        </div>
+        <div className="text-muted-foreground/80 truncate text-[10px]">
+          {queue.movie_count.toLocaleString()} movie · {queue.series_count.toLocaleString()} series
+          · {queue.raw_file_count.toLocaleString()} raw
+        </div>
       </div>
     </div>
   );

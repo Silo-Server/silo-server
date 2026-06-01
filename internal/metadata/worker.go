@@ -42,6 +42,10 @@ type MixedFileClaimer interface {
 	ClaimUnmatchedMixedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int, attemptBefore time.Time) ([]*models.MediaFile, error)
 }
 
+type MatchSuppressionChecker interface {
+	IsMatchSuppressed(ctx context.Context, fileID int) (bool, error)
+}
+
 type MovieFileClaimer interface {
 	Claim(ctx context.Context, limit int) ([]*models.MediaFile, error)
 	ClaimByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int, attemptBefore time.Time) ([]*models.MediaFile, error)
@@ -504,6 +508,9 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 				if ctx.Err() != nil {
 					return
 				}
+				if w.isMatchSuppressed(ctx, file) {
+					continue
+				}
 				w.processFileWithFolderCache(ctx, file, &folders, &deferredSeriesLinks)
 				processed.Add(1)
 			}
@@ -527,6 +534,32 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 	}
 
 	return claimedCount
+}
+
+func (w *MatchWorker) isMatchSuppressed(ctx context.Context, file *models.MediaFile) bool {
+	if file == nil {
+		return true
+	}
+	checker, ok := w.fileLister.(MatchSuppressionChecker)
+	if !ok {
+		return false
+	}
+	suppressed, err := checker.IsMatchSuppressed(ctx, file.ID)
+	if err != nil {
+		slog.Warn("metadata: failed to check match suppression",
+			"file_id", file.ID,
+			"path", file.FilePath,
+			"error", err,
+		)
+		return true
+	}
+	if suppressed {
+		slog.Info("metadata: skipping suppressed unmatched file",
+			"file_id", file.ID,
+			"path", file.FilePath,
+		)
+	}
+	return suppressed
 }
 
 func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, files []*models.MediaFile) int {

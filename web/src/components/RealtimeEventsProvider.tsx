@@ -163,6 +163,7 @@ function invalidateCatalogState(queryClient: QueryClient, itemId?: string) {
   });
   void queryClient.refetchQueries({ queryKey: catalogKeys.all, type: "active" });
   void queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+  void queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
   void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
   void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
 }
@@ -233,6 +234,7 @@ function applyScanUpdate(queryClient: QueryClient, scan: ScanRun, eventName: str
     eventName === "scan.cancelled"
   ) {
     void queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+    void queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
   }
 }
 

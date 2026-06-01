@@ -871,6 +871,8 @@ func main() {
 		providerIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		movieQueueRepo = metadata.NewMovieMatchQueueRepository(deps.DB, deps.FileRepo)
 		seriesQueueRepo = metadata.NewSeriesRootMatchQueueRepository(deps.DB)
+		deps.MovieMatchQueueRepo = movieQueueRepo
+		deps.SeriesRootMatchQueueRepo = seriesQueueRepo
 		matchQueueCoordinator = metadata.NewMatchQueueCoordinator(movieQueueRepo, seriesQueueRepo)
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)

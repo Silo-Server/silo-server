@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   useScanLibrary: vi.fn(),
   useScanAllLibraries: vi.fn(),
   useRefreshLibraryMetadata: vi.fn(),
+  useLibraryMetadataMatchQueues: vi.fn(),
+  useLibraryMetadataMatchQueueDetail: vi.fn(),
+  useRetryLibraryMetadataMatchQueue: vi.fn(),
+  useCancelLibraryMetadataMatchQueue: vi.fn(),
   useConfirmEmptyRootCleanup: vi.fn(),
   useLibraryProviders: vi.fn(),
   useSetLibraryProviders: vi.fn(),
@@ -45,6 +49,14 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useScanLibrary: (...args: unknown[]) => mocks.useScanLibrary(...args),
   useScanAllLibraries: (...args: unknown[]) => mocks.useScanAllLibraries(...args),
   useRefreshLibraryMetadata: (...args: unknown[]) => mocks.useRefreshLibraryMetadata(...args),
+  useLibraryMetadataMatchQueues: (...args: unknown[]) =>
+    mocks.useLibraryMetadataMatchQueues(...args),
+  useLibraryMetadataMatchQueueDetail: (...args: unknown[]) =>
+    mocks.useLibraryMetadataMatchQueueDetail(...args),
+  useRetryLibraryMetadataMatchQueue: (...args: unknown[]) =>
+    mocks.useRetryLibraryMetadataMatchQueue(...args),
+  useCancelLibraryMetadataMatchQueue: (...args: unknown[]) =>
+    mocks.useCancelLibraryMetadataMatchQueue(...args),
   useConfirmEmptyRootCleanup: (...args: unknown[]) => mocks.useConfirmEmptyRootCleanup(...args),
   useLibraryProviders: (...args: unknown[]) => mocks.useLibraryProviders(...args),
   useSetLibraryProviders: (...args: unknown[]) => mocks.useSetLibraryProviders(...args),
@@ -130,6 +142,16 @@ describe("AdminLibraries", () => {
     mocks.useScanLibrary.mockReturnValue(queryState);
     mocks.useScanAllLibraries.mockReturnValue(queryState);
     mocks.useRefreshLibraryMetadata.mockReturnValue(queryState);
+    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
+      data: [],
+      isLoading: false,
+    });
+    mocks.useLibraryMetadataMatchQueueDetail.mockReturnValue({
+      data: null,
+      isLoading: false,
+    });
+    mocks.useRetryLibraryMetadataMatchQueue.mockReturnValue(queryState);
+    mocks.useCancelLibraryMetadataMatchQueue.mockReturnValue(queryState);
     mocks.useConfirmEmptyRootCleanup.mockReturnValue(queryState);
     mocks.useLibraryProviders.mockReturnValue({
       data: { levels: {} },
@@ -196,6 +218,64 @@ describe("AdminLibraries", () => {
 
     expect(markup).toContain("Ambiguous Roots");
     expect(markup).toContain("Scanner roots that stay visible");
+  });
+
+  it("surfaces pending metadata matcher queue work", () => {
+    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
+      data: [
+        {
+          library_id: 1,
+          movie_count: 1,
+          series_count: 2,
+          raw_file_count: 0,
+          total_count: 3,
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("3 matching");
+    expect(markup).not.toContain("View backlog");
+  });
+
+  it("shows active scan progress in the library task status row", () => {
+    mocks.useActiveScans.mockReturnValue({
+      data: [
+        {
+          id: "scan-1",
+          library_id: 1,
+          mode: "library",
+          trigger: "manual",
+          status: "running",
+          started_at: "2026-03-23T20:00:00Z",
+          result: {
+            new: 0,
+            updated: 0,
+            unchanged: 0,
+            missing: 0,
+            files_deleted: 0,
+            memberships_removed: 0,
+            items_deleted: 0,
+            matched_files: 0,
+            retried_items: 0,
+            still_unmatched_warnings: 0,
+            skipped: 0,
+            errors: 0,
+            message: "Processing files",
+            total_files: 20,
+            files_processed: 10,
+          },
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Processing files · 10 / 20 (50%)");
+    expect(markup).toContain("Full library scan · Entire library");
   });
 
   it("renders the collapsed Ambiguous Roots section when no roots exist", () => {

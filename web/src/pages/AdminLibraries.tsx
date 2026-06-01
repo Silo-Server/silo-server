@@ -6,6 +6,7 @@ import type {
   AdminJob,
   CreateLibraryRequest,
   Library,
+  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibrarySkippedRoot,
@@ -33,6 +34,7 @@ import {
   useCancelAdminJob,
   useConfirmEmptyRootCleanup,
   useLibraryProviders,
+  useLibraryMetadataMatchQueues,
   useSetLibraryProviders,
   useUploadLibraryPoster,
   useDeleteLibraryPoster,
@@ -133,6 +135,7 @@ export default function AdminLibraries() {
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
+  const { data: metadataMatchQueues = [] } = useLibraryMetadataMatchQueues();
   const { data: skippedRoots = [] } = useSkippedLibraryRoots();
   const { data: staleIDs = [] } = useStaleMediaIDs();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -223,6 +226,15 @@ export default function AdminLibraries() {
     }
     return scansByLibraryID;
   }, [activeScans]);
+  const metadataMatchQueueByLibraryId = useMemo(() => {
+    const queuesByLibraryID = new Map<number, LibraryMetadataMatchQueueStatus>();
+    for (const queue of metadataMatchQueues) {
+      if (queue.total_count > 0) {
+        queuesByLibraryID.set(queue.library_id, queue);
+      }
+    }
+    return queuesByLibraryID;
+  }, [metadataMatchQueues]);
   const activeScanGroups = useMemo(() => {
     return Array.from(activeScansByLibraryId.entries())
       .map(([libraryID, scans]) => {
@@ -413,6 +425,8 @@ export default function AdminLibraries() {
                   const isScanning = scanMutation.isPending && scanMutation.variables === lib.id;
                   const activeRefreshJob = activeRefreshJobsByLibraryId.get(lib.id);
                   const activeLibraryScans = activeScansByLibraryId.get(lib.id) ?? [];
+                  const metadataMatchQueue = metadataMatchQueueByLibraryId.get(lib.id);
+                  const hasMetadataMatchQueue = (metadataMatchQueue?.total_count ?? 0) > 0;
                   const runningLibraryScans = activeLibraryScans.filter(
                     (scan) => scan.status === "running",
                   ).length;
@@ -463,6 +477,11 @@ export default function AdminLibraries() {
                             ) : null}
                             {queuedLibraryScans > 0 ? (
                               <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
+                            ) : null}
+                            {hasMetadataMatchQueue ? (
+                              <Badge variant="secondary">
+                                {metadataMatchQueue?.total_count.toLocaleString()} matching
+                              </Badge>
                             ) : null}
                             {lib.scan_warning_code === "empty_root" ? (
                               <Badge variant="destructive">Empty root guarded</Badge>
@@ -998,43 +1017,80 @@ function LibraryActiveWorkRow({
   return (
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={7} className="bg-muted/20 px-4 py-2">
-        <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 pl-12 text-[11px]">
+        <div className="text-muted-foreground flex flex-col gap-1.5 pl-12 text-[11px]">
           {activeRefreshJob ? (
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-start gap-1.5">
               <StopTaskButton
                 disabled={cancellingJobID === activeRefreshJob.id}
                 label="Cancel metadata refresh"
                 onClick={() => onCancelJob(activeRefreshJob.id)}
               />
-              <DatabaseBackup className="h-3 w-3 shrink-0" />
-              <span className="text-foreground/80 font-medium">Metadata</span>
-              <span className="truncate">
-                {activeRefreshJob.message || "Metadata refresh queued"}
-              </span>
-              <span className="shrink-0">· {formatJobProgress(activeRefreshJob)}</span>
+              <DatabaseBackup className="mt-0.5 h-3 w-3 shrink-0" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="text-foreground/80 font-medium">Metadata</span>
+                  <span className="truncate">
+                    {activeRefreshJob.message || "Metadata refresh queued"}
+                  </span>
+                </div>
+                <div className="text-muted-foreground/80 truncate text-[10px]">
+                  {formatJobProgress(activeRefreshJob)}
+                </div>
+              </div>
             </div>
           ) : null}
           {activeLibraryScans.map((scan) => (
-            <div key={scan.id} className="flex min-w-0 items-center gap-1.5">
-              <StopTaskButton
-                disabled={cancellingLibraryID === libraryID}
-                label="Cancel library scans"
-                onClick={() => onCancelScans(libraryID)}
-              />
-              <RefreshCw
-                className={cn("h-3 w-3 shrink-0", scan.status === "running" && "animate-spin")}
-              />
-              <span className="text-foreground/80 font-medium">Scan</span>
-              <span className="shrink-0">
-                {formatActiveScanMode(scan)}
-                {scan.status === "running" ? " running" : " queued"}
-              </span>
-              {scan.path ? <span className="truncate">· {scan.path}</span> : null}
-            </div>
+            <LibraryScanTaskRow
+              key={scan.id}
+              scan={scan}
+              cancelling={cancellingLibraryID === libraryID}
+              libraryID={libraryID}
+              onCancelScans={onCancelScans}
+            />
           ))}
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function LibraryScanTaskRow({
+  scan,
+  cancelling,
+  libraryID,
+  onCancelScans,
+}: {
+  scan: ScanRun;
+  cancelling: boolean;
+  libraryID: number;
+  onCancelScans: (libraryID: number) => void;
+}) {
+  const progress = formatActiveScanProgress(scan);
+
+  return (
+    <div className="flex min-w-0 items-start gap-1.5">
+      <StopTaskButton
+        disabled={cancelling}
+        label="Cancel library scans"
+        onClick={() => onCancelScans(libraryID)}
+      />
+      <RefreshCw
+        className={cn("mt-0.5 h-3 w-3 shrink-0", scan.status === "running" && "animate-spin")}
+      />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="text-foreground/80 font-medium">Scan</span>
+          <span className="shrink-0">{scan.status === "running" ? "Running" : "Queued"}</span>
+        </div>
+        <div className="text-muted-foreground/80 truncate text-[10px]">
+          {formatActiveScanMode(scan)}
+          {scan.path ? ` · ${scan.path}` : " · Entire library"}
+        </div>
+        {progress ? (
+          <div className="text-muted-foreground/80 truncate text-[10px]">{progress}</div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
