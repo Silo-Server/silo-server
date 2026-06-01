@@ -612,6 +612,16 @@ type requestIntegrationResponse struct {
 }
 
 func requestIntegrationResponseFrom(integration mediarequests.Integration) requestIntegrationResponse {
+	// Normalize nil slices so they serialize as [] (not null); the frontend
+	// types them as number[] and indexes/maps over them.
+	tags := integration.Tags
+	if tags == nil {
+		tags = []int{}
+	}
+	animeTags := integration.AnimeTags
+	if animeTags == nil {
+		animeTags = []int{}
+	}
 	return requestIntegrationResponse{
 		ID:                    integration.ID,
 		Name:                  integration.Name,
@@ -623,12 +633,12 @@ func requestIntegrationResponseFrom(integration mediarequests.Integration) reque
 		AnimeEnabled:          integration.AnimeEnabled,
 		AnimeQualityProfileID: integration.AnimeQualityProfileID,
 		AnimeRootFolder:       integration.AnimeRootFolder,
-		AnimeTags:             integration.AnimeTags,
+		AnimeTags:             animeTags,
 		BaseURL:               integration.BaseURL,
 		HasAPIKey:             strings.TrimSpace(integration.APIKeyRef) != "",
 		RootFolder:            integration.RootFolder,
 		QualityProfileID:      integration.QualityProfileID,
-		Tags:                  integration.Tags,
+		Tags:                  tags,
 		Options:               integration.Options,
 		LastCheckAt:           integration.LastCheckAt,
 		LastCheckStatus:       integration.LastCheckStatus,

@@ -64,9 +64,19 @@ func resolveInstance(pt plannedTarget) Integration {
 		in.Options = clone
 	}
 	if pt.IsAnime {
-		in.RootFolder = in.AnimeRootFolder
-		in.QualityProfileID = in.AnimeQualityProfileID
-		in.Tags = in.AnimeTags
+		// Anime fields are overrides: only replace the standard value when the
+		// anime counterpart is set, so an admin can enable anime detection while
+		// reusing the standard root folder / quality profile / tags for any field
+		// they leave blank (rather than clearing them into an invalid submission).
+		if in.AnimeRootFolder != "" {
+			in.RootFolder = in.AnimeRootFolder
+		}
+		if in.AnimeQualityProfileID != nil {
+			in.QualityProfileID = in.AnimeQualityProfileID
+		}
+		if len(in.AnimeTags) > 0 {
+			in.Tags = in.AnimeTags
+		}
 		if in.Kind == "sonarr" {
 			in.Options["series_type"] = "anime"
 		}

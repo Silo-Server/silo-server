@@ -740,7 +740,10 @@ function IntegrationEditor({
   }
 
   const saving = createIntegration.isPending || updateIntegration.isPending;
-  const canSave = form.name.trim().length > 0 && form.base_url.trim().length > 0;
+  // New instances must carry an API key (there's no saved key to fall back on);
+  // edits may leave it blank to keep the stored key (has_api_key).
+  const hasApiKey = form.api_key_ref.trim().length > 0 || form.has_api_key;
+  const canSave = form.name.trim().length > 0 && form.base_url.trim().length > 0 && hasApiKey;
 
   function handleSave() {
     const payload = formToIntegration(form);
@@ -967,6 +970,8 @@ function IntegrationEditor({
           type="button"
           className="flex w-full items-center justify-between gap-2 text-left"
           onClick={() => setAnimeOpen((open) => !open)}
+          aria-expanded={animeOpen}
+          aria-controls="anime-overrides-panel"
         >
           <div className="flex items-center gap-2">
             {animeOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -975,7 +980,7 @@ function IntegrationEditor({
           </div>
         </button>
         {animeOpen ? (
-          <div className="space-y-4">
+          <div id="anime-overrides-panel" className="space-y-4">
             <SwitchField
               label="Enable anime overrides"
               description="Route anime requests to a dedicated profile, root folder, and tags."

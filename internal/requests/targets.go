@@ -105,8 +105,12 @@ func (r *Repository) CreateTarget(ctx context.Context, t Target) (Target, error)
 }
 
 func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
-	if _, err := r.pool.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1`, id); err != nil {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1`, id)
+	if err != nil {
 		return fmt.Errorf("delete target: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
