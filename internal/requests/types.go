@@ -22,6 +22,8 @@ const (
 	StatusCompleted   Status = "completed"
 )
 
+const StatusFailed Status = "failed" // target-only status; requests use outcome=failed
+
 type Outcome string
 
 const (
@@ -294,12 +296,6 @@ type IntegrationOptions struct {
 	RootFolders     []IntegrationRootFolder     `json:"root_folders"`
 	QualityProfiles []IntegrationQualityProfile `json:"quality_profiles"`
 	Tags            []IntegrationTag            `json:"tags"`
-}
-
-type QueueUpdate struct {
-	IntegrationKind string
-	ExternalID      string
-	ExternalStatus  string
 }
 
 type FulfillmentResult struct {

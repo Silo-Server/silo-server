@@ -272,6 +272,7 @@ func (r *Repository) CreateRequest(ctx context.Context, input CreateRequestRecor
 
 type requestExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
@@ -413,48 +414,6 @@ func (r *Repository) SetStatus(ctx context.Context, id string, status Status, ac
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit request status transaction: %w", err)
-	}
-	return req, nil
-}
-
-func (r *Repository) MarkQueued(ctx context.Context, id string, update QueueUpdate, actor Viewer) (*Request, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin request queue transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	externalStatus := strings.TrimSpace(update.ExternalStatus)
-	if externalStatus == "" {
-		externalStatus = "queued"
-	}
-	req, err := scanRequest(tx.QueryRow(ctx, `
-		UPDATE media_requests
-		SET status = 'queued',
-		    outcome = 'active',
-		    integration_kind = $2,
-		    external_id = $3,
-		    external_status = $4,
-		    last_error = '',
-		    updated_at = now(),
-		    approved_at = CASE WHEN approved_at IS NULL THEN now() ELSE approved_at END
-		WHERE id = $1
-		RETURNING `+requestColumns(), id,
-		strings.TrimSpace(update.IntegrationKind),
-		strings.TrimSpace(update.ExternalID),
-		externalStatus,
-	))
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("mark request queued: %w", err)
-	}
-	if err := r.recordEvent(ctx, tx, id, "status_queued", actor, externalStatus); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit request queue transaction: %w", err)
 	}
 	return req, nil
 }
@@ -665,9 +624,8 @@ func requestSelectSQL() string {
 func requestColumns() string {
 	return `id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 	        overview, poster_path, backdrop_path, status, outcome,
-	        requested_by_user_id, requested_by_profile_id, integration_kind,
-	        external_id, external_status, last_error, created_at, updated_at,
-	        approved_at, completed_at`
+	        requested_by_user_id, requested_by_profile_id, is_anime,
+	        last_error, created_at, updated_at, approved_at, completed_at`
 }
 
 type requestScanner interface {
@@ -694,9 +652,7 @@ func scanRequest(row requestScanner) (*Request, error) {
 		&req.Outcome,
 		&req.RequestedByUserID,
 		&req.RequestedByProfileID,
-		&req.IntegrationKind,
-		&req.ExternalID,
-		&req.ExternalStatus,
+		&req.IsAnime,
 		&req.LastError,
 		&req.CreatedAt,
 		&req.UpdatedAt,
