@@ -27,10 +27,10 @@ func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
 	var s Settings
 	err := r.pool.QueryRow(ctx, `
 		SELECT requests_enabled, global_max_requests, global_window_days,
-		       global_auto_approval_enabled, updated_at
+		       global_auto_approval_enabled, force_dual_quality, updated_at
 		FROM request_settings
 		WHERE id = true
-	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.UpdatedAt)
+	`).Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Settings{
@@ -57,19 +57,20 @@ func (r *Repository) UpdateSettings(ctx context.Context, settings Settings) (Set
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO request_settings (
 			id, requests_enabled, global_max_requests, global_window_days,
-			global_auto_approval_enabled, updated_at
+			global_auto_approval_enabled, force_dual_quality, updated_at
 		)
-		VALUES (true, $1, $2, $3, $4, now())
+		VALUES (true, $1, $2, $3, $4, $5, now())
 		ON CONFLICT (id) DO UPDATE SET
 			requests_enabled = EXCLUDED.requests_enabled,
 			global_max_requests = EXCLUDED.global_max_requests,
 			global_window_days = EXCLUDED.global_window_days,
 			global_auto_approval_enabled = EXCLUDED.global_auto_approval_enabled,
+			force_dual_quality = EXCLUDED.force_dual_quality,
 			updated_at = now()
 		RETURNING requests_enabled, global_max_requests, global_window_days,
-		          global_auto_approval_enabled, updated_at
-	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled).
-		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.UpdatedAt)
+		          global_auto_approval_enabled, force_dual_quality, updated_at
+	`, settings.RequestsEnabled, settings.GlobalMaxRequests, settings.GlobalWindowDays, settings.GlobalAutoApprovalEnabled, settings.ForceDualQuality).
+		Scan(&s.RequestsEnabled, &s.GlobalMaxRequests, &s.GlobalWindowDays, &s.GlobalAutoApprovalEnabled, &s.ForceDualQuality, &s.UpdatedAt)
 	if err != nil {
 		return Settings{}, fmt.Errorf("update request settings: %w", err)
 	}
