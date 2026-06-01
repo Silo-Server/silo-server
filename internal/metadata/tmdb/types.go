@@ -191,6 +191,8 @@ type MediaDetail struct {
 	Homepage            string
 	ContentRating       string
 	ProductionCompanies []string
+	OriginalLanguage    string
+	KeywordIDs          []int
 
 	NumberOfSeasons  int
 	NumberOfEpisodes int
@@ -255,6 +257,12 @@ type personEntry struct {
 	Name string `json:"name"`
 }
 
+// idEntry is a generic {id,name} TMDB object used for keyword lists.
+type idEntry struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 type recommendationsMovieResponse struct {
 	Results []mediaMovieResponse `json:"results"`
 }
@@ -288,16 +296,21 @@ type contentRatingEntry struct {
 }
 
 type movieDetailResponse struct {
-	ID                  int                           `json:"id"`
-	IMDbID              string                        `json:"imdb_id"`
-	Title               string                        `json:"title"`
-	OriginalTitle       string                        `json:"original_title"`
-	Tagline             string                        `json:"tagline"`
-	Overview            string                        `json:"overview"`
-	PosterPath          string                        `json:"poster_path"`
-	BackdropPath        string                        `json:"backdrop_path"`
-	ReleaseDate         string                        `json:"release_date"`
-	Runtime             int                           `json:"runtime"`
+	ID               int    `json:"id"`
+	IMDbID           string `json:"imdb_id"`
+	Title            string `json:"title"`
+	OriginalTitle    string `json:"original_title"`
+	Tagline          string `json:"tagline"`
+	Overview         string `json:"overview"`
+	PosterPath       string `json:"poster_path"`
+	BackdropPath     string `json:"backdrop_path"`
+	ReleaseDate      string `json:"release_date"`
+	Runtime          int    `json:"runtime"`
+	OriginalLanguage string `json:"original_language"`
+	Keywords         struct {
+		Keywords []idEntry `json:"keywords"` // movies
+		Results  []idEntry `json:"results"`  // tv
+	} `json:"keywords"`
 	Genres              []genreEntry                  `json:"genres"`
 	VoteAverage         float64                       `json:"vote_average"`
 	VoteCount           int                           `json:"vote_count"`
@@ -311,27 +324,32 @@ type movieDetailResponse struct {
 }
 
 type tvDetailResponse struct {
-	ID               int                        `json:"id"`
-	Name             string                     `json:"name"`
-	OriginalName     string                     `json:"original_name"`
-	Tagline          string                     `json:"tagline"`
-	Overview         string                     `json:"overview"`
-	PosterPath       string                     `json:"poster_path"`
-	BackdropPath     string                     `json:"backdrop_path"`
-	FirstAirDate     string                     `json:"first_air_date"`
-	LastAirDate      string                     `json:"last_air_date"`
-	EpisodeRunTime   []int                      `json:"episode_run_time"`
-	NumberOfSeasons  int                        `json:"number_of_seasons"`
-	NumberOfEpisodes int                        `json:"number_of_episodes"`
-	Genres           []genreEntry               `json:"genres"`
-	VoteAverage      float64                    `json:"vote_average"`
-	VoteCount        int                        `json:"vote_count"`
-	Status           string                     `json:"status"`
-	Homepage         string                     `json:"homepage"`
-	Networks         []networkEntry             `json:"networks"`
-	CreatedBy        []personEntry              `json:"created_by"`
-	Credits          *creditsResponse           `json:"credits"`
-	ExternalIDs      *ExternalIDs               `json:"external_ids"`
-	Recommendations  *recommendationsTVResponse `json:"recommendations"`
-	ContentRatings   *contentRatingsResponse    `json:"content_ratings"`
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	OriginalName     string `json:"original_name"`
+	Tagline          string `json:"tagline"`
+	Overview         string `json:"overview"`
+	PosterPath       string `json:"poster_path"`
+	BackdropPath     string `json:"backdrop_path"`
+	FirstAirDate     string `json:"first_air_date"`
+	LastAirDate      string `json:"last_air_date"`
+	EpisodeRunTime   []int  `json:"episode_run_time"`
+	NumberOfSeasons  int    `json:"number_of_seasons"`
+	NumberOfEpisodes int    `json:"number_of_episodes"`
+	OriginalLanguage string `json:"original_language"`
+	Keywords         struct {
+		Keywords []idEntry `json:"keywords"` // movies
+		Results  []idEntry `json:"results"`  // tv
+	} `json:"keywords"`
+	Genres          []genreEntry               `json:"genres"`
+	VoteAverage     float64                    `json:"vote_average"`
+	VoteCount       int                        `json:"vote_count"`
+	Status          string                     `json:"status"`
+	Homepage        string                     `json:"homepage"`
+	Networks        []networkEntry             `json:"networks"`
+	CreatedBy       []personEntry              `json:"created_by"`
+	Credits         *creditsResponse           `json:"credits"`
+	ExternalIDs     *ExternalIDs               `json:"external_ids"`
+	Recommendations *recommendationsTVResponse `json:"recommendations"`
+	ContentRatings  *contentRatingsResponse    `json:"content_ratings"`
 }
