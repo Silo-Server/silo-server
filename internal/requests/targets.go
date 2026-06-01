@@ -100,6 +100,13 @@ func (r *Repository) CreateTarget(ctx context.Context, t Target) (Target, error)
 	return t, nil
 }
 
+func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete target: %w", err)
+	}
+	return nil
+}
+
 // UpdateTargetStatus updates one target and recomputes the parent request's
 // aggregate status/outcome, all in one transaction.
 func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, status Status,

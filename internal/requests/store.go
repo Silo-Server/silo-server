@@ -24,6 +24,7 @@ type Store interface {
 	SetOutcome(ctx context.Context, id string, outcome Outcome, actor Viewer, message string) (*Request, error)
 	ListTargets(ctx context.Context, requestID string) ([]Target, error)
 	CreateTarget(ctx context.Context, target Target) (Target, error)
+	DeleteTarget(ctx context.Context, id int64) error
 	UpdateTargetStatus(ctx context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, actor Viewer) (*Request, error)
 	ListIntegrations(ctx context.Context) ([]Integration, error)
 	GetIntegration(ctx context.Context, id string) (*Integration, error)
@@ -37,6 +38,7 @@ type CreateRequestRecord struct {
 	Input     CreateRequestInput
 	Status    Status
 	Outcome   Outcome
+	IsAnime   bool
 	Requester Viewer
 	Now       time.Time
 	// Quota, when non-nil, instructs the store to atomically verify the

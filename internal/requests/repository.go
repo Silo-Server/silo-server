@@ -298,18 +298,18 @@ func (r *Repository) insertRequest(
 		INSERT INTO media_requests (
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 			overview, poster_path, backdrop_path, status, outcome,
-			requested_by_user_id, requested_by_profile_id, created_at, updated_at, approved_at
+			requested_by_user_id, requested_by_profile_id, is_anime, created_at, updated_at, approved_at
 		)
 		VALUES (
 			$1, 'tmdb', $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
-			$13, $14, $15, $15, $16
+			$13, $14, $15, $16, $16, $17
 		)
 		RETURNING `+requestColumns(), input.ID, input.Input.MediaType, input.Input.TMDBID, tvdbID,
 		strings.TrimSpace(input.Input.IMDbID), strings.TrimSpace(input.Input.Title), year,
 		strings.TrimSpace(input.Input.Overview), strings.TrimSpace(input.Input.PosterPath),
 		strings.TrimSpace(input.Input.BackdropPath), status, outcome,
-		input.Requester.UserID, input.Requester.ProfileID, now, approvedAt)
+		input.Requester.UserID, input.Requester.ProfileID, input.IsAnime, now, approvedAt)
 	req, err := scanRequest(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert request: %w", err)
