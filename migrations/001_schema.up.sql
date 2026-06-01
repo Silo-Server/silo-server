@@ -90,7 +90,7 @@ CREATE TABLE public.admin_jobs (
     heartbeat_at timestamp with time zone,
     expires_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT admin_jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'completed'::text, 'failed'::text])))
+    CONSTRAINT admin_jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
 );
 
 

@@ -23,6 +23,7 @@ const (
 	TypeJobProgress      Type = "job.progress"
 	TypeJobCompleted     Type = "job.completed"
 	TypeJobFailed        Type = "job.failed"
+	TypeJobCancelled     Type = "job.cancelled"
 )
 
 type Envelope struct {

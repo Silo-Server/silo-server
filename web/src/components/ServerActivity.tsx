@@ -1,13 +1,23 @@
 import { useState, useMemo } from "react";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
+import { Activity, ChevronRight, DatabaseBackup, Loader, ScanLine, Square } from "lucide-react";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useTasks } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
-import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import {
+  useAdminLibraries,
+  useCancelAdminJob,
+  useLibraryRefreshJobs,
+} from "@/hooks/queries/admin/libraries";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
-import type { TaskInfo, ScanRun } from "@/api/types";
+import type { AdminJob, TaskInfo, ScanRun } from "@/api/types";
+import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
+import {
+  getLibraryRefreshLibraryID,
+  getLibraryRefreshLibraryName,
+  isActiveAdminJob,
+} from "@/lib/adminJobs";
 
 interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
@@ -22,6 +32,7 @@ function useServerActivityData() {
   const { data: tasks = [] } = useTasks();
   const { data: scans } = useActiveScans();
   const { data: libraries = [] } = useAdminLibraries();
+  const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
   const { connectionState } = useRealtimeEvents();
 
   const activeScans = useMemo(
@@ -30,6 +41,10 @@ function useServerActivityData() {
   );
 
   const runningTasks = useMemo(() => tasks.filter((t) => t.state === "running"), [tasks]);
+  const activeLibraryRefreshJobs = useMemo(
+    () => libraryRefreshJobs.filter(isActiveAdminJob),
+    [libraryRefreshJobs],
+  );
 
   const streamCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -40,13 +55,15 @@ function useServerActivityData() {
     return counts;
   }, [sessions]);
 
-  const totalActive = sessions.length + runningTasks.length + activeScans.length;
+  const totalActive =
+    sessions.length + runningTasks.length + activeLibraryRefreshJobs.length + activeScans.length;
 
   const libraryName = (id: number) => libraries.find((l) => l.id === id)?.name ?? `Library #${id}`;
 
   return {
     sessions,
     runningTasks,
+    activeLibraryRefreshJobs,
     activeScans,
     streamCounts,
     totalActive,
@@ -65,6 +82,7 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
   const {
     sessions,
     runningTasks,
+    activeLibraryRefreshJobs,
     activeScans,
     streamCounts,
     totalActive,
@@ -72,6 +90,7 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
     connectionState,
     scansLoaded,
   } = useServerActivityData();
+  const cancelJob = useCancelAdminJob();
 
   // Keep mounted while popover is open so Radix can animate closed
   if (hideWhenEmpty && totalActive === 0 && !open) return null;
@@ -159,6 +178,30 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
                     </div>
                   ) : (
                     <EmptyRow>No running tasks</EmptyRow>
+                  )}
+                </ActivitySection>
+
+                {/* Metadata */}
+                <ActivitySection
+                  title="Metadata"
+                  count={activeLibraryRefreshJobs.length}
+                  href="/admin/libraries"
+                  onNavigate={() => setOpen(false)}
+                >
+                  {activeLibraryRefreshJobs.length > 0 ? (
+                    <div className="space-y-2">
+                      {activeLibraryRefreshJobs.map((job) => (
+                        <MetadataJobRow
+                          key={job.id}
+                          cancelling={cancelJob.isPending && cancelJob.variables === job.id}
+                          job={job}
+                          libraryName={resolveLibraryRefreshName(job, libraryName)}
+                          onCancel={() => cancelJob.mutate(job.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyRow>No active metadata refresh</EmptyRow>
                   )}
                 </ActivitySection>
 
@@ -283,6 +326,47 @@ function TaskRow({ task }: { task: TaskInfo }) {
   );
 }
 
+function MetadataJobRow({
+  job,
+  libraryName,
+  cancelling,
+  onCancel,
+}: {
+  job: AdminJob;
+  libraryName: string;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  const progress = formatJobProgress(job);
+  return (
+    <div className="flex items-start gap-2.5">
+      <button
+        type="button"
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-ring mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label={`Cancel metadata refresh for ${libraryName}`}
+        title={`Cancel metadata refresh for ${libraryName}`}
+        disabled={cancelling}
+        onClick={onCancel}
+      >
+        <Square className="h-2.5 w-2.5 fill-current" />
+      </button>
+      <DatabaseBackup className="text-primary mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[12px] font-medium">{libraryName}</span>
+          <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">
+            {job.status === "queued" ? "Queued" : "Refreshing…"}
+          </span>
+        </div>
+        <div className="text-muted-foreground truncate text-[10px]">
+          {job.message || "Library metadata refresh"}
+        </div>
+        <div className="text-muted-foreground/80 truncate text-[10px]">{progress}</div>
+      </div>
+    </div>
+  );
+}
+
 function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) {
   const progressLabel = formatScanProgress(scan);
   return (
@@ -309,6 +393,15 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
       </div>
     </div>
   );
+}
+
+function resolveLibraryRefreshName(job: AdminJob, libraryName: (id: number) => string) {
+  const payloadName = getLibraryRefreshLibraryName(job);
+  if (payloadName) {
+    return payloadName;
+  }
+  const libraryID = getLibraryRefreshLibraryID(job);
+  return libraryID === null ? "Library metadata" : libraryName(libraryID);
 }
 
 function formatScanLabel(scan: ScanRun) {

@@ -115,6 +115,7 @@ type Dependencies struct {
 	FFmpegLogSink                playback.FFmpegLogSink
 	RedisClient                  *redis.Client            // for session listing (may be nil)
 	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
+	AdminJobCancelRegistry       *adminjob.CancelRegistry
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
 	MarkerRegistry               *markers.Registry
@@ -684,6 +685,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
+		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry
 		if adminHandler != nil && deps.FolderRepo != nil && deps.FileRepo != nil && itemRepo != nil && episodeRepo != nil {
 			adminHandler.JobRepo = jobRepo
 			adminHandler.ItemRefreshResolver = adminjob.NewItemRefreshResolver(
@@ -1833,6 +1835,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminJobsHandler != nil {
 								r.Route("/jobs", func(r chi.Router) {
 									r.Get("/", adminJobsHandler.HandleList)
+									r.Post("/{id}/cancel", adminJobsHandler.HandleCancel)
 								})
 							}
 

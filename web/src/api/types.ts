@@ -2202,7 +2202,7 @@ export interface CatalogSeedImportResponse {
   unmatched_roots?: string[];
 }
 
-export type AdminJobStatus = "queued" | "running" | "completed" | "failed";
+export type AdminJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface LibraryRefreshJobRequest {
   library_id: number;

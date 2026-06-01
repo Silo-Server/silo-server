@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   useUnmatchedLibraryItems: vi.fn(),
   useAdminPlugins: vi.fn(),
   useCancelLibraryScans: vi.fn(),
+  useCancelAdminJob: vi.fn(),
   useLibraryRoots: vi.fn(),
   useUpsertLibraryRootOverride: vi.fn(),
   useDeleteLibraryRootOverride: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useDeleteLibraryPoster: (...args: unknown[]) => mocks.useDeleteLibraryPoster(...args),
   useUnmatchedLibraryItems: (...args: unknown[]) => mocks.useUnmatchedLibraryItems(...args),
   useCancelLibraryScans: (...args: unknown[]) => mocks.useCancelLibraryScans(...args),
+  useCancelAdminJob: (...args: unknown[]) => mocks.useCancelAdminJob(...args),
   useLibraryRoots: (...args: unknown[]) => mocks.useLibraryRoots(...args),
   useUpsertLibraryRootOverride: (...args: unknown[]) => mocks.useUpsertLibraryRootOverride(...args),
   useDeleteLibraryRootOverride: (...args: unknown[]) => mocks.useDeleteLibraryRootOverride(...args),
@@ -148,6 +150,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useCancelLibraryScans.mockReturnValue(queryState);
+    mocks.useCancelAdminJob.mockReturnValue(queryState);
     mocks.useLibraryRoots.mockReturnValue({ data: [], isLoading: false });
     mocks.useUpsertLibraryRootOverride.mockReturnValue(queryState);
     mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
@@ -162,13 +165,13 @@ describe("AdminLibraries", () => {
     );
     expect(markup).toContain('title="Scan Library"');
     expect(markup).toContain("Scan All");
-    expect(markup).toContain('title="Refresh metadata"');
+    expect(markup).toContain('title="Rescan Metadata"');
     expect(markup).toContain(
       "Run another scan after storage returns, or confirm deletion before the next empty-root scan.",
     );
   });
 
-  it("renders the Ambiguous Roots section with a populated row", () => {
+  it("renders the collapsed Ambiguous Roots section with a populated count", () => {
     mocks.useLibraryRoots.mockReturnValue({
       data: [
         {
@@ -192,21 +195,19 @@ describe("AdminLibraries", () => {
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain("Inception");
-    expect(markup).toContain("/media/movies/Inception (2010)");
+    expect(markup).toContain("Scanner roots that stay visible");
   });
 
-  it("renders the empty-state inside Ambiguous Roots when no roots exist", () => {
+  it("renders the collapsed Ambiguous Roots section when no roots exist", () => {
     // Default useLibraryRoots mock returns { data: [], isLoading: false }. The
-    // section itself still renders (it's gated on libraries.length, not on the
-    // root list), and the table body shows the empty-state copy.
+    // section itself still renders because it is gated on libraries.length.
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain("No ambiguous roots for this library");
+    expect(markup).toContain("Scanner roots that stay visible");
   });
 
-  it("renders Match instead of Re-match for stale IDs", () => {
+  it("renders Stale External IDs collapsed by default", () => {
     mocks.useStaleMediaIDs.mockReturnValue({
       data: [
         {
@@ -227,11 +228,11 @@ describe("AdminLibraries", () => {
 
     const markup = renderPage();
 
-    expect(markup).toContain("Match");
+    expect(markup).toContain("Stale External IDs");
     expect(markup).not.toContain("Re-match");
   });
 
-  it("renders an unmatched items section when unmatched items exist", () => {
+  it("renders an unmatched items section collapsed by default when unmatched items exist", () => {
     mocks.useUnmatchedLibraryItems.mockReturnValue({
       data: {
         items: [
@@ -253,8 +254,7 @@ describe("AdminLibraries", () => {
     const markup = renderPage();
 
     expect(markup).toContain("Unmatched Items");
-    expect(markup).toContain("Unknown Film");
-    expect(markup).toContain("unmatched");
+    expect(markup).toContain("Items that could not be matched to any metadata provider.");
   });
 
   it("hides unmatched items section when no unmatched items exist", () => {

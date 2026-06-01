@@ -508,6 +508,22 @@ export function useRefreshLibraryMetadata() {
   });
 }
 
+export function useCancelAdminJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<AdminJob>(`/admin/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Cancellation requested");
+      queryClient.invalidateQueries({ queryKey: adminKeys.jobs("library_refresh") });
+      queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel job");
+    },
+  });
+}
+
 const UNMATCHED_PAGE_SIZE = 10;
 
 export function useUnmatchedLibraryItems(page = 0, search = "") {

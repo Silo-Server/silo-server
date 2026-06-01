@@ -73,7 +73,7 @@ function parseEventsMessage(value: unknown): EventsStreamMessage | null {
 }
 
 function isTerminalJob(job: AdminJob) {
-  return job.status === "completed" || job.status === "failed";
+  return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
 }
 
 async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
@@ -84,6 +84,9 @@ async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
     }
     if (job.status === "failed") {
       throw new Error(job.error_message || job.message || "Job failed");
+    }
+    if (job.status === "cancelled") {
+      throw new Error(job.message || "Job cancelled");
     }
     await new Promise((resolve) => window.setTimeout(resolve, 1_000));
   }
@@ -319,6 +322,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     window.clearTimeout(waiter.timeoutId);
     if (job.status === "completed") {
       waiter.resolve(job);
+      return;
+    }
+    if (job.status === "cancelled") {
+      waiter.reject(new Error(job.message || "Job cancelled"));
       return;
     }
     waiter.reject(new Error(job.error_message || job.message || "Job failed"));

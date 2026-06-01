@@ -484,6 +484,8 @@ func main() {
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
 	}
+	adminJobCancelRegistry := adminjob.NewCancelRegistry()
+	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
 		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
@@ -1605,6 +1607,7 @@ func main() {
 			templateBundleApplyExecutor,
 			deps.RealtimeHub,
 		)
+		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
 
