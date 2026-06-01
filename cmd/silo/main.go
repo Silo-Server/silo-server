@@ -29,6 +29,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
@@ -1320,6 +1321,14 @@ func main() {
 		)
 		requestReconcileSvc.SetSecretResolver(settingsRepo)
 		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		if userStoreProvider != nil {
+			reconcileResolver := access.NewResolver(
+				auth.NewUserRepository(deps.DB),
+				userStoreProvider,
+				access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
+			)
+			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
+		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)

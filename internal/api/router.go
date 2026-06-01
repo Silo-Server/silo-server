@@ -410,6 +410,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		requestSvc.SetSecretResolver(settingsRepo)
 		requestSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		if viewerResolver != nil {
+			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
+		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
 		if deps.PersonRepo != nil {
@@ -2040,8 +2043,10 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
 								r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
 								r.Get("/request-integrations", requestHandler.HandleListIntegrations)
-								r.Put("/request-integrations", requestHandler.HandleUpdateIntegrations)
-								r.Post("/request-integrations/{kind}/options", requestHandler.HandleLoadIntegrationOptions)
+								r.Post("/request-integrations", requestHandler.HandleCreateIntegration)
+								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
+								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
+								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
 							}
 
 							if deps.ActivityLogRepo != nil {

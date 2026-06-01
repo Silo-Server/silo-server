@@ -397,7 +397,30 @@ func (s *Service) ListAdmin(ctx context.Context, viewer Viewer, filter ListFilte
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	return s.store.ListAdmin(ctx, normalizeListFilter(filter))
+	reqs, err := s.store.ListAdmin(ctx, normalizeListFilter(filter))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachTargets(ctx, reqs...); err != nil {
+		return nil, err
+	}
+	return reqs, nil
+}
+
+// attachTargets loads and attaches the per-instance fulfillment targets for each
+// request so callers (admin queue, detail view) can surface multi-target status.
+func (s *Service) attachTargets(ctx context.Context, reqs ...*Request) error {
+	for _, r := range reqs {
+		if r == nil {
+			continue
+		}
+		targets, err := s.store.ListTargets(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		r.Targets = targets
+	}
+	return nil
 }
 
 func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Request, error) {
@@ -410,6 +433,9 @@ func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Re
 	}
 	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
 		return nil, ErrForbidden
+	}
+	if err := s.attachTargets(ctx, req); err != nil {
+		return nil, err
 	}
 	return req, nil
 }

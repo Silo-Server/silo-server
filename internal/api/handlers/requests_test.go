@@ -127,12 +127,16 @@ func (f *fakeRequestService) ListIntegrations(context.Context, mediarequests.Vie
 	return nil, nil
 }
 
-func (f *fakeRequestService) UpsertIntegration(context.Context, mediarequests.Viewer, mediarequests.Integration) (*mediarequests.Integration, error) {
-	return nil, nil
+func (f *fakeRequestService) CreateIntegration(_ context.Context, _ mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error) {
+	return &integration, nil
 }
 
-func (f *fakeRequestService) UpsertIntegrations(context.Context, mediarequests.Viewer, []mediarequests.Integration) ([]mediarequests.Integration, error) {
-	return nil, nil
+func (f *fakeRequestService) UpdateIntegration(_ context.Context, _ mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error) {
+	return &integration, nil
+}
+
+func (f *fakeRequestService) DeleteIntegration(context.Context, mediarequests.Viewer, string) error {
+	return nil
 }
 
 func (f *fakeRequestService) LoadIntegrationOptions(context.Context, mediarequests.Viewer, mediarequests.Integration) (*mediarequests.IntegrationOptions, error) {
