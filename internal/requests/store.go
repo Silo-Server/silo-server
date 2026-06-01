@@ -30,6 +30,9 @@ type Store interface {
 	GetIntegration(ctx context.Context, id string) (*Integration, error)
 	CreateIntegration(ctx context.Context, integration Integration) (*Integration, error)
 	UpdateIntegration(ctx context.Context, integration Integration) (*Integration, error)
+	// SaveIntegrationWithDefaults clears the conflicting kind default(s) and
+	// creates (isCreate) or updates the instance atomically in one transaction.
+	SaveIntegrationWithDefaults(ctx context.Context, integration Integration, isCreate bool) (*Integration, error)
 	DeleteIntegration(ctx context.Context, id string) error
 }
 

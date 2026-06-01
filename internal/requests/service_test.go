@@ -1208,6 +1208,35 @@ func (f *fakeStore) UpdateIntegration(_ context.Context, in Integration) (*Integ
 	return nil, ErrNotFound
 }
 
+func (f *fakeStore) SaveIntegrationWithDefaults(_ context.Context, in Integration, isCreate bool) (*Integration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.integrations {
+		if f.integrations[i].Kind != in.Kind || f.integrations[i].ID == in.ID {
+			continue
+		}
+		if in.IsDefault {
+			f.integrations[i].IsDefault = false
+		}
+		if in.IsDefault4K {
+			f.integrations[i].IsDefault4K = false
+		}
+	}
+	if isCreate {
+		f.integrations = append(f.integrations, in)
+		cp := in
+		return &cp, nil
+	}
+	for i := range f.integrations {
+		if f.integrations[i].ID == in.ID {
+			f.integrations[i] = in
+			cp := in
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 func (f *fakeStore) DeleteIntegration(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -13,6 +13,7 @@ func TestAggregateStatus(t *testing.T) {
 		{"one downloading", []Target{{Status: StatusCompleted}, {Status: StatusDownloading}}, StatusDownloading, OutcomeActive},
 		{"queued only", []Target{{Status: StatusQueued}}, StatusQueued, OutcomeActive},
 		{"all failed", []Target{{Status: StatusFailed}, {Status: StatusFailed}}, StatusQueued, OutcomeFailed},
+		{"completed plus failed", []Target{{Status: StatusCompleted}, {Status: StatusFailed}}, StatusQueued, OutcomeFailed},
 		{"partial fail stays active", []Target{{Status: StatusFailed}, {Status: StatusDownloading}}, StatusDownloading, OutcomeActive},
 	}
 	for _, tc := range cases {

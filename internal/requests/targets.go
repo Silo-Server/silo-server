@@ -31,19 +31,23 @@ func aggregateStatus(targets []Target) (Status, Outcome) {
 			anyQueued = true
 		}
 	}
-	if failed == len(targets) {
-		return StatusQueued, OutcomeFailed
-	}
 	if completed == len(targets) {
 		return StatusCompleted, OutcomeActive
 	}
+	// Active targets keep the request active even with a failed sibling so the
+	// in-flight targets can finish (partial failure stays active).
 	if anyDownloading {
 		return StatusDownloading, OutcomeActive
 	}
 	if anyQueued {
 		return StatusQueued, OutcomeActive
 	}
-	// remaining: mix of completed + failed, none active -> treat as completed.
+	// No active targets remain and at least one failed (all-failed, or a mix of
+	// completed + failed) -> surface as failed so Retry can re-submit the failed
+	// target while leaving completed ones untouched.
+	if failed > 0 {
+		return StatusQueued, OutcomeFailed
+	}
 	return StatusCompleted, OutcomeActive
 }
 

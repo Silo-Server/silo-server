@@ -492,6 +492,17 @@ func (r *Repository) GetIntegration(ctx context.Context, id string) (*Integratio
 }
 
 func (r *Repository) CreateIntegration(ctx context.Context, i Integration) (*Integration, error) {
+	return r.insertIntegration(ctx, r.pool, i)
+}
+
+func (r *Repository) UpdateIntegration(ctx context.Context, i Integration) (*Integration, error) {
+	return r.updateIntegration(ctx, r.pool, i)
+}
+
+// insertIntegration runs the integration INSERT against any executor (pool or
+// tx) so the same SQL is reused by the plain create path and the transactional
+// SaveIntegrationWithDefaults path.
+func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor, i Integration) (*Integration, error) {
 	if i.Options == nil {
 		i.Options = map[string]any{}
 	}
@@ -499,7 +510,7 @@ func (r *Repository) CreateIntegration(ctx context.Context, i Integration) (*Int
 	if err != nil {
 		return nil, fmt.Errorf("marshal options: %w", err)
 	}
-	row := r.pool.QueryRow(ctx, `
+	row := exec.QueryRow(ctx, `
 		INSERT INTO request_integrations (
 			id, kind, name, enabled, base_url, api_key_ref, root_folder,
 			quality_profile_id, tags, is_4k, is_default, is_default_4k,
@@ -519,7 +530,9 @@ func (r *Repository) CreateIntegration(ctx context.Context, i Integration) (*Int
 	return &out, nil
 }
 
-func (r *Repository) UpdateIntegration(ctx context.Context, i Integration) (*Integration, error) {
+// updateIntegration runs the integration UPDATE against any executor (pool or
+// tx) so the plain update path and SaveIntegrationWithDefaults share the SQL.
+func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor, i Integration) (*Integration, error) {
 	if i.Options == nil {
 		i.Options = map[string]any{}
 	}
@@ -527,7 +540,7 @@ func (r *Repository) UpdateIntegration(ctx context.Context, i Integration) (*Int
 	if err != nil {
 		return nil, fmt.Errorf("marshal options: %w", err)
 	}
-	row := r.pool.QueryRow(ctx, `
+	row := exec.QueryRow(ctx, `
 		UPDATE request_integrations SET
 			name=$2, enabled=$3, base_url=$4,
 			api_key_ref = CASE WHEN $5 = '' THEN api_key_ref ELSE $5 END,
@@ -552,6 +565,42 @@ func (r *Repository) UpdateIntegration(ctx context.Context, i Integration) (*Int
 	return &out, nil
 }
 
+// SaveIntegrationWithDefaults clears the conflicting kind default(s) and
+// creates/updates the instance in a single transaction so a save failure can
+// never leave the kind with zero defaults.
+func (r *Repository) SaveIntegrationWithDefaults(ctx context.Context, in Integration, isCreate bool) (*Integration, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin save integration: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if in.IsDefault {
+		if err := r.ClearDefault(ctx, tx, in.Kind, false, in.ID); err != nil {
+			return nil, err
+		}
+	}
+	if in.IsDefault4K {
+		if err := r.ClearDefault(ctx, tx, in.Kind, true, in.ID); err != nil {
+			return nil, err
+		}
+	}
+
+	var out *Integration
+	if isCreate {
+		out, err = r.insertIntegration(ctx, tx, in)
+	} else {
+		out, err = r.updateIntegration(ctx, tx, in)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit save integration: %w", err)
+	}
+	return out, nil
+}
+
 func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM request_integrations WHERE id = $1`, id)
 	if err != nil {
@@ -563,12 +612,15 @@ func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) ClearDefault(ctx context.Context, exec requestExecutor, kind string, fourK bool) error {
+// ClearDefault unsets the HD (or 4K) default flag for every instance of a kind
+// except excludeID, so saving an instance that is itself the new default does
+// not clear its own freshly-written flag.
+func (r *Repository) ClearDefault(ctx context.Context, exec requestExecutor, kind string, fourK bool, excludeID string) error {
 	col := "is_default"
 	if fourK {
 		col = "is_default_4k"
 	}
-	_, err := exec.Exec(ctx, `UPDATE request_integrations SET `+col+` = false WHERE kind = $1`, kind)
+	_, err := exec.Exec(ctx, `UPDATE request_integrations SET `+col+` = false WHERE kind = $1 AND id <> $2`, kind, excludeID)
 	if err != nil {
 		return fmt.Errorf("clear default: %w", err)
 	}

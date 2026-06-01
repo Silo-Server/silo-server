@@ -24,7 +24,7 @@ func integrationKindForMediaType(mediaType MediaType) string {
 func routeTargets(req Request, ceiling string, settings Settings, instances []Integration) []plannedTarget {
 	kind := integrationKindForMediaType(req.MediaType)
 
-	wants4K := settings.ForceDualQuality || access.QualityAllowed(access.PlaybackQuality4K, ceiling)
+	wants4K := settings.ForceDualQuality || access.CompareQuality(ceiling, access.PlaybackQuality4K) >= 0
 
 	var hd, uhd *Integration
 	for i := range instances {

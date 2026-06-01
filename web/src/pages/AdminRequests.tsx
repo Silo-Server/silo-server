@@ -717,6 +717,7 @@ function IntegrationEditor({
       const loaded = await loadOptions.mutateAsync({
         id: form.id || "new",
         body: {
+          kind: form.kind,
           base_url: form.base_url,
           api_key_ref: form.api_key_ref.trim() || undefined,
         },

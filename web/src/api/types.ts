@@ -1651,6 +1651,7 @@ export interface RequestIntegrationOptions {
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
+  kind: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
 }

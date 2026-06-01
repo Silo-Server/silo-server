@@ -541,12 +541,6 @@ func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request
 	if err != nil {
 		return nil, err
 	}
-	hasOK := make(map[Quality]bool)
-	for _, t := range existing {
-		if t.Status != StatusFailed {
-			hasOK[t.Quality] = true
-		}
-	}
 	ceiling := s.requesterCeiling(ctx, active.RequestedByUserID, active.RequestedByProfileID)
 	planned := routeTargets(*active, ceiling, settings, instances)
 	if len(planned) == 0 {
@@ -555,7 +549,23 @@ func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request
 				integrationKindForMediaType(active.MediaType)))
 	}
 
-	latest := active
+	return s.submitPlannedTargets(ctx, *active, planned, existing, viewer)
+}
+
+// submitPlannedTargets submits each planned target idempotently against the
+// already-recorded targets: a non-failed target for a quality is left alone, a
+// failed one is deleted and re-submitted, and a missing one is submitted fresh.
+// This is shared by Retry and the reconcile-driven submit so a re-run never
+// violates the UNIQUE(request_id, quality) constraint.
+func (s *Service) submitPlannedTargets(ctx context.Context, req Request, planned []plannedTarget, existing []Target, actor Viewer) (*Request, error) {
+	hasOK := make(map[Quality]bool)
+	for _, t := range existing {
+		if t.Status != StatusFailed {
+			hasOK[t.Quality] = true
+		}
+	}
+
+	latest := &req
 	for _, pt := range planned {
 		if hasOK[pt.Quality] {
 			continue // healthy target already exists for this quality
@@ -568,7 +578,7 @@ func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request
 				}
 			}
 		}
-		updated, err := s.submitPlannedTarget(ctx, *active, pt, viewer)
+		updated, err := s.submitPlannedTarget(ctx, req, pt, actor)
 		if err != nil {
 			return nil, err
 		}
@@ -711,10 +721,7 @@ func (s *Service) CreateIntegration(ctx context.Context, viewer Viewer, in Integ
 		return nil, err
 	}
 	in.ID = id
-	if err := s.clearConflictingDefaults(ctx, in); err != nil {
-		return nil, err
-	}
-	return s.store.CreateIntegration(ctx, in)
+	return s.store.SaveIntegrationWithDefaults(ctx, in, true)
 }
 
 func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integration) (*Integration, error) {
@@ -727,10 +734,7 @@ func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if err := validateInstance(&in); err != nil {
 		return nil, err
 	}
-	if err := s.clearConflictingDefaults(ctx, in); err != nil {
-		return nil, err
-	}
-	return s.store.UpdateIntegration(ctx, in)
+	return s.store.SaveIntegrationWithDefaults(ctx, in, false)
 }
 
 func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id string) error {
@@ -738,31 +742,6 @@ func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id strin
 		return ErrForbidden
 	}
 	return s.store.DeleteIntegration(ctx, strings.TrimSpace(id))
-}
-
-// clearConflictingDefaults unsets the prior HD/4K default(s) for this kind when
-// the incoming instance claims them, preserving the single-default invariant.
-func (s *Service) clearConflictingDefaults(ctx context.Context, in Integration) error {
-	if !in.IsDefault && !in.IsDefault4K {
-		return nil
-	}
-	instances, err := s.store.ListIntegrations(ctx)
-	if err != nil {
-		return err
-	}
-	for _, existing := range instances {
-		if existing.Kind != in.Kind || existing.ID == in.ID {
-			continue
-		}
-		if (in.IsDefault && existing.IsDefault) || (in.IsDefault4K && existing.IsDefault4K) {
-			existing.IsDefault = existing.IsDefault && !in.IsDefault
-			existing.IsDefault4K = existing.IsDefault4K && !in.IsDefault4K
-			if _, err := s.store.UpdateIntegration(ctx, existing); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func validateInstance(in *Integration) error {
@@ -786,11 +765,30 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
+	// For a saved instance the request body carries only the path id (no kind and
+	// often no creds), so resolve the saved row by id and backfill what the body
+	// omitted. This makes "Test connection" reuse the correct per-instance key
+	// (each kind can have multiple instances) instead of borrowing a sibling's.
+	if id := strings.TrimSpace(integration.ID); id != "" && id != "new" {
+		stored, err := s.store.GetIntegration(ctx, id)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+		if stored != nil {
+			if strings.TrimSpace(integration.Kind) == "" {
+				integration.Kind = stored.Kind
+			}
+			if strings.TrimSpace(integration.BaseURL) == "" {
+				integration.BaseURL = stored.BaseURL
+			}
+			if strings.TrimSpace(integration.APIKeyRef) == "" {
+				integration.APIKeyRef = stored.APIKeyRef
+			}
+		}
+	}
+
 	normalized, err := normalizeIntegrationConnection(integration)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.applyStoredIntegrationCredentials(ctx, &normalized); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(normalized.BaseURL) == "" {
@@ -1106,7 +1104,7 @@ func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType
 	}
 	kind := integrationKindForMediaType(mediaType)
 	for _, in := range instances {
-		if in.Kind == kind && in.Enabled && in.IsDefault && integrationIsConfigured(in) {
+		if in.Kind == kind && in.Enabled && (in.IsDefault || in.IsDefault4K) && integrationIsConfigured(in) {
 			return true, nil
 		}
 	}
@@ -1133,20 +1131,14 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 				integrationKindForMediaType(req.MediaType)))
 	}
 
-	var lastReq *Request
-	for _, pt := range planned {
-		updated, err := s.submitPlannedTarget(ctx, req, pt, actor)
-		if err != nil {
-			return nil, err
-		}
-		if updated != nil {
-			lastReq = updated
-		}
+	// Reconcile can re-run submit while the request is still 'approved'; skip
+	// qualities that already have a live target and replace failed ones so the
+	// UNIQUE(request_id, quality) constraint is never violated.
+	existing, err := s.store.ListTargets(ctx, req.ID)
+	if err != nil {
+		return nil, err
 	}
-	if lastReq == nil {
-		return &req, nil
-	}
-	return lastReq, nil
+	return s.submitPlannedTargets(ctx, req, planned, existing, actor)
 }
 
 // submitPlannedTarget creates a target row, submits it to the adapter, and
@@ -1236,13 +1228,24 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 		return reconcileUnchanged, err
 	}
 	if completed {
-		if req.Status == StatusCompleted {
-			return reconcileUnchanged, nil
-		}
-		if _, err := s.store.SetStatus(ctx, req.ID, StatusCompleted, Viewer{}); err != nil {
+		// The presence check is quality-agnostic (TMDB id only), so it must not
+		// force-complete a request whose targets are still in flight — that would
+		// orphan in-progress downloads. Only take the shortcut for legacy/no-live
+		// -target requests; otherwise let per-target reconcile + aggregate drive
+		// completion.
+		hasLiveTargets, err := s.hasLiveTargets(ctx, req.ID)
+		if err != nil {
 			return reconcileUnchanged, err
 		}
-		return reconcileCompleted, nil
+		if !hasLiveTargets {
+			if req.Status == StatusCompleted {
+				return reconcileUnchanged, nil
+			}
+			if _, err := s.store.SetStatus(ctx, req.ID, StatusCompleted, Viewer{}); err != nil {
+				return reconcileUnchanged, err
+			}
+			return reconcileCompleted, nil
+		}
 	}
 
 	if req.Status == StatusApproved {
@@ -1330,6 +1333,21 @@ func targetStatusFromFulfillment(st FulfillmentStatus) Status {
 		}
 		return StatusQueued
 	}
+}
+
+// hasLiveTargets reports whether the request has any non-terminal (queued or
+// downloading) fulfillment target.
+func (s *Service) hasLiveTargets(ctx context.Context, requestID string) (bool, error) {
+	targets, err := s.store.ListTargets(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	for _, t := range targets {
+		if t.Status == StatusQueued || t.Status == StatusDownloading {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, error) {
@@ -1504,32 +1522,6 @@ func normalizeIntegrationConnection(integration Integration) (Integration, error
 		integration.Options = map[string]any{}
 	}
 	return integration, nil
-}
-
-func (s *Service) applyStoredIntegrationCredentials(ctx context.Context, integration *Integration) error {
-	if integration == nil || s.store == nil {
-		return nil
-	}
-	if strings.TrimSpace(integration.BaseURL) != "" && strings.TrimSpace(integration.APIKeyRef) != "" {
-		return nil
-	}
-	stored, err := s.store.ListIntegrations(ctx)
-	if err != nil {
-		return err
-	}
-	for _, candidate := range stored {
-		if candidate.Kind != integration.Kind {
-			continue
-		}
-		if strings.TrimSpace(integration.BaseURL) == "" {
-			integration.BaseURL = candidate.BaseURL
-		}
-		if strings.TrimSpace(integration.APIKeyRef) == "" {
-			integration.APIKeyRef = candidate.APIKeyRef
-		}
-		return nil
-	}
-	return nil
 }
 
 func normalizeMediaType(mediaType MediaType) (MediaType, error) {

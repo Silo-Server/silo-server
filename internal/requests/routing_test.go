@@ -31,6 +31,7 @@ func TestRouteTargets(t *testing.T) {
 		{"4k user but no 4k default", Request{MediaType: MediaTypeMovie}, "2160p", false, []Integration{hd}, []Quality{Quality1080p}, false},
 		{"no hd default", Request{MediaType: MediaTypeMovie}, "2160p", false, []Integration{uhd}, []Quality{Quality2160p}, false},
 		{"anime on anime-enabled hd", Request{MediaType: MediaTypeMovie, IsAnime: true}, "1080p", false, []Integration{hdAnime}, []Quality{Quality1080p}, true},
+		{"empty ceiling hd only", Request{MediaType: MediaTypeMovie}, "", false, []Integration{hd, uhd}, []Quality{Quality1080p}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
