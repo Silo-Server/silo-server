@@ -492,13 +492,13 @@ func (r *Repository) SetOutcome(ctx context.Context, id string, outcome Outcome,
 	return req, nil
 }
 
+const integrationColumns = `id, kind, name, enabled, base_url, api_key_ref,
+	root_folder, quality_profile_id, tags, is_4k, is_default, is_default_4k,
+	anime_enabled, anime_quality_profile_id, anime_root_folder, anime_tags,
+	options, last_check_at, last_check_status, last_check_error, updated_at`
+
 func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT kind, enabled, base_url, api_key_ref, root_folder, quality_profile_id,
-		       tags, options, last_check_at, last_check_status, last_check_error, updated_at
-		FROM request_integrations
-		ORDER BY kind
-	`)
+	rows, err := r.pool.Query(ctx, `SELECT `+integrationColumns+` FROM request_integrations ORDER BY kind, name`)
 	if err != nil {
 		return nil, fmt.Errorf("list request integrations: %w", err)
 	}
@@ -518,72 +518,101 @@ func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error
 	return out, nil
 }
 
-func (r *Repository) UpsertIntegration(ctx context.Context, integration Integration) (*Integration, error) {
-	out, err := r.upsertIntegration(ctx, r.pool, integration)
+func (r *Repository) GetIntegration(ctx context.Context, id string) (*Integration, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+integrationColumns+
+		` FROM request_integrations WHERE id = $1`, id)
+	i, err := scanIntegration(row)
 	if err != nil {
-		return nil, fmt.Errorf("upsert request integration: %w", err)
-	}
-	return out, nil
-}
-
-func (r *Repository) UpsertIntegrations(ctx context.Context, integrations []Integration) ([]Integration, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin request integrations transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	out := make([]Integration, 0, len(integrations))
-	for _, integration := range integrations {
-		updated, err := r.upsertIntegration(ctx, tx, integration)
-		if err != nil {
-			return nil, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
 		}
-		out = append(out, *updated)
+		return nil, fmt.Errorf("get request integration: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit request integrations transaction: %w", err)
-	}
-	return out, nil
+	return &i, nil
 }
 
-func (r *Repository) upsertIntegration(ctx context.Context, exec requestExecutor, integration Integration) (*Integration, error) {
-	if integration.Options == nil {
-		integration.Options = map[string]any{}
+func (r *Repository) CreateIntegration(ctx context.Context, i Integration) (*Integration, error) {
+	if i.Options == nil {
+		i.Options = map[string]any{}
 	}
-	options, err := json.Marshal(integration.Options)
+	options, err := json.Marshal(i.Options)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request integration options: %w", err)
+		return nil, fmt.Errorf("marshal options: %w", err)
 	}
-	tags := int32Slice(integration.Tags)
-	row := exec.QueryRow(ctx, `
+	row := r.pool.QueryRow(ctx, `
 		INSERT INTO request_integrations (
-			kind, enabled, base_url, api_key_ref, root_folder, quality_profile_id,
-			tags, options, updated_at
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-		ON CONFLICT (kind) DO UPDATE SET
-			enabled = EXCLUDED.enabled,
-			base_url = EXCLUDED.base_url,
-			api_key_ref = CASE
-				WHEN EXCLUDED.api_key_ref = '' THEN request_integrations.api_key_ref
-				ELSE EXCLUDED.api_key_ref
-			END,
-			root_folder = EXCLUDED.root_folder,
-			quality_profile_id = EXCLUDED.quality_profile_id,
-			tags = EXCLUDED.tags,
-			options = EXCLUDED.options,
-			updated_at = now()
-		RETURNING kind, enabled, base_url, api_key_ref, root_folder, quality_profile_id,
-		          tags, options, last_check_at, last_check_status, last_check_error, updated_at
-	`, integration.Kind, integration.Enabled, strings.TrimSpace(integration.BaseURL),
-		strings.TrimSpace(integration.APIKeyRef), strings.TrimSpace(integration.RootFolder),
-		integration.QualityProfileID, tags, options)
+			id, kind, name, enabled, base_url, api_key_ref, root_folder,
+			quality_profile_id, tags, is_4k, is_default, is_default_4k,
+			anime_enabled, anime_quality_profile_id, anime_root_folder, anime_tags,
+			options, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
+		RETURNING `+integrationColumns,
+		i.ID, i.Kind, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
+		strings.TrimSpace(i.APIKeyRef), strings.TrimSpace(i.RootFolder), i.QualityProfileID,
+		int32Slice(i.Tags), i.Is4K, i.IsDefault, i.IsDefault4K, i.AnimeEnabled,
+		i.AnimeQualityProfileID, strings.TrimSpace(i.AnimeRootFolder), int32Slice(i.AnimeTags),
+		options)
 	out, err := scanIntegration(row)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create request integration: %w", err)
 	}
 	return &out, nil
+}
+
+func (r *Repository) UpdateIntegration(ctx context.Context, i Integration) (*Integration, error) {
+	if i.Options == nil {
+		i.Options = map[string]any{}
+	}
+	options, err := json.Marshal(i.Options)
+	if err != nil {
+		return nil, fmt.Errorf("marshal options: %w", err)
+	}
+	row := r.pool.QueryRow(ctx, `
+		UPDATE request_integrations SET
+			name=$2, enabled=$3, base_url=$4,
+			api_key_ref = CASE WHEN $5 = '' THEN api_key_ref ELSE $5 END,
+			root_folder=$6, quality_profile_id=$7, tags=$8, is_4k=$9,
+			is_default=$10, is_default_4k=$11, anime_enabled=$12,
+			anime_quality_profile_id=$13, anime_root_folder=$14, anime_tags=$15,
+			options=$16, updated_at=now()
+		WHERE id=$1
+		RETURNING `+integrationColumns,
+		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
+		strings.TrimSpace(i.APIKeyRef), strings.TrimSpace(i.RootFolder), i.QualityProfileID,
+		int32Slice(i.Tags), i.Is4K, i.IsDefault, i.IsDefault4K, i.AnimeEnabled,
+		i.AnimeQualityProfileID, strings.TrimSpace(i.AnimeRootFolder), int32Slice(i.AnimeTags),
+		options)
+	out, err := scanIntegration(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update request integration: %w", err)
+	}
+	return &out, nil
+}
+
+func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM request_integrations WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete request integration: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) ClearDefault(ctx context.Context, exec requestExecutor, kind string, fourK bool) error {
+	col := "is_default"
+	if fourK {
+		col = "is_default_4k"
+	}
+	_, err := exec.Exec(ctx, `UPDATE request_integrations SET `+col+` = false WHERE kind = $1`, kind)
+	if err != nil {
+		return fmt.Errorf("clear default: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) recordEvent(ctx context.Context, exec requestExecutor, requestID, eventType string, actor Viewer, message string) error {
@@ -698,44 +727,41 @@ type integrationScanner interface {
 }
 
 func scanIntegration(row integrationScanner) (Integration, error) {
-	var integration Integration
-	var quality sql.NullInt64
-	var tags []int32
+	var i Integration
+	var quality, animeQuality sql.NullInt64
+	var tags, animeTags []int32
 	var optionsRaw []byte
 	var lastCheckAt sql.NullTime
 	if err := row.Scan(
-		&integration.Kind,
-		&integration.Enabled,
-		&integration.BaseURL,
-		&integration.APIKeyRef,
-		&integration.RootFolder,
-		&quality,
-		&tags,
-		&optionsRaw,
-		&lastCheckAt,
-		&integration.LastCheckStatus,
-		&integration.LastCheckError,
-		&integration.UpdatedAt,
+		&i.ID, &i.Kind, &i.Name, &i.Enabled, &i.BaseURL, &i.APIKeyRef,
+		&i.RootFolder, &quality, &tags, &i.Is4K, &i.IsDefault, &i.IsDefault4K,
+		&i.AnimeEnabled, &animeQuality, &i.AnimeRootFolder, &animeTags,
+		&optionsRaw, &lastCheckAt, &i.LastCheckStatus, &i.LastCheckError, &i.UpdatedAt,
 	); err != nil {
 		return Integration{}, err
 	}
 	if quality.Valid {
 		v := int(quality.Int64)
-		integration.QualityProfileID = &v
+		i.QualityProfileID = &v
 	}
-	integration.Tags = intsFromInt32(tags)
+	if animeQuality.Valid {
+		v := int(animeQuality.Int64)
+		i.AnimeQualityProfileID = &v
+	}
+	i.Tags = intsFromInt32(tags)
+	i.AnimeTags = intsFromInt32(animeTags)
 	if len(optionsRaw) > 0 {
-		if err := json.Unmarshal(optionsRaw, &integration.Options); err != nil {
-			return Integration{}, fmt.Errorf("unmarshal request integration options for %s: %w", integration.Kind, err)
+		if err := json.Unmarshal(optionsRaw, &i.Options); err != nil {
+			return Integration{}, fmt.Errorf("unmarshal request integration options for %s: %w", i.ID, err)
 		}
 	}
-	if integration.Options == nil {
-		integration.Options = map[string]any{}
+	if i.Options == nil {
+		i.Options = map[string]any{}
 	}
 	if lastCheckAt.Valid {
-		integration.LastCheckAt = &lastCheckAt.Time
+		i.LastCheckAt = &lastCheckAt.Time
 	}
-	return integration, nil
+	return i, nil
 }
 
 func int32Slice(values []int) []int32 {
