@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
@@ -421,16 +422,20 @@ function RequestTargetBadge({ target }: { target: RequestTarget }) {
   const qualityLabel = target.quality === "2160p" ? "2160p" : "1080p";
   const instanceLabel = target.instance_name || target.integration_kind || "Unknown";
   const failed = target.status === "failed";
+  const statusLabel = target.status === "failed" ? "Failed" : formatRequestStatus(target.status);
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="outline">{qualityLabel}</Badge>
         <span className="text-foreground">{instanceLabel}</span>
-        <Badge variant={failed ? "destructive" : "secondary"}>{target.status}</Badge>
+        <Badge variant={failed ? "destructive" : "secondary"}>{statusLabel}</Badge>
         {target.external_status ? <span>{target.external_status}</span> : null}
       </div>
       {failed && target.last_error ? (
-        <p className="text-destructive max-w-xs">{target.last_error}</p>
+        <p className="text-destructive flex max-w-xs items-start gap-1">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{target.last_error}</span>
+        </p>
       ) : null}
     </div>
   );
@@ -599,6 +604,7 @@ function RequestIntegrationsTab() {
 type IntegrationCard = {
   key: string;
   form: IntegrationFormState;
+  source: RequestIntegration | null;
 };
 
 let integrationCardCounter = 0;
@@ -613,6 +619,7 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
     integrations.map((integration) => ({
       key: integration.id || nextCardKey(),
       form: integrationToForm(integration.kind === "sonarr" ? "sonarr" : "radarr", integration),
+      source: integration,
     })),
   );
 
@@ -625,7 +632,10 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
   }
 
   function addCard(kind: "radarr" | "sonarr") {
-    setCards((current) => [...current, { key: nextCardKey(), form: integrationToForm(kind) }]);
+    setCards((current) => [
+      ...current,
+      { key: nextCardKey(), form: integrationToForm(kind), source: null },
+    ]);
   }
 
   function removeCard(key: string) {
@@ -657,6 +667,7 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
                   <IntegrationEditor
                     key={card.key}
                     form={card.form}
+                    source={card.source}
                     onChange={(patch) => updateCard(card.key, patch)}
                     onRemove={() => removeCard(card.key)}
                   />
@@ -672,10 +683,12 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
 
 function IntegrationEditor({
   form,
+  source,
   onChange,
   onRemove,
 }: {
   form: IntegrationFormState;
+  source: RequestIntegration | null;
   onChange: (patch: Partial<IntegrationFormState>) => void;
   onRemove: () => void;
 }) {
@@ -685,6 +698,8 @@ function IntegrationEditor({
   const updateIntegration = useUpdateRequestIntegration();
   const deleteIntegration = useDeleteRequestIntegration();
   const [animeOpen, setAnimeOpen] = useState(form.anime_enabled);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isDirty = !isNew && source !== null && isIntegrationDirty(form, source);
   const loadOptions = useLoadRequestIntegrationOptions();
   const [options, setOptions] = useState<RequestIntegrationOptions | null>(null);
   const rootFolders = rootFolderChoices(options, form.root_folder);
@@ -743,6 +758,7 @@ function IntegrationEditor({
           <h2 className="text-lg font-semibold tracking-normal">{title}</h2>
           {form.has_api_key ? <Badge variant="secondary">Key saved</Badge> : null}
           {isNew ? <Badge variant="outline">New</Badge> : null}
+          {isDirty ? <Badge variant="secondary">Unsaved changes</Badge> : null}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -780,14 +796,22 @@ function IntegrationEditor({
         />
         <SwitchField
           label="Default (HD)"
-          description="Default instance for 1080p requests."
+          description={
+            form.is_4k
+              ? "Disabled because this is a 4K instance."
+              : "Default instance for 1080p requests."
+          }
           checked={form.is_default}
           disabled={form.is_4k}
           onCheckedChange={(is_default) => onChange({ is_default })}
         />
         <SwitchField
           label="Default 4K"
-          description="Default instance for 2160p requests."
+          description={
+            form.is_4k
+              ? "Default instance for 2160p requests."
+              : "Enable the 4K instance toggle to set this."
+          }
           checked={form.is_default_4k}
           disabled={!form.is_4k}
           onCheckedChange={(is_default_4k) => onChange({ is_default_4k })}
@@ -1062,7 +1086,7 @@ function IntegrationEditor({
             type="button"
             variant="ghost"
             className="text-destructive"
-            onClick={() => deleteIntegration.mutate(form.id)}
+            onClick={() => setConfirmDelete(true)}
             disabled={deleteIntegration.isPending}
           >
             <Trash2 className="h-4 w-4" />
@@ -1070,6 +1094,38 @@ function IntegrationEditor({
           </Button>
         )}
       </div>
+
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(false);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete instance</DialogTitle>
+            <DialogDescription>
+              {`"${form.name.trim() || title}" will be permanently removed. New requests will no longer route to this instance.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                deleteIntegration.mutate(form.id);
+                setConfirmDelete(false);
+              }}
+              disabled={deleteIntegration.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1144,6 +1200,27 @@ function formToIntegration(form: IntegrationFormState): RequestIntegration {
     anime_tags: parseTags(form.anime_tags),
     options,
   };
+}
+
+function isIntegrationDirty(form: IntegrationFormState, source: RequestIntegration): boolean {
+  // A pending API key entry always counts as an unsaved change.
+  if (form.api_key_ref.trim().length > 0) return true;
+
+  const next = formToIntegration(form);
+  const seeded = integrationToForm(form.kind, source);
+  const original = formToIntegration(seeded);
+
+  return (
+    JSON.stringify(stripIntegrationForCompare(next)) !==
+    JSON.stringify(stripIntegrationForCompare(original))
+  );
+}
+
+function stripIntegrationForCompare(integration: RequestIntegration): Record<string, unknown> {
+  // api_key_ref is write-only (never round-trips from the source) and is handled
+  // separately above, so exclude it from the structural comparison.
+  const { api_key_ref: _apiKeyRef, ...rest } = integration;
+  return rest;
 }
 
 function rootFolderChoices(options: RequestIntegrationOptions | null, currentPath: string) {
