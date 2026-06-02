@@ -10,8 +10,11 @@ func applyRewrites(path string, rewrites []PathRewrite) string {
 		if from == "" {
 			continue
 		}
-		if strings.HasPrefix(path, from) {
-			return strings.TrimSpace(rw.To) + strings.TrimPrefix(path, from)
+		// Match only at a path-segment boundary: exact, or prefix followed by '/'.
+		// This prevents From="/data/media" from rewriting "/data/media2/x".
+		trimmed := strings.TrimSuffix(from, "/")
+		if path == trimmed || strings.HasPrefix(path, trimmed+"/") {
+			return strings.TrimSpace(rw.To) + strings.TrimPrefix(path, trimmed)
 		}
 	}
 	return path

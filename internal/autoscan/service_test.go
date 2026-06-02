@@ -55,22 +55,22 @@ func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.
 
 type allowSuppressor struct{}
 
-func (allowSuppressor) ShouldScan(context.Context, int, time.Duration) (bool, error) {
+func (allowSuppressor) ShouldScan(context.Context, string, time.Duration) (bool, error) {
 	return true, nil
 }
-func (allowSuppressor) Release(context.Context, int) error { return nil }
+func (allowSuppressor) Release(context.Context, string) error { return nil }
 
 type recordingSuppressor struct {
-	claimed  []int
-	released []int
+	claimed  []string
+	released []string
 }
 
-func (s *recordingSuppressor) ShouldScan(_ context.Context, folderID int, _ time.Duration) (bool, error) {
-	s.claimed = append(s.claimed, folderID)
+func (s *recordingSuppressor) ShouldScan(_ context.Context, key string, _ time.Duration) (bool, error) {
+	s.claimed = append(s.claimed, key)
 	return true, nil
 }
-func (s *recordingSuppressor) Release(_ context.Context, folderID int) error {
-	s.released = append(s.released, folderID)
+func (s *recordingSuppressor) Release(_ context.Context, key string) error {
+	s.released = append(s.released, key)
 	return nil
 }
 
@@ -107,6 +107,39 @@ func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	}
 	if _, ok := store.advanced["i1"]; !ok {
 		t.Fatalf("expected last_poll advanced for i1")
+	}
+}
+
+func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
+	// Two imported subtrees resolve to the SAME folder ID (7) but DIFFERENT
+	// target paths. Keying suppression on folder ID alone would drop the second;
+	// keying on (folder, path) must scan both.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
+		sources: []Source{{
+			IntegrationID: "i1", Kind: "sonarr", BaseURL: "http://sonarr", APIKeyRef: "k", Enabled: true,
+		}},
+	}
+	hist := &fakeHistory{paths: map[string][]string{
+		"http://sonarr": {
+			"/mnt/media/ShowA/S01/E01.mkv",
+			"/mnt/media/ShowB/S01/E01.mkv",
+		},
+	}}
+	q := &recordingQueuer{}
+	sup := &recordingSuppressor{}
+	svc := NewService(store, hist, fakeResolver{}, q, sup, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 2 {
+		t.Fatalf("expected 2 enqueued targets (distinct paths), got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if len(sup.claimed) != 2 {
+		t.Fatalf("expected 2 claimed keys, got %d: %v", len(sup.claimed), sup.claimed)
+	}
+	if sup.claimed[0] == sup.claimed[1] {
+		t.Fatalf("expected distinct claimed keys, both were %q", sup.claimed[0])
 	}
 }
 

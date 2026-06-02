@@ -113,10 +113,15 @@ func (h *AutoscanHandler) HandleUpsertSource(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
-	if err := h.svc.PollOnce(r.Context()); err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
+	// Run the poll detached: don't block the request on a full cycle, and don't
+	// tie the poll to the request context (which is cancelled once we respond).
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := h.svc.PollOnce(ctx); err != nil {
+			slog.WarnContext(ctx, "autoscan: manual poll failed", "err", err)
+		}
+	}()
 	writeJSON(w, http.StatusAccepted, struct {
 		Status string `json:"status"`
 	}{Status: "ok"})

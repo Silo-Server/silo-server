@@ -2,6 +2,8 @@ package autoscan
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -9,6 +11,11 @@ import (
 )
 
 const scanTrigger = "autoscan"
+
+const (
+	pollOverlap = 2 * time.Minute // re-poll a small overlap so boundary events aren't missed
+	maxLookback = 24 * time.Hour  // cap the window so a long outage can't produce an oversized response
+)
 
 type Store interface {
 	GetSettings(ctx context.Context) (Settings, error)
@@ -69,6 +76,13 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if src.LastPollAt != nil {
 			since = *src.LastPollAt
 		}
+		// Overlap buffer absorbs clock skew so boundary events aren't missed.
+		since = since.Add(-pollOverlap)
+		// Floor the window so a long outage can't produce an oversized history
+		// response that arrclient truncates (permanent stall otherwise).
+		if floor := cycleStart.Add(-maxLookback); since.Before(floor) {
+			since = floor
+		}
 
 		apiKey := src.APIKeyRef
 		if s.secrets != nil && apiKey != "" {
@@ -93,30 +107,39 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			rewritten = append(rewritten, applyRewrites(p, src.PathRewrites))
 		}
 		var targets []scantrigger.Target
-		var claimed []int
+		var claimed []string
 		for _, dir := range uniqueParentDirs(rewritten) {
 			target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
 			if rerr != nil {
+				var reqErr *scantrigger.RequestError
+				if errors.As(rerr, &reqErr) {
+					// Path outside Silo's media folders (or otherwise unresolvable)
+					// — an expected skip, not an error worth logging every cycle.
+					continue
+				}
 				slog.WarnContext(ctx, "autoscan: resolve failed", "path", dir, "err", rerr)
 				continue
 			}
 			if target == nil || target.Folder == nil {
 				continue
 			}
-			ok, serr := s.suppress.ShouldScan(ctx, target.Folder.ID, ttl)
+			// Key on (folder, path) to match the scanqueue dedup granularity so two
+			// distinct subtrees under one library folder are not collapsed.
+			key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
+			ok, serr := s.suppress.ShouldScan(ctx, key, ttl)
 			if serr != nil || !ok {
 				continue
 			}
 			target.Trigger = scanTrigger
 			targets = append(targets, *target)
-			claimed = append(claimed, target.Folder.ID)
+			claimed = append(claimed, key)
 		}
 		if len(targets) > 0 {
 			if eerr := s.queue.EnqueueScans(ctx, targets); eerr != nil {
 				slog.WarnContext(ctx, "autoscan: enqueue failed", "integration_id", src.IntegrationID, "err", eerr)
-				for _, folderID := range claimed {
-					if rerr := s.suppress.Release(ctx, folderID); rerr != nil {
-						slog.WarnContext(ctx, "autoscan: release claim failed", "folder_id", folderID, "err", rerr)
+				for _, k := range claimed {
+					if rerr := s.suppress.Release(ctx, k); rerr != nil {
+						slog.WarnContext(ctx, "autoscan: release claim failed", "key", k, "err", rerr)
 					}
 				}
 				continue
