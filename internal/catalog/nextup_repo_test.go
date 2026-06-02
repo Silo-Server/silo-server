@@ -11,13 +11,17 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 	query, args := buildListNextUpQuery(NextUpQuery{
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, []string{"ep-19", "ep-20"}, 20)
+	}, 20)
 
 	expectedFragments := []string{
 		"eligible_series AS (",
 		"uwp_ip.completed = FALSE",
 		"e_ip.series_id = ce.series_id",
 		"uwp_ip.updated_at > ce.updated_at",
+		"FROM user_history_hidden_items hhi",
+		"uwp.updated_at <= hhi.hidden_before",
+		"ORDER BY e.series_id, uwp.updated_at DESC, e.season_number DESC, e.episode_number DESC",
+		"LIMIT $3",
 	}
 	for _, fragment := range expectedFragments {
 		if !strings.Contains(query, fragment) {
@@ -25,7 +29,11 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 		}
 	}
 
-	if len(args) != 4 {
+	if strings.Contains(query, "uwp.media_item_id = ANY") {
+		t.Fatalf("query must not cap completed progress before deriving series anchors, got:\n%s", query)
+	}
+
+	if len(args) != 3 {
 		t.Fatalf("expected default arg count, got %d", len(args))
 	}
 }
@@ -37,7 +45,7 @@ func TestBuildListNextUpQuery_EnableResumableSkipsSeriesSuppressionCTE(t *testin
 		UserID:          7,
 		ProfileID:       "profile-1",
 		EnableResumable: true,
-	}, []string{"ep-20"}, 20)
+	}, 20)
 
 	if strings.Contains(query, "eligible_series AS (") {
 		t.Fatalf("expected resumable query to skip eligible_series suppression CTE, got:\n%s", query)
