@@ -1660,6 +1660,31 @@ export interface RequestIntegrationsResponse {
   integrations: RequestIntegration[];
 }
 
+export interface AutoscanSettings {
+  enabled: boolean;
+  poll_interval_minutes: number;
+  debounce_seconds: number;
+  updated_at?: string;
+}
+
+export interface AutoscanPathRewrite {
+  from: string;
+  to: string;
+}
+
+export interface AutoscanSource {
+  integration_id: string;
+  kind: string;
+  name: string;
+  enabled: boolean;
+  path_rewrites: AutoscanPathRewrite[];
+  last_poll_at?: string | null;
+}
+
+export interface AutoscanSourcesResponse {
+  sources: AutoscanSource[];
+}
+
 export interface RequestListParams {
   status?: MediaRequestStatus | "all";
   outcome?: MediaRequestOutcome | "all";
