@@ -10,31 +10,55 @@ import (
 )
 
 type fakeStore struct {
-	settings Settings
-	sources  []Source
-	advanced map[string]time.Time
+	settings   Settings
+	sources    []Source
+	connection Connection
+	advanced   map[string]string // source ID -> marker
+	recorded   map[string]string // source ID -> error message
 }
 
-func (f *fakeStore) GetSettings(context.Context) (Settings, error)        { return f.settings, nil }
-func (f *fakeStore) ListEnabledSources(context.Context) ([]Source, error) { return f.sources, nil }
-func (f *fakeStore) AdvanceLastPoll(_ context.Context, id string, at time.Time) error {
+func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
+func (f *fakeStore) ListEnabledSources(context.Context) ([]Source, error) {
+	return f.sources, nil
+}
+func (f *fakeStore) GetConnection(context.Context, string) (Connection, error) {
+	return f.connection, nil
+}
+func (f *fakeStore) AdvanceMarker(_ context.Context, sourceID, marker string) error {
 	if f.advanced == nil {
-		f.advanced = map[string]time.Time{}
+		f.advanced = map[string]string{}
 	}
-	f.advanced[id] = at
+	f.advanced[sourceID] = marker
+	return nil
+}
+func (f *fakeStore) RecordError(_ context.Context, sourceID, msg string) error {
+	if f.recorded == nil {
+		f.recorded = map[string]string{}
+	}
+	f.recorded[sourceID] = msg
 	return nil
 }
 
-type fakeHistory struct {
-	paths map[string][]string
-	err   error
+// fakeProvider implements ScanSourceProvider, keyed by capability ID.
+type fakeProvider struct {
+	paths      map[string][]string // key: capabilityID
+	nextMarker string
+	err        error
 }
 
-func (f *fakeHistory) ChangedPaths(_ context.Context, baseURL, _ string, _ time.Time) ([]string, error) {
+func (f *fakeProvider) PollChanges(_ context.Context, _ int, capabilityID, _ string, _ ResolvedConnection) ([]string, string, error) {
 	if f.err != nil {
-		return nil, f.err
+		return nil, "", f.err
 	}
-	return f.paths[baseURL], nil
+	return f.paths[capabilityID], f.nextMarker, nil
+}
+
+// passthroughConnRes resolves to empty credentials; the engine doesn't inspect
+// them in tests (the fake provider ignores conn).
+type passthroughConnRes struct{}
+
+func (passthroughConnRes) Resolve(context.Context, Connection) (ResolvedConnection, error) {
+	return ResolvedConnection{}, nil
 }
 
 type fakeResolver struct{}
@@ -80,22 +104,26 @@ func (failingQueuer) EnqueueScans(context.Context, []scantrigger.Target) error {
 	return context.DeadlineExceeded
 }
 
+func newService(store Store, provider ScanSourceProvider, queue Queuer, suppress Suppressor) *Service {
+	return NewService(store, provider, passthroughConnRes{}, fakeResolver{}, queue, suppress)
+}
+
 func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	store := &fakeStore{
-		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			IntegrationID: "i1", Kind: "sonarr", BaseURL: "http://sonarr", APIKeyRef: "k", Enabled: true,
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true,
 		}},
 	}
-	hist := &fakeHistory{paths: map[string][]string{
-		"http://sonarr": {
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
 			"/mnt/media/Show/S01/E01.mkv",
 			"/mnt/media/Show/S01/E02.mkv",
 			"/outside/lib/x.mkv",
 		},
-	}}
+	}, nextMarker: "m1"}
 	q := &recordingQueuer{}
-	svc := NewService(store, hist, fakeResolver{}, q, allowSuppressor{}, nil)
+	svc := newService(store, prov, q, allowSuppressor{})
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
@@ -105,8 +133,8 @@ func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	if q.enqueued[0].Trigger != "autoscan" || q.enqueued[0].Folder.ID != 7 {
 		t.Fatalf("unexpected target: %+v", q.enqueued[0])
 	}
-	if _, ok := store.advanced["i1"]; !ok {
-		t.Fatalf("expected last_poll advanced for i1")
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
 	}
 }
 
@@ -115,20 +143,20 @@ func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
 	// target paths. Keying suppression on folder ID alone would drop the second;
 	// keying on (folder, path) must scan both.
 	store := &fakeStore{
-		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			IntegrationID: "i1", Kind: "sonarr", BaseURL: "http://sonarr", APIKeyRef: "k", Enabled: true,
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true,
 		}},
 	}
-	hist := &fakeHistory{paths: map[string][]string{
-		"http://sonarr": {
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
 			"/mnt/media/ShowA/S01/E01.mkv",
 			"/mnt/media/ShowB/S01/E01.mkv",
 		},
-	}}
+	}, nextMarker: "m1"}
 	q := &recordingQueuer{}
 	sup := &recordingSuppressor{}
-	svc := NewService(store, hist, fakeResolver{}, q, sup, nil)
+	svc := newService(store, prov, q, sup)
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
@@ -143,10 +171,30 @@ func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
 	}
 }
 
+func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true,
+		}},
+	}
+	const opaque = "eyJjdXJzb3IiOiJhYmMxMjMifQ==|2026-06-02T14:10:00Z"
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {"/mnt/media/Show/S01/E01.mkv"},
+	}, nextMarker: opaque}
+	svc := newService(store, prov, &recordingQueuer{}, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if got := store.advanced["s1"]; got != opaque {
+		t.Fatalf("marker not stored verbatim: got %q want %q", got, opaque)
+	}
+}
+
 func TestPollOnceDisabledNoop(t *testing.T) {
 	store := &fakeStore{settings: Settings{Enabled: false}}
 	q := &recordingQueuer{}
-	svc := NewService(store, &fakeHistory{}, fakeResolver{}, q, allowSuppressor{}, nil)
+	svc := newService(store, &fakeProvider{}, q, allowSuppressor{})
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
@@ -155,78 +203,40 @@ func TestPollOnceDisabledNoop(t *testing.T) {
 	}
 }
 
-func TestPollOnceSourceFailureDoesNotAdvance(t *testing.T) {
+func TestPollOnceProviderErrorKeepsMarker(t *testing.T) {
 	store := &fakeStore{
-		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
-		sources:  []Source{{IntegrationID: "i1", BaseURL: "http://x", APIKeyRef: "k", Enabled: true}},
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true}},
 	}
-	hist := &fakeHistory{err: context.DeadlineExceeded}
+	prov := &fakeProvider{err: context.DeadlineExceeded}
 	q := &recordingQueuer{}
-	svc := NewService(store, hist, fakeResolver{}, q, allowSuppressor{}, nil)
+	svc := newService(store, prov, q, allowSuppressor{})
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce should not propagate per-source error: %v", err)
 	}
-	if _, ok := store.advanced["i1"]; ok {
-		t.Fatalf("last_poll must NOT advance on source failure")
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance on provider failure")
+	}
+	if msg, ok := store.recorded["s1"]; !ok || msg == "" {
+		t.Fatalf("expected provider error recorded for s1, got %q ok=%v", msg, ok)
 	}
 }
 
-func (f *fakeStore) GetSource(context.Context, string) (*Source, error) { return nil, nil }
-
 func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	store := &fakeStore{
-		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
-		sources:  []Source{{IntegrationID: "i1", BaseURL: "http://x", APIKeyRef: "k", Enabled: true}},
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true}},
 	}
-	hist := &fakeHistory{paths: map[string][]string{"http://x": {"/mnt/media/Show/S01/E01.mkv"}}}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
 	sup := &recordingSuppressor{}
-	svc := NewService(store, hist, fakeResolver{}, failingQueuer{}, sup, nil)
+	svc := newService(store, prov, failingQueuer{}, sup)
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
 	if len(sup.claimed) != 1 || len(sup.released) != 1 || sup.released[0] != sup.claimed[0] {
 		t.Fatalf("expected claimed folder to be released, claimed=%v released=%v", sup.claimed, sup.released)
 	}
-	if _, ok := store.advanced["i1"]; ok {
-		t.Fatalf("last_poll must NOT advance when enqueue fails")
-	}
-}
-
-type fakeRootFolders struct {
-	paths []string
-	err   error
-}
-
-func (f fakeRootFolders) RootFolders(context.Context, string, string) ([]string, error) {
-	return f.paths, f.err
-}
-
-type fakeFolderLister struct{ paths []string }
-
-func (f fakeFolderLister) ListFolderPaths(context.Context) ([]string, error) { return f.paths, nil }
-
-type sourceGetterStore struct {
-	fakeStore
-	src *Source
-}
-
-func (s *sourceGetterStore) GetSource(context.Context, string) (*Source, error) { return s.src, nil }
-
-func TestSuggestRewritesService(t *testing.T) {
-	store := &sourceGetterStore{src: &Source{IntegrationID: "i1", Kind: "sonarr", BaseURL: "http://x", APIKeyRef: "k"}}
-	svc := NewService(store, &fakeHistory{}, fakeResolver{}, &recordingQueuer{}, allowSuppressor{}, nil)
-	svc.SetRewriteResolvers(
-		fakeRootFolders{paths: []string{"/mnt/happy/storage2/tvshows1", "/data/Movies"}},
-		fakeFolderLister{paths: []string{"/mnt/media/happy/storage2/tvshows1"}},
-	)
-	got, err := svc.SuggestRewrites(context.Background(), "i1")
-	if err != nil {
-		t.Fatalf("SuggestRewrites: %v", err)
-	}
-	if len(got.Proposed) != 1 || got.Proposed[0].To != "/mnt/media/happy/storage2/tvshows1" {
-		t.Fatalf("proposed=%+v", got.Proposed)
-	}
-	if len(got.Unmatched) != 1 || got.Unmatched[0] != "/data/Movies" {
-		t.Fatalf("unmatched=%+v", got.Unmatched)
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance when enqueue fails")
 	}
 }

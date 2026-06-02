@@ -12,52 +12,65 @@ import (
 
 const scanTrigger = "autoscan"
 
-const (
-	pollOverlap = 2 * time.Minute // re-poll a small overlap so boundary events aren't missed
-	maxLookback = 24 * time.Hour  // cap the window so a long outage can't produce an oversized response
-)
-
+// Store is the persistence surface the engine needs. The repository implements
+// the full CRUD surface; this interface is the read/bookkeeping subset the poll
+// loop touches.
 type Store interface {
 	GetSettings(ctx context.Context) (Settings, error)
 	ListEnabledSources(ctx context.Context) ([]Source, error)
-	AdvanceLastPoll(ctx context.Context, integrationID string, at time.Time) error
-	GetSource(ctx context.Context, integrationID string) (*Source, error)
+	GetConnection(ctx context.Context, id string) (Connection, error)
+	AdvanceMarker(ctx context.Context, sourceID, marker string) error
+	RecordError(ctx context.Context, sourceID, msg string) error
 }
 
+// Resolver maps a Silo-native path to a concrete scan target (library folder).
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
 }
 
+// Queuer enqueues resolved scan targets.
 type Queuer interface {
 	EnqueueScans(ctx context.Context, targets []scantrigger.Target) error
 }
 
-type SecretResolver interface {
-	Get(ctx context.Context, key string) (string, error)
+// connectionResolver resolves a stored connection to concrete credentials.
+type connectionResolver interface {
+	Resolve(ctx context.Context, c Connection) (ResolvedConnection, error)
 }
 
 type Service struct {
-	store       Store
-	history     HistoryClient
-	resolver    Resolver
-	queue       Queuer
-	suppress    Suppressor
-	secrets     SecretResolver
-	now         func() time.Time
-	rootFolders RootFolderClient
-	folders     FolderLister
+	store    Store
+	provider ScanSourceProvider
+	connres  connectionResolver
+	resolver Resolver
+	queue    Queuer
+	suppress Suppressor
 }
 
-func NewService(store Store, history HistoryClient, resolver Resolver, queue Queuer, suppress Suppressor, secrets SecretResolver) *Service {
+// NewService builds the autoscan engine. The provider supplies changed paths
+// from scan_source plugins; connres resolves a source's connection to concrete
+// credentials; resolver/queue/suppress drive the resolve→suppress→enqueue loop.
+func NewService(
+	store Store,
+	provider ScanSourceProvider,
+	connres connectionResolver,
+	resolver Resolver,
+	queue Queuer,
+	suppress Suppressor,
+) *Service {
 	return &Service{
-		store: store, history: history, resolver: resolver, queue: queue,
-		suppress: suppress, secrets: secrets,
-		now: func() time.Time { return time.Now().UTC() },
+		store:    store,
+		provider: provider,
+		connres:  connres,
+		resolver: resolver,
+		queue:    queue,
+		suppress: suppress,
 	}
 }
 
 // PollOnce runs one autoscan cycle. Per-source failures are logged and skipped;
-// only settings/listing errors propagate.
+// only settings/listing errors propagate. The opaque next marker returned by the
+// provider is stored verbatim, but only after a successful enqueue.
 func (s *Service) PollOnce(ctx context.Context) error {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
@@ -73,129 +86,91 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	ttl := time.Duration(settings.DebounceSeconds) * time.Second
 
 	for _, src := range sources {
-		cycleStart := s.now()
-		// First enable: last_poll_at null -> floor at cycleStart (don't replay history).
-		since := cycleStart
-		if src.LastPollAt != nil {
-			since = *src.LastPollAt
-		}
-		// Overlap buffer absorbs clock skew so boundary events aren't missed.
-		since = since.Add(-pollOverlap)
-		// Floor the window so a long outage can't produce an oversized history
-		// response that arrclient truncates (permanent stall otherwise).
-		if floor := cycleStart.Add(-maxLookback); since.Before(floor) {
-			since = floor
-		}
-
-		apiKey := src.APIKeyRef
-		if s.secrets != nil && apiKey != "" {
-			resolved, rerr := s.secrets.Get(ctx, apiKey)
-			if rerr != nil {
-				slog.WarnContext(ctx, "autoscan: resolve api key failed", "integration_id", src.IntegrationID, "err", rerr)
-				continue
-			}
-			if resolved != "" {
-				apiKey = resolved
-			}
-		}
-
-		paths, perr := s.history.ChangedPaths(ctx, src.BaseURL, apiKey, since)
-		if perr != nil {
-			slog.WarnContext(ctx, "autoscan: source poll failed", "integration_id", src.IntegrationID, "err", perr)
+		conn, cerr := s.resolveConnection(ctx, src.ConnectionID)
+		if cerr != nil {
+			slog.WarnContext(ctx, "autoscan: resolve connection failed", "source_id", src.ID, "err", cerr)
 			continue
 		}
+		marker := ""
+		if src.Marker != nil {
+			marker = *src.Marker
+		}
+		paths, next, perr := s.provider.PollChanges(ctx, src.InstallationID, src.CapabilityID, marker, conn)
+		if perr != nil {
+			slog.WarnContext(ctx, "autoscan: poll changes failed", "source_id", src.ID, "err", perr)
+			if rerr := s.store.RecordError(ctx, src.ID, perr.Error()); rerr != nil {
+				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+			}
+			continue // do NOT advance marker
+		}
 
-		rewritten := make([]string, 0, len(paths))
-		for _, p := range paths {
-			// Normalize Windows separators so an arr running on Windows (reporting
-			// C:\Media\... paths) still rewrites/resolves on the Linux host. Path
-			// rewrites and Silo media folders are expected to use forward slashes.
-			rewritten = append(rewritten, applyRewrites(normalizeSeparators(p), src.PathRewrites))
-		}
-		var targets []scantrigger.Target
-		var claimed []string
-		for _, dir := range uniqueParentDirs(rewritten) {
-			target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
-			if rerr != nil {
-				var reqErr *scantrigger.RequestError
-				if errors.As(rerr, &reqErr) {
-					// Path outside Silo's media folders (or otherwise unresolvable)
-					// — an expected skip, not an error worth logging every cycle.
-					continue
-				}
-				slog.WarnContext(ctx, "autoscan: resolve failed", "path", dir, "err", rerr)
-				continue
-			}
-			if target == nil || target.Folder == nil {
-				continue
-			}
-			// Key on (folder, path) to match the scanqueue dedup granularity so two
-			// distinct subtrees under one library folder are not collapsed.
-			key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
-			ok, serr := s.suppress.ShouldScan(ctx, key, ttl)
-			if serr != nil || !ok {
-				continue
-			}
-			target.Trigger = scanTrigger
-			targets = append(targets, *target)
-			claimed = append(claimed, key)
-		}
+		targets, claimed := s.resolveAndClaim(ctx, paths, ttl)
 		if len(targets) > 0 {
 			if eerr := s.queue.EnqueueScans(ctx, targets); eerr != nil {
-				slog.WarnContext(ctx, "autoscan: enqueue failed", "integration_id", src.IntegrationID, "err", eerr)
-				for _, k := range claimed {
-					if rerr := s.suppress.Release(ctx, k); rerr != nil {
-						slog.WarnContext(ctx, "autoscan: release claim failed", "key", k, "err", rerr)
-					}
-				}
-				continue
+				s.releaseClaims(ctx, claimed)
+				slog.WarnContext(ctx, "autoscan: enqueue failed", "source_id", src.ID, "err", eerr)
+				continue // do NOT advance marker
 			}
 		}
-		if aerr := s.store.AdvanceLastPoll(ctx, src.IntegrationID, cycleStart); aerr != nil {
-			slog.WarnContext(ctx, "autoscan: advance last_poll failed", "integration_id", src.IntegrationID, "err", aerr)
+		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
+			slog.WarnContext(ctx, "autoscan: advance marker failed", "source_id", src.ID, "err", aerr)
 		}
 	}
 	return nil
 }
 
-// PollIntervalMinutes reads the configured interval, defaulting to 10 on error.
-func (s *Service) PollIntervalMinutes(ctx context.Context) int {
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil || settings.PollIntervalMinutes <= 0 {
-		return 10
-	}
-	return settings.PollIntervalMinutes
-}
-
-// SetRewriteResolvers wires the deps used by SuggestRewrites (optional; only the
-// admin-facing service needs them).
-func (s *Service) SetRewriteResolvers(rootFolders RootFolderClient, folders FolderLister) {
-	s.rootFolders = rootFolders
-	s.folders = folders
-}
-
-// SuggestRewrites matches an instance's arr root folders to Silo media folders.
-func (s *Service) SuggestRewrites(ctx context.Context, integrationID string) (RewriteSuggestions, error) {
-	if s.rootFolders == nil || s.folders == nil {
-		return RewriteSuggestions{}, fmt.Errorf("autoscan: rewrite suggestion not configured")
-	}
-	src, err := s.store.GetSource(ctx, integrationID)
+// resolveConnection loads and resolves a source's connection to credentials.
+func (s *Service) resolveConnection(ctx context.Context, connectionID string) (ResolvedConnection, error) {
+	conn, err := s.store.GetConnection(ctx, connectionID)
 	if err != nil {
-		return RewriteSuggestions{}, err
+		return ResolvedConnection{}, err
 	}
-	apiKey := src.APIKeyRef
-	if s.secrets != nil && apiKey != "" {
-		if resolved, rerr := s.secrets.Get(ctx, apiKey); rerr == nil && resolved != "" {
-			apiKey = resolved
+	return s.connres.Resolve(ctx, conn)
+}
+
+// resolveAndClaim dedupes the changed paths to parent directories, resolves each
+// to a scan target, and atomically claims it via the suppressor. It returns the
+// targets to enqueue and the suppression keys claimed for them (so they can be
+// released if the enqueue fails). This is the PR #43 salvage loop, generalized
+// to take already-Silo-native paths.
+func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.Duration) ([]scantrigger.Target, []string) {
+	var targets []scantrigger.Target
+	var claimed []string
+	for _, dir := range uniqueParentDirs(paths) {
+		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
+		if rerr != nil {
+			var reqErr *scantrigger.RequestError
+			if errors.As(rerr, &reqErr) {
+				// Path outside Silo's media folders (or otherwise unresolvable)
+				// — an expected skip, not an error worth logging every cycle.
+				continue
+			}
+			slog.WarnContext(ctx, "autoscan: resolve failed", "path", dir, "err", rerr)
+			continue
+		}
+		if target == nil || target.Folder == nil {
+			continue
+		}
+		// Key on (folder, path) to match the scanqueue dedup granularity so two
+		// distinct subtrees under one library folder are not collapsed.
+		key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
+		ok, serr := s.suppress.ShouldScan(ctx, key, ttl)
+		if serr != nil || !ok {
+			continue
+		}
+		target.Trigger = scanTrigger
+		targets = append(targets, *target)
+		claimed = append(claimed, key)
+	}
+	return targets, claimed
+}
+
+// releaseClaims drops suppression claims (used when the scan enqueue fails so a
+// later cycle can retry the same targets).
+func (s *Service) releaseClaims(ctx context.Context, claimed []string) {
+	for _, k := range claimed {
+		if rerr := s.suppress.Release(ctx, k); rerr != nil {
+			slog.WarnContext(ctx, "autoscan: release claim failed", "key", k, "err", rerr)
 		}
 	}
-	arrRoots, err := s.rootFolders.RootFolders(ctx, src.BaseURL, apiKey)
-	if err != nil {
-		return RewriteSuggestions{}, fmt.Errorf("autoscan: list arr root folders: %w", err)
-	}
-	siloPaths, err := s.folders.ListFolderPaths(ctx)
-	if err != nil {
-		return RewriteSuggestions{}, fmt.Errorf("autoscan: list silo folders: %w", err)
-	}
-	return suggestRewrites(arrRoots, siloPaths, src.PathRewrites), nil
 }
