@@ -428,6 +428,10 @@ func NewRouter(deps Dependencies) chi.Router {
 				autoscan.NewRedisSuppressor(deps.RedisClient),
 				settingsRepo,
 			)
+			autoscanSvc.SetRewriteResolvers(
+				autoscan.NewArrRootFolderClient(nil),
+				autoscan.NewCatalogFolderLister(deps.FolderRepo),
+			)
 			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc, deps.TaskManager)
 		}
 
@@ -2072,6 +2076,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpsertSource)
 								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
 								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
+								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
 							}
 
 							if deps.ActivityLogRepo != nil {

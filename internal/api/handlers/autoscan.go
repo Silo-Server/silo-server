@@ -26,6 +26,7 @@ type autoscanStore interface {
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
 type autoscanTriggerer interface {
 	PollOnce(ctx context.Context) error
+	SuggestRewrites(ctx context.Context, integrationID string) (autoscan.RewriteSuggestions, error)
 }
 
 // triggerUpdater reconfigures a task's schedule (satisfied by *taskmanager.TaskManager).
@@ -125,6 +126,20 @@ func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusAccepted, struct {
 		Status string `json:"status"`
 	}{Status: "ok"})
+}
+
+func (h *AutoscanHandler) HandleRewriteSuggestions(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	suggestions, err := h.svc.SuggestRewrites(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, autoscan.ErrIntegrationNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Autoscan source not found")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "arr_unreachable", "Could not load root folders from the arr instance")
+		return
+	}
+	writeJSON(w, http.StatusOK, suggestions)
 }
 
 type autoscanStatusSource struct {

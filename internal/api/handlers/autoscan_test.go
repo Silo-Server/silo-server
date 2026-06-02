@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 )
 
@@ -55,6 +57,10 @@ type fakeAutoscanTriggerer struct {
 func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
 	f.called = true
 	return f.err
+}
+
+func (f *fakeAutoscanTriggerer) SuggestRewrites(context.Context, string) (autoscan.RewriteSuggestions, error) {
+	return autoscan.RewriteSuggestions{}, nil
 }
 
 func TestAutoscanHandleGetSettingsReturnsJSON(t *testing.T) {
@@ -192,10 +198,26 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 	}
 }
 
-// errIntegrationNotFound mirrors the repository's "integration not found"
-// message so the handler's substring-based 404 mapping is exercised.
-var errIntegrationNotFound = &autoscanTestError{"integration not found: missing"}
+func TestAutoscanHandleRewriteSuggestions(t *testing.T) {
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{}, nil)
 
-type autoscanTestError struct{ msg string }
+	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/sources/radarr-1/rewrite-suggestions", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", "radarr-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rec := httptest.NewRecorder()
 
-func (e *autoscanTestError) Error() string { return e.msg }
+	h.HandleRewriteSuggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body autoscan.RewriteSuggestions
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+}
+
+// errIntegrationNotFound is the repository's sentinel, so the handler's
+// errors.Is-based 404 mapping is exercised.
+var errIntegrationNotFound = autoscan.ErrIntegrationNotFound
