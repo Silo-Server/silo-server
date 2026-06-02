@@ -171,6 +171,8 @@ func TestPollOnceSourceFailureDoesNotAdvance(t *testing.T) {
 	}
 }
 
+func (f *fakeStore) GetSource(context.Context, string) (*Source, error) { return nil, nil }
+
 func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
@@ -187,5 +189,44 @@ func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	}
 	if _, ok := store.advanced["i1"]; ok {
 		t.Fatalf("last_poll must NOT advance when enqueue fails")
+	}
+}
+
+type fakeRootFolders struct {
+	paths []string
+	err   error
+}
+
+func (f fakeRootFolders) RootFolders(context.Context, string, string) ([]string, error) {
+	return f.paths, f.err
+}
+
+type fakeFolderLister struct{ paths []string }
+
+func (f fakeFolderLister) ListFolderPaths(context.Context) ([]string, error) { return f.paths, nil }
+
+type sourceGetterStore struct {
+	fakeStore
+	src *Source
+}
+
+func (s *sourceGetterStore) GetSource(context.Context, string) (*Source, error) { return s.src, nil }
+
+func TestSuggestRewritesService(t *testing.T) {
+	store := &sourceGetterStore{src: &Source{IntegrationID: "i1", Kind: "sonarr", BaseURL: "http://x", APIKeyRef: "k"}}
+	svc := NewService(store, &fakeHistory{}, fakeResolver{}, &recordingQueuer{}, allowSuppressor{}, nil)
+	svc.SetRewriteResolvers(
+		fakeRootFolders{paths: []string{"/mnt/happy/storage2/tvshows1", "/data/Movies"}},
+		fakeFolderLister{paths: []string{"/mnt/media/happy/storage2/tvshows1"}},
+	)
+	got, err := svc.SuggestRewrites(context.Background(), "i1")
+	if err != nil {
+		t.Fatalf("SuggestRewrites: %v", err)
+	}
+	if len(got.Proposed) != 1 || got.Proposed[0].To != "/mnt/media/happy/storage2/tvshows1" {
+		t.Fatalf("proposed=%+v", got.Proposed)
+	}
+	if len(got.Unmatched) != 1 || got.Unmatched[0] != "/data/Movies" {
+		t.Fatalf("unmatched=%+v", got.Unmatched)
 	}
 }
