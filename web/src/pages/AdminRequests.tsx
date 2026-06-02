@@ -1430,7 +1430,10 @@ function AutoscanSourcesSection() {
       <h2 className="text-lg font-semibold tracking-normal">Instances</h2>
       <div className="grid gap-4 xl:grid-cols-2">
         {list.map((source) => (
-          <AutoscanSourceEditor key={source.integration_id} source={source} />
+          <AutoscanSourceEditor
+            key={`${source.integration_id}:${source.enabled}:${JSON.stringify(source.path_rewrites)}`}
+            source={source}
+          />
         ))}
       </div>
     </div>
