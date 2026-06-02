@@ -3,10 +3,16 @@ package autoscan
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/requests/arrclient"
 )
+
+// rootFolderTimeout is generous: Radarr/Sonarr compute unmappedFolders by
+// scanning every root folder (often slow network shares), so a large library's
+// /api/v3/rootfolder can take 20-30s+ — well past arrclient's 30s default.
+const rootFolderTimeout = 2 * time.Minute
 
 // RootFolderClient lists a Radarr/Sonarr instance's configured root folder paths.
 type RootFolderClient interface {
@@ -21,7 +27,11 @@ type FolderLister interface {
 type arrRootFolderClient struct{ httpClient *http.Client }
 
 // NewArrRootFolderClient returns a RootFolderClient backed by the shared arrclient.
+// When no client is given it uses a long timeout, since the root-folder scan is slow.
 func NewArrRootFolderClient(httpClient *http.Client) RootFolderClient {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: rootFolderTimeout}
+	}
 	return &arrRootFolderClient{httpClient: httpClient}
 }
 
