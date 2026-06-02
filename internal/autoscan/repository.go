@@ -66,6 +66,20 @@ func scanSource(row interface{ Scan(...any) error }) (Source, error) {
 	return src, nil
 }
 
+// GetSource returns one instance's autoscan state joined with its
+// request_integrations row (kind/base_url/api_key_ref), regardless of enabled.
+func (r *Repository) GetSource(ctx context.Context, integrationID string) (*Source, error) {
+	row := r.pool.QueryRow(ctx, sourceSelect+` WHERE ri.id = $1`, integrationID)
+	src, err := scanSource(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrIntegrationNotFound, integrationID)
+		}
+		return nil, fmt.Errorf("get autoscan source: %w", err)
+	}
+	return &src, nil
+}
+
 // ListAllSources returns every Radarr/Sonarr instance with its autoscan state
 // (admin UI — includes disabled).
 func (r *Repository) ListAllSources(ctx context.Context) ([]Source, error) {
