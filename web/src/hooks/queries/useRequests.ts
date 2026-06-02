@@ -326,35 +326,75 @@ export function useRequestIntegrations() {
   });
 }
 
-export function useUpdateRequestIntegrations() {
+export function useCreateRequestIntegration() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (integrations: RequestIntegration[]) =>
-      api<RequestIntegrationsResponse>("/admin/request-integrations", {
-        method: "PUT",
-        body: JSON.stringify({ integrations }),
+    mutationFn: (integration: RequestIntegration) =>
+      api<RequestIntegration>("/admin/request-integrations", {
+        method: "POST",
+        body: JSON.stringify(integration),
       }),
     onSuccess: () => {
-      toast.success("Integrations saved");
+      toast.success("Integration created");
       queryClient.invalidateQueries({ queryKey: adminKeys.requestIntegrations() });
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save integrations");
+      toast.error(err instanceof Error ? err.message : "Failed to create integration");
+    },
+  });
+}
+
+export function useUpdateRequestIntegration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...integration }: RequestIntegration) =>
+      api<RequestIntegration>(`/admin/request-integrations/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ id, ...integration }),
+      }),
+    onSuccess: () => {
+      toast.success("Integration saved");
+      queryClient.invalidateQueries({ queryKey: adminKeys.requestIntegrations() });
+      invalidateRequestSurfaces(queryClient);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to save integration");
+    },
+  });
+}
+
+export function useDeleteRequestIntegration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/admin/request-integrations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      toast.success("Integration deleted");
+      queryClient.invalidateQueries({ queryKey: adminKeys.requestIntegrations() });
+      invalidateRequestSurfaces(queryClient);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to delete integration");
     },
   });
 }
 
 export function useLoadRequestIntegrationOptions() {
   return useMutation({
-    mutationFn: ({ kind, body }: { kind: string; body: LoadRequestIntegrationOptionsRequest }) =>
+    mutationFn: ({ id, body }: { id: string; body: LoadRequestIntegrationOptionsRequest }) =>
       api<RequestIntegrationOptions>(
-        `/admin/request-integrations/${encodeURIComponent(kind)}/options`,
+        `/admin/request-integrations/${encodeURIComponent(id)}/options`,
         {
           method: "POST",
           body: JSON.stringify(body),
         },
       ),
+    onSuccess: () => {
+      toast.success("Connection successful");
+    },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to load integration settings");
     },

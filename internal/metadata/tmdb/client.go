@@ -827,14 +827,14 @@ func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (
 
 	switch mediaType {
 	case "movie":
-		path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates", id)
+		path := fmt.Sprintf("/movie/%d?append_to_response=credits,external_ids,recommendations,release_dates,keywords", id)
 		var resp movieDetailResponse
 		if err := c.doGet(ctx, path, &resp); err != nil {
 			return nil, err
 		}
 		return normalizeMovieDetail(&resp), nil
 	case "series", "tv":
-		path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings", id)
+		path := fmt.Sprintf("/tv/%d?append_to_response=credits,external_ids,recommendations,content_ratings,keywords", id)
 		var resp tvDetailResponse
 		if err := c.doGet(ctx, path, &resp); err != nil {
 			return nil, err
@@ -847,24 +847,26 @@ func (c *Client) GetMediaDetail(ctx context.Context, mediaType string, id int) (
 
 func normalizeMovieDetail(resp *movieDetailResponse) *MediaDetail {
 	detail := &MediaDetail{
-		MediaType:     "movie",
-		ID:            resp.ID,
-		IMDbID:        resp.IMDbID,
-		Title:         resp.Title,
-		OriginalTitle: resp.OriginalTitle,
-		Tagline:       resp.Tagline,
-		Overview:      resp.Overview,
-		PosterPath:    resp.PosterPath,
-		BackdropPath:  resp.BackdropPath,
-		ReleaseDate:   resp.ReleaseDate,
-		Year:          releaseYear(resp.ReleaseDate),
-		Runtime:       resp.Runtime,
-		Genres:        namesFromGenres(resp.Genres),
-		VoteAverage:   resp.VoteAverage,
-		VoteCount:     resp.VoteCount,
-		Status:        resp.Status,
-		Homepage:      resp.Homepage,
-		ContentRating: pickMovieCertification(resp.ReleaseDates),
+		MediaType:        "movie",
+		ID:               resp.ID,
+		IMDbID:           resp.IMDbID,
+		Title:            resp.Title,
+		OriginalTitle:    resp.OriginalTitle,
+		Tagline:          resp.Tagline,
+		Overview:         resp.Overview,
+		PosterPath:       resp.PosterPath,
+		BackdropPath:     resp.BackdropPath,
+		ReleaseDate:      resp.ReleaseDate,
+		Year:             releaseYear(resp.ReleaseDate),
+		Runtime:          resp.Runtime,
+		Genres:           namesFromGenres(resp.Genres),
+		VoteAverage:      resp.VoteAverage,
+		VoteCount:        resp.VoteCount,
+		Status:           resp.Status,
+		Homepage:         resp.Homepage,
+		ContentRating:    pickMovieCertification(resp.ReleaseDates),
+		OriginalLanguage: resp.OriginalLanguage,
+		KeywordIDs:       keywordIDs(resp.Keywords.Keywords, resp.Keywords.Results),
 	}
 	for _, company := range resp.ProductionCompanies {
 		if name := strings.TrimSpace(company.Name); name != "" {
@@ -923,6 +925,8 @@ func normalizeTVDetail(resp *tvDetailResponse) *MediaDetail {
 		NumberOfSeasons:  resp.NumberOfSeasons,
 		NumberOfEpisodes: resp.NumberOfEpisodes,
 		ContentRating:    pickTVRating(resp.ContentRatings),
+		OriginalLanguage: resp.OriginalLanguage,
+		KeywordIDs:       keywordIDs(resp.Keywords.Keywords, resp.Keywords.Results),
 	}
 	if len(resp.EpisodeRunTime) > 0 {
 		detail.Runtime = resp.EpisodeRunTime[0]
@@ -972,6 +976,18 @@ func namesFromGenres(genres []genreEntry) []string {
 	for _, g := range genres {
 		if name := strings.TrimSpace(g.Name); name != "" {
 			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// keywordIDs flattens one or more TMDB keyword lists (movies use the
+// "keywords" array, tv uses "results") into their numeric ids.
+func keywordIDs(groups ...[]idEntry) []int {
+	var out []int
+	for _, g := range groups {
+		for _, e := range g {
+			out = append(out, e.ID)
 		}
 	}
 	return out
