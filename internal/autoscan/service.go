@@ -21,6 +21,7 @@ type Store interface {
 	GetSettings(ctx context.Context) (Settings, error)
 	ListEnabledSources(ctx context.Context) ([]Source, error)
 	AdvanceLastPoll(ctx context.Context, integrationID string, at time.Time) error
+	GetSource(ctx context.Context, integrationID string) (*Source, error)
 }
 
 type Resolver interface {
@@ -36,13 +37,15 @@ type SecretResolver interface {
 }
 
 type Service struct {
-	store    Store
-	history  HistoryClient
-	resolver Resolver
-	queue    Queuer
-	suppress Suppressor
-	secrets  SecretResolver
-	now      func() time.Time
+	store       Store
+	history     HistoryClient
+	resolver    Resolver
+	queue       Queuer
+	suppress    Suppressor
+	secrets     SecretResolver
+	now         func() time.Time
+	rootFolders RootFolderClient
+	folders     FolderLister
 }
 
 func NewService(store Store, history HistoryClient, resolver Resolver, queue Queuer, suppress Suppressor, secrets SecretResolver) *Service {
@@ -162,4 +165,37 @@ func (s *Service) PollIntervalMinutes(ctx context.Context) int {
 		return 10
 	}
 	return settings.PollIntervalMinutes
+}
+
+// SetRewriteResolvers wires the deps used by SuggestRewrites (optional; only the
+// admin-facing service needs them).
+func (s *Service) SetRewriteResolvers(rootFolders RootFolderClient, folders FolderLister) {
+	s.rootFolders = rootFolders
+	s.folders = folders
+}
+
+// SuggestRewrites matches an instance's arr root folders to Silo media folders.
+func (s *Service) SuggestRewrites(ctx context.Context, integrationID string) (RewriteSuggestions, error) {
+	if s.rootFolders == nil || s.folders == nil {
+		return RewriteSuggestions{}, fmt.Errorf("autoscan: rewrite suggestion not configured")
+	}
+	src, err := s.store.GetSource(ctx, integrationID)
+	if err != nil {
+		return RewriteSuggestions{}, err
+	}
+	apiKey := src.APIKeyRef
+	if s.secrets != nil && apiKey != "" {
+		if resolved, rerr := s.secrets.Get(ctx, apiKey); rerr == nil && resolved != "" {
+			apiKey = resolved
+		}
+	}
+	arrRoots, err := s.rootFolders.RootFolders(ctx, src.BaseURL, apiKey)
+	if err != nil {
+		return RewriteSuggestions{}, fmt.Errorf("autoscan: list arr root folders: %w", err)
+	}
+	siloPaths, err := s.folders.ListFolderPaths(ctx)
+	if err != nil {
+		return RewriteSuggestions{}, fmt.Errorf("autoscan: list silo folders: %w", err)
+	}
+	return suggestRewrites(arrRoots, siloPaths, src.PathRewrites), nil
 }
