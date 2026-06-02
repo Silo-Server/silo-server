@@ -30,7 +30,7 @@ type fakeHistory struct {
 	err   error
 }
 
-func (f *fakeHistory) ImportedPaths(_ context.Context, baseURL, _ string, _ time.Time) ([]string, error) {
+func (f *fakeHistory) ChangedPaths(_ context.Context, baseURL, _ string, _ time.Time) ([]string, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
