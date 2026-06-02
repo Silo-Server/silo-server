@@ -2,6 +2,6 @@ package autoscan
 
 import "errors"
 
-// ErrIntegrationNotFound is returned when an autoscan operation references a
-// request integration that does not exist.
-var ErrIntegrationNotFound = errors.New("autoscan: integration not found")
+// ErrNotFound is returned when an autoscan operation references a connection or
+// source that does not exist. The admin API surfaces it as a 404.
+var ErrNotFound = errors.New("autoscan: not found")

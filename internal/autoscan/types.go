@@ -4,33 +4,32 @@ import "time"
 
 // Settings is the global autoscan configuration (singleton row).
 type Settings struct {
-	Enabled             bool      `json:"enabled"`
-	PollIntervalMinutes int       `json:"poll_interval_minutes"`
-	DebounceSeconds     int       `json:"debounce_seconds"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	Enabled                    bool
+	DefaultPollIntervalSeconds int
+	DebounceSeconds            int
 }
 
-// PathRewrite is an optional prefix translation from an arr path to a Silo path.
-type PathRewrite struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+// Connection is an arr server the host can reach: either own credentials, or a
+// live reference to a Requests integration (RequestIntegrationID set).
+type Connection struct {
+	ID                   string
+	Name                 string
+	Kind                 string
+	BaseURL              string // own; empty when linked
+	APIKeyRef            string // own; empty when linked
+	RequestIntegrationID *string
 }
 
-// Source is an autoscan-enabled Radarr/Sonarr instance. Kind/BaseURL/APIKeyRef/Name
-// are read from request_integrations; the rest live in autoscan_sources.
+// Source ties a scan_source plugin capability instance to a connection plus the
+// host-owned scheduling/bookkeeping state.
 type Source struct {
-	IntegrationID string        `json:"integration_id"`
-	Kind          string        `json:"kind"`
-	Name          string        `json:"name"`
-	BaseURL       string        `json:"-"`
-	APIKeyRef     string        `json:"-"`
-	Enabled       bool          `json:"enabled"`
-	PathRewrites  []PathRewrite `json:"path_rewrites"`
-	LastPollAt    *time.Time    `json:"last_poll_at,omitempty"`
-}
-
-// SourceUpdate is the admin-editable subset of a source.
-type SourceUpdate struct {
-	Enabled      bool          `json:"enabled"`
-	PathRewrites []PathRewrite `json:"path_rewrites"`
+	ID                  string
+	InstallationID      int
+	CapabilityID        string
+	ConnectionID        string
+	Enabled             bool
+	PollIntervalSeconds *int    // nil => use settings default
+	Marker              *string // opaque; nil on first run
+	LastRunAt           *time.Time
+	LastError           *string
 }
