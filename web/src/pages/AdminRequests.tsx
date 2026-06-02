@@ -16,6 +16,9 @@ import {
   X,
 } from "lucide-react";
 import type {
+  AutoscanPathRewrite,
+  AutoscanSettings,
+  AutoscanSource,
   MediaRequest,
   MediaRequestOutcome,
   MediaRequestStatus,
@@ -59,6 +62,13 @@ import {
 } from "@/components/ui/table";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
+  useAutoscanSettings,
+  useAutoscanSources,
+  useTriggerAutoscan,
+  useUpdateAutoscanSettings,
+  useUpdateAutoscanSource,
+} from "@/hooks/queries/useAutoscan";
+import {
   useAdminMediaRequests,
   useApproveMediaRequest,
   useCreateRequestIntegration,
@@ -87,7 +97,7 @@ import {
 type StatusFilter = MediaRequestStatus | "all";
 type OutcomeFilter = MediaRequestOutcome | "all";
 
-const ADMIN_REQUEST_TABS = ["queue", "settings", "integrations", "overrides"] as const;
+const ADMIN_REQUEST_TABS = ["queue", "settings", "integrations", "autoscan", "overrides"] as const;
 type AdminRequestTab = (typeof ADMIN_REQUEST_TABS)[number];
 
 function normalizeAdminRequestTab(value: string | null): AdminRequestTab {
@@ -131,6 +141,7 @@ export default function AdminRequests() {
           <TabsTrigger value="queue">Queue</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          <TabsTrigger value="autoscan">Autoscan</TabsTrigger>
           <TabsTrigger value="overrides">User Overrides</TabsTrigger>
         </TabsList>
         <TabsContent value="queue">
@@ -141,6 +152,9 @@ export default function AdminRequests() {
         </TabsContent>
         <TabsContent value="integrations">
           <RequestIntegrationsTab />
+        </TabsContent>
+        <TabsContent value="autoscan">
+          <AutoscanTab />
         </TabsContent>
         <TabsContent value="overrides">
           <UserOverridesTab />
@@ -1282,6 +1296,269 @@ function toggleTag(current: string, tagID: number): string {
   const tags = parseTags(current);
   const next = tags.includes(tagID) ? tags.filter((tag) => tag !== tagID) : [...tags, tagID];
   return next.join(", ");
+}
+
+type AutoscanSettingsFormState = {
+  enabled: boolean;
+  poll_interval_minutes: string;
+  debounce_seconds: string;
+  updated_at: string;
+};
+
+function AutoscanTab() {
+  return (
+    <div className="space-y-8">
+      <AutoscanSettingsCard />
+      <AutoscanSourcesSection />
+    </div>
+  );
+}
+
+function AutoscanSettingsCard() {
+  const settings = useAutoscanSettings();
+
+  if (settings.isLoading) return <RowsSkeleton />;
+  if (settings.isError) {
+    return <EmptyPanel title="Settings failed" detail="Autoscan settings could not be loaded." />;
+  }
+  if (!settings.data) {
+    return <EmptyPanel title="No settings" detail="Autoscan settings are not available." />;
+  }
+
+  return (
+    <AutoscanSettingsForm key={settings.data.updated_at ?? "settings"} settings={settings.data} />
+  );
+}
+
+function AutoscanSettingsForm({ settings }: { settings: AutoscanSettings }) {
+  const updateSettings = useUpdateAutoscanSettings();
+  const triggerAutoscan = useTriggerAutoscan();
+  const [form, setForm] = useState<AutoscanSettingsFormState>(() => ({
+    enabled: settings.enabled,
+    poll_interval_minutes: String(settings.poll_interval_minutes),
+    debounce_seconds: String(settings.debounce_seconds),
+    updated_at: settings.updated_at ?? "",
+  }));
+
+  function saveSettings() {
+    updateSettings.mutate({
+      enabled: form.enabled,
+      poll_interval_minutes: Math.max(1, Number(form.poll_interval_minutes) || 10),
+      debounce_seconds: Math.max(0, Number(form.debounce_seconds) || 0),
+      updated_at: form.updated_at || undefined,
+    });
+  }
+
+  return (
+    <div className="border-border bg-card max-w-3xl space-y-5 rounded-lg border p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <RefreshCw className="text-primary h-4 w-4" />
+          <h2 className="text-lg font-semibold tracking-normal">Autoscan</h2>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => triggerAutoscan.mutate()}
+          disabled={triggerAutoscan.isPending}
+        >
+          <RefreshCw className="h-4 w-4" />
+          Poll now
+        </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <SwitchField
+            label="Autoscan enabled"
+            description="Poll Radarr and Sonarr instances and rescan affected library paths automatically."
+            checked={form.enabled}
+            onCheckedChange={(enabled) => setForm((current) => ({ ...current, enabled }))}
+          />
+        </div>
+        <Field label="Poll interval (minutes)">
+          <Input
+            type="number"
+            min={1}
+            value={form.poll_interval_minutes}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, poll_interval_minutes: event.target.value }))
+            }
+          />
+        </Field>
+        <Field label="Debounce (seconds)">
+          <Input
+            type="number"
+            min={0}
+            value={form.debounce_seconds}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, debounce_seconds: event.target.value }))
+            }
+          />
+        </Field>
+      </div>
+
+      <Button onClick={saveSettings} disabled={updateSettings.isPending}>
+        <Save className="h-4 w-4" />
+        Save Settings
+      </Button>
+    </div>
+  );
+}
+
+function AutoscanSourcesSection() {
+  const sources = useAutoscanSources();
+
+  if (sources.isLoading) return <RowsSkeleton />;
+  if (sources.isError) {
+    return <EmptyPanel title="Sources failed" detail="Autoscan sources could not be loaded." />;
+  }
+
+  const list = sources.data ?? [];
+  if (list.length === 0) {
+    return (
+      <EmptyPanel
+        title="No instances"
+        detail="Add a Radarr or Sonarr instance in the Integrations tab first."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold tracking-normal">Instances</h2>
+      <div className="grid gap-4 xl:grid-cols-2">
+        {list.map((source) => (
+          <AutoscanSourceEditor key={source.integration_id} source={source} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
+  const updateSource = useUpdateAutoscanSource();
+  const [enabled, setEnabled] = useState(source.enabled);
+  const [rewrites, setRewrites] = useState<AutoscanPathRewrite[]>(() =>
+    source.path_rewrites.map((rewrite) => ({ ...rewrite })),
+  );
+  const [rewritesOpen, setRewritesOpen] = useState(source.path_rewrites.length > 0);
+  const rewritesPanelID = useId();
+
+  function updateRewrite(index: number, patch: Partial<AutoscanPathRewrite>) {
+    setRewrites((current) =>
+      current.map((rewrite, i) => (i === index ? { ...rewrite, ...patch } : rewrite)),
+    );
+  }
+
+  function addRewrite() {
+    setRewrites((current) => [...current, { from: "", to: "" }]);
+  }
+
+  function removeRewrite(index: number) {
+    setRewrites((current) => current.filter((_, i) => i !== index));
+  }
+
+  function handleSave() {
+    const path_rewrites = rewrites
+      .map((rewrite) => ({ from: rewrite.from.trim(), to: rewrite.to.trim() }))
+      .filter((rewrite) => rewrite.from.length > 0 || rewrite.to.length > 0);
+    updateSource.mutate({ id: source.integration_id, body: { enabled, path_rewrites } });
+  }
+
+  return (
+    <div className="border-border bg-card space-y-5 rounded-lg border p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Plug className="text-primary h-4 w-4" />
+          <h2 className="text-lg font-semibold tracking-normal">{source.name}</h2>
+          <Badge variant="secondary">{source.kind}</Badge>
+        </div>
+      </div>
+
+      <SwitchField label="Autoscan" checked={enabled} onCheckedChange={setEnabled} />
+
+      <Field label="Last polled">
+        <p className="text-muted-foreground text-sm">
+          {formatAutoscanPollDate(source.last_poll_at)}
+        </p>
+      </Field>
+
+      <div className="border-border space-y-4 rounded-lg border p-3">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-2 text-left"
+          onClick={() => setRewritesOpen((open) => !open)}
+          aria-expanded={rewritesOpen}
+          aria-controls={rewritesPanelID}
+        >
+          <div className="flex items-center gap-2">
+            {rewritesOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            <span className="text-sm font-medium">Path rewrites</span>
+            {rewrites.length > 0 ? <Badge variant="secondary">{rewrites.length}</Badge> : null}
+          </div>
+        </button>
+        {rewritesOpen ? (
+          <div id={rewritesPanelID} className="space-y-3" role="region" aria-label="Path rewrites">
+            {rewrites.length === 0 ? (
+              <p className="text-muted-foreground text-xs">
+                No path rewrites. Map remote paths to local library paths.
+              </p>
+            ) : (
+              rewrites.map((rewrite, index) => (
+                <div key={index} className="flex items-end gap-2">
+                  <Field label="From">
+                    <Input
+                      value={rewrite.from}
+                      onChange={(event) => updateRewrite(index, { from: event.target.value })}
+                      placeholder="/remote/media"
+                    />
+                  </Field>
+                  <Field label="To">
+                    <Input
+                      value={rewrite.to}
+                      onChange={(event) => updateRewrite(index, { to: event.target.value })}
+                      placeholder="/media"
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeRewrite(index)}
+                    aria-label="Remove rewrite"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={addRewrite}>
+              <Plus className="h-4 w-4" />
+              Add rewrite
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      <Button type="button" onClick={handleSave} disabled={updateSource.isPending}>
+        <Save className="h-4 w-4" />
+        Save
+      </Button>
+    </div>
+  );
+}
+
+function formatAutoscanPollDate(value: string | null | undefined): string {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 type UserLimitFormState = {
