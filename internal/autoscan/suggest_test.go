@@ -74,6 +74,36 @@ func TestSuggestRewrites(t *testing.T) {
 			t.Fatalf("normalization failed: %+v", got.Proposed)
 		}
 	})
+
+	t.Run("covered by a Windows-style existing rule (normalized)", func(t *testing.T) {
+		existing := []PathRewrite{{From: `\mnt\happy`, To: "/mnt/media/happy"}}
+		got := suggestRewrites([]string{"/mnt/happy/storage2/tvshows1"}, silo, existing)
+		if len(got.Covered) != 1 || len(got.Proposed) != 0 {
+			t.Fatalf("backslash From should cover the root: %+v", got)
+		}
+	})
+
+	t.Run("duplicate arr roots collapse to one proposal", func(t *testing.T) {
+		got := suggestRewrites([]string{"/mnt/happy/storage2/tvshows1", "/mnt/happy/storage2/tvshows1/"}, silo, nil)
+		if len(got.Proposed) != 1 {
+			t.Fatalf("dup roots should yield 1 proposal, got %+v", got.Proposed)
+		}
+	})
+
+	t.Run("no-op (arr path equals Silo path) is not proposed", func(t *testing.T) {
+		got := suggestRewrites([]string{"/library/Films"}, silo, nil)
+		if len(got.Proposed) != 0 || len(got.Unmatched) != 0 {
+			t.Fatalf("from==to should be skipped, got %+v", got)
+		}
+	})
+
+	t.Run("duplicate Silo paths do not create duplicate candidates", func(t *testing.T) {
+		dupSilo := []string{"/mnt/media/storage/Anime/Subs", "/mnt/media/storage/Anime/Subs"}
+		got := suggestRewrites([]string{"/mnt/kodama/storage1/Anime/Subs"}, dupSilo, nil)
+		if len(got.Proposed) != 1 || len(got.Ambiguous) != 0 {
+			t.Fatalf("dup silo paths should still be a unique match, got %+v", got)
+		}
+	})
 }
 
 func TestCommonSuffixLen(t *testing.T) {
