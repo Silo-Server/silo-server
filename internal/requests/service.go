@@ -390,7 +390,14 @@ func (s *Service) ListMine(ctx context.Context, viewer Viewer, filter ListFilter
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
-	return s.store.ListMine(ctx, viewer.UserID, normalizeListFilter(filter))
+	reqs, err := s.store.ListMine(ctx, viewer.UserID, normalizeListFilter(filter))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachTargets(ctx, reqs...); err != nil {
+		return nil, err
+	}
+	return reqs, nil
 }
 
 func (s *Service) ListAdmin(ctx context.Context, viewer Viewer, filter ListFilter) ([]*Request, error) {

@@ -602,12 +602,40 @@ func (r *Repository) SaveIntegrationWithDefaults(ctx context.Context, in Integra
 }
 
 func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM request_integrations WHERE id = $1`, id)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("begin delete integration: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var lockedID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM request_integrations WHERE id = $1 FOR UPDATE
+	`, id).Scan(&lockedID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("lock request integration: %w", err)
+	}
+
+	var hasLiveTargets bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM media_request_targets
+			WHERE integration_id = $1 AND status IN ('queued', 'downloading')
+		)
+	`, id).Scan(&hasLiveTargets); err != nil {
+		return fmt.Errorf("check integration targets: %w", err)
+	}
+	if hasLiveTargets {
+		return ErrInvalidState
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM request_integrations WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("delete request integration: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete integration: %w", err)
 	}
 	return nil
 }

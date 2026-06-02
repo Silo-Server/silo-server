@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
@@ -699,6 +699,7 @@ function IntegrationEditor({
   const deleteIntegration = useDeleteRequestIntegration();
   const [animeOpen, setAnimeOpen] = useState(form.anime_enabled);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const animePanelID = useId();
   const isDirty = !isNew && source !== null && isIntegrationDirty(form, source);
   const loadOptions = useLoadRequestIntegrationOptions();
   const [options, setOptions] = useState<RequestIntegrationOptions | null>(null);
@@ -971,7 +972,7 @@ function IntegrationEditor({
           className="flex w-full items-center justify-between gap-2 text-left"
           onClick={() => setAnimeOpen((open) => !open)}
           aria-expanded={animeOpen}
-          aria-controls="anime-overrides-panel"
+          aria-controls={animePanelID}
         >
           <div className="flex items-center gap-2">
             {animeOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -980,7 +981,7 @@ function IntegrationEditor({
           </div>
         </button>
         {animeOpen ? (
-          <div id="anime-overrides-panel" className="space-y-4">
+          <div id={animePanelID} className="space-y-4" role="region" aria-label="Anime overrides">
             <SwitchField
               label="Enable anime overrides"
               description="Route anime requests to a dedicated profile, root folder, and tags."

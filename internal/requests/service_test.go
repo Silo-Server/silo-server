@@ -322,6 +322,37 @@ func TestCreateRequestEnrichesSeriesTVDBID(t *testing.T) {
 	}
 }
 
+func TestListMineAttachesTargets(t *testing.T) {
+	store := newFakeStore()
+	store.mine = []*Request{{
+		ID:                "req-1",
+		MediaType:         MediaTypeMovie,
+		TMDBID:            550,
+		Status:            StatusQueued,
+		Outcome:           OutcomeActive,
+		RequestedByUserID: 1,
+	}}
+	store.targets = map[string][]Target{
+		"req-1": {{
+			ID:        10,
+			RequestID: "req-1",
+			Quality:   Quality2160p,
+			Status:    StatusQueued,
+		}},
+	}
+
+	got, err := newTestService(store).ListMine(context.Background(), testViewer(1), ListFilter{})
+	if err != nil {
+		t.Fatalf("ListMine returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListMine returned %d requests, want 1", len(got))
+	}
+	if len(got[0].Targets) != 1 || got[0].Targets[0].Quality != Quality2160p {
+		t.Fatalf("targets = %+v, want attached 2160p target", got[0].Targets)
+	}
+}
+
 func TestCreateRequestBlocksWhenHydratedTVDBIDIsAvailable(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -804,6 +835,36 @@ func TestReconcileRequestsMarksDownloadingFromAdapter(t *testing.T) {
 	}
 }
 
+func TestDeleteIntegrationRejectsLiveTargets(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{{
+		ID:      "radarr-hd",
+		Kind:    "radarr",
+		Enabled: true,
+	}}
+	store.targets = map[string][]Target{
+		"req-1": {{
+			ID:            10,
+			RequestID:     "req-1",
+			IntegrationID: "radarr-hd",
+			Quality:       Quality1080p,
+			Status:        StatusDownloading,
+		}},
+	}
+
+	err := newTestService(store).DeleteIntegration(
+		context.Background(),
+		Viewer{UserID: 1, IsAdmin: true},
+		"radarr-hd",
+	)
+	if !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("err = %v, want ErrInvalidState", err)
+	}
+	if len(store.integrations) != 1 {
+		t.Fatalf("integrations = %d, want delete blocked", len(store.integrations))
+	}
+}
+
 func TestCancelOwnerCanWithdrawPendingRequest(t *testing.T) {
 	store := newFakeStore()
 	store.requests["req-mine"] = &Request{
@@ -988,6 +1049,7 @@ type fakeStore struct {
 	created       []CreateRequestRecord
 	integrations  []Integration
 	candidates    []*Request
+	mine          []*Request
 	statusUpdates []Status
 	requests      map[string]*Request
 	targets       map[string][]Target
@@ -1134,7 +1196,9 @@ func (f *fakeStore) ListReconciliationCandidates(context.Context, int) ([]*Reque
 }
 
 func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*Request(nil), f.mine...), nil
 }
 
 func (f *fakeStore) ListAdmin(context.Context, ListFilter) ([]*Request, error) {
@@ -1240,6 +1304,13 @@ func (f *fakeStore) SaveIntegrationWithDefaults(_ context.Context, in Integratio
 func (f *fakeStore) DeleteIntegration(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, targets := range f.targets {
+		for _, target := range targets {
+			if target.IntegrationID == id && (target.Status == StatusQueued || target.Status == StatusDownloading) {
+				return ErrInvalidState
+			}
+		}
+	}
 	for i := range f.integrations {
 		if f.integrations[i].ID == id {
 			f.integrations = append(f.integrations[:i], f.integrations[i+1:]...)
