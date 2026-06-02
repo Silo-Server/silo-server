@@ -106,6 +106,13 @@ func TestSuggestRewrites(t *testing.T) {
 	})
 }
 
+func TestSuggestRewritesNeverNilSlices(t *testing.T) {
+	got := suggestRewrites(nil, nil, nil)
+	if got.Proposed == nil || got.Unmatched == nil || got.Ambiguous == nil || got.Covered == nil {
+		t.Fatalf("slices must be non-nil so JSON serializes [] not null: %+v", got)
+	}
+}
+
 func TestCommonSuffixLen(t *testing.T) {
 	cases := []struct {
 		a, b []string
