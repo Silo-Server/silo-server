@@ -12,37 +12,53 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
-	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// autoscanStore is the subset of *autoscan.Repository the handler needs.
+// autoscanStore is the subset of *autoscan.Repository the handler needs. The
+// repository implements the full CRUD surface; this interface lets tests inject
+// a fake.
 type autoscanStore interface {
 	GetSettings(ctx context.Context) (autoscan.Settings, error)
 	UpdateSettings(ctx context.Context, s autoscan.Settings) (autoscan.Settings, error)
-	ListAllSources(ctx context.Context) ([]autoscan.Source, error)
-	UpsertSource(ctx context.Context, integrationID string, u autoscan.SourceUpdate) (*autoscan.Source, error)
+	ListConnections(ctx context.Context) ([]autoscan.Connection, error)
+	CreateConnection(ctx context.Context, c autoscan.Connection) (autoscan.Connection, error)
+	UpdateConnection(ctx context.Context, c autoscan.Connection) (autoscan.Connection, error)
+	DeleteConnection(ctx context.Context, id string) error
+	ListSources(ctx context.Context) ([]autoscan.Source, error)
+	GetSource(ctx context.Context, id string) (autoscan.Source, error)
+	UpsertSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
 }
 
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
 type autoscanTriggerer interface {
 	PollOnce(ctx context.Context) error
-	SuggestRewrites(ctx context.Context, integrationID string) (autoscan.RewriteSuggestions, error)
 }
 
-// triggerUpdater reconfigures a task's schedule (satisfied by *taskmanager.TaskManager).
-type triggerUpdater interface {
-	UpdateTriggers(key string, triggerConfigs []taskmanager.TriggerConfig) error
-}
-
-// AutoscanHandler serves the admin-only autoscan settings/sources/trigger API.
+// AutoscanHandler serves the admin-only autoscan settings/connections/sources/
+// trigger API.
 type AutoscanHandler struct {
-	repo     autoscanStore
-	svc      autoscanTriggerer
-	triggers triggerUpdater
+	repo autoscanStore
+	svc  autoscanTriggerer
 }
 
-func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer, triggers triggerUpdater) *AutoscanHandler {
-	return &AutoscanHandler{repo: repo, svc: svc, triggers: triggers}
+func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer) *AutoscanHandler {
+	return &AutoscanHandler{repo: repo, svc: svc}
+}
+
+// --- Settings ---
+
+type autoscanSettingsResponse struct {
+	Enabled                    bool `json:"enabled"`
+	DefaultPollIntervalSeconds int  `json:"default_poll_interval_seconds"`
+	DebounceSeconds            int  `json:"debounce_seconds"`
+}
+
+func settingsResponse(s autoscan.Settings) autoscanSettingsResponse {
+	return autoscanSettingsResponse{
+		Enabled:                    s.Enabled,
+		DefaultPollIntervalSeconds: s.DefaultPollIntervalSeconds,
+		DebounceSeconds:            s.DebounceSeconds,
+	}
 }
 
 func (h *AutoscanHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -51,67 +67,237 @@ func (h *AutoscanHandler) HandleGetSettings(w http.ResponseWriter, r *http.Reque
 		writeAutoscanError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settings)
+	writeJSON(w, http.StatusOK, settingsResponse(settings))
 }
 
 func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
-	var s autoscan.Settings
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+	var req autoscanSettingsResponse
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if s.PollIntervalMinutes <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "poll_interval_minutes must be greater than 0")
+	if req.DefaultPollIntervalSeconds <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "default_poll_interval_seconds must be greater than 0")
 		return
 	}
-	if s.DebounceSeconds < 0 {
+	if req.DebounceSeconds < 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "debounce_seconds must be 0 or greater")
 		return
 	}
-	updated, err := h.repo.UpdateSettings(r.Context(), s)
+	updated, err := h.repo.UpdateSettings(r.Context(), autoscan.Settings{
+		Enabled:                    req.Enabled,
+		DefaultPollIntervalSeconds: req.DefaultPollIntervalSeconds,
+		DebounceSeconds:            req.DebounceSeconds,
+	})
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	if h.triggers != nil {
-		intervalMs := int64(updated.PollIntervalMinutes) * 60 * 1000
-		if terr := h.triggers.UpdateTriggers("autoscan_poll", []taskmanager.TriggerConfig{
-			{Type: taskmanager.TriggerTypeInterval, IntervalMs: intervalMs},
-		}); terr != nil {
-			slog.WarnContext(r.Context(), "autoscan: update trigger failed", "err", terr)
-		}
-	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, settingsResponse(updated))
 }
 
-func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := h.repo.ListAllSources(r.Context())
+// --- Connections ---
+
+// autoscanConnectionResponse is the client view of a connection. It NEVER
+// includes api_key_ref or any resolved credential: callers manage credentials
+// either by setting an api-key ref (write-only) or by linking a Requests
+// integration.
+type autoscanConnectionResponse struct {
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	Kind                 string  `json:"kind"`
+	BaseURL              string  `json:"base_url,omitempty"`
+	RequestIntegrationID *string `json:"request_integration_id,omitempty"`
+	// HasAPIKey reports whether the connection carries its own (write-only)
+	// api-key ref, without disclosing the ref itself.
+	HasAPIKey bool `json:"has_api_key"`
+}
+
+func connectionResponse(c autoscan.Connection) autoscanConnectionResponse {
+	return autoscanConnectionResponse{
+		ID:                   c.ID,
+		Name:                 c.Name,
+		Kind:                 c.Kind,
+		BaseURL:              c.BaseURL,
+		RequestIntegrationID: c.RequestIntegrationID,
+		HasAPIKey:            strings.TrimSpace(c.APIKeyRef) != "",
+	}
+}
+
+// autoscanConnectionInput is the write payload. api_key_ref is accepted (it is
+// an opaque reference into platform settings, never a plaintext secret) but is
+// never echoed back in any response.
+type autoscanConnectionInput struct {
+	Name                 string  `json:"name"`
+	Kind                 string  `json:"kind"`
+	BaseURL              string  `json:"base_url"`
+	APIKeyRef            string  `json:"api_key_ref"`
+	RequestIntegrationID *string `json:"request_integration_id"`
+}
+
+func (h *AutoscanHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
+	conns, err := h.repo.ListConnections(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	if sources == nil {
-		sources = []autoscan.Source{}
+	out := make([]autoscanConnectionResponse, 0, len(conns))
+	for _, c := range conns {
+		out = append(out, connectionResponse(c))
 	}
 	writeJSON(w, http.StatusOK, struct {
-		Sources []autoscan.Source `json:"sources"`
-	}{Sources: sources})
+		Connections []autoscanConnectionResponse `json:"connections"`
+	}{Connections: out})
 }
 
-func (h *AutoscanHandler) HandleUpsertSource(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	var update autoscan.SourceUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+func (h *AutoscanHandler) HandleCreateConnection(w http.ResponseWriter, r *http.Request) {
+	var in autoscanConnectionInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	source, err := h.repo.UpsertSource(r.Context(), id, update)
+	if strings.TrimSpace(in.Name) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
+		return
+	}
+	created, err := h.repo.CreateConnection(r.Context(), autoscan.Connection{
+		Name:                 strings.TrimSpace(in.Name),
+		Kind:                 strings.TrimSpace(in.Kind),
+		BaseURL:              strings.TrimSpace(in.BaseURL),
+		APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
+		RequestIntegrationID: in.RequestIntegrationID,
+	})
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, source)
+	writeJSON(w, http.StatusCreated, connectionResponse(created))
 }
+
+func (h *AutoscanHandler) HandleUpdateConnection(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	var in autoscanConnectionInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
+		return
+	}
+	updated, err := h.repo.UpdateConnection(r.Context(), autoscan.Connection{
+		ID:                   id,
+		Name:                 strings.TrimSpace(in.Name),
+		Kind:                 strings.TrimSpace(in.Kind),
+		BaseURL:              strings.TrimSpace(in.BaseURL),
+		APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
+		RequestIntegrationID: in.RequestIntegrationID,
+	})
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, connectionResponse(updated))
+}
+
+func (h *AutoscanHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if err := h.repo.DeleteConnection(r.Context(), id); err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Sources ---
+
+// autoscanSourceResponse is the client view of a source. It carries no
+// credentials: the connection link is by id only.
+type autoscanSourceResponse struct {
+	ID                  string     `json:"id"`
+	InstallationID      int        `json:"installation_id"`
+	CapabilityID        string     `json:"capability_id"`
+	ConnectionID        string     `json:"connection_id"`
+	Enabled             bool       `json:"enabled"`
+	PollIntervalSeconds *int       `json:"poll_interval_seconds,omitempty"`
+	LastRunAt           *time.Time `json:"last_run_at,omitempty"`
+	LastError           *string    `json:"last_error,omitempty"`
+}
+
+func sourceResponse(s autoscan.Source) autoscanSourceResponse {
+	return autoscanSourceResponse{
+		ID:                  s.ID,
+		InstallationID:      s.InstallationID,
+		CapabilityID:        s.CapabilityID,
+		ConnectionID:        s.ConnectionID,
+		Enabled:             s.Enabled,
+		PollIntervalSeconds: s.PollIntervalSeconds,
+		LastRunAt:           s.LastRunAt,
+		LastError:           s.LastError,
+	}
+}
+
+func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
+	sources, err := h.repo.ListSources(r.Context())
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	out := make([]autoscanSourceResponse, 0, len(sources))
+	for _, s := range sources {
+		out = append(out, sourceResponse(s))
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Sources []autoscanSourceResponse `json:"sources"`
+	}{Sources: out})
+}
+
+// autoscanSourceInput is the source write payload. The (installation_id,
+// capability_id) identity is read from the existing source row, so only the
+// schedulable/binding fields are accepted.
+type autoscanSourceInput struct {
+	ConnectionID        string `json:"connection_id"`
+	Enabled             bool   `json:"enabled"`
+	PollIntervalSeconds *int   `json:"poll_interval_seconds"`
+}
+
+func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	var in autoscanSourceInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if in.PollIntervalSeconds != nil && *in.PollIntervalSeconds <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "poll_interval_seconds must be greater than 0 when set")
+		return
+	}
+	// Look up the existing source so the (installation_id, capability_id)
+	// identity is preserved on upsert; a missing source maps to 404.
+	existing, err := h.repo.GetSource(r.Context(), id)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	connectionID := strings.TrimSpace(in.ConnectionID)
+	if connectionID == "" {
+		connectionID = existing.ConnectionID
+	}
+	updated, err := h.repo.UpsertSource(r.Context(), autoscan.Source{
+		InstallationID:      existing.InstallationID,
+		CapabilityID:        existing.CapabilityID,
+		ConnectionID:        connectionID,
+		Enabled:             in.Enabled,
+		PollIntervalSeconds: in.PollIntervalSeconds,
+	})
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sourceResponse(updated))
+}
+
+// --- Trigger ---
 
 func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
 	// Run the poll detached: don't block the request on a full cycle, and don't
@@ -128,24 +314,16 @@ func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) 
 	}{Status: "ok"})
 }
 
-func (h *AutoscanHandler) HandleRewriteSuggestions(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSpace(chi.URLParam(r, "id"))
-	suggestions, err := h.svc.SuggestRewrites(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, autoscan.ErrIntegrationNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Autoscan source not found")
-			return
-		}
-		writeError(w, http.StatusBadGateway, "arr_unreachable", "Could not load root folders from the arr instance")
-		return
-	}
-	writeJSON(w, http.StatusOK, suggestions)
-}
+// --- Status ---
 
 type autoscanStatusSource struct {
-	IntegrationID string     `json:"integration_id"`
-	Name          string     `json:"name"`
-	LastPollAt    *time.Time `json:"last_poll_at,omitempty"`
+	ID             string     `json:"id"`
+	InstallationID int        `json:"installation_id"`
+	CapabilityID   string     `json:"capability_id"`
+	ConnectionID   string     `json:"connection_id"`
+	Enabled        bool       `json:"enabled"`
+	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
+	LastError      *string    `json:"last_error,omitempty"`
 }
 
 type autoscanStatusResponse struct {
@@ -160,7 +338,7 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		writeAutoscanError(w, err)
 		return
 	}
-	sources, err := h.repo.ListAllSources(ctx)
+	sources, err := h.repo.ListSources(ctx)
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
@@ -168,9 +346,13 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	trimmed := make([]autoscanStatusSource, 0, len(sources))
 	for _, src := range sources {
 		trimmed = append(trimmed, autoscanStatusSource{
-			IntegrationID: src.IntegrationID,
-			Name:          src.Name,
-			LastPollAt:    src.LastPollAt,
+			ID:             src.ID,
+			InstallationID: src.InstallationID,
+			CapabilityID:   src.CapabilityID,
+			ConnectionID:   src.ConnectionID,
+			Enabled:        src.Enabled,
+			LastRunAt:      src.LastRunAt,
+			LastError:      src.LastError,
 		})
 	}
 	writeJSON(w, http.StatusOK, autoscanStatusResponse{
@@ -180,13 +362,13 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeAutoscanError maps autoscan repository/service errors to HTTP status
-// codes: a missing integration on upsert maps to 404, everything else to 500.
+// codes: a missing connection or source maps to 404, everything else to 500.
 func writeAutoscanError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
-	if errors.Is(err, autoscan.ErrIntegrationNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "Autoscan source not found")
+	if errors.Is(err, autoscan.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Autoscan resource not found")
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "internal_error", "Autoscan operation failed")

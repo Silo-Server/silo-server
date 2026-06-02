@@ -15,10 +15,15 @@ import (
 )
 
 type fakeAutoscanStore struct {
-	getSettingsFn    func() (autoscan.Settings, error)
-	updateSettingsFn func(autoscan.Settings) (autoscan.Settings, error)
-	listSourcesFn    func() ([]autoscan.Source, error)
-	upsertSourceFn   func(string, autoscan.SourceUpdate) (*autoscan.Source, error)
+	getSettingsFn      func() (autoscan.Settings, error)
+	updateSettingsFn   func(autoscan.Settings) (autoscan.Settings, error)
+	listConnectionsFn  func() ([]autoscan.Connection, error)
+	createConnectionFn func(autoscan.Connection) (autoscan.Connection, error)
+	updateConnectionFn func(autoscan.Connection) (autoscan.Connection, error)
+	deleteConnectionFn func(string) error
+	listSourcesFn      func() ([]autoscan.Source, error)
+	getSourceFn        func(string) (autoscan.Source, error)
+	upsertSourceFn     func(autoscan.Source) (autoscan.Source, error)
 }
 
 func (f *fakeAutoscanStore) GetSettings(context.Context) (autoscan.Settings, error) {
@@ -35,18 +40,53 @@ func (f *fakeAutoscanStore) UpdateSettings(_ context.Context, s autoscan.Setting
 	return s, nil
 }
 
-func (f *fakeAutoscanStore) ListAllSources(context.Context) ([]autoscan.Source, error) {
+func (f *fakeAutoscanStore) ListConnections(context.Context) ([]autoscan.Connection, error) {
+	if f.listConnectionsFn != nil {
+		return f.listConnectionsFn()
+	}
+	return nil, nil
+}
+
+func (f *fakeAutoscanStore) CreateConnection(_ context.Context, c autoscan.Connection) (autoscan.Connection, error) {
+	if f.createConnectionFn != nil {
+		return f.createConnectionFn(c)
+	}
+	return c, nil
+}
+
+func (f *fakeAutoscanStore) UpdateConnection(_ context.Context, c autoscan.Connection) (autoscan.Connection, error) {
+	if f.updateConnectionFn != nil {
+		return f.updateConnectionFn(c)
+	}
+	return c, nil
+}
+
+func (f *fakeAutoscanStore) DeleteConnection(_ context.Context, id string) error {
+	if f.deleteConnectionFn != nil {
+		return f.deleteConnectionFn(id)
+	}
+	return nil
+}
+
+func (f *fakeAutoscanStore) ListSources(context.Context) ([]autoscan.Source, error) {
 	if f.listSourcesFn != nil {
 		return f.listSourcesFn()
 	}
 	return nil, nil
 }
 
-func (f *fakeAutoscanStore) UpsertSource(_ context.Context, id string, u autoscan.SourceUpdate) (*autoscan.Source, error) {
-	if f.upsertSourceFn != nil {
-		return f.upsertSourceFn(id, u)
+func (f *fakeAutoscanStore) GetSource(_ context.Context, id string) (autoscan.Source, error) {
+	if f.getSourceFn != nil {
+		return f.getSourceFn(id)
 	}
-	return &autoscan.Source{IntegrationID: id, Enabled: u.Enabled, PathRewrites: u.PathRewrites}, nil
+	return autoscan.Source{ID: id}, nil
+}
+
+func (f *fakeAutoscanStore) UpsertSource(_ context.Context, s autoscan.Source) (autoscan.Source, error) {
+	if f.upsertSourceFn != nil {
+		return f.upsertSourceFn(s)
+	}
+	return s, nil
 }
 
 type fakeAutoscanTriggerer struct {
@@ -69,17 +109,28 @@ func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
 	return f.err
 }
 
-func (f *fakeAutoscanTriggerer) SuggestRewrites(context.Context, string) (autoscan.RewriteSuggestions, error) {
-	return autoscan.RewriteSuggestions{}, nil
+func newAutoscanRequest(method, target, body, id string) *http.Request {
+	var r *http.Request
+	if body != "" {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	} else {
+		r = httptest.NewRequest(method, target, nil)
+	}
+	if id != "" {
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", id)
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
+	}
+	return r
 }
 
 func TestAutoscanHandleGetSettingsReturnsJSON(t *testing.T) {
 	store := &fakeAutoscanStore{
 		getSettingsFn: func() (autoscan.Settings, error) {
-			return autoscan.Settings{Enabled: true, PollIntervalMinutes: 5, DebounceSeconds: 30}, nil
+			return autoscan.Settings{Enabled: true, DefaultPollIntervalSeconds: 300, DebounceSeconds: 30}, nil
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
 	rec := httptest.NewRecorder()
 	h.HandleGetSettings(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/settings", nil))
@@ -87,20 +138,20 @@ func TestAutoscanHandleGetSettingsReturnsJSON(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	var body autoscan.Settings
+	var body autoscanSettingsResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !body.Enabled || body.PollIntervalMinutes != 5 {
+	if !body.Enabled || body.DefaultPollIntervalSeconds != 300 {
 		t.Errorf("settings = %+v", body)
 	}
 }
 
 func TestAutoscanHandleUpdateSettingsRejectsZeroInterval(t *testing.T) {
-	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{}, nil)
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{})
 
 	req := httptest.NewRequest("PUT", "/api/v1/admin/autoscan/settings",
-		strings.NewReader(`{"enabled":true,"poll_interval_minutes":0,"debounce_seconds":10}`))
+		strings.NewReader(`{"enabled":true,"default_poll_interval_seconds":0,"debounce_seconds":10}`))
 	rec := httptest.NewRecorder()
 	h.HandleUpdateSettings(rec, req)
 
@@ -109,52 +160,74 @@ func TestAutoscanHandleUpdateSettingsRejectsZeroInterval(t *testing.T) {
 	}
 }
 
-func TestAutoscanHandleListSourcesOmitsSecrets(t *testing.T) {
-	now := time.Now()
+func TestAutoscanHandleListConnectionsOmitsSecrets(t *testing.T) {
 	store := &fakeAutoscanStore{
-		listSourcesFn: func() ([]autoscan.Source, error) {
-			return []autoscan.Source{
+		listConnectionsFn: func() ([]autoscan.Connection, error) {
+			return []autoscan.Connection{
 				{
-					IntegrationID: "radarr-1",
-					Kind:          "radarr",
-					Name:          "Radarr",
-					BaseURL:       "http://radarr.internal:7878",
-					APIKeyRef:     "secret-ref-xyz",
-					Enabled:       true,
-					LastPollAt:    &now,
+					ID:        "conn-1",
+					Name:      "Radarr",
+					Kind:      "radarr",
+					BaseURL:   "http://radarr.internal:7878",
+					APIKeyRef: "secret-ref-xyz",
 				},
 			}, nil
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
 	rec := httptest.NewRecorder()
-	h.HandleListSources(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/sources", nil))
+	h.HandleListConnections(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/connections", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	raw := rec.Body.String()
-	if strings.Contains(raw, "base_url") || strings.Contains(raw, "radarr.internal") {
-		t.Errorf("response leaks base_url: %s", raw)
-	}
 	if strings.Contains(raw, "api_key_ref") || strings.Contains(raw, "secret-ref-xyz") {
-		t.Errorf("response leaks api_key_ref: %s", raw)
+		t.Errorf("connections response leaks api_key_ref: %s", raw)
+	}
+	// has_api_key should be reported true (so operators know a key is set) without
+	// disclosing the ref itself.
+	var body struct {
+		Connections []autoscanConnectionResponse `json:"connections"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Connections) != 1 || !body.Connections[0].HasAPIKey {
+		t.Errorf("connections = %+v", body.Connections)
 	}
 }
 
-func TestAutoscanHandleUpsertSourceNotFoundReturns404(t *testing.T) {
+func TestAutoscanHandleUpdateSourceNotFoundReturns404(t *testing.T) {
 	store := &fakeAutoscanStore{
-		upsertSourceFn: func(string, autoscan.SourceUpdate) (*autoscan.Source, error) {
-			return nil, errIntegrationNotFound
+		getSourceFn: func(string) (autoscan.Source, error) {
+			return autoscan.Source{}, autoscan.ErrNotFound
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
-	req := httptest.NewRequest("PUT", "/api/v1/admin/autoscan/sources/missing",
-		strings.NewReader(`{"enabled":true,"path_rewrites":[]}`))
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/missing",
+		`{"enabled":true,"connection_id":"conn-1"}`, "missing")
 	rec := httptest.NewRecorder()
-	h.HandleUpsertSource(rec, req)
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAutoscanHandleDeleteConnectionNotFoundReturns404(t *testing.T) {
+	store := &fakeAutoscanStore{
+		deleteConnectionFn: func(string) error {
+			return autoscan.ErrNotFound
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("DELETE", "/api/v1/admin/autoscan/connections/missing", "", "missing")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteConnection(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
@@ -163,7 +236,7 @@ func TestAutoscanHandleUpsertSourceNotFoundReturns404(t *testing.T) {
 
 func TestAutoscanHandleTriggerInvokesPollOnce(t *testing.T) {
 	trig := &fakeAutoscanTriggerer{done: make(chan struct{}, 1)}
-	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig, nil)
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
 
 	rec := httptest.NewRecorder()
 	h.HandleTrigger(rec, httptest.NewRequest("POST", "/api/v1/admin/autoscan/trigger", nil))
@@ -190,11 +263,11 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 		},
 		listSourcesFn: func() ([]autoscan.Source, error) {
 			return []autoscan.Source{
-				{IntegrationID: "radarr-1", Name: "Radarr", BaseURL: "http://x:7878", APIKeyRef: "k"},
+				{ID: "src-1", InstallationID: 7, CapabilityID: "scan_source", ConnectionID: "conn-1", Enabled: true},
 			}, nil
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
 	rec := httptest.NewRecorder()
 	h.HandleStatus(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/status", nil))
@@ -210,31 +283,7 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !body.Enabled || len(body.Sources) != 1 || body.Sources[0].IntegrationID != "radarr-1" {
+	if !body.Enabled || len(body.Sources) != 1 || body.Sources[0].ID != "src-1" {
 		t.Errorf("status = %+v", body)
 	}
 }
-
-func TestAutoscanHandleRewriteSuggestions(t *testing.T) {
-	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{}, nil)
-
-	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/sources/radarr-1/rewrite-suggestions", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", "radarr-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rec := httptest.NewRecorder()
-
-	h.HandleRewriteSuggestions(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var body autoscan.RewriteSuggestions
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-}
-
-// errIntegrationNotFound is the repository's sentinel, so the handler's
-// errors.Is-based 404 mapping is exercised.
-var errIntegrationNotFound = autoscan.ErrIntegrationNotFound
