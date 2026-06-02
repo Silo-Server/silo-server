@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -135,15 +136,12 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeAutoscanError maps autoscan repository/service errors to HTTP status
-// codes. The repository has no exported sentinel errors; the only domain error
-// it surfaces is a missing integration on upsert, reported as "integration not
-// found: <id>", so we detect that by message and map it to 404. Everything else
-// is an internal failure.
+// codes: a missing integration on upsert maps to 404, everything else to 500.
 func writeAutoscanError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
-	if strings.Contains(err.Error(), "not found") {
+	if errors.Is(err, autoscan.ErrIntegrationNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "Autoscan source not found")
 		return
 	}

@@ -3,6 +3,7 @@ package autoscan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -125,8 +126,8 @@ func (r *Repository) UpsertSource(ctx context.Context, integrationID string, u S
 	row := r.pool.QueryRow(ctx, sourceSelect+` WHERE ri.id = $1`, integrationID)
 	src, err := scanSource(row)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("integration not found: %s", integrationID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %s", ErrIntegrationNotFound, integrationID)
 		}
 		return nil, err
 	}
