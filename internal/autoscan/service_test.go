@@ -58,6 +58,27 @@ type allowSuppressor struct{}
 func (allowSuppressor) ShouldScan(context.Context, int, time.Duration) (bool, error) {
 	return true, nil
 }
+func (allowSuppressor) Release(context.Context, int) error { return nil }
+
+type recordingSuppressor struct {
+	claimed  []int
+	released []int
+}
+
+func (s *recordingSuppressor) ShouldScan(_ context.Context, folderID int, _ time.Duration) (bool, error) {
+	s.claimed = append(s.claimed, folderID)
+	return true, nil
+}
+func (s *recordingSuppressor) Release(_ context.Context, folderID int) error {
+	s.released = append(s.released, folderID)
+	return nil
+}
+
+type failingQueuer struct{}
+
+func (failingQueuer) EnqueueScans(context.Context, []scantrigger.Target) error {
+	return context.DeadlineExceeded
+}
 
 func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	store := &fakeStore{
@@ -114,5 +135,24 @@ func TestPollOnceSourceFailureDoesNotAdvance(t *testing.T) {
 	}
 	if _, ok := store.advanced["i1"]; ok {
 		t.Fatalf("last_poll must NOT advance on source failure")
+	}
+}
+
+func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, PollIntervalMinutes: 10, DebounceSeconds: 60},
+		sources:  []Source{{IntegrationID: "i1", BaseURL: "http://x", APIKeyRef: "k", Enabled: true}},
+	}
+	hist := &fakeHistory{paths: map[string][]string{"http://x": {"/mnt/media/Show/S01/E01.mkv"}}}
+	sup := &recordingSuppressor{}
+	svc := NewService(store, hist, fakeResolver{}, failingQueuer{}, sup, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(sup.claimed) != 1 || len(sup.released) != 1 || sup.released[0] != sup.claimed[0] {
+		t.Fatalf("expected claimed folder to be released, claimed=%v released=%v", sup.claimed, sup.released)
+	}
+	if _, ok := store.advanced["i1"]; ok {
+		t.Fatalf("last_poll must NOT advance when enqueue fails")
 	}
 }
