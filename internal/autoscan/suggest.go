@@ -90,7 +90,14 @@ func suggestRewrites(arrRoots, siloFolderPaths []string, existing []PathRewrite)
 		siloSegs = append(siloSegs, segments(n))
 	}
 
-	var out RewriteSuggestions
+	// Initialize to non-nil so the JSON response always has arrays ([]) rather
+	// than null — the frontend maps over these directly.
+	out := RewriteSuggestions{
+		Proposed:  []ProposedRewrite{},
+		Unmatched: []string{},
+		Ambiguous: []AmbiguousRoot{},
+		Covered:   []string{},
+	}
 	rootSeen := make(map[string]struct{})
 	for _, raw := range arrRoots {
 		root := normalizePath(raw)

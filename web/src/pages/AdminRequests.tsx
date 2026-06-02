@@ -1569,10 +1569,26 @@ function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
                 </div>
               ))
             )}
-            <Button type="button" variant="outline" size="sm" onClick={addRewrite}>
-              <Plus className="h-4 w-4" />
-              Add rewrite
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={addRewrite}>
+                <Plus className="h-4 w-4" />
+                Add rewrite
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={suggest.isPending}
+                onClick={async () => {
+                  const s = await suggest.mutateAsync(source.integration_id);
+                  setPreview(s);
+                  setSelected(new Set((s.proposed ?? []).map((p) => p.from)));
+                }}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Sync rewrites
+              </Button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -1649,19 +1665,6 @@ function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
         <Button type="button" onClick={handleSave} disabled={updateSource.isPending}>
           <Save className="h-4 w-4" />
           Save
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={suggest.isPending}
-          onClick={async () => {
-            const s = await suggest.mutateAsync(source.integration_id);
-            setPreview(s);
-            setSelected(new Set(s.proposed.map((p) => p.from)));
-          }}
-        >
-          <RefreshCw className="h-4 w-4" />
-          Sync from arr
         </Button>
       </div>
     </div>
