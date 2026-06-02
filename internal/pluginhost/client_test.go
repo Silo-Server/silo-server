@@ -52,6 +52,19 @@ func TestClient_ScheduledTask_CapabilityGate(t *testing.T) {
 			t.Fatal("expected non-nil ScheduledTaskClient")
 		}
 	})
+
+	t.Run("wrong id returns error", func(t *testing.T) {
+		c := makeTestClient(t, []*pluginv1.CapabilityDescriptor{
+			{Type: "scheduled_task.v1", Id: "nightly"},
+		})
+		_, err := c.ScheduledTask("weekly")
+		if err == nil {
+			t.Fatal("expected error for mismatched scheduled_task.v1 capability id, got nil")
+		}
+		if !errors.Is(err, ErrCapabilityNotFound) {
+			t.Errorf("expected ErrCapabilityNotFound, got %v", err)
+		}
+	})
 }
 
 func TestClient_ScanSource_CapabilityGate(t *testing.T) {
@@ -76,6 +89,19 @@ func TestClient_ScanSource_CapabilityGate(t *testing.T) {
 		}
 		if got == nil {
 			t.Fatal("expected non-nil ScanSourceClient")
+		}
+	})
+
+	t.Run("wrong id returns error", func(t *testing.T) {
+		c := makeTestClient(t, []*pluginv1.CapabilityDescriptor{
+			{Type: "scan_source.v1", Id: "arr"},
+		})
+		_, err := c.ScanSource("inotify")
+		if err == nil {
+			t.Fatal("expected error for mismatched scan_source.v1 capability id, got nil")
+		}
+		if !errors.Is(err, ErrCapabilityNotFound) {
+			t.Errorf("expected ErrCapabilityNotFound, got %v", err)
 		}
 	})
 }

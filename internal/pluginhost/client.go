@@ -129,7 +129,7 @@ func (c *Client) ScanSource(capabilityID string) (*ScanSourceClient, error) {
 	}
 	return &ScanSourceClient{
 		client:  c.rpc.ScanSource(),
-		timeout: DefaultControlTimeout,
+		timeout: DefaultScanSourceTimeout,
 	}, nil
 }
 
