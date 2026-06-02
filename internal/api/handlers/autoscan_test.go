@@ -63,7 +63,7 @@ func TestAutoscanHandleGetSettingsReturnsJSON(t *testing.T) {
 			return autoscan.Settings{Enabled: true, PollIntervalMinutes: 5, DebounceSeconds: 30}, nil
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
 
 	rec := httptest.NewRecorder()
 	h.HandleGetSettings(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/settings", nil))
@@ -81,7 +81,7 @@ func TestAutoscanHandleGetSettingsReturnsJSON(t *testing.T) {
 }
 
 func TestAutoscanHandleUpdateSettingsRejectsZeroInterval(t *testing.T) {
-	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{})
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{}, nil)
 
 	req := httptest.NewRequest("PUT", "/api/v1/admin/autoscan/settings",
 		strings.NewReader(`{"enabled":true,"poll_interval_minutes":0,"debounce_seconds":10}`))
@@ -110,7 +110,7 @@ func TestAutoscanHandleListSourcesOmitsSecrets(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
 
 	rec := httptest.NewRecorder()
 	h.HandleListSources(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/sources", nil))
@@ -133,7 +133,7 @@ func TestAutoscanHandleUpsertSourceNotFoundReturns404(t *testing.T) {
 			return nil, errIntegrationNotFound
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
 
 	req := httptest.NewRequest("PUT", "/api/v1/admin/autoscan/sources/missing",
 		strings.NewReader(`{"enabled":true,"path_rewrites":[]}`))
@@ -147,7 +147,7 @@ func TestAutoscanHandleUpsertSourceNotFoundReturns404(t *testing.T) {
 
 func TestAutoscanHandleTriggerInvokesPollOnce(t *testing.T) {
 	trig := &fakeAutoscanTriggerer{}
-	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig, nil)
 
 	rec := httptest.NewRecorder()
 	h.HandleTrigger(rec, httptest.NewRequest("POST", "/api/v1/admin/autoscan/trigger", nil))
@@ -171,7 +171,7 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{}, nil)
 
 	rec := httptest.NewRecorder()
 	h.HandleStatus(rec, httptest.NewRequest("GET", "/api/v1/admin/autoscan/status", nil))
