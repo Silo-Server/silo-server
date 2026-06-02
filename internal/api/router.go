@@ -428,7 +428,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				autoscan.NewRedisSuppressor(deps.RedisClient),
 				settingsRepo,
 			)
-			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc)
+			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc, deps.TaskManager)
 		}
 
 		if deps.PersonRepo != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
 // autoscanStore is the subset of *autoscan.Repository the handler needs.
@@ -26,14 +28,20 @@ type autoscanTriggerer interface {
 	PollOnce(ctx context.Context) error
 }
 
-// AutoscanHandler serves the admin-only autoscan settings/sources/trigger API.
-type AutoscanHandler struct {
-	repo autoscanStore
-	svc  autoscanTriggerer
+// triggerUpdater reconfigures a task's schedule (satisfied by *taskmanager.TaskManager).
+type triggerUpdater interface {
+	UpdateTriggers(key string, triggerConfigs []taskmanager.TriggerConfig) error
 }
 
-func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer) *AutoscanHandler {
-	return &AutoscanHandler{repo: repo, svc: svc}
+// AutoscanHandler serves the admin-only autoscan settings/sources/trigger API.
+type AutoscanHandler struct {
+	repo     autoscanStore
+	svc      autoscanTriggerer
+	triggers triggerUpdater
+}
+
+func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer, triggers triggerUpdater) *AutoscanHandler {
+	return &AutoscanHandler{repo: repo, svc: svc, triggers: triggers}
 }
 
 func (h *AutoscanHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +71,14 @@ func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
+	}
+	if h.triggers != nil {
+		intervalMs := int64(updated.PollIntervalMinutes) * 60 * 1000
+		if terr := h.triggers.UpdateTriggers("autoscan_poll", []taskmanager.TriggerConfig{
+			{Type: taskmanager.TriggerTypeInterval, IntervalMs: intervalMs},
+		}); terr != nil {
+			slog.WarnContext(r.Context(), "autoscan: update trigger failed", "err", terr)
+		}
 	}
 	writeJSON(w, http.StatusOK, updated)
 }

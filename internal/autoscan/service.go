@@ -72,7 +72,12 @@ func (s *Service) PollOnce(ctx context.Context) error {
 
 		apiKey := src.APIKeyRef
 		if s.secrets != nil && apiKey != "" {
-			if resolved, rerr := s.secrets.Get(ctx, apiKey); rerr == nil && resolved != "" {
+			resolved, rerr := s.secrets.Get(ctx, apiKey)
+			if rerr != nil {
+				slog.WarnContext(ctx, "autoscan: resolve api key failed", "integration_id", src.IntegrationID, "err", rerr)
+				continue
+			}
+			if resolved != "" {
 				apiKey = resolved
 			}
 		}
@@ -88,6 +93,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			rewritten = append(rewritten, applyRewrites(p, src.PathRewrites))
 		}
 		var targets []scantrigger.Target
+		var claimed []int
 		for _, dir := range uniqueParentDirs(rewritten) {
 			target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
 			if rerr != nil {
@@ -103,10 +109,16 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			}
 			target.Trigger = scanTrigger
 			targets = append(targets, *target)
+			claimed = append(claimed, target.Folder.ID)
 		}
 		if len(targets) > 0 {
 			if eerr := s.queue.EnqueueScans(ctx, targets); eerr != nil {
 				slog.WarnContext(ctx, "autoscan: enqueue failed", "integration_id", src.IntegrationID, "err", eerr)
+				for _, folderID := range claimed {
+					if rerr := s.suppress.Release(ctx, folderID); rerr != nil {
+						slog.WarnContext(ctx, "autoscan: release claim failed", "folder_id", folderID, "err", rerr)
+					}
+				}
 				continue
 			}
 		}
