@@ -104,7 +104,10 @@ func (s *Service) PollOnce(ctx context.Context) error {
 
 		rewritten := make([]string, 0, len(paths))
 		for _, p := range paths {
-			rewritten = append(rewritten, applyRewrites(p, src.PathRewrites))
+			// Normalize Windows separators so an arr running on Windows (reporting
+			// C:\Media\... paths) still rewrites/resolves on the Linux host. Path
+			// rewrites and Silo media folders are expected to use forward slashes.
+			rewritten = append(rewritten, applyRewrites(normalizeSeparators(p), src.PathRewrites))
 		}
 		var targets []scantrigger.Target
 		var claimed []string

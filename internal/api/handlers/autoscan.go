@@ -140,8 +140,16 @@ type autoscanStatusResponse struct {
 
 func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	s, _ := h.repo.GetSettings(ctx)
-	sources, _ := h.repo.ListAllSources(ctx)
+	s, err := h.repo.GetSettings(ctx)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	sources, err := h.repo.ListAllSources(ctx)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
 	trimmed := make([]autoscanStatusSource, 0, len(sources))
 	for _, src := range sources {
 		trimmed = append(trimmed, autoscanStatusSource{
