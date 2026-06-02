@@ -135,6 +135,22 @@ type autoscanConnectionInput struct {
 	RequestIntegrationID *string `json:"request_integration_id"`
 }
 
+// validateConnectionInput enforces the invariant that migration 172 dropped from
+// the DB CHECK and delegated to the application layer: a connection must carry
+// either its own base_url or a live link to a Requests integration. A connection
+// with neither is a both-NULL orphan that ConnectionResolver.Resolve would hand
+// a plugin as an empty base URL. A whitespace-only request_integration_id counts
+// as absent. Enforced on both create and update (an update can strip a
+// connection to both-empty).
+func validateConnectionInput(in autoscanConnectionInput) error {
+	hasOwn := strings.TrimSpace(in.BaseURL) != ""
+	hasLink := in.RequestIntegrationID != nil && strings.TrimSpace(*in.RequestIntegrationID) != ""
+	if !hasOwn && !hasLink {
+		return errors.New("connection requires base_url or request_integration_id")
+	}
+	return nil
+}
+
 func (h *AutoscanHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
 	conns, err := h.repo.ListConnections(r.Context())
 	if err != nil {
@@ -160,6 +176,10 @@ func (h *AutoscanHandler) HandleCreateConnection(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
 		return
 	}
+	if err := validateConnectionInput(in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	created, err := h.repo.CreateConnection(r.Context(), autoscan.Connection{
 		Name:                 strings.TrimSpace(in.Name),
 		Kind:                 strings.TrimSpace(in.Kind),
@@ -183,6 +203,10 @@ func (h *AutoscanHandler) HandleUpdateConnection(w http.ResponseWriter, r *http.
 	}
 	if strings.TrimSpace(in.Name) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "name is required")
+		return
+	}
+	if err := validateConnectionInput(in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	updated, err := h.repo.UpdateConnection(r.Context(), autoscan.Connection{

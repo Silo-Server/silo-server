@@ -199,6 +199,53 @@ func TestAutoscanHandleListConnectionsOmitsSecrets(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleCreateConnectionRejectsBothEmpty(t *testing.T) {
+	created := false
+	store := &fakeAutoscanStore{
+		createConnectionFn: func(c autoscan.Connection) (autoscan.Connection, error) {
+			created = true
+			return c, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := httptest.NewRequest("POST", "/api/v1/admin/autoscan/connections",
+		strings.NewReader(`{"name":"x"}`))
+	rec := httptest.NewRecorder()
+	h.HandleCreateConnection(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if created {
+		t.Fatal("CreateConnection was called for a both-empty connection")
+	}
+}
+
+func TestAutoscanHandleUpdateConnectionRejectsBothEmpty(t *testing.T) {
+	updated := false
+	store := &fakeAutoscanStore{
+		updateConnectionFn: func(c autoscan.Connection) (autoscan.Connection, error) {
+			updated = true
+			return c, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// Whitespace-only request_integration_id must count as absent.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/connections/conn-1",
+		`{"name":"x","base_url":"","request_integration_id":"  "}`, "conn-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConnection(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if updated {
+		t.Fatal("UpdateConnection was called for a both-empty connection")
+	}
+}
+
 func TestAutoscanHandleUpdateSourceNotFoundReturns404(t *testing.T) {
 	store := &fakeAutoscanStore{
 		getSourceFn: func(string) (autoscan.Source, error) {
