@@ -1685,6 +1685,24 @@ export interface AutoscanSourcesResponse {
   sources: AutoscanSource[];
 }
 
+export interface AutoscanProposedRewrite {
+  from: string;
+  to: string;
+  match_depth: number;
+}
+
+export interface AutoscanAmbiguousRoot {
+  root: string;
+  candidates: string[];
+}
+
+export interface AutoscanRewriteSuggestions {
+  proposed: AutoscanProposedRewrite[];
+  unmatched: string[];
+  ambiguous: AutoscanAmbiguousRoot[];
+  covered: string[];
+}
+
 export interface RequestListParams {
   status?: MediaRequestStatus | "all";
   outcome?: MediaRequestOutcome | "all";

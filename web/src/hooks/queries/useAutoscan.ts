@@ -6,6 +6,7 @@ import type {
   AutoscanSource,
   AutoscanSourcesResponse,
   AutoscanPathRewrite,
+  AutoscanRewriteSuggestions,
 } from "@/api/types";
 import { adminKeys } from "./keys";
 
@@ -67,6 +68,19 @@ export function useUpdateAutoscanSource() {
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save autoscan source");
     },
+  });
+}
+
+export function useAutoscanRewriteSuggestions() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<AutoscanRewriteSuggestions>(
+        `/admin/autoscan/sources/${encodeURIComponent(id)}/rewrite-suggestions`,
+      ),
+    onError: (err) =>
+      toast.error(
+        err instanceof Error ? err.message : "Could not sync rewrites from the arr instance",
+      ),
   });
 }
 
