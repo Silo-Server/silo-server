@@ -35,6 +35,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -73,6 +74,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -1330,6 +1332,17 @@ func main() {
 			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
+			autoscanSvc := autoscan.NewService(
+				autoscan.NewRepository(deps.DB),
+				autoscan.NewArrHistoryClient(nil),
+				scantrigger.NewResolver(deps.FolderRepo),
+				deps.LibraryScanQueue,
+				autoscan.NewRedisSuppressor(deps.RedisClient),
+				settingsRepo,
+			)
+			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, autoscanSvc.PollIntervalMinutes(appCtx)))
+		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)

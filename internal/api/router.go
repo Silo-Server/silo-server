@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -52,6 +53,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -340,6 +342,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var calendarRepo *catalog.CalendarRepository
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	var autoscanHandler *handlers.AutoscanHandler
 	if deps.DB != nil {
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -414,6 +417,23 @@ func NewRouter(deps Dependencies) chi.Router {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
+
+		autoscanRepo := autoscan.NewRepository(deps.DB)
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
+			autoscanSvc := autoscan.NewService(
+				autoscanRepo,
+				autoscan.NewArrHistoryClient(nil),
+				scantrigger.NewResolver(deps.FolderRepo),
+				deps.LibraryScanQueue,
+				autoscan.NewRedisSuppressor(deps.RedisClient),
+				settingsRepo,
+			)
+			autoscanSvc.SetRewriteResolvers(
+				autoscan.NewArrRootFolderClient(nil),
+				autoscan.NewCatalogFolderLister(deps.FolderRepo),
+			)
+			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc, deps.TaskManager)
+		}
 
 		if deps.PersonRepo != nil {
 			peopleHandler = handlers.NewPeopleHandler(deps.PersonRepo, browseRepo, itemRepo, detailSvc)
@@ -2047,6 +2067,16 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
 								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
 								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
+							}
+
+							if autoscanHandler != nil {
+								r.Get("/autoscan/settings", autoscanHandler.HandleGetSettings)
+								r.Put("/autoscan/settings", autoscanHandler.HandleUpdateSettings)
+								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
+								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpsertSource)
+								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
+								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
+								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
 							}
 
 							if deps.ActivityLogRepo != nil {

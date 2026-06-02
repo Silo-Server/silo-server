@@ -393,4 +393,6 @@ export const adminKeys = {
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,
+  autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
+  autoscanSources: () => ["admin", "autoscan", "sources"] as const,
 };
