@@ -1531,6 +1531,22 @@ export interface CreateMediaRequestInput {
   backdrop_path?: string;
 }
 
+export interface RequestTarget {
+  id: number;
+  request_id: string;
+  integration_id?: string;
+  integration_kind?: string;
+  instance_name?: string;
+  quality: "1080p" | "2160p";
+  is_anime: boolean;
+  external_id?: string;
+  external_status?: string;
+  status: MediaRequestStatus | "failed";
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MediaRequest {
   id: string;
   provider: string;
@@ -1547,6 +1563,8 @@ export interface MediaRequest {
   outcome: MediaRequestOutcome;
   requested_by_user_id?: number;
   requested_by_profile_id?: string;
+  is_anime?: boolean;
+  targets?: RequestTarget[];
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
@@ -1570,6 +1588,7 @@ export interface RequestSettings {
   global_max_requests: number;
   global_window_days: number;
   global_auto_approval_enabled: boolean;
+  force_dual_quality: boolean;
   updated_at: string;
 }
 
@@ -1583,14 +1602,23 @@ export interface RequestUserLimit {
 }
 
 export interface RequestIntegration {
+  id: string;
+  name: string;
   kind: string;
   enabled: boolean;
+  is_4k: boolean;
+  is_default: boolean;
+  is_default_4k: boolean;
   base_url: string;
   api_key_ref?: string;
   has_api_key?: boolean;
   root_folder: string;
   quality_profile_id?: number | null;
   tags: number[];
+  anime_enabled: boolean;
+  anime_quality_profile_id?: number | null;
+  anime_root_folder?: string;
+  anime_tags: number[];
   options: Record<string, unknown>;
   last_check_at?: string | null;
   last_check_status?: string;
@@ -1623,6 +1651,7 @@ export interface RequestIntegrationOptions {
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
+  kind: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
 }
