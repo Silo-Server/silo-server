@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type {
   AutoscanPathRewrite,
+  AutoscanRewriteSuggestions,
   AutoscanSettings,
   AutoscanSource,
   MediaRequest,
@@ -62,6 +63,7 @@ import {
 } from "@/components/ui/table";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
+  useAutoscanRewriteSuggestions,
   useAutoscanSettings,
   useAutoscanSources,
   useTriggerAutoscan,
@@ -1442,11 +1444,14 @@ function AutoscanSourcesSection() {
 
 function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
   const updateSource = useUpdateAutoscanSource();
+  const suggest = useAutoscanRewriteSuggestions();
   const [enabled, setEnabled] = useState(source.enabled);
   const [rewrites, setRewrites] = useState<AutoscanPathRewrite[]>(() =>
     source.path_rewrites.map((rewrite) => ({ ...rewrite })),
   );
   const [rewritesOpen, setRewritesOpen] = useState(source.path_rewrites.length > 0);
+  const [preview, setPreview] = useState<AutoscanRewriteSuggestions | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const rewritesPanelID = useId();
 
   function updateRewrite(index: number, patch: Partial<AutoscanPathRewrite>) {
@@ -1468,6 +1473,29 @@ function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
       .map((rewrite) => ({ from: rewrite.from.trim(), to: rewrite.to.trim() }))
       .filter((rewrite) => rewrite.from.length > 0 || rewrite.to.length > 0);
     updateSource.mutate({ id: source.integration_id, body: { enabled, path_rewrites } });
+  }
+
+  function toggleSelected(from: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(from)) {
+        next.delete(from);
+      } else {
+        next.add(from);
+      }
+      return next;
+    });
+  }
+
+  function addSelectedToRewrites() {
+    if (!preview) return;
+    const existingFroms = new Set(rewrites.map((rewrite) => rewrite.from));
+    const additions = preview.proposed
+      .filter((proposal) => selected.has(proposal.from) && !existingFroms.has(proposal.from))
+      .map((proposal) => ({ from: proposal.from, to: proposal.to }));
+    setRewrites([...rewrites, ...additions]);
+    setRewritesOpen(true);
+    setPreview(null);
   }
 
   return (
@@ -1549,10 +1577,93 @@ function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
         ) : null}
       </div>
 
-      <Button type="button" onClick={handleSave} disabled={updateSource.isPending}>
-        <Save className="h-4 w-4" />
-        Save
-      </Button>
+      {preview ? (
+        <div
+          className="border-border space-y-4 rounded-lg border p-3"
+          role="region"
+          aria-label="Rewrite suggestions"
+        >
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Proposed</p>
+            {preview.proposed.length === 0 ? (
+              <p className="text-muted-foreground text-xs">No proposed rewrites.</p>
+            ) : (
+              preview.proposed.map((proposal) => (
+                <label key={proposal.from} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(proposal.from)}
+                    onChange={() => toggleSelected(proposal.from)}
+                  />
+                  <span className="font-mono text-xs">
+                    {proposal.from} → {proposal.to}
+                  </span>
+                  {proposal.match_depth >= 2 ? (
+                    <Badge variant="secondary">{`${proposal.match_depth} segments`}</Badge>
+                  ) : (
+                    <Badge variant="destructive">1 segment — weak</Badge>
+                  )}
+                </label>
+              ))
+            )}
+          </div>
+
+          {preview.unmatched.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-sm font-medium">No Silo match (add manually if needed)</p>
+              <ul className="text-muted-foreground space-y-0.5 text-xs">
+                {preview.unmatched.map((path) => (
+                  <li key={path} className="font-mono">
+                    {path}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {preview.ambiguous.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Ambiguous (pick one manually)</p>
+              <ul className="text-muted-foreground space-y-0.5 text-xs">
+                {preview.ambiguous.map((entry) => (
+                  <li key={entry.root} className="font-mono">
+                    {`${entry.root} → ${entry.candidates.join(", ")}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={addSelectedToRewrites}>
+              Add selected to rewrites
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPreview(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" onClick={handleSave} disabled={updateSource.isPending}>
+          <Save className="h-4 w-4" />
+          Save
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={suggest.isPending}
+          onClick={async () => {
+            const s = await suggest.mutateAsync(source.integration_id);
+            setPreview(s);
+            setSelected(new Set(s.proposed.map((p) => p.from)));
+          }}
+        >
+          <RefreshCw className="h-4 w-4" />
+          Sync from arr
+        </Button>
+      </div>
     </div>
   );
 }
