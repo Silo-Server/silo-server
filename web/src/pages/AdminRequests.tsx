@@ -1449,7 +1449,7 @@ function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
   const [rewrites, setRewrites] = useState<AutoscanPathRewrite[]>(() =>
     source.path_rewrites.map((rewrite) => ({ ...rewrite })),
   );
-  const [rewritesOpen, setRewritesOpen] = useState(source.path_rewrites.length > 0);
+  const [rewritesOpen, setRewritesOpen] = useState(false);
   const [preview, setPreview] = useState<AutoscanRewriteSuggestions | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const rewritesPanelID = useId();
@@ -1585,8 +1585,8 @@ function AutoscanSourceEditor({ source }: { source: AutoscanSource }) {
                   setSelected(new Set((s.proposed ?? []).map((p) => p.from)));
                 }}
               >
-                <RefreshCw className="h-4 w-4" />
-                Sync rewrites
+                <RefreshCw className={`h-4 w-4 ${suggest.isPending ? "animate-spin" : ""}`} />
+                {suggest.isPending ? "Syncing…" : "Sync rewrites"}
               </Button>
             </div>
           </div>
