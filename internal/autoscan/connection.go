@@ -3,6 +3,7 @@ package autoscan
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // ResolvedConnection is concrete credentials handed to the plugin.
@@ -47,13 +48,13 @@ func (cr *ConnectionResolver) Resolve(ctx context.Context, c Connection) (Resolv
 		}
 		baseURL, apiKeyRef = u, ref
 	}
-	apiKey := apiKeyRef
-	if cr.secrets != nil && apiKeyRef != "" {
-		resolved, err := cr.secrets.Get(ctx, apiKeyRef)
+	apiKey := strings.TrimSpace(apiKeyRef)
+	if cr.secrets != nil && apiKey != "" {
+		resolved, err := cr.secrets.Get(ctx, apiKey)
 		if err != nil {
 			return ResolvedConnection{}, fmt.Errorf("autoscan: resolve api key: %w", err)
 		}
-		if resolved != "" {
+		if resolved = strings.TrimSpace(resolved); resolved != "" {
 			apiKey = resolved
 		}
 	}

@@ -22,9 +22,8 @@ CREATE TABLE public.autoscan_connections (
     api_key_ref text,
     request_integration_id text REFERENCES public.request_integrations(id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT autoscan_connections_source_present
-        CHECK (request_integration_id IS NOT NULL OR base_url IS NOT NULL)
+    updated_at timestamptz NOT NULL DEFAULT now()
+    -- creation-time validity (own creds OR a link) is enforced at the application layer; a linked connection may become orphaned (both null) when its Requests integration is deleted (ON DELETE SET NULL), surfacing as "needs attention".
 );
 
 CREATE TABLE public.autoscan_sources (
