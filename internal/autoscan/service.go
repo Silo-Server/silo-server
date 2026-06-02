@@ -99,7 +99,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			}
 		}
 
-		paths, perr := s.history.ImportedPaths(ctx, src.BaseURL, apiKey, since)
+		paths, perr := s.history.ChangedPaths(ctx, src.BaseURL, apiKey, since)
 		if perr != nil {
 			slog.WarnContext(ctx, "autoscan: source poll failed", "integration_id", src.IntegrationID, "err", perr)
 			continue
