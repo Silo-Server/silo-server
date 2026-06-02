@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -121,6 +122,12 @@ func (r *Repository) UpsertSource(ctx context.Context, integrationID string, u S
 			path_rewrites = EXCLUDED.path_rewrites,
 			updated_at = now()`,
 		integrationID, u.Enabled, rewrites); err != nil {
+		// A non-existent integration trips the FK constraint (SQLSTATE 23503);
+		// surface it as a 404 rather than a 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return nil, fmt.Errorf("%w: %s", ErrIntegrationNotFound, integrationID)
+		}
 		return nil, fmt.Errorf("upsert autoscan source: %w", err)
 	}
 	row := r.pool.QueryRow(ctx, sourceSelect+` WHERE ri.id = $1`, integrationID)
@@ -139,7 +146,9 @@ func (r *Repository) AdvanceLastPoll(ctx context.Context, integrationID string, 
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO autoscan_sources (integration_id, last_poll_at, updated_at)
 		VALUES ($1, $2, now())
-		ON CONFLICT (integration_id) DO UPDATE SET last_poll_at = $2, updated_at = now()`,
+		ON CONFLICT (integration_id) DO UPDATE SET
+			last_poll_at = GREATEST(autoscan_sources.last_poll_at, $2),
+			updated_at = now()`,
 		integrationID, at)
 	if err != nil {
 		return fmt.Errorf("advance autoscan last_poll: %w", err)
