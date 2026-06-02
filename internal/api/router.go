@@ -53,7 +53,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
-	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -406,8 +405,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
+		requestsRepo := mediarequests.NewRepository(deps.DB)
 		requestSvc := mediarequests.NewService(
-			mediarequests.NewRepository(deps.DB),
+			requestsRepo,
 			tmdb.NewClient(tmdbAPIKey, 40),
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
@@ -419,20 +419,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
 		autoscanRepo := autoscan.NewRepository(deps.DB)
-		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
-			autoscanSvc := autoscan.NewService(
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
+			autoscanSvc := BuildAutoscanService(
 				autoscanRepo,
-				autoscan.NewArrHistoryClient(nil),
-				scantrigger.NewResolver(deps.FolderRepo),
-				deps.LibraryScanQueue,
-				autoscan.NewRedisSuppressor(deps.RedisClient),
+				deps.PluginService,
+				requestsRepo,
 				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
 			)
-			autoscanSvc.SetRewriteResolvers(
-				autoscan.NewArrRootFolderClient(nil),
-				autoscan.NewCatalogFolderLister(deps.FolderRepo),
-			)
-			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc, deps.TaskManager)
+			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc)
 		}
 
 		if deps.PersonRepo != nil {
@@ -2072,11 +2069,14 @@ func NewRouter(deps Dependencies) chi.Router {
 							if autoscanHandler != nil {
 								r.Get("/autoscan/settings", autoscanHandler.HandleGetSettings)
 								r.Put("/autoscan/settings", autoscanHandler.HandleUpdateSettings)
+								r.Get("/autoscan/connections", autoscanHandler.HandleListConnections)
+								r.Post("/autoscan/connections", autoscanHandler.HandleCreateConnection)
+								r.Put("/autoscan/connections/{id}", autoscanHandler.HandleUpdateConnection)
+								r.Delete("/autoscan/connections/{id}", autoscanHandler.HandleDeleteConnection)
 								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
-								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpsertSource)
+								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
 								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
 								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
-								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
 							}
 
 							if deps.ActivityLogRepo != nil {

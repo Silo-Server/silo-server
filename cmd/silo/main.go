@@ -74,7 +74,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
-	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -1332,16 +1331,28 @@ func main() {
 			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
-		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
-			autoscanSvc := autoscan.NewService(
-				autoscan.NewRepository(deps.DB),
-				autoscan.NewArrHistoryClient(nil),
-				scantrigger.NewResolver(deps.FolderRepo),
-				deps.LibraryScanQueue,
-				autoscan.NewRedisSuppressor(deps.RedisClient),
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil {
+			autoscanRepo := autoscan.NewRepository(deps.DB)
+			autoscanSvc := api.BuildAutoscanService(
+				autoscanRepo,
+				pluginService,
+				mediarequests.NewRepository(deps.DB),
 				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
 			)
-			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, autoscanSvc.PollIntervalMinutes(appCtx)))
+			// The poll task's default interval seeds the schedule from the stored
+			// settings (DefaultPollIntervalSeconds); per-cycle gating still runs
+			// off the live settings inside PollOnce.
+			intervalMinutes := 10
+			if settings, serr := autoscanRepo.GetSettings(appCtx); serr == nil && settings.DefaultPollIntervalSeconds > 0 {
+				intervalMinutes = settings.DefaultPollIntervalSeconds / 60
+				if intervalMinutes <= 0 {
+					intervalMinutes = 1
+				}
+			}
+			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMinutes))
 		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)

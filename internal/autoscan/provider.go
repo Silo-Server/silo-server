@@ -12,16 +12,21 @@ type ScanSourceProvider interface {
 	PollChanges(ctx context.Context, installationID int, capabilityID, marker string, conn ResolvedConnection) (paths []string, nextMarker string, err error)
 }
 
-// pluginScanSourceClient is the slice of *pluginhost.ScanSourceClient used here.
-type pluginScanSourceClient interface {
+// PollChangesClient is the slice of *pluginhost.ScanSourceClient used here. It
+// is exported so wiring in the api package can declare an adapter whose
+// ScanSourceClient returns it (Go interface method signatures must match
+// exactly across packages, and the unexported form could not be named there).
+type PollChangesClient interface {
 	PollChanges(ctx context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error)
 }
 
-type scanSourceResolver interface {
-	ScanSourceClient(ctx context.Context, installationID int, capabilityID string) (pluginScanSourceClient, error)
+// ScanSourceResolver yields a per-(installation, capability) scan-source client.
+// Exported for the same cross-package adapter reason as PollChangesClient.
+type ScanSourceResolver interface {
+	ScanSourceClient(ctx context.Context, installationID int, capabilityID string) (PollChangesClient, error)
 }
 
-type pluginProvider struct{ resolver scanSourceResolver }
+type pluginProvider struct{ resolver ScanSourceResolver }
 
 // NewPluginProvider builds the production scan-source provider over the plugins
 // resolver.
@@ -31,7 +36,7 @@ type pluginProvider struct{ resolver scanSourceResolver }
 // {base_url, api_key}); it is accepted here so a future provider variant could
 // inject it per call. For v1 the production path configures the plugin instance
 // with the resolved connection at upsert time.
-func NewPluginProvider(resolver scanSourceResolver) ScanSourceProvider {
+func NewPluginProvider(resolver ScanSourceResolver) ScanSourceProvider {
 	return &pluginProvider{resolver: resolver}
 }
 
