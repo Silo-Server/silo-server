@@ -52,10 +52,20 @@ func (f *fakeAutoscanStore) UpsertSource(_ context.Context, id string, u autosca
 type fakeAutoscanTriggerer struct {
 	called bool
 	err    error
+	// done, when non-nil, receives once PollOnce runs. HandleTrigger dispatches
+	// PollOnce on a detached goroutine, so tests synchronize on this instead of
+	// reading `called` straight after the handler returns (which races the
+	// goroutine and is also an unsynchronized read of `called`). The channel
+	// send happens-before the test's receive, so reading `called` afterwards is
+	// race-free.
+	done chan struct{}
 }
 
 func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
 	f.called = true
+	if f.done != nil {
+		f.done <- struct{}{}
+	}
 	return f.err
 }
 
@@ -152,17 +162,24 @@ func TestAutoscanHandleUpsertSourceNotFoundReturns404(t *testing.T) {
 }
 
 func TestAutoscanHandleTriggerInvokesPollOnce(t *testing.T) {
-	trig := &fakeAutoscanTriggerer{}
+	trig := &fakeAutoscanTriggerer{done: make(chan struct{}, 1)}
 	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig, nil)
 
 	rec := httptest.NewRecorder()
 	h.HandleTrigger(rec, httptest.NewRequest("POST", "/api/v1/admin/autoscan/trigger", nil))
 
-	if !trig.called {
-		t.Fatal("PollOnce was not invoked")
-	}
+	// The handler responds immediately and runs PollOnce on a detached
+	// goroutine; wait (bounded) for that goroutine to fire.
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	select {
+	case <-trig.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PollOnce was not invoked within timeout")
+	}
+	if !trig.called {
+		t.Fatal("PollOnce was not invoked")
 	}
 }
 
