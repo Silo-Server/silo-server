@@ -56,10 +56,11 @@ func commonSuffixLen(a, b []string) int {
 }
 
 // coveredBy reports whether an existing rewrite already matches root (same
-// boundary rule as applyRewrites).
+// boundary rule as applyRewrites). The existing From is normalized too, so a
+// stored Windows/dup-slash rewrite still covers a normalized root.
 func coveredBy(root string, existing []PathRewrite) bool {
 	for _, rw := range existing {
-		from := strings.TrimRight(strings.TrimSpace(rw.From), "/")
+		from := normalizePath(rw.From)
 		if from == "" {
 			continue
 		}
@@ -75,21 +76,31 @@ func coveredBy(root string, existing []PathRewrite) bool {
 func suggestRewrites(arrRoots, siloFolderPaths []string, existing []PathRewrite) RewriteSuggestions {
 	siloNorm := make([]string, 0, len(siloFolderPaths))
 	siloSegs := make([][]string, 0, len(siloFolderPaths))
+	siloSeen := make(map[string]struct{})
 	for _, p := range siloFolderPaths {
 		n := normalizePath(p)
 		if n == "" {
 			continue
 		}
+		if _, dup := siloSeen[n]; dup { // dedup Silo paths so candidates are distinct
+			continue
+		}
+		siloSeen[n] = struct{}{}
 		siloNorm = append(siloNorm, n)
 		siloSegs = append(siloSegs, segments(n))
 	}
 
 	var out RewriteSuggestions
+	rootSeen := make(map[string]struct{})
 	for _, raw := range arrRoots {
 		root := normalizePath(raw)
 		if root == "" {
 			continue
 		}
+		if _, dup := rootSeen[root]; dup { // dedup arr roots that normalize alike
+			continue
+		}
+		rootSeen[root] = struct{}{}
 		if coveredBy(root, existing) {
 			out.Covered = append(out.Covered, root)
 			continue
@@ -112,6 +123,9 @@ func suggestRewrites(arrRoots, siloFolderPaths []string, existing []PathRewrite)
 		case best == 0:
 			out.Unmatched = append(out.Unmatched, root)
 		case len(winners) == 1:
+			if winners[0] == root {
+				continue // arr path already equals the Silo path — no rewrite needed
+			}
 			out.Proposed = append(out.Proposed, ProposedRewrite{From: root, To: winners[0], MatchDepth: best})
 		default:
 			out.Ambiguous = append(out.Ambiguous, AmbiguousRoot{Root: root, Candidates: winners})
