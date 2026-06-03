@@ -1660,48 +1660,76 @@ export interface RequestIntegrationsResponse {
   integrations: RequestIntegration[];
 }
 
+// --- Autoscan v2 types (matched to autoscan.go handler DTOs) ---
+
 export interface AutoscanSettings {
   enabled: boolean;
-  poll_interval_minutes: number;
+  default_poll_interval_seconds: number;
   debounce_seconds: number;
-  updated_at?: string;
 }
 
-export interface AutoscanPathRewrite {
-  from: string;
-  to: string;
+export interface AutoscanConnection {
+  id: string;
+  name: string;
+  kind: string;
+  base_url?: string;
+  request_integration_id?: string | null;
+  has_api_key: boolean;
+}
+
+export interface AutoscanConnectionInput {
+  name: string;
+  kind: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionsResponse {
+  connections: AutoscanConnection[];
 }
 
 export interface AutoscanSource {
-  integration_id: string;
-  kind: string;
-  name: string;
+  id: string;
+  installation_id: number;
+  capability_id: string;
+  connection_id: string | null;
   enabled: boolean;
-  path_rewrites: AutoscanPathRewrite[];
-  last_poll_at?: string | null;
+  poll_interval_seconds: number | null;
+  last_run_at: string | null;
+  last_error: string | null;
+}
+
+export interface AutoscanSourceInput {
+  connection_id?: string;
+  enabled: boolean;
+  poll_interval_seconds?: number | null;
 }
 
 export interface AutoscanSourcesResponse {
   sources: AutoscanSource[];
 }
 
-export interface AutoscanProposedRewrite {
-  from: string;
-  to: string;
-  match_depth: number;
+export interface AutoscanStatusSource {
+  id: string;
+  installation_id: number;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_error: string | null;
 }
 
-export interface AutoscanAmbiguousRoot {
-  root: string;
-  candidates: string[];
+export interface AutoscanStatus {
+  enabled: boolean;
+  sources: AutoscanStatusSource[];
 }
 
-export interface AutoscanRewriteSuggestions {
-  proposed: AutoscanProposedRewrite[];
-  unmatched: string[];
-  ambiguous: AutoscanAmbiguousRoot[];
-  covered: string[];
-}
+// Deprecated stubs kept for AdminRequests.tsx compatibility until Task 6 removes the autoscan tab.
+/** @deprecated removed in v2; will be cleaned up in Task 6 */
+export type AutoscanPathRewrite = { from: string; to: string };
+/** @deprecated removed in v2; will be cleaned up in Task 6 */
+export type AutoscanRewriteSuggestions = Record<string, never>;
 
 export interface RequestListParams {
   status?: MediaRequestStatus | "all";

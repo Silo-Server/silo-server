@@ -394,5 +394,7 @@ export const adminKeys = {
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,
   autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
+  autoscanConnections: () => ["admin", "autoscan", "connections"] as const,
   autoscanSources: () => ["admin", "autoscan", "sources"] as const,
+  autoscanStatus: () => ["admin", "autoscan", "status"] as const,
 };
