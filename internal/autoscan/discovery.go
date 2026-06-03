@@ -59,3 +59,13 @@ func (s *Service) DiscoverSources(ctx context.Context) (map[discoveredKey]struct
 	}
 	return present, nil
 }
+
+// RefreshDiscovered runs discovery for its seeding side effect and discards the
+// present-set, so a caller that only needs "make installed scan_source plugins
+// show up as source rows" (e.g. the admin sources list) can trigger it without
+// referencing the internal discovered-key type. Safe to call when no lister is
+// configured (no-op).
+func (s *Service) RefreshDiscovered(ctx context.Context) error {
+	_, err := s.DiscoverSources(ctx)
+	return err
+}

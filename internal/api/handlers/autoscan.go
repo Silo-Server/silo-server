@@ -35,6 +35,11 @@ type autoscanStore interface {
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
 type autoscanTriggerer interface {
 	PollOnce(ctx context.Context) error
+	// RefreshDiscovered seeds source rows for currently-installed scan_source
+	// plugins. Called when the sources list is viewed so a plugin installed via
+	// /admin/plugins shows up in Autoscan immediately, without waiting for a
+	// poll cycle (which only runs when autoscan is enabled).
+	RefreshDiscovered(ctx context.Context) error
 }
 
 // autoscanTriggerUpdater reconfigures the poll task's schedule when the default
@@ -305,6 +310,12 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 }
 
 func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
+	// Seed source rows for any scan_source plugin installed via /admin/plugins so
+	// it appears here immediately, even when autoscan is disabled (no poll cycle).
+	// Best-effort: a discovery error must not block listing already-known sources.
+	if derr := h.svc.RefreshDiscovered(r.Context()); derr != nil {
+		slog.WarnContext(r.Context(), "autoscan: discover-on-list failed", "err", derr)
+	}
 	sources, err := h.repo.ListSources(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)

@@ -115,8 +115,9 @@ func (f *fakeTriggerUpdater) UpdateTriggers(key string, cfgs []taskmanager.Trigg
 }
 
 type fakeAutoscanTriggerer struct {
-	called bool
-	err    error
+	called     bool
+	discovered bool
+	err        error
 	// done, when non-nil, receives once PollOnce runs. HandleTrigger dispatches
 	// PollOnce on a detached goroutine, so tests synchronize on this instead of
 	// reading `called` straight after the handler returns (which races the
@@ -132,6 +133,11 @@ func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
 		f.done <- struct{}{}
 	}
 	return f.err
+}
+
+func (f *fakeAutoscanTriggerer) RefreshDiscovered(context.Context) error {
+	f.discovered = true
+	return nil
 }
 
 func newAutoscanRequest(method, target, body, id string) *http.Request {
@@ -182,6 +188,27 @@ func TestAutoscanHandleUpdateSettingsRejectsZeroInterval(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAutoscanHandleListSourcesTriggersDiscovery(t *testing.T) {
+	// Viewing the sources list must seed rows for currently-installed scan_source
+	// plugins (installed via /admin/plugins), so they appear in Autoscan even
+	// when autoscan is disabled and no poll cycle has run.
+	store := &fakeAutoscanStore{
+		listSourcesFn: func() ([]autoscan.Source, error) { return nil, nil },
+	}
+	trig := &fakeAutoscanTriggerer{}
+	h := NewAutoscanHandler(store, trig)
+
+	rec := httptest.NewRecorder()
+	h.HandleListSources(rec, newAutoscanRequest("GET", "/api/v1/admin/autoscan/sources", "", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !trig.discovered {
+		t.Fatal("HandleListSources did not run discovery; a freshly-installed plugin would not appear")
 	}
 }
 
