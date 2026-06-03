@@ -68,8 +68,8 @@ Silo already ships a full out-of-process plugin runtime (`internal/plugins`, `in
               │  (new installable repo, like silo-plugin-tmdb)   │
               │  receives resolved arr address + key             │
               │  polls /history (imports + renames)              │
-              │  applies its OWN path rewrites                    │
-              │  returns Silo-native paths + next marker          │
+              │  returns RAW source paths + next marker          │
+              │  (host applies the source's rewrites)            │
               └──────────────────────────────────────────────────┘
 ```
 
@@ -86,7 +86,7 @@ Silo already ships a full out-of-process plugin runtime (`internal/plugins`, `in
 | Concern | Owner | Rationale |
 |---|---|---|
 | Talk to arr; poll `/history`; imports + renames; bounded window; first-run | **Plugin** | Provider-specific I/O. |
-| **Path rewrites** (config, application, "Sync from arr" suggester) | **Plugin** | Each source mounts content differently; translation is per-source. Plugin returns Silo-native paths. |
+| **Path rewrites** (per-source config + application) | **Host** | _(Revised post-merge: the SDK landed host-owned rewrites.)_ The plugin returns RAW source-namespace paths in `source_paths`; the host applies each source's rewrite rules (longest-`From`-first) before resolving. Keeps every provider dumb and rewrite behavior uniform. Rewrites are edited per-source in the Autoscan UI and stored in `autoscan_sources.path_rewrites`. |
 | Resolve Silo-native path → `MediaFolder`; dedupe; **enqueue rescan** | **Host** | Touches Silo internals (scan queue, DB, library map) that plugins cannot and must not reach. |
 | Opaque per-source marker; poll interval; enabled; last-run status | **Host** | Scheduling and bookkeeping are the engine's job. |
 | Connection selection (reuse-from-Requests vs own) and credential resolution | **Host** | Only the host knows about Requests; the plugin receives resolved creds. |
@@ -120,9 +120,10 @@ message ResolvedConnection {
 }
 
 message PollChangesResponse {
-  // Absolute paths already translated to Silo's filesystem namespace
-  // (the plugin has applied its own rewrites). Files or directories.
-  repeated string changed_paths = 1;
+  // Absolute changed paths in the provider/source namespace (RAW — NOT yet
+  // rewritten). Files or directories. The host applies the source's rewrite
+  // rules and validates before enqueueing.
+  repeated string source_paths = 1;
   // Opaque continuation token. Host stores verbatim and echoes it back
   // on the next PollChanges. The plugin never assumes the host parses it.
   string next_marker = 2;
@@ -136,7 +137,7 @@ message PollChangesResponse {
 - **First run.** `marker == ""` ⇒ the plugin starts from "now" (do not replay full history).
 - **Idempotent, at-least-once.** The host may re-issue the same `marker` if it failed to persist `next_marker`; providers must tolerate returning overlapping paths. The host's suppression layer (§7) absorbs duplicates.
 - **Error semantics.** A failed `PollChanges` (e.g. arr unreachable) ⇒ the host keeps the *old* marker and retries next tick; nothing is skipped or advanced.
-- **Silo-native paths only.** `changed_paths` are already rewritten by the plugin; the host does no path translation.
+- **Raw source paths.** `source_paths` are in the provider's namespace, NOT rewritten. The host applies each source's path-rewrite rules (host-owned, per-source) before resolving to a library folder.
 - **Credentials per call.** The host resolves the source's connection (§8) and passes the concrete `{base_url, api_key}` in `PollChangesRequest.connection` on every poll. The plugin reads them from the request — it stores no credentials and never knows whether they came from its own config or a reused Requests link. Delivered over the local host↔plugin gRPC channel only.
 
 The capability needs **only** `PollChanges` for v1. A `TestConnection`/validate RPC is explicitly deferred (YAGNI; connection validity surfaces as a failed poll).
@@ -177,10 +178,10 @@ New top-level **Autoscan** admin section (its own nav entry, not a Requests tab)
 
 A **source** corresponds to one configured `scan_source.v1` capability instance and carries:
 
-- **Plugin-owned config:** path rewrites (+ "Sync from arr") and any provider-specific settings. Configured on the plugin's own settings screen.
+- **Host-owned per-source config:** path rewrites (`autoscan_sources.path_rewrites`, edited in the Autoscan Sources UI) and any provider-specific settings. _(Revised post-merge: rewrites moved host-side; the plugin has no config.)_
 - **Host-owned per-source state:** the chosen connection, enabled on/off, poll interval (per-source, not one global timer), the opaque marker, and last-run status/error.
 
-**Source auto-discovery (resolves §14 risk #1).** Source rows are not created by hand. On each poll cycle the host enumerates every installed `scan_source.v1` capability (via the plugin installation store) and *seeds a disabled, connection-less row* per capability (`INSERT … ON CONFLICT (installation_id, capability_id) DO NOTHING`, never disturbing existing config). The operator then binds a connection and enables it. Consequently **`connection_id` is nullable**: a freshly-discovered source has none, and the engine skips any enabled source with no connection (recording a "no connection bound" status). The admin API rejects enabling a source that has no effective connection.
+**Install flow + source auto-discovery (resolves §14 risk #1).** A scan-source plugin (Sonarr/Radarr, etc.) is installed through the **normal `/admin/plugins`** page — there is no separate install path; the installer doesn't special-case the capability type. Source rows are then never created by hand: the host enumerates every installed `scan_source.v1` capability (via the plugin installation store) and *seeds a disabled, connection-less row* per capability (`INSERT … ON CONFLICT (installation_id, capability_id) DO NOTHING`, never disturbing existing config). Discovery runs **both on each poll cycle AND when the Autoscan sources list is viewed** (so a freshly-installed plugin appears in Autoscan immediately, even when autoscan is disabled and nothing is polling). The operator then binds a connection and enables it. Consequently **`connection_id` is nullable**: a freshly-discovered source has none, and the engine skips any enabled source with no connection (recording a "no connection bound" status). The admin API rejects enabling a source that has no effective connection.
 
 **Per-source interval** is honoured as a floor: the global poll task runs at `default_poll_interval_seconds`, and within a cycle the engine skips a source whose `last_run_at` is newer than its own `poll_interval_seconds` (falling back to the default). A source therefore polls *at most* every N seconds, never more often than the global cadence.
 
@@ -201,8 +202,7 @@ A new installable repo structured like `silo-plugin-tmdb` (standalone Go module,
 1. Treat `marker` as the "since" timestamp (empty ⇒ now).
 2. Call arr `/api/v3/history/since`, capped by a bounded window (24h max-lookback floor + overlap buffer — relocated from PR #43) so a long outage cannot pull an oversized response.
 3. Extract paths: **imports** (`downloadFolderImported.importedPath`) and **renames** (`episodeFileRenamed`/`movieFileRenamed`: both new `path` and old `sourcePath`). Deletes ignored (upgrade-deletes are covered by the paired import; standalone deletes carry no path).
-4. **Apply this source's path rewrites** → Silo-native paths. Normalize separators (Windows arr → Linux host).
-5. Return `{changed_paths, next_marker = newest history timestamp}`.
+4. Return `{source_paths = the RAW arr paths, next_marker = newest history timestamp}`. The plugin does NOT rewrite — the host normalizes separators and applies the source's rewrite rules. _(Revised post-merge.)_
 
 **Rewrite config + "Sync from arr":** the rewrite list and the suffix-match suggester (which matches arr root folders to Silo media folders) live in the plugin. The suggester needs Silo's media-folder list, obtained via the existing host library-listing service (`internal/pluginhost` library lister) exposed to plugins. The relocated logic is PR #43's `suggest.go`/`suggest_deps.go`/`rewrite.go`/`history.go`.
 
