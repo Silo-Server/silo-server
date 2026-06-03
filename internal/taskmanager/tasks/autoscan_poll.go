@@ -33,9 +33,9 @@ func NewAutoscanPollTask(poller AutoscanPoller, intervalMs int64) *AutoscanPollT
 }
 
 func (t *AutoscanPollTask) Key() string  { return "autoscan_poll" }
-func (t *AutoscanPollTask) Name() string { return "Autoscan Poll" }
+func (t *AutoscanPollTask) Name() string { return "Autoscan poll" }
 func (t *AutoscanPollTask) Description() string {
-	return "Polls autoscan-enabled Radarr/Sonarr instances for imported files and scans the affected folders"
+	return "Poll installed scan-source providers for changes and enqueue rescans"
 }
 func (t *AutoscanPollTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
@@ -49,7 +49,7 @@ func (t *AutoscanPollTask) DefaultTriggers() []taskmanager.TriggerConfig {
 }
 
 func (t *AutoscanPollTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
-	progress.Report(0, "Polling arr instances")
+	progress.Report(0, "Polling scan-source providers")
 	if t.poller == nil {
 		progress.Report(100, "Autoscan unavailable")
 		return nil
