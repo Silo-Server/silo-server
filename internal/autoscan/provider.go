@@ -30,12 +30,6 @@ type pluginProvider struct{ resolver ScanSourceResolver }
 
 // NewPluginProvider builds the production scan-source provider over the plugins
 // resolver.
-//
-// The resolved connection is delivered to the plugin out-of-band as runtime
-// config when the source is configured (the plugin reads its own
-// {base_url, api_key}); it is accepted here so a future provider variant could
-// inject it per call. For v1 the production path configures the plugin instance
-// with the resolved connection at upsert time.
 func NewPluginProvider(resolver ScanSourceResolver) ScanSourceProvider {
 	return &pluginProvider{resolver: resolver}
 }
@@ -45,7 +39,11 @@ func (p *pluginProvider) PollChanges(ctx context.Context, installationID int, ca
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := client.PollChanges(ctx, &pluginv1.PollChangesRequest{CapabilityId: capabilityID, Marker: marker})
+	resp, err := client.PollChanges(ctx, &pluginv1.PollChangesRequest{
+		CapabilityId: capabilityID,
+		Marker:       marker,
+		Connection:   &pluginv1.ResolvedConnection{BaseUrl: conn.BaseURL, ApiKey: conn.APIKey},
+	})
 	if err != nil {
 		return nil, "", err
 	}
