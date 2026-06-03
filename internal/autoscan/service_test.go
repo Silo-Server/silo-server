@@ -401,7 +401,7 @@ func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	}
 }
 
-func TestPollOncemPollsConnectionlessSource(t *testing.T) {
+func TestPollOncePollsConnectionlessSource(t *testing.T) {
 	// A connection is OPTIONAL: a source with no bound connection is still polled
 	// (the provider gets an empty connection it may ignore — e.g. a filesystem
 	// watcher). Whether the plugin needs credentials is the plugin's concern.
