@@ -105,7 +105,11 @@ func NewService(
 
 // PollOnce runs one autoscan cycle. Per-source failures are logged and skipped;
 // only settings/listing errors propagate. The opaque next marker returned by the
-// provider is stored verbatim, but only after a successful enqueue.
+// provider is stored verbatim, but only when the cycle's work is genuinely
+// consumed: the provider returned no paths, or it returned paths and at least one
+// resolved+enqueued. When paths come back but NONE resolve to a library folder
+// (e.g. a freshly-enabled source with unconfigured rewrites) the marker is held
+// and an error recorded, so those imports aren't skipped forever.
 func (s *Service) PollOnce(ctx context.Context) error {
 	// Fetch the set of currently-installed scan_source capabilities so we can skip
 	// orphaned source rows (their plugin was uninstalled). Listing failures are
@@ -194,6 +198,25 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				slog.WarnContext(ctx, "autoscan: enqueue failed", "source_id", src.ID, "err", eerr)
 				continue // do NOT advance marker
 			}
+		}
+
+		// Advancing the marker is what tells the provider "I've consumed up to
+		// here". Advance it ONLY when the work it represents is genuinely done:
+		//   - provider returned ZERO paths     → nothing to do, advance normally.
+		//   - returned paths AND ≥1 resolved    → enqueued (above), advance.
+		//   - returned paths AND ZERO resolved  → do NOT advance. This is the
+		//     freshly-enabled-source state (path_rewrites not configured yet); the
+		//     incoming paths don't map to any Silo library folder. Advancing here
+		//     would skip those imports forever. Surface why so the operator can fix
+		//     the rewrites, then a later poll re-reads the same window and resolves.
+		// (Some-but-not-all resolving counts as resolved — the unresolved paths are
+		// legitimately outside Silo's libraries, so advancing is correct.)
+		if len(paths) > 0 && len(targets) == 0 {
+			msg := fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — check this source's path rewrites", len(paths))
+			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
+				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+			}
+			continue // do NOT advance marker
 		}
 		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
 			slog.WarnContext(ctx, "autoscan: advance marker failed", "source_id", src.ID, "err", aerr)

@@ -2,6 +2,7 @@ package autoscan
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +233,66 @@ func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
 	}
 	if got := store.advanced["s1"]; got != opaque {
 		t.Fatalf("marker not stored verbatim: got %q want %q", got, opaque)
+	}
+}
+
+func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
+	// A freshly-enabled source with no path_rewrites: the provider returns paths
+	// that don't map to any Silo library folder. The marker must NOT advance (so
+	// the imports aren't skipped forever) and an explaining error is recorded.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			// no PathRewrites: /data/tv/... never resolves under /mnt/media/
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
+			"/data/tv/Show/S01/E01.mkv",
+			"/data/tv/Show/S01/E02.mkv",
+		},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("nothing should enqueue when no path resolves, got %d", len(q.enqueued))
+	}
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance when paths returned but none resolved")
+	}
+	msg, ok := store.recorded["s1"]
+	if !ok || msg == "" {
+		t.Fatalf("expected an explaining error recorded for s1, got %q ok=%v", msg, ok)
+	}
+	if want := "returned 2 path(s)"; !strings.Contains(msg, want) {
+		t.Fatalf("recorded error %q should mention %q", msg, want)
+	}
+}
+
+func TestPollOnceAdvancesMarkerWhenZeroPathsReturned(t *testing.T) {
+	// The "nothing to do" case: provider returns no paths at all. The marker must
+	// advance normally and no error is recorded.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if got, ok := store.advanced["s1"]; !ok || got != "m1" {
+		t.Fatalf("marker must advance to %q when zero paths returned, got %q ok=%v", "m1", got, ok)
+	}
+	if _, ok := store.recorded["s1"]; ok {
+		t.Fatalf("no error should be recorded when there's simply nothing to do")
 	}
 }
 
