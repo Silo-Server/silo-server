@@ -74,13 +74,22 @@ const scanSourceCapabilityType = "scan_source.v1"
 
 // PluginScanSourceLister adapts the plugin installation store to
 // autoscan.ScanSourceLister: it enumerates every installed scan_source.v1
-// capability across enabled installations.
+// capability across ALL installed plugins, regardless of enabled state.
+//
+// Using List (not ListEnabled) is deliberate for orphan detection: a temporarily
+// DISABLED-but-installed plugin must NOT be treated as orphaned. If we dropped
+// disabled plugins here, PollOnce would prune their sources and skip them with no
+// last_error — they'd vanish silently. Keeping them present means PollOnce still
+// attempts them; the plugin client fails to load (not running) and the source
+// gets a visible RecordError instead. Only a fully UNINSTALLED plugin (gone from
+// List entirely) is a true orphan. The Add-source picker shares this all-installed
+// set, which is fine — operators can bind sources against an installed capability.
 type PluginScanSourceLister struct {
 	Store *plugins.InstallationStore
 }
 
 func (l PluginScanSourceLister) ListScanSources(ctx context.Context) ([]autoscan.DiscoveredSource, error) {
-	installations, err := l.Store.ListEnabled(ctx)
+	installations, err := l.Store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
