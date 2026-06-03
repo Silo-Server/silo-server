@@ -152,7 +152,16 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			continue // do NOT advance marker
 		}
 
-		targets, claimed := s.resolveAndClaim(ctx, paths, ttl)
+		// The merged scan_source contract returns RAW source-namespace paths;
+		// rewrite ownership moved from the plugin to the host. Normalize Windows
+		// separators and apply this source's per-source prefix rewrites to turn
+		// each raw path Silo-native BEFORE dedupe/resolve/enqueue.
+		rewritten := make([]string, 0, len(paths))
+		for _, p := range paths {
+			rewritten = append(rewritten, applyRewrites(normalizeSeparators(p), src.PathRewrites))
+		}
+
+		targets, claimed := s.resolveAndClaim(ctx, rewritten, ttl)
 		if len(targets) > 0 {
 			if eerr := s.queue.EnqueueScans(ctx, targets); eerr != nil {
 				s.releaseClaims(ctx, claimed)

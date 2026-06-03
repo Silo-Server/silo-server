@@ -146,6 +146,39 @@ func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	}
 }
 
+func TestPollOnceAppliesSourceRewritesBeforeEnqueue(t *testing.T) {
+	// The provider returns RAW source-namespace paths (/data/tv/...). The source's
+	// rewrite /data/tv -> /mnt/media/tv must be applied host-side so the resolved
+	// target uses the rewritten, Silo-native path. fakeResolver only resolves
+	// paths under /mnt/media/, so a missing rewrite would resolve to nothing.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/data/tv", To: "/mnt/media/tv"}},
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {"/data/tv/Show/S01/E01.mkv"},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 enqueued target, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	// uniqueParentDirs collapses E01.mkv to its parent dir; the rewritten target
+	// must be the Silo-native /mnt/media/tv/Show/S01.
+	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01" {
+		t.Fatalf("expected rewritten target path /mnt/media/tv/Show/S01, got %q", got)
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
 func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
 	// Two imported subtrees resolve to the SAME folder ID (7) but DIFFERENT
 	// target paths. Keying suppression on folder ID alone would drop the second;

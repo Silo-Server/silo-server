@@ -598,6 +598,68 @@ func TestAutoscanHandleTriggerInvokesPollOnce(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleUpdateSourceRoundTripsPathRewrites(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":true,"connection_id":"conn-1","path_rewrites":[{"from":"/data/tv","to":"/mnt/media/tv"}]}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// The repo received the rewrite.
+	if len(got.PathRewrites) != 1 || got.PathRewrites[0].From != "/data/tv" || got.PathRewrites[0].To != "/mnt/media/tv" {
+		t.Fatalf("expected path_rewrites passed to repo, got %+v", got.PathRewrites)
+	}
+	// The response echoes it back.
+	var body autoscanSourceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.PathRewrites) != 1 || body.PathRewrites[0].From != "/data/tv" || body.PathRewrites[0].To != "/mnt/media/tv" {
+		t.Fatalf("response missing path_rewrites: %+v", body.PathRewrites)
+	}
+}
+
+func TestAutoscanHandleUpdateSourceRejectsBlankRewrite(t *testing.T) {
+	upserted := false
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			upserted = true
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// A rewrite with a blank "to" must be rejected with 400.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":true,"connection_id":"conn-1","path_rewrites":[{"from":"/data/tv","to":""}]}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if upserted {
+		t.Fatal("UpsertSource was called despite an invalid path_rewrite")
+	}
+}
+
 func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 	store := &fakeAutoscanStore{
 		getSettingsFn: func() (autoscan.Settings, error) {

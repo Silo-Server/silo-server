@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -272,17 +273,24 @@ func (h *AutoscanHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.
 // autoscanSourceResponse is the client view of a source. It carries no
 // credentials: the connection link is by id only.
 type autoscanSourceResponse struct {
-	ID                  string     `json:"id"`
-	InstallationID      int        `json:"installation_id"`
-	CapabilityID        string     `json:"capability_id"`
-	ConnectionID        *string    `json:"connection_id"`
-	Enabled             bool       `json:"enabled"`
-	PollIntervalSeconds *int       `json:"poll_interval_seconds,omitempty"`
-	LastRunAt           *time.Time `json:"last_run_at,omitempty"`
-	LastError           *string    `json:"last_error,omitempty"`
+	ID                  string                 `json:"id"`
+	InstallationID      int                    `json:"installation_id"`
+	CapabilityID        string                 `json:"capability_id"`
+	ConnectionID        *string                `json:"connection_id"`
+	Enabled             bool                   `json:"enabled"`
+	PollIntervalSeconds *int                   `json:"poll_interval_seconds,omitempty"`
+	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
+	LastRunAt           *time.Time             `json:"last_run_at,omitempty"`
+	LastError           *string                `json:"last_error,omitempty"`
 }
 
 func sourceResponse(s autoscan.Source) autoscanSourceResponse {
+	// Always emit a (possibly empty) array, never JSON null, so clients can treat
+	// path_rewrites as a stable list field.
+	rewrites := s.PathRewrites
+	if rewrites == nil {
+		rewrites = []autoscan.PathRewrite{}
+	}
 	return autoscanSourceResponse{
 		ID:                  s.ID,
 		InstallationID:      s.InstallationID,
@@ -290,6 +298,7 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 		ConnectionID:        s.ConnectionID,
 		Enabled:             s.Enabled,
 		PollIntervalSeconds: s.PollIntervalSeconds,
+		PathRewrites:        rewrites,
 		LastRunAt:           s.LastRunAt,
 		LastError:           s.LastError,
 	}
@@ -319,10 +328,38 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 //   - non-empty string UUID     → bind to that connection
 //
 // The UI must always send the full desired state for all three fields.
+// path_rewrites is full-state like connection_id: the UI always sends the
+// complete desired list. Each entry needs a non-empty from and to.
 type autoscanSourceInput struct {
-	ConnectionID        *string `json:"connection_id"`
-	Enabled             bool    `json:"enabled"`
-	PollIntervalSeconds *int    `json:"poll_interval_seconds"`
+	ConnectionID        *string                `json:"connection_id"`
+	Enabled             bool                   `json:"enabled"`
+	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
+	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
+}
+
+// validatePathRewrites lightly validates a source's rewrite list: each entry
+// must carry a non-empty (trimmed) from and to. Returns an error suitable for a
+// 400 response.
+func validatePathRewrites(rewrites []autoscan.PathRewrite) error {
+	for i, rw := range rewrites {
+		if strings.TrimSpace(rw.From) == "" || strings.TrimSpace(rw.To) == "" {
+			return fmt.Errorf("path_rewrites[%d]: from and to are both required", i)
+		}
+	}
+	return nil
+}
+
+// normalizePathRewrites trims whitespace off each rewrite's from/to so stored
+// rules match the same trimming applyRewrites does at poll time.
+func normalizePathRewrites(rewrites []autoscan.PathRewrite) []autoscan.PathRewrite {
+	out := make([]autoscan.PathRewrite, 0, len(rewrites))
+	for _, rw := range rewrites {
+		out = append(out, autoscan.PathRewrite{
+			From: strings.TrimSpace(rw.From),
+			To:   strings.TrimSpace(rw.To),
+		})
+	}
+	return out
 }
 
 func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -334,6 +371,10 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 	}
 	if in.PollIntervalSeconds != nil && *in.PollIntervalSeconds <= 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "poll_interval_seconds must be greater than 0 when set")
+		return
+	}
+	if err := validatePathRewrites(in.PathRewrites); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	// Look up the existing source so the (installation_id, capability_id)
@@ -364,6 +405,7 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		ConnectionID:        connArg,
 		Enabled:             in.Enabled,
 		PollIntervalSeconds: in.PollIntervalSeconds,
+		PathRewrites:        normalizePathRewrites(in.PathRewrites),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -405,13 +447,14 @@ func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) 
 // --- Status ---
 
 type autoscanStatusSource struct {
-	ID             string     `json:"id"`
-	InstallationID int        `json:"installation_id"`
-	CapabilityID   string     `json:"capability_id"`
-	ConnectionID   *string    `json:"connection_id"`
-	Enabled        bool       `json:"enabled"`
-	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
-	LastError      *string    `json:"last_error,omitempty"`
+	ID             string                 `json:"id"`
+	InstallationID int                    `json:"installation_id"`
+	CapabilityID   string                 `json:"capability_id"`
+	ConnectionID   *string                `json:"connection_id"`
+	Enabled        bool                   `json:"enabled"`
+	PathRewrites   []autoscan.PathRewrite `json:"path_rewrites"`
+	LastRunAt      *time.Time             `json:"last_run_at,omitempty"`
+	LastError      *string                `json:"last_error,omitempty"`
 }
 
 type autoscanStatusResponse struct {
@@ -433,12 +476,17 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	trimmed := make([]autoscanStatusSource, 0, len(sources))
 	for _, src := range sources {
+		rewrites := src.PathRewrites
+		if rewrites == nil {
+			rewrites = []autoscan.PathRewrite{}
+		}
 		trimmed = append(trimmed, autoscanStatusSource{
 			ID:             src.ID,
 			InstallationID: src.InstallationID,
 			CapabilityID:   src.CapabilityID,
 			ConnectionID:   src.ConnectionID,
 			Enabled:        src.Enabled,
+			PathRewrites:   rewrites,
 			LastRunAt:      src.LastRunAt,
 			LastError:      src.LastError,
 		})

@@ -20,6 +20,15 @@ type Connection struct {
 	RequestIntegrationID *string
 }
 
+// PathRewrite is a per-source prefix translation from a raw arr/source-namespace
+// path to a Silo-native path. The merged scan_source contract moved rewrite
+// ownership from the plugin to the host, so these are applied host-side before a
+// raw path is resolved/enqueued.
+type PathRewrite struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 // Source ties a scan_source plugin capability instance to a connection plus the
 // host-owned scheduling/bookkeeping state.
 type Source struct {
@@ -28,8 +37,9 @@ type Source struct {
 	CapabilityID        string
 	ConnectionID        *string // nil until an operator binds a connection
 	Enabled             bool
-	PollIntervalSeconds *int    // nil => use settings default
-	Marker              *string // opaque; nil on first run
+	PollIntervalSeconds *int          // nil => use settings default
+	PathRewrites        []PathRewrite // host-owned raw->Silo prefix rewrites
+	Marker              *string       // opaque; nil on first run
 	LastRunAt           *time.Time
 	LastError           *string
 }

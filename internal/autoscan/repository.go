@@ -2,6 +2,7 @@ package autoscan
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -172,15 +173,50 @@ func (r *Repository) GetConnection(ctx context.Context, id string) (Connection, 
 // --- Sources ---
 
 const sourceColumns = `id, installation_id, capability_id, connection_id, enabled,
-	poll_interval_seconds, marker, last_run_at, last_error`
+	poll_interval_seconds, path_rewrites, marker, last_run_at, last_error`
 
 func scanSource(row interface{ Scan(...any) error }) (Source, error) {
 	var s Source
+	var pathRewrites []byte
 	if err := row.Scan(&s.ID, &s.InstallationID, &s.CapabilityID, &s.ConnectionID,
-		&s.Enabled, &s.PollIntervalSeconds, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
+		&s.Enabled, &s.PollIntervalSeconds, &pathRewrites, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
 		return Source{}, err
 	}
+	rewrites, err := unmarshalPathRewrites(pathRewrites)
+	if err != nil {
+		return Source{}, err
+	}
+	s.PathRewrites = rewrites
 	return s, nil
+}
+
+// unmarshalPathRewrites decodes the jsonb path_rewrites column into a slice. A
+// NULL/empty column maps to an empty (non-nil) slice so callers never see a nil.
+func unmarshalPathRewrites(raw []byte) ([]PathRewrite, error) {
+	if len(raw) == 0 {
+		return []PathRewrite{}, nil
+	}
+	var out []PathRewrite
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode autoscan path_rewrites: %w", err)
+	}
+	if out == nil {
+		out = []PathRewrite{}
+	}
+	return out, nil
+}
+
+// marshalPathRewrites encodes path rewrites for the jsonb column. A nil slice is
+// stored as an empty JSON array (matching the column default '[]').
+func marshalPathRewrites(rewrites []PathRewrite) ([]byte, error) {
+	if rewrites == nil {
+		rewrites = []PathRewrite{}
+	}
+	b, err := json.Marshal(rewrites)
+	if err != nil {
+		return nil, fmt.Errorf("encode autoscan path_rewrites: %w", err)
+	}
+	return b, nil
 }
 
 // connectionIDArg maps a nullable connection id to a SQL value: nil pointer and
@@ -197,18 +233,23 @@ func connectionIDArg(id *string) any {
 // its scheduling fields. Bookkeeping fields (marker/last_run_at/last_error) are
 // left untouched on update.
 func (r *Repository) UpsertSource(ctx context.Context, s Source) (Source, error) {
+	rewrites, err := marshalPathRewrites(s.PathRewrites)
+	if err != nil {
+		return Source{}, err
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO autoscan_sources (
-			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, updated_at
+			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, now())
+		VALUES ($1, $2, $3, $4, $5, $6, now())
 		ON CONFLICT (installation_id, capability_id) DO UPDATE SET
 			connection_id = EXCLUDED.connection_id,
 			enabled = EXCLUDED.enabled,
 			poll_interval_seconds = EXCLUDED.poll_interval_seconds,
+			path_rewrites = EXCLUDED.path_rewrites,
 			updated_at = now()
 		RETURNING `+sourceColumns,
-		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds)
+		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites)
 	out, err := scanSource(row)
 	if err != nil {
 		// A non-existent connection trips the FK constraint (23503).
