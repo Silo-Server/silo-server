@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -378,16 +379,28 @@ func (r *Repository) AdvanceMarker(ctx context.Context, sourceID, marker string)
 	return nil
 }
 
-// maxLastErrorLen bounds the stored last_error so a pathological provider error
-// can't bloat the row.
+// maxLastErrorLen bounds the stored last_error (in bytes) so a pathological
+// provider error can't bloat the row.
 const maxLastErrorLen = 2048
+
+// truncateUTF8 caps s to at most maxBytes bytes without splitting a multi-byte
+// UTF-8 rune: if the byte cut lands mid-rune it backs off to the last valid
+// rune boundary, so the stored value is always valid UTF-8.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
 
 // RecordError records a poll failure for a source: it stamps last_run_at and
 // stores the (length-bounded) error message without advancing the marker.
 func (r *Repository) RecordError(ctx context.Context, sourceID, msg string) error {
-	if len(msg) > maxLastErrorLen {
-		msg = msg[:maxLastErrorLen]
-	}
+	msg = truncateUTF8(msg, maxLastErrorLen)
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE autoscan_sources
 		SET last_error = $2, last_run_at = now(), updated_at = now()
