@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 
@@ -27,7 +29,27 @@ func (l RequestIntegrationLookup) Get(ctx context.Context, integrationID string)
 	if err != nil {
 		return "", "", err
 	}
+	// A reused Requests connection must honor the integration's live state. The
+	// v1 poll gated on `WHERE ri.enabled = true`; here we surface a disabled or
+	// unconfigured (blank base_url) integration as an error so the engine turns
+	// it into a logged skip / RecordError rather than polling an unusable target.
+	if err := checkRequestIntegrationUsable(integrationID, integration.Enabled, integration.BaseURL); err != nil {
+		return "", "", err
+	}
 	return integration.BaseURL, integration.APIKeyRef, nil
+}
+
+// checkRequestIntegrationUsable returns a non-nil error when a linked Requests
+// integration cannot be polled: it is disabled, or it has no base_url. Extracted
+// as a pure function so the gating is unit-testable without a DB-backed repo.
+func checkRequestIntegrationUsable(integrationID string, enabled bool, baseURL string) error {
+	if !enabled {
+		return fmt.Errorf("linked requests integration %q is disabled", integrationID)
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return fmt.Errorf("linked requests integration %q has no base_url configured", integrationID)
+	}
+	return nil
 }
 
 // PluginScanSourceAdapter adapts plugins.Service to autoscan.ScanSourceResolver.
