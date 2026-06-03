@@ -166,21 +166,3 @@ export function useTriggerAutoscan() {
     },
   });
 }
-
-// ---------------------------------------------------------------------------
-// Deprecated shim — kept only so AdminRequests.tsx continues to compile until
-// Task 6 removes the old autoscan tab from that file.  Do NOT use in new code.
-// ---------------------------------------------------------------------------
-
-/** @deprecated the rewrite-suggestions endpoint was removed in the v2 backend.
- *  This no-op stub exists solely to keep AdminRequests.tsx compiling until
- *  Task 6 migrates or removes the old autoscan tab there. */
-export function useAutoscanRewriteSuggestions() {
-  return useMutation({
-    mutationFn: (_id: string): Promise<Record<string, never>> => Promise.resolve({}),
-    onError: (err) =>
-      toast.error(
-        err instanceof Error ? err.message : "Could not sync rewrites from the arr instance",
-      ),
-  });
-}

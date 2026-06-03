@@ -1725,12 +1725,6 @@ export interface AutoscanStatus {
   sources: AutoscanStatusSource[];
 }
 
-// Deprecated stubs kept for AdminRequests.tsx compatibility until Task 6 removes the autoscan tab.
-/** @deprecated removed in v2; will be cleaned up in Task 6 */
-export type AutoscanPathRewrite = { from: string; to: string };
-/** @deprecated removed in v2; will be cleaned up in Task 6 */
-export type AutoscanRewriteSuggestions = Record<string, never>;
-
 export interface RequestListParams {
   status?: MediaRequestStatus | "all";
   outcome?: MediaRequestOutcome | "all";
