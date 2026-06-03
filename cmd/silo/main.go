@@ -1345,15 +1345,15 @@ func main() {
 			)
 			// The poll task's default interval seeds the schedule from the stored
 			// settings (DefaultPollIntervalSeconds); per-cycle gating still runs
-			// off the live settings inside PollOnce.
-			intervalMinutes := 10
+			// off the live settings inside PollOnce. Seed in MILLISECONDS as
+			// seconds*1000 — the SAME computation HandleUpdateSettings uses to
+			// reschedule — so startup and reschedule agree for sub-minute and
+			// non-60-multiple intervals (the old seconds/60 minutes path diverged).
+			var intervalMs int64 = 10 * 60 * 1000
 			if settings, serr := autoscanRepo.GetSettings(appCtx); serr == nil && settings.DefaultPollIntervalSeconds > 0 {
-				intervalMinutes = settings.DefaultPollIntervalSeconds / 60
-				if intervalMinutes <= 0 {
-					intervalMinutes = 1
-				}
+				intervalMs = int64(settings.DefaultPollIntervalSeconds) * 1000
 			}
-			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMinutes))
+			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMs))
 		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)

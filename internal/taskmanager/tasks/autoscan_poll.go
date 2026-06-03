@@ -11,16 +11,25 @@ type AutoscanPoller interface {
 	PollOnce(ctx context.Context) error
 }
 
+// defaultAutoscanPollIntervalMs is the fallback poll cadence (10 minutes) used
+// when no positive interval is supplied.
+const defaultAutoscanPollIntervalMs int64 = 10 * 60 * 1000
+
 type AutoscanPollTask struct {
-	poller          AutoscanPoller
-	intervalMinutes int
+	poller     AutoscanPoller
+	intervalMs int64
 }
 
-func NewAutoscanPollTask(poller AutoscanPoller, intervalMinutes int) *AutoscanPollTask {
-	if intervalMinutes <= 0 {
-		intervalMinutes = 10
+// NewAutoscanPollTask builds the poll task with an interval expressed in
+// MILLISECONDS. This matches the reschedule path (HandleUpdateSettings seeds
+// seconds*1000 ms), so the startup-seeded schedule and a settings-driven
+// reschedule agree for sub-minute and non-60-multiple intervals — previously the
+// startup path integer-divided seconds by 60 (minutes) and diverged.
+func NewAutoscanPollTask(poller AutoscanPoller, intervalMs int64) *AutoscanPollTask {
+	if intervalMs <= 0 {
+		intervalMs = defaultAutoscanPollIntervalMs
 	}
-	return &AutoscanPollTask{poller: poller, intervalMinutes: intervalMinutes}
+	return &AutoscanPollTask{poller: poller, intervalMs: intervalMs}
 }
 
 func (t *AutoscanPollTask) Key() string  { return "autoscan_poll" }
@@ -35,7 +44,7 @@ func (t *AutoscanPollTask) IsHidden() bool { return false }
 
 func (t *AutoscanPollTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(t.intervalMinutes) * 60 * 1000},
+		{Type: taskmanager.TriggerTypeInterval, IntervalMs: t.intervalMs},
 	}
 }
 
