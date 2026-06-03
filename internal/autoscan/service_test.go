@@ -15,6 +15,7 @@ type fakeStore struct {
 	connection Connection
 	advanced   map[string]string // source ID -> marker
 	recorded   map[string]string // source ID -> error message
+	ensured    []DiscoveredSource
 }
 
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
@@ -23,6 +24,10 @@ func (f *fakeStore) ListEnabledSources(context.Context) ([]Source, error) {
 }
 func (f *fakeStore) GetConnection(context.Context, string) (Connection, error) {
 	return f.connection, nil
+}
+func (f *fakeStore) EnsureSource(_ context.Context, installationID int, capabilityID string) error {
+	f.ensured = append(f.ensured, DiscoveredSource{InstallationID: installationID, CapabilityID: capabilityID})
+	return nil
 }
 func (f *fakeStore) AdvanceMarker(_ context.Context, sourceID, marker string) error {
 	if f.advanced == nil {
@@ -105,14 +110,17 @@ func (failingQueuer) EnqueueScans(context.Context, []scantrigger.Target) error {
 }
 
 func newService(store Store, provider ScanSourceProvider, queue Queuer, suppress Suppressor) *Service {
-	return NewService(store, provider, passthroughConnRes{}, fakeResolver{}, queue, suppress)
+	return NewService(store, provider, passthroughConnRes{}, fakeResolver{}, queue, suppress, nil)
 }
+
+// strptr is a tiny helper for the *string ConnectionID field in tests.
+func strptr(s string) *string { return &s }
 
 func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true,
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -145,7 +153,7 @@ func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true,
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -175,7 +183,7 @@ func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true,
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	const opaque = "eyJjdXJzb3IiOiJhYmMxMjMifQ==|2026-06-02T14:10:00Z"
@@ -206,7 +214,7 @@ func TestPollOnceDisabledNoop(t *testing.T) {
 func TestPollOnceProviderErrorKeepsMarker(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true}},
+		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true}},
 	}
 	prov := &fakeProvider{err: context.DeadlineExceeded}
 	q := &recordingQueuer{}
@@ -225,7 +233,7 @@ func TestPollOnceProviderErrorKeepsMarker(t *testing.T) {
 func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: "c1", Enabled: true}},
+		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
 	sup := &recordingSuppressor{}
@@ -238,5 +246,29 @@ func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	}
 	if _, ok := store.advanced["s1"]; ok {
 		t.Fatalf("marker must NOT advance when enqueue fails")
+	}
+}
+
+func TestPollOnceSkipsEnabledSourceWithoutConnection(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: nil, Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("a connection-less source must not poll, got %d enqueued", len(q.enqueued))
+	}
+	if msg, ok := store.recorded["s1"]; !ok || msg != "no connection bound" {
+		t.Fatalf("expected 'no connection bound' recorded for s1, got %q ok=%v", msg, ok)
+	}
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance for a connection-less source")
 	}
 }

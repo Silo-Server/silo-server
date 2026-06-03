@@ -176,6 +176,15 @@ func scanSource(row interface{ Scan(...any) error }) (Source, error) {
 	return s, nil
 }
 
+// connectionIDArg maps a nullable connection id to a SQL value: nil pointer and
+// whitespace-only ids map to SQL NULL.
+func connectionIDArg(id *string) any {
+	if id == nil {
+		return nil
+	}
+	return nullable(*id)
+}
+
 // UpsertSource creates or updates the autoscan source for an
 // (installation_id, capability_id) pair, binding it to a connection and setting
 // its scheduling fields. Bookkeeping fields (marker/last_run_at/last_error) are
@@ -192,17 +201,36 @@ func (r *Repository) UpsertSource(ctx context.Context, s Source) (Source, error)
 			poll_interval_seconds = EXCLUDED.poll_interval_seconds,
 			updated_at = now()
 		RETURNING `+sourceColumns,
-		s.InstallationID, s.CapabilityID, s.ConnectionID, s.Enabled, s.PollIntervalSeconds)
+		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds)
 	out, err := scanSource(row)
 	if err != nil {
 		// A non-existent connection trips the FK constraint (23503).
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return Source{}, fmt.Errorf("%w: connection %s", ErrNotFound, s.ConnectionID)
+			connID := ""
+			if s.ConnectionID != nil {
+				connID = *s.ConnectionID
+			}
+			return Source{}, fmt.Errorf("%w: connection %s", ErrNotFound, connID)
 		}
 		return Source{}, fmt.Errorf("upsert autoscan source: %w", err)
 	}
 	return out, nil
+}
+
+// EnsureSource seeds a disabled, connection-less source row for a discovered
+// scan_source capability without disturbing an existing row (auto-discovery runs
+// every poll cycle, so it must be idempotent).
+func (r *Repository) EnsureSource(ctx context.Context, installationID int, capabilityID string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO autoscan_sources (installation_id, capability_id, enabled)
+		VALUES ($1, $2, false)
+		ON CONFLICT (installation_id, capability_id) DO NOTHING`,
+		installationID, capabilityID)
+	if err != nil {
+		return fmt.Errorf("ensure autoscan source: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) ListSources(ctx context.Context) ([]Source, error) {

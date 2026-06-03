@@ -26,7 +26,7 @@ type Source struct {
 	ID                  string
 	InstallationID      int
 	CapabilityID        string
-	ConnectionID        string
+	ConnectionID        *string // nil until an operator binds a connection
 	Enabled             bool
 	PollIntervalSeconds *int    // nil => use settings default
 	Marker              *string // opaque; nil on first run

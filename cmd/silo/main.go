@@ -1331,11 +1331,12 @@ func main() {
 			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
-		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil {
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
 			autoscanRepo := autoscan.NewRepository(deps.DB)
 			autoscanSvc := api.BuildAutoscanService(
 				autoscanRepo,
 				pluginService,
+				pluginInstallationStore,
 				mediarequests.NewRepository(deps.DB),
 				settingsRepo,
 				deps.FolderRepo,

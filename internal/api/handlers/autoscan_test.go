@@ -264,6 +264,61 @@ func TestAutoscanHandleUpdateSourceNotFoundReturns404(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleUpdateSourceEnableWithoutConnectionReturns400(t *testing.T) {
+	upserted := false
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			// Existing source has no connection bound yet.
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: nil}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			upserted = true
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":true}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if upserted {
+		t.Fatal("UpsertSource was called when enabling without a connection")
+	}
+}
+
+func TestAutoscanHandleUpdateSourceEnableWithExistingConnectionSucceeds(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// Enable without supplying a new connection_id: the existing bound connection
+	// must satisfy the requirement.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":true}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.ConnectionID == nil || *got.ConnectionID != "conn-1" {
+		t.Fatalf("expected existing connection preserved, got %+v", got.ConnectionID)
+	}
+}
+
 func TestAutoscanHandleDeleteConnectionNotFoundReturns404(t *testing.T) {
 	store := &fakeAutoscanStore{
 		deleteConnectionFn: func(string) error {
@@ -310,7 +365,7 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 		},
 		listSourcesFn: func() ([]autoscan.Source, error) {
 			return []autoscan.Source{
-				{ID: "src-1", InstallationID: 7, CapabilityID: "scan_source", ConnectionID: "conn-1", Enabled: true},
+				{ID: "src-1", InstallationID: 7, CapabilityID: "scan_source", ConnectionID: ptr("conn-1"), Enabled: true},
 			}, nil
 		},
 	}

@@ -45,6 +45,41 @@ func (a PluginScanSourceAdapter) ScanSourceClient(ctx context.Context, installat
 	return a.Svc.ScanSourceClient(ctx, installationID, capabilityID)
 }
 
+// scanSourceCapabilityType is the plugin capability type autoscan discovery
+// enumerates.
+const scanSourceCapabilityType = "scan_source.v1"
+
+// PluginScanSourceLister adapts the plugin installation store to
+// autoscan.ScanSourceLister: it enumerates every installed scan_source.v1
+// capability across enabled installations.
+type PluginScanSourceLister struct {
+	Store *plugins.InstallationStore
+}
+
+func (l PluginScanSourceLister) ListScanSources(ctx context.Context) ([]autoscan.DiscoveredSource, error) {
+	installations, err := l.Store.ListEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []autoscan.DiscoveredSource
+	for _, inst := range installations {
+		caps, err := l.Store.ListCapabilities(ctx, inst.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range caps {
+			if c == nil || c.Type != scanSourceCapabilityType {
+				continue
+			}
+			out = append(out, autoscan.DiscoveredSource{
+				InstallationID: c.InstallationID,
+				CapabilityID:   c.ID,
+			})
+		}
+	}
+	return out, nil
+}
+
 // AutoscanSecretResolver resolves an encrypted api-key reference to plaintext.
 // It is satisfied by the server settings repo (Get(ctx, key) (string, error)).
 type AutoscanSecretResolver interface {
@@ -57,6 +92,7 @@ type AutoscanSecretResolver interface {
 func BuildAutoscanService(
 	repo *autoscan.Repository,
 	pluginService *plugins.Service,
+	installationStore *plugins.InstallationStore,
 	requestsRepo *mediarequests.Repository,
 	secrets AutoscanSecretResolver,
 	folders scantrigger.FolderRepository,
@@ -72,5 +108,6 @@ func BuildAutoscanService(
 		scantrigger.NewResolver(folders),
 		queue,
 		autoscan.NewRedisSuppressor(redisClient),
+		PluginScanSourceLister{installationStore},
 	)
 }

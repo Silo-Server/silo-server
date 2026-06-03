@@ -21,6 +21,7 @@ type Store interface {
 	GetConnection(ctx context.Context, id string) (Connection, error)
 	AdvanceMarker(ctx context.Context, sourceID, marker string) error
 	RecordError(ctx context.Context, sourceID, msg string) error
+	EnsureSource(ctx context.Context, installationID int, capabilityID string) error
 }
 
 // Resolver maps a Silo-native path to a concrete scan target (library folder).
@@ -45,11 +46,15 @@ type Service struct {
 	resolver Resolver
 	queue    Queuer
 	suppress Suppressor
+	lister   ScanSourceLister
+	seeder   sourceSeeder
 }
 
 // NewService builds the autoscan engine. The provider supplies changed paths
 // from scan_source plugins; connres resolves a source's connection to concrete
 // credentials; resolver/queue/suppress drive the resolve→suppress→enqueue loop.
+// lister enumerates installed scan_source capabilities so DiscoverSources can
+// seed a disabled row per capability; it may be nil to disable auto-discovery.
 func NewService(
 	store Store,
 	provider ScanSourceProvider,
@@ -57,6 +62,7 @@ func NewService(
 	resolver Resolver,
 	queue Queuer,
 	suppress Suppressor,
+	lister ScanSourceLister,
 ) *Service {
 	return &Service{
 		store:    store,
@@ -65,6 +71,8 @@ func NewService(
 		resolver: resolver,
 		queue:    queue,
 		suppress: suppress,
+		lister:   lister,
+		seeder:   store,
 	}
 }
 
@@ -72,6 +80,12 @@ func NewService(
 // only settings/listing errors propagate. The opaque next marker returned by the
 // provider is stored verbatim, but only after a successful enqueue.
 func (s *Service) PollOnce(ctx context.Context) error {
+	// Keep the source list in sync with installed scan_source plugins on the poll
+	// cadence. Discovery failures are non-fatal: a stale source list still polls.
+	if derr := s.DiscoverSources(ctx); derr != nil {
+		slog.WarnContext(ctx, "autoscan: discover sources failed", "err", derr)
+	}
+
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return err
@@ -86,7 +100,15 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	ttl := time.Duration(settings.DebounceSeconds) * time.Second
 
 	for _, src := range sources {
-		conn, cerr := s.resolveConnection(ctx, src.ConnectionID)
+		// An enabled source with no bound connection can't be polled; surface why
+		// so the UI shows it as "needs attention" rather than silently stalling.
+		if src.ConnectionID == nil {
+			if rerr := s.store.RecordError(ctx, src.ID, "no connection bound"); rerr != nil {
+				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+			}
+			continue
+		}
+		conn, cerr := s.resolveConnection(ctx, *src.ConnectionID)
 		if cerr != nil {
 			slog.WarnContext(ctx, "autoscan: resolve connection failed", "source_id", src.ID, "err", cerr)
 			continue

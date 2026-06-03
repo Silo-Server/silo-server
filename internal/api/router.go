@@ -423,6 +423,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			autoscanSvc := BuildAutoscanService(
 				autoscanRepo,
 				deps.PluginService,
+				plugins.NewInstallationStore(deps.DB),
 				requestsRepo,
 				settingsRepo,
 				deps.FolderRepo,

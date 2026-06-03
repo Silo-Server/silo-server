@@ -241,7 +241,7 @@ type autoscanSourceResponse struct {
 	ID                  string     `json:"id"`
 	InstallationID      int        `json:"installation_id"`
 	CapabilityID        string     `json:"capability_id"`
-	ConnectionID        string     `json:"connection_id"`
+	ConnectionID        *string    `json:"connection_id"`
 	Enabled             bool       `json:"enabled"`
 	PollIntervalSeconds *int       `json:"poll_interval_seconds,omitempty"`
 	LastRunAt           *time.Time `json:"last_run_at,omitempty"`
@@ -303,14 +303,26 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		writeAutoscanError(w, err)
 		return
 	}
+	// The effective connection is the one in the update, else the one already
+	// bound to the source. A whitespace-only update id counts as absent.
 	connectionID := strings.TrimSpace(in.ConnectionID)
-	if connectionID == "" {
-		connectionID = existing.ConnectionID
+	if connectionID == "" && existing.ConnectionID != nil {
+		connectionID = strings.TrimSpace(*existing.ConnectionID)
+	}
+	// Enabling a source requires a bound connection: it can't be polled without
+	// credentials.
+	if in.Enabled && connectionID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "connection_id is required to enable a source")
+		return
+	}
+	var connArg *string
+	if connectionID != "" {
+		connArg = &connectionID
 	}
 	updated, err := h.repo.UpsertSource(r.Context(), autoscan.Source{
 		InstallationID:      existing.InstallationID,
 		CapabilityID:        existing.CapabilityID,
-		ConnectionID:        connectionID,
+		ConnectionID:        connArg,
 		Enabled:             in.Enabled,
 		PollIntervalSeconds: in.PollIntervalSeconds,
 	})
@@ -344,7 +356,7 @@ type autoscanStatusSource struct {
 	ID             string     `json:"id"`
 	InstallationID int        `json:"installation_id"`
 	CapabilityID   string     `json:"capability_id"`
-	ConnectionID   string     `json:"connection_id"`
+	ConnectionID   *string    `json:"connection_id"`
 	Enabled        bool       `json:"enabled"`
 	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
 	LastError      *string    `json:"last_error,omitempty"`

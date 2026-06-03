@@ -30,7 +30,7 @@ CREATE TABLE public.autoscan_sources (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     installation_id integer NOT NULL,
     capability_id text NOT NULL,
-    connection_id uuid NOT NULL REFERENCES public.autoscan_connections(id) ON DELETE RESTRICT,
+    connection_id uuid REFERENCES public.autoscan_connections(id) ON DELETE RESTRICT,
     enabled boolean NOT NULL DEFAULT false,
     poll_interval_seconds integer,
     marker text,
