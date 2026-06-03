@@ -291,7 +291,7 @@ func TestAutoscanHandleUpdateSourceEnableWithoutConnectionReturns400(t *testing.
 	}
 }
 
-func TestAutoscanHandleUpdateSourceEnableWithExistingConnectionSucceeds(t *testing.T) {
+func TestAutoscanHandleUpdateSourceEnableWithConnectionSucceeds(t *testing.T) {
 	var got autoscan.Source
 	store := &fakeAutoscanStore{
 		getSourceFn: func(id string) (autoscan.Source, error) {
@@ -304,10 +304,9 @@ func TestAutoscanHandleUpdateSourceEnableWithExistingConnectionSucceeds(t *testi
 	}
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
-	// Enable without supplying a new connection_id: the existing bound connection
-	// must satisfy the requirement.
+	// Full-state update: enable=true and supply the connection_id explicitly.
 	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
-		`{"enabled":true}`, "src-1")
+		`{"enabled":true,"connection_id":"conn-1"}`, "src-1")
 	rec := httptest.NewRecorder()
 	h.HandleUpdateSource(rec, req)
 
@@ -315,7 +314,90 @@ func TestAutoscanHandleUpdateSourceEnableWithExistingConnectionSucceeds(t *testi
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	if got.ConnectionID == nil || *got.ConnectionID != "conn-1" {
-		t.Fatalf("expected existing connection preserved, got %+v", got.ConnectionID)
+		t.Fatalf("expected connection bound, got %+v", got.ConnectionID)
+	}
+}
+
+func TestAutoscanHandleUpdateSourceBindConnectionSucceeds(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			// Source starts with no connection.
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: nil}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// Bind a connection while leaving the source disabled.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":false,"connection_id":"conn-42"}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.ConnectionID == nil || *got.ConnectionID != "conn-42" {
+		t.Fatalf("expected connection bound to conn-42, got %+v", got.ConnectionID)
+	}
+}
+
+func TestAutoscanHandleUpdateSourceUnbindConnectionSucceeds(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			// Source starts with a connection already bound.
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// Unbind: send connection_id: null explicitly with enabled: false.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":false,"connection_id":null}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.ConnectionID != nil {
+		t.Fatalf("expected connection unbound (nil), got %+v", got.ConnectionID)
+	}
+}
+
+func TestAutoscanHandleUpdateSourceUnbindWhileEnabledReturns400(t *testing.T) {
+	upserted := false
+	store := &fakeAutoscanStore{
+		getSourceFn: func(id string) (autoscan.Source, error) {
+			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
+		},
+		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			upserted = true
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// Attempting to enable=true while sending connection_id: null must be rejected.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":true,"connection_id":null}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if upserted {
+		t.Fatal("UpsertSource was called when enabling with null connection")
 	}
 }
 

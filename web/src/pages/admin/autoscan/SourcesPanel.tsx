@@ -83,44 +83,29 @@ function SourceRow({
     edit.intervalStr !==
       (source.poll_interval_seconds != null ? String(source.poll_interval_seconds) : "");
 
-  function commitChange(patch: Partial<AutoscanSourceInput>) {
+  /** Build the full desired state to send on every mutation. */
+  function fullBody(overrides: Partial<AutoscanSourceInput>): AutoscanSourceInput {
     const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
-
-    const body: AutoscanSourceInput = {
+    return {
+      connection_id: edit.connectionId === "" ? null : edit.connectionId,
       enabled: source.enabled,
-      connection_id: edit.connectionId || undefined,
       poll_interval_seconds: intervalVal,
-      ...patch,
+      ...overrides,
     };
-
-    update.mutate({ id: source.id, body });
   }
 
   function handleToggleEnabled(checked: boolean) {
-    if (checked && !edit.connectionId) {
-      // Surface a friendly message; backend would 400 anyway.
-      // The toast comes from the mutation's onError handler.
-      update.mutate(
-        {
-          id: source.id,
-          body: {
-            enabled: true,
-            connection_id: undefined,
-            poll_interval_seconds: edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr),
-          },
-        },
-        // onError is handled globally in useUpdateAutoscanSource; nothing extra needed here.
-      );
-      return;
-    }
-    commitChange({ enabled: checked });
+    update.mutate({
+      id: source.id,
+      body: fullBody({ enabled: checked }),
+    });
   }
 
   function handleIntervalBlur() {
     const raw = edit.intervalStr.trim();
     if (raw === "") {
       setIntervalError(false);
-      if (isDirty) commitChange({});
+      if (isDirty) update.mutate({ id: source.id, body: fullBody({}) });
       return;
     }
     const n = Number(raw);
@@ -129,19 +114,19 @@ function SourceRow({
       return;
     }
     setIntervalError(false);
-    if (isDirty) commitChange({});
+    if (isDirty) update.mutate({ id: source.id, body: fullBody({}) });
   }
 
   function handleConnectionChange(value: string) {
     const next = value === "__none__" ? "" : value;
     setEdit((e) => ({ ...e, connectionId: next }));
-    // Auto-save connection change immediately.
+    // Auto-save connection change immediately; always send full state.
     const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
     update.mutate({
       id: source.id,
       body: {
+        connection_id: next === "" ? null : next,
         enabled: source.enabled,
-        connection_id: next || undefined,
         poll_interval_seconds: intervalVal,
       },
     });
@@ -166,7 +151,10 @@ function SourceRow({
         {source.connection_id === null && !edit.connectionId ? (
           <div className="flex items-center gap-2">
             <Select value="__none__" onValueChange={handleConnectionChange}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger
+                className="w-[200px]"
+                aria-label={`Connection for ${sourceLabel(source)}`}
+              >
                 <SelectValue placeholder="No connection" />
               </SelectTrigger>
               <SelectContent>
@@ -184,7 +172,10 @@ function SourceRow({
           </div>
         ) : (
           <Select value={edit.connectionId || "__none__"} onValueChange={handleConnectionChange}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger
+              className="w-[200px]"
+              aria-label={`Connection for ${sourceLabel(source)}`}
+            >
               <SelectValue placeholder="No connection" />
             </SelectTrigger>
             <SelectContent>
@@ -207,6 +198,7 @@ function SourceRow({
             placeholder="Default"
             value={edit.intervalStr}
             aria-invalid={intervalError}
+            aria-label={`Poll interval seconds for ${sourceLabel(source)}`}
             onChange={(e) => {
               setIntervalError(false);
               setEdit((ed) => ({ ...ed, intervalStr: e.target.value }));

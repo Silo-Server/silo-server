@@ -279,10 +279,16 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 // autoscanSourceInput is the source write payload. The (installation_id,
 // capability_id) identity is read from the existing source row, so only the
 // schedulable/binding fields are accepted.
+//
+// connection_id is a *string so the caller can express three distinct states:
+//   - field absent / JSON null  → nil  → unbind (clear the connection)
+//   - non-empty string UUID     → bind to that connection
+//
+// The UI must always send the full desired state for all three fields.
 type autoscanSourceInput struct {
-	ConnectionID        string `json:"connection_id"`
-	Enabled             bool   `json:"enabled"`
-	PollIntervalSeconds *int   `json:"poll_interval_seconds"`
+	ConnectionID        *string `json:"connection_id"`
+	Enabled             bool    `json:"enabled"`
+	PollIntervalSeconds *int    `json:"poll_interval_seconds"`
 }
 
 func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -303,21 +309,20 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		writeAutoscanError(w, err)
 		return
 	}
-	// The effective connection is the one in the update, else the one already
-	// bound to the source. A whitespace-only update id counts as absent.
-	connectionID := strings.TrimSpace(in.ConnectionID)
-	if connectionID == "" && existing.ConnectionID != nil {
-		connectionID = strings.TrimSpace(*existing.ConnectionID)
+	// connection_id is a full-state field: nil means unbind, a UUID string
+	// means bind. A whitespace-only string is normalised to nil (unbound).
+	var connArg *string
+	if in.ConnectionID != nil {
+		trimmed := strings.TrimSpace(*in.ConnectionID)
+		if trimmed != "" {
+			connArg = &trimmed
+		}
 	}
 	// Enabling a source requires a bound connection: it can't be polled without
 	// credentials.
-	if in.Enabled && connectionID == "" {
+	if in.Enabled && connArg == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "connection_id is required to enable a source")
 		return
-	}
-	var connArg *string
-	if connectionID != "" {
-		connArg = &connectionID
 	}
 	updated, err := h.repo.UpsertSource(r.Context(), autoscan.Source{
 		InstallationID:      existing.InstallationID,

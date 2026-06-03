@@ -1701,9 +1701,9 @@ export interface AutoscanSource {
 }
 
 export interface AutoscanSourceInput {
-  connection_id?: string;
+  connection_id: string | null;
   enabled: boolean;
-  poll_interval_seconds?: number | null;
+  poll_interval_seconds: number | null;
 }
 
 export interface AutoscanSourcesResponse {
