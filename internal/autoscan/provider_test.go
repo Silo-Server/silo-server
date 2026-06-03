@@ -14,7 +14,7 @@ type capturingClient struct {
 
 func (c *capturingClient) PollChanges(_ context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error) {
 	c.last = req
-	return &pluginv1.PollChangesResponse{ChangedPaths: []string{"/mnt/media/x"}, NextMarker: "m2"}, nil
+	return &pluginv1.PollChangesResponse{SourcePaths: []string{"/mnt/media/x"}, NextMarker: "m2"}, nil
 }
 
 // capturingResolver yields a fixed capturingClient.

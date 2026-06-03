@@ -47,5 +47,8 @@ func (p *pluginProvider) PollChanges(ctx context.Context, installationID int, ca
 	if err != nil {
 		return nil, "", err
 	}
-	return resp.GetChangedPaths(), resp.GetNextMarker(), nil
+	// The merged scan_source contract renamed changed_paths -> source_paths: the
+	// plugin now returns RAW source-namespace paths. The host applies per-source
+	// path rewrites (see service.PollOnce) before resolving/enqueueing them.
+	return resp.GetSourcePaths(), resp.GetNextMarker(), nil
 }
