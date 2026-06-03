@@ -82,8 +82,13 @@ func NewService(
 func (s *Service) PollOnce(ctx context.Context) error {
 	// Keep the source list in sync with installed scan_source plugins on the poll
 	// cadence. Discovery failures are non-fatal: a stale source list still polls.
-	if derr := s.DiscoverSources(ctx); derr != nil {
+	// present is the set of currently-discovered (installation, capability) pairs;
+	// a nil set means discovery is unavailable (no lister, or it failed), in which
+	// case we do NOT prune orphans — every enabled source is assumed present.
+	present, derr := s.DiscoverSources(ctx)
+	if derr != nil {
 		slog.WarnContext(ctx, "autoscan: discover sources failed", "err", derr)
+		present = nil
 	}
 
 	settings, err := s.store.GetSettings(ctx)
@@ -101,6 +106,16 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	now := time.Now()
 
 	for _, src := range sources {
+		// Skip orphaned sources: an enabled source whose scan_source plugin has
+		// been uninstalled/disabled is no longer in the discovered set, so polling
+		// it would error every cycle. Skip it quietly (no RecordError) so the spam
+		// stops; the operator can delete it via the source delete endpoint. A nil
+		// `present` set means discovery is unavailable — don't prune in that case.
+		if present != nil {
+			if _, ok := present[discoveredKey{InstallationID: src.InstallationID, CapabilityID: src.CapabilityID}]; !ok {
+				continue
+			}
+		}
 		// An enabled source with no bound connection can't be polled; surface why
 		// so the UI shows it as "needs attention" rather than silently stalling.
 		if src.ConnectionID == nil {

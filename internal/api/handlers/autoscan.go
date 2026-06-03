@@ -27,6 +27,7 @@ type autoscanStore interface {
 	ListSources(ctx context.Context) ([]autoscan.Source, error)
 	GetSource(ctx context.Context, id string) (autoscan.Source, error)
 	UpsertSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
+	DeleteSource(ctx context.Context, id string) error
 }
 
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
@@ -336,6 +337,19 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, sourceResponse(updated))
+}
+
+// HandleDeleteSource removes a source row. This is the operator's escape hatch
+// for an orphaned source (one whose scan_source plugin was uninstalled): the
+// poll loop skips such rows quietly, and this endpoint clears them. An unknown
+// id maps to 404 via autoscan.ErrNotFound.
+func (h *AutoscanHandler) HandleDeleteSource(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if err := h.repo.DeleteSource(r.Context(), id); err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Trigger ---

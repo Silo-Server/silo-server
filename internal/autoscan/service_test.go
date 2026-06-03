@@ -320,3 +320,40 @@ func TestPollOnceRunsSourcePastItsInterval(t *testing.T) {
 		t.Fatalf("expected marker advanced for s1")
 	}
 }
+
+func TestPollOnceSkipsOrphanedSourceQuietly(t *testing.T) {
+	// Two enabled sources: only "arr-live" is still discovered; "arr-gone"'s
+	// plugin has been uninstalled. The orphan must be skipped quietly — no poll,
+	// no RecordError spam — while the live source still polls normally.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{
+			{ID: "live", InstallationID: 1, CapabilityID: "arr-live", ConnectionID: strptr("c1"), Enabled: true},
+			{ID: "gone", InstallationID: 2, CapabilityID: "arr-gone", ConnectionID: strptr("c1"), Enabled: true},
+		},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr-live": {"/mnt/media/Show/S01/E01.mkv"},
+		"arr-gone": {"/mnt/media/Other/S01/E01.mkv"},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	// Lister reports only the live capability; the orphan is absent.
+	lister := fakeLister{sources: []DiscoveredSource{{InstallationID: 1, CapabilityID: "arr-live"}}}
+	svc := NewService(store, prov, passthroughConnRes{}, fakeResolver{}, q, allowSuppressor{}, lister)
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("only the live source should enqueue, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if _, ok := store.advanced["live"]; !ok {
+		t.Fatalf("expected live source marker advanced")
+	}
+	if _, ok := store.advanced["gone"]; ok {
+		t.Fatalf("orphaned source must NOT poll/advance")
+	}
+	if _, ok := store.recorded["gone"]; ok {
+		t.Fatalf("orphaned source must be skipped quietly, but an error was recorded: %q", store.recorded["gone"])
+	}
+}

@@ -28,7 +28,8 @@ func TestDiscoverSourcesSeedsEachCapability(t *testing.T) {
 	seeder := &spySeeder{}
 	svc := &Service{lister: lister, seeder: seeder}
 
-	if err := svc.DiscoverSources(context.Background()); err != nil {
+	present, err := svc.DiscoverSources(context.Background())
+	if err != nil {
 		t.Fatalf("DiscoverSources: %v", err)
 	}
 	if len(seeder.ensured) != 2 {
@@ -37,15 +38,25 @@ func TestDiscoverSourcesSeedsEachCapability(t *testing.T) {
 	if seeder.ensured[0] != (DiscoveredSource{1, "arr-a"}) || seeder.ensured[1] != (DiscoveredSource{2, "arr-b"}) {
 		t.Fatalf("unexpected seeded sources: %+v", seeder.ensured)
 	}
+	if len(present) != 2 {
+		t.Fatalf("expected discovered set of 2, got %d: %+v", len(present), present)
+	}
+	if _, ok := present[discoveredKey{1, "arr-a"}]; !ok {
+		t.Fatalf("discovered set missing 1/arr-a: %+v", present)
+	}
 }
 
 func TestDiscoverSourcesNilListerNoop(t *testing.T) {
 	seeder := &spySeeder{}
 	svc := &Service{lister: nil, seeder: seeder}
-	if err := svc.DiscoverSources(context.Background()); err != nil {
+	present, err := svc.DiscoverSources(context.Background())
+	if err != nil {
 		t.Fatalf("DiscoverSources: %v", err)
 	}
 	if len(seeder.ensured) != 0 {
 		t.Fatalf("nil lister must seed nothing, got %+v", seeder.ensured)
+	}
+	if present != nil {
+		t.Fatalf("nil lister must return a nil discovered set, got %+v", present)
 	}
 }

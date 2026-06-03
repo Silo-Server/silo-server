@@ -24,6 +24,7 @@ type fakeAutoscanStore struct {
 	listSourcesFn      func() ([]autoscan.Source, error)
 	getSourceFn        func(string) (autoscan.Source, error)
 	upsertSourceFn     func(autoscan.Source) (autoscan.Source, error)
+	deleteSourceFn     func(string) error
 }
 
 func (f *fakeAutoscanStore) GetSettings(context.Context) (autoscan.Settings, error) {
@@ -87,6 +88,13 @@ func (f *fakeAutoscanStore) UpsertSource(_ context.Context, s autoscan.Source) (
 		return f.upsertSourceFn(s)
 	}
 	return s, nil
+}
+
+func (f *fakeAutoscanStore) DeleteSource(_ context.Context, id string) error {
+	if f.deleteSourceFn != nil {
+		return f.deleteSourceFn(id)
+	}
+	return nil
 }
 
 type fakeAutoscanTriggerer struct {
@@ -458,6 +466,45 @@ func TestAutoscanHandleUpdateConnectionBlankKeyPassedThroughForKeep(t *testing.T
 	}
 	if !body.HasAPIKey {
 		t.Fatalf("expected preserved key reflected as has_api_key=true, got %+v", body)
+	}
+}
+
+func TestAutoscanHandleDeleteSourceSucceeds(t *testing.T) {
+	deleted := ""
+	store := &fakeAutoscanStore{
+		deleteSourceFn: func(id string) error {
+			deleted = id
+			return nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("DELETE", "/api/v1/admin/autoscan/sources/src-1", "", "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteSource(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if deleted != "src-1" {
+		t.Fatalf("expected DeleteSource called with src-1, got %q", deleted)
+	}
+}
+
+func TestAutoscanHandleDeleteSourceNotFoundReturns404(t *testing.T) {
+	store := &fakeAutoscanStore{
+		deleteSourceFn: func(string) error {
+			return autoscan.ErrNotFound
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("DELETE", "/api/v1/admin/autoscan/sources/missing", "", "missing")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteSource(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

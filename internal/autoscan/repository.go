@@ -286,6 +286,20 @@ func (r *Repository) GetSource(ctx context.Context, id string) (Source, error) {
 	return s, nil
 }
 
+// DeleteSource removes a source row by id. It lets an operator clear an orphaned
+// source (one whose scan_source plugin was uninstalled/disabled). An unknown id
+// maps to ErrNotFound.
+func (r *Repository) DeleteSource(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM autoscan_sources WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete autoscan source: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: source %s", ErrNotFound, id)
+	}
+	return nil
+}
+
 // AdvanceMarker stores the opaque next marker for a source, stamps last_run_at,
 // and clears any prior error. Called only after a successful enqueue.
 func (r *Repository) AdvanceMarker(ctx context.Context, sourceID, marker string) error {

@@ -2076,6 +2076,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Delete("/autoscan/connections/{id}", autoscanHandler.HandleDeleteConnection)
 								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
 								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
+								r.Delete("/autoscan/sources/{id}", autoscanHandler.HandleDeleteSource)
 								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
 								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
 							}
