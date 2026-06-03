@@ -24,7 +24,8 @@ type fakeAutoscanStore struct {
 	deleteConnectionFn func(string) error
 	listSourcesFn      func() ([]autoscan.Source, error)
 	getSourceFn        func(string) (autoscan.Source, error)
-	upsertSourceFn     func(autoscan.Source) (autoscan.Source, error)
+	createSourceFn     func(autoscan.Source) (autoscan.Source, error)
+	updateSourceFn     func(autoscan.Source) (autoscan.Source, error)
 	deleteSourceFn     func(string) error
 }
 
@@ -84,9 +85,16 @@ func (f *fakeAutoscanStore) GetSource(_ context.Context, id string) (autoscan.So
 	return autoscan.Source{ID: id}, nil
 }
 
-func (f *fakeAutoscanStore) UpsertSource(_ context.Context, s autoscan.Source) (autoscan.Source, error) {
-	if f.upsertSourceFn != nil {
-		return f.upsertSourceFn(s)
+func (f *fakeAutoscanStore) CreateSource(_ context.Context, s autoscan.Source) (autoscan.Source, error) {
+	if f.createSourceFn != nil {
+		return f.createSourceFn(s)
+	}
+	return s, nil
+}
+
+func (f *fakeAutoscanStore) UpdateSource(_ context.Context, s autoscan.Source) (autoscan.Source, error) {
+	if f.updateSourceFn != nil {
+		return f.updateSourceFn(s)
 	}
 	return s, nil
 }
@@ -115,9 +123,17 @@ func (f *fakeTriggerUpdater) UpdateTriggers(key string, cfgs []taskmanager.Trigg
 }
 
 type fakeAutoscanTriggerer struct {
-	called     bool
-	discovered bool
-	err        error
+	called bool
+	err    error
+	// available is returned by ListAvailableScanSources (the Add-source picker /
+	// create-validation set).
+	available []autoscan.AvailableScanSource
+	// testResult / testErr drive TestConnection + TestConnectionByID.
+	testResult autoscan.ConnectionTestResult
+	testErr    error
+	// suggestions / suggestErr drive SuggestRewrites.
+	suggestions autoscan.RewriteSuggestions
+	suggestErr  error
 	// done, when non-nil, receives once PollOnce runs. HandleTrigger dispatches
 	// PollOnce on a detached goroutine, so tests synchronize on this instead of
 	// reading `called` straight after the handler returns (which races the
@@ -135,9 +151,20 @@ func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
 	return f.err
 }
 
-func (f *fakeAutoscanTriggerer) RefreshDiscovered(context.Context) error {
-	f.discovered = true
-	return nil
+func (f *fakeAutoscanTriggerer) ListAvailableScanSources(context.Context) ([]autoscan.AvailableScanSource, error) {
+	return f.available, nil
+}
+
+func (f *fakeAutoscanTriggerer) TestConnection(context.Context, autoscan.Connection) (autoscan.ConnectionTestResult, error) {
+	return f.testResult, f.testErr
+}
+
+func (f *fakeAutoscanTriggerer) TestConnectionByID(context.Context, string) (autoscan.ConnectionTestResult, error) {
+	return f.testResult, f.testErr
+}
+
+func (f *fakeAutoscanTriggerer) SuggestRewrites(context.Context, string) (autoscan.RewriteSuggestions, error) {
+	return f.suggestions, f.suggestErr
 }
 
 func newAutoscanRequest(method, target, body, id string) *http.Request {
@@ -191,15 +218,17 @@ func TestAutoscanHandleUpdateSettingsRejectsZeroInterval(t *testing.T) {
 	}
 }
 
-func TestAutoscanHandleListSourcesTriggersDiscovery(t *testing.T) {
-	// Viewing the sources list must seed rows for currently-installed scan_source
-	// plugins (installed via /admin/plugins), so they appear in Autoscan even
-	// when autoscan is disabled and no poll cycle has run.
+func TestAutoscanHandleListSourcesListsOnly(t *testing.T) {
+	// Sources are now operator-created (no auto-seed on list). The list endpoint
+	// must simply return the stored rows.
+	listed := false
 	store := &fakeAutoscanStore{
-		listSourcesFn: func() ([]autoscan.Source, error) { return nil, nil },
+		listSourcesFn: func() ([]autoscan.Source, error) {
+			listed = true
+			return []autoscan.Source{{ID: "src-1", InstallationID: 1, CapabilityID: "arr"}}, nil
+		},
 	}
-	trig := &fakeAutoscanTriggerer{}
-	h := NewAutoscanHandler(store, trig)
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
 	rec := httptest.NewRecorder()
 	h.HandleListSources(rec, newAutoscanRequest("GET", "/api/v1/admin/autoscan/sources", "", ""))
@@ -207,8 +236,219 @@ func TestAutoscanHandleListSourcesTriggersDiscovery(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !trig.discovered {
-		t.Fatal("HandleListSources did not run discovery; a freshly-installed plugin would not appear")
+	if !listed {
+		t.Fatal("HandleListSources did not list stored sources")
+	}
+	var body struct {
+		Sources []autoscanSourceResponse `json:"sources"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Sources) != 1 || body.Sources[0].ID != "src-1" {
+		t.Fatalf("unexpected sources: %+v", body.Sources)
+	}
+}
+
+func TestAutoscanHandleListAvailableScanSources(t *testing.T) {
+	trig := &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{
+		{InstallationID: 1, CapabilityID: "arr", PluginID: "sonarr", DisplayName: "Sonarr"},
+	}}
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
+
+	rec := httptest.NewRecorder()
+	h.HandleListAvailableScanSources(rec, newAutoscanRequest("GET", "/api/v1/admin/autoscan/scan-source-plugins", "", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Plugins []autoscanScanSourcePluginResponse `json:"plugins"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Plugins) != 1 || body.Plugins[0].PluginID != "sonarr" || body.Plugins[0].DisplayName != "Sonarr" {
+		t.Fatalf("unexpected plugins: %+v", body.Plugins)
+	}
+}
+
+func TestAutoscanHandleCreateSourceSucceeds(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		createSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			s.ID = "new-src"
+			return s, nil
+		},
+	}
+	trig := &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{
+		{InstallationID: 1, CapabilityID: "arr"},
+	}}
+	h := NewAutoscanHandler(store, trig)
+
+	req := newAutoscanRequest("POST", "/api/v1/admin/autoscan/sources",
+		`{"installation_id":1,"capability_id":"arr","connection_id":"conn-1","enabled":true}`, "")
+	rec := httptest.NewRecorder()
+	h.HandleCreateSource(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.InstallationID != 1 || got.CapabilityID != "arr" || got.ConnectionID == nil || *got.ConnectionID != "conn-1" {
+		t.Fatalf("unexpected created source: %+v", got)
+	}
+	var body autoscanSourceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.ID != "new-src" {
+		t.Fatalf("expected created id echoed, got %+v", body)
+	}
+}
+
+func TestAutoscanHandleCreateSourceRejectsUnknownCapability(t *testing.T) {
+	created := false
+	store := &fakeAutoscanStore{
+		createSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			created = true
+			return s, nil
+		},
+	}
+	// Installed set does NOT include (1, "arr").
+	trig := &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{
+		{InstallationID: 2, CapabilityID: "other"},
+	}}
+	h := NewAutoscanHandler(store, trig)
+
+	req := newAutoscanRequest("POST", "/api/v1/admin/autoscan/sources",
+		`{"installation_id":1,"capability_id":"arr","enabled":false}`, "")
+	rec := httptest.NewRecorder()
+	h.HandleCreateSource(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if created {
+		t.Fatal("CreateSource was called for an uninstalled capability")
+	}
+}
+
+func TestAutoscanHandleCreateSourceEnableWithoutConnectionReturns400(t *testing.T) {
+	created := false
+	store := &fakeAutoscanStore{
+		createSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			created = true
+			return s, nil
+		},
+	}
+	trig := &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{
+		{InstallationID: 1, CapabilityID: "arr"},
+	}}
+	h := NewAutoscanHandler(store, trig)
+
+	req := newAutoscanRequest("POST", "/api/v1/admin/autoscan/sources",
+		`{"installation_id":1,"capability_id":"arr","enabled":true}`, "")
+	rec := httptest.NewRecorder()
+	h.HandleCreateSource(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if created {
+		t.Fatal("CreateSource was called when enabling without a connection")
+	}
+}
+
+func TestAutoscanHandleTestConnectionOK(t *testing.T) {
+	trig := &fakeAutoscanTriggerer{testResult: autoscan.ConnectionTestResult{OK: true, Version: "4.0.1"}}
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
+
+	req := newAutoscanRequest("POST", "/api/v1/admin/autoscan/connections/test",
+		`{"base_url":"http://radarr:7878","api_key_ref":"k"}`, "")
+	rec := httptest.NewRecorder()
+	h.HandleTestConnection(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body autoscanTestConnectionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.OK || body.Version != "4.0.1" {
+		t.Fatalf("unexpected test result: %+v", body)
+	}
+}
+
+func TestAutoscanHandleTestConnectionFailureIs200WithError(t *testing.T) {
+	trig := &fakeAutoscanTriggerer{testResult: autoscan.ConnectionTestResult{OK: false, Err: "arr: HTTP 401"}}
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
+
+	req := newAutoscanRequest("POST", "/api/v1/admin/autoscan/connections/test",
+		`{"connection_id":"conn-1"}`, "")
+	rec := httptest.NewRecorder()
+	h.HandleTestConnection(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body autoscanTestConnectionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.OK || body.Error == "" {
+		t.Fatalf("expected ok=false with error, got %+v", body)
+	}
+}
+
+func TestAutoscanHandleTestConnectionRejectsEmptyInput(t *testing.T) {
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("POST", "/api/v1/admin/autoscan/connections/test", `{}`, "")
+	rec := httptest.NewRecorder()
+	h.HandleTestConnection(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAutoscanHandleRewriteSuggestions(t *testing.T) {
+	trig := &fakeAutoscanTriggerer{suggestions: autoscan.RewriteSuggestions{
+		Proposed:  []autoscan.ProposedRewrite{{From: "/data/tv", To: "/mnt/media/tv", MatchDepth: 1}},
+		Unmatched: []string{},
+		Ambiguous: []autoscan.AmbiguousRoot{},
+		Covered:   []string{},
+	}}
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
+
+	req := newAutoscanRequest("GET", "/api/v1/admin/autoscan/sources/src-1/rewrite-suggestions", "", "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleRewriteSuggestions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body autoscan.RewriteSuggestions
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Proposed) != 1 || body.Proposed[0].From != "/data/tv" {
+		t.Fatalf("unexpected suggestions: %+v", body)
+	}
+}
+
+func TestAutoscanHandleRewriteSuggestionsNoConnectionReturns400(t *testing.T) {
+	trig := &fakeAutoscanTriggerer{suggestErr: autoscan.ErrNoConnection}
+	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)
+
+	req := newAutoscanRequest("GET", "/api/v1/admin/autoscan/sources/src-1/rewrite-suggestions", "", "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleRewriteSuggestions(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -300,7 +540,7 @@ func TestAutoscanHandleUpdateConnectionRejectsBothEmpty(t *testing.T) {
 
 func TestAutoscanHandleUpdateSourceNotFoundReturns404(t *testing.T) {
 	store := &fakeAutoscanStore{
-		getSourceFn: func(string) (autoscan.Source, error) {
+		updateSourceFn: func(autoscan.Source) (autoscan.Source, error) {
 			return autoscan.Source{}, autoscan.ErrNotFound
 		},
 	}
@@ -323,7 +563,7 @@ func TestAutoscanHandleUpdateSourceEnableWithoutConnectionReturns400(t *testing.
 			// Existing source has no connection bound yet.
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: nil}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			upserted = true
 			return s, nil
 		},
@@ -349,7 +589,7 @@ func TestAutoscanHandleUpdateSourceEnableWithConnectionSucceeds(t *testing.T) {
 		getSourceFn: func(id string) (autoscan.Source, error) {
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			got = s
 			return s, nil
 		},
@@ -377,7 +617,7 @@ func TestAutoscanHandleUpdateSourceBindConnectionSucceeds(t *testing.T) {
 			// Source starts with no connection.
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: nil}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			got = s
 			return s, nil
 		},
@@ -405,7 +645,7 @@ func TestAutoscanHandleUpdateSourceUnbindConnectionSucceeds(t *testing.T) {
 			// Source starts with a connection already bound.
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			got = s
 			return s, nil
 		},
@@ -432,7 +672,7 @@ func TestAutoscanHandleUpdateSourceUnbindWhileEnabledReturns400(t *testing.T) {
 		getSourceFn: func(id string) (autoscan.Source, error) {
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			upserted = true
 			return s, nil
 		},
@@ -631,7 +871,7 @@ func TestAutoscanHandleUpdateSourceRoundTripsPathRewrites(t *testing.T) {
 		getSourceFn: func(id string) (autoscan.Source, error) {
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			got = s
 			return s, nil
 		},
@@ -666,7 +906,7 @@ func TestAutoscanHandleUpdateSourceRejectsBlankRewrite(t *testing.T) {
 		getSourceFn: func(id string) (autoscan.Source, error) {
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
 		},
-		upsertSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
 			upserted = true
 			return s, nil
 		},

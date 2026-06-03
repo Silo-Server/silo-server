@@ -2079,9 +2079,13 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Post("/autoscan/connections", autoscanHandler.HandleCreateConnection)
 								r.Put("/autoscan/connections/{id}", autoscanHandler.HandleUpdateConnection)
 								r.Delete("/autoscan/connections/{id}", autoscanHandler.HandleDeleteConnection)
+								r.Post("/autoscan/connections/test", autoscanHandler.HandleTestConnection)
+								r.Get("/autoscan/scan-source-plugins", autoscanHandler.HandleListAvailableScanSources)
 								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
+								r.Post("/autoscan/sources", autoscanHandler.HandleCreateSource)
 								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
 								r.Delete("/autoscan/sources/{id}", autoscanHandler.HandleDeleteSource)
+								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
 								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
 								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
 							}

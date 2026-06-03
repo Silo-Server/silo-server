@@ -8,6 +8,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
@@ -96,10 +97,33 @@ func (l PluginScanSourceLister) ListScanSources(ctx context.Context) ([]autoscan
 			out = append(out, autoscan.DiscoveredSource{
 				InstallationID: c.InstallationID,
 				CapabilityID:   c.ID,
+				PluginID:       inst.PluginID,
+				DisplayName:    scanSourceDisplayName(inst.PluginID, c),
 			})
 		}
 	}
 	return out, nil
+}
+
+// scanSourceDisplayName derives a human-friendly label for a scan_source
+// capability: the capability manifest's display_name when present, else the
+// plugin id (with the capability id appended when it adds information).
+func scanSourceDisplayName(pluginID string, c *plugins.Capability) string {
+	if c != nil && c.Metadata != nil {
+		if name, ok := c.Metadata["display_name"].(string); ok && strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name)
+		}
+	}
+	switch {
+	case pluginID != "" && c != nil && c.ID != "":
+		return pluginID + " / " + c.ID
+	case pluginID != "":
+		return pluginID
+	case c != nil:
+		return c.ID
+	default:
+		return ""
+	}
 }
 
 // AutoscanSecretResolver resolves an encrypted api-key reference to plaintext.
@@ -117,19 +141,26 @@ func BuildAutoscanService(
 	installationStore *plugins.InstallationStore,
 	requestsRepo *mediarequests.Repository,
 	secrets AutoscanSecretResolver,
-	folders scantrigger.FolderRepository,
+	folderRepo *catalog.FolderRepository,
 	queue autoscanQueuer,
 	redisClient *redis.Client,
 ) *autoscan.Service {
 	provider := autoscan.NewPluginProvider(PluginScanSourceAdapter{pluginService})
 	connRes := autoscan.NewConnectionResolver(RequestIntegrationLookup{requestsRepo}, secrets)
-	return autoscan.NewService(
+	svc := autoscan.NewService(
 		repo,
 		provider,
 		connRes,
-		scantrigger.NewResolver(folders),
+		scantrigger.NewResolver(folderRepo),
 		queue,
 		autoscan.NewRedisSuppressor(redisClient),
 		PluginScanSourceLister{installationStore},
 	)
+	// Wire the connection-test + rewrite-suggester deps: a (long-timeout)
+	// arr root-folder/status client and a Silo media-folder lister.
+	svc.SetSuggesterDeps(
+		autoscan.NewArrRootFolderClient(nil),
+		autoscan.NewCatalogFolderLister(folderRepo),
+	)
+	return svc
 }

@@ -28,18 +28,25 @@ type autoscanStore interface {
 	DeleteConnection(ctx context.Context, id string) error
 	ListSources(ctx context.Context) ([]autoscan.Source, error)
 	GetSource(ctx context.Context, id string) (autoscan.Source, error)
-	UpsertSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
+	CreateSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
+	UpdateSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
 	DeleteSource(ctx context.Context, id string) error
 }
 
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
 type autoscanTriggerer interface {
 	PollOnce(ctx context.Context) error
-	// RefreshDiscovered seeds source rows for currently-installed scan_source
-	// plugins. Called when the sources list is viewed so a plugin installed via
-	// /admin/plugins shows up in Autoscan immediately, without waiting for a
-	// poll cycle (which only runs when autoscan is enabled).
-	RefreshDiscovered(ctx context.Context) error
+	// ListAvailableScanSources enumerates installed scan_source capabilities for
+	// the Add-source picker, and is also used to validate a create request
+	// targets a currently-installed capability.
+	ListAvailableScanSources(ctx context.Context) ([]autoscan.AvailableScanSource, error)
+	// TestConnection probes an ad-hoc connection input; TestConnectionByID probes
+	// an existing stored connection.
+	TestConnection(ctx context.Context, c autoscan.Connection) (autoscan.ConnectionTestResult, error)
+	TestConnectionByID(ctx context.Context, id string) (autoscan.ConnectionTestResult, error)
+	// SuggestRewrites proposes path rewrites by matching the source's arr root
+	// folders against Silo's media folders.
+	SuggestRewrites(ctx context.Context, sourceID string) (autoscan.RewriteSuggestions, error)
 }
 
 // autoscanTriggerUpdater reconfigures the poll task's schedule when the default
@@ -310,12 +317,8 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 }
 
 func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
-	// Seed source rows for any scan_source plugin installed via /admin/plugins so
-	// it appears here immediately, even when autoscan is disabled (no poll cycle).
-	// Best-effort: a discovery error must not block listing already-known sources.
-	if derr := h.svc.RefreshDiscovered(r.Context()); derr != nil {
-		slog.WarnContext(r.Context(), "autoscan: discover-on-list failed", "err", derr)
-	}
+	// Sources are operator-created (no auto-seed): just list what exists. Use
+	// GET /scan-source-plugins for the Add-source picker of installed capabilities.
 	sources, err := h.repo.ListSources(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -328,6 +331,120 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, struct {
 		Sources []autoscanSourceResponse `json:"sources"`
 	}{Sources: out})
+}
+
+// --- Available scan-source plugins (Add-source picker) ---
+
+type autoscanScanSourcePluginResponse struct {
+	InstallationID int    `json:"installation_id"`
+	CapabilityID   string `json:"capability_id"`
+	PluginID       string `json:"plugin_id"`
+	DisplayName    string `json:"display_name"`
+}
+
+// HandleListAvailableScanSources returns every installed scan_source capability
+// an operator can create a source against (the Add-source picker list).
+func (h *AutoscanHandler) HandleListAvailableScanSources(w http.ResponseWriter, r *http.Request) {
+	available, err := h.svc.ListAvailableScanSources(r.Context())
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	out := make([]autoscanScanSourcePluginResponse, 0, len(available))
+	for _, a := range available {
+		out = append(out, autoscanScanSourcePluginResponse{
+			InstallationID: a.InstallationID,
+			CapabilityID:   a.CapabilityID,
+			PluginID:       a.PluginID,
+			DisplayName:    a.DisplayName,
+		})
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Plugins []autoscanScanSourcePluginResponse `json:"plugins"`
+	}{Plugins: out})
+}
+
+// --- Create source ---
+
+// autoscanCreateSourceInput is the create payload: it names the installed
+// scan_source capability to bind (installation_id + capability_id) plus the
+// initial binding/scheduling fields. Unlike the update payload, identity is
+// supplied here rather than read from an existing row.
+type autoscanCreateSourceInput struct {
+	InstallationID      int                    `json:"installation_id"`
+	CapabilityID        string                 `json:"capability_id"`
+	ConnectionID        *string                `json:"connection_id"`
+	Enabled             bool                   `json:"enabled"`
+	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
+	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
+}
+
+// HandleCreateSource creates a new source bound to an installed scan_source
+// capability. Many sources may share one capability (e.g. one Sonarr plugin
+// fronting several arr servers, one source per connection). The capability must
+// currently be installed; enabling requires a bound connection.
+func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Request) {
+	var in autoscanCreateSourceInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	capID := strings.TrimSpace(in.CapabilityID)
+	if capID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "capability_id is required")
+		return
+	}
+	if in.PollIntervalSeconds != nil && *in.PollIntervalSeconds <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "poll_interval_seconds must be greater than 0 when set")
+		return
+	}
+	if err := validatePathRewrites(in.PathRewrites); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	// Validate the (installation_id, capability_id) is a currently-installed
+	// scan_source capability — a source may only be created against an installed
+	// plugin capability.
+	available, err := h.svc.ListAvailableScanSources(r.Context())
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	if !scanSourceInstalled(available, in.InstallationID, capID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "installation_id + capability_id is not a currently-installed scan_source capability")
+		return
+	}
+	connArg := normalizeConnectionID(in.ConnectionID)
+	// Enabling a source requires a bound connection: it can't be polled without
+	// credentials.
+	if in.Enabled && connArg == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "connection_id is required to enable a source")
+		return
+	}
+	created, err := h.repo.CreateSource(r.Context(), autoscan.Source{
+		InstallationID:      in.InstallationID,
+		CapabilityID:        capID,
+		ConnectionID:        connArg,
+		Enabled:             in.Enabled,
+		PollIntervalSeconds: in.PollIntervalSeconds,
+		PathRewrites:        normalizePathRewrites(in.PathRewrites),
+	})
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, sourceResponse(created))
+}
+
+// scanSourceInstalled reports whether (installationID, capabilityID) is in the
+// set of currently-installed scan_source capabilities.
+func scanSourceInstalled(available []autoscan.AvailableScanSource, installationID int, capabilityID string) bool {
+	for _, a := range available {
+		if a.InstallationID == installationID && a.CapabilityID == capabilityID {
+			return true
+		}
+	}
+	return false
 }
 
 // autoscanSourceInput is the source write payload. The (installation_id,
@@ -388,31 +505,19 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	// Look up the existing source so the (installation_id, capability_id)
-	// identity is preserved on upsert; a missing source maps to 404.
-	existing, err := h.repo.GetSource(r.Context(), id)
-	if err != nil {
-		writeAutoscanError(w, err)
-		return
-	}
 	// connection_id is a full-state field: nil means unbind, a UUID string
 	// means bind. A whitespace-only string is normalised to nil (unbound).
-	var connArg *string
-	if in.ConnectionID != nil {
-		trimmed := strings.TrimSpace(*in.ConnectionID)
-		if trimmed != "" {
-			connArg = &trimmed
-		}
-	}
+	connArg := normalizeConnectionID(in.ConnectionID)
 	// Enabling a source requires a bound connection: it can't be polled without
 	// credentials.
 	if in.Enabled && connArg == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "connection_id is required to enable a source")
 		return
 	}
-	updated, err := h.repo.UpsertSource(r.Context(), autoscan.Source{
-		InstallationID:      existing.InstallationID,
-		CapabilityID:        existing.CapabilityID,
+	// Update by id; identity (installation_id, capability_id) is immutable and
+	// preserved by the repo. A missing source maps to 404.
+	updated, err := h.repo.UpdateSource(r.Context(), autoscan.Source{
+		ID:                  id,
 		ConnectionID:        connArg,
 		Enabled:             in.Enabled,
 		PollIntervalSeconds: in.PollIntervalSeconds,
@@ -423,6 +528,20 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, sourceResponse(updated))
+}
+
+// normalizeConnectionID maps a full-state connection_id input to a stored value:
+// a nil pointer or a whitespace-only string means unbound (nil); a non-empty
+// trimmed UUID binds to that connection.
+func normalizeConnectionID(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*in)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // HandleDeleteSource removes a source row. This is the operator's escape hatch
@@ -436,6 +555,88 @@ func (h *AutoscanHandler) HandleDeleteSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Test connection ---
+
+// autoscanTestConnectionInput probes either an ad-hoc connection (own base_url +
+// api_key_ref, or a linked request_integration_id) OR an existing stored
+// connection by id. When connection_id is set, it takes precedence and the
+// ad-hoc fields are ignored.
+type autoscanTestConnectionInput struct {
+	ConnectionID         *string `json:"connection_id"`
+	BaseURL              string  `json:"base_url"`
+	APIKeyRef            string  `json:"api_key_ref"`
+	RequestIntegrationID *string `json:"request_integration_id"`
+}
+
+// autoscanTestConnectionResponse is the probe outcome: ok=true with the reported
+// arr version on success, or ok=false with a human-readable error on failure
+// (unreachable / 401 / non-200). A failed probe is still a 200 response — the
+// failure lives in the payload, not the HTTP status.
+type autoscanTestConnectionResponse struct {
+	OK      bool   `json:"ok"`
+	Version string `json:"version,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// HandleTestConnection probes an arr connection's /api/v3/system/status.
+func (h *AutoscanHandler) HandleTestConnection(w http.ResponseWriter, r *http.Request) {
+	var in autoscanTestConnectionInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	var (
+		result autoscan.ConnectionTestResult
+		err    error
+	)
+	if in.ConnectionID != nil && strings.TrimSpace(*in.ConnectionID) != "" {
+		result, err = h.svc.TestConnectionByID(r.Context(), strings.TrimSpace(*in.ConnectionID))
+	} else {
+		// Ad-hoc connection: must carry own base_url or a linked integration,
+		// same invariant as create/update.
+		conn := autoscan.Connection{
+			BaseURL:              strings.TrimSpace(in.BaseURL),
+			APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
+			RequestIntegrationID: in.RequestIntegrationID,
+		}
+		hasOwn := conn.BaseURL != ""
+		hasLink := conn.RequestIntegrationID != nil && strings.TrimSpace(*conn.RequestIntegrationID) != ""
+		if !hasOwn && !hasLink {
+			writeError(w, http.StatusBadRequest, "bad_request", "connection requires connection_id, base_url, or request_integration_id")
+			return
+		}
+		result, err = h.svc.TestConnection(r.Context(), conn)
+	}
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, autoscanTestConnectionResponse{
+		OK:      result.OK,
+		Version: result.Version,
+		Error:   result.Err,
+	})
+}
+
+// --- Rewrite suggestions (sync from arr) ---
+
+// HandleRewriteSuggestions proposes path rewrites for a source by matching its
+// bound connection's arr root folders against Silo's media folders. The
+// operator applies chosen suggestions via the normal source PUT (path_rewrites).
+func (h *AutoscanHandler) HandleRewriteSuggestions(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	suggestions, err := h.svc.SuggestRewrites(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, autoscan.ErrNoConnection) {
+			writeError(w, http.StatusBadRequest, "bad_request", "source has no bound connection; bind one before syncing rewrites")
+			return
+		}
+		writeAutoscanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, suggestions)
 }
 
 // --- Trigger ---
