@@ -400,6 +400,27 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// SourceRow helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Safely parse an interval string for inclusion in a source PUT body.
+ *
+ * - Empty/blank → null (intentional "use the global default").
+ * - Valid positive integer → that integer.
+ * - Anything else (NaN, non-integer, < 1, mid-edit garbage) → fall back to
+ *   the source's currently-persisted value so an unrelated save (enable toggle,
+ *   connection change) never corrupts the interval.
+ */
+function parseInterval(intervalStr: string, current: number | null): number | null {
+  const t = intervalStr.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isInteger(n) || n < 1) return current;
+  return n;
+}
+
+// ---------------------------------------------------------------------------
 // SourceRow
 // ---------------------------------------------------------------------------
 
@@ -425,7 +446,7 @@ function SourceRow({
 
   /** Build the full desired state to send on every mutation — always includes path_rewrites. */
   function fullBody(overrides: Partial<AutoscanSourceInput>): AutoscanSourceInput {
-    const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
+    const intervalVal = parseInterval(edit.intervalStr, source.poll_interval_seconds);
     // Trim and drop empty rewrite rows before sending.
     const path_rewrites = edit.rewrites
       .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
@@ -465,19 +486,11 @@ function SourceRow({
   function handleConnectionChange(value: string) {
     const next = value === "__none__" ? "" : value;
     setEdit((e) => ({ ...e, connectionId: next }));
-    // Auto-save connection change immediately; always send full state.
-    const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
-    const path_rewrites = edit.rewrites
-      .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
-      .filter((r) => r.from.length > 0 && r.to.length > 0);
+    // Auto-save connection change immediately; always send full state via fullBody
+    // so the interval is computed safely (never corrupted by mid-edit garbage).
     update.mutate({
       id: source.id,
-      body: {
-        connection_id: next === "" ? null : next,
-        enabled: source.enabled,
-        poll_interval_seconds: intervalVal,
-        path_rewrites,
-      },
+      body: fullBody({ connection_id: next === "" ? null : next }),
     });
   }
 
@@ -487,15 +500,9 @@ function SourceRow({
     const path_rewrites = (rewrites ?? edit.rewrites)
       .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
       .filter((r) => r.from.length > 0 && r.to.length > 0);
-    const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
     update.mutate({
       id: source.id,
-      body: {
-        connection_id: edit.connectionId === "" ? null : edit.connectionId,
-        enabled: source.enabled,
-        poll_interval_seconds: intervalVal,
-        path_rewrites,
-      },
+      body: fullBody({ path_rewrites }),
     });
   }
 
