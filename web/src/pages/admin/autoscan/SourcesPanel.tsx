@@ -1,6 +1,16 @@
-import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, Trash2 } from "lucide-react";
-import type { AutoscanSource, AutoscanSourceInput } from "@/api/types";
+import { useId, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
+import { Link } from "react-router";
+import type { AutoscanPathRewrite, AutoscanSource, AutoscanSourceInput } from "@/api/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,6 +24,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -61,19 +72,154 @@ function formatRelativeTime(isoString: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Row state for per-row edits (connection + interval)
+// Row state for per-row edits (connection + interval + rewrites)
 // ---------------------------------------------------------------------------
 
 interface RowEdit {
   connectionId: string; // "" means no connection
   intervalStr: string; // "" means use default
+  rewrites: AutoscanPathRewrite[];
 }
 
 function sourceToRowEdit(source: AutoscanSource): RowEdit {
   return {
     connectionId: source.connection_id ?? "",
     intervalStr: source.poll_interval_seconds != null ? String(source.poll_interval_seconds) : "",
+    rewrites: source.path_rewrites.map((r) => ({ ...r })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// RewriteEditor — expandable section inside a SourceRow
+// ---------------------------------------------------------------------------
+
+function RewriteEditor({
+  rewrites,
+  onChange,
+  onSave,
+  isSaving,
+}: {
+  rewrites: AutoscanPathRewrite[];
+  onChange: (next: AutoscanPathRewrite[]) => void;
+  onSave: () => void;
+  isSaving: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
+
+  function updateRewrite(index: number, patch: Partial<AutoscanPathRewrite>) {
+    setRewriteError(null);
+    onChange(rewrites.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+
+  function addRewrite() {
+    onChange([...rewrites, { from: "", to: "" }]);
+    setOpen(true);
+  }
+
+  function removeRewrite(index: number) {
+    setRewriteError(null);
+    onChange(rewrites.filter((_, i) => i !== index));
+  }
+
+  function handleSave() {
+    // Validate: any non-empty row must have both from and to filled in.
+    const hasIncomplete = rewrites.some(
+      (r) =>
+        (r.from.trim().length > 0 && r.to.trim().length === 0) ||
+        (r.from.trim().length === 0 && r.to.trim().length > 0),
+    );
+    if (hasIncomplete) {
+      setRewriteError("Each rewrite must have both a 'from' and a 'to' path.");
+      return;
+    }
+    setRewriteError(null);
+    onSave();
+  }
+
+  return (
+    <div className="border-border mt-3 rounded-md border">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={panelId}
+      >
+        {open ? (
+          <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
+        ) : (
+          <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
+        )}
+        <span className="text-sm font-medium">Path rewrites</span>
+        {rewrites.length > 0 && (
+          <Badge variant="secondary" className="text-xs">
+            {rewrites.length}
+          </Badge>
+        )}
+      </button>
+
+      {open && (
+        <div id={panelId} className="space-y-3 px-3 pb-3" role="region" aria-label="Path rewrites">
+          {rewrites.length === 0 ? (
+            <p className="text-muted-foreground text-xs">
+              No path rewrites. Map remote paths (from the scan source) to local library paths.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {rewrites.map((rewrite, index) => (
+                <div key={index} className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-muted-foreground text-xs">From</Label>
+                    <Input
+                      value={rewrite.from}
+                      onChange={(e) => updateRewrite(index, { from: e.target.value })}
+                      placeholder="/remote/media"
+                      className="h-8 text-sm"
+                      aria-label={`Rewrite ${index + 1} from path`}
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-muted-foreground text-xs">To</Label>
+                    <Input
+                      value={rewrite.to}
+                      onChange={(e) => updateRewrite(index, { to: e.target.value })}
+                      placeholder="/media"
+                      className="h-8 text-sm"
+                      aria-label={`Rewrite ${index + 1} to path`}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => removeRewrite(index)}
+                    aria-label={`Remove rewrite ${index + 1}`}
+                    className="mb-0.5 shrink-0"
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {rewriteError && <p className="text-destructive text-xs">{rewriteError}</p>}
+
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={addRewrite}>
+              <Plus className="size-3.5" />
+              Add rewrite
+            </Button>
+            <Button type="button" size="sm" disabled={isSaving} onClick={handleSave}>
+              Save rewrites
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -100,13 +246,18 @@ function SourceRow({
     edit.intervalStr !==
       (source.poll_interval_seconds != null ? String(source.poll_interval_seconds) : "");
 
-  /** Build the full desired state to send on every mutation. */
+  /** Build the full desired state to send on every mutation — always includes path_rewrites. */
   function fullBody(overrides: Partial<AutoscanSourceInput>): AutoscanSourceInput {
     const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
+    // Trim and drop empty rewrite rows before sending.
+    const path_rewrites = edit.rewrites
+      .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
+      .filter((r) => r.from.length > 0 && r.to.length > 0);
     return {
       connection_id: edit.connectionId === "" ? null : edit.connectionId,
       enabled: source.enabled,
       poll_interval_seconds: intervalVal,
+      path_rewrites,
       ...overrides,
     };
   }
@@ -139,14 +290,22 @@ function SourceRow({
     setEdit((e) => ({ ...e, connectionId: next }));
     // Auto-save connection change immediately; always send full state.
     const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
+    const path_rewrites = edit.rewrites
+      .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
+      .filter((r) => r.from.length > 0 && r.to.length > 0);
     update.mutate({
       id: source.id,
       body: {
         connection_id: next === "" ? null : next,
         enabled: source.enabled,
         poll_interval_seconds: intervalVal,
+        path_rewrites,
       },
     });
+  }
+
+  function handleRewriteSave() {
+    update.mutate({ id: source.id, body: fullBody({}) });
   }
 
   // A source can only be meaningfully enabled when it has a bound connection.
@@ -237,6 +396,13 @@ function SourceRow({
             ? `Floor only — values below the global default (${globalPollInterval}s) have no effect.`
             : "Floor only — values below the global default poll interval have no effect."}
         </p>
+        {/* Path rewrites editor — nested under the interval cell to avoid adding a new column */}
+        <RewriteEditor
+          rewrites={edit.rewrites}
+          onChange={(next) => setEdit((ed) => ({ ...ed, rewrites: next }))}
+          onSave={handleRewriteSave}
+          isSaving={update.isPending}
+        />
       </TableCell>
 
       {/* Enable toggle */}
@@ -330,22 +496,39 @@ export default function SourcesPanel() {
 
   if (list.length === 0) {
     return (
-      <p className="text-muted-foreground py-6 text-sm">
-        No scan sources found. Install a <code>scan_source</code> plugin capability to see sources
-        here.
-      </p>
+      <div className="space-y-3 py-6">
+        <p className="text-muted-foreground text-sm">
+          No scan sources found. Install a <code>scan_source</code> plugin capability to see sources
+          here.
+        </p>
+        <p className="text-muted-foreground text-sm">
+          Scan-source plugins (Sonarr/Radarr, etc.) are installed from the{" "}
+          <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
+            Plugins page
+          </Link>{" "}
+          — once installed they appear here automatically.
+        </p>
+      </div>
     );
   }
 
   return (
     <>
+      <p className="text-muted-foreground mb-3 text-xs">
+        Scan-source plugins are installed from the{" "}
+        <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
+          Plugins page
+        </Link>{" "}
+        and appear here automatically once installed.
+      </p>
+
       <div className="rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Source</TableHead>
               <TableHead>Connection</TableHead>
-              <TableHead>Interval</TableHead>
+              <TableHead>Interval &amp; path rewrites</TableHead>
               <TableHead>Enabled</TableHead>
               <TableHead>Last run</TableHead>
               <TableHead className="w-0" />

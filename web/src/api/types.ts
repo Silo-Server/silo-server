@@ -1689,6 +1689,11 @@ export interface AutoscanConnectionsResponse {
   connections: AutoscanConnection[];
 }
 
+export interface AutoscanPathRewrite {
+  from: string;
+  to: string;
+}
+
 export interface AutoscanSource {
   id: string;
   installation_id: number;
@@ -1698,12 +1703,14 @@ export interface AutoscanSource {
   poll_interval_seconds: number | null;
   last_run_at: string | null;
   last_error: string | null;
+  path_rewrites: AutoscanPathRewrite[];
 }
 
 export interface AutoscanSourceInput {
   connection_id: string | null;
   enabled: boolean;
   poll_interval_seconds: number | null;
+  path_rewrites?: AutoscanPathRewrite[];
 }
 
 export interface AutoscanSourcesResponse {
