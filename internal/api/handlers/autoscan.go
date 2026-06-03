@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
 // autoscanStore is the subset of *autoscan.Repository the handler needs. The
@@ -35,15 +36,35 @@ type autoscanTriggerer interface {
 	PollOnce(ctx context.Context) error
 }
 
+// autoscanTriggerUpdater reconfigures the poll task's schedule when the default
+// poll interval changes (satisfied by *taskmanager.TaskManager). It is optional:
+// when nil, a settings change still persists but only takes effect on restart.
+type autoscanTriggerUpdater interface {
+	UpdateTriggers(key string, triggerConfigs []taskmanager.TriggerConfig) error
+}
+
+// autoscanPollTaskKey is the task-manager key for the autoscan poll task. It must
+// match (*tasks.AutoscanPollTask).Key().
+const autoscanPollTaskKey = "autoscan_poll"
+
 // AutoscanHandler serves the admin-only autoscan settings/connections/sources/
 // trigger API.
 type AutoscanHandler struct {
-	repo autoscanStore
-	svc  autoscanTriggerer
+	repo     autoscanStore
+	svc      autoscanTriggerer
+	triggers autoscanTriggerUpdater // optional; nil skips rescheduling
 }
 
 func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer) *AutoscanHandler {
 	return &AutoscanHandler{repo: repo, svc: svc}
+}
+
+// SetTriggerUpdater wires the optional poll-task rescheduler so a settings change
+// re-applies the poll interval without a restart. Keeping it a setter (rather
+// than a constructor arg) lets tests construct the handler without a task
+// manager.
+func (h *AutoscanHandler) SetTriggerUpdater(t autoscanTriggerUpdater) {
+	h.triggers = t
 }
 
 // --- Settings ---
@@ -93,6 +114,18 @@ func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
+	}
+	// Reschedule the poll task so a changed default_poll_interval_seconds takes
+	// effect immediately rather than only after a restart. Optional: skip when no
+	// task manager is wired (e.g. tests). A reschedule failure is non-fatal — the
+	// new interval is persisted and will apply on the next restart regardless.
+	if h.triggers != nil {
+		intervalMs := int64(updated.DefaultPollIntervalSeconds) * 1000
+		if terr := h.triggers.UpdateTriggers(autoscanPollTaskKey, []taskmanager.TriggerConfig{
+			{Type: taskmanager.TriggerTypeInterval, IntervalMs: intervalMs},
+		}); terr != nil {
+			slog.WarnContext(r.Context(), "autoscan: reschedule poll task failed", "err", terr)
+		}
 	}
 	writeJSON(w, http.StatusOK, settingsResponse(updated))
 }

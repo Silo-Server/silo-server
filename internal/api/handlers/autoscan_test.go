@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
 type fakeAutoscanStore struct {
@@ -95,6 +96,22 @@ func (f *fakeAutoscanStore) DeleteSource(_ context.Context, id string) error {
 		return f.deleteSourceFn(id)
 	}
 	return nil
+}
+
+// fakeTriggerUpdater records the last UpdateTriggers call so a test can assert
+// the handler reschedules the poll task with the new interval.
+type fakeTriggerUpdater struct {
+	called   bool
+	key      string
+	triggers []taskmanager.TriggerConfig
+	err      error
+}
+
+func (f *fakeTriggerUpdater) UpdateTriggers(key string, cfgs []taskmanager.TriggerConfig) error {
+	f.called = true
+	f.key = key
+	f.triggers = cfgs
+	return f.err
 }
 
 type fakeAutoscanTriggerer struct {
@@ -505,6 +522,57 @@ func TestAutoscanHandleDeleteSourceNotFoundReturns404(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAutoscanHandleUpdateSettingsReschedulesPollTask(t *testing.T) {
+	// Fix 5: a successful settings update must reschedule the poll task with the
+	// new default_poll_interval_seconds.
+	store := &fakeAutoscanStore{
+		updateSettingsFn: func(s autoscan.Settings) (autoscan.Settings, error) {
+			return s, nil
+		},
+	}
+	trig := &fakeTriggerUpdater{}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+	h.SetTriggerUpdater(trig)
+
+	req := httptest.NewRequest("PUT", "/api/v1/admin/autoscan/settings",
+		strings.NewReader(`{"enabled":true,"default_poll_interval_seconds":300,"debounce_seconds":30}`))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSettings(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !trig.called {
+		t.Fatal("expected UpdateTriggers to be called on settings update")
+	}
+	if trig.key != "autoscan_poll" {
+		t.Fatalf("rescheduled wrong task key: %q", trig.key)
+	}
+	if len(trig.triggers) != 1 || trig.triggers[0].Type != taskmanager.TriggerTypeInterval {
+		t.Fatalf("unexpected triggers: %+v", trig.triggers)
+	}
+	// 300 seconds -> 300_000 ms.
+	if trig.triggers[0].IntervalMs != 300*1000 {
+		t.Fatalf("interval = %d ms, want 300000", trig.triggers[0].IntervalMs)
+	}
+}
+
+func TestAutoscanHandleUpdateSettingsWithoutTriggerUpdaterSucceeds(t *testing.T) {
+	// Fix 5: the reschedule dep is optional; a nil updater must not break the
+	// settings update.
+	store := &fakeAutoscanStore{}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := httptest.NewRequest("PUT", "/api/v1/admin/autoscan/settings",
+		strings.NewReader(`{"enabled":true,"default_poll_interval_seconds":300,"debounce_seconds":30}`))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSettings(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

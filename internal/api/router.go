@@ -431,6 +431,11 @@ func NewRouter(deps Dependencies) chi.Router {
 				deps.RedisClient,
 			)
 			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc)
+			// Wire the optional poll-task rescheduler so a settings change
+			// re-applies the poll interval without a restart.
+			if deps.TaskManager != nil {
+				autoscanHandler.SetTriggerUpdater(deps.TaskManager)
+			}
 		}
 
 		if deps.PersonRepo != nil {
