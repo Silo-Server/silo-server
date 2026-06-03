@@ -1,6 +1,11 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
-import type { AutoscanConnection, AutoscanConnectionInput } from "@/api/types";
+import { CheckCircle2, Pencil, Plus, Trash2, XCircle } from "lucide-react";
+import type {
+  AutoscanConnection,
+  AutoscanConnectionInput,
+  AutoscanConnectionTestInput,
+  AutoscanConnectionTestResult,
+} from "@/api/types";
 import type { RequestIntegration } from "@/api/types";
 import {
   AlertDialog,
@@ -44,6 +49,7 @@ import {
   useAutoscanConnections,
   useCreateAutoscanConnection,
   useDeleteAutoscanConnection,
+  useTestAutoscanConnection,
   useUpdateAutoscanConnection,
 } from "@/hooks/queries/useAutoscan";
 import { useRequestIntegrations } from "@/hooks/queries/useRequests";
@@ -102,9 +108,11 @@ export default function ConnectionsPanel() {
   const createConnection = useCreateAutoscanConnection();
   const updateConnection = useUpdateAutoscanConnection();
   const deleteConnection = useDeleteAutoscanConnection();
+  const testConnection = useTestAutoscanConnection();
 
   const [dialog, setDialog] = useState<DialogState>(BLANK_DIALOG);
   const [deleteTarget, setDeleteTarget] = useState<AutoscanConnection | null>(null);
+  const [testResult, setTestResult] = useState<AutoscanConnectionTestResult | null>(null);
 
   const arrIntegrations = (requestIntegrations.data ?? []).filter(isArrKind);
 
@@ -113,10 +121,12 @@ export default function ConnectionsPanel() {
   // -------------------------------------------------------------------------
 
   function openAddDialog() {
+    setTestResult(null);
     setDialog({ ...BLANK_DIALOG, open: true });
   }
 
   function openEditDialog(conn: AutoscanConnection) {
+    setTestResult(null);
     if (conn.request_integration_id) {
       setDialog({
         open: true,
@@ -143,8 +153,49 @@ export default function ConnectionsPanel() {
   }
 
   function closeDialog() {
+    setTestResult(null);
     setDialog(BLANK_DIALOG);
   }
+
+  // -------------------------------------------------------------------------
+  // Test connection (advisory — never blocks save)
+  // -------------------------------------------------------------------------
+
+  function handleTest() {
+    setTestResult(null);
+    let body: AutoscanConnectionTestInput;
+    if (dialog.editing && dialog.mode === "own") {
+      // Editing an existing own-credentials connection: test the saved record
+      // unless the operator typed new credentials in this dialog session.
+      if (dialog.baseUrl.trim() && dialog.apiKey.trim()) {
+        body = { base_url: dialog.baseUrl.trim(), api_key_ref: dialog.apiKey.trim() };
+      } else {
+        body = { connection_id: dialog.editing.id };
+      }
+    } else if (dialog.editing && dialog.mode === "reuse") {
+      body = { connection_id: dialog.editing.id };
+    } else if (dialog.mode === "reuse") {
+      body = { request_integration_id: dialog.requestIntegrationId };
+    } else {
+      body = {
+        base_url: dialog.baseUrl.trim(),
+        ...(dialog.apiKey.trim() ? { api_key_ref: dialog.apiKey.trim() } : {}),
+      };
+    }
+    testConnection.mutate(body, {
+      onSuccess: (result) => setTestResult(result),
+      onError: (err) =>
+        setTestResult({
+          ok: false,
+          error: err instanceof Error ? err.message : "Connection test failed",
+        }),
+    });
+  }
+
+  const canTest =
+    dialog.mode === "reuse"
+      ? Boolean(dialog.requestIntegrationId) || Boolean(dialog.editing)
+      : Boolean(dialog.baseUrl.trim()) || Boolean(dialog.editing);
 
   // -------------------------------------------------------------------------
   // Save
@@ -314,7 +365,10 @@ export default function ConnectionsPanel() {
                 ) : (
                   <Select
                     value={dialog.requestIntegrationId}
-                    onValueChange={(v) => setDialog((d) => ({ ...d, requestIntegrationId: v }))}
+                    onValueChange={(v) => {
+                      setTestResult(null);
+                      setDialog((d) => ({ ...d, requestIntegrationId: v }));
+                    }}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select an integration…" />
@@ -364,7 +418,10 @@ export default function ConnectionsPanel() {
                     id="conn-url"
                     placeholder="http://localhost:8989"
                     value={dialog.baseUrl}
-                    onChange={(e) => setDialog((d) => ({ ...d, baseUrl: e.target.value }))}
+                    onChange={(e) => {
+                      setTestResult(null);
+                      setDialog((d) => ({ ...d, baseUrl: e.target.value }));
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -381,7 +438,10 @@ export default function ConnectionsPanel() {
                     type="password"
                     placeholder={dialog.editing?.has_api_key ? "••••••••" : "Enter API key"}
                     value={dialog.apiKey}
-                    onChange={(e) => setDialog((d) => ({ ...d, apiKey: e.target.value }))}
+                    onChange={(e) => {
+                      setTestResult(null);
+                      setDialog((d) => ({ ...d, apiKey: e.target.value }));
+                    }}
                     autoComplete="new-password"
                   />
                 </div>
@@ -389,13 +449,50 @@ export default function ConnectionsPanel() {
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog} disabled={isSaving}>
-              Cancel
+          {/* Inline test result (advisory) */}
+          {testResult && (
+            <div
+              className={`flex items-start gap-2 rounded-md border p-2.5 text-sm ${
+                testResult.ok
+                  ? "border-green-500/30 bg-green-500/10"
+                  : "border-destructive/30 bg-destructive/10"
+              }`}
+              role="status"
+            >
+              {testResult.ok ? (
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-green-500" />
+              ) : (
+                <XCircle className="text-destructive mt-0.5 size-4 shrink-0" />
+              )}
+              <span
+                className={
+                  testResult.ok ? "text-green-600 dark:text-green-400" : "text-destructive"
+                }
+              >
+                {testResult.ok
+                  ? `Connected${testResult.version ? ` (v${testResult.version})` : ""}`
+                  : (testResult.error ?? "Connection failed")}
+              </span>
+            </div>
+          )}
+
+          <DialogFooter className="sm:justify-between">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={handleTest}
+              disabled={!canTest || testConnection.isPending}
+            >
+              {testConnection.isPending ? "Testing…" : "Test connection"}
             </Button>
-            <Button onClick={handleSave} disabled={!canSave || isSaving}>
-              {isSaving ? "Saving…" : dialog.editing ? "Save changes" : "Add connection"}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closeDialog} disabled={isSaving}>
+                Cancel
+              </Button>
+              <Button onClick={handleSave} disabled={!canSave || isSaving}>
+                {isSaving ? "Saving…" : dialog.editing ? "Save changes" : "Add connection"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
