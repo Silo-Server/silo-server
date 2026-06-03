@@ -79,6 +79,23 @@ func (fakeResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantr
 	return nil, nil
 }
 
+// unresolvableResolver treats every path as outside Silo's media folders,
+// returning a RequestError — the "none resolved → misconfiguration" signal.
+type unresolvableResolver struct{}
+
+func (unresolvableResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
+// denySuppressor resolves paths normally but denies every claim, simulating a
+// recently-scanned / debounced target (resolved but suppressed).
+type denySuppressor struct{}
+
+func (denySuppressor) ShouldScan(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (denySuppressor) Release(context.Context, string) error { return nil }
+
 type recordingQueuer struct{ enqueued []scantrigger.Target }
 
 func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.Target) error {
@@ -238,13 +255,13 @@ func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
 
 func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	// A freshly-enabled source with no path_rewrites: the provider returns paths
-	// that don't map to any Silo library folder. The marker must NOT advance (so
-	// the imports aren't skipped forever) and an explaining error is recorded.
+	// that don't map to any Silo library folder (the resolver RequestErrors on
+	// every path). The marker must NOT advance (so the imports aren't skipped
+	// forever) and an explaining error is recorded.
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
 			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-			// no PathRewrites: /data/tv/... never resolves under /mnt/media/
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -254,7 +271,9 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 		},
 	}, nextMarker: "m1"}
 	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
+	// unresolvableResolver rejects every path; allowSuppressor would happily claim
+	// anything, so the only reason nothing resolves is the resolver.
+	svc := NewService(store, prov, passthroughConnRes{}, unresolvableResolver{}, q, allowSuppressor{}, nil)
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
@@ -270,6 +289,42 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	}
 	if want := "returned 2 path(s)"; !strings.Contains(msg, want) {
 		t.Fatalf("recorded error %q should mention %q", msg, want)
+	}
+}
+
+func TestPollOnceAdvancesMarkerWhenResolvedButAllSuppressed(t *testing.T) {
+	// Paths DO resolve to a Silo library folder, but every claim is denied by the
+	// suppressor (recently scanned / debounced). This is NOT a misconfiguration:
+	// the work is effectively done, so the marker must ADVANCE and no error is
+	// recorded. Regression guard for treating "resolved-but-suppressed" as
+	// "nothing resolved."
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			// rewrite /data/tv -> /mnt/media/tv so fakeResolver resolves the paths.
+			PathRewrites: []PathRewrite{{From: "/data/tv", To: "/mnt/media/tv"}},
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
+			"/data/tv/Show/S01/E01.mkv",
+			"/data/tv/Show/S01/E02.mkv",
+		},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, denySuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("nothing should enqueue when every target is suppressed, got %d", len(q.enqueued))
+	}
+	if got, ok := store.advanced["s1"]; !ok || got != "m1" {
+		t.Fatalf("marker must advance to %q when paths resolve but are all suppressed, got %q ok=%v", "m1", got, ok)
+	}
+	if _, ok := store.recorded["s1"]; ok {
+		t.Fatalf("no error should be recorded when targets merely suppressed (work is debounced, not misconfigured)")
 	}
 }
 

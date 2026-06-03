@@ -197,7 +197,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			rewritten = append(rewritten, applyRewrites(normalizeSeparators(p), src.PathRewrites))
 		}
 
-		targets, claimed := s.resolveAndClaim(ctx, rewritten, ttl)
+		targets, claimed, resolvedAny := s.resolveAndClaim(ctx, rewritten, ttl)
 		if len(targets) > 0 {
 			if eerr := s.queue.EnqueueScans(ctx, targets); eerr != nil {
 				s.releaseClaims(ctx, claimed)
@@ -208,16 +208,22 @@ func (s *Service) PollOnce(ctx context.Context) error {
 
 		// Advancing the marker is what tells the provider "I've consumed up to
 		// here". Advance it ONLY when the work it represents is genuinely done:
-		//   - provider returned ZERO paths     → nothing to do, advance normally.
-		//   - returned paths AND ≥1 resolved    → enqueued (above), advance.
-		//   - returned paths AND ZERO resolved  → do NOT advance. This is the
+		//   - provider returned ZERO paths        → nothing to do, advance normally.
+		//   - returned paths AND ≥1 resolved       → enqueued (above), advance.
+		//   - returned paths, resolved but all
+		//     suppressed (recently scanned /
+		//     debounced)                           → work is effectively done; advance.
+		//   - returned paths AND NOTHING resolved  → do NOT advance. This is the
 		//     freshly-enabled-source state (path_rewrites not configured yet); the
 		//     incoming paths don't map to any Silo library folder. Advancing here
 		//     would skip those imports forever. Surface why so the operator can fix
 		//     the rewrites, then a later poll re-reads the same window and resolves.
 		// (Some-but-not-all resolving counts as resolved — the unresolved paths are
 		// legitimately outside Silo's libraries, so advancing is correct.)
-		if len(paths) > 0 && len(targets) == 0 {
+		//
+		// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
+		// yet be fully suppressed. Gate the error on resolvedAny, not targets.
+		if len(paths) > 0 && !resolvedAny {
 			msg := fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — check this source's path rewrites", len(paths))
 			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
 				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
@@ -242,12 +248,13 @@ func (s *Service) resolveConnection(ctx context.Context, connectionID string) (R
 
 // resolveAndClaim dedupes the changed paths to parent directories, resolves each
 // to a scan target, and atomically claims it via the suppressor. It returns the
-// targets to enqueue and the suppression keys claimed for them (so they can be
-// released if the enqueue fails). This is the PR #43 salvage loop, generalized
-// to take already-Silo-native paths.
-func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.Duration) ([]scantrigger.Target, []string) {
-	var targets []scantrigger.Target
-	var claimed []string
+// targets to enqueue, the suppression keys claimed for them (so they can be
+// released if the enqueue fails), and resolvedAny — whether ANY path resolved to
+// a Silo library folder, independent of suppression. resolvedAny lets PollOnce
+// distinguish "nothing resolved → misconfiguration" from "resolved but all
+// suppressed → debounced, work effectively done." This is the PR #43 salvage
+// loop, generalized to take already-Silo-native paths.
+func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.Duration) (targets []scantrigger.Target, claimed []string, resolvedAny bool) {
 	for _, dir := range uniqueParentDirs(paths) {
 		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
 		if rerr != nil {
@@ -263,6 +270,9 @@ func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.
 		if target == nil || target.Folder == nil {
 			continue
 		}
+		// This path maps to a real Silo library folder, regardless of whether the
+		// suppressor lets us claim it below.
+		resolvedAny = true
 		// Key on (folder, path) to match the scanqueue dedup granularity so two
 		// distinct subtrees under one library folder are not collapsed.
 		key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
@@ -274,7 +284,7 @@ func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.
 		targets = append(targets, *target)
 		claimed = append(claimed, key)
 	}
-	return targets, claimed
+	return targets, claimed, resolvedAny
 }
 
 // releaseClaims drops suppression claims (used when the scan enqueue fails so a
