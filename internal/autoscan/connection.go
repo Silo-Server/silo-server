@@ -38,7 +38,11 @@ func NewConnectionResolver(r RequestIntegrationLookup, s SecretResolver) *Connec
 // ref is then resolved to plaintext via the secrets resolver.
 func (cr *ConnectionResolver) Resolve(ctx context.Context, c Connection) (ResolvedConnection, error) {
 	baseURL, apiKeyRef := c.BaseURL, c.APIKeyRef
-	if c.RequestIntegrationID != nil {
+	// A pointer-to-empty-string request_integration_id is NOT a live link (it can
+	// arise from a both-NULL orphan or a stripped link). Treat empty/whitespace as
+	// "no link" so we don't call requests.Get("") and use the connection's own
+	// fields instead.
+	if c.RequestIntegrationID != nil && strings.TrimSpace(*c.RequestIntegrationID) != "" {
 		if cr.requests == nil {
 			return ResolvedConnection{}, fmt.Errorf("autoscan: linked requests integration %q: no lookup configured", *c.RequestIntegrationID)
 		}
