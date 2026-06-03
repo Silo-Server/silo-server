@@ -265,7 +265,8 @@ export default function ConnectionsPanel() {
             <p className="text-muted-foreground px-6 py-4 text-sm">Loading…</p>
           ) : list.length === 0 ? (
             <p className="text-muted-foreground px-6 py-6 text-sm">
-              No connections yet. Add one to link scan sources to an arr instance.
+              No connections yet. A connection holds credentials for a server-based source (e.g.
+              Sonarr/Radarr). Add one if your source needs to reach a server.
             </p>
           ) : (
             <Table>
@@ -327,8 +328,8 @@ export default function ConnectionsPanel() {
           <DialogHeader>
             <DialogTitle>{dialog.editing ? "Edit connection" : "Add connection"}</DialogTitle>
             <DialogDescription>
-              Connect a scan source to an arr instance by reusing an existing Requests integration
-              or by entering your own credentials.
+              Reuse a server you already configured in Requests (Sonarr/Radarr), or enter your own
+              credentials.
             </DialogDescription>
           </DialogHeader>
 

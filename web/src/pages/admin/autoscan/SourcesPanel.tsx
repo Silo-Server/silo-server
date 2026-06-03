@@ -281,12 +281,12 @@ function RewriteEditor({
               onClick={handleSync}
               title={
                 hasConnection
-                  ? "Fetch root-folder mappings from the arr instance"
+                  ? "Fetch root-folder mappings from the connected server"
                   : "Bind a connection first"
               }
             >
               <RefreshCw className={`size-3.5 ${suggest.isPending ? "animate-spin" : ""}`} />
-              {suggest.isPending ? "Syncing…" : "Sync from arr"}
+              {suggest.isPending ? "Syncing…" : "Sync from server"}
             </Button>
             <Button type="button" size="sm" disabled={isSaving} onClick={handleSave}>
               Save rewrites
@@ -506,9 +506,8 @@ function SourceRow({
     });
   }
 
-  // A source can only be meaningfully enabled when it has a bound connection.
-  // "Effective" means either the server-side binding is set OR the operator has
-  // selected one in the pending edit but hasn't saved yet.
+  // Whether this source has a bound connection (server-side or pending edit).
+  // Used to gate the Sync-from-server button, which needs a server to query.
   const hasEffectiveConnection = Boolean(source.connection_id) || Boolean(edit.connectionId);
 
   // Status column
@@ -546,7 +545,7 @@ function SourceRow({
               </SelectContent>
             </Select>
             <Badge variant="outline" className="text-muted-foreground shrink-0">
-              Needs connection
+              No connection
             </Badge>
           </div>
         ) : (
@@ -610,7 +609,7 @@ function SourceRow({
         <Switch
           checked={source.enabled}
           onCheckedChange={handleToggleEnabled}
-          disabled={update.isPending || !hasEffectiveConnection}
+          disabled={update.isPending}
           aria-label={`${sourceLabel(source)} enabled`}
         />
       </TableCell>
@@ -735,8 +734,9 @@ function AddSourceDialog({
         <DialogHeader>
           <DialogTitle>Add scan source</DialogTitle>
           <DialogDescription>
-            Create a scan source from an installed plugin and bind it to an arr connection. Add one
-            source per connection to watch multiple arr instances.
+            Create a scan source from an installed plugin. Bind a connection if the source needs to
+            reach a server (Sonarr/Radarr); a source that reads locally needs none. Add one source
+            per thing you want to watch.
           </DialogDescription>
         </DialogHeader>
 
@@ -793,8 +793,8 @@ function AddSourceDialog({
                 </SelectContent>
               </Select>
               <p className="text-muted-foreground text-xs">
-                Optional — you can bind a connection later. A source must have a connection before
-                it can be enabled.
+                Optional — bind one if the source needs to reach a server (e.g. Sonarr/Radarr).
+                Sources that read locally need no connection.
               </p>
             </div>
 
@@ -863,7 +863,7 @@ export default function SourcesPanel() {
         <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
           Plugins page
         </Link>
-        . Add a source for each arr connection you want to watch.
+        . Add a source for each thing you want to watch.
       </p>
       <Button variant="outline" size="sm" className="shrink-0" onClick={() => setAddOpen(true)}>
         <Plus />

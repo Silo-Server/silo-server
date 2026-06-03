@@ -160,8 +160,9 @@ export default function AdminAutoscan() {
               ))}
           </div>
           <p className="text-muted-foreground max-w-2xl text-sm leading-6">
-            Automatically detect library changes from your arr instances. Configure connections,
-            enable scan sources, and tune polling intervals.
+            Automatically detect library changes from installed scan-source plugins. Install them
+            from the Plugins page, configure each source, bind a connection if it needs one, and
+            tune polling intervals.
           </p>
         </div>
         <div className="flex items-center gap-3">
