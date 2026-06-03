@@ -145,49 +145,47 @@ export default function AdminAutoscan() {
   return (
     <div className="space-y-6">
       <div className="page-header">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
-                Autoscan
-              </h1>
-              {settings.data &&
-                (enabled ? (
-                  <Badge variant="secondary">Enabled</Badge>
-                ) : (
-                  <Badge variant="outline" className="text-muted-foreground">
-                    Disabled
-                  </Badge>
-                ))}
-            </div>
-            <p className="text-muted-foreground max-w-2xl text-sm leading-6">
-              Automatically detect library changes via arr webhook sources. Configure connections,
-              enable scan sources, and tune polling intervals.
-            </p>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
+              Autoscan
+            </h1>
+            {settings.data &&
+              (enabled ? (
+                <Badge variant="secondary">Enabled</Badge>
+              ) : (
+                <Badge variant="outline" className="text-muted-foreground">
+                  Disabled
+                </Badge>
+              ))}
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="autoscan-enabled" className="text-muted-foreground text-sm">
-                Autoscan
-              </Label>
-              <Switch
-                id="autoscan-enabled"
-                checked={enabled}
-                onCheckedChange={toggleEnabled}
-                disabled={!settings.data || updateSettings.isPending}
-                aria-label="Enable autoscan"
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={trigger.isPending}
-              onClick={() => trigger.mutate()}
-            >
-              <Play />
-              {trigger.isPending ? "Triggering…" : "Run now"}
-            </Button>
+          <p className="text-muted-foreground max-w-2xl text-sm leading-6">
+            Automatically detect library changes from your arr instances. Configure connections,
+            enable scan sources, and tune polling intervals.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="autoscan-enabled" className="text-muted-foreground text-sm">
+              Autoscan
+            </Label>
+            <Switch
+              id="autoscan-enabled"
+              checked={enabled}
+              onCheckedChange={toggleEnabled}
+              disabled={!settings.data || updateSettings.isPending}
+              aria-label="Enable autoscan"
+            />
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={trigger.isPending}
+            onClick={() => trigger.mutate()}
+          >
+            <Play />
+            {trigger.isPending ? "Triggering…" : "Run now"}
+          </Button>
         </div>
       </div>
 
