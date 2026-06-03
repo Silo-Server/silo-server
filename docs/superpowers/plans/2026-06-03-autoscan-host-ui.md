@@ -8,7 +8,7 @@
 
 **Tech Stack:** React + TypeScript, React Query (`@tanstack/react-query`), the project's `ui/` component library (`Tabs`, `Table`, `Card`, etc.), `react-router` routes in `App.tsx`, 2-space indent / double quotes / 100-col (`web/.prettierrc`).
 
-Commands assume the silo-server repository root (`/opt/silo`) is the cwd. **Depends on Part 1 (backend)** being implemented (the v2 endpoints must exist).
+Commands assume the silo-server repository root is the cwd. **Depends on Part 1 (backend)** being implemented (the v2 endpoints must exist).
 
 ---
 

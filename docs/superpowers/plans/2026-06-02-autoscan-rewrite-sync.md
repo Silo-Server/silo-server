@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-02-autoscan-rewrite-sync-design.md`
 
-**Commands assume the repository root is the cwd.** Go tests: `go test ./internal/autoscan/...`. Frontend: `cd web && pnpm exec tsc -b && pnpm run lint`. The Go toolchain may be at `/tmp/go/bin` — prepend to `PATH` if `go` is missing. `internal/api`/`internal/api/handlers` cannot be compiled without libvips; verify those via `gofmt` + the Docker build.
+**Commands assume the repository root is the cwd.** Go tests: `go test ./internal/autoscan/...`. Frontend: `cd web && pnpm exec tsc -b && pnpm run lint`. Ensure the Go toolchain is on `PATH` (prepend its `bin` directory if `go` is missing). `internal/api`/`internal/api/handlers` cannot be compiled without libvips; verify those via `gofmt` + the Docker build.
 
 ---
 
@@ -565,7 +565,7 @@ Add a test asserting `HandleRewriteSuggestions` returns 200 with JSON for a know
 - [ ] **Step 5.5: Verify (limited) + commit**
 
 ```bash
-export PATH=$PATH:/tmp/go/bin
+# ensure the Go toolchain is on PATH
 go vet ./internal/autoscan/...
 gofmt -l internal/api/handlers/autoscan.go internal/api/router.go internal/api/handlers/autoscan_test.go
 # internal/api cannot compile here (libvips) — Docker verifies later.
@@ -659,7 +659,7 @@ git commit -m "feat(web): autoscan sync-rewrites preview"
 - [ ] **Step 8.1: Go**
 
 ```bash
-export PATH=$PATH:/tmp/go/bin
+# ensure the Go toolchain is on PATH
 go test ./internal/autoscan/... 2>&1 | tail
 go vet ./internal/autoscan/...
 gofmt -l internal/autoscan internal/api/handlers/autoscan.go internal/api/router.go

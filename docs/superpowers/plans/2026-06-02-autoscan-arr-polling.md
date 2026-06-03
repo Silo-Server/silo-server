@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-02-autoscan-arr-polling-design.md`
 
-**Commands assume the repository root is the cwd.** Go tests: `go test ./internal/autoscan/...`. Full lint: `make lint`. Frontend: `cd web && pnpm run lint`. The Go toolchain may be at `/tmp/go/bin` — prepend it to `PATH` if `go` is not found. Use the project's disposable test DB for migrations; never touch a live database.
+**Commands assume the repository root is the cwd.** Go tests: `go test ./internal/autoscan/...`. Full lint: `make lint`. Frontend: `cd web && pnpm run lint`. Ensure the Go toolchain is on `PATH` (prepend its `bin` directory if `go` is not found). Use the project's disposable test DB for migrations; never touch a live database.
 
 ---
 

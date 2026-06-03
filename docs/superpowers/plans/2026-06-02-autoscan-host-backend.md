@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, pgx/v5, the `internal/plugins`/`internal/pluginhost` runtime, `internal/scantrigger`/`internal/scanqueue`, `internal/taskmanager`, numbered SQL migrations, `github.com/Silo-Server/silo-plugin-sdk` (the new `scan_source.v1` capability).
 
-Commands assume the silo-server repository root (`/opt/silo`) is the cwd. This is **Part 1 (backend)**; the Autoscan admin UI is Part 2.
+Commands assume the silo-server repository root is the cwd. This is **Part 1 (backend)**; the Autoscan admin UI is Part 2.
 
 ---
 
@@ -17,10 +17,12 @@ Commands assume the silo-server repository root (`/opt/silo`) is the cwd. This i
 1. **SDK dependency.** This plan needs the SDK's `scan_source.v1` symbols (`runtime.Client.ScanSource()`, `pluginv1.ScanSourceClient`, `pluginv1.PollChangesRequest/Response`, `capability.ScanSource`). They are in `silo-plugin-sdk` PR #2 but **not yet released**. Until `v0.5.0` is tagged, add a local replace directive so the host builds against the working checkout:
 
    ```bash
-   cd /opt/silo
-   go mod edit -replace github.com/Silo-Server/silo-plugin-sdk=/opt/silo-plugin-sdk
+   # from the repository root (cwd)
+   go mod edit -replace github.com/Silo-Server/silo-plugin-sdk=../silo-plugin-sdk
    go mod tidy
    ```
+
+   This points the replace at the `silo-plugin-sdk` checkout (a sibling of this repo).
 
    The final task removes the replace and bumps to the tagged version.
 

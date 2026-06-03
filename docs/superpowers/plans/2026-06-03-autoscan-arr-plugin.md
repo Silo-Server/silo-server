@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, `github.com/Silo-Server/silo-plugin-sdk` (`v0.5.0`, the `scan_source.v1` capability), `hashicorp/go-plugin` runtime (via the SDK), arr HTTP API (`X-Api-Key`).
 
-Commands assume the **new plugin repository root** is the cwd (suggested checkout: `/opt/silo-plugin-autoscan-arr`, a real sibling like `/opt/silo-plugin-sdk`).
+Commands assume the **new plugin repository root** is the cwd (the `silo-plugin-autoscan-arr` checkout, a sibling of this repo like the `silo-plugin-sdk` checkout).
 
 ---
 
@@ -16,10 +16,10 @@ Commands assume the **new plugin repository root** is the cwd (suggested checkou
 
 1. **SDK `v0.5.0`.** Needs `scan_source.v1` from `silo-plugin-sdk` PR #2. Until tagged, depend on the local checkout via replace:
    ```bash
-   go mod edit -replace github.com/Silo-Server/silo-plugin-sdk=/opt/silo-plugin-sdk
+   go mod edit -replace github.com/Silo-Server/silo-plugin-sdk=../silo-plugin-sdk
    ```
-   Task 8 finalizes to `v0.5.0`.
-2. **Template:** `silo-plugin-tmdb` (checked out at `/opt/silo-plugin-tmdb`) — copy its `main.go` runtime scaffold, `Makefile`, and `manifest.json` shape.
+   This points at the `silo-plugin-sdk` checkout (a sibling of this repo). Task 8 finalizes to `v0.5.0`.
+2. **Template:** the `silo-plugin-tmdb` checkout (a sibling of this repo) — copy its `main.go` runtime scaffold, `Makefile`, and `manifest.json` shape.
 3. **Salvage source:** the arr logic is on silo-server `main` at `internal/autoscan/history.go` (imports + renames extraction, bounded window), `rewrite.go` (`applyRewrites`, `normalizeSeparators`), `suggest.go`/`suggest_deps.go` (root-folder suffix-match suggester). Port these verbatim where possible.
 4. **New repo:** create `Silo-Server/silo-plugin-autoscan-arr` (or fork pattern). The plugin is registered in the `silo-plugins` catalog in a separate follow-up (Task 9 notes it).
 
@@ -48,7 +48,7 @@ Commands assume the **new plugin repository root** is the cwd (suggested checkou
 
 ```bash
 go mod init github.com/Silo-Server/silo-plugin-autoscan-arr
-go mod edit -replace github.com/Silo-Server/silo-plugin-sdk=/opt/silo-plugin-sdk
+go mod edit -replace github.com/Silo-Server/silo-plugin-sdk=../silo-plugin-sdk   # the silo-plugin-sdk checkout, a sibling of this repo
 go get github.com/Silo-Server/silo-plugin-sdk@v0.4.0   # replace points at the scan_source branch checkout
 ```
 
