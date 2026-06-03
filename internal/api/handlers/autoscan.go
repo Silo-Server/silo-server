@@ -182,7 +182,7 @@ type autoscanConnectionInput struct {
 	RequestIntegrationID *string `json:"request_integration_id"`
 }
 
-// validateConnectionInput enforces the invariant that migration 172 dropped from
+// validateConnectionInput enforces the invariant that migration 171 dropped from
 // the DB CHECK and delegated to the application layer: a connection must carry
 // either its own base_url or a live link to a Requests integration. A connection
 // with neither is a both-NULL orphan that ConnectionResolver.Resolve would hand
@@ -196,6 +196,22 @@ func validateConnectionInput(in autoscanConnectionInput) error {
 		return errors.New("connection requires base_url or request_integration_id")
 	}
 	return nil
+}
+
+// normalizeRequestIntegrationID trims whitespace from the optional Requests
+// integration link and collapses an empty-after-trim value to nil. This keeps
+// the persisted column either a real id or NULL — a pointer to "" or "  " must
+// never be stored as a bogus link (the resolver guards empty at read time, but
+// normalizing on write keeps the data consistent).
+func normalizeRequestIntegrationID(ref *string) *string {
+	if ref == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*ref)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (h *AutoscanHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +248,7 @@ func (h *AutoscanHandler) HandleCreateConnection(w http.ResponseWriter, r *http.
 		Kind:                 strings.TrimSpace(in.Kind),
 		BaseURL:              strings.TrimSpace(in.BaseURL),
 		APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
-		RequestIntegrationID: in.RequestIntegrationID,
+		RequestIntegrationID: normalizeRequestIntegrationID(in.RequestIntegrationID),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -262,7 +278,7 @@ func (h *AutoscanHandler) HandleUpdateConnection(w http.ResponseWriter, r *http.
 		Kind:                 strings.TrimSpace(in.Kind),
 		BaseURL:              strings.TrimSpace(in.BaseURL),
 		APIKeyRef:            strings.TrimSpace(in.APIKeyRef),
-		RequestIntegrationID: in.RequestIntegrationID,
+		RequestIntegrationID: normalizeRequestIntegrationID(in.RequestIntegrationID),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
