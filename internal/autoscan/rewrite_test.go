@@ -31,6 +31,28 @@ func TestApplyRewrites(t *testing.T) {
 	}
 }
 
+// TestApplyRewritesNormalizesStoredFrom verifies that a Windows-style / dup-slash
+// stored From is normalized the same way coveredBy/normalizePath does, so a
+// rewrite the suggester reports as "covered" actually matches at poll time. The
+// incoming path is already separator-normalized by PollOnce before applyRewrites.
+func TestApplyRewritesNormalizesStoredFrom(t *testing.T) {
+	// Backslash From: a Windows-hosted arr root stored verbatim.
+	winFrom := []PathRewrite{{From: `D:\data\tv`, To: "/mnt/media/tv"}}
+	if got := applyRewrites("D:/data/tv/Show/S01/E01.mkv", winFrom); got != "/mnt/media/tv/Show/S01/E01.mkv" {
+		t.Fatalf("backslash From should match normalized path, got %q", got)
+	}
+	// coveredBy must agree with applyRewrites: the normalized root is covered.
+	if !coveredBy("D:/data/tv", winFrom) {
+		t.Fatalf("coveredBy should report the backslash From as covering the root")
+	}
+
+	// Dup-slash From collapses too.
+	dupFrom := []PathRewrite{{From: "/data//tv/", To: "/mnt/media/tv"}}
+	if got := applyRewrites("/data/tv/Show/E.mkv", dupFrom); got != "/mnt/media/tv/Show/E.mkv" {
+		t.Fatalf("dup-slash From should match collapsed path, got %q", got)
+	}
+}
+
 // TestApplyRewritesMostSpecificWins verifies the longest matching From wins
 // regardless of slice ordering: a broad rule must not shadow a nested one.
 func TestApplyRewritesMostSpecificWins(t *testing.T) {

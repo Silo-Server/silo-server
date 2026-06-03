@@ -22,13 +22,17 @@ func applyRewrites(path string, rewrites []PathRewrite) string {
 	bestLen := -1
 	var bestTrimmed string
 	for i, rw := range rewrites {
-		from := strings.TrimSpace(rw.From)
-		if from == "" {
+		// Normalize the stored From the SAME way coveredBy/normalizePath does
+		// (backslash→slash, collapse '//', strip trailing '/') so a Windows-style
+		// or dup-slash rewrite that suggest-time reports as "covered" actually
+		// matches at poll time. Without this, a From like `D:\data\tv` would be
+		// "covered" in the suggester yet never match the normalized incoming path.
+		trimmed := normalizePath(rw.From)
+		if trimmed == "" {
 			continue
 		}
 		// Match only at a path-segment boundary: exact, or prefix followed by '/'.
 		// This prevents From="/data/media" from rewriting "/data/media2/x".
-		trimmed := strings.TrimSuffix(from, "/")
 		if path == trimmed || strings.HasPrefix(path, trimmed+"/") {
 			if len(trimmed) > bestLen {
 				bestLen = len(trimmed)
