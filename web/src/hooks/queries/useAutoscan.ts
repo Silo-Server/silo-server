@@ -140,6 +140,23 @@ export function useUpdateAutoscanSource() {
   });
 }
 
+export function useDeleteAutoscanSource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/admin/autoscan/sources/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      toast.success("Autoscan source deleted");
+      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to delete autoscan source");
+    },
+  });
+}
+
 // --- Status ---
 
 export function useAutoscanStatus() {

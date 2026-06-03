@@ -1,7 +1,18 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Trash2 } from "lucide-react";
 import type { AutoscanSource, AutoscanSourceInput } from "@/api/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -21,7 +32,9 @@ import {
 } from "@/components/ui/table";
 import {
   useAutoscanConnections,
+  useAutoscanSettings,
   useAutoscanSources,
+  useDeleteAutoscanSource,
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
 
@@ -70,9 +83,13 @@ function sourceToRowEdit(source: AutoscanSource): RowEdit {
 function SourceRow({
   source,
   connectionOptions,
+  globalPollInterval,
+  onDelete,
 }: {
   source: AutoscanSource;
   connectionOptions: Array<{ id: string; name: string }>;
+  globalPollInterval: number | null;
+  onDelete: (source: AutoscanSource) => void;
 }) {
   const update = useUpdateAutoscanSource();
   const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source));
@@ -131,6 +148,11 @@ function SourceRow({
       },
     });
   }
+
+  // A source can only be meaningfully enabled when it has a bound connection.
+  // "Effective" means either the server-side binding is set OR the operator has
+  // selected one in the pending edit but hasn't saved yet.
+  const hasEffectiveConnection = Boolean(source.connection_id) || Boolean(edit.connectionId);
 
   // Status column
   const hasError = Boolean(source.last_error);
@@ -210,6 +232,11 @@ function SourceRow({
         {intervalError && (
           <p className="text-destructive mt-1 text-xs">Must be a positive integer.</p>
         )}
+        <p className="text-muted-foreground mt-1 text-xs">
+          {globalPollInterval != null
+            ? `Floor only — values below the global default (${globalPollInterval}s) have no effect.`
+            : "Floor only — values below the global default poll interval have no effect."}
+        </p>
       </TableCell>
 
       {/* Enable toggle */}
@@ -217,7 +244,7 @@ function SourceRow({
         <Switch
           checked={source.enabled}
           onCheckedChange={handleToggleEnabled}
-          disabled={update.isPending}
+          disabled={update.isPending || !hasEffectiveConnection}
           aria-label={`${sourceLabel(source)} enabled`}
         />
       </TableCell>
@@ -252,6 +279,18 @@ function SourceRow({
           <span className="text-muted-foreground text-sm">Not run yet</span>
         )}
       </TableCell>
+
+      {/* Actions */}
+      <TableCell>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Delete source ${sourceLabel(source)}`}
+          onClick={() => onDelete(source)}
+        >
+          <Trash2 className="text-destructive" />
+        </Button>
+      </TableCell>
     </TableRow>
   );
 }
@@ -263,11 +302,17 @@ function SourceRow({
 export default function SourcesPanel() {
   const sources = useAutoscanSources();
   const connections = useAutoscanConnections();
+  const settings = useAutoscanSettings();
+  const deleteSource = useDeleteAutoscanSource();
+
+  const [deleteTarget, setDeleteTarget] = useState<AutoscanSource | null>(null);
 
   const connectionOptions = (connections.data ?? []).map((c) => ({
     id: c.id,
     name: c.name,
   }));
+
+  const globalPollInterval = settings.data?.default_poll_interval_seconds ?? null;
 
   if (sources.isLoading) {
     return <p className="text-muted-foreground py-4 text-sm">Loading sources…</p>;
@@ -293,23 +338,62 @@ export default function SourcesPanel() {
   }
 
   return (
-    <div className="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Source</TableHead>
-            <TableHead>Connection</TableHead>
-            <TableHead>Interval</TableHead>
-            <TableHead>Enabled</TableHead>
-            <TableHead>Last run</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {list.map((source) => (
-            <SourceRow key={source.id} source={source} connectionOptions={connectionOptions} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <>
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Source</TableHead>
+              <TableHead>Connection</TableHead>
+              <TableHead>Interval</TableHead>
+              <TableHead>Enabled</TableHead>
+              <TableHead>Last run</TableHead>
+              <TableHead className="w-0" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.map((source) => (
+              <SourceRow
+                key={source.id}
+                source={source}
+                connectionOptions={connectionOptions}
+                globalPollInterval={globalPollInterval}
+                onDelete={setDeleteTarget}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete source?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &ldquo;{deleteTarget ? sourceLabel(deleteTarget) : ""}&rdquo; will be permanently
+              removed. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (deleteTarget) {
+                  deleteSource.mutate(deleteTarget.id);
+                  setDeleteTarget(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
