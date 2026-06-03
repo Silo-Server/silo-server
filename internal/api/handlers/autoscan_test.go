@@ -418,6 +418,49 @@ func TestAutoscanHandleDeleteConnectionNotFoundReturns404(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleUpdateConnectionBlankKeyPassedThroughForKeep(t *testing.T) {
+	// Fix 1: a metadata-only edit omits api_key_ref ("leave blank to keep
+	// existing"). The handler must pass a blank api_key_ref through to the repo,
+	// whose UpdateConnection SQL keeps the stored key (CASE WHEN $5 = '' THEN
+	// api_key_ref ...). Here we assert the handler does NOT fabricate/clear a key:
+	// it forwards the empty string so the repo's keep-semantics fire.
+	var got autoscan.Connection
+	store := &fakeAutoscanStore{
+		updateConnectionFn: func(c autoscan.Connection) (autoscan.Connection, error) {
+			got = c
+			// Emulate the repo keep-semantics: a blank incoming ref leaves the
+			// previously-stored key in place.
+			if strings.TrimSpace(c.APIKeyRef) == "" {
+				c.APIKeyRef = "existing-stored-ref"
+			}
+			return c, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	// Update with base_url present but api_key_ref absent from the JSON.
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/connections/conn-1",
+		`{"name":"Radarr","kind":"radarr","base_url":"http://radarr:7878"}`, "conn-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConnection(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// Handler must forward a blank api_key_ref (so the repo keeps the existing key).
+	if strings.TrimSpace(got.APIKeyRef) != "" {
+		t.Fatalf("expected handler to forward blank api_key_ref, got %q", got.APIKeyRef)
+	}
+	// And the response must still report HasAPIKey=true (the stored key survived).
+	var body autoscanConnectionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.HasAPIKey {
+		t.Fatalf("expected preserved key reflected as has_api_key=true, got %+v", body)
+	}
+}
+
 func TestAutoscanHandleTriggerInvokesPollOnce(t *testing.T) {
 	trig := &fakeAutoscanTriggerer{done: make(chan struct{}, 1)}
 	h := NewAutoscanHandler(&fakeAutoscanStore{}, trig)

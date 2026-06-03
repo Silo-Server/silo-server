@@ -98,13 +98,20 @@ func (r *Repository) CreateConnection(ctx context.Context, c Connection) (Connec
 }
 
 func (r *Repository) UpdateConnection(ctx context.Context, c Connection) (Connection, error) {
+	// A blank incoming api_key_ref KEEPS the existing stored value: the UI
+	// deliberately omits the key on a metadata-only edit ("leave blank to keep
+	// existing"), so unconditionally writing it would NULL the key and break the
+	// next poll. Mirrors requests.UpdateIntegration's CASE-WHEN keep-semantics.
+	// Pass the raw trimmed string (not nullable()) so the empty-string sentinel
+	// reaches the CASE.
 	row := r.pool.QueryRow(ctx, `
 		UPDATE autoscan_connections
-		SET name = $2, kind = $3, base_url = $4, api_key_ref = $5,
+		SET name = $2, kind = $3, base_url = $4,
+		    api_key_ref = CASE WHEN $5 = '' THEN api_key_ref ELSE $5 END,
 		    request_integration_id = $6, updated_at = now()
 		WHERE id = $1
 		RETURNING `+connectionColumns,
-		c.ID, c.Name, c.Kind, nullable(c.BaseURL), nullable(c.APIKeyRef), c.RequestIntegrationID)
+		c.ID, c.Name, c.Kind, nullable(c.BaseURL), c.APIKeyRef, c.RequestIntegrationID)
 	out, err := scanConnection(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
