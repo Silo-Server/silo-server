@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { Play } from "lucide-react";
 import type { AutoscanSettings } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,20 +64,10 @@ function SettingsTab() {
 
   return (
     <div className="max-w-lg space-y-6">
-      {/* Global enable */}
-      <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
-        <div className="space-y-0.5">
-          <Label className="text-sm font-medium">Enable Autoscan</Label>
-          <p className="text-muted-foreground text-xs">
-            When disabled, no scan sources will poll for changes.
-          </p>
-        </div>
-        <Switch
-          checked={effective.enabled}
-          onCheckedChange={(checked) => save({ enabled: checked })}
-          disabled={updateSettings.isPending}
-        />
-      </div>
+      <p className="text-muted-foreground text-sm">
+        Autoscan can be enabled or disabled from the toggle in the page header. Tune polling
+        behavior below.
+      </p>
 
       {/* Default poll interval */}
       <div className="space-y-1.5">
@@ -131,6 +122,15 @@ export default function AdminAutoscan() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeTab(searchParams.get("tab"));
   const trigger = useTriggerAutoscan();
+  const settings = useAutoscanSettings();
+  const updateSettings = useUpdateAutoscanSettings();
+
+  const enabled = settings.data?.enabled ?? false;
+
+  function toggleEnabled(checked: boolean) {
+    if (!settings.data) return;
+    updateSettings.mutate({ ...settings.data, enabled: checked });
+  }
 
   function setActiveTab(value: string) {
     const next = new URLSearchParams(searchParams);
@@ -145,25 +145,49 @@ export default function AdminAutoscan() {
   return (
     <div className="space-y-6">
       <div className="page-header">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
-              Autoscan
-            </h1>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
+                Autoscan
+              </h1>
+              {settings.data &&
+                (enabled ? (
+                  <Badge variant="secondary">Enabled</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Disabled
+                  </Badge>
+                ))}
+            </div>
             <p className="text-muted-foreground max-w-2xl text-sm leading-6">
               Automatically detect library changes via arr webhook sources. Configure connections,
               enable scan sources, and tune polling intervals.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={trigger.isPending}
-            onClick={() => trigger.mutate()}
-          >
-            <Play />
-            {trigger.isPending ? "Triggering…" : "Run now"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="autoscan-enabled" className="text-muted-foreground text-sm">
+                Autoscan
+              </Label>
+              <Switch
+                id="autoscan-enabled"
+                checked={enabled}
+                onCheckedChange={toggleEnabled}
+                disabled={!settings.data || updateSettings.isPending}
+                aria-label="Enable autoscan"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={trigger.isPending}
+              onClick={() => trigger.mutate()}
+            >
+              <Play />
+              {trigger.isPending ? "Triggering…" : "Run now"}
+            </Button>
+          </div>
         </div>
       </div>
 
