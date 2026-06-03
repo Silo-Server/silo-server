@@ -6,11 +6,17 @@ import {
   ChevronRight,
   Clock,
   Plus,
+  RefreshCw,
   Trash2,
   X,
 } from "lucide-react";
 import { Link } from "react-router";
-import type { AutoscanPathRewrite, AutoscanSource, AutoscanSourceInput } from "@/api/types";
+import type {
+  AutoscanPathRewrite,
+  AutoscanRewriteSuggestions,
+  AutoscanSource,
+  AutoscanSourceInput,
+} from "@/api/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +29,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -43,8 +57,11 @@ import {
 } from "@/components/ui/table";
 import {
   useAutoscanConnections,
+  useAutoscanRewriteSuggestions,
   useAutoscanSettings,
   useAutoscanSources,
+  useAvailableScanSources,
+  useCreateAutoscanSource,
   useDeleteAutoscanSource,
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
@@ -94,19 +111,27 @@ function sourceToRowEdit(source: AutoscanSource): RowEdit {
 // ---------------------------------------------------------------------------
 
 function RewriteEditor({
+  sourceId,
+  hasConnection,
   rewrites,
   onChange,
   onSave,
   isSaving,
 }: {
+  sourceId: string;
+  hasConnection: boolean;
   rewrites: AutoscanPathRewrite[];
   onChange: (next: AutoscanPathRewrite[]) => void;
-  onSave: () => void;
+  onSave: (rewrites?: AutoscanPathRewrite[]) => void;
   isSaving: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+
+  const suggest = useAutoscanRewriteSuggestions();
+  const [preview, setPreview] = useState<AutoscanRewriteSuggestions | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   function updateRewrite(index: number, patch: Partial<AutoscanPathRewrite>) {
     setRewriteError(null);
@@ -123,6 +148,40 @@ function RewriteEditor({
     onChange(rewrites.filter((_, i) => i !== index));
   }
 
+  async function handleSync() {
+    const s = await suggest.mutateAsync(sourceId);
+    setPreview(s);
+    setSelected(new Set((s.proposed ?? []).map((p) => p.from)));
+    setOpen(true);
+  }
+
+  function toggleSelected(from: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(from)) {
+        next.delete(from);
+      } else {
+        next.add(from);
+      }
+      return next;
+    });
+  }
+
+  /** Merge the checked proposed rewrites into the list (dedupe by `from`) and save. */
+  function applySelected() {
+    if (!preview) return;
+    const existingFroms = new Set(rewrites.map((r) => r.from));
+    const additions = preview.proposed
+      .filter((p) => selected.has(p.from) && !existingFroms.has(p.from))
+      .map((p) => ({ from: p.from, to: p.to }));
+    const merged = [...rewrites, ...additions];
+    onChange(merged);
+    setPreview(null);
+    setOpen(true);
+    // Persist immediately via the normal full-state source PUT.
+    onSave(merged);
+  }
+
   function handleSave() {
     // Validate: any non-empty row must have both from and to filled in.
     const hasIncomplete = rewrites.some(
@@ -137,6 +196,8 @@ function RewriteEditor({
     setRewriteError(null);
     onSave();
   }
+
+  const syncDisabled = !hasConnection || suggest.isPending;
 
   return (
     <div className="border-border mt-3 rounded-md border">
@@ -207,16 +268,132 @@ function RewriteEditor({
 
           {rewriteError && <p className="text-destructive text-xs">{rewriteError}</p>}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={addRewrite}>
               <Plus className="size-3.5" />
               Add rewrite
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={syncDisabled}
+              onClick={handleSync}
+              title={
+                hasConnection
+                  ? "Fetch root-folder mappings from the arr instance"
+                  : "Bind a connection first"
+              }
+            >
+              <RefreshCw className={`size-3.5 ${suggest.isPending ? "animate-spin" : ""}`} />
+              {suggest.isPending ? "Syncing…" : "Sync from arr"}
             </Button>
             <Button type="button" size="sm" disabled={isSaving} onClick={handleSave}>
               Save rewrites
             </Button>
           </div>
+
+          {/* Sync-from-arr preview */}
+          {preview && (
+            <div
+              className="border-border space-y-4 rounded-md border p-3"
+              role="region"
+              aria-label="Rewrite suggestions"
+            >
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Proposed</p>
+                {preview.proposed.length === 0 ? (
+                  <p className="text-muted-foreground text-xs">No proposed rewrites.</p>
+                ) : (
+                  preview.proposed.map((proposal) => (
+                    <label key={proposal.from} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(proposal.from)}
+                        onChange={() => toggleSelected(proposal.from)}
+                      />
+                      <span className="font-mono text-xs">
+                        {proposal.from} → {proposal.to}
+                      </span>
+                      {proposal.match_depth >= 2 ? (
+                        <Badge variant="secondary" className="text-xs">
+                          {`${proposal.match_depth} segments`}
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="text-xs">
+                          1 segment — weak
+                        </Badge>
+                      )}
+                    </label>
+                  ))
+                )}
+              </div>
+
+              {preview.unmatched.length > 0 && (
+                <CollapsibleList
+                  title={`No Silo match (${preview.unmatched.length})`}
+                  items={preview.unmatched}
+                />
+              )}
+
+              {preview.ambiguous.length > 0 && (
+                <CollapsibleList
+                  title={`Ambiguous (${preview.ambiguous.length})`}
+                  items={preview.ambiguous.map((a) => `${a.root} → ${a.candidates.join(", ")}`)}
+                />
+              )}
+
+              {preview.covered.length > 0 && (
+                <CollapsibleList
+                  title={`Already mapped (${preview.covered.length})`}
+                  items={preview.covered}
+                />
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" disabled={isSaving} onClick={applySelected}>
+                  Apply selected
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => setPreview(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Collapsed list section used inside the sync-from-arr preview. */
+function CollapsibleList({ title, items }: { title: string; items: string[] }) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        className="flex items-center gap-1.5 text-left"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={panelId}
+      >
+        {open ? (
+          <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
+        ) : (
+          <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
+        )}
+        <span className="text-sm font-medium">{title}</span>
+      </button>
+      {open && (
+        <ul id={panelId} className="text-muted-foreground space-y-0.5 pl-5 text-xs">
+          {items.map((item) => (
+            <li key={item} className="font-mono break-all">
+              {item}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -304,8 +481,22 @@ function SourceRow({
     });
   }
 
-  function handleRewriteSave() {
-    update.mutate({ id: source.id, body: fullBody({}) });
+  function handleRewriteSave(rewrites?: AutoscanPathRewrite[]) {
+    // When called from "Apply selected", the merged rewrites are passed in
+    // directly to avoid a stale-state read (setEdit hasn't flushed yet).
+    const path_rewrites = (rewrites ?? edit.rewrites)
+      .map((r) => ({ from: r.from.trim(), to: r.to.trim() }))
+      .filter((r) => r.from.length > 0 && r.to.length > 0);
+    const intervalVal = edit.intervalStr.trim() === "" ? null : Number(edit.intervalStr);
+    update.mutate({
+      id: source.id,
+      body: {
+        connection_id: edit.connectionId === "" ? null : edit.connectionId,
+        enabled: source.enabled,
+        poll_interval_seconds: intervalVal,
+        path_rewrites,
+      },
+    });
   }
 
   // A source can only be meaningfully enabled when it has a bound connection.
@@ -398,6 +589,8 @@ function SourceRow({
         </p>
         {/* Path rewrites editor — nested under the interval cell to avoid adding a new column */}
         <RewriteEditor
+          sourceId={source.id}
+          hasConnection={hasEffectiveConnection}
           rewrites={edit.rewrites}
           onChange={(next) => setEdit((ed) => ({ ...ed, rewrites: next }))}
           onSave={handleRewriteSave}
@@ -462,6 +655,181 @@ function SourceRow({
 }
 
 // ---------------------------------------------------------------------------
+// Add source dialog
+// ---------------------------------------------------------------------------
+
+interface AddSourceForm {
+  /** "installation_id:capability_id" composite key of the chosen plugin. */
+  pluginKey: string;
+  connectionId: string; // "" / "__none__" means no connection
+  intervalStr: string;
+}
+
+const BLANK_ADD_SOURCE: AddSourceForm = {
+  pluginKey: "",
+  connectionId: "",
+  intervalStr: "",
+};
+
+function pluginKey(installationId: number, capabilityId: string): string {
+  return `${installationId}:${capabilityId}`;
+}
+
+function AddSourceDialog({
+  open,
+  onOpenChange,
+  connectionOptions,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  connectionOptions: Array<{ id: string; name: string }>;
+}) {
+  const available = useAvailableScanSources();
+  const createSource = useCreateAutoscanSource();
+  const [form, setForm] = useState<AddSourceForm>(BLANK_ADD_SOURCE);
+
+  const plugins = available.data ?? [];
+  const selectedPlugin = plugins.find(
+    (p) => pluginKey(p.installation_id, p.capability_id) === form.pluginKey,
+  );
+
+  function close() {
+    setForm(BLANK_ADD_SOURCE);
+    onOpenChange(false);
+  }
+
+  function handleSubmit() {
+    if (!selectedPlugin) return;
+    const connectionId =
+      form.connectionId && form.connectionId !== "__none__" ? form.connectionId : null;
+    const raw = form.intervalStr.trim();
+    const pollInterval = raw === "" ? null : Number(raw);
+    createSource.mutate(
+      {
+        installation_id: selectedPlugin.installation_id,
+        capability_id: selectedPlugin.capability_id,
+        connection_id: connectionId,
+        enabled: false,
+        poll_interval_seconds: pollInterval,
+        path_rewrites: [],
+      },
+      { onSuccess: close },
+    );
+  }
+
+  const intervalInvalid =
+    form.intervalStr.trim() !== "" &&
+    (!Number.isInteger(Number(form.intervalStr)) || Number(form.intervalStr) < 1);
+  const canSubmit = Boolean(selectedPlugin) && !intervalInvalid && !createSource.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add scan source</DialogTitle>
+          <DialogDescription>
+            Create a scan source from an installed plugin and bind it to an arr connection. Add one
+            source per connection to watch multiple arr instances.
+          </DialogDescription>
+        </DialogHeader>
+
+        {available.isLoading ? (
+          <p className="text-muted-foreground py-4 text-sm">Loading available plugins…</p>
+        ) : plugins.length === 0 ? (
+          <p className="text-muted-foreground py-4 text-sm">
+            No scan-source plugins installed. Install one from the{" "}
+            <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
+              Plugins page
+            </Link>{" "}
+            to add sources here.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Plugin</Label>
+              <Select
+                value={form.pluginKey}
+                onValueChange={(v) => setForm((f) => ({ ...f, pluginKey: v }))}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a scan-source plugin…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {plugins.map((p) => (
+                    <SelectItem
+                      key={pluginKey(p.installation_id, p.capability_id)}
+                      value={pluginKey(p.installation_id, p.capability_id)}
+                    >
+                      {p.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Connection</Label>
+              <Select
+                value={form.connectionId || "__none__"}
+                onValueChange={(v) => setForm((f) => ({ ...f, connectionId: v }))}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="No connection" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No connection —</SelectItem>
+                  {connectionOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                Optional — you can bind a connection later. A source must have a connection before
+                it can be enabled.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="add-source-interval">Poll interval (seconds)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="add-source-interval"
+                  className="w-32"
+                  placeholder="Default"
+                  value={form.intervalStr}
+                  aria-invalid={intervalInvalid}
+                  onChange={(e) => setForm((f) => ({ ...f, intervalStr: e.target.value }))}
+                />
+                <span className="text-muted-foreground text-sm">sec</span>
+              </div>
+              {intervalInvalid && (
+                <p className="text-destructive text-xs">Must be a positive integer.</p>
+              )}
+              <p className="text-muted-foreground text-xs">
+                Optional — leave blank to use the global default poll interval.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={close} disabled={createSource.isPending}>
+            Cancel
+          </Button>
+          {plugins.length > 0 && (
+            <Button onClick={handleSubmit} disabled={!canSubmit}>
+              {createSource.isPending ? "Adding…" : "Add source"}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
 
@@ -472,6 +840,7 @@ export default function SourcesPanel() {
   const deleteSource = useDeleteAutoscanSource();
 
   const [deleteTarget, setDeleteTarget] = useState<AutoscanSource | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   const connectionOptions = (connections.data ?? []).map((c) => ({
     id: c.id,
@@ -479,6 +848,30 @@ export default function SourcesPanel() {
   }));
 
   const globalPollInterval = settings.data?.default_poll_interval_seconds ?? null;
+
+  const header = (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-muted-foreground text-xs">
+        Scan-source plugins are installed from the{" "}
+        <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
+          Plugins page
+        </Link>
+        . Add a source for each arr connection you want to watch.
+      </p>
+      <Button variant="outline" size="sm" className="shrink-0" onClick={() => setAddOpen(true)}>
+        <Plus />
+        Add source
+      </Button>
+    </div>
+  );
+
+  const addDialog = (
+    <AddSourceDialog
+      open={addOpen}
+      onOpenChange={setAddOpen}
+      connectionOptions={connectionOptions}
+    />
+  );
 
   if (sources.isLoading) {
     return <p className="text-muted-foreground py-4 text-sm">Loading sources…</p>;
@@ -496,31 +889,22 @@ export default function SourcesPanel() {
 
   if (list.length === 0) {
     return (
-      <div className="space-y-3 py-6">
-        <p className="text-muted-foreground text-sm">
-          No scan sources found. Install a <code>scan_source</code> plugin capability to see sources
-          here.
-        </p>
-        <p className="text-muted-foreground text-sm">
-          Scan-source plugins (Sonarr/Radarr, etc.) are installed from the{" "}
-          <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
-            Plugins page
-          </Link>{" "}
-          — once installed they appear here automatically.
-        </p>
+      <div className="space-y-4">
+        {header}
+        <div className="rounded-lg border border-dashed p-8 text-center">
+          <p className="text-muted-foreground text-sm">
+            No scan sources yet. Click <span className="font-medium">Add source</span> to create one
+            from an installed scan-source plugin.
+          </p>
+        </div>
+        {addDialog}
       </div>
     );
   }
 
   return (
-    <>
-      <p className="text-muted-foreground mb-3 text-xs">
-        Scan-source plugins are installed from the{" "}
-        <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
-          Plugins page
-        </Link>{" "}
-        and appear here automatically once installed.
-      </p>
+    <div className="space-y-4">
+      {header}
 
       <div className="rounded-lg border">
         <Table>
@@ -577,6 +961,8 @@ export default function SourcesPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+
+      {addDialog}
+    </div>
   );
 }
