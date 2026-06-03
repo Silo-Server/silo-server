@@ -108,3 +108,10 @@ type UserStore interface {
 	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
 	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
 }
+
+// DeviceRegistry is implemented by stores that track observed devices even
+// when they do not currently have any device-scoped overrides.
+type DeviceRegistry interface {
+	RegisterDevice(ctx context.Context, entry DeviceEntry) error
+	ListDevices(ctx context.Context) ([]DeviceEntry, error)
+}

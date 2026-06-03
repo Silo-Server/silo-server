@@ -1986,6 +1986,9 @@ export interface AdminDeviceDetail {
   device_id: string;
   device_name: string;
   device_platform: string;
+  override_count: number;
+  profile_count: number;
+  profiles: AdminDeviceProfileSummary[];
   last_updated: string;
   settings: {
     user_id: number;

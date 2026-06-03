@@ -39,6 +39,16 @@ type DeviceSettingEntry struct {
 	UpdatedAt      string
 }
 
+// DeviceEntry is a durable app/device identity observed for one profile
+// within a user. It lets admins configure a device before it has overrides.
+type DeviceEntry struct {
+	ProfileID      string
+	DeviceID       string
+	DeviceName     string
+	DevicePlatform string
+	LastSeenAt     string
+}
+
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
 	Name                       *string
