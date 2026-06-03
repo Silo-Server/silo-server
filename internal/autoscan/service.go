@@ -98,6 +98,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		return err
 	}
 	ttl := time.Duration(settings.DebounceSeconds) * time.Second
+	now := time.Now()
 
 	for _, src := range sources {
 		// An enabled source with no bound connection can't be polled; surface why
@@ -106,6 +107,16 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			if rerr := s.store.RecordError(ctx, src.ID, "no connection bound"); rerr != nil {
 				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
 			}
+			continue
+		}
+		// Honor the per-source poll interval as a "poll at most every N seconds"
+		// floor: the global task fires at the default cadence, so a source with a
+		// longer interval is skipped until enough time has elapsed.
+		interval := time.Duration(settings.DefaultPollIntervalSeconds) * time.Second
+		if src.PollIntervalSeconds != nil {
+			interval = time.Duration(*src.PollIntervalSeconds) * time.Second
+		}
+		if src.LastRunAt != nil && now.Sub(*src.LastRunAt) < interval {
 			continue
 		}
 		conn, cerr := s.resolveConnection(ctx, *src.ConnectionID)

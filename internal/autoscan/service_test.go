@@ -272,3 +272,51 @@ func TestPollOnceSkipsEnabledSourceWithoutConnection(t *testing.T) {
 		t.Fatalf("marker must NOT advance for a connection-less source")
 	}
 }
+
+func TestPollOnceSkipsSourcePolledTooRecently(t *testing.T) {
+	recent := time.Now().Add(-30 * time.Second)
+	interval := 600
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			PollIntervalSeconds: &interval, LastRunAt: &recent,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("a source within its poll interval must be skipped, got %d enqueued", len(q.enqueued))
+	}
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance for a skipped (too-recent) source")
+	}
+}
+
+func TestPollOnceRunsSourcePastItsInterval(t *testing.T) {
+	old := time.Now().Add(-20 * time.Minute)
+	interval := 600 // 10 min; last run was 20 min ago => eligible
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			PollIntervalSeconds: &interval, LastRunAt: &old,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("a source past its interval must poll, got %d enqueued", len(q.enqueued))
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
+	}
+}
