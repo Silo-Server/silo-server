@@ -11,7 +11,11 @@
 --   * v1 autoscan_sources rows -> v2 autoscan_sources: v2 sources are keyed on a
 --     plugin (installation_id, capability_id) that did not exist in v1, so they
 --     cannot be backfilled and are left to runtime discovery.
---   * v1 path_rewrites: path mapping moves into per-plugin config in v2.
+--   * v1 path_rewrites: in v2 the HOST owns per-source prefix rewrites
+--     (autoscan_sources.path_rewrites jsonb). They can NOT be backfilled from v1:
+--     v2 sources are keyed on a plugin (installation_id, capability_id) that has
+--     no mapping to a v1 source row, so there is no row to copy the v1 rewrites
+--     onto. Operators must re-enter path rewrites per source after upgrading.
 
 -- (a) Rename v1 tables aside.
 ALTER TABLE IF EXISTS public.autoscan_settings RENAME TO autoscan_settings_v1;
@@ -50,6 +54,11 @@ CREATE TABLE public.autoscan_sources (
     connection_id uuid REFERENCES public.autoscan_connections(id) ON DELETE RESTRICT,
     enabled boolean NOT NULL DEFAULT false,
     poll_interval_seconds integer,
+    -- Host-owned per-source prefix rewrites: [{"from": "...", "to": "..."}].
+    -- Applied to raw source-namespace paths from the scan_source plugin before
+    -- resolving/enqueueing. NOT backfilled from v1 (see header note); operators
+    -- re-enter these per source after upgrading.
+    path_rewrites jsonb NOT NULL DEFAULT '[]'::jsonb,
     marker text,
     last_run_at timestamptz,
     last_error text,
