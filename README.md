@@ -218,93 +218,57 @@ Silo requires only a `DATABASE_URL` when running from source or against external
 | `proxy` | Stream proxy node that connects to the shared deployment database and Redis |
 | `transcode` | HLS transcode worker node that connects to the shared deployment database and Redis |
 
-## PostgreSQL Performance Tuning
+## PostgreSQL Auto-Tuning
 
-The default PostgreSQL configuration is conservative and not optimized for any particular workload. For better performance, use [PGTune](https://pgtune.leopard.in.ua/) to generate settings tailored to your hardware.
-
-**Recommended PGTune settings:**
-
-| Setting | Value |
-|---|---|
-| DB Type | **Web application** |
-| Total Memory | Your server's RAM |
-| Number of CPUs | Your server's CPU count |
-| Number of Connections | 20 (Silo's default pool size) |
-| Data Storage | SSD or HDD depending on your setup |
-
-Silo's workload is predominantly read-heavy API queries (browse, search, metadata lookups) with the database small enough to fit in RAM for most libraries. The **Web application** profile optimizes for this: CPU-bound simple queries served from cached pages, high concurrent reads, and low write volume.
-
-If you have a very large library (50,000+ items) or heavy activity logging, consider switching to the **OLTP** profile instead.
-
-### Recommended Defaults for Modern Hardware
-
-Assuming you're using modern hardware with fast NVMe storage this is what I'm currently running.
-
-```ini
-# Connections
-max_connections = 100
-
-# Memory (tuned to keep PG under ~8GB total)
-shared_buffers = 4GB               # holds the entire DB in cache (typical DB is 1-4GB)
-effective_cache_size = 6GB         # planner hint only, not an allocation
-work_mem = 32MB                    # per-operation sort/hash memory
-maintenance_work_mem = 512MB       # VACUUM, CREATE INDEX, catalog imports
-
-# WAL / Write Performance
-wal_buffers = 64MB
-min_wal_size = 512MB
-max_wal_size = 2GB
-checkpoint_completion_target = 0.9
-
-# Storage (NVMe/Optane)
-random_page_cost = 1.1             # default 4.0; NVMe random ≈ sequential
-effective_io_concurrency = 200     # NVMe handles many concurrent requests
-
-# Parallelism
-max_worker_processes = 8
-max_parallel_workers_per_gather = 4
-max_parallel_workers = 8
-max_parallel_maintenance_workers = 4
-
-# Huge Pages
-huge_pages = try
-```
-
-These settings keep PostgreSQL under ~8GB of RAM while still caching the entire database. For HDD storage, change `random_page_cost` to `4.0` and `effective_io_concurrency` to `2`.
-
-### Applying Settings
-
-**Docker (recommended):** Save the settings above to a `postgresql.conf` file and mount it into your container:
+The default Docker Compose stack does not require a checked-in `postgresql.conf`.
+It enables Silo's [pgtune](https://github.com/le0pard/pgtune)-style OLTP tuning
+by default:
 
 ```yaml
-# docker-compose.yml
-postgres:
-  image: pgvector/pgvector:pg18
-  volumes:
-    - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
-  command: postgres -c config_file=/etc/postgresql/postgresql.conf
+POSTGRES_TUNE: auto
 ```
 
-Then restart: `docker compose restart postgres`
+When enabled, Silo connects with `DATABASE_URL` and applies recommendations with
+`ALTER SYSTEM`, which writes to PostgreSQL's `postgresql.auto.conf` inside the
+database data directory. Reloadable settings are applied immediately with
+`pg_reload_conf()`. Settings that PostgreSQL marks as restart-only are written
+too, and Silo logs the setting names so you can restart PostgreSQL once:
 
-**Existing PostgreSQL:** You can apply settings without editing config files using `ALTER SYSTEM`, which writes to `postgresql.auto.conf` inside the data directory:
-
-```sql
-ALTER SYSTEM SET work_mem = '32MB';
-ALTER SYSTEM SET effective_cache_size = '6GB';
-ALTER SYSTEM SET random_page_cost = 1.1;
-ALTER SYSTEM SET effective_io_concurrency = 200;
--- Apply without restart:
-SELECT pg_reload_conf();
-
--- These require a full restart:
-ALTER SYSTEM SET shared_buffers = '4GB';
-ALTER SYSTEM SET max_connections = 100;
-ALTER SYSTEM SET max_worker_processes = 8;
-ALTER SYSTEM SET huge_pages = 'try';
+```sh
+docker compose restart postgres
 ```
 
-Settings like `shared_buffers`, `max_connections`, `max_worker_processes`, and `huge_pages` require a PostgreSQL restart. Memory/planner settings (`work_mem`, `effective_cache_size`, `random_page_cost`) can be reloaded live.
+The default Compose database user has the required PostgreSQL permissions. If
+you use an external PostgreSQL server, make sure the configured `DATABASE_URL`
+user can run `ALTER SYSTEM`, or set `POSTGRES_TUNE=off` and manage
+PostgreSQL yourself.
+
+For `POSTGRES_TUNE_MEMORY=auto`, Silo uses the first trustworthy memory source:
+a finite Docker cgroup limit, the read-only `/host/proc/meminfo` mount supplied
+by the bundled Compose file, then `/proc/meminfo` with container safety guards.
+Auto-detected memory is treated as a PostgreSQL budget, defaulting to 75% of
+detected RAM so Silo, Redis, plugins, transcodes, and the OS retain headroom.
+`POSTGRES_TUNE_DB_SIZE=auto` queries `pg_database_size(current_database())` and
+classifies the workload by comparing the database size to that memory budget.
+
+Optional tuning overrides:
+
+| Variable | Default | Description |
+|---|---:|---|
+| `POSTGRES_TUNE_PROFILE` | `oltp` | Tuning profile. Only `oltp` is currently supported. |
+| `POSTGRES_TUNE_MEMORY` | `auto` | Server/container RAM, such as `8GB` or `32GB`; explicit values are used as-is. |
+| `POSTGRES_TUNE_MEMORY_BUDGET_PERCENT` | `75` | Percent of auto-detected RAM used for PostgreSQL recommendations. |
+| `POSTGRES_TUNE_CPUS` | `auto` | CPU count used for worker recommendations. |
+| `POSTGRES_TUNE_STORAGE` | `ssd` | One of `hdd`, `ssd`, `san`, or `nvme`. |
+| `POSTGRES_TUNE_DB_SIZE` | `auto` | Use `less_ram` when the database comfortably fits in RAM, `mid_ram`, or `greater_ram` for very large databases. |
+| `POSTGRES_TUNE_CONNECTIONS` | `100` | PostgreSQL `max_connections`; automatically raised if Silo's app pool is configured higher. |
+| `POSTGRES_SHM_SIZE` | `8gb` | Docker `/dev/shm` size for the bundled PostgreSQL container. |
+
+Advanced operators can still supply their own PostgreSQL configuration or
+override these env vars. Set `POSTGRES_TUNE=off` when you do not want Silo to
+change PostgreSQL server settings. Settings already written with `ALTER SYSTEM`
+remain in `postgresql.auto.conf`; reset those PostgreSQL parameters if you later
+move fully to a custom `postgresql.conf`.
 
 ## Project Structure
 
