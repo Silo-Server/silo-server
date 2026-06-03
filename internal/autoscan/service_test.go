@@ -346,7 +346,10 @@ func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	}
 }
 
-func TestPollOnceSkipsEnabledSourceWithoutConnection(t *testing.T) {
+func TestPollOncemPollsConnectionlessSource(t *testing.T) {
+	// A connection is OPTIONAL: a source with no bound connection is still polled
+	// (the provider gets an empty connection it may ignore — e.g. a filesystem
+	// watcher). Whether the plugin needs credentials is the plugin's concern.
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
@@ -359,14 +362,14 @@ func TestPollOnceSkipsEnabledSourceWithoutConnection(t *testing.T) {
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
-	if len(q.enqueued) != 0 {
-		t.Fatalf("a connection-less source must not poll, got %d enqueued", len(q.enqueued))
+	if len(q.enqueued) != 1 {
+		t.Fatalf("a connection-less source must still poll + enqueue, got %d enqueued", len(q.enqueued))
 	}
-	if msg, ok := store.recorded["s1"]; !ok || msg != "no connection bound" {
-		t.Fatalf("expected 'no connection bound' recorded for s1, got %q ok=%v", msg, ok)
+	if _, ok := store.recorded["s1"]; ok {
+		t.Fatalf("a connection-less source must not record a 'no connection' error")
 	}
-	if _, ok := store.advanced["s1"]; ok {
-		t.Fatalf("marker must NOT advance for a connection-less source")
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("marker must advance after a successful connection-less poll")
 	}
 }
 

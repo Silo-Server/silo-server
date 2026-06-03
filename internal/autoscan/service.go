@@ -146,14 +146,6 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				continue
 			}
 		}
-		// An enabled source with no bound connection can't be polled; surface why
-		// so the UI shows it as "needs attention" rather than silently stalling.
-		if src.ConnectionID == nil {
-			if rerr := s.store.RecordError(ctx, src.ID, "no connection bound"); rerr != nil {
-				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
-			}
-			continue
-		}
 		// Honor the per-source poll interval as a "poll at most every N seconds"
 		// floor: the global task fires at the default cadence, so a source with a
 		// longer interval is skipped until enough time has elapsed.
@@ -164,10 +156,24 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if src.LastRunAt != nil && now.Sub(*src.LastRunAt) < interval {
 			continue
 		}
-		conn, cerr := s.resolveConnection(ctx, *src.ConnectionID)
-		if cerr != nil {
-			slog.WarnContext(ctx, "autoscan: resolve connection failed", "source_id", src.ID, "err", cerr)
-			continue
+		// A connection is OPTIONAL. Server-based providers (Sonarr/Radarr) bind a
+		// connection and the resolved {base_url, api_key} is handed to the plugin.
+		// Other providers (e.g. a filesystem/CephFS watcher) need none and get an
+		// empty connection they ignore. If a plugin requires a connection it didn't
+		// get, it returns an error that is RecordError'd below — so the operator
+		// still sees "needs attention" without the host assuming every source is
+		// credential-based.
+		var conn ResolvedConnection
+		if src.ConnectionID != nil {
+			resolved, cerr := s.resolveConnection(ctx, *src.ConnectionID)
+			if cerr != nil {
+				slog.WarnContext(ctx, "autoscan: resolve connection failed", "source_id", src.ID, "err", cerr)
+				if rerr := s.store.RecordError(ctx, src.ID, cerr.Error()); rerr != nil {
+					slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+				}
+				continue
+			}
+			conn = resolved
 		}
 		marker := ""
 		if src.Marker != nil {

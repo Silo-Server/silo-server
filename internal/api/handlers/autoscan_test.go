@@ -334,11 +334,14 @@ func TestAutoscanHandleCreateSourceRejectsUnknownCapability(t *testing.T) {
 	}
 }
 
-func TestAutoscanHandleCreateSourceEnableWithoutConnectionReturns400(t *testing.T) {
-	created := false
+func TestAutoscanHandleCreateSourceEnableWithoutConnectionSucceeds(t *testing.T) {
+	// A connection is optional: a source can be created enabled without one
+	// (e.g. a filesystem/CephFS provider). The plugin surfaces any
+	// missing-credential error at poll time.
+	var got autoscan.Source
 	store := &fakeAutoscanStore{
 		createSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			created = true
+			got = s
 			return s, nil
 		},
 	}
@@ -352,11 +355,11 @@ func TestAutoscanHandleCreateSourceEnableWithoutConnectionReturns400(t *testing.
 	rec := httptest.NewRecorder()
 	h.HandleCreateSource(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	if created {
-		t.Fatal("CreateSource was called when enabling without a connection")
+	if !got.Enabled || got.ConnectionID != nil {
+		t.Fatalf("expected enabled connection-less source created, got %+v", got)
 	}
 }
 
@@ -556,15 +559,18 @@ func TestAutoscanHandleUpdateSourceNotFoundReturns404(t *testing.T) {
 	}
 }
 
-func TestAutoscanHandleUpdateSourceEnableWithoutConnectionReturns400(t *testing.T) {
-	upserted := false
+func TestAutoscanHandleUpdateSourceEnableWithoutConnectionSucceeds(t *testing.T) {
+	// A connection is OPTIONAL — a source may enable without one (e.g. a
+	// filesystem/CephFS provider that needs no credentials). The handler no
+	// longer blocks it; if the plugin actually needs a connection it surfaces
+	// the error at poll time instead.
+	var got autoscan.Source
 	store := &fakeAutoscanStore{
 		getSourceFn: func(id string) (autoscan.Source, error) {
-			// Existing source has no connection bound yet.
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: nil}, nil
 		},
 		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			upserted = true
+			got = s
 			return s, nil
 		},
 	}
@@ -575,11 +581,11 @@ func TestAutoscanHandleUpdateSourceEnableWithoutConnectionReturns400(t *testing.
 	rec := httptest.NewRecorder()
 	h.HandleUpdateSource(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if upserted {
-		t.Fatal("UpsertSource was called when enabling without a connection")
+	if !got.Enabled || got.ConnectionID != nil {
+		t.Fatalf("expected enabled connection-less source persisted, got %+v", got)
 	}
 }
 
@@ -666,30 +672,32 @@ func TestAutoscanHandleUpdateSourceUnbindConnectionSucceeds(t *testing.T) {
 	}
 }
 
-func TestAutoscanHandleUpdateSourceUnbindWhileEnabledReturns400(t *testing.T) {
-	upserted := false
+func TestAutoscanHandleUpdateSourceUnbindWhileEnabledSucceeds(t *testing.T) {
+	// Unbinding the connection while enabled is allowed now that a connection is
+	// optional — the row persists enabled with connection_id: null. (A provider
+	// that needs credentials surfaces the error at poll time.)
+	var got autoscan.Source
 	store := &fakeAutoscanStore{
 		getSourceFn: func(id string) (autoscan.Source, error) {
 			return autoscan.Source{ID: id, InstallationID: 1, CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
 		},
 		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			upserted = true
+			got = s
 			return s, nil
 		},
 	}
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
-	// Attempting to enable=true while sending connection_id: null must be rejected.
 	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
 		`{"enabled":true,"connection_id":null}`, "src-1")
 	rec := httptest.NewRecorder()
 	h.HandleUpdateSource(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if upserted {
-		t.Fatal("UpsertSource was called when enabling with null connection")
+	if !got.Enabled || got.ConnectionID != nil {
+		t.Fatalf("expected enabled source with nil connection, got %+v", got)
 	}
 }
 

@@ -415,12 +415,6 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	connArg := normalizeConnectionID(in.ConnectionID)
-	// Enabling a source requires a bound connection: it can't be polled without
-	// credentials.
-	if in.Enabled && connArg == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "connection_id is required to enable a source")
-		return
-	}
 	created, err := h.repo.CreateSource(r.Context(), autoscan.Source{
 		InstallationID:      in.InstallationID,
 		CapabilityID:        capID,
@@ -508,12 +502,6 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 	// connection_id is a full-state field: nil means unbind, a UUID string
 	// means bind. A whitespace-only string is normalised to nil (unbound).
 	connArg := normalizeConnectionID(in.ConnectionID)
-	// Enabling a source requires a bound connection: it can't be polled without
-	// credentials.
-	if in.Enabled && connArg == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "connection_id is required to enable a source")
-		return
-	}
 	// Update by id; identity (installation_id, capability_id) is immutable and
 	// preserved by the repo. A missing source maps to 404.
 	updated, err := h.repo.UpdateSource(r.Context(), autoscan.Source{
