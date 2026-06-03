@@ -184,6 +184,70 @@ func configureOperationalLogging(
 	return operationalWriter, opslog.NewRepo(pool), opsPM
 }
 
+func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxConnections int, mode string) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "integrated", "api":
+	default:
+		return
+	}
+
+	opts, err := database.LoadPostgresTuneOptionsFromEnv(appMaxConnections)
+	if err != nil {
+		slog.Warn("postgres auto-tuning disabled", "error", err)
+		return
+	}
+	if !opts.Enabled {
+		return
+	}
+
+	tuneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := database.ApplyPostgresTuning(tuneCtx, pool, opts)
+	for _, failure := range result.Failures {
+		slog.Warn("postgres auto-tuning setting failed",
+			"name", failure.Name,
+			"value", failure.Value,
+			"error", failure.Err,
+		)
+	}
+	if err != nil {
+		slog.Warn("postgres auto-tuning failed",
+			"error", err,
+			"applied", result.Applied,
+			"failures", len(result.Failures),
+		)
+		return
+	}
+
+	slog.Info("postgres auto-tuning applied",
+		"profile", opts.Profile,
+		"postgres_major", result.PostgresMajorVersion,
+		"settings", result.Applied,
+		"resets", len(result.Reset),
+		"failures", len(result.Failures),
+		"memory_budget_bytes", opts.MemoryBudgetBytes,
+		"detected_memory_bytes", opts.DetectedMemoryBytes,
+		"memory_source", opts.MemorySource,
+		"memory_budget_percent", opts.MemoryBudgetPercent,
+		"cpus", opts.CPUs,
+		"connections", opts.Connections,
+		"storage", opts.Storage,
+		"db_size", result.DBSize,
+		"database_size_bytes", result.DatabaseSizeBytes,
+	)
+	if len(result.RestartRequired) > 0 {
+		slog.Warn("postgres restart required to finish applying auto-tuned settings",
+			"settings", strings.Join(result.RestartRequired, ","),
+		)
+	}
+	if len(result.Reset) > 0 {
+		slog.Info("postgres auto-tuning reset stale settings",
+			"settings", strings.Join(result.Reset, ","),
+		)
+	}
+}
+
 func main() {
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	flag.Parse()
@@ -314,6 +378,7 @@ func main() {
 	slog.SetDefault(slog.New(logfilter.New(baseHandler, cfg.Server.LogQuiet)))
 
 	mode := cfg.Server.Mode
+	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
 	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
 
 	appCtx, appCancel := context.WithCancel(ctx)
