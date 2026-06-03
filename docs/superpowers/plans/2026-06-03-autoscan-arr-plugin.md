@@ -30,12 +30,12 @@ Commands assume the **new plugin repository root** is the cwd (suggested checkou
 | File | Responsibility | Action |
 |---|---|---|
 | `go.mod` | module `github.com/Silo-Server/silo-plugin-autoscan-arr`; SDK dep | Create |
-| `manifest.json` | declares `scan_source.v1` capability + `global_config_schema` (arr URL/key, rewrites) | Create |
+| `manifest.json` | declares `scan_source.v1` capability + `global_config_schema` (path rewrites only; connection arrives per request) | Create |
 | `main.go` | `runtimeServer` (GetManifest/Configure) + `scanSourceServer` (PollChanges); `runtime.Serve` | Create |
 | `internal/arr/history.go` | poll `/history`, imports + renames, bounded window | Create (port) |
 | `internal/arr/rewrite.go` | `applyRewrites`, `normalizeSeparators` | Create (port) |
 | `internal/arr/client.go` | arr HTTP client (`X-Api-Key`, response cap, timeout) | Create |
-| `internal/config/config.go` | parse Configure payload → `{baseURL, apiKey, rewrites, sinceWindow}` | Create |
+| `internal/config/config.go` | parse Configure payload → `{rewrites}` (connection comes per request, not config) | Create |
 | `Makefile` | build (cross-platform), like tmdb | Create |
 
 ---
@@ -76,12 +76,12 @@ Mirror tmdb's shape, declaring the scan source:
     }
   ],
   "global_config_schema": [
-    {"key": "base_url", "type": "string", "required": true, "display_name": "Server URL"},
-    {"key": "api_key", "type": "secret", "required": true, "display_name": "API Key"},
     {"key": "path_rewrites", "type": "json", "required": false, "display_name": "Path rewrites"}
   ]
 }
 ```
+
+> **Connection is NOT plugin config.** The arr base URL + API key are delivered by the host in each `PollChangesRequest.connection` (resolved from the operator's Autoscan connection — own creds or a reused Requests link). The plugin reads them from the request and stores no credentials. Only path rewrites (and other provider-specific behaviour) live in plugin config.
 
 (Confirm the exact `global_config_schema` entry shape against `silo-plugin-sdk` `pkg/pluginsdk/config` — adapt field names to the SDK's config schema type.)
 
@@ -122,28 +122,27 @@ git commit -m "feat: scaffold autoscan-arr scan_source.v1 plugin"
 
 ---
 
-## Task 2: Config parsing (Configure → arr connection + rewrites)
+## Task 2: Config parsing (Configure → path rewrites only)
 
 **Files:** Create `internal/config/config.go`, `internal/config/config_test.go`.
+
+> Connection (base_url/api_key) is NOT config — it arrives per poll in `PollChangesRequest.connection` (Task 5). Plugin config carries only path rewrites.
 
 - [ ] **Step 1: Failing test**
 
 ```go
 func TestParseConfig(t *testing.T) {
 	cfg, err := Parse(map[string]string{
-		"base_url": "http://sonarr:8989",
-		"api_key":  "KEY",
 		"path_rewrites": `[{"from":"/mnt/arr/tv","to":"/mnt/media/tv"}]`,
 	})
 	if err != nil { t.Fatalf("Parse: %v", err) }
-	if cfg.BaseURL != "http://sonarr:8989" || cfg.APIKey != "KEY" { t.Fatalf("bad creds: %+v", cfg) }
 	if len(cfg.Rewrites) != 1 || cfg.Rewrites[0].From != "/mnt/arr/tv" { t.Fatalf("bad rewrites: %+v", cfg.Rewrites) }
 }
 ```
 
 - [ ] **Step 2: Run → fail.** `go test ./internal/config/` → undefined `Parse`.
 
-- [ ] **Step 3: Implement** `Parse(map[string]string) (*Config, error)` with `Config{BaseURL, APIKey string; Rewrites []Rewrite}` where `Rewrite{From, To string}`; unmarshal `path_rewrites` JSON. Wire `runtimeServer.Configure` to store the parsed config so `scanSourceServer` reads it.
+- [ ] **Step 3: Implement** `Parse(map[string]string) (*Config, error)` with `Config{Rewrites []Rewrite}` where `Rewrite{From, To string}`; unmarshal `path_rewrites` JSON. Wire `runtimeServer.Configure` to store the parsed config so `scanSourceServer` reads the rewrites.
 
 - [ ] **Step 4: Run → pass.**
 
@@ -187,19 +186,23 @@ Port `applyRewrites` (boundary-safe prefix: `path==trimmed || HasPrefix(path, tr
 
 **Files:** Modify `main.go` (`scanSourceServer.PollChanges`), add `main_test.go`.
 
-- [ ] **Step 1: Failing test** — a `scanSourceServer` configured with a stub arr server (httptest) and one rewrite; assert `PollChanges` with empty marker returns rewritten Silo-native paths and a non-empty `next_marker`; a second call with that marker queries arr with the right `since`.
+- [ ] **Step 1: Failing test** — a `scanSourceServer` (rewrites configured) called with a `PollChangesRequest` whose `Connection` points at a stub arr server (httptest); assert `PollChanges` with empty marker returns rewritten Silo-native paths and a non-empty `next_marker`, and that the request actually hit the stub at `connection.base_url` with `X-Api-Key: connection.api_key`. A second call with the returned marker queries arr with the right `since`. Also assert a request with a nil/empty `Connection` returns an error (no credentials to poll with).
 
 - [ ] **Step 2: Run → fail.**
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement** — read the connection from the request, not from config:
 
 ```go
 func (s *scanSourceServer) PollChanges(ctx context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error) {
+	conn := req.GetConnection()
+	if conn == nil || conn.GetBaseUrl() == "" {
+		return nil, fmt.Errorf("scan_source: no connection supplied")
+	}
 	since := time.Time{} // empty marker => now (history client floors to now)
 	if m := req.GetMarker(); m != "" {
 		if t, err := time.Parse(time.RFC3339, m); err == nil { since = t }
 	}
-	raw, newest, err := arr.ChangedPaths(ctx, s.cfg.BaseURL, s.cfg.APIKey, since)
+	raw, newest, err := arr.ChangedPaths(ctx, conn.GetBaseUrl(), conn.GetApiKey(), since)
 	if err != nil { return nil, err }
 	out := make([]string, 0, len(raw))
 	for _, p := range raw {
@@ -259,4 +262,4 @@ Port `suggestRewrites` (suffix-match arr root folders → Silo folders) from `ma
 - **Spec coverage:** §10 (arr plugin: history imports + renames, bounded window, rewrites, Silo-native paths) Tasks 3–5; §5 contract (`PollChanges`, opaque marker = RFC3339 timestamp, first-run "now") Task 5; "Sync from arr" §10/§14-risk-2 Task 6 (with an explicit skip path).
 - **Salvage:** history/rewrite/suggest ported from the closed PR (Tasks 3,4,6) — exactly the files the host backend plan deletes (Part-1 Task 8).
 - **Risk:** §14 risk #1 (one plugin installation per arr server vs. many) — this plugin holds one connection per installation/config; multiple arr servers ⇒ multiple installs unless the runtime supports multiple capability instances. §14 risk #2 (Sync UI) gated in Task 6 with a clean skip.
-- **Type consistency:** `Config{BaseURL,APIKey,Rewrites}`, `Rewrite{From,To}`, `arr.ChangedPaths(...) ([]string, time.Time, error)`, `arr.ApplyRewrites`/`NormalizeSeparators`, `scanSourceServer.PollChanges` consistent across Tasks 2–6.
+- **Type consistency:** `Config{Rewrites}` (no creds — connection arrives in `PollChangesRequest.connection`), `Rewrite{From,To}`, `arr.ChangedPaths(ctx, baseURL, apiKey, since) ([]string, time.Time, error)`, `arr.ApplyRewrites`/`NormalizeSeparators`, `scanSourceServer.PollChanges` consistent across Tasks 2–6.

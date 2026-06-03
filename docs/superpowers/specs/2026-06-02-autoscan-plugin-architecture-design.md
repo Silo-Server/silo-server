@@ -97,7 +97,7 @@ The plugin's responsibility ends at **"here are the changed paths, in Silo's ter
 
 A new, additive capability in `silo-plugin-sdk`. Existing plugins never declare it and are unaffected (§11).
 
-### Protobuf (illustrative; final names settled in SDK implementation)
+### Protobuf (as implemented in silo-plugin-sdk)
 
 ```proto
 // scan_source.v1 — host pulls changed paths from a provider on a timer.
@@ -107,8 +107,16 @@ service ScanSource {
 }
 
 message PollChangesRequest {
-  string capability_id = 1;   // which configured scan_source instance
-  string marker        = 2;   // opaque; empty string on first run
+  string capability_id = 1;          // which configured scan_source instance
+  string marker        = 2;          // opaque; empty string on first run
+  ResolvedConnection connection = 3; // resolved upstream credentials (see §8)
+}
+
+// Concrete upstream credentials the host resolves and hands to the plugin each
+// poll, so the plugin stays credential-source-agnostic and stores no secrets.
+message ResolvedConnection {
+  string base_url = 1;
+  string api_key  = 2;
 }
 
 message PollChangesResponse {
@@ -129,6 +137,7 @@ message PollChangesResponse {
 - **Idempotent, at-least-once.** The host may re-issue the same `marker` if it failed to persist `next_marker`; providers must tolerate returning overlapping paths. The host's suppression layer (§7) absorbs duplicates.
 - **Error semantics.** A failed `PollChanges` (e.g. arr unreachable) ⇒ the host keeps the *old* marker and retries next tick; nothing is skipped or advanced.
 - **Silo-native paths only.** `changed_paths` are already rewritten by the plugin; the host does no path translation.
+- **Credentials per call.** The host resolves the source's connection (§8) and passes the concrete `{base_url, api_key}` in `PollChangesRequest.connection` on every poll. The plugin reads them from the request — it stores no credentials and never knows whether they came from its own config or a reused Requests link. Delivered over the local host↔plugin gRPC channel only.
 
 The capability needs **only** `PollChanges` for v1. A `TestConnection`/validate RPC is explicitly deferred (YAGNI; connection validity surfaces as a failed poll).
 
@@ -158,7 +167,7 @@ A **connection** is "an arr server Silo can reach," created two ways:
 - **Own:** name + base URL + API key, entered in the Autoscan category; the key is Fernet-encrypted at rest (same mechanism as existing service credentials — never plaintext in JSONB).
 - **Linked (reuse):** a live reference to an existing Requests `request_integrations` arr server. Resolved at use-time, so edits in Requests propagate.
 
-**Resolution:** at configure/poll time the host resolves the chosen connection (own or linked) into concrete `{base_url, api_key}` and supplies them to the plugin as its runtime configuration. The plugin is credential-source-agnostic — it only ever sees resolved values. This "reuse or own" behaviour is therefore free for every future provider.
+**Resolution:** on each poll the host resolves the chosen connection (own or linked) into concrete `{base_url, api_key}` and passes them in `PollChangesRequest.connection` (§5). The plugin is credential-source-agnostic — it only ever sees resolved values, fresh each poll, so a change to a reused Requests credential propagates immediately with no re-push. This "reuse or own" behaviour is therefore free for every future provider. (Resolving per-call rather than caching in plugin config also means no decrypted secret is ever stored at rest in the plugin.)
 
 **Decoupling from Requests:** the link is **soft and optional** — `SET NULL` / surfaced-as-"needs attention", never cascading. Requests has no knowledge of Autoscan. Autoscan and Requests are peers; Autoscan merely *offers* to borrow a Requests connection.
 
@@ -171,12 +180,16 @@ A **source** corresponds to one configured `scan_source.v1` capability instance 
 - **Plugin-owned config:** path rewrites (+ "Sync from arr") and any provider-specific settings. Configured on the plugin's own settings screen.
 - **Host-owned per-source state:** the chosen connection, enabled on/off, poll interval (per-source, not one global timer), the opaque marker, and last-run status/error.
 
+**Source auto-discovery (resolves §14 risk #1).** Source rows are not created by hand. On each poll cycle the host enumerates every installed `scan_source.v1` capability (via the plugin installation store) and *seeds a disabled, connection-less row* per capability (`INSERT … ON CONFLICT (installation_id, capability_id) DO NOTHING`, never disturbing existing config). The operator then binds a connection and enables it. Consequently **`connection_id` is nullable**: a freshly-discovered source has none, and the engine skips any enabled source with no connection (recording a "no connection bound" status). The admin API rejects enabling a source that has no effective connection.
+
+**Per-source interval** is honoured as a floor: the global poll task runs at `default_poll_interval_seconds`, and within a cycle the engine skips a source whose `last_run_at` is newer than its own `poll_interval_seconds` (falling back to the default). A source therefore polls *at most* every N seconds, never more often than the global cadence.
+
 ### Schema changes (host)
 
 Rework the PR #43 tables; **no FK into `request_integrations`**:
 
 - `autoscan_connections` — `id`, `name`, `kind` (e.g. `sonarr`/`radarr`), and *either* own credentials (`base_url`, `api_key_ref` encrypted) *or* a nullable soft link `request_integration_id` (`ON DELETE SET NULL`).
-- `autoscan_sources` — `id`, the `scan_source` capability/installation identifier, `connection_id → autoscan_connections`, `enabled`, `poll_interval_seconds`, `marker` (opaque text, nullable), `last_run_at`, `last_error`.
+- `autoscan_sources` — `id`, `(installation_id, capability_id)` (unique; the discovered identity), **nullable** `connection_id → autoscan_connections` (`ON DELETE RESTRICT`; null until the operator binds one), `enabled`, `poll_interval_seconds` (nullable; null = use default), `marker` (opaque text, nullable), `last_run_at`, `last_error`. Creation-time validity for connections (own creds OR a link) is enforced at the application layer (the DB CHECK would conflict with `ON DELETE SET NULL` on the reuse link).
 - `autoscan_settings` (optional) — retain a global enable + default interval; per-source interval overrides it.
 
 A migration supersedes PR #43's `171_autoscan` schema (which is not yet upstream, so this is a forward redefinition, not a production migration of live data on `origin/main`).
