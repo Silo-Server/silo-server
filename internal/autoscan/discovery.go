@@ -5,44 +5,74 @@ import (
 	"fmt"
 )
 
-// DiscoveredSource identifies one installed scan_source.v1 capability instance.
+// DiscoveredSource identifies one installed scan_source.v1 capability instance,
+// enriched with the metadata the Add-source picker needs (plugin id + a
+// human-friendly display name).
 type DiscoveredSource struct {
 	InstallationID int
 	CapabilityID   string
+	// PluginID is the installation's plugin id (e.g. "sonarr"); empty when the
+	// lister cannot supply it.
+	PluginID string
+	// DisplayName is a human-friendly label for the capability (from the
+	// capability's manifest display_name, falling back to plugin/capability ids).
+	DisplayName string
 }
 
 // ScanSourceLister enumerates every installed scan_source.v1 capability so the
-// engine can seed a disabled source row per capability before an operator binds
-// a connection.
+// engine can (a) offer them in the Add-source picker and (b) detect orphaned
+// source rows whose plugin has been uninstalled.
 type ScanSourceLister interface {
-	// ListScanSources returns (installationID, capabilityID) for every installed
-	// scan_source.v1 capability.
+	// ListScanSources returns one entry per installed scan_source.v1 capability,
+	// enriched with plugin id + display name.
 	ListScanSources(ctx context.Context) ([]DiscoveredSource, error)
 }
 
-// sourceSeeder is the persistence subset DiscoverSources needs; the repository
-// implements it.
-type sourceSeeder interface {
-	EnsureSource(ctx context.Context, installationID int, capabilityID string) error
+// AvailableScanSource is one installed scan_source capability an operator can
+// create a source against (the Add-source picker list).
+type AvailableScanSource struct {
+	InstallationID int    `json:"installation_id"`
+	CapabilityID   string `json:"capability_id"`
+	PluginID       string `json:"plugin_id"`
+	DisplayName    string `json:"display_name"`
 }
 
-// discoveredKey identifies a discovered scan_source capability for set
+// installedKey identifies an installed scan_source capability for set
 // membership tests (orphan detection in PollOnce).
-type discoveredKey struct {
+type installedKey struct {
 	InstallationID int
 	CapabilityID   string
 }
 
-// DiscoverSources lists every installed scan_source capability and seeds a
-// disabled, connection-less source row for each (idempotent: an existing row is
-// left untouched). It is called at the start of each poll cycle so the source
-// list stays in sync with installed plugins on the poll cadence. It returns the
-// set of currently-discovered capabilities so the caller can detect orphaned
-// source rows (their plugin is gone) and skip them instead of erroring forever.
-// When no lister is configured the returned set is nil; callers must treat a nil
-// set as "discovery unavailable" and NOT prune (everything is then assumed
-// present).
-func (s *Service) DiscoverSources(ctx context.Context) (map[discoveredKey]struct{}, error) {
+// ListAvailableScanSources enumerates every installed scan_source capability so
+// an operator can pick one when creating a source. When no lister is configured
+// it returns an empty list. The handler also uses this to validate that a
+// create request targets a currently-installed capability.
+func (s *Service) ListAvailableScanSources(ctx context.Context) ([]AvailableScanSource, error) {
+	if s.lister == nil {
+		return []AvailableScanSource{}, nil
+	}
+	discovered, err := s.lister.ListScanSources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list scan sources: %w", err)
+	}
+	out := make([]AvailableScanSource, 0, len(discovered))
+	for _, d := range discovered {
+		out = append(out, AvailableScanSource{
+			InstallationID: d.InstallationID,
+			CapabilityID:   d.CapabilityID,
+			PluginID:       d.PluginID,
+			DisplayName:    d.DisplayName,
+		})
+	}
+	return out, nil
+}
+
+// installedScanSources returns the set of currently-installed scan_source
+// capabilities so PollOnce can skip orphaned source rows (their plugin is
+// gone). A nil set means the set is unavailable (no lister) — callers must treat
+// that as "discovery unavailable" and NOT prune.
+func (s *Service) installedScanSources(ctx context.Context) (map[installedKey]struct{}, error) {
 	if s.lister == nil {
 		return nil, nil
 	}
@@ -50,22 +80,9 @@ func (s *Service) DiscoverSources(ctx context.Context) (map[discoveredKey]struct
 	if err != nil {
 		return nil, fmt.Errorf("list scan sources: %w", err)
 	}
-	present := make(map[discoveredKey]struct{}, len(discovered))
+	present := make(map[installedKey]struct{}, len(discovered))
 	for _, d := range discovered {
-		if err := s.seeder.EnsureSource(ctx, d.InstallationID, d.CapabilityID); err != nil {
-			return nil, fmt.Errorf("ensure source %d/%s: %w", d.InstallationID, d.CapabilityID, err)
-		}
-		present[discoveredKey{InstallationID: d.InstallationID, CapabilityID: d.CapabilityID}] = struct{}{}
+		present[installedKey{InstallationID: d.InstallationID, CapabilityID: d.CapabilityID}] = struct{}{}
 	}
 	return present, nil
-}
-
-// RefreshDiscovered runs discovery for its seeding side effect and discards the
-// present-set, so a caller that only needs "make installed scan_source plugins
-// show up as source rows" (e.g. the admin sources list) can trigger it without
-// referencing the internal discovered-key type. Safe to call when no lister is
-// configured (no-op).
-func (s *Service) RefreshDiscovered(ctx context.Context) error {
-	_, err := s.DiscoverSources(ctx)
-	return err
 }

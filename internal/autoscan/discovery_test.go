@@ -12,51 +12,61 @@ func (f fakeLister) ListScanSources(context.Context) ([]DiscoveredSource, error)
 	return f.sources, nil
 }
 
-// spySeeder records EnsureSource calls.
-type spySeeder struct{ ensured []DiscoveredSource }
+func TestListAvailableScanSourcesEnumeratesInstalled(t *testing.T) {
+	lister := fakeLister{sources: []DiscoveredSource{
+		{InstallationID: 1, CapabilityID: "arr-a", PluginID: "sonarr", DisplayName: "Sonarr"},
+		{InstallationID: 2, CapabilityID: "arr-b", PluginID: "radarr", DisplayName: "Radarr"},
+	}}
+	svc := &Service{lister: lister}
 
-func (s *spySeeder) EnsureSource(_ context.Context, installationID int, capabilityID string) error {
-	s.ensured = append(s.ensured, DiscoveredSource{InstallationID: installationID, CapabilityID: capabilityID})
-	return nil
+	available, err := svc.ListAvailableScanSources(context.Background())
+	if err != nil {
+		t.Fatalf("ListAvailableScanSources: %v", err)
+	}
+	if len(available) != 2 {
+		t.Fatalf("expected 2 available, got %d: %+v", len(available), available)
+	}
+	if available[0] != (AvailableScanSource{InstallationID: 1, CapabilityID: "arr-a", PluginID: "sonarr", DisplayName: "Sonarr"}) {
+		t.Fatalf("unexpected first available: %+v", available[0])
+	}
 }
 
-func TestDiscoverSourcesSeedsEachCapability(t *testing.T) {
+func TestListAvailableScanSourcesNilListerEmpty(t *testing.T) {
+	svc := &Service{lister: nil}
+	available, err := svc.ListAvailableScanSources(context.Background())
+	if err != nil {
+		t.Fatalf("ListAvailableScanSources: %v", err)
+	}
+	if len(available) != 0 {
+		t.Fatalf("nil lister must return empty, got %+v", available)
+	}
+}
+
+func TestInstalledScanSourcesSetMembership(t *testing.T) {
 	lister := fakeLister{sources: []DiscoveredSource{
 		{InstallationID: 1, CapabilityID: "arr-a"},
-		{InstallationID: 2, CapabilityID: "arr-b"},
 	}}
-	seeder := &spySeeder{}
-	svc := &Service{lister: lister, seeder: seeder}
+	svc := &Service{lister: lister}
 
-	present, err := svc.DiscoverSources(context.Background())
+	present, err := svc.installedScanSources(context.Background())
 	if err != nil {
-		t.Fatalf("DiscoverSources: %v", err)
+		t.Fatalf("installedScanSources: %v", err)
 	}
-	if len(seeder.ensured) != 2 {
-		t.Fatalf("expected 2 EnsureSource calls, got %d: %+v", len(seeder.ensured), seeder.ensured)
+	if _, ok := present[installedKey{1, "arr-a"}]; !ok {
+		t.Fatalf("expected 1/arr-a present: %+v", present)
 	}
-	if seeder.ensured[0] != (DiscoveredSource{1, "arr-a"}) || seeder.ensured[1] != (DiscoveredSource{2, "arr-b"}) {
-		t.Fatalf("unexpected seeded sources: %+v", seeder.ensured)
-	}
-	if len(present) != 2 {
-		t.Fatalf("expected discovered set of 2, got %d: %+v", len(present), present)
-	}
-	if _, ok := present[discoveredKey{1, "arr-a"}]; !ok {
-		t.Fatalf("discovered set missing 1/arr-a: %+v", present)
+	if _, ok := present[installedKey{2, "arr-b"}]; ok {
+		t.Fatalf("did not expect 2/arr-b present: %+v", present)
 	}
 }
 
-func TestDiscoverSourcesNilListerNoop(t *testing.T) {
-	seeder := &spySeeder{}
-	svc := &Service{lister: nil, seeder: seeder}
-	present, err := svc.DiscoverSources(context.Background())
+func TestInstalledScanSourcesNilListerNilSet(t *testing.T) {
+	svc := &Service{lister: nil}
+	present, err := svc.installedScanSources(context.Background())
 	if err != nil {
-		t.Fatalf("DiscoverSources: %v", err)
-	}
-	if len(seeder.ensured) != 0 {
-		t.Fatalf("nil lister must seed nothing, got %+v", seeder.ensured)
+		t.Fatalf("installedScanSources: %v", err)
 	}
 	if present != nil {
-		t.Fatalf("nil lister must return a nil discovered set, got %+v", present)
+		t.Fatalf("nil lister must return a nil set, got %+v", present)
 	}
 }

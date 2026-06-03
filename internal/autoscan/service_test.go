@@ -15,19 +15,22 @@ type fakeStore struct {
 	connection Connection
 	advanced   map[string]string // source ID -> marker
 	recorded   map[string]string // source ID -> error message
-	ensured    []DiscoveredSource
 }
 
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
 func (f *fakeStore) ListEnabledSources(context.Context) ([]Source, error) {
 	return f.sources, nil
 }
+func (f *fakeStore) GetSource(_ context.Context, id string) (Source, error) {
+	for _, s := range f.sources {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return Source{}, ErrNotFound
+}
 func (f *fakeStore) GetConnection(context.Context, string) (Connection, error) {
 	return f.connection, nil
-}
-func (f *fakeStore) EnsureSource(_ context.Context, installationID int, capabilityID string) error {
-	f.ensured = append(f.ensured, DiscoveredSource{InstallationID: installationID, CapabilityID: capabilityID})
-	return nil
 }
 func (f *fakeStore) AdvanceMarker(_ context.Context, sourceID, marker string) error {
 	if f.advanced == nil {

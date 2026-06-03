@@ -228,57 +228,78 @@ func connectionIDArg(id *string) any {
 	return nullable(*id)
 }
 
-// UpsertSource creates or updates the autoscan source for an
-// (installation_id, capability_id) pair, binding it to a connection and setting
-// its scheduling fields. Bookkeeping fields (marker/last_run_at/last_error) are
-// left untouched on update.
-func (r *Repository) UpsertSource(ctx context.Context, s Source) (Source, error) {
+// CreateSource inserts a new autoscan source row. One installed scan_source
+// capability can back many sources (e.g. one Sonarr plugin install fronting 4
+// arr servers, one source per connection), so this is a plain INSERT with a
+// fresh uuid rather than an upsert. A non-existent connection trips the FK
+// constraint and maps to ErrNotFound.
+func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error) {
 	rewrites, err := marshalPathRewrites(s.PathRewrites)
 	if err != nil {
 		return Source{}, err
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO autoscan_sources (
-			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, updated_at
+			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
-		ON CONFLICT (installation_id, capability_id) DO UPDATE SET
-			connection_id = EXCLUDED.connection_id,
-			enabled = EXCLUDED.enabled,
-			poll_interval_seconds = EXCLUDED.poll_interval_seconds,
-			path_rewrites = EXCLUDED.path_rewrites,
-			updated_at = now()
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+sourceColumns,
 		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites)
 	out, err := scanSource(row)
 	if err != nil {
-		// A non-existent connection trips the FK constraint (23503).
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			connID := ""
-			if s.ConnectionID != nil {
-				connID = *s.ConnectionID
-			}
+		if connID, ok := connectionFKViolation(err, s.ConnectionID); ok {
 			return Source{}, fmt.Errorf("%w: connection %s", ErrNotFound, connID)
 		}
-		return Source{}, fmt.Errorf("upsert autoscan source: %w", err)
+		return Source{}, fmt.Errorf("create autoscan source: %w", err)
 	}
 	return out, nil
 }
 
-// EnsureSource seeds a disabled, connection-less source row for a discovered
-// scan_source capability without disturbing an existing row (auto-discovery runs
-// every poll cycle, so it must be idempotent).
-func (r *Repository) EnsureSource(ctx context.Context, installationID int, capabilityID string) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO autoscan_sources (installation_id, capability_id, enabled)
-		VALUES ($1, $2, false)
-		ON CONFLICT (installation_id, capability_id) DO NOTHING`,
-		installationID, capabilityID)
+// UpdateSource updates a source's binding/scheduling fields by id. Identity
+// (installation_id, capability_id) and bookkeeping fields (marker/last_run_at/
+// last_error) are left untouched. An unknown id maps to ErrNotFound; a
+// non-existent connection trips the FK constraint and also maps to ErrNotFound.
+func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error) {
+	rewrites, err := marshalPathRewrites(s.PathRewrites)
 	if err != nil {
-		return fmt.Errorf("ensure autoscan source: %w", err)
+		return Source{}, err
 	}
-	return nil
+	row := r.pool.QueryRow(ctx, `
+		UPDATE autoscan_sources
+		SET connection_id = $2,
+		    enabled = $3,
+		    poll_interval_seconds = $4,
+		    path_rewrites = $5,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING `+sourceColumns,
+		s.ID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites)
+	out, err := scanSource(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Source{}, fmt.Errorf("%w: source %s", ErrNotFound, s.ID)
+		}
+		if connID, ok := connectionFKViolation(err, s.ConnectionID); ok {
+			return Source{}, fmt.Errorf("%w: connection %s", ErrNotFound, connID)
+		}
+		return Source{}, fmt.Errorf("update autoscan source: %w", err)
+	}
+	return out, nil
+}
+
+// connectionFKViolation reports whether err is the connection FK constraint
+// violation (23503), returning the offending connection id for the error
+// message.
+func connectionFKViolation(err error, connectionID *string) (string, bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return "", false
+	}
+	connID := ""
+	if connectionID != nil {
+		connID = *connectionID
+	}
+	return connID, true
 }
 
 func (r *Repository) ListSources(ctx context.Context) ([]Source, error) {

@@ -6,8 +6,9 @@
 --   * autoscan_settings    - singleton global config (enable, poll cadence, debounce)
 --   * autoscan_connections - reachable upstreams: own credentials, OR a live link
 --                            to a Requests integration (reused arr server)
---   * autoscan_sources     - one row per installed scan_source capability instance
---                            (auto-discovered), binding a connection + rewrites + cadence
+--   * autoscan_sources     - operator-created rows, each binding one installed
+--                            scan_source capability to a connection + rewrites +
+--                            cadence (many sources may share one capability)
 
 CREATE TABLE public.autoscan_settings (
     id boolean PRIMARY KEY DEFAULT true,
@@ -54,6 +55,8 @@ CREATE TABLE public.autoscan_sources (
     last_error text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT autoscan_sources_interval_pos CHECK (poll_interval_seconds IS NULL OR poll_interval_seconds > 0),
-    CONSTRAINT autoscan_sources_capability_unique UNIQUE (installation_id, capability_id)
+    CONSTRAINT autoscan_sources_interval_pos CHECK (poll_interval_seconds IS NULL OR poll_interval_seconds > 0)
+    -- No UNIQUE(installation_id, capability_id): one installed scan_source plugin
+    -- capability backs MANY sources, each bound to a different connection (e.g. 4
+    -- arr servers from one plugin install). Operators create sources explicitly.
 );

@@ -18,10 +18,10 @@ const scanTrigger = "autoscan"
 type Store interface {
 	GetSettings(ctx context.Context) (Settings, error)
 	ListEnabledSources(ctx context.Context) ([]Source, error)
+	GetSource(ctx context.Context, id string) (Source, error)
 	GetConnection(ctx context.Context, id string) (Connection, error)
 	AdvanceMarker(ctx context.Context, sourceID, marker string) error
 	RecordError(ctx context.Context, sourceID, msg string) error
-	EnsureSource(ctx context.Context, installationID int, capabilityID string) error
 }
 
 // Resolver maps a Silo-native path to a concrete scan target (library folder).
@@ -39,6 +39,19 @@ type connectionResolver interface {
 	Resolve(ctx context.Context, c Connection) (ResolvedConnection, error)
 }
 
+// RootFolderClient lists a Radarr/Sonarr instance's configured root folder
+// paths (used by the rewrite suggester). The concrete impl additionally
+// satisfies ArrStatusProbe for the connection-test endpoint.
+type RootFolderClient interface {
+	RootFolders(ctx context.Context, baseURL, apiKey string) ([]string, error)
+}
+
+// FolderLister lists every Silo media-folder path (used by the rewrite
+// suggester to match arr roots against Silo folders).
+type FolderLister interface {
+	ListFolderPaths(ctx context.Context) ([]string, error)
+}
+
 type Service struct {
 	store    Store
 	provider ScanSourceProvider
@@ -47,14 +60,29 @@ type Service struct {
 	queue    Queuer
 	suppress Suppressor
 	lister   ScanSourceLister
-	seeder   sourceSeeder
+
+	// Optional deps for the connection-test and rewrite-suggester endpoints.
+	// Wired via setters so the poll-loop constructor stays unchanged and tests
+	// that only exercise PollOnce need not supply them.
+	rootFolders RootFolderClient
+	folders     FolderLister
+}
+
+// SetSuggesterDeps wires the dependencies the rewrite-suggester and
+// connection-test endpoints need: an arr root-folder/status client and a Silo
+// media-folder lister. Optional — when unset, SuggestRewrites/TestConnection
+// return an error.
+func (s *Service) SetSuggesterDeps(rootFolders RootFolderClient, folders FolderLister) {
+	s.rootFolders = rootFolders
+	s.folders = folders
 }
 
 // NewService builds the autoscan engine. The provider supplies changed paths
 // from scan_source plugins; connres resolves a source's connection to concrete
 // credentials; resolver/queue/suppress drive the resolve→suppress→enqueue loop.
-// lister enumerates installed scan_source capabilities so DiscoverSources can
-// seed a disabled row per capability; it may be nil to disable auto-discovery.
+// lister enumerates installed scan_source capabilities so the Add-source picker
+// can offer them and PollOnce can skip orphaned source rows; it may be nil
+// (the picker then returns an empty list and orphan-pruning is disabled).
 func NewService(
 	store Store,
 	provider ScanSourceProvider,
@@ -72,7 +100,6 @@ func NewService(
 		queue:    queue,
 		suppress: suppress,
 		lister:   lister,
-		seeder:   store,
 	}
 }
 
@@ -80,14 +107,13 @@ func NewService(
 // only settings/listing errors propagate. The opaque next marker returned by the
 // provider is stored verbatim, but only after a successful enqueue.
 func (s *Service) PollOnce(ctx context.Context) error {
-	// Keep the source list in sync with installed scan_source plugins on the poll
-	// cadence. Discovery failures are non-fatal: a stale source list still polls.
-	// present is the set of currently-discovered (installation, capability) pairs;
-	// a nil set means discovery is unavailable (no lister, or it failed), in which
-	// case we do NOT prune orphans — every enabled source is assumed present.
-	present, derr := s.DiscoverSources(ctx)
+	// Fetch the set of currently-installed scan_source capabilities so we can skip
+	// orphaned source rows (their plugin was uninstalled). Listing failures are
+	// non-fatal: a nil set means the installed set is unavailable, in which case
+	// we do NOT prune orphans — every enabled source is assumed present.
+	present, derr := s.installedScanSources(ctx)
 	if derr != nil {
-		slog.WarnContext(ctx, "autoscan: discover sources failed", "err", derr)
+		slog.WarnContext(ctx, "autoscan: list installed scan sources failed", "err", derr)
 		present = nil
 	}
 
@@ -112,7 +138,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		// stops; the operator can delete it via the source delete endpoint. A nil
 		// `present` set means discovery is unavailable — don't prune in that case.
 		if present != nil {
-			if _, ok := present[discoveredKey{InstallationID: src.InstallationID, CapabilityID: src.CapabilityID}]; !ok {
+			if _, ok := present[installedKey{InstallationID: src.InstallationID, CapabilityID: src.CapabilityID}]; !ok {
 				continue
 			}
 		}
