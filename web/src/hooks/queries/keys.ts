@@ -396,5 +396,6 @@ export const adminKeys = {
   autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
   autoscanConnections: () => ["admin", "autoscan", "connections"] as const,
   autoscanSources: () => ["admin", "autoscan", "sources"] as const,
+  autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
   autoscanStatus: () => ["admin", "autoscan", "status"] as const,
 };

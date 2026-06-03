@@ -1717,6 +1717,57 @@ export interface AutoscanSourcesResponse {
   sources: AutoscanSource[];
 }
 
+export interface AutoscanAvailableSource {
+  installation_id: number;
+  capability_id: string;
+  plugin_id: string;
+  display_name: string;
+}
+
+export interface AutoscanAvailableSourcesResponse {
+  plugins: AutoscanAvailableSource[];
+}
+
+export interface AutoscanSourceCreateInput {
+  installation_id: number;
+  capability_id: string;
+  connection_id?: string | null;
+  enabled: boolean;
+  poll_interval_seconds?: number | null;
+  path_rewrites: AutoscanPathRewrite[];
+}
+
+export interface AutoscanConnectionTestInput {
+  connection_id?: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionTestResult {
+  ok: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface AutoscanProposedRewrite {
+  from: string;
+  to: string;
+  match_depth: number;
+}
+
+export interface AutoscanAmbiguousRoot {
+  root: string;
+  candidates: string[];
+}
+
+export interface AutoscanRewriteSuggestions {
+  proposed: AutoscanProposedRewrite[];
+  unmatched: string[];
+  ambiguous: AutoscanAmbiguousRoot[];
+  covered: string[];
+}
+
 export interface AutoscanStatusSource {
   id: string;
   installation_id: number;

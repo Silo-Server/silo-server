@@ -2,11 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type {
+  AutoscanAvailableSourcesResponse,
   AutoscanConnection,
   AutoscanConnectionInput,
   AutoscanConnectionsResponse,
+  AutoscanConnectionTestInput,
+  AutoscanConnectionTestResult,
+  AutoscanRewriteSuggestions,
   AutoscanSettings,
   AutoscanSource,
+  AutoscanSourceCreateInput,
   AutoscanSourceInput,
   AutoscanSourcesResponse,
   AutoscanStatus,
@@ -122,6 +127,35 @@ export function useAutoscanSources() {
   });
 }
 
+export function useAvailableScanSources() {
+  return useQuery({
+    queryKey: adminKeys.autoscanScanSourcePlugins(),
+    queryFn: () =>
+      api<AutoscanAvailableSourcesResponse>("/admin/autoscan/scan-source-plugins").then(
+        (data) => data.plugins ?? [],
+      ),
+    staleTime: AUTOSCAN_STALE_TIME,
+  });
+}
+
+export function useCreateAutoscanSource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AutoscanSourceCreateInput) =>
+      api<AutoscanSource>("/admin/autoscan/sources", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      toast.success("Autoscan source created");
+      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to create autoscan source");
+    },
+  });
+}
+
 export function useUpdateAutoscanSource() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -154,6 +188,40 @@ export function useDeleteAutoscanSource() {
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to delete autoscan source");
     },
+  });
+}
+
+/**
+ * Test an arr connection. Accepts either an existing connection id, or raw
+ * credentials (base_url + api_key_ref) / a request integration id for an
+ * unsaved dialog. Returns the result so the caller can render it inline;
+ * errors are surfaced via the returned result, not a toast (advisory only).
+ */
+export function useTestAutoscanConnection() {
+  return useMutation({
+    mutationFn: (body: AutoscanConnectionTestInput) =>
+      api<AutoscanConnectionTestResult>("/admin/autoscan/connections/test", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  });
+}
+
+/**
+ * Lazily fetch rewrite suggestions for a single source. Triggered on demand
+ * (per source) so it is modelled as a mutation rather than a query. Returns
+ * the suggestions; the 400 (no bound connection) surfaces as a toast.
+ */
+export function useAutoscanRewriteSuggestions() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<AutoscanRewriteSuggestions>(
+        `/admin/autoscan/sources/${encodeURIComponent(id)}/rewrite-suggestions`,
+      ),
+    onError: (err) =>
+      toast.error(
+        err instanceof Error ? err.message : "Could not sync rewrites from the arr instance",
+      ),
   });
 }
 
