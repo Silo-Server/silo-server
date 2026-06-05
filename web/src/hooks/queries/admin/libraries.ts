@@ -30,6 +30,7 @@ import type {
 import { adminKeys, libraryKeys } from "../keys";
 import { toast } from "sonner";
 import type { LibraryReorderEntry } from "@/pages/adminLibraryOrder";
+import { usePageActivity } from "@/hooks/usePageActivity";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -409,6 +410,8 @@ export function useCancelLibraryScans() {
 }
 
 export function useLibraryMetadataMatchQueues() {
+  const pageActivity = usePageActivity();
+
   return useQuery({
     queryKey: adminKeys.libraryMatchQueueStatuses(),
     queryFn: () =>
@@ -416,7 +419,7 @@ export function useLibraryMetadataMatchQueues() {
         (data) => data ?? [],
       ),
     staleTime: 0,
-    refetchInterval: 10_000,
+    refetchInterval: pageActivity.canApplyRealtimeUpdates ? 10_000 : false,
   });
 }
 

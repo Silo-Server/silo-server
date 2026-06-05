@@ -120,7 +120,10 @@ func (h *Hub) PublishCatalogLibraryChanged(ctx context.Context, event LibraryCha
 	if h == nil || h.inner == nil {
 		return nil
 	}
-	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogLibraryChanged), libraryChangePayload(event), evt.PublishOptions{})
+	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogLibraryChanged), libraryChangePayload(event), evt.PublishOptions{}); err != nil {
+		return err
+	}
+	return h.PublishLibraryChanged(ctx, event)
 }
 
 func (h *Hub) PublishMetadataUpdated(ctx context.Context, event MetadataUpdateEvent) error {
@@ -141,11 +144,14 @@ func (h *Hub) PublishCatalogItemChanged(ctx context.Context, event MetadataUpdat
 	if change == "" {
 		change = "metadata_updated"
 	}
-	return h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), map[string]any{
+	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), map[string]any{
 		"library_id": event.LibraryID,
 		"content_id": event.ContentID,
 		"change":     change,
-	}, evt.PublishOptions{})
+	}, evt.PublishOptions{}); err != nil {
+		return err
+	}
+	return h.PublishMetadataUpdated(ctx, event)
 }
 
 func (h *Hub) PublishJob(ctx context.Context, eventType Type, job *models.AdminJob) error {

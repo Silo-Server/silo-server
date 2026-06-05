@@ -318,7 +318,7 @@ func sessionComponentDecision(playMethod string, transcodeAudio bool, targetVide
 		}
 		audioDec := "transcode"
 		if !transcodeAudio {
-			audioDec = "direct"
+			audioDec = "remux"
 		}
 		return videoDec, audioDec
 	default:

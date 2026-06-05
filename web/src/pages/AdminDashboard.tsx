@@ -73,6 +73,8 @@ export default function AdminDashboard() {
     sessionsQuery.data !== undefined &&
     librariesQuery.data !== undefined &&
     usersQuery.data !== undefined;
+  const hasStaleDashboardData =
+    statsQuery.isStale || sessionsQuery.isStale || librariesQuery.isStale || usersQuery.isStale;
   const dashboardDataUpdatedAt = Math.max(
     statsQuery.dataUpdatedAt,
     sessionsQuery.dataUpdatedAt,
@@ -151,10 +153,21 @@ export default function AdminDashboard() {
     const resumedPolling = wasDashboardPollingPausedRef.current;
     wasDashboardPollingPausedRef.current = false;
     if (
+      resumedPolling &&
+      hasDashboardData &&
+      (hasStaleDashboardData ||
+        !lastDashboardUpdatedAt ||
+        Date.now() - lastDashboardUpdatedAt >= DASHBOARD_AUTO_REFRESH_MS)
+    ) {
+      void refreshDashboard({ manual: true });
+      return;
+    }
+
+    if (
       lastDashboardUpdatedAt &&
       Date.now() - lastDashboardUpdatedAt >= DASHBOARD_AUTO_REFRESH_MS
     ) {
-      void refreshDashboard({ manual: resumedPolling });
+      void refreshDashboard({ manual: false });
     }
 
     const interval = window.setInterval(() => {
@@ -165,6 +178,8 @@ export default function AdminDashboard() {
       window.clearInterval(interval);
     };
   }, [
+    hasDashboardData,
+    hasStaleDashboardData,
     isManualRefreshPending,
     lastDashboardUpdatedAt,
     pageActivity.canPollDashboard,

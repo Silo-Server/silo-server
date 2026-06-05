@@ -47,9 +47,10 @@ export function normalizeStreamDecision(decision?: string): string {
 }
 
 export function formatPlaybackDecisionSummary(session: AdminSession): string {
-  const videoDecision = session.video_decision || session.play_method;
-  const audioDecision =
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method);
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  const audioDecision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
 
   if (videoDecision && videoDecision === audioDecision) {
     return videoDecision;
@@ -57,16 +58,17 @@ export function formatPlaybackDecisionSummary(session: AdminSession): string {
   if (videoDecision === "transcode" || audioDecision === "transcode") {
     return "transcode";
   }
-  if (videoDecision === "remux" || audioDecision === "remux") {
-    return "remux";
+  if (videoDecision === "copy" || audioDecision === "copy") {
+    return "copy";
   }
   return videoDecision || audioDecision || session.play_method || "";
 }
 
 export function formatTranscodeModeSummary(session: AdminSession): string | null {
-  const videoDecision = session.video_decision || session.play_method;
-  const audioDecision =
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method);
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  const audioDecision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
   if (videoDecision !== "transcode" && audioDecision !== "transcode") {
     return null;
   }
@@ -155,7 +157,7 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
 }
 
 export function formatVideoDetail(session: AdminSession): string {
-  const decision = session.video_decision || session.play_method;
+  const decision = normalizeStreamDecision(session.video_decision || session.play_method);
   const requestedSource = formatRequestedVideoSource(session);
   const target = [formatCodec(session.target_video_codec), session.target_resolution?.trim()]
     .filter(Boolean)
@@ -174,7 +176,7 @@ export function formatVideoDetail(session: AdminSession): string {
   if (decision === "transcode") {
     return target ? `Output → ${target}` : "Transcoding";
   }
-  if (decision === "remux") {
+  if (decision === "copy") {
     return "Video stream copied";
   }
   if (decision === "direct") {
@@ -212,8 +214,9 @@ export function formatDeliveredAudioSummary(session: AdminSession): string {
 }
 
 export function formatAudioDetail(session: AdminSession): string {
-  const decision =
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method);
+  const decision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
   if (decision === "transcode") {
     const target = [
       formatCodec(session.target_audio_codec || "aac"),
@@ -223,7 +226,7 @@ export function formatAudioDetail(session: AdminSession): string {
       .join(" ");
     return target ? `→ ${target}` : "Audio transcode";
   }
-  if (decision === "remux") {
+  if (decision === "copy") {
     return "Audio stream copied";
   }
   if (decision === "direct") {

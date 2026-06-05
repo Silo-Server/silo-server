@@ -28,6 +28,7 @@ import {
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router";
 
 interface JobWaiter {
   timeoutId: number;
@@ -46,6 +47,12 @@ interface UserStatePayload {
 }
 
 const CATALOG_ITEM_CHANGED_EVENTS = new Set(["metadata.updated", "catalog.item.changed"]);
+const DASHBOARD_QUERY_KEYS = [
+  adminKeys.stats(),
+  adminKeys.sessions(),
+  adminKeys.libraries(),
+  adminKeys.users(),
+] as const;
 
 function buildEventsUrl(token: string | null, location: Pick<Location, "protocol" | "host">) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -157,33 +164,68 @@ function findCachedAdminJob(queryClient: QueryClient, jobId: string) {
   return null;
 }
 
-function invalidateCatalogState(queryClient: QueryClient, itemId?: string) {
+function invalidateDashboardQueries(queryClient: QueryClient, allowRefetch: boolean) {
+  for (const queryKey of DASHBOARD_QUERY_KEYS) {
+    void queryClient.invalidateQueries({
+      queryKey,
+      refetchType: allowRefetch ? "active" : "none",
+    });
+  }
+}
+
+function invalidateCatalogState(
+  queryClient: QueryClient,
+  options: { itemId?: string; allowDashboardRefetch: boolean },
+) {
+  const { itemId, allowDashboardRefetch } = options;
   void invalidateMediaSurfaceQueries(queryClient, itemId ? { itemId } : {}).then(() => {
     bumpHomeRefreshSignal(queryClient);
   });
   void queryClient.refetchQueries({ queryKey: catalogKeys.all, type: "active" });
-  void queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+  void queryClient.invalidateQueries({
+    queryKey: adminKeys.libraries(),
+    refetchType: allowDashboardRefetch ? "active" : "none",
+  });
   void queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
-  void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
+  void queryClient.invalidateQueries({
+    queryKey: adminKeys.stats(),
+    refetchType: allowDashboardRefetch ? "active" : "none",
+  });
   void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
 }
 
-function handleJobSideEffects(queryClient: QueryClient, job: AdminJob, eventName: string) {
+function handleJobSideEffects(
+  queryClient: QueryClient,
+  job: AdminJob,
+  eventName: string,
+  allowDashboardRefetch: boolean,
+) {
   if (job.job_type === "delete_library") {
-    void queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+    void queryClient.invalidateQueries({
+      queryKey: adminKeys.libraries(),
+      refetchType: allowDashboardRefetch ? "active" : "none",
+    });
     void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
   }
 
   if (eventName === "job.completed" && job.job_type === "catalog_import") {
-    invalidateCatalogState(queryClient);
+    invalidateCatalogState(queryClient, { allowDashboardRefetch });
   }
 
   if (eventName === "job.completed" && job.job_type === "delete_library") {
-    invalidateCatalogState(queryClient);
+    invalidateCatalogState(queryClient, { allowDashboardRefetch });
   }
 }
 
-function hydrateSessions(queryClient: QueryClient, sessions: AdminSession[]) {
+function hydrateSessions(
+  queryClient: QueryClient,
+  sessions: AdminSession[],
+  allowDashboardUpdates: boolean,
+) {
+  if (!allowDashboardUpdates) {
+    invalidateDashboardQueries(queryClient, false);
+    return;
+  }
   queryClient.setQueryData(adminKeys.sessions(), sessions);
   void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
 }
@@ -278,6 +320,7 @@ function handleUserStateEvent(
   queryClient: QueryClient,
   payload: UserStatePayload,
   activeProfileID: string | null | undefined,
+  allowDashboardRefetch: boolean,
 ) {
   if (payload.profile_id && activeProfileID && payload.profile_id !== activeProfileID) {
     return;
@@ -300,13 +343,19 @@ function handleUserStateEvent(
   ).then(() => {
     bumpHomeRefreshSignal(queryClient);
   });
-  void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
+  void queryClient.invalidateQueries({
+    queryKey: adminKeys.stats(),
+    refetchType: allowDashboardRefetch ? "active" : "none",
+  });
 }
 
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { user, profile } = useAuth();
   const pageActivity = usePageActivity();
+  const location = useLocation();
+  const isDashboardRoute = location.pathname === "/admin" || location.pathname === "/admin/";
+  const allowDashboardRealtimeUpdates = !isDashboardRoute || pageActivity.canPollDashboard;
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
   const reconnectTimerRef = useRef<number | undefined>(undefined);
   const closingRef = useRef(false);
@@ -319,10 +368,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const waitersRef = useRef(new Map<string, JobWaiter>());
   const activeProfileIDRef = useRef<string | null | undefined>(profile?.id);
   const canApplyRealtimeUpdatesRef = useRef(pageActivity.canApplyRealtimeUpdates);
+  const allowDashboardRealtimeUpdatesRef = useRef(allowDashboardRealtimeUpdates);
   const shouldCatchUpOnFocusRef = useRef(!pageActivity.canApplyRealtimeUpdates);
 
   activeProfileIDRef.current = profile?.id;
   canApplyRealtimeUpdatesRef.current = pageActivity.canApplyRealtimeUpdates;
+  allowDashboardRealtimeUpdatesRef.current = allowDashboardRealtimeUpdates;
 
   const settleWaiterRef = useRef<(job: AdminJob) => void>(() => {});
   settleWaiterRef.current = (job: AdminJob) => {
@@ -393,7 +444,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         }
         break;
       case "sessions":
-        hydrateSessions(queryClient, (message.data as AdminSession[]) ?? []);
+        hydrateSessions(
+          queryClient,
+          (message.data as AdminSession[]) ?? [],
+          allowDashboardRealtimeUpdatesRef.current,
+        );
         break;
       case "tasks":
         hydrateTasks(queryClient, (message.data as TaskInfo[]) ?? []);
@@ -414,24 +469,36 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     switch (message.channel) {
       case "catalog":
         if (CATALOG_ITEM_CHANGED_EVENTS.has(message.event)) {
-          invalidateCatalogState(
-            queryClient,
-            typeof message.data === "object" && message.data && "content_id" in message.data
-              ? (message.data as { content_id?: string }).content_id
-              : undefined,
-          );
+          invalidateCatalogState(queryClient, {
+            itemId:
+              typeof message.data === "object" && message.data && "content_id" in message.data
+                ? (message.data as { content_id?: string }).content_id
+                : undefined,
+            allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+          });
         } else {
-          invalidateCatalogState(queryClient);
+          invalidateCatalogState(queryClient, {
+            allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+          });
         }
         break;
       case "jobs":
         applyAdminJobUpdate(queryClient, message.data as AdminJob);
-        handleJobSideEffects(queryClient, message.data as AdminJob, message.event);
+        handleJobSideEffects(
+          queryClient,
+          message.data as AdminJob,
+          message.event,
+          allowDashboardRealtimeUpdatesRef.current,
+        );
         settleWaiterRef.current(message.data as AdminJob);
         break;
       case "sessions":
         if (message.event === "sessions.replaced") {
-          hydrateSessions(queryClient, (message.data as AdminSession[]) ?? []);
+          hydrateSessions(
+            queryClient,
+            (message.data as AdminSession[]) ?? [],
+            allowDashboardRealtimeUpdatesRef.current,
+          );
         }
         break;
       case "tasks":
@@ -450,6 +517,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           queryClient,
           message.data as UserStatePayload,
           activeProfileIDRef.current,
+          allowDashboardRealtimeUpdatesRef.current,
         );
         break;
       default:
@@ -595,6 +663,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             return Promise.reject(
               new Error(cachedJob.error_message || cachedJob.message || "Job failed"),
             );
+          }
+          if (cachedJob.status === "cancelled") {
+            return Promise.reject(new Error(cachedJob.message || "Job cancelled"));
           }
         }
 

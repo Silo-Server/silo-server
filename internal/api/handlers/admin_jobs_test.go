@@ -2,12 +2,21 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
 func TestCanReadAdminJob_AdminCanReadAnyJob(t *testing.T) {
@@ -78,4 +87,121 @@ func TestAdminJobToResponseForClaims_NonAdminSanitizesItemRefreshPayloads(t *tes
 	if resp.ErrorMessage != "" {
 		t.Fatalf("ErrorMessage = %q, want stripped for non-admin", resp.ErrorMessage)
 	}
+}
+
+func TestAdminJobsHandleCancel_RunningRegistryMissDoesNotUpdateProgress(t *testing.T) {
+	repo := &fakeAdminJobRepository{
+		job: &models.AdminJob{
+			ID:              "job-1",
+			JobType:         adminjob.JobTypeLibraryRefresh,
+			Status:          adminjob.StatusRunning,
+			CreatedByUserID: 1,
+			Message:         "Running",
+			RequestedAt:     time.Now().UTC(),
+		},
+	}
+	handler := NewAdminJobsHandler(repo, nil)
+
+	rec := httptest.NewRecorder()
+	handler.HandleCancel(rec, adminJobCancelRequest("job-1"))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if repo.updateProgressCalls != 0 {
+		t.Fatalf("UpdateProgress called %d times, want 0", repo.updateProgressCalls)
+	}
+}
+
+func TestAdminJobsHandleCancel_QueuedPublishesCancelledEvent(t *testing.T) {
+	repo := &fakeAdminJobRepository{
+		job: &models.AdminJob{
+			ID:              "job-1",
+			JobType:         adminjob.JobTypeLibraryRefresh,
+			Status:          adminjob.StatusQueued,
+			CreatedByUserID: 1,
+			Message:         "Queued",
+			RequestedAt:     time.Now().UTC(),
+		},
+	}
+	hub := notifications.NewHub("test", &cache.NoopEventBus{})
+	events, unsubscribe := hub.Subscribe()
+	defer unsubscribe()
+
+	handler := NewAdminJobsHandler(repo, nil)
+	handler.RealtimeHub = hub
+
+	rec := httptest.NewRecorder()
+	handler.HandleCancel(rec, adminJobCancelRequest("job-1"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	select {
+	case event := <-events:
+		if event.Type != notifications.TypeJobCancelled {
+			t.Fatalf("event.Type = %q, want %q", event.Type, notifications.TypeJobCancelled)
+		}
+		if event.Job == nil || event.Job.ID != "job-1" {
+			t.Fatalf("event.Job = %#v, want job-1", event.Job)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for job.cancelled event")
+	}
+}
+
+func adminJobCancelRequest(id string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/admin/jobs/"+id+"/cancel", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", id)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+type fakeAdminJobRepository struct {
+	job                 *models.AdminJob
+	updateProgressCalls int
+}
+
+func (r *fakeAdminJobRepository) List(context.Context, adminjob.ListJobsOptions) ([]*models.AdminJob, error) {
+	if r.job == nil {
+		return nil, nil
+	}
+	return []*models.AdminJob{r.job}, nil
+}
+
+func (r *fakeAdminJobRepository) GetByID(_ context.Context, id string) (*models.AdminJob, error) {
+	if r.job == nil || r.job.ID != id {
+		return nil, adminjob.ErrJobNotFound
+	}
+	cp := *r.job
+	return &cp, nil
+}
+
+func (r *fakeAdminJobRepository) Cancel(_ context.Context, id, message string, _ time.Time) (*models.AdminJob, error) {
+	if r.job == nil || r.job.ID != id {
+		return nil, adminjob.ErrJobNotFound
+	}
+	if r.job.Status != adminjob.StatusQueued && r.job.Status != adminjob.StatusRunning {
+		return nil, adminjob.ErrJobNotCancellable
+	}
+	cp := *r.job
+	cp.Status = adminjob.StatusCancelled
+	cp.Message = message
+	r.job = &cp
+	return &cp, nil
+}
+
+func (r *fakeAdminJobRepository) UpdateProgress(_ context.Context, id string, current, total int, message string) error {
+	r.updateProgressCalls++
+	if r.job == nil || r.job.ID != id {
+		return adminjob.ErrJobNotFound
+	}
+	if message == "" {
+		return errors.New("message is required")
+	}
+	r.job.ProgressCurrent = current
+	r.job.ProgressTotal = total
+	r.job.Message = message
+	return nil
 }
