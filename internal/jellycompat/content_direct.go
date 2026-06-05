@@ -27,9 +27,14 @@ type LibraryPosterPresigner interface {
 // directContentService relies on. Defined as an interface so tests can
 // substitute a stub without standing up a Postgres pool.
 type browseSource interface {
-	Browse(ctx context.Context, filters catalog.BrowseFilters) (*catalog.BrowseResult, error)
+	BrowsePage(ctx context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error)
 	ListGenres(ctx context.Context, filters catalog.BrowseFilters) ([]string, error)
 }
+
+const (
+	compatBrowseChunkLimit = 100
+	compatBrowseMaxLimit   = 1000
+)
 
 // itemAccessSource is the subset of *catalog.ItemRepository that
 // directContentService season/episode handlers rely on. Defined as an
@@ -165,17 +170,23 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	filter := s.resolveFilter(ctx, session)
 	isPlayedFilter := params.Get("is_played") // "", "true", or "false"
 	contentIDs := parseContentIDParam(params.Get("content_ids"))
+	includeTotal := parseBool(params.Get("include_total"), true)
 
 	requestedLimit := catalog.ParseIntParam(params.Get("limit"))
 	if requestedLimit <= 0 {
 		requestedLimit = 24
 	}
-	requestedOffset := catalog.ParseIntParam(params.Get("offset"))
+	if requestedLimit > compatBrowseMaxLimit {
+		requestedLimit = compatBrowseMaxLimit
+	}
+	requestedOffset := max(catalog.ParseIntParam(params.Get("offset")), 0)
 
-	// When filtering by played status, over-fetch to compensate for filtered-out items.
 	fetchLimit := requestedLimit
 	if isPlayedFilter != "" {
-		fetchLimit = min(requestedLimit*3, 100)
+		// Played status is a profile overlay, so browse over-fetches bounded
+		// chunks and filters them locally instead of asking catalog for every
+		// row in a large library.
+		fetchLimit = min(max(requestedLimit*3, compatBrowseChunkLimit), compatBrowseMaxLimit)
 	}
 
 	filters := catalog.BrowseFilters{
@@ -191,19 +202,31 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		Sort:               params.Get("sort"),
 		Order:              params.Get("order"),
 		Limit:              fetchLimit,
+		MaxLimit:           compatBrowseMaxLimit,
 		Offset:             requestedOffset,
 	}
 
 	var collected []upstreamListItem
 	totalFromCatalog := 0
-	maxIterations := 5
+	totalKnown := false
+	hasMore := false
+	scannedRows := 0
+	maxScannedRows := requestedLimit
+	if isPlayedFilter != "" {
+		maxScannedRows = max(requestedLimit*5, compatBrowseChunkLimit)
+	}
 
-	for range maxIterations {
-		result, err := s.browseRepo.Browse(ctx, filters)
+	for len(collected) < requestedLimit && scannedRows < maxScannedRows {
+		wantTotal := includeTotal && !totalKnown
+		result, err := s.browseRepo.BrowsePage(ctx, filters, wantTotal)
 		if err != nil {
 			return nil, fmt.Errorf("browse items: %w", err)
 		}
-		totalFromCatalog = result.Total
+		if wantTotal {
+			totalFromCatalog = result.Total
+			totalKnown = true
+		}
+		hasMore = result.HasMore
 
 		batch := make([]upstreamListItem, 0, len(result.Items))
 		for _, mi := range result.Items {
@@ -232,21 +255,24 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 			collected = append(collected, batch...)
 		}
 
-		// Stop if we have enough or catalog is exhausted.
-		if len(collected) >= requestedLimit || len(result.Items) < filters.Limit {
+		scannedRows += len(result.Items)
+		if len(result.Items) == 0 || !result.HasMore {
 			break
 		}
-		filters.Offset += filters.Limit
+		filters.Offset += len(result.Items)
 	}
 
 	// Trim to requested limit.
 	if len(collected) > requestedLimit {
 		collected = collected[:requestedLimit]
 	}
+	if totalKnown {
+		hasMore = totalFromCatalog > requestedOffset+requestedLimit
+	}
 
 	return &upstreamBrowseResponse{
 		Total:   totalFromCatalog,
-		HasMore: totalFromCatalog > requestedOffset+requestedLimit,
+		HasMore: hasMore,
 		Items:   collected,
 	}, nil
 }
