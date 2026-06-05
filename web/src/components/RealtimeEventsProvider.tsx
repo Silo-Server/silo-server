@@ -196,6 +196,7 @@ function hydrateTasks(queryClient: QueryClient, tasks: TaskInfo[]) {
 }
 
 function applyTaskUpdate(queryClient: QueryClient, task: TaskInfo) {
+  const previousTask = queryClient.getQueryData<TaskInfo>(adminKeys.task(task.key));
   queryClient.setQueryData<TaskInfo[]>(adminKeys.tasks(), (existing) => {
     const tasks = existing ? [...existing] : [];
     const index = tasks.findIndex((entry) => entry.key === task.key);
@@ -207,6 +208,15 @@ function applyTaskUpdate(queryClient: QueryClient, task: TaskInfo) {
     return tasks.sort((left, right) => left.key.localeCompare(right.key));
   });
   queryClient.setQueryData(adminKeys.task(task.key), task);
+
+  if (
+    task.state === "idle" &&
+    task.last_execution?.completed_at &&
+    previousTask?.last_execution?.completed_at !== task.last_execution.completed_at
+  ) {
+    void queryClient.invalidateQueries({ queryKey: adminKeys.taskHistory(task.key) });
+    void queryClient.invalidateQueries({ queryKey: adminKeys.taskMetrics(task.key) });
+  }
 }
 
 function hydrateScans(queryClient: QueryClient, scans: ScanRun[]) {
