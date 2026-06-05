@@ -128,6 +128,8 @@ import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
 
+// Keep toast lifetime and delayed state cleanup coordinated so visible feedback
+// disappears before state is cleared.
 const MOUNT_CHECK_FEEDBACK_MS = 5_000;
 
 export default function AdminLibraries() {
@@ -168,6 +170,8 @@ export default function AdminLibraries() {
 
   useEffect(() => {
     return () => {
+      // Cancel pending mount-check cleanup timers so unmount cannot clear state
+      // after the page leaves.
       for (const timeoutID of Object.values(mountCheckClearTimeoutsRef.current)) {
         window.clearTimeout(timeoutID);
       }
@@ -282,6 +286,8 @@ export default function AdminLibraries() {
         if (existingTimeout) {
           window.clearTimeout(existingTimeout);
         }
+        // Match the toast duration so the inline mount-check result stays visible
+        // for the same window.
         mountCheckClearTimeoutsRef.current[libraryId] = window.setTimeout(() => {
           setLastMountCheckByLibraryId((current) => {
             const next = { ...current };
