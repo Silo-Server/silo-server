@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -54,6 +55,95 @@ func TestItemEtagIncludesPremiereDate(t *testing.T) {
 
 	if itemEtag(base) == itemEtag(updated) {
 		t.Fatal("expected date changes to alter the compat item etag")
+	}
+}
+
+type countingCompatImageResolver struct {
+	singleCalls int
+	batchCalls  int
+	variants    []string
+	paths       []string
+}
+
+func (r *countingCompatImageResolver) ResolveImageURL(_ context.Context, path string, variant string) string {
+	r.singleCalls++
+	return "single:" + variant + ":" + path
+}
+
+func (r *countingCompatImageResolver) ResolveImageURLs(_ context.Context, paths []string, variant string) map[string]string {
+	resolved := r.ResolveImageURLsWithExpiry(context.Background(), paths, variant)
+	urls := make(map[string]string, len(resolved))
+	for path, value := range resolved {
+		urls[path] = value.URL
+	}
+	return urls
+}
+
+func (r *countingCompatImageResolver) ResolveImageURLWithExpiry(_ context.Context, path string, variant string) catalog.ResolvedImageURL {
+	r.singleCalls++
+	return catalog.ResolvedImageURL{URL: "single:" + variant + ":" + path}
+}
+
+func (r *countingCompatImageResolver) ResolveImageURLsWithExpiry(_ context.Context, paths []string, variant string) map[string]catalog.ResolvedImageURL {
+	r.batchCalls++
+	r.variants = append(r.variants, variant)
+	r.paths = append(r.paths, paths...)
+	resolved := make(map[string]catalog.ResolvedImageURL, len(paths))
+	for _, path := range paths {
+		resolved[path] = catalog.ResolvedImageURL{URL: "batch:" + variant + ":" + path}
+	}
+	return resolved
+}
+
+func TestPresignListItemsBatchResolvesImages(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	svc := &directContentService{detailSvc: detailSvc}
+
+	items := []upstreamListItem{
+		{
+			ContentID:   "movie-1",
+			PosterURL:   "plug://poster-1",
+			BackdropURL: "plug://backdrop-1",
+			LogoURL:     "plug://logo-1",
+		},
+		{
+			ContentID: "movie-2",
+			PosterURL: "plug://poster-2",
+			StillURL:  "plug://still-2",
+		},
+	}
+
+	svc.presignListItems(context.Background(), items)
+
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	if resolver.batchCalls != 4 {
+		t.Fatalf("batch image resolver calls = %d, want 4", resolver.batchCalls)
+	}
+	for _, variant := range resolver.variants {
+		if variant != "card" {
+			t.Fatalf("batch variant = %q, want card", variant)
+		}
+	}
+	for _, path := range []string{"plug://poster-1", "plug://poster-2", "plug://backdrop-1", "plug://logo-1", "plug://still-2"} {
+		if !slices.Contains(resolver.paths, path) {
+			t.Fatalf("batch paths %v missing %q", resolver.paths, path)
+		}
+	}
+	if items[0].PosterPath != "plug://poster-1" {
+		t.Fatalf("PosterPath = %q, want original path", items[0].PosterPath)
+	}
+	if got := items[0].PosterURL; got != "batch:card:plug://poster-1" {
+		t.Fatalf("PosterURL = %q", got)
+	}
+	if got := items[0].BackdropURL; got != "batch:card:plug://backdrop-1" {
+		t.Fatalf("BackdropURL = %q", got)
+	}
+	if got := items[1].StillURL; got != "batch:card:plug://still-2" {
+		t.Fatalf("StillURL = %q", got)
 	}
 }
 
