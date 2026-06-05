@@ -78,9 +78,26 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Derive a human-readable label from installation_id + capability_id. */
-function sourceLabel(source: AutoscanSource): string {
-  return `${source.capability_id} (plugin #${source.installation_id})`;
+/**
+ * Resolve a source's display name from its persisted state via the shared label
+ * chain (operator label -> connection name -> manifest display_name -> capability).
+ * Used where no live row-edit state is available (e.g. the delete dialog); inside
+ * a SourceRow, prefer the row's `resolvedLabel` which reflects in-progress edits.
+ */
+function resolveSourceName(
+  source: AutoscanSource,
+  connectionOptions: Array<{ id: string; name: string }>,
+  pluginDisplayNames: Map<string, string>,
+): string {
+  return composeSourceLabel({
+    operatorLabel: source.label,
+    connectionName: connectionOptions.find((c) => c.id === (source.connection_id ?? ""))?.name,
+    displayName: pluginDisplayNames.get(
+      pluginDisplayNameKey(source.installation_id, source.capability_id),
+    ),
+    capabilityId: source.capability_id,
+    installationId: source.installation_id,
+  }).name;
 }
 
 function formatRelativeTime(isoString: string | null): string {
@@ -873,7 +890,7 @@ function SourceRow({
         <Select value="__none__" onValueChange={handleConnectionChange}>
           <SelectTrigger
             className={connectionSelectClass}
-            aria-label={`Connection for ${sourceLabel(source)}`}
+            aria-label={`Connection for ${resolvedLabel.name}`}
           >
             <SelectValue placeholder="No connection" />
           </SelectTrigger>
@@ -894,7 +911,7 @@ function SourceRow({
       <Select value={edit.connectionId || "__none__"} onValueChange={handleConnectionChange}>
         <SelectTrigger
           className={connectionSelectClass}
-          aria-label={`Connection for ${sourceLabel(source)}`}
+          aria-label={`Connection for ${resolvedLabel.name}`}
         >
           <SelectValue placeholder="No connection" />
         </SelectTrigger>
@@ -917,7 +934,7 @@ function SourceRow({
           placeholder="Default"
           value={edit.intervalStr}
           aria-invalid={intervalError}
-          aria-label={`Poll interval seconds for ${sourceLabel(source)}`}
+          aria-label={`Poll interval seconds for ${resolvedLabel.name}`}
           onChange={(e) => {
             setIntervalError(false);
             setEdit((ed) => ({ ...ed, intervalStr: e.target.value }));
@@ -957,7 +974,7 @@ function SourceRow({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Delete source ${sourceLabel(source)}`}
+            aria-label={`Delete source ${resolvedLabel.name}`}
             onClick={() => onDelete(source)}
             className="shrink-0"
           >
@@ -982,7 +999,7 @@ function SourceRow({
               checked={source.enabled}
               onCheckedChange={handleToggleEnabled}
               disabled={update.isPending}
-              aria-label={`${sourceLabel(source)} enabled`}
+              aria-label={`${resolvedLabel.name} enabled`}
             />
           </div>
 
@@ -1017,7 +1034,7 @@ function SourceRow({
           checked={source.enabled}
           onCheckedChange={handleToggleEnabled}
           disabled={update.isPending}
-          aria-label={`${sourceLabel(source)} enabled`}
+          aria-label={`${resolvedLabel.name} enabled`}
         />
       </TableCell>
 
@@ -1029,7 +1046,7 @@ function SourceRow({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Delete source ${sourceLabel(source)}`}
+          aria-label={`Delete source ${resolvedLabel.name}`}
           onClick={() => onDelete(source)}
         >
           <Trash2 className="text-destructive" />
@@ -1379,8 +1396,11 @@ export default function SourcesPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete source?</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{deleteTarget ? sourceLabel(deleteTarget) : ""}&rdquo; will be permanently
-              removed. This cannot be undone.
+              &ldquo;
+              {deleteTarget
+                ? resolveSourceName(deleteTarget, connectionOptions, pluginDisplayNames)
+                : ""}
+              &rdquo; will be permanently removed. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
