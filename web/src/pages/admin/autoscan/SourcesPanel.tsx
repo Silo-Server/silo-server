@@ -798,10 +798,16 @@ function SourceRow({
       ? `Floor only - values below the global default (${globalPollInterval}s) have no effect.`
       : "Floor only - values below the global default poll interval have no effect.";
 
+  const boundConnectionId = edit.connectionId || source.connection_id || "";
+  const connectionName = connectionOptions.find((c) => c.id === boundConnectionId)?.name ?? "";
   const sourceIdentity = (
     <div className="min-w-0 space-y-0.5">
-      <p className="truncate leading-none font-medium">{source.capability_id}</p>
-      <p className="text-muted-foreground text-xs">Plugin #{source.installation_id}</p>
+      <p className="truncate leading-none font-medium">{connectionName || source.capability_id}</p>
+      <p className="text-muted-foreground text-xs">
+        {connectionName
+          ? `${source.capability_id} · plugin #${source.installation_id}`
+          : `Plugin #${source.installation_id}`}
+      </p>
     </div>
   );
 
