@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,10 @@ type autoscanStore interface {
 	CreateSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
 	UpdateSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
 	DeleteSource(ctx context.Context, id string) error
+	ListAutoscanScans(ctx context.Context, filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error)
+	ListEvents(ctx context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
+	GetQueueSummary(ctx context.Context) (autoscan.QueueSummary, error)
+	LatestEventAt(ctx context.Context) (*time.Time, error)
 }
 
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
@@ -308,6 +313,7 @@ type autoscanSourceResponse struct {
 	Enabled             bool                   `json:"enabled"`
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds,omitempty"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
+	SourceConfig        map[string]string      `json:"source_config"`
 	LastRunAt           *time.Time             `json:"last_run_at,omitempty"`
 	LastError           *string                `json:"last_error,omitempty"`
 }
@@ -319,6 +325,7 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 	if rewrites == nil {
 		rewrites = []autoscan.PathRewrite{}
 	}
+	config := normalizeSourceConfig(s.SourceConfig)
 	return autoscanSourceResponse{
 		ID:                  s.ID,
 		InstallationID:      s.InstallationID,
@@ -327,6 +334,7 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 		Enabled:             s.Enabled,
 		PollIntervalSeconds: s.PollIntervalSeconds,
 		PathRewrites:        rewrites,
+		SourceConfig:        config,
 		LastRunAt:           s.LastRunAt,
 		LastError:           s.LastError,
 	}
@@ -393,6 +401,7 @@ type autoscanCreateSourceInput struct {
 	Enabled             bool                   `json:"enabled"`
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
+	SourceConfig        map[string]string      `json:"source_config"`
 }
 
 // HandleCreateSource creates a new source bound to an installed scan_source
@@ -438,6 +447,7 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		Enabled:             in.Enabled,
 		PollIntervalSeconds: in.PollIntervalSeconds,
 		PathRewrites:        normalizePathRewrites(in.PathRewrites),
+		SourceConfig:        normalizeSourceConfig(in.SourceConfig),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -473,6 +483,7 @@ type autoscanSourceInput struct {
 	Enabled             bool                   `json:"enabled"`
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
+	SourceConfig        map[string]string      `json:"source_config"`
 }
 
 // validatePathRewrites lightly validates a source's rewrite list: each entry
@@ -496,6 +507,18 @@ func normalizePathRewrites(rewrites []autoscan.PathRewrite) []autoscan.PathRewri
 			From: strings.TrimSpace(rw.From),
 			To:   strings.TrimSpace(rw.To),
 		})
+	}
+	return out
+}
+
+func normalizeSourceConfig(config map[string]string) map[string]string {
+	out := make(map[string]string, len(config))
+	for key, value := range config {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(value)
 	}
 	return out
 }
@@ -526,6 +549,7 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		Enabled:             in.Enabled,
 		PollIntervalSeconds: in.PollIntervalSeconds,
 		PathRewrites:        normalizePathRewrites(in.PathRewrites),
+		SourceConfig:        normalizeSourceConfig(in.SourceConfig),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -660,6 +684,192 @@ func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) 
 	}{Status: "ok"})
 }
 
+// --- Events ---
+
+type autoscanEventScanRunResponse struct {
+	ID           string     `json:"id"`
+	LibraryID    int        `json:"library_id"`
+	Mode         string     `json:"mode"`
+	Path         string     `json:"path,omitempty"`
+	Trigger      string     `json:"trigger"`
+	Status       string     `json:"status"`
+	RequestedAt  *time.Time `json:"requested_at,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
+}
+
+type autoscanEventResponse struct {
+	ID              int64                          `json:"id"`
+	SourceID        *string                        `json:"source_id"`
+	InstallationID  int                            `json:"installation_id"`
+	CapabilityID    string                         `json:"capability_id"`
+	StartedAt       time.Time                      `json:"started_at"`
+	CompletedAt     time.Time                      `json:"completed_at"`
+	DurationMS      int64                          `json:"duration_ms"`
+	Status          string                         `json:"status"`
+	ChangesReturned int                            `json:"changes_returned"`
+	ChangesResolved int                            `json:"changes_resolved"`
+	TargetsClaimed  int                            `json:"targets_claimed"`
+	ScansCreated    int                            `json:"scans_created"`
+	ScansReused     int                            `json:"scans_reused"`
+	ScansSuppressed int                            `json:"scans_suppressed"`
+	ErrorMessage    string                         `json:"error_message,omitempty"`
+	ScanRuns        []autoscanEventScanRunResponse `json:"scan_runs"`
+}
+
+type autoscanEventsResponse struct {
+	Events []autoscanEventResponse `json:"events"`
+}
+
+func eventResponse(event autoscan.EventWithRuns) autoscanEventResponse {
+	runs := make([]autoscanEventScanRunResponse, 0, len(event.Runs))
+	for _, run := range event.Runs {
+		runs = append(runs, autoscanEventScanRunResponse{
+			ID:           run.ID,
+			LibraryID:    run.MediaFolderID,
+			Mode:         run.Mode,
+			Path:         run.Path,
+			Trigger:      run.Trigger,
+			Status:       run.Status,
+			RequestedAt:  run.RequestedAt,
+			StartedAt:    run.StartedAt,
+			CompletedAt:  run.CompletedAt,
+			ErrorMessage: run.ErrorMessage,
+		})
+	}
+	e := event.Event
+	return autoscanEventResponse{
+		ID:              e.ID,
+		SourceID:        e.SourceID,
+		InstallationID:  e.InstallationID,
+		CapabilityID:    e.CapabilityID,
+		StartedAt:       e.StartedAt,
+		CompletedAt:     e.CompletedAt,
+		DurationMS:      e.DurationMS,
+		Status:          string(e.Status),
+		ChangesReturned: e.ChangesReturned,
+		ChangesResolved: e.ChangesResolved,
+		TargetsClaimed:  e.TargetsClaimed,
+		ScansCreated:    e.ScansCreated,
+		ScansReused:     e.ScansReused,
+		ScansSuppressed: e.ScansSuppressed,
+		ErrorMessage:    e.ErrorMessage,
+		ScanRuns:        runs,
+	}
+}
+
+func (h *AutoscanHandler) HandleListEvents(w http.ResponseWriter, r *http.Request) {
+	filter := autoscan.EventListFilter{
+		SourceID: strings.TrimSpace(r.URL.Query().Get("source_id")),
+		Status:   autoscan.EventStatus(strings.TrimSpace(r.URL.Query().Get("status"))),
+		Search:   strings.TrimSpace(r.URL.Query().Get("q")),
+		Limit:    50,
+	}
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit < 1 {
+			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
+			return
+		}
+		filter.Limit = limit
+	}
+	switch filter.Status {
+	case "", autoscan.EventStatusSuccess, autoscan.EventStatusError, autoscan.EventStatusUnresolved:
+	default:
+		writeError(w, http.StatusBadRequest, "bad_request", "status must be success, error, or unresolved")
+		return
+	}
+
+	events, err := h.repo.ListEvents(r.Context(), filter)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	out := make([]autoscanEventResponse, 0, len(events))
+	for _, event := range events {
+		out = append(out, eventResponse(event))
+	}
+	writeJSON(w, http.StatusOK, autoscanEventsResponse{Events: out})
+}
+
+type autoscanScanResponse struct {
+	ID               string     `json:"id"`
+	LibraryID        int        `json:"library_id"`
+	Mode             string     `json:"mode"`
+	Path             string     `json:"path,omitempty"`
+	Trigger          string     `json:"trigger"`
+	Status           string     `json:"status"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	RequestedAt      *time.Time `json:"requested_at,omitempty"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	AutoscanEventID  *int64     `json:"autoscan_event_id,omitempty"`
+	SourceID         *string    `json:"source_id,omitempty"`
+	InstallationID   *int       `json:"installation_id,omitempty"`
+	CapabilityID     string     `json:"capability_id,omitempty"`
+	EventStatus      string     `json:"event_status,omitempty"`
+	EventCompletedAt *time.Time `json:"event_completed_at,omitempty"`
+}
+
+type autoscanScansResponse struct {
+	Scans []autoscanScanResponse `json:"scans"`
+}
+
+func autoscanScanRunResponse(scan autoscan.ScanWithEvent) autoscanScanResponse {
+	return autoscanScanResponse{
+		ID:               scan.ID,
+		LibraryID:        scan.MediaFolderID,
+		Mode:             scan.Mode,
+		Path:             scan.Path,
+		Trigger:          scan.Trigger,
+		Status:           scan.Status,
+		ErrorMessage:     scan.ErrorMessage,
+		RequestedAt:      scan.RequestedAt,
+		StartedAt:        scan.StartedAt,
+		CompletedAt:      scan.CompletedAt,
+		AutoscanEventID:  scan.AutoscanEventID,
+		SourceID:         scan.SourceID,
+		InstallationID:   scan.InstallationID,
+		CapabilityID:     scan.CapabilityID,
+		EventStatus:      string(scan.EventStatus),
+		EventCompletedAt: scan.EventCompletedAt,
+	}
+}
+
+func (h *AutoscanHandler) HandleListScans(w http.ResponseWriter, r *http.Request) {
+	filter := autoscan.ScanListFilter{
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Search: strings.TrimSpace(r.URL.Query().Get("q")),
+		Limit:  50,
+	}
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit < 1 {
+			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
+			return
+		}
+		filter.Limit = limit
+	}
+	switch filter.Status {
+	case "", "accepted", "running", "completed", "failed", "cancelled":
+	default:
+		writeError(w, http.StatusBadRequest, "bad_request", "status must be accepted, running, completed, failed, or cancelled")
+		return
+	}
+
+	scans, err := h.repo.ListAutoscanScans(r.Context(), filter)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	out := make([]autoscanScanResponse, 0, len(scans))
+	for _, scan := range scans {
+		out = append(out, autoscanScanRunResponse(scan))
+	}
+	writeJSON(w, http.StatusOK, autoscanScansResponse{Scans: out})
+}
+
 // --- Status ---
 
 type autoscanStatusSource struct {
@@ -674,8 +884,12 @@ type autoscanStatusSource struct {
 }
 
 type autoscanStatusResponse struct {
-	Enabled bool                   `json:"enabled"`
-	Sources []autoscanStatusSource `json:"sources"`
+	Enabled       bool                   `json:"enabled"`
+	Sources       []autoscanStatusSource `json:"sources"`
+	ActiveScans   int                    `json:"active_scans"`
+	AcceptedScans int                    `json:"accepted_scans"`
+	RunningScans  int                    `json:"running_scans"`
+	LatestEventAt *time.Time             `json:"latest_event_at,omitempty"`
 }
 
 func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
@@ -686,6 +900,16 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sources, err := h.repo.ListSources(ctx)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	queue, err := h.repo.GetQueueSummary(ctx)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	latestEventAt, err := h.repo.LatestEventAt(ctx)
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
@@ -708,8 +932,12 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, autoscanStatusResponse{
-		Enabled: s.Enabled,
-		Sources: trimmed,
+		Enabled:       s.Enabled,
+		Sources:       trimmed,
+		ActiveScans:   queue.Active,
+		AcceptedScans: queue.Accepted,
+		RunningScans:  queue.Running,
+		LatestEventAt: latestEventAt,
 	})
 }
 

@@ -133,31 +133,46 @@ func (s *Service) EnqueueScan(ctx context.Context, folderID int, mode, path, tri
 }
 
 func (s *Service) EnqueueScans(ctx context.Context, targets []scantrigger.Target) error {
+	_, _, err := s.enqueueScans(ctx, targets, nil)
+	return err
+}
+
+func (s *Service) EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+	return s.enqueueScans(ctx, targets, &eventID)
+}
+
+func (s *Service) enqueueScans(ctx context.Context, targets []scantrigger.Target, autoscanEventID *int64) (int, int, error) {
 	if s == nil || s.repo == nil {
-		return fmt.Errorf("scan queue is not configured")
+		return 0, 0, fmt.Errorf("scan queue is not configured")
 	}
 	inputs := make([]CreateInput, 0, len(targets))
 	for _, target := range targets {
 		if target.Folder == nil {
-			return fmt.Errorf("scan queue: target is missing folder")
+			return 0, 0, fmt.Errorf("scan queue: target is missing folder")
 		}
 		inputs = append(inputs, CreateInput{
-			LibraryID: target.Folder.ID,
-			Mode:      target.Mode,
-			Path:      target.Path,
-			Trigger:   target.Trigger,
+			LibraryID:       target.Folder.ID,
+			Mode:            target.Mode,
+			Path:            target.Path,
+			Trigger:         target.Trigger,
+			AutoscanEventID: autoscanEventID,
 		})
 	}
 	runs, created, err := s.repo.CreateBatch(ctx, inputs)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
+	createdCount := 0
+	reusedCount := 0
 	for i, run := range runs {
 		if i < len(created) && created[i] {
+			createdCount++
 			s.publish(ctx, "scan.accepted", run)
+		} else {
+			reusedCount++
 		}
 	}
-	return nil
+	return createdCount, reusedCount, nil
 }
 
 func (s *Service) CancelAcceptedByLibrary(ctx context.Context, libraryID int) (int, error) {

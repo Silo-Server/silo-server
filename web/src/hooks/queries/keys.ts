@@ -398,4 +398,8 @@ export const adminKeys = {
   autoscanSources: () => ["admin", "autoscan", "sources"] as const,
   autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
   autoscanStatus: () => ["admin", "autoscan", "status"] as const,
+  autoscanScans: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "scans", params ?? {}] as const,
+  autoscanEvents: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "events", params ?? {}] as const,
 };

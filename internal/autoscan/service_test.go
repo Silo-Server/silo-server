@@ -2,6 +2,7 @@ package autoscan
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,11 +12,13 @@ import (
 )
 
 type fakeStore struct {
-	settings   Settings
-	sources    []Source
-	connection Connection
-	advanced   map[string]string // source ID -> marker
-	recorded   map[string]string // source ID -> error message
+	settings      Settings
+	sources       []Source
+	connection    Connection
+	advanced      map[string]string // source ID -> marker
+	recorded      map[string]string // source ID -> error message
+	createdEvents []EventCreate
+	events        []EventFinish
 }
 
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
@@ -47,19 +50,55 @@ func (f *fakeStore) RecordError(_ context.Context, sourceID, msg string) error {
 	f.recorded[sourceID] = msg
 	return nil
 }
+func (f *fakeStore) CreateEvent(_ context.Context, event EventCreate) (int64, error) {
+	f.createdEvents = append(f.createdEvents, event)
+	return int64(len(f.createdEvents)), nil
+}
+func (f *fakeStore) FinishEvent(_ context.Context, event EventFinish) error {
+	f.events = append(f.events, event)
+	return nil
+}
 
 // fakeProvider implements ScanSourceProvider, keyed by capability ID.
 type fakeProvider struct {
-	paths      map[string][]string // key: capabilityID
+	paths      map[string][]string // key: capabilityID, legacy source_paths behavior
+	changes    map[string][]Change // key: capabilityID, structured changes
 	nextMarker string
 	err        error
+	lastConfig map[string]string
 }
 
-func (f *fakeProvider) PollChanges(_ context.Context, _ int, capabilityID, _ string, _ ResolvedConnection) ([]string, string, error) {
+func (f *fakeProvider) PollChanges(_ context.Context, _ int, capabilityID, _ string, _ ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
+	f.lastConfig = sourceConfig
 	if f.err != nil {
 		return nil, "", f.err
 	}
-	return f.paths[capabilityID], f.nextMarker, nil
+	if changes, ok := f.changes[capabilityID]; ok {
+		return changes, f.nextMarker, nil
+	}
+	changes := make([]Change, 0, len(f.paths[capabilityID]))
+	for _, path := range f.paths[capabilityID] {
+		changes = append(changes, Change{SourcePath: path, Scope: ChangeScopeAuto})
+	}
+	return changes, f.nextMarker, nil
+}
+
+func TestPollOncePassesSourceConfigToProvider(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "cephfs", Enabled: true,
+			SourceConfig: map[string]string{"exclusions": ".downloads\n.recyclebin"},
+		}},
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	svc := newService(store, prov, &recordingQueuer{}, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if got := prov.lastConfig["exclusions"]; got != ".downloads\n.recyclebin" {
+		t.Fatalf("source config = %#v", prov.lastConfig)
+	}
 }
 
 // passthroughConnRes resolves to empty credentials; the engine doesn't inspect
@@ -73,10 +112,21 @@ func (passthroughConnRes) Resolve(context.Context, Connection) (ResolvedConnecti
 type fakeResolver struct{}
 
 func (fakeResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
-	if len(req.Path) >= 11 && req.Path[:11] == "/mnt/media/" {
-		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: req.Path, Trigger: req.Trigger}, nil
+	if strings.HasPrefix(req.Path, "/mnt/media/") {
+		mode := scantrigger.ModeSubtree
+		if filepath.Ext(req.Path) == ".mkv" {
+			mode = scantrigger.ModeFile
+		}
+		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: mode, Path: req.Path, Trigger: req.Trigger}, nil
 	}
 	return nil, nil
+}
+
+func (fakeResolver) ResolveMissingSubtree(_ context.Context, subtreePath, trigger string) (*scantrigger.Target, error) {
+	if strings.HasPrefix(subtreePath, "/mnt/media/") {
+		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: subtreePath, Trigger: trigger}, nil
+	}
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 
 // unresolvableResolver treats every path as outside Silo's media folders,
@@ -84,6 +134,9 @@ func (fakeResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantr
 type unresolvableResolver struct{}
 
 func (unresolvableResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+func (unresolvableResolver) ResolveMissingSubtree(context.Context, string, string) (*scantrigger.Target, error) {
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 
@@ -96,11 +149,24 @@ func (denySuppressor) ShouldScan(context.Context, string, time.Duration) (bool, 
 }
 func (denySuppressor) Release(context.Context, string) error { return nil }
 
-type recordingQueuer struct{ enqueued []scantrigger.Target }
+type recordingQueuer struct {
+	enqueued       []scantrigger.Target
+	autoscanEvents []int64
+	createdCount   *int
+	reusedCount    int
+}
 
 func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.Target) error {
 	q.enqueued = append(q.enqueued, targets...)
 	return nil
+}
+func (q *recordingQueuer) EnqueueAutoscanScans(_ context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+	q.enqueued = append(q.enqueued, targets...)
+	q.autoscanEvents = append(q.autoscanEvents, eventID)
+	if q.createdCount != nil {
+		return *q.createdCount, q.reusedCount, nil
+	}
+	return len(targets), q.reusedCount, nil
 }
 
 type allowSuppressor struct{}
@@ -128,6 +194,9 @@ type failingQueuer struct{}
 
 func (failingQueuer) EnqueueScans(context.Context, []scantrigger.Target) error {
 	return context.DeadlineExceeded
+}
+func (failingQueuer) EnqueueAutoscanScans(context.Context, []scantrigger.Target, int64) (int, int, error) {
+	return 0, 0, context.DeadlineExceeded
 }
 
 func newService(store Store, provider ScanSourceProvider, queue Queuer, suppress Suppressor) *Service {
@@ -167,6 +236,80 @@ func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	}
 }
 
+func TestPollOnceRecordsSuccessfulEvent(t *testing.T) {
+	marker := "m0"
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true, Marker: &marker,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {"/mnt/media/Show/S01/E01.mkv"},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(store.createdEvents) != 1 {
+		t.Fatalf("expected one event created, got %d", len(store.createdEvents))
+	}
+	if got := store.createdEvents[0].MarkerBefore; got != marker {
+		t.Fatalf("marker_before = %q, want %q", got, marker)
+	}
+	if len(q.autoscanEvents) != 1 || q.autoscanEvents[0] != 1 {
+		t.Fatalf("autoscan enqueue event ids = %v, want [1]", q.autoscanEvents)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.ID != 1 || event.Status != EventStatusSuccess {
+		t.Fatalf("event identity/status = %+v", event)
+	}
+	if event.ChangesReturned != 1 || event.ChangesResolved != 1 || event.TargetsClaimed != 1 {
+		t.Fatalf("event change counts = %+v", event)
+	}
+	if event.ScansCreated != 1 || event.ScansReused != 0 || event.ScansSuppressed != 0 {
+		t.Fatalf("event scan counts = %+v", event)
+	}
+	if event.MarkerAfter != "m1" || event.ErrorMessage != "" {
+		t.Fatalf("event completion fields = %+v", event)
+	}
+}
+
+func TestPollOnceRecordsReusedScanCounts(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
+			"/mnt/media/ShowA/S01/E01.mkv",
+			"/mnt/media/ShowB/S01/E01.mkv",
+		},
+	}, nextMarker: "m1"}
+	created := 1
+	q := &recordingQueuer{createdCount: &created, reusedCount: 1}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.ScansCreated != 1 || event.ScansReused != 1 {
+		t.Fatalf("event scan counts = %+v", event)
+	}
+	if event.TargetsClaimed != 2 {
+		t.Fatalf("targets_claimed = %d, want 2", event.TargetsClaimed)
+	}
+}
+
 func TestPollOnceAppliesSourceRewritesBeforeEnqueue(t *testing.T) {
 	// The provider returns RAW source-namespace paths (/data/tv/...). The source's
 	// rewrite /data/tv -> /mnt/media/tv must be applied host-side so the resolved
@@ -194,6 +337,72 @@ func TestPollOnceAppliesSourceRewritesBeforeEnqueue(t *testing.T) {
 	// must be the Silo-native /mnt/media/tv/Show/S01.
 	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01" {
 		t.Fatalf("expected rewritten target path /mnt/media/tv/Show/S01, got %q", got)
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
+func TestPollOnceStructuredFileChangeEnqueuesExactFile(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/tv", To: "/mnt/media/tv"}},
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/tv/Show/S01/E01.mkv",
+			Scope:      ChangeScopeFile,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 file scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeFile {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeFile)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01/E01.mkv" {
+		t.Fatalf("file path = %q", got)
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
+func TestPollOnceStructuredSubtreeChangeEnqueuesExactSubtree(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", InstallationID: 1, CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/movies/Movie (2026)",
+			Scope:      ChangeScopeSubtree,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie (2026)" {
+		t.Fatalf("subtree path = %q", got)
 	}
 	if _, ok := store.advanced["s1"]; !ok {
 		t.Fatalf("expected marker advanced for s1")
@@ -289,6 +498,19 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	}
 	if want := "returned 2 path(s)"; !strings.Contains(msg, want) {
 		t.Fatalf("recorded error %q should mention %q", msg, want)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.Status != EventStatusUnresolved {
+		t.Fatalf("event status = %q, want %q", event.Status, EventStatusUnresolved)
+	}
+	if event.ChangesReturned != 2 || event.ChangesResolved != 0 || event.TargetsClaimed != 0 {
+		t.Fatalf("event counts = %+v", event)
+	}
+	if !strings.Contains(event.ErrorMessage, "returned 2 path(s)") {
+		t.Fatalf("event error = %q", event.ErrorMessage)
 	}
 }
 
@@ -398,6 +620,16 @@ func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	}
 	if _, ok := store.advanced["s1"]; ok {
 		t.Fatalf("marker must NOT advance when enqueue fails")
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.Status != EventStatusError || !strings.Contains(event.ErrorMessage, context.DeadlineExceeded.Error()) {
+		t.Fatalf("event should record enqueue error, got %+v", event)
+	}
+	if event.ChangesReturned != 1 || event.ChangesResolved != 1 || event.TargetsClaimed != 1 {
+		t.Fatalf("event counts = %+v", event)
 	}
 }
 

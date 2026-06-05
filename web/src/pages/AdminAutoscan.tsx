@@ -14,13 +14,14 @@ import {
   useUpdateAutoscanSettings,
 } from "@/hooks/queries/useAutoscan";
 import ConnectionsPanel from "@/pages/admin/autoscan/ConnectionsPanel";
+import ActivityPanel from "@/pages/admin/autoscan/ActivityPanel";
 import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
 
 // ---------------------------------------------------------------------------
 // Tab routing helpers
 // ---------------------------------------------------------------------------
 
-const AUTOSCAN_TABS = ["sources", "connections", "settings"] as const;
+const AUTOSCAN_TABS = ["sources", "activity", "connections", "settings"] as const;
 type AutoscanTab = (typeof AUTOSCAN_TABS)[number];
 
 function normalizeTab(value: string | null): AutoscanTab {
@@ -193,12 +194,17 @@ export default function AdminAutoscan() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-5">
         <TabsList variant="line" className="border-border w-full justify-start border-b">
           <TabsTrigger value="sources">Sources</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sources">
           <SourcesPanel />
+        </TabsContent>
+
+        <TabsContent value="activity">
+          <ActivityPanel />
         </TabsContent>
 
         <TabsContent value="connections">

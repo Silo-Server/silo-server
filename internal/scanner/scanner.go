@@ -504,6 +504,7 @@ func (s *Scanner) scanPaths(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workers)
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	subtitleCache := newExternalSubtitleDirCache()
 
 	for range s.workers {
 		wg.Go(func() {
@@ -511,7 +512,7 @@ func (s *Scanner) scanPaths(
 				if ctx.Err() != nil {
 					continue // drain channel
 				}
-				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path])
+				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
 				if processErr != nil {
 					slog.Error("scanner: file processing failed", "path", path, "error", processErr)
 					errorCount.Add(1)
@@ -980,6 +981,7 @@ func (s *Scanner) scanScope(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workers)
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	subtitleCache := newExternalSubtitleDirCache()
 
 	for range s.workers {
 		wg.Go(func() {
@@ -987,7 +989,7 @@ func (s *Scanner) scanScope(
 				if ctx.Err() != nil {
 					continue
 				}
-				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path])
+				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
 				if processErr != nil {
 					slog.Error("scanner: file processing failed", "path", path, "error", processErr)
 					errorCount.Add(1)
@@ -1399,7 +1401,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return fmt.Errorf("loading group overrides for file: %w", err)
 	}
 	applyGroupOverrides(&groupInference, groupOverrides)
-	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)])
+	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache())
 	if err != nil {
 		return err
 	}
@@ -1541,6 +1543,7 @@ func (s *Scanner) processFile(
 	existingContentStatuses map[string]string,
 	assignment fileRootAssignment,
 	groupAssignment fileGroupAssignment,
+	subtitleCache *externalSubtitleDirCache,
 ) (fileAction, []string, error) {
 	// Stat the file.
 	info, err := os.Stat(filePath)
@@ -1550,13 +1553,33 @@ func (s *Scanner) processFile(
 
 	fileSize := info.Size()
 	fileModifiedAt := normalizeFileModifiedAt(info.ModTime())
+	var externalSubs []ExternalSubtitleInfo
+	externalSubsLoaded := false
+	externalSubsChecked := false
+	loadExternalSubs := func() []ExternalSubtitleInfo {
+		if externalSubsLoaded {
+			return externalSubs
+		}
+		externalSubsLoaded = true
+		var subErr error
+		externalSubs, subErr = subtitleCache.Detect(filePath)
+		if subErr != nil {
+			slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
+			externalSubs = nil
+			externalSubsChecked = false
+			return externalSubs
+		}
+		externalSubsChecked = true
+		return externalSubs
+	}
 
 	// Check if unchanged (same size) only when playback-critical probe data
 	// is already present or this scanner cannot repair it on this node. This
 	// lets rescans repair legacy rows when local ffprobe metadata is available
 	// without forcing endless rewrites on nodes that cannot probe.
 	if existing, ok := existingByPath[filePath]; ok {
-		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, assignment, groupAssignment, folder.Type, s.ffprobePath != "")
+		currentExternalSubtitlePaths := externalSubtitleInfoPaths(loadExternalSubs())
+		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, currentExternalSubtitlePaths, externalSubsChecked, assignment, groupAssignment, folder.Type, s.ffprobePath != "")
 		if shouldSkipStableConfirmedScanState(existing, existingContentStatuses[existing.ContentID], fileSize, fileModifiedAt, updateReasons, s.ffprobePath != "") {
 			return actionUnchanged, nil, nil
 		}
@@ -1572,10 +1595,7 @@ func (s *Scanner) processFile(
 		probe, probeSource := s.probeFile(ctx, filePath)
 
 		// Detect external subtitles.
-		externalSubs, subErr := DetectExternalSubtitles(filePath)
-		if subErr != nil {
-			slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
-		}
+		externalSubs = loadExternalSubs()
 
 		// Check for intro/credits markers from S3.
 		markerFetcher := s.markerFetcher
@@ -1696,10 +1716,7 @@ func (s *Scanner) processFile(
 	probe, probeSource := s.probeFile(ctx, filePath)
 
 	// Detect external subtitles.
-	externalSubs, subErr := DetectExternalSubtitles(filePath)
-	if subErr != nil {
-		slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
-	}
+	externalSubs = loadExternalSubs()
 
 	// Check for intro/credits markers from S3.
 	markerFetcher := s.markerFetcher
@@ -1817,6 +1834,8 @@ func scanStateUpdateReasons(
 	existing *scanStateFile,
 	fileSize int64,
 	fileModifiedAt time.Time,
+	currentExternalSubtitlePaths []string,
+	externalSubtitlesChecked bool,
 	assignment fileRootAssignment,
 	groupAssignment fileGroupAssignment,
 	libraryType string,
@@ -1839,7 +1858,11 @@ func scanStateUpdateReasons(
 	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
 		reasons = append(reasons, "probe_repair")
 	}
-	if hasMissingExternalSubtitlePath(existing.ExternalSubtitlePaths) {
+	if externalSubtitlesChecked {
+		if !sameStringSet(existing.ExternalSubtitlePaths, currentExternalSubtitlePaths) {
+			reasons = append(reasons, "external_subtitle_changed")
+		}
+	} else if hasMissingExternalSubtitlePath(existing.ExternalSubtitlePaths) {
 		reasons = append(reasons, "external_subtitle_missing")
 	}
 	if scanStateRootAssignmentChanged(existing, assignment, libraryType) {
@@ -1849,6 +1872,45 @@ func scanStateUpdateReasons(
 		reasons = append(reasons, "group_assignment_changed")
 	}
 	return reasons
+}
+
+func externalSubtitleInfoPaths(subtitles []ExternalSubtitleInfo) []string {
+	paths := make([]string, 0, len(subtitles))
+	for _, subtitle := range subtitles {
+		path := strings.TrimSpace(subtitle.Path)
+		if path == "" {
+			continue
+		}
+		paths = append(paths, filepath.Clean(path))
+	}
+	return paths
+}
+
+func sameStringSet(left, right []string) bool {
+	seen := make(map[string]int, len(left))
+	for _, value := range left {
+		value = filepath.Clean(strings.TrimSpace(value))
+		if value == "." || value == "" {
+			continue
+		}
+		seen[value]++
+	}
+	for _, value := range right {
+		value = filepath.Clean(strings.TrimSpace(value))
+		if value == "." || value == "" {
+			continue
+		}
+		if seen[value] == 0 {
+			return false
+		}
+		seen[value]--
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func hasMissingExternalSubtitlePath(paths []string) bool {

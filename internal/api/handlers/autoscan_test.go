@@ -27,6 +27,10 @@ type fakeAutoscanStore struct {
 	createSourceFn     func(autoscan.Source) (autoscan.Source, error)
 	updateSourceFn     func(autoscan.Source) (autoscan.Source, error)
 	deleteSourceFn     func(string) error
+	listScansFn        func(autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error)
+	listEventsFn       func(autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
+	queueSummaryFn     func() (autoscan.QueueSummary, error)
+	latestEventAtFn    func() (*time.Time, error)
 }
 
 func (f *fakeAutoscanStore) GetSettings(context.Context) (autoscan.Settings, error) {
@@ -104,6 +108,34 @@ func (f *fakeAutoscanStore) DeleteSource(_ context.Context, id string) error {
 		return f.deleteSourceFn(id)
 	}
 	return nil
+}
+
+func (f *fakeAutoscanStore) ListAutoscanScans(_ context.Context, filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
+	if f.listScansFn != nil {
+		return f.listScansFn(filter)
+	}
+	return nil, nil
+}
+
+func (f *fakeAutoscanStore) ListEvents(_ context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
+	if f.listEventsFn != nil {
+		return f.listEventsFn(filter)
+	}
+	return nil, nil
+}
+
+func (f *fakeAutoscanStore) GetQueueSummary(context.Context) (autoscan.QueueSummary, error) {
+	if f.queueSummaryFn != nil {
+		return f.queueSummaryFn()
+	}
+	return autoscan.QueueSummary{}, nil
+}
+
+func (f *fakeAutoscanStore) LatestEventAt(context.Context) (*time.Time, error) {
+	if f.latestEventAtFn != nil {
+		return f.latestEventAtFn()
+	}
+	return nil, nil
 }
 
 // fakeTriggerUpdater records the last UpdateTriggers call so a test can assert
@@ -908,6 +940,36 @@ func TestAutoscanHandleUpdateSourceRoundTripsPathRewrites(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleUpdateSourceRoundTripsSourceConfig(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
+		`{"enabled":true,"source_config":{" movie_flat_paths ":" /mnt/movies ","exclusions":".downloads\n.recyclebin"}}`, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.SourceConfig["movie_flat_paths"] != "/mnt/movies" || got.SourceConfig["exclusions"] != ".downloads\n.recyclebin" {
+		t.Fatalf("source_config passed to repo = %#v", got.SourceConfig)
+	}
+	var body autoscanSourceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.SourceConfig["movie_flat_paths"] != "/mnt/movies" {
+		t.Fatalf("response source_config = %#v", body.SourceConfig)
+	}
+}
+
 func TestAutoscanHandleUpdateSourceRejectsBlankRewrite(t *testing.T) {
 	upserted := false
 	store := &fakeAutoscanStore{
@@ -935,7 +997,194 @@ func TestAutoscanHandleUpdateSourceRejectsBlankRewrite(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleListScansSerializesFiltersAndEventContext(t *testing.T) {
+	requested := time.Date(2026, 6, 4, 15, 0, 0, 0, time.UTC)
+	started := requested.Add(2 * time.Second)
+	completed := started.Add(5 * time.Second)
+	eventCompleted := completed.Add(-1 * time.Second)
+	eventID := int64(42)
+	sourceID := "src-1"
+	installationID := 7
+	var gotFilter autoscan.ScanListFilter
+	store := &fakeAutoscanStore{
+		listScansFn: func(filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
+			gotFilter = filter
+			return []autoscan.ScanWithEvent{{
+				ScanRunSummary: autoscan.ScanRunSummary{
+					ID:            "run-1",
+					MediaFolderID: 9,
+					Mode:          "subtree",
+					Path:          "/mnt/media/Show/S01",
+					Trigger:       "autoscan",
+					Status:        "completed",
+					RequestedAt:   &requested,
+					StartedAt:     &started,
+					CompletedAt:   &completed,
+				},
+				AutoscanEventID:  &eventID,
+				SourceID:         &sourceID,
+				InstallationID:   &installationID,
+				CapabilityID:     "cephfs",
+				EventStatus:      autoscan.EventStatusSuccess,
+				EventCompletedAt: &eventCompleted,
+			}}, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/scans?status=completed&limit=25&q=Show", nil)
+	rec := httptest.NewRecorder()
+	h.HandleListScans(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if gotFilter.Status != "completed" || gotFilter.Limit != 25 || gotFilter.Search != "Show" {
+		t.Fatalf("filter = %+v", gotFilter)
+	}
+	var body autoscanScansResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Scans) != 1 {
+		t.Fatalf("scans = %+v", body.Scans)
+	}
+	scan := body.Scans[0]
+	if scan.ID != "run-1" || scan.Path != "/mnt/media/Show/S01" || scan.Status != "completed" {
+		t.Fatalf("scan = %+v", scan)
+	}
+	if scan.AutoscanEventID == nil || *scan.AutoscanEventID != eventID || scan.EventStatus != "success" {
+		t.Fatalf("event context = %+v", scan)
+	}
+	if scan.SourceID == nil || *scan.SourceID != sourceID || scan.InstallationID == nil || *scan.InstallationID != installationID || scan.CapabilityID != "cephfs" {
+		t.Fatalf("source context = %+v", scan)
+	}
+}
+
+func TestAutoscanHandleListScansRejectsBadFilters(t *testing.T) {
+	listed := false
+	store := &fakeAutoscanStore{
+		listScansFn: func(autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
+			listed = true
+			return nil, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	for _, target := range []string{
+		"/api/v1/admin/autoscan/scans?status=unknown",
+		"/api/v1/admin/autoscan/scans?limit=0",
+	} {
+		rec := httptest.NewRecorder()
+		h.HandleListScans(rec, httptest.NewRequest("GET", target, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d, want 400; body=%s", target, rec.Code, rec.Body.String())
+		}
+	}
+	if listed {
+		t.Fatal("ListAutoscanScans should not run for invalid filters")
+	}
+}
+
+func TestAutoscanHandleListEventsSerializesFiltersAndRuns(t *testing.T) {
+	started := time.Date(2026, 6, 4, 14, 0, 0, 0, time.UTC)
+	completed := started.Add(1500 * time.Millisecond)
+	sourceID := "src-1"
+	var gotFilter autoscan.EventListFilter
+	store := &fakeAutoscanStore{
+		listEventsFn: func(filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
+			gotFilter = filter
+			return []autoscan.EventWithRuns{{
+				Event: autoscan.Event{
+					ID:              42,
+					SourceID:        &sourceID,
+					InstallationID:  7,
+					CapabilityID:    "cephfs",
+					StartedAt:       started,
+					CompletedAt:     completed,
+					DurationMS:      1500,
+					Status:          autoscan.EventStatusSuccess,
+					ChangesReturned: 3,
+					ChangesResolved: 2,
+					TargetsClaimed:  2,
+					ScansCreated:    1,
+					ScansReused:     1,
+					ScansSuppressed: 1,
+				},
+				Runs: []autoscan.ScanRunSummary{{
+					ID:            "run-1",
+					MediaFolderID: 9,
+					Mode:          "subtree",
+					Path:          "/mnt/media/Show/S01",
+					Trigger:       "autoscan",
+					Status:        "accepted",
+					StartedAt:     nil,
+					CompletedAt:   nil,
+				}},
+			}}, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/events?source_id=src-1&status=success&limit=25&q=Show", nil)
+	rec := httptest.NewRecorder()
+	h.HandleListEvents(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if gotFilter.SourceID != "src-1" ||
+		gotFilter.Status != autoscan.EventStatusSuccess ||
+		gotFilter.Limit != 25 ||
+		gotFilter.Search != "Show" {
+		t.Fatalf("filter = %+v", gotFilter)
+	}
+	var body autoscanEventsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Events) != 1 {
+		t.Fatalf("events = %+v", body.Events)
+	}
+	event := body.Events[0]
+	if event.ID != 42 || event.SourceID == nil || *event.SourceID != sourceID || event.Status != "success" {
+		t.Fatalf("event identity = %+v", event)
+	}
+	if event.ChangesReturned != 3 || event.ScansCreated != 1 || event.ScansReused != 1 || event.ScansSuppressed != 1 {
+		t.Fatalf("event counts = %+v", event)
+	}
+	if len(event.ScanRuns) != 1 || event.ScanRuns[0].ID != "run-1" || event.ScanRuns[0].Path != "/mnt/media/Show/S01" {
+		t.Fatalf("scan_runs = %+v", event.ScanRuns)
+	}
+}
+
+func TestAutoscanHandleListEventsRejectsBadFilters(t *testing.T) {
+	listed := false
+	store := &fakeAutoscanStore{
+		listEventsFn: func(autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
+			listed = true
+			return nil, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	for _, target := range []string{
+		"/api/v1/admin/autoscan/events?status=unknown",
+		"/api/v1/admin/autoscan/events?limit=0",
+	} {
+		rec := httptest.NewRecorder()
+		h.HandleListEvents(rec, httptest.NewRequest("GET", target, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d, want 400; body=%s", target, rec.Code, rec.Body.String())
+		}
+	}
+	if listed {
+		t.Fatal("ListEvents should not run for invalid filters")
+	}
+}
+
 func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
+	latestEventAt := time.Date(2026, 6, 4, 14, 30, 0, 0, time.UTC)
 	store := &fakeAutoscanStore{
 		getSettingsFn: func() (autoscan.Settings, error) {
 			return autoscan.Settings{Enabled: true}, nil
@@ -944,6 +1193,12 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 			return []autoscan.Source{
 				{ID: "src-1", InstallationID: 7, CapabilityID: "scan_source", ConnectionID: ptr("conn-1"), Enabled: true},
 			}, nil
+		},
+		queueSummaryFn: func() (autoscan.QueueSummary, error) {
+			return autoscan.QueueSummary{Active: 3, Accepted: 2, Running: 1}, nil
+		},
+		latestEventAtFn: func() (*time.Time, error) {
+			return &latestEventAt, nil
 		},
 	}
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
@@ -964,5 +1219,11 @@ func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 	}
 	if !body.Enabled || len(body.Sources) != 1 || body.Sources[0].ID != "src-1" {
 		t.Errorf("status = %+v", body)
+	}
+	if body.ActiveScans != 3 || body.AcceptedScans != 2 || body.RunningScans != 1 {
+		t.Errorf("queue summary = %+v", body)
+	}
+	if body.LatestEventAt == nil || !body.LatestEventAt.Equal(latestEventAt) {
+		t.Errorf("latest_event_at = %v, want %v", body.LatestEventAt, latestEventAt)
 	}
 }

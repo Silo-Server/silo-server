@@ -8,6 +8,10 @@ import type {
   AutoscanConnectionsResponse,
   AutoscanConnectionTestInput,
   AutoscanConnectionTestResult,
+  AutoscanEventsResponse,
+  AutoscanEventStatus,
+  AutoscanScansResponse,
+  AutoscanScanStatus,
   AutoscanRewriteSuggestions,
   AutoscanSettings,
   AutoscanSource,
@@ -19,6 +23,7 @@ import type {
 import { adminKeys } from "./keys";
 
 const AUTOSCAN_STALE_TIME = 30_000;
+const AUTOSCAN_ACTIVITY_REFRESH_MS = 15_000;
 
 // --- Settings ---
 
@@ -232,6 +237,51 @@ export function useAutoscanStatus() {
     queryKey: adminKeys.autoscanStatus(),
     queryFn: () => api<AutoscanStatus>("/admin/autoscan/status"),
     staleTime: AUTOSCAN_STALE_TIME,
+    refetchInterval: AUTOSCAN_ACTIVITY_REFRESH_MS,
+  });
+}
+
+export function useAutoscanEvents(params?: {
+  sourceId?: string;
+  status?: AutoscanEventStatus;
+  query?: string;
+  limit?: number;
+  enabled?: boolean;
+}) {
+  const queryParams = new URLSearchParams();
+  if (params?.sourceId) queryParams.set("source_id", params.sourceId);
+  if (params?.status) queryParams.set("status", params.status);
+  if (params?.query) queryParams.set("q", params.query);
+  if (params?.limit != null) queryParams.set("limit", String(params.limit));
+  const suffix = queryParams.toString();
+  const path = suffix ? `/admin/autoscan/events?${suffix}` : "/admin/autoscan/events";
+  return useQuery({
+    queryKey: adminKeys.autoscanEvents(params ?? {}),
+    queryFn: () => api<AutoscanEventsResponse>(path).then((data) => data.events ?? []),
+    staleTime: AUTOSCAN_ACTIVITY_REFRESH_MS,
+    refetchInterval: AUTOSCAN_ACTIVITY_REFRESH_MS,
+    enabled: params?.enabled ?? true,
+  });
+}
+
+export function useAutoscanScans(params?: {
+  status?: AutoscanScanStatus;
+  query?: string;
+  limit?: number;
+  enabled?: boolean;
+}) {
+  const queryParams = new URLSearchParams();
+  if (params?.status) queryParams.set("status", params.status);
+  if (params?.query) queryParams.set("q", params.query);
+  if (params?.limit != null) queryParams.set("limit", String(params.limit));
+  const suffix = queryParams.toString();
+  const path = suffix ? `/admin/autoscan/scans?${suffix}` : "/admin/autoscan/scans";
+  return useQuery({
+    queryKey: adminKeys.autoscanScans(params ?? {}),
+    queryFn: () => api<AutoscanScansResponse>(path).then((data) => data.scans ?? []),
+    staleTime: AUTOSCAN_ACTIVITY_REFRESH_MS,
+    refetchInterval: AUTOSCAN_ACTIVITY_REFRESH_MS,
+    enabled: params?.enabled ?? true,
   });
 }
 

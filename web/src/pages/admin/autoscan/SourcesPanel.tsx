@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Library as LibraryIcon,
   Plus,
   RefreshCw,
   Trash2,
@@ -16,6 +17,7 @@ import type {
   AutoscanRewriteSuggestions,
   AutoscanSource,
   AutoscanSourceInput,
+  Library,
 } from "@/api/types";
 import {
   AlertDialog,
@@ -65,6 +67,7 @@ import {
   useDeleteAutoscanSource,
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
+import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +99,7 @@ interface RowEdit {
   connectionId: string; // "" means no connection
   intervalStr: string; // "" means use default
   rewrites: AutoscanPathRewrite[];
+  sourceConfig: Record<string, string>;
 }
 
 function sourceToRowEdit(source: AutoscanSource): RowEdit {
@@ -103,6 +107,142 @@ function sourceToRowEdit(source: AutoscanSource): RowEdit {
     connectionId: source.connection_id ?? "",
     intervalStr: source.poll_interval_seconds != null ? String(source.poll_interval_seconds) : "",
     rewrites: source.path_rewrites.map((r) => ({ ...r })),
+    sourceConfig: sourceConfigForEdit(source),
+  };
+}
+
+const CEPHFS_PLUGIN_ID = "silo.autoscan.cephfs";
+const CEPHFS_CAPABILITY_ID = "cephfs";
+const DEFAULT_CEPHFS_EXCLUSIONS = [
+  "*.partial",
+  "*.tmp",
+  "@eaDir",
+  "#recycle",
+  ".downloads",
+  ".recyclebin",
+  "volumes",
+];
+const CEPHFS_MOVIE_PATHS_KEY = "movie_flat_paths";
+const CEPHFS_TV_PATHS_KEY = "tv_flat_paths";
+const CEPHFS_LEGACY_MOVIE_NESTED_KEY = "movie_nested_paths";
+const CEPHFS_LEGACY_TV_NESTED_KEY = "tv_nested_paths";
+
+function isCephFSSource(source: AutoscanSource): boolean {
+  return source.capability_id === CEPHFS_CAPABILITY_ID;
+}
+
+function isCephFSPlugin(plugin: { plugin_id: string; capability_id: string } | undefined): boolean {
+  return plugin?.plugin_id === CEPHFS_PLUGIN_ID || plugin?.capability_id === CEPHFS_CAPABILITY_ID;
+}
+
+function defaultCephFSConfig(): Record<string, string> {
+  return { exclusions: DEFAULT_CEPHFS_EXCLUSIONS.join("\n") };
+}
+
+function mergeLineValues(...values: Array<string | undefined>): string {
+  const lines = new Set<string>();
+  for (const value of values) {
+    (value ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => lines.add(line));
+  }
+  return Array.from(lines).join("\n");
+}
+
+function mergeLineDefaults(value: string | undefined, defaults: string[]): string {
+  const lines = new Set(
+    (value ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  for (const entry of defaults) {
+    lines.add(entry);
+  }
+  return Array.from(lines).join("\n");
+}
+
+function sourceConfigForEdit(source: AutoscanSource): Record<string, string> {
+  if (!isCephFSSource(source)) {
+    return { ...(source.source_config ?? {}) };
+  }
+  const config = source.source_config ?? {};
+  return {
+    [CEPHFS_MOVIE_PATHS_KEY]: mergeLineValues(
+      config[CEPHFS_MOVIE_PATHS_KEY],
+      config[CEPHFS_LEGACY_MOVIE_NESTED_KEY],
+    ),
+    [CEPHFS_TV_PATHS_KEY]: mergeLineValues(
+      config[CEPHFS_TV_PATHS_KEY],
+      config[CEPHFS_LEGACY_TV_NESTED_KEY],
+    ),
+    exclusions: mergeLineDefaults(config.exclusions, DEFAULT_CEPHFS_EXCLUSIONS),
+  };
+}
+
+function normalizeSourceConfig(config: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(config)) {
+    const trimmedKey = key.trim();
+    if (!trimmedKey) continue;
+    out[trimmedKey] = value.trim();
+  }
+  return out;
+}
+
+function libraryKind(type: string): "movie" | "tv" | "mixed" | null {
+  switch (type.trim().toLowerCase()) {
+    case "movie":
+    case "movies":
+      return "movie";
+    case "series":
+    case "show":
+    case "shows":
+    case "tv":
+    case "tvshows":
+      return "tv";
+    case "mixed":
+      return "mixed";
+    default:
+      return null;
+  }
+}
+
+function configFromLibraries(
+  libraries: Library[],
+  current: Record<string, string>,
+): Record<string, string> {
+  const moviePaths = new Set<string>();
+  const tvPaths = new Set<string>();
+
+  for (const library of libraries) {
+    if (!library.enabled) {
+      continue;
+    }
+    const kind = libraryKind(library.type);
+    if (!kind) {
+      continue;
+    }
+    for (const path of library.paths ?? []) {
+      const trimmed = path.trim();
+      if (!trimmed) {
+        continue;
+      }
+      if (kind === "movie" || kind === "mixed") {
+        moviePaths.add(trimmed);
+      }
+      if (kind === "tv" || kind === "mixed") {
+        tvPaths.add(trimmed);
+      }
+    }
+  }
+
+  return {
+    [CEPHFS_MOVIE_PATHS_KEY]: Array.from(moviePaths).join("\n"),
+    [CEPHFS_TV_PATHS_KEY]: Array.from(tvPaths).join("\n"),
+    exclusions: mergeLineDefaults(current.exclusions, DEFAULT_CEPHFS_EXCLUSIONS),
   };
 }
 
@@ -230,8 +370,8 @@ function RewriteEditor({
           ) : (
             <div className="space-y-2">
               {rewrites.map((rewrite, index) => (
-                <div key={index} className="flex items-end gap-2">
-                  <div className="flex-1 space-y-1">
+                <div key={index} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <Label className="text-muted-foreground text-xs">From</Label>
                     <Input
                       value={rewrite.from}
@@ -241,7 +381,7 @@ function RewriteEditor({
                       aria-label={`Rewrite ${index + 1} from path`}
                     />
                   </div>
-                  <div className="flex-1 space-y-1">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <Label className="text-muted-foreground text-xs">To</Label>
                     <Input
                       value={rewrite.to}
@@ -257,7 +397,7 @@ function RewriteEditor({
                     size="icon-sm"
                     onClick={() => removeRewrite(index)}
                     aria-label={`Remove rewrite ${index + 1}`}
-                    className="mb-0.5 shrink-0"
+                    className="shrink-0 self-end sm:mb-0.5"
                   >
                     <X className="size-3.5" />
                   </Button>
@@ -399,6 +539,130 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function CephFSConfigEditor({
+  config,
+  onChange,
+  onSave,
+  isSaving,
+  showSave = true,
+}: {
+  config: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+  onSave: (next?: Record<string, string>) => void;
+  isSaving: boolean;
+  showSave?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const libraries = useAdminLibraries();
+
+  function patch(key: string, value: string) {
+    onChange({ ...config, [key]: value });
+  }
+
+  function useConfiguredLibraries() {
+    const next = configFromLibraries(libraries.data ?? [], config);
+    onChange(next);
+    if (showSave) {
+      onSave(next);
+    }
+  }
+
+  const libraryPathCount =
+    libraries.data
+      ?.filter((library) => library.enabled)
+      .reduce((count, library) => count + (library.paths?.length ?? 0), 0) ?? 0;
+  const canUseLibraries = !libraries.isLoading && libraryPathCount > 0 && !isSaving;
+
+  const fields = [
+    {
+      key: CEPHFS_MOVIE_PATHS_KEY,
+      label: "Movie library roots",
+      description: "One configured movie library path per line.",
+      placeholder: "/mnt/media/movies",
+    },
+    {
+      key: CEPHFS_TV_PATHS_KEY,
+      label: "TV library roots",
+      description: "One configured TV library path per line.",
+      placeholder: "/mnt/media/television",
+    },
+    {
+      key: "exclusions",
+      label: "Ignored paths",
+      description: "One glob, directory name, or path prefix per line.",
+      placeholder: DEFAULT_CEPHFS_EXCLUSIONS.join("\n"),
+    },
+  ];
+
+  return (
+    <div className="border-border mt-3 rounded-md border">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 pt-3 text-left sm:py-2"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+        >
+          {open ? (
+            <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
+          ) : (
+            <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
+          )}
+          <span className="truncate text-sm font-medium">CephFS paths &amp; ignores</span>
+        </button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mx-3 mb-3 justify-center whitespace-normal sm:mr-2 sm:mb-0 sm:ml-0 sm:shrink-0 sm:whitespace-nowrap"
+          disabled={!canUseLibraries}
+          onClick={useConfiguredLibraries}
+          title={
+            libraries.isLoading
+              ? "Loading libraries"
+              : libraryPathCount === 0
+                ? "No enabled library paths"
+                : "Replace CephFS roots with enabled Silo library paths"
+          }
+        >
+          <LibraryIcon className="size-3.5" />
+          Use configured libraries
+        </Button>
+      </div>
+
+      {open && (
+        <div id={panelId} className="space-y-3 px-3 pb-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            {fields.map((field) => (
+              <div key={field.key} className="space-y-1">
+                <Label className="text-muted-foreground text-xs">{field.label}</Label>
+                <textarea
+                  value={config[field.key] ?? ""}
+                  onChange={(event) => patch(field.key, event.target.value)}
+                  placeholder={field.placeholder}
+                  rows={field.key === "exclusions" ? 6 : 3}
+                  className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-20 w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={field.label}
+                />
+                <p className="text-muted-foreground text-xs">{field.description}</p>
+              </div>
+            ))}
+          </div>
+          {showSave && (
+            <div className="flex justify-end">
+              <Button type="button" size="sm" disabled={isSaving} onClick={() => onSave()}>
+                Save CephFS settings
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SourceRow helpers
 // ---------------------------------------------------------------------------
@@ -429,11 +693,13 @@ function SourceRow({
   connectionOptions,
   globalPollInterval,
   onDelete,
+  layout = "table",
 }: {
   source: AutoscanSource;
   connectionOptions: Array<{ id: string; name: string }>;
   globalPollInterval: number | null;
   onDelete: (source: AutoscanSource) => void;
+  layout?: "table" | "card";
 }) {
   const update = useUpdateAutoscanSource();
   const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source));
@@ -456,6 +722,7 @@ function SourceRow({
       enabled: source.enabled,
       poll_interval_seconds: intervalVal,
       path_rewrites,
+      source_config: normalizeSourceConfig(edit.sourceConfig),
       ...overrides,
     };
   }
@@ -506,6 +773,14 @@ function SourceRow({
     });
   }
 
+  function handleSourceConfigSave(nextConfig?: Record<string, string>) {
+    const sourceConfig = nextConfig ?? edit.sourceConfig;
+    update.mutate({
+      id: source.id,
+      body: fullBody({ source_config: normalizeSourceConfig(sourceConfig) }),
+    });
+  }
+
   // Whether this source has a bound connection (server-side or pending edit).
   // Used to gate the Sync-from-server button, which needs a server to query.
   const hasEffectiveConnection = Boolean(source.connection_id) || Boolean(edit.connectionId);
@@ -513,96 +788,191 @@ function SourceRow({
   // Status column
   const hasError = Boolean(source.last_error);
   const hasRun = Boolean(source.last_run_at);
+  const connectionSelectClass = layout === "card" ? "!w-full min-w-0 max-w-full" : "w-[200px]";
+  const statusMessageClass =
+    layout === "card"
+      ? "text-muted-foreground min-w-0 max-w-full whitespace-normal break-words text-xs [overflow-wrap:anywhere]"
+      : "text-muted-foreground min-w-0 max-w-full truncate text-xs";
+  const intervalHelp =
+    globalPollInterval != null
+      ? `Floor only - values below the global default (${globalPollInterval}s) have no effect.`
+      : "Floor only - values below the global default poll interval have no effect.";
+
+  const sourceIdentity = (
+    <div className="min-w-0 space-y-0.5">
+      <p className="truncate leading-none font-medium">{source.capability_id}</p>
+      <p className="text-muted-foreground text-xs">Plugin #{source.installation_id}</p>
+    </div>
+  );
+
+  const statusNode = hasError ? (
+    <div className="flex max-w-full min-w-0 items-start gap-1.5 overflow-hidden text-sm">
+      <AlertTriangle className="text-destructive size-4 shrink-0" />
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-destructive leading-none font-medium">Error</p>
+        <p className={statusMessageClass} title={source.last_error ?? ""}>
+          {source.last_error}
+        </p>
+      </div>
+    </div>
+  ) : hasRun ? (
+    <div className="flex max-w-full min-w-0 items-center gap-1.5 overflow-hidden text-sm">
+      <CheckCircle2 className="size-4 shrink-0 text-green-500" />
+      <div className="min-w-0 space-y-0.5">
+        <p className="leading-none font-medium">OK</p>
+        <p className="text-muted-foreground flex items-center gap-1 text-xs">
+          <Clock className="size-3" />
+          {formatRelativeTime(source.last_run_at)}
+        </p>
+      </div>
+    </div>
+  ) : (
+    <span className="text-muted-foreground text-sm">Not run yet</span>
+  );
+
+  const connectionControl =
+    source.connection_id === null && !edit.connectionId ? (
+      <div className="flex max-w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <Select value="__none__" onValueChange={handleConnectionChange}>
+          <SelectTrigger
+            className={connectionSelectClass}
+            aria-label={`Connection for ${sourceLabel(source)}`}
+          >
+            <SelectValue placeholder="No connection" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— No connection —</SelectItem>
+            {connectionOptions.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Badge variant="outline" className="text-muted-foreground w-fit shrink-0">
+          No connection
+        </Badge>
+      </div>
+    ) : (
+      <Select value={edit.connectionId || "__none__"} onValueChange={handleConnectionChange}>
+        <SelectTrigger
+          className={connectionSelectClass}
+          aria-label={`Connection for ${sourceLabel(source)}`}
+        >
+          <SelectValue placeholder="No connection" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">— No connection —</SelectItem>
+          {connectionOptions.map((c) => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+
+  const intervalSettings = (
+    <>
+      <div className="flex items-center gap-2">
+        <Input
+          className="w-24"
+          placeholder="Default"
+          value={edit.intervalStr}
+          aria-invalid={intervalError}
+          aria-label={`Poll interval seconds for ${sourceLabel(source)}`}
+          onChange={(e) => {
+            setIntervalError(false);
+            setEdit((ed) => ({ ...ed, intervalStr: e.target.value }));
+          }}
+          onBlur={handleIntervalBlur}
+        />
+        <span className="text-muted-foreground text-xs">sec</span>
+      </div>
+      {intervalError && (
+        <p className="text-destructive mt-1 text-xs">Must be a positive integer.</p>
+      )}
+      <p className="text-muted-foreground mt-1 text-xs">{intervalHelp}</p>
+      <RewriteEditor
+        sourceId={source.id}
+        hasConnection={hasEffectiveConnection}
+        rewrites={edit.rewrites}
+        onChange={(next) => setEdit((ed) => ({ ...ed, rewrites: next }))}
+        onSave={handleRewriteSave}
+        isSaving={update.isPending}
+      />
+      {isCephFSSource(source) && (
+        <CephFSConfigEditor
+          config={edit.sourceConfig}
+          onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next }))}
+          onSave={handleSourceConfigSave}
+          isSaving={update.isPending}
+        />
+      )}
+    </>
+  );
+
+  if (layout === "card") {
+    return (
+      <section className="bg-card min-w-0 overflow-hidden rounded-lg border p-3 shadow-sm">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          {sourceIdentity}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Delete source ${sourceLabel(source)}`}
+            onClick={() => onDelete(source)}
+            className="shrink-0"
+          >
+            <Trash2 className="text-destructive" />
+          </Button>
+        </div>
+
+        <div className="mt-4 grid min-w-0 gap-4">
+          <div className="grid min-w-0 gap-1.5">
+            <Label className="text-muted-foreground text-xs">Connection</Label>
+            {connectionControl}
+          </div>
+
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Enabled</p>
+              <p className="text-muted-foreground text-xs break-words">
+                Poll this source for changes
+              </p>
+            </div>
+            <Switch
+              checked={source.enabled}
+              onCheckedChange={handleToggleEnabled}
+              disabled={update.isPending}
+              aria-label={`${sourceLabel(source)} enabled`}
+            />
+          </div>
+
+          <div className="grid min-w-0 gap-1.5">
+            <Label className="text-muted-foreground text-xs">Last run</Label>
+            <div className="min-w-0 overflow-hidden rounded-md border px-3 py-2">{statusNode}</div>
+          </div>
+
+          <div className="grid min-w-0 gap-1.5">
+            <Label className="text-muted-foreground text-xs">Interval &amp; settings</Label>
+            {intervalSettings}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <TableRow>
       {/* Plugin / capability */}
-      <TableCell>
-        <div className="space-y-0.5">
-          <p className="leading-none font-medium">{source.capability_id}</p>
-          <p className="text-muted-foreground text-xs">Plugin #{source.installation_id}</p>
-        </div>
-      </TableCell>
+      <TableCell>{sourceIdentity}</TableCell>
 
       {/* Connection binding */}
-      <TableCell>
-        {source.connection_id === null && !edit.connectionId ? (
-          <div className="flex items-center gap-2">
-            <Select value="__none__" onValueChange={handleConnectionChange}>
-              <SelectTrigger
-                className="w-[200px]"
-                aria-label={`Connection for ${sourceLabel(source)}`}
-              >
-                <SelectValue placeholder="No connection" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— No connection —</SelectItem>
-                {connectionOptions.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Badge variant="outline" className="text-muted-foreground shrink-0">
-              No connection
-            </Badge>
-          </div>
-        ) : (
-          <Select value={edit.connectionId || "__none__"} onValueChange={handleConnectionChange}>
-            <SelectTrigger
-              className="w-[200px]"
-              aria-label={`Connection for ${sourceLabel(source)}`}
-            >
-              <SelectValue placeholder="No connection" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— No connection —</SelectItem>
-              {connectionOptions.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </TableCell>
+      <TableCell>{connectionControl}</TableCell>
 
       {/* Poll interval */}
-      <TableCell>
-        <div className="flex items-center gap-2">
-          <Input
-            className="w-24"
-            placeholder="Default"
-            value={edit.intervalStr}
-            aria-invalid={intervalError}
-            aria-label={`Poll interval seconds for ${sourceLabel(source)}`}
-            onChange={(e) => {
-              setIntervalError(false);
-              setEdit((ed) => ({ ...ed, intervalStr: e.target.value }));
-            }}
-            onBlur={handleIntervalBlur}
-          />
-          <span className="text-muted-foreground text-xs">sec</span>
-        </div>
-        {intervalError && (
-          <p className="text-destructive mt-1 text-xs">Must be a positive integer.</p>
-        )}
-        <p className="text-muted-foreground mt-1 text-xs">
-          {globalPollInterval != null
-            ? `Floor only — values below the global default (${globalPollInterval}s) have no effect.`
-            : "Floor only — values below the global default poll interval have no effect."}
-        </p>
-        {/* Path rewrites editor — nested under the interval cell to avoid adding a new column */}
-        <RewriteEditor
-          sourceId={source.id}
-          hasConnection={hasEffectiveConnection}
-          rewrites={edit.rewrites}
-          onChange={(next) => setEdit((ed) => ({ ...ed, rewrites: next }))}
-          onSave={handleRewriteSave}
-          isSaving={update.isPending}
-        />
-      </TableCell>
+      <TableCell>{intervalSettings}</TableCell>
 
       {/* Enable toggle */}
       <TableCell>
@@ -615,35 +985,7 @@ function SourceRow({
       </TableCell>
 
       {/* Status */}
-      <TableCell>
-        {hasError ? (
-          <div className="flex items-center gap-1.5 text-sm">
-            <AlertTriangle className="text-destructive size-4 shrink-0" />
-            <div className="space-y-0.5">
-              <p className="text-destructive leading-none font-medium">Error</p>
-              <p
-                className="text-muted-foreground max-w-[180px] truncate text-xs"
-                title={source.last_error ?? ""}
-              >
-                {source.last_error}
-              </p>
-            </div>
-          </div>
-        ) : hasRun ? (
-          <div className="flex items-center gap-1.5 text-sm">
-            <CheckCircle2 className="size-4 shrink-0 text-green-500" />
-            <div className="space-y-0.5">
-              <p className="leading-none font-medium">OK</p>
-              <p className="text-muted-foreground flex items-center gap-1 text-xs">
-                <Clock className="size-3" />
-                {formatRelativeTime(source.last_run_at)}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <span className="text-muted-foreground text-sm">Not run yet</span>
-        )}
-      </TableCell>
+      <TableCell>{statusNode}</TableCell>
 
       {/* Actions */}
       <TableCell>
@@ -669,12 +1011,14 @@ interface AddSourceForm {
   pluginKey: string;
   connectionId: string; // "" / "__none__" means no connection
   intervalStr: string;
+  sourceConfig: Record<string, string>;
 }
 
 const BLANK_ADD_SOURCE: AddSourceForm = {
   pluginKey: "",
   connectionId: "",
   intervalStr: "",
+  sourceConfig: {},
 };
 
 function pluginKey(installationId: number, capabilityId: string): string {
@@ -698,6 +1042,7 @@ function AddSourceDialog({
   const selectedPlugin = plugins.find(
     (p) => pluginKey(p.installation_id, p.capability_id) === form.pluginKey,
   );
+  const selectedIsCephFS = isCephFSPlugin(selectedPlugin);
 
   function close() {
     setForm(BLANK_ADD_SOURCE);
@@ -718,6 +1063,7 @@ function AddSourceDialog({
         enabled: false,
         poll_interval_seconds: pollInterval,
         path_rewrites: [],
+        source_config: selectedIsCephFS ? normalizeSourceConfig(form.sourceConfig) : {},
       },
       { onSuccess: close },
     );
@@ -730,7 +1076,7 @@ function AddSourceDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Add scan source</DialogTitle>
           <DialogDescription>
@@ -756,7 +1102,19 @@ function AddSourceDialog({
               <Label>Plugin</Label>
               <Select
                 value={form.pluginKey}
-                onValueChange={(v) => setForm((f) => ({ ...f, pluginKey: v }))}
+                onValueChange={(v) => {
+                  const plugin = plugins.find(
+                    (p) => pluginKey(p.installation_id, p.capability_id) === v,
+                  );
+                  setForm((f) => ({
+                    ...f,
+                    pluginKey: v,
+                    sourceConfig:
+                      isCephFSPlugin(plugin) && Object.keys(f.sourceConfig).length === 0
+                        ? defaultCephFSConfig()
+                        : f.sourceConfig,
+                  }));
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a scan-source plugin…" />
@@ -818,6 +1176,16 @@ function AddSourceDialog({
                 Optional — leave blank to use the global default poll interval.
               </p>
             </div>
+
+            {selectedIsCephFS && (
+              <CephFSConfigEditor
+                config={form.sourceConfig}
+                onChange={(sourceConfig) => setForm((f) => ({ ...f, sourceConfig }))}
+                onSave={() => undefined}
+                isSaving={createSource.isPending}
+                showSave={false}
+              />
+            )}
           </div>
         )}
 
@@ -857,7 +1225,7 @@ export default function SourcesPanel() {
   const globalPollInterval = settings.data?.default_poll_interval_seconds ?? null;
 
   const header = (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-muted-foreground text-xs">
         Scan-source plugins are installed from the{" "}
         <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
@@ -865,7 +1233,12 @@ export default function SourcesPanel() {
         </Link>
         . Add a source for each thing you want to watch.
       </p>
-      <Button variant="outline" size="sm" className="shrink-0" onClick={() => setAddOpen(true)}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full justify-center sm:w-auto sm:shrink-0"
+        onClick={() => setAddOpen(true)}
+      >
         <Plus />
         Add source
       </Button>
@@ -913,13 +1286,26 @@ export default function SourcesPanel() {
     <div className="space-y-4">
       {header}
 
-      <div className="rounded-lg border">
+      <div className="space-y-3 lg:hidden">
+        {list.map((source) => (
+          <SourceRow
+            key={source.id}
+            source={source}
+            connectionOptions={connectionOptions}
+            globalPollInterval={globalPollInterval}
+            onDelete={setDeleteTarget}
+            layout="card"
+          />
+        ))}
+      </div>
+
+      <div className="hidden rounded-lg border lg:block">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Source</TableHead>
               <TableHead>Connection</TableHead>
-              <TableHead>Interval &amp; path rewrites</TableHead>
+              <TableHead>Interval &amp; settings</TableHead>
               <TableHead>Enabled</TableHead>
               <TableHead>Last run</TableHead>
               <TableHead className="w-0" />
@@ -933,6 +1319,7 @@ export default function SourcesPanel() {
                 connectionOptions={connectionOptions}
                 globalPollInterval={globalPollInterval}
                 onDelete={setDeleteTarget}
+                layout="table"
               />
             ))}
           </TableBody>

@@ -22,16 +22,26 @@ type Store interface {
 	GetConnection(ctx context.Context, id string) (Connection, error)
 	AdvanceMarker(ctx context.Context, sourceID, marker string) error
 	RecordError(ctx context.Context, sourceID, msg string) error
+	CreateEvent(ctx context.Context, event EventCreate) (int64, error)
+	FinishEvent(ctx context.Context, event EventFinish) error
 }
 
 // Resolver maps a Silo-native path to a concrete scan target (library folder).
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
+	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
 }
 
 // Queuer enqueues resolved scan targets.
 type Queuer interface {
 	EnqueueScans(ctx context.Context, targets []scantrigger.Target) error
+	EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) (created, reused int, err error)
+}
+
+type resolveStats struct {
+	ChangesResolved int
+	TargetsClaimed  int
+	Suppressed      int
 }
 
 // connectionResolver resolves a stored connection to concrete credentials.
@@ -156,6 +166,11 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if src.LastRunAt != nil && now.Sub(*src.LastRunAt) < interval {
 			continue
 		}
+		marker := ""
+		if src.Marker != nil {
+			marker = *src.Marker
+		}
+		eventID := s.createEvent(ctx, src, marker, time.Now())
 		// A connection is OPTIONAL. Server-based providers (Sonarr/Radarr) bind a
 		// connection and the resolved {base_url, api_key} is handed to the plugin.
 		// Other providers (e.g. a filesystem/CephFS watcher) need none and get an
@@ -171,37 +186,52 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				if rerr := s.store.RecordError(ctx, src.ID, cerr.Error()); rerr != nil {
 					slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
 				}
+				s.finishEvent(ctx, eventID, EventFinish{
+					Status:       EventStatusError,
+					ErrorMessage: cerr.Error(),
+					MarkerAfter:  marker,
+				})
 				continue
 			}
 			conn = resolved
 		}
-		marker := ""
-		if src.Marker != nil {
-			marker = *src.Marker
-		}
-		paths, next, perr := s.provider.PollChanges(ctx, src.InstallationID, src.CapabilityID, marker, conn)
+		changes, next, perr := s.provider.PollChanges(ctx, src.InstallationID, src.CapabilityID, marker, conn, src.SourceConfig)
 		if perr != nil {
 			slog.WarnContext(ctx, "autoscan: poll changes failed", "source_id", src.ID, "err", perr)
 			if rerr := s.store.RecordError(ctx, src.ID, perr.Error()); rerr != nil {
 				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
 			}
+			s.finishEvent(ctx, eventID, EventFinish{
+				Status:       EventStatusError,
+				ErrorMessage: perr.Error(),
+				MarkerAfter:  marker,
+			})
 			continue // do NOT advance marker
 		}
 
-		// The merged scan_source contract returns RAW source-namespace paths;
-		// rewrite ownership moved from the plugin to the host. Normalize Windows
-		// separators and apply this source's per-source prefix rewrites to turn
-		// each raw path Silo-native BEFORE dedupe/resolve/enqueue.
-		rewritten := make([]string, 0, len(paths))
-		for _, p := range paths {
-			rewritten = append(rewritten, applyRewrites(normalizeSeparators(p), src.PathRewrites))
-		}
-
-		targets, claimed, resolvedAny := s.resolveAndClaim(ctx, rewritten, ttl)
+		rewritten := rewriteChanges(changes, src.PathRewrites)
+		targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, ttl)
+		var enqueue EnqueueResult
 		if len(targets) > 0 {
-			if eerr := s.queue.EnqueueScans(ctx, targets); eerr != nil {
+			var eerr error
+			if eventID != 0 {
+				enqueue.Created, enqueue.Reused, eerr = s.queue.EnqueueAutoscanScans(ctx, targets, eventID)
+			} else {
+				eerr = s.queue.EnqueueScans(ctx, targets)
+				enqueue.Created = len(targets)
+			}
+			if eerr != nil {
 				s.releaseClaims(ctx, claimed)
 				slog.WarnContext(ctx, "autoscan: enqueue failed", "source_id", src.ID, "err", eerr)
+				s.finishEvent(ctx, eventID, EventFinish{
+					Status:          EventStatusError,
+					ChangesReturned: len(changes),
+					ChangesResolved: stats.ChangesResolved,
+					TargetsClaimed:  stats.TargetsClaimed,
+					ScansSuppressed: stats.Suppressed,
+					ErrorMessage:    eerr.Error(),
+					MarkerAfter:     marker,
+				})
 				continue // do NOT advance marker
 			}
 		}
@@ -223,18 +253,78 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		//
 		// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
 		// yet be fully suppressed. Gate the error on resolvedAny, not targets.
-		if len(paths) > 0 && !resolvedAny {
-			msg := fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — check this source's path rewrites", len(paths))
+		if len(changes) > 0 && !resolvedAny {
+			msg := fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — check this source's path rewrites", len(changes))
 			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
 				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
 			}
+			s.finishEvent(ctx, eventID, EventFinish{
+				Status:          EventStatusUnresolved,
+				ChangesReturned: len(changes),
+				ErrorMessage:    msg,
+				MarkerAfter:     marker,
+			})
 			continue // do NOT advance marker
 		}
 		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
 			slog.WarnContext(ctx, "autoscan: advance marker failed", "source_id", src.ID, "err", aerr)
+			s.finishEvent(ctx, eventID, EventFinish{
+				Status:          EventStatusError,
+				ChangesReturned: len(changes),
+				ChangesResolved: stats.ChangesResolved,
+				TargetsClaimed:  stats.TargetsClaimed,
+				ScansCreated:    enqueue.Created,
+				ScansReused:     enqueue.Reused,
+				ScansSuppressed: stats.Suppressed,
+				ErrorMessage:    aerr.Error(),
+				MarkerAfter:     marker,
+			})
+			continue
 		}
+		s.finishEvent(ctx, eventID, EventFinish{
+			Status:          EventStatusSuccess,
+			ChangesReturned: len(changes),
+			ChangesResolved: stats.ChangesResolved,
+			TargetsClaimed:  stats.TargetsClaimed,
+			ScansCreated:    enqueue.Created,
+			ScansReused:     enqueue.Reused,
+			ScansSuppressed: stats.Suppressed,
+			MarkerAfter:     next,
+		})
 	}
 	return nil
+}
+
+func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) int64 {
+	if s == nil || s.store == nil {
+		return 0
+	}
+	id, err := s.store.CreateEvent(ctx, EventCreate{
+		SourceID:       src.ID,
+		InstallationID: src.InstallationID,
+		CapabilityID:   src.CapabilityID,
+		StartedAt:      startedAt,
+		MarkerBefore:   marker,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: create event failed", "source_id", src.ID, "err", err)
+		return 0
+	}
+	return id
+}
+
+func (s *Service) finishEvent(ctx context.Context, eventID int64, finish EventFinish) {
+	if eventID == 0 || s == nil || s.store == nil {
+		return
+	}
+	finish.ID = eventID
+	finish.CompletedAt = time.Now()
+	if finish.Status == "" {
+		finish.Status = EventStatusSuccess
+	}
+	if err := s.store.FinishEvent(ctx, finish); err != nil {
+		slog.WarnContext(ctx, "autoscan: finish event failed", "event_id", eventID, "err", err)
+	}
 }
 
 // resolveConnection loads and resolves a source's connection to credentials.
@@ -246,16 +336,41 @@ func (s *Service) resolveConnection(ctx context.Context, connectionID string) (R
 	return s.connres.Resolve(ctx, conn)
 }
 
-// resolveAndClaim dedupes the changed paths to parent directories, resolves each
-// to a scan target, and atomically claims it via the suppressor. It returns the
-// targets to enqueue, the suppression keys claimed for them (so they can be
-// released if the enqueue fails), and resolvedAny — whether ANY path resolved to
-// a Silo library folder, independent of suppression. resolvedAny lets PollOnce
-// distinguish "nothing resolved → misconfiguration" from "resolved but all
-// suppressed → debounced, work effectively done." This is the PR #43 salvage
-// loop, generalized to take already-Silo-native paths.
-func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.Duration) (targets []scantrigger.Target, claimed []string, resolvedAny bool) {
-	for _, dir := range uniqueParentDirs(paths) {
+func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
+	rewritten := make([]Change, 0, len(changes))
+	for _, change := range changes {
+		path := applyRewrites(normalizeSeparators(change.SourcePath), rewrites)
+		rewritten = append(rewritten, Change{SourcePath: path, Scope: change.Scope})
+	}
+	return rewritten
+}
+
+// resolveAndClaim resolves changes to scan targets and atomically claims them
+// via the suppressor. Legacy/auto changes retain the historical parent-dir
+// collapse. Structured file changes resolve exact files, and subtree changes
+// resolve exact subtree paths even when the path no longer exists.
+func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl time.Duration) (targets []scantrigger.Target, claimed []string, resolvedAny bool, stats resolveStats) {
+	seenTargets := make(map[string]struct{})
+
+	var legacyPaths []string
+	for _, change := range changes {
+		switch change.Scope {
+		case ChangeScopeFile, ChangeScopeSubtree:
+			target, ok := s.resolveChange(ctx, change)
+			if !ok {
+				continue
+			}
+			resolvedAny = true
+			stats.ChangesResolved++
+			if !s.claimTarget(ctx, *target, ttl, seenTargets, &targets, &claimed) {
+				stats.Suppressed++
+			}
+		default:
+			legacyPaths = append(legacyPaths, change.SourcePath)
+		}
+	}
+
+	for _, dir := range uniqueParentDirs(legacyPaths) {
 		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
 		if rerr != nil {
 			var reqErr *scantrigger.RequestError
@@ -270,21 +385,72 @@ func (s *Service) resolveAndClaim(ctx context.Context, paths []string, ttl time.
 		if target == nil || target.Folder == nil {
 			continue
 		}
-		// This path maps to a real Silo library folder, regardless of whether the
-		// suppressor lets us claim it below.
 		resolvedAny = true
-		// Key on (folder, path) to match the scanqueue dedup granularity so two
-		// distinct subtrees under one library folder are not collapsed.
-		key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
-		ok, serr := s.suppress.ShouldScan(ctx, key, ttl)
-		if serr != nil || !ok {
-			continue
+		stats.ChangesResolved++
+		if !s.claimTarget(ctx, *target, ttl, seenTargets, &targets, &claimed) {
+			stats.Suppressed++
 		}
-		target.Trigger = scanTrigger
-		targets = append(targets, *target)
-		claimed = append(claimed, key)
 	}
-	return targets, claimed, resolvedAny
+	stats.TargetsClaimed = len(targets)
+	return targets, claimed, resolvedAny, stats
+}
+
+func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigger.Target, bool) {
+	if change.SourcePath == "" {
+		return nil, false
+	}
+	var (
+		target *scantrigger.Target
+		err    error
+	)
+	switch change.Scope {
+	case ChangeScopeSubtree:
+		target, err = s.resolver.ResolveMissingSubtree(ctx, change.SourcePath, scanTrigger)
+	case ChangeScopeFile:
+		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
+		if err == nil && target != nil && target.Mode != scantrigger.ModeFile {
+			return nil, false
+		}
+	default:
+		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
+	}
+	if err != nil {
+		var reqErr *scantrigger.RequestError
+		if errors.As(err, &reqErr) {
+			return nil, false
+		}
+		slog.WarnContext(ctx, "autoscan: resolve failed", "path", change.SourcePath, "scope", change.Scope, "err", err)
+		return nil, false
+	}
+	if target == nil || target.Folder == nil {
+		return nil, false
+	}
+	return target, true
+}
+
+func (s *Service) claimTarget(
+	ctx context.Context,
+	target scantrigger.Target,
+	ttl time.Duration,
+	seenTargets map[string]struct{},
+	targets *[]scantrigger.Target,
+	claimed *[]string,
+) bool {
+	targetKey := fmt.Sprintf("%d|%s|%s", target.Folder.ID, target.Mode, target.Path)
+	if _, seen := seenTargets[targetKey]; seen {
+		return false
+	}
+	seenTargets[targetKey] = struct{}{}
+
+	key := fmt.Sprintf("%d|%s", target.Folder.ID, target.Path)
+	ok, serr := s.suppress.ShouldScan(ctx, key, ttl)
+	if serr != nil || !ok {
+		return false
+	}
+	target.Trigger = scanTrigger
+	*targets = append(*targets, target)
+	*claimed = append(*claimed, key)
+	return true
 }
 
 // releaseClaims drops suppression claims (used when the scan enqueue fails so a

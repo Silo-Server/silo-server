@@ -29,6 +29,22 @@ type PathRewrite struct {
 	To   string `json:"to"`
 }
 
+// ChangeScope tells the host how to interpret a scan_source path.
+type ChangeScope string
+
+const (
+	ChangeScopeAuto    ChangeScope = "auto"
+	ChangeScopeFile    ChangeScope = "file"
+	ChangeScopeSubtree ChangeScope = "subtree"
+)
+
+// Change is one raw provider/source-namespace path returned by a scan_source
+// plugin. The host applies PathRewrites before resolving the changed path.
+type Change struct {
+	SourcePath string
+	Scope      ChangeScope
+}
+
 // Source ties a scan_source plugin capability instance to a connection plus the
 // host-owned scheduling/bookkeeping state.
 type Source struct {
@@ -39,7 +55,110 @@ type Source struct {
 	Enabled             bool
 	PollIntervalSeconds *int          // nil => use settings default
 	PathRewrites        []PathRewrite // host-owned raw->Silo prefix rewrites
-	Marker              *string       // opaque; nil on first run
+	SourceConfig        map[string]string
+	Marker              *string // opaque; nil on first run
 	LastRunAt           *time.Time
 	LastError           *string
+}
+
+type EventStatus string
+
+const (
+	EventStatusSuccess    EventStatus = "success"
+	EventStatusError      EventStatus = "error"
+	EventStatusUnresolved EventStatus = "unresolved"
+)
+
+type Event struct {
+	ID              int64
+	SourceID        *string
+	InstallationID  int
+	CapabilityID    string
+	StartedAt       time.Time
+	CompletedAt     time.Time
+	DurationMS      int64
+	Status          EventStatus
+	ChangesReturned int
+	ChangesResolved int
+	TargetsClaimed  int
+	ScansCreated    int
+	ScansReused     int
+	ScansSuppressed int
+	ErrorMessage    string
+	MarkerBefore    *string
+	MarkerAfter     *string
+}
+
+type EventCreate struct {
+	SourceID       string
+	InstallationID int
+	CapabilityID   string
+	StartedAt      time.Time
+	MarkerBefore   string
+}
+
+type EventFinish struct {
+	ID              int64
+	CompletedAt     time.Time
+	Status          EventStatus
+	ChangesReturned int
+	ChangesResolved int
+	TargetsClaimed  int
+	ScansCreated    int
+	ScansReused     int
+	ScansSuppressed int
+	ErrorMessage    string
+	MarkerAfter     string
+}
+
+type EnqueueResult struct {
+	Created int
+	Reused  int
+}
+
+type EventListFilter struct {
+	SourceID string
+	Status   EventStatus
+	Search   string
+	Limit    int
+}
+
+type ScanListFilter struct {
+	Status string
+	Search string
+	Limit  int
+}
+
+type EventWithRuns struct {
+	Event Event
+	Runs  []ScanRunSummary
+}
+
+type ScanRunSummary struct {
+	ID            string
+	MediaFolderID int
+	Mode          string
+	Path          string
+	Trigger       string
+	Status        string
+	ErrorMessage  string
+	RequestedAt   *time.Time
+	StartedAt     *time.Time
+	CompletedAt   *time.Time
+}
+
+type ScanWithEvent struct {
+	ScanRunSummary
+	AutoscanEventID  *int64
+	SourceID         *string
+	InstallationID   *int
+	CapabilityID     string
+	EventStatus      EventStatus
+	EventCompletedAt *time.Time
+}
+
+type QueueSummary struct {
+	Active   int
+	Accepted int
+	Running  int
 }
