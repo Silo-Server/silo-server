@@ -1705,6 +1705,7 @@ export interface AutoscanSource {
   last_error: string | null;
   path_rewrites: AutoscanPathRewrite[];
   source_config: Record<string, string>;
+  label: string;
 }
 
 export interface AutoscanSourceInput {
@@ -1713,6 +1714,7 @@ export interface AutoscanSourceInput {
   poll_interval_seconds: number | null;
   path_rewrites?: AutoscanPathRewrite[];
   source_config?: Record<string, string>;
+  label?: string;
 }
 
 export interface AutoscanSourcesResponse {
