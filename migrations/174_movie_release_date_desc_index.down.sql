@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS public.idx_media_items_movie_release_date_desc_content;

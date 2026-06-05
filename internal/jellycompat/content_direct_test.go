@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"testing"
 	"time"
@@ -329,10 +330,28 @@ func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context,
 type stubBrowseSource struct {
 	items []*models.MediaItem
 	total int
+	calls []stubBrowseCall
 }
 
-func (s *stubBrowseSource) Browse(_ context.Context, _ catalog.BrowseFilters) (*catalog.BrowseResult, error) {
-	return &catalog.BrowseResult{Items: s.items, Total: s.total}, nil
+type stubBrowseCall struct {
+	filters      catalog.BrowseFilters
+	includeTotal bool
+}
+
+func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error) {
+	s.calls = append(s.calls, stubBrowseCall{filters: filters, includeTotal: includeTotal})
+
+	start := min(max(filters.Offset, 0), len(s.items))
+	end := min(start+max(filters.Limit, 0), len(s.items))
+	total := 0
+	if includeTotal {
+		total = s.total
+	}
+	return &catalog.BrowseResult{
+		Items:   append([]*models.MediaItem(nil), s.items[start:end]...),
+		Total:   total,
+		HasMore: end < len(s.items),
+	}, nil
 }
 
 func (s *stubBrowseSource) ListGenres(_ context.Context, _ catalog.BrowseFilters) ([]string, error) {
@@ -413,6 +432,84 @@ func TestBrowseItems_FetchesProgressWhenPlayedFilterSet(t *testing.T) {
 	}
 }
 
+func TestBrowseItems_FillsLargeJellyfinLimitInSingleCatalogPage(t *testing.T) {
+	provider := newProgressCountingStoreProvider()
+	browse := &stubBrowseSource{
+		items: makeBrowseTestMediaItems(400),
+		total: 400,
+	}
+	svc := newDirectContentServiceForTest(browse, provider)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	params := url.Values{}
+	params.Set("limit", "250")
+	params.Set("offset", "10")
+	params.Set("include_total", "true")
+
+	result, err := svc.BrowseItems(context.Background(), session, params)
+	if err != nil {
+		t.Fatalf("BrowseItems returned error: %v", err)
+	}
+	if got, want := len(result.Items), 250; got != want {
+		t.Fatalf("items length = %d, want %d", got, want)
+	}
+	if result.Total != 400 {
+		t.Fatalf("Total = %d, want 400", result.Total)
+	}
+	if !result.HasMore {
+		t.Fatal("HasMore = false, want true")
+	}
+	if got, want := len(browse.calls), 1; got != want {
+		t.Fatalf("BrowsePage calls = %d, want %d", got, want)
+	}
+
+	call := browse.calls[0]
+	if call.filters.Limit != 250 {
+		t.Fatalf("Limit = %d, want 250", call.filters.Limit)
+	}
+	if call.filters.MaxLimit != compatBrowseMaxLimit {
+		t.Fatalf("MaxLimit = %d, want %d", call.filters.MaxLimit, compatBrowseMaxLimit)
+	}
+	if call.filters.Offset != 10 {
+		t.Fatalf("Offset = %d, want 10", call.filters.Offset)
+	}
+	if !call.includeTotal {
+		t.Fatal("includeTotal = false, want true")
+	}
+}
+
+func TestBrowseItems_HonorsIncludeTotalFalse(t *testing.T) {
+	browse := &stubBrowseSource{
+		items: makeBrowseTestMediaItems(300),
+		total: 300,
+	}
+	svc := newDirectContentServiceForTest(browse, nil)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	params := url.Values{}
+	params.Set("limit", "150")
+	params.Set("include_total", "false")
+
+	result, err := svc.BrowseItems(context.Background(), session, params)
+	if err != nil {
+		t.Fatalf("BrowseItems returned error: %v", err)
+	}
+	if got, want := len(result.Items), 150; got != want {
+		t.Fatalf("items length = %d, want %d", got, want)
+	}
+	if result.Total != 0 {
+		t.Fatalf("Total = %d, want 0 when include_total=false", result.Total)
+	}
+	if got, want := len(browse.calls), 1; got != want {
+		t.Fatalf("BrowsePage calls = %d, want %d", got, want)
+	}
+	for i, call := range browse.calls {
+		if call.includeTotal {
+			t.Fatalf("call %d includeTotal = true, want false", i)
+		}
+	}
+}
+
 // TestEnrichListItemsUserData_BatchesIntoSingleFetch verifies that
 // enrichListItemsUserData makes exactly one batched ListProgressByMediaItems
 // call regardless of batch size — not N+1 per-item fetches.
@@ -436,4 +533,16 @@ func TestEnrichListItemsUserData_BatchesIntoSingleFetch(t *testing.T) {
 		t.Fatalf("ListProgressByMediaItems should receive all %d ids in one batch; got %d",
 			want, got)
 	}
+}
+
+func makeBrowseTestMediaItems(count int) []*models.MediaItem {
+	items := make([]*models.MediaItem, 0, count)
+	for i := range count {
+		items = append(items, &models.MediaItem{
+			ContentID: fmt.Sprintf("movie-%03d", i),
+			Type:      "movie",
+			Title:     fmt.Sprintf("Movie %03d", i),
+		})
+	}
+	return items
 }

@@ -41,9 +41,11 @@ func TestQueryExecutor_PreviewPage_SkipTotal_OmitsWindowCount(t *testing.T) {
 	}
 }
 
-// TestBrowseRepository_browse_UsesWindowCount asserts that buildBrowsePlan +
-// pagedSQL emit COUNT(*) OVER () in the data SELECT when includeTotal is true.
-func TestBrowseRepository_browse_UsesWindowCount(t *testing.T) {
+// TestBrowseRepository_browse_ExactTotalOmitsWindowCount asserts that
+// buildBrowsePlan + pagedSQL keep the data SELECT free of COUNT(*) OVER ().
+// BrowsePage runs the exact count separately when needed so large ordered
+// catalogs can use top-N/index plans for the page fetch.
+func TestBrowseRepository_browse_ExactTotalOmitsWindowCount(t *testing.T) {
 	repo := &BrowseRepository{}
 	plan, earlyEmpty, err := repo.buildBrowsePlan(BrowseFilters{Limit: 20})
 	if err != nil {
@@ -53,8 +55,8 @@ func TestBrowseRepository_browse_UsesWindowCount(t *testing.T) {
 		t.Fatalf("did not expect early empty result for default filters")
 	}
 	sql, _ := plan.pagedSQL(true)
-	if !strings.Contains(sql, "COUNT(*) OVER ()") {
-		t.Fatalf("expected COUNT(*) OVER () for single-pass browse count; got:\n%s", sql)
+	if strings.Contains(sql, "COUNT(*) OVER ()") {
+		t.Fatalf("exact browse totals must omit COUNT(*) OVER (); got:\n%s", sql)
 	}
 }
 
@@ -72,6 +74,31 @@ func TestBrowseRepository_browse_SkipTotal_OmitsWindowCount(t *testing.T) {
 	sql, _ := plan.pagedSQL(false)
 	if strings.Contains(sql, "COUNT(*) OVER ()") {
 		t.Fatalf("SkipTotal must omit COUNT(*) OVER (); got:\n%s", sql)
+	}
+}
+
+func TestBrowseRepository_browse_MaxLimitAllowsCallerSpecificLargePages(t *testing.T) {
+	repo := &BrowseRepository{}
+	plan, earlyEmpty, err := repo.buildBrowsePlan(BrowseFilters{Limit: 1000, MaxLimit: 1000})
+	if err != nil {
+		t.Fatalf("buildBrowsePlan error: %v", err)
+	}
+	if earlyEmpty {
+		t.Fatalf("did not expect early empty result")
+	}
+	if plan.limit != 1000 {
+		t.Fatalf("plan limit = %d, want 1000", plan.limit)
+	}
+
+	defaultPlan, earlyEmpty, err := repo.buildBrowsePlan(BrowseFilters{Limit: 1000})
+	if err != nil {
+		t.Fatalf("buildBrowsePlan default cap error: %v", err)
+	}
+	if earlyEmpty {
+		t.Fatalf("did not expect early empty result for default cap")
+	}
+	if defaultPlan.limit != 100 {
+		t.Fatalf("default plan limit = %d, want 100", defaultPlan.limit)
 	}
 }
 
