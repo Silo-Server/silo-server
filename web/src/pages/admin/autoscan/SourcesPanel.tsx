@@ -760,8 +760,9 @@ function SourceRow({
     if (isDirty) update.mutate({ id: source.id, body: fullBody({}) });
   }
 
+  // Label uses its own dirty-check (isDirty covers only connectionId/intervalStr).
   function handleLabelBlur() {
-    if (edit.label.trim() === (source.label ?? "").trim()) return;
+    if (edit.label.trim() === source.label.trim()) return;
     update.mutate({ id: source.id, body: fullBody({}) });
   }
 
@@ -813,7 +814,7 @@ function SourceRow({
       ? `Floor only - values below the global default (${globalPollInterval}s) have no effect.`
       : "Floor only - values below the global default poll interval have no effect.";
 
-  const sourceLabel2 = composeSourceLabel({
+  const resolvedLabel = composeSourceLabel({
     operatorLabel: edit.label,
     connectionName: connectionOptions.find(
       (c) => c.id === (edit.connectionId || source.connection_id || ""),
@@ -827,13 +828,13 @@ function SourceRow({
   const sourceIdentity = (
     <div className="min-w-0 space-y-1">
       <div className="min-w-0 space-y-0.5">
-        <p className="truncate leading-none font-medium">{sourceLabel2.name}</p>
-        <p className="text-muted-foreground text-xs">{sourceLabel2.detail}</p>
+        <p className="truncate leading-none font-medium">{resolvedLabel.name}</p>
+        <p className="text-muted-foreground text-xs">{resolvedLabel.detail}</p>
       </div>
       <Input
         value={edit.label}
         placeholder="Custom label (optional)"
-        aria-label={`Custom label for ${sourceLabel2.name}`}
+        aria-label={`Custom label for ${resolvedLabel.name}`}
         className="h-7 text-xs"
         onChange={(e) => setEdit((ed) => ({ ...ed, label: e.target.value }))}
         onBlur={handleLabelBlur}
