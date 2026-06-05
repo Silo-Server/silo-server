@@ -176,14 +176,14 @@ func (r *Repository) GetConnection(ctx context.Context, id string) (Connection, 
 // --- Sources ---
 
 const sourceColumns = `id, installation_id, capability_id, connection_id, enabled,
-	poll_interval_seconds, path_rewrites, source_config, marker, last_run_at, last_error`
+	poll_interval_seconds, path_rewrites, source_config, label, marker, last_run_at, last_error`
 
 func scanSource(row interface{ Scan(...any) error }) (Source, error) {
 	var s Source
 	var pathRewrites []byte
 	var sourceConfig []byte
 	if err := row.Scan(&s.ID, &s.InstallationID, &s.CapabilityID, &s.ConnectionID,
-		&s.Enabled, &s.PollIntervalSeconds, &pathRewrites, &sourceConfig, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
+		&s.Enabled, &s.PollIntervalSeconds, &pathRewrites, &sourceConfig, &s.Label, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
 		return Source{}, err
 	}
 	rewrites, err := unmarshalPathRewrites(pathRewrites)
@@ -283,11 +283,11 @@ func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error)
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO autoscan_sources (
-			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, source_config
+			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, source_config, label
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+sourceColumns,
-		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig)
+		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
 	out, err := scanSource(row)
 	if err != nil {
 		if connID, ok := connectionFKViolation(err, s.ConnectionID); ok {
@@ -318,10 +318,11 @@ func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error)
 		    poll_interval_seconds = $4,
 		    path_rewrites = $5,
 		    source_config = $6,
+		    label = $7,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING `+sourceColumns,
-		s.ID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig)
+		s.ID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
 	out, err := scanSource(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
