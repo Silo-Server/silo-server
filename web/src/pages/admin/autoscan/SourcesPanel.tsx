@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -68,6 +68,11 @@ import {
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import {
+  buildPluginDisplayNames,
+  composeSourceLabel,
+  pluginDisplayNameKey,
+} from "@/lib/autoscanLabels";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,6 +105,7 @@ interface RowEdit {
   intervalStr: string; // "" means use default
   rewrites: AutoscanPathRewrite[];
   sourceConfig: Record<string, string>;
+  label: string;
 }
 
 function sourceToRowEdit(source: AutoscanSource): RowEdit {
@@ -108,6 +114,7 @@ function sourceToRowEdit(source: AutoscanSource): RowEdit {
     intervalStr: source.poll_interval_seconds != null ? String(source.poll_interval_seconds) : "",
     rewrites: source.path_rewrites.map((r) => ({ ...r })),
     sourceConfig: sourceConfigForEdit(source),
+    label: source.label ?? "",
   };
 }
 
@@ -691,12 +698,14 @@ function parseInterval(intervalStr: string, current: number | null): number | nu
 function SourceRow({
   source,
   connectionOptions,
+  pluginDisplayNames,
   globalPollInterval,
   onDelete,
   layout = "table",
 }: {
   source: AutoscanSource;
   connectionOptions: Array<{ id: string; name: string }>;
+  pluginDisplayNames: Map<string, string>;
   globalPollInterval: number | null;
   onDelete: (source: AutoscanSource) => void;
   layout?: "table" | "card";
@@ -723,6 +732,7 @@ function SourceRow({
       poll_interval_seconds: intervalVal,
       path_rewrites,
       source_config: normalizeSourceConfig(edit.sourceConfig),
+      label: edit.label.trim(),
       ...overrides,
     };
   }
@@ -748,6 +758,11 @@ function SourceRow({
     }
     setIntervalError(false);
     if (isDirty) update.mutate({ id: source.id, body: fullBody({}) });
+  }
+
+  function handleLabelBlur() {
+    if (edit.label.trim() === (source.label ?? "").trim()) return;
+    update.mutate({ id: source.id, body: fullBody({}) });
   }
 
   function handleConnectionChange(value: string) {
@@ -798,16 +813,31 @@ function SourceRow({
       ? `Floor only - values below the global default (${globalPollInterval}s) have no effect.`
       : "Floor only - values below the global default poll interval have no effect.";
 
-  const boundConnectionId = edit.connectionId || source.connection_id || "";
-  const connectionName = connectionOptions.find((c) => c.id === boundConnectionId)?.name ?? "";
+  const sourceLabel2 = composeSourceLabel({
+    operatorLabel: edit.label,
+    connectionName: connectionOptions.find(
+      (c) => c.id === (edit.connectionId || source.connection_id || ""),
+    )?.name,
+    displayName: pluginDisplayNames.get(
+      pluginDisplayNameKey(source.installation_id, source.capability_id),
+    ),
+    capabilityId: source.capability_id,
+    installationId: source.installation_id,
+  });
   const sourceIdentity = (
-    <div className="min-w-0 space-y-0.5">
-      <p className="truncate leading-none font-medium">{connectionName || source.capability_id}</p>
-      <p className="text-muted-foreground text-xs">
-        {connectionName
-          ? `${source.capability_id} · plugin #${source.installation_id}`
-          : `Plugin #${source.installation_id}`}
-      </p>
+    <div className="min-w-0 space-y-1">
+      <div className="min-w-0 space-y-0.5">
+        <p className="truncate leading-none font-medium">{sourceLabel2.name}</p>
+        <p className="text-muted-foreground text-xs">{sourceLabel2.detail}</p>
+      </div>
+      <Input
+        value={edit.label}
+        placeholder="Custom label (optional)"
+        aria-label={`Custom label for ${sourceLabel2.name}`}
+        className="h-7 text-xs"
+        onChange={(e) => setEdit((ed) => ({ ...ed, label: e.target.value }))}
+        onBlur={handleLabelBlur}
+      />
     </div>
   );
 
@@ -1218,6 +1248,11 @@ export default function SourcesPanel() {
   const sources = useAutoscanSources();
   const connections = useAutoscanConnections();
   const settings = useAutoscanSettings();
+  const available = useAvailableScanSources();
+  const pluginDisplayNames = useMemo(
+    () => buildPluginDisplayNames(available.data ?? []),
+    [available.data],
+  );
   const deleteSource = useDeleteAutoscanSource();
 
   const [deleteTarget, setDeleteTarget] = useState<AutoscanSource | null>(null);
@@ -1298,6 +1333,7 @@ export default function SourcesPanel() {
             key={source.id}
             source={source}
             connectionOptions={connectionOptions}
+            pluginDisplayNames={pluginDisplayNames}
             globalPollInterval={globalPollInterval}
             onDelete={setDeleteTarget}
             layout="card"
@@ -1323,6 +1359,7 @@ export default function SourcesPanel() {
                 key={source.id}
                 source={source}
                 connectionOptions={connectionOptions}
+                pluginDisplayNames={pluginDisplayNames}
                 globalPollInterval={globalPollInterval}
                 onDelete={setDeleteTarget}
                 layout="table"
