@@ -56,6 +56,7 @@ type Source struct {
 	PollIntervalSeconds *int          // nil => use settings default
 	PathRewrites        []PathRewrite // host-owned raw->Silo prefix rewrites
 	SourceConfig        map[string]string
+	Label               string  // operator-set display label; "" = unset
 	Marker              *string // opaque; nil on first run
 	LastRunAt           *time.Time
 	LastError           *string
