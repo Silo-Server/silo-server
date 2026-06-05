@@ -884,6 +884,7 @@ type autoscanStatusSource struct {
 	CapabilityID   string                 `json:"capability_id"`
 	ConnectionID   *string                `json:"connection_id"`
 	Enabled        bool                   `json:"enabled"`
+	Label          string                 `json:"label"`
 	PathRewrites   []autoscan.PathRewrite `json:"path_rewrites"`
 	LastRunAt      *time.Time             `json:"last_run_at,omitempty"`
 	LastError      *string                `json:"last_error,omitempty"`
@@ -932,6 +933,7 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 			CapabilityID:   src.CapabilityID,
 			ConnectionID:   src.ConnectionID,
 			Enabled:        src.Enabled,
+			Label:          src.Label,
 			PathRewrites:   rewrites,
 			LastRunAt:      src.LastRunAt,
 			LastError:      src.LastError,

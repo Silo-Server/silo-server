@@ -142,7 +142,9 @@ function scanStatusLabel(status: AutoscanScanStatus | ScanRun["status"]) {
 // capability, so resolve every Activity row through the shared label chain:
 // operator label -> connection name -> manifest display_name -> capability_id.
 function pollSourceName(event: AutoscanEvent, lookups: SourceLabelLookups): string {
-  return resolveEventSourceName(event, lookups);
+  return (
+    resolveEventSourceName(event, lookups) || `${event.capability_id} #${event.installation_id}`
+  );
 }
 
 function scanSourceName(scan: AutoscanScan, lookups: SourceLabelLookups): string {

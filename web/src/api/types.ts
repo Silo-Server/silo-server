@@ -1779,6 +1779,7 @@ export interface AutoscanStatusSource {
   capability_id: string;
   connection_id: string | null;
   enabled: boolean;
+  label: string;
   last_run_at: string | null;
   last_error: string | null;
 }
