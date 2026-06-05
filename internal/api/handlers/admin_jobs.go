@@ -28,6 +28,7 @@ type adminJobRepository interface {
 	List(ctx context.Context, opts adminjob.ListJobsOptions) ([]*models.AdminJob, error)
 	GetByID(ctx context.Context, id string) (*models.AdminJob, error)
 	Cancel(ctx context.Context, id, message string, expiresAt time.Time) (*models.AdminJob, error)
+	CancelQueued(ctx context.Context, id, message string, expiresAt time.Time) (*models.AdminJob, error)
 	UpdateProgress(ctx context.Context, id string, current, total int, message string) error
 }
 
@@ -159,7 +160,7 @@ func (h *AdminJobsHandler) HandleCancel(w http.ResponseWriter, r *http.Request) 
 
 	switch job.Status {
 	case adminjob.StatusQueued:
-		cancelled, cancelErr := h.repo.Cancel(
+		cancelled, cancelErr := h.repo.CancelQueued(
 			r.Context(),
 			id,
 			"Library metadata refresh cancelled",
@@ -171,6 +172,19 @@ func (h *AdminJobsHandler) HandleCancel(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			if errors.Is(cancelErr, adminjob.ErrJobNotCancellable) {
+				advanced, loadErr := h.repo.GetByID(r.Context(), id)
+				if loadErr != nil {
+					if errors.Is(loadErr, adminjob.ErrJobNotFound) {
+						writeError(w, http.StatusNotFound, "not_found", "Job not found")
+						return
+					}
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin job")
+					return
+				}
+				if advanced.Status == adminjob.StatusRunning {
+					h.requestRunningCancellation(w, r, advanced)
+					return
+				}
 				writeError(w, http.StatusConflict, "not_cancellable", "Job is no longer cancellable")
 				return
 			}
@@ -187,29 +201,33 @@ func (h *AdminJobsHandler) HandleCancel(w http.ResponseWriter, r *http.Request) 
 		}
 		writeJSON(w, http.StatusOK, adminJobToResponse(r, cancelled, h.store))
 	case adminjob.StatusRunning:
-		if h.CancelRegistry == nil || !h.CancelRegistry.Cancel(id) {
-			writeError(w, http.StatusConflict, "not_cancellable", "Running job is not cancellable on this node")
-			return
-		}
-		if err := h.repo.UpdateProgress(
-			r.Context(),
-			id,
-			job.ProgressCurrent,
-			job.ProgressTotal,
-			"Cancellation requested",
-		); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request cancellation")
-			return
-		}
-		updated, err := h.repo.GetByID(r.Context(), id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin job")
-			return
-		}
-		writeJSON(w, http.StatusAccepted, adminJobToResponse(r, updated, h.store))
+		h.requestRunningCancellation(w, r, job)
 	default:
 		writeError(w, http.StatusConflict, "not_cancellable", "Job is no longer cancellable")
 	}
+}
+
+func (h *AdminJobsHandler) requestRunningCancellation(w http.ResponseWriter, r *http.Request, job *models.AdminJob) {
+	if h.CancelRegistry == nil || !h.CancelRegistry.Cancel(job.ID) {
+		writeError(w, http.StatusConflict, "not_cancellable", "Running job is not cancellable on this node")
+		return
+	}
+	if err := h.repo.UpdateProgress(
+		r.Context(),
+		job.ID,
+		job.ProgressCurrent,
+		job.ProgressTotal,
+		"Cancellation requested",
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request cancellation")
+		return
+	}
+	updated, err := h.repo.GetByID(r.Context(), job.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin job")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, adminJobToResponse(r, updated, h.store))
 }
 
 func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArtifactStore) adminJobResponse {

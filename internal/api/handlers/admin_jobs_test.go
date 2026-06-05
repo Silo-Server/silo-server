@@ -151,6 +151,56 @@ func TestAdminJobsHandleCancel_QueuedPublishesCancelledEvent(t *testing.T) {
 	}
 }
 
+func TestAdminJobsHandleCancel_QueuedSnapshotFallsBackToRunningCancellation(t *testing.T) {
+	repo := &fakeAdminJobRepository{
+		job: &models.AdminJob{
+			ID:              "job-1",
+			JobType:         adminjob.JobTypeLibraryRefresh,
+			Status:          adminjob.StatusQueued,
+			CreatedByUserID: 1,
+			Message:         "Queued",
+			RequestedAt:     time.Now().UTC(),
+			ProgressCurrent: 3,
+			ProgressTotal:   10,
+		},
+		promoteToRunningOnCancelQueued: true,
+	}
+	cancelled := false
+	registry := adminjob.NewCancelRegistry()
+	unregister := registry.Register("job-1", func() {
+		cancelled = true
+	})
+	defer unregister()
+
+	handler := NewAdminJobsHandler(repo, nil)
+	handler.CancelRegistry = registry
+
+	rec := httptest.NewRecorder()
+	handler.HandleCancel(rec, adminJobCancelRequest("job-1"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	if !cancelled {
+		t.Fatal("expected running job cancel registry to be invoked")
+	}
+	if repo.cancelQueuedCalls != 1 {
+		t.Fatalf("CancelQueued called %d times, want 1", repo.cancelQueuedCalls)
+	}
+	if repo.cancelCalls != 0 {
+		t.Fatalf("Cancel called %d times, want 0", repo.cancelCalls)
+	}
+	if repo.updateProgressCalls != 1 {
+		t.Fatalf("UpdateProgress called %d times, want 1", repo.updateProgressCalls)
+	}
+	if repo.job.Status != adminjob.StatusRunning {
+		t.Fatalf("job status = %q, want %q", repo.job.Status, adminjob.StatusRunning)
+	}
+	if repo.job.Message != "Cancellation requested" {
+		t.Fatalf("job message = %q, want cancellation request", repo.job.Message)
+	}
+}
+
 func adminJobCancelRequest(id string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/admin/jobs/"+id+"/cancel", nil)
 	routeCtx := chi.NewRouteContext()
@@ -159,8 +209,11 @@ func adminJobCancelRequest(id string) *http.Request {
 }
 
 type fakeAdminJobRepository struct {
-	job                 *models.AdminJob
-	updateProgressCalls int
+	job                            *models.AdminJob
+	updateProgressCalls            int
+	cancelCalls                    int
+	cancelQueuedCalls              int
+	promoteToRunningOnCancelQueued bool
 }
 
 func (r *fakeAdminJobRepository) List(context.Context, adminjob.ListJobsOptions) ([]*models.AdminJob, error) {
@@ -179,10 +232,32 @@ func (r *fakeAdminJobRepository) GetByID(_ context.Context, id string) (*models.
 }
 
 func (r *fakeAdminJobRepository) Cancel(_ context.Context, id, message string, _ time.Time) (*models.AdminJob, error) {
+	r.cancelCalls++
 	if r.job == nil || r.job.ID != id {
 		return nil, adminjob.ErrJobNotFound
 	}
 	if r.job.Status != adminjob.StatusQueued && r.job.Status != adminjob.StatusRunning {
+		return nil, adminjob.ErrJobNotCancellable
+	}
+	cp := *r.job
+	cp.Status = adminjob.StatusCancelled
+	cp.Message = message
+	r.job = &cp
+	return &cp, nil
+}
+
+func (r *fakeAdminJobRepository) CancelQueued(_ context.Context, id, message string, _ time.Time) (*models.AdminJob, error) {
+	r.cancelQueuedCalls++
+	if r.job == nil || r.job.ID != id {
+		return nil, adminjob.ErrJobNotFound
+	}
+	if r.promoteToRunningOnCancelQueued {
+		cp := *r.job
+		cp.Status = adminjob.StatusRunning
+		r.job = &cp
+		return nil, adminjob.ErrJobNotCancellable
+	}
+	if r.job.Status != adminjob.StatusQueued {
 		return nil, adminjob.ErrJobNotCancellable
 	}
 	cp := *r.job
