@@ -1399,7 +1399,7 @@ func (h *LibraryHandler) HandleListMetadataMatchQueues(w http.ResponseWriter, r 
 }
 
 func (h *LibraryHandler) HandleGetMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
-	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil && h.RawMatchBacklogRepo == nil {
+	if !h.metadataMatchBacklogConfigured() {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
 		return
 	}
@@ -1508,7 +1508,7 @@ func (h *LibraryHandler) HandleGetMetadataMatchQueue(w http.ResponseWriter, r *h
 }
 
 func (h *LibraryHandler) HandleRetryMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
-	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil && h.RawMatchBacklogRepo == nil {
+	if !h.metadataMatchBacklogConfigured() {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
 		return
 	}
@@ -1566,7 +1566,7 @@ func (h *LibraryHandler) HandleRetryMetadataMatchQueue(w http.ResponseWriter, r 
 }
 
 func (h *LibraryHandler) HandleCancelMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
-	if h.MovieMatchQueueRepo == nil && h.SeriesMatchQueueRepo == nil && h.RawMatchBacklogRepo == nil {
+	if !h.metadataMatchBacklogConfigured() {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
 		return
 	}
@@ -1628,6 +1628,11 @@ func (h *LibraryHandler) HandleCancelMetadataMatchQueue(w http.ResponseWriter, r
 		TotalCancelled:   movieCancelled + seriesCancelled + rawFileCancelled,
 		Queue:            status,
 	})
+}
+
+func (h *LibraryHandler) metadataMatchBacklogConfigured() bool {
+	return h.folderRepo != nil &&
+		(h.MovieMatchQueueRepo != nil || h.SeriesMatchQueueRepo != nil || h.RawMatchBacklogRepo != nil)
 }
 
 func (h *LibraryHandler) metadataMatchQueueStatus(ctx context.Context, libraryID int) (libraryMetadataMatchQueueStatusResponse, error) {
