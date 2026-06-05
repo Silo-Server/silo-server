@@ -1183,6 +1183,36 @@ func TestAutoscanHandleListEventsRejectsBadFilters(t *testing.T) {
 	}
 }
 
+func TestAutoscanHandleUpdateSourceNormalizesLabel(t *testing.T) {
+	var got autoscan.Source
+	store := &fakeAutoscanStore{
+		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+			got = s
+			return s, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+
+	body := `{"connection_id":null,"enabled":false,"label":"  4K Movies  "}`
+	req := newAutoscanRequest("PATCH", "/api/v1/admin/autoscan/sources/src-1", body, "src-1")
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.Label != "4K Movies" {
+		t.Fatalf("stored label = %q, want %q", got.Label, "4K Movies")
+	}
+	var resp autoscanSourceResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Label != "4K Movies" {
+		t.Fatalf("response label = %q, want %q", resp.Label, "4K Movies")
+	}
+}
+
 func TestAutoscanHandleStatusReturnsTrimmedSources(t *testing.T) {
 	latestEventAt := time.Date(2026, 6, 4, 14, 30, 0, 0, time.UTC)
 	store := &fakeAutoscanStore{

@@ -314,6 +314,7 @@ type autoscanSourceResponse struct {
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds,omitempty"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
 	SourceConfig        map[string]string      `json:"source_config"`
+	Label               string                 `json:"label"`
 	LastRunAt           *time.Time             `json:"last_run_at,omitempty"`
 	LastError           *string                `json:"last_error,omitempty"`
 }
@@ -335,6 +336,7 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 		PollIntervalSeconds: s.PollIntervalSeconds,
 		PathRewrites:        rewrites,
 		SourceConfig:        config,
+		Label:               s.Label,
 		LastRunAt:           s.LastRunAt,
 		LastError:           s.LastError,
 	}
@@ -402,6 +404,7 @@ type autoscanCreateSourceInput struct {
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
 	SourceConfig        map[string]string      `json:"source_config"`
+	Label               string                 `json:"label"`
 }
 
 // HandleCreateSource creates a new source bound to an installed scan_source
@@ -448,6 +451,7 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		PollIntervalSeconds: in.PollIntervalSeconds,
 		PathRewrites:        normalizePathRewrites(in.PathRewrites),
 		SourceConfig:        normalizeSourceConfig(in.SourceConfig),
+		Label:               autoscan.NormalizeSourceLabel(in.Label),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -484,6 +488,7 @@ type autoscanSourceInput struct {
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
 	SourceConfig        map[string]string      `json:"source_config"`
+	Label               string                 `json:"label"`
 }
 
 // validatePathRewrites lightly validates a source's rewrite list: each entry
@@ -550,6 +555,7 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		PollIntervalSeconds: in.PollIntervalSeconds,
 		PathRewrites:        normalizePathRewrites(in.PathRewrites),
 		SourceConfig:        normalizeSourceConfig(in.SourceConfig),
+		Label:               autoscan.NormalizeSourceLabel(in.Label),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
