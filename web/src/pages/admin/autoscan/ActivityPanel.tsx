@@ -46,9 +46,15 @@ import {
   useAutoscanScans,
   useAutoscanSources,
   useAutoscanStatus,
+  useAvailableScanSources,
 } from "@/hooks/queries/useAutoscan";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries, useCancelLibraryScans } from "@/hooks/queries/admin/libraries";
+import {
+  buildPluginDisplayNames,
+  resolveEventSourceName,
+  type SourceLabelLookups,
+} from "@/lib/autoscanLabels";
 import {
   compareActiveScans,
   formatActiveScanMode,
@@ -132,22 +138,15 @@ function scanStatusLabel(status: AutoscanScanStatus | ScanRun["status"]) {
   return status === "accepted" ? "queued" : status;
 }
 
-// sourceNames maps a source id to its bound connection name (e.g. "Radarr4k").
 // arr-plugin sources fan out one-per-connection under a single generic
-// capability, so the connection name is the only human-distinguishing label;
-// sources without a connection (e.g. cephfs) fall back to capability + plugin.
-function pollSourceName(event: AutoscanEvent, sourceNames: Map<string, string>): string {
-  const connectionName = event.source_id ? sourceNames.get(event.source_id) : undefined;
-  return connectionName ?? `${event.capability_id} #${event.installation_id}`;
+// capability, so resolve every Activity row through the shared label chain:
+// operator label -> connection name -> manifest display_name -> capability_id.
+function pollSourceName(event: AutoscanEvent, lookups: SourceLabelLookups): string {
+  return resolveEventSourceName(event, lookups);
 }
 
-function scanSourceName(scan: AutoscanScan, sourceNames: Map<string, string>): string {
-  const connectionName = scan.source_id ? sourceNames.get(scan.source_id) : undefined;
-  if (connectionName) return connectionName;
-  if (scan.capability_id && scan.installation_id != null) {
-    return `${scan.capability_id} #${scan.installation_id}`;
-  }
-  return "Autoscan";
+function scanSourceName(scan: AutoscanScan, lookups: SourceLabelLookups): string {
+  return resolveEventSourceName(scan, lookups) || "Autoscan";
 }
 
 function libraryName(librariesByID: Map<number, Library>, libraryID: number): string {
@@ -384,11 +383,11 @@ function AutoscanQueue({
 function ScanHistoryCard({
   scan,
   librariesByID,
-  sourceNames,
+  lookups,
 }: {
   scan: AutoscanScan;
   librariesByID: Map<number, Library>;
-  sourceNames: Map<string, string>;
+  lookups: SourceLabelLookups;
 }) {
   return (
     <div className="border-border rounded-lg border p-4">
@@ -400,7 +399,7 @@ function ScanHistoryCard({
           </div>
           <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
             <span>{formatActiveScanMode(scan)}</span>
-            <span>{scanSourceName(scan, sourceNames)}</span>
+            <span>{scanSourceName(scan, lookups)}</span>
             <span>
               {formatTimestamp(scan.completed_at ?? scan.started_at ?? scan.requested_at)}
             </span>
@@ -426,11 +425,11 @@ function ScanHistoryCard({
 function ScanHistoryTable({
   scans,
   librariesByID,
-  sourceNames,
+  lookups,
 }: {
   scans: AutoscanScan[];
   librariesByID: Map<number, Library>;
-  sourceNames: Map<string, string>;
+  lookups: SourceLabelLookups;
 }) {
   return (
     <>
@@ -440,7 +439,7 @@ function ScanHistoryTable({
             key={scan.id}
             scan={scan}
             librariesByID={librariesByID}
-            sourceNames={sourceNames}
+            lookups={lookups}
           />
         ))}
       </div>
@@ -466,9 +465,7 @@ function ScanHistoryTable({
                   {libraryName(librariesByID, scan.library_id)}
                   <div className="text-muted-foreground mt-1 text-[11px]">{scan.id}</div>
                 </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {scanSourceName(scan, sourceNames)}
-                </TableCell>
+                <TableCell className="whitespace-nowrap">{scanSourceName(scan, lookups)}</TableCell>
                 <TableCell className="max-w-xl">
                   <div className="text-sm">{formatActiveScanMode(scan)}</div>
                   <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
@@ -495,20 +492,14 @@ function ScanHistoryTable({
   );
 }
 
-function PollEventCard({
-  event,
-  sourceNames,
-}: {
-  event: AutoscanEvent;
-  sourceNames: Map<string, string>;
-}) {
+function PollEventCard({ event, lookups }: { event: AutoscanEvent; lookups: SourceLabelLookups }) {
   return (
     <div className="border-border rounded-lg border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <PollStatusBadge status={event.status} />
-            <span className="font-medium">{pollSourceName(event, sourceNames)}</span>
+            <span className="font-medium">{pollSourceName(event, lookups)}</span>
           </div>
           <PollMetricStrip event={event} />
         </div>
@@ -536,16 +527,16 @@ function PollEventCard({
 
 function PollEventTable({
   events,
-  sourceNames,
+  lookups,
 }: {
   events: AutoscanEvent[];
-  sourceNames: Map<string, string>;
+  lookups: SourceLabelLookups;
 }) {
   return (
     <>
       <div className="space-y-3 lg:hidden">
         {events.map((event) => (
-          <PollEventCard key={event.id} event={event} sourceNames={sourceNames} />
+          <PollEventCard key={event.id} event={event} lookups={lookups} />
         ))}
       </div>
       <div className="hidden rounded-lg border lg:block">
@@ -566,7 +557,7 @@ function PollEventTable({
                 <TableCell>
                   <PollStatusBadge status={event.status} />
                 </TableCell>
-                <TableCell className="font-medium">{pollSourceName(event, sourceNames)}</TableCell>
+                <TableCell className="font-medium">{pollSourceName(event, lookups)}</TableCell>
                 <TableCell>
                   <PollMetricStrip event={event} />
                   {event.error_message ? (
@@ -626,6 +617,7 @@ export default function ActivityPanel() {
   const { data: libraries = [] } = useAdminLibraries();
   const { data: autoscanSources = [] } = useAutoscanSources();
   const { data: autoscanConnections = [] } = useAutoscanConnections();
+  const available = useAvailableScanSources();
   const cancelScans = useCancelLibraryScans();
 
   const queue = status.data;
@@ -633,18 +625,14 @@ export default function ActivityPanel() {
     () => new Map(libraries.map((library) => [library.id, library])),
     [libraries],
   );
-  // Map each source id to its bound connection name so Activity rows label
-  // arr-plugin sources by connection (Radarr/Sonarr/...) instead of the shared
-  // "arr" capability. Sources without a connection are omitted and fall back.
-  const sourceNames = useMemo(() => {
-    const connectionByID = new Map(autoscanConnections.map((c) => [c.id, c.name]));
-    const names = new Map<string, string>();
-    for (const source of autoscanSources) {
-      const name = source.connection_id ? connectionByID.get(source.connection_id) : undefined;
-      if (name) names.set(source.id, name);
-    }
-    return names;
-  }, [autoscanSources, autoscanConnections]);
+  const labelLookups: SourceLabelLookups = useMemo(
+    () => ({
+      sourceByID: new Map(autoscanSources.map((s) => [s.id, s])),
+      connectionByID: new Map(autoscanConnections.map((c) => [c.id, c.name])),
+      displayNames: buildPluginDisplayNames(available.data ?? []),
+    }),
+    [autoscanSources, autoscanConnections, available.data],
+  );
   const autoscanQueue = useMemo(
     () =>
       activeScans
@@ -850,10 +838,10 @@ export default function ActivityPanel() {
               <ScanHistoryTable
                 scans={scanHistory.data ?? []}
                 librariesByID={librariesByID}
-                sourceNames={sourceNames}
+                lookups={labelLookups}
               />
             ) : (
-              <PollEventTable events={pollEvents.data ?? []} sourceNames={sourceNames} />
+              <PollEventTable events={pollEvents.data ?? []} lookups={labelLookups} />
             )}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
