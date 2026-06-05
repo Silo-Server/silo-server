@@ -235,10 +235,9 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 					mi = localized
 				}
 			}
-			item := mediaItemToListItem(mi)
-			s.presignListItem(ctx, &item)
-			batch = append(batch, item)
+			batch = append(batch, mediaItemToListItem(mi))
 		}
+		s.presignListItems(ctx, batch)
 		if isPlayedFilter != "" {
 			// Need user data to filter by played status. The handler's
 			// resolveUserStateForContentIDs call covers UserData on the wire
@@ -313,10 +312,9 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 				mi = localized
 			}
 		}
-		item := mediaItemToListItem(mi)
-		s.presignListItem(ctx, &item)
-		listItems = append(listItems, item)
+		listItems = append(listItems, mediaItemToListItem(mi))
 	}
+	s.presignListItems(ctx, listItems)
 	s.enrichListItemsUserData(ctx, session, listItems)
 
 	return &upstreamBrowseResponse{
@@ -652,6 +650,39 @@ func seasonUserDataFromProgress(progress userstore.WatchProgress) *catalog.Seaso
 // --- Image URL presigning helpers ---
 
 func (s *directContentService) presignListItem(ctx context.Context, item *upstreamListItem) {
+	if item == nil {
+		return
+	}
+	items := []upstreamListItem{*item}
+	s.presignListItems(ctx, items)
+	*item = items[0]
+}
+
+func (s *directContentService) presignListItems(ctx context.Context, items []upstreamListItem) {
+	if len(items) == 0 {
+		return
+	}
+	for i := range items {
+		ensureListItemImagePaths(&items[i])
+	}
+	if s.detailSvc == nil {
+		return
+	}
+
+	posterURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.PosterURL }), "poster", compatCardImageSize)
+	backdropURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.BackdropURL }), "backdrop", compatCardImageSize)
+	logoURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.LogoURL }), "logo", compatCardImageSize)
+	stillURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.StillURL }), "still", compatCardImageSize)
+
+	for i := range items {
+		items[i].PosterURL = resolvedListImageURL(posterURLs, items[i].PosterURL)
+		items[i].BackdropURL = resolvedListImageURL(backdropURLs, items[i].BackdropURL)
+		items[i].LogoURL = resolvedListImageURL(logoURLs, items[i].LogoURL)
+		items[i].StillURL = resolvedListImageURL(stillURLs, items[i].StillURL)
+	}
+}
+
+func ensureListItemImagePaths(item *upstreamListItem) {
 	if item.PosterPath == "" {
 		item.PosterPath = item.PosterURL
 	}
@@ -664,10 +695,33 @@ func (s *directContentService) presignListItem(ctx context.Context, item *upstre
 	if item.StillPath == "" {
 		item.StillPath = item.StillURL
 	}
-	item.PosterURL = compatPresignImage(s.detailSvc, ctx, item.PosterURL, "poster", compatCardImageSize)
-	item.BackdropURL = compatPresignImage(s.detailSvc, ctx, item.BackdropURL, "backdrop", compatCardImageSize)
-	item.LogoURL = compatPresignImage(s.detailSvc, ctx, item.LogoURL, "logo", compatCardImageSize)
-	item.StillURL = compatPresignImage(s.detailSvc, ctx, item.StillURL, "still", compatCardImageSize)
+}
+
+func collectListImagePaths(items []upstreamListItem, pick func(upstreamListItem) string) []string {
+	paths := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		path := pick(item)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func resolvedListImageURL(resolved map[string]catalog.ResolvedImageURL, path string) string {
+	if path == "" {
+		return ""
+	}
+	if value, ok := resolved[path]; ok {
+		return value.URL
+	}
+	return ""
 }
 
 func (s *directContentService) presignSeason(ctx context.Context, season *upstreamSeason) {
