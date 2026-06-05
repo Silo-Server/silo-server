@@ -64,10 +64,10 @@ function formatRelativeTime(dateStr: string, now: number): string {
 function formatDuration(ms: number): string {
   if (ms <= 0) return "<1ms";
   if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainSec = Math.round(seconds % 60);
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainSec = totalSeconds - minutes * 60;
   if (minutes < 60) return `${minutes}m ${remainSec}s`;
   const hours = Math.floor(minutes / 60);
   const remainMinutes = minutes % 60;

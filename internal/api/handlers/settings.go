@@ -604,6 +604,9 @@ func registerRequestDevice(
 	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(device.DeviceID) == "" {
 		return
 	}
+	if store == nil {
+		return
+	}
 	registry, ok := store.(userstore.DeviceRegistry)
 	if !ok {
 		return

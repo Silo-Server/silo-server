@@ -14,7 +14,7 @@ import type {
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
 import { getCachedWatchedInvalidationKeys } from "@/pages/ItemDetail/watchedState";
-import { invalidateMediaSurfaceQueries, setCachedItemDetail } from "./mediaSurfaceRefresh";
+import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 export async function fetchWatchDetail(
@@ -230,8 +230,7 @@ export function useUpdateItemMetadata(contentId: string) {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
-    onSuccess: (updatedItem) => {
-      setCachedItemDetail(queryClient, contentId, updatedItem);
+    onSuccess: () => {
       void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
         bumpHomeRefreshSignal(queryClient);
       });

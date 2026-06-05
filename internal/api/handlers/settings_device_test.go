@@ -47,6 +47,14 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 	return r.users[id], nil
 }
 
+func TestRegisterRequestDeviceNilStore(t *testing.T) {
+	registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
+		DeviceID:       "device-1",
+		DeviceName:     "Living Room",
+		DevicePlatform: "web",
+	})
+}
+
 type mappedTestUserStoreProvider struct {
 	stores map[int]userstore.UserStore
 }
