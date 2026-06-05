@@ -98,4 +98,17 @@ describe("resolveEventSourceName", () => {
   it("returns empty string when the reference has no capability", () => {
     expect(resolveEventSourceName({ source_id: null }, lookups)).toBe("");
   });
+
+  it("falls back to display name when the bound connection is missing (deleted)", () => {
+    const orphaned: SourceLabelLookups = {
+      ...lookups,
+      sourceByID: new Map([["src-1", { ...source, connection_id: "conn-gone" }]]),
+    };
+    expect(
+      resolveEventSourceName(
+        { source_id: "src-1", capability_id: "arr", installation_id: 4 },
+        orphaned,
+      ),
+    ).toBe("Arr Watcher");
+  });
 });

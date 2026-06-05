@@ -22,19 +22,19 @@ export function composeSourceLabel(parts: SourceLabelParts): SourceLabel {
   const operator = parts.operatorLabel?.trim() ?? "";
   const connection = parts.connectionName?.trim() ?? "";
   const display = parts.displayName?.trim() ?? "";
-  const plugin = `plugin #${parts.installationId}`;
+  const pluginSuffix = `plugin #${parts.installationId}`;
   const pluginIdentity = display || parts.capabilityId;
 
   if (operator) {
-    return { name: operator, detail: `${connection || pluginIdentity} · ${plugin}` };
+    return { name: operator, detail: `${connection || pluginIdentity} · ${pluginSuffix}` };
   }
   if (connection) {
-    return { name: connection, detail: `${pluginIdentity} · ${plugin}` };
+    return { name: connection, detail: `${pluginIdentity} · ${pluginSuffix}` };
   }
   if (display) {
-    return { name: display, detail: plugin };
+    return { name: display, detail: pluginSuffix };
   }
-  return { name: parts.capabilityId, detail: plugin };
+  return { name: parts.capabilityId, detail: pluginSuffix };
 }
 
 /** Stable key for the (installation, capability) -> manifest display_name map. */
@@ -51,7 +51,7 @@ export function buildPluginDisplayNames(available: AutoscanAvailableSource[]): M
   return map;
 }
 
-/** Lookups the Activity panel threads through to resolve an event/scan's source label. */
+/** Maps the Activity panel uses to resolve an event/scan's source label. */
 export interface SourceLabelLookups {
   sourceByID: Map<string, AutoscanSource>;
   connectionByID: Map<string, string>;
