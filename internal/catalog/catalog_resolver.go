@@ -39,6 +39,13 @@ type CatalogFiltersResult struct {
 	Resolutions       []string
 	AudioLanguages    []string
 	SubtitleLanguages []string
+	// Authors, Narrators and Series are audiobook-native facets. Populated
+	// whenever the scope contains audiobook items; empty for video-only
+	// scopes. They share the item_people / audiobook_series tables so
+	// callers don't need to switch on media type.
+	Authors   []string
+	Narrators []string
+	Series    []string
 }
 
 type CatalogFilterOptions struct {
@@ -54,6 +61,23 @@ type facetFetcher interface {
 	Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
+	// PeopleByKind returns distinct people names for the given PersonKind
+	// across the scoped result set. Used for Authors / Narrators facets.
+	PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
+	// AudiobookSeries returns distinct series_name values from
+	// audiobook_series joined onto the scoped result set.
+	AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
+	// SearchDistinctArrayColumn prefix-searches an array-column facet
+	// (genres, studios, networks, countries). Returns up to limit
+	// alphabetical matches and hasMore=true when more would be available.
+	SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
+	// SearchDistinctScalarColumn is the scalar-column variant (e.g.
+	// content_rating, original_language).
+	SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
+	// SearchPeopleByKind is the typeahead equivalent of PeopleByKind.
+	SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
+	// SearchAudiobookSeries is the typeahead equivalent of AudiobookSeries.
+	SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
 }
 
 // pgxFacetFetcher is the production facetFetcher. It dispatches each method to
@@ -80,6 +104,30 @@ func (f *pgxFacetFetcher) JSONBLanguages(ctx context.Context, column string, fil
 
 func (f *pgxFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
 	return listSubtitleLanguagesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+}
+
+func (f *pgxFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return listDistinctPeopleByKindWithSource(ctx, f.pool, kind, filters, baseRelation, mediaScope)
+}
+
+func (f *pgxFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return listDistinctAudiobookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+}
+
+func (f *pgxFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return searchDistinctArrayColumnWithSource(ctx, f.pool, column, filters, baseRelation, mediaScope, prefix, limit)
+}
+
+func (f *pgxFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return searchDistinctScalarColumnWithSource(ctx, f.pool, column, filters, baseRelation, mediaScope, prefix, limit)
+}
+
+func (f *pgxFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return searchDistinctPeopleByKindWithSource(ctx, f.pool, kind, filters, baseRelation, mediaScope, prefix, limit)
+}
+
+func (f *pgxFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return searchDistinctAudiobookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope, prefix, limit)
 }
 
 // previewExecutor is the seam consumed by previewQuerySource so tests can
@@ -665,11 +713,153 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	return r.listFiltersForSource(ctx, filters, options, "media_items mi", "")
 }
 
+// CatalogFacetSearchResult is the typed return for SearchFacet. Matches
+// is in alphabetical order; HasMore is true when the underlying result
+// set held more rows than the supplied limit.
+type CatalogFacetSearchResult struct {
+	Matches []string
+	HasMore bool
+}
+
+// catalogFacetSearchMaxLimit caps how many matches a single typeahead
+// query can request. 50 is enough for a dropdown without overwhelming
+// the page; clients that need more pages should narrow the prefix.
+const catalogFacetSearchMaxLimit = 50
+
+// SearchFacet powers /api/v1/catalog/filters/search. The request scope
+// (libraries / access / media scope) mirrors ListFiltersWithOptions;
+// the additional facet + prefix + limit arguments come from the URL.
+// Empty or whitespace-only prefix returns no matches — the caller
+// should fall back to the bulk /catalog/filters endpoint for the
+// initial dropdown render.
+func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, access AccessFilter, facet string, prefix string, limit int) (*CatalogFacetSearchResult, error) {
+	if r == nil || r.browseRepo == nil {
+		return nil, fmt.Errorf("catalog resolver requires a browse repository")
+	}
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return &CatalogFacetSearchResult{Matches: []string{}}, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > catalogFacetSearchMaxLimit {
+		limit = catalogFacetSearchMaxLimit
+	}
+
+	var (
+		filters    BrowseFilters
+		earlyEmpty bool
+		err        error
+	)
+	switch req.Source {
+	case CatalogSourceQuery:
+		if err := validateCatalogQueryRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
+			return nil, err
+		}
+		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
+		if err != nil {
+			return nil, err
+		}
+	case CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory:
+		if err := validateCatalogPersonalRequest(req); err != nil {
+			return nil, err
+		}
+		if access.UserID <= 0 || strings.TrimSpace(access.ProfileID) == "" {
+			return nil, fmt.Errorf("%w: source %q requires active user scope", ErrInvalidCatalogRequest, "personal")
+		}
+		store, err := r.catalogStoreForAccess(ctx, access)
+		if err != nil {
+			return nil, err
+		}
+		contentIDs, err := r.loadPersonalSourceIDs(ctx, store, req, access.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
+		if err != nil {
+			return nil, err
+		}
+		filters.ContentIDs = contentIDs
+	case CatalogSourcePerson:
+		if err := validateCatalogPersonRequest(req); err != nil {
+			return nil, err
+		}
+		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
+		if err != nil {
+			return nil, err
+		}
+		filters.PersonID = req.PersonID
+	default:
+		return nil, fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
+	}
+	if earlyEmpty {
+		return &CatalogFacetSearchResult{Matches: []string{}}, nil
+	}
+
+	baseRelation := "media_items mi"
+	mediaScope := ""
+	if isEpisodeCatalogScope(req.Query.MediaScope) {
+		baseRelation = episodeCatalogBaseRelation
+		mediaScope = req.Query.MediaScope
+	}
+
+	facets := r.facets
+	if facets == nil {
+		facets = &pgxFacetFetcher{pool: r.browseRepo.pool}
+	}
+
+	matches, hasMore, err := dispatchFacetSearch(ctx, facets, facet, filters, baseRelation, mediaScope, prefix, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &CatalogFacetSearchResult{Matches: matches, HasMore: hasMore}, nil
+}
+
+// dispatchFacetSearch routes a facet name to the right facetFetcher
+// method. The set of supported facet names mirrors what
+// /api/v1/catalog/filters returns; anything else is rejected as an
+// invalid request so callers learn about typos at the API boundary.
+func dispatchFacetSearch(ctx context.Context, facets facetFetcher, facet string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	switch facet {
+	case "genre":
+		return facets.SearchDistinctArrayColumn(ctx, "genres", filters, baseRelation, mediaScope, prefix, limit)
+	case "studio":
+		return facets.SearchDistinctArrayColumn(ctx, "studios", filters, baseRelation, mediaScope, prefix, limit)
+	case "network":
+		return facets.SearchDistinctArrayColumn(ctx, "networks", filters, baseRelation, mediaScope, prefix, limit)
+	case "country":
+		return facets.SearchDistinctArrayColumn(ctx, "countries", filters, baseRelation, mediaScope, prefix, limit)
+	case "original_language":
+		return facets.SearchDistinctScalarColumn(ctx, "original_language", filters, baseRelation, mediaScope, prefix, limit)
+	case "content_rating":
+		return facets.SearchDistinctScalarColumn(ctx, "content_rating", filters, baseRelation, mediaScope, prefix, limit)
+	case "author":
+		return facets.SearchPeopleByKind(ctx, models.PersonKindAuthor, filters, baseRelation, mediaScope, prefix, limit)
+	case "narrator":
+		return facets.SearchPeopleByKind(ctx, models.PersonKindNarrator, filters, baseRelation, mediaScope, prefix, limit)
+	case "series":
+		return facets.SearchAudiobookSeries(ctx, filters, baseRelation, mediaScope, prefix, limit)
+	default:
+		return nil, false, fmt.Errorf("%w: unknown facet %q", ErrInvalidCatalogRequest, facet)
+	}
+}
+
 // catalogFacetConcurrency caps how many facet queries run in parallel for a
 // single ListFiltersWithOptions invocation. With nine independent facet
 // lookups and a default pgx pool of ten connections, capping at six leaves
 // headroom for other concurrent work and avoids saturating the pool.
 const catalogFacetConcurrency = 6
+
+// catalogFacetMaxValues caps how many distinct values each facet query
+// returns. Above ~1000 entries a typeahead UI is the only sensible way to
+// present a dropdown — and the audiobook library on this server has
+// >88k distinct authors / >92k narrators / >161k series, which produced
+// an 11.7 MB /api/v1/catalog/filters response before this cap landed.
+// The SearchableSelect dropdown stays responsive at 1000 client-side
+// entries; beyond that, the filter response should switch to a server-
+// side typeahead surface (out of scope for the cap-only fix).
+const catalogFacetMaxValues = 1000
 
 func (r *CatalogResolver) listFiltersForSource(
 	ctx context.Context,
@@ -693,6 +883,9 @@ func (r *CatalogResolver) listFiltersForSource(
 		resolutions       []string
 		audioLanguages    []string
 		subtitleLanguages []string
+		authors           []string
+		narrators         []string
+		series            []string
 	)
 
 	eg, gctx := errgroup.WithContext(ctx)
@@ -757,6 +950,30 @@ func (r *CatalogResolver) listFiltersForSource(
 		contentRatings = out
 		return nil
 	}))
+	eg.Go(withLimit(func() error {
+		out, err := facets.PeopleByKind(gctx, models.PersonKindAuthor, filters, baseRelation, mediaScope)
+		if err != nil {
+			return fmt.Errorf("listing catalog authors: %w", err)
+		}
+		authors = out
+		return nil
+	}))
+	eg.Go(withLimit(func() error {
+		out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
+		if err != nil {
+			return fmt.Errorf("listing catalog narrators: %w", err)
+		}
+		narrators = out
+		return nil
+	}))
+	eg.Go(withLimit(func() error {
+		out, err := facets.AudiobookSeries(gctx, filters, baseRelation, mediaScope)
+		if err != nil {
+			return fmt.Errorf("listing catalog audiobook series: %w", err)
+		}
+		series = out
+		return nil
+	}))
 
 	if options.IncludeTechnical {
 		eg.Go(withLimit(func() error {
@@ -796,6 +1013,9 @@ func (r *CatalogResolver) listFiltersForSource(
 		Countries:         countries,
 		OriginalLanguages: originalLanguages,
 		ContentRatings:    contentRatings,
+		Authors:           authors,
+		Narrators:         narrators,
+		Series:            series,
 	}
 	if options.IncludeTechnical {
 		result.Resolutions = resolutions
@@ -936,6 +1156,9 @@ var catalogQueryRuleFields = map[string]bool{
 	"director":          true,
 	"writer":            true,
 	"producer":          true,
+	"author":            true,
+	"narrator":          true,
+	"series":            true,
 	"watched":           true,
 	"favorited":         true,
 	"in_watchlist":      true,
@@ -966,6 +1189,9 @@ var catalogPersonalRuleFields = map[string]bool{
 	"director":          true,
 	"writer":            true,
 	"producer":          true,
+	"author":            true,
+	"narrator":          true,
+	"series":            true,
 	"watched":           true,
 	"favorited":         true,
 	"in_watchlist":      true,
@@ -994,7 +1220,7 @@ func requiresAdvancedQueryExecution(def QueryDefinition) bool {
 	for _, group := range def.Groups {
 		for _, rule := range group.Rules {
 			switch rule.Field {
-			case "actor", "director", "writer", "producer", "watched", "favorited", "in_watchlist", "in_progress", "last_watched", "resolution", "hdr", "dolby_vision", "bitrate", "audio_language", "subtitle_language":
+			case "actor", "director", "writer", "producer", "author", "narrator", "series", "watched", "favorited", "in_watchlist", "in_progress", "last_watched", "resolution", "hdr", "dolby_vision", "bitrate", "audio_language", "subtitle_language":
 				return true
 			}
 		}

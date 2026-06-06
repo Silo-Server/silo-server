@@ -166,18 +166,23 @@ func (r *Repo) GetEmbedding(ctx context.Context, itemID string) ([]float32, erro
 }
 
 // FindSimilar returns items ordered by cosine similarity to the given embedding,
-// excluding the specified item IDs.
-func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, limit int) ([]ScoredItem, error) {
+// excluding the specified item IDs. When mediaType is non-empty, results are
+// restricted to that media_items.type so cross-media-type results never appear
+// (e.g. an audiobook in a "Similar to this movie" rail) once audiobook
+// embeddings exist alongside movie/series ones.
+func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int) ([]ScoredItem, error) {
 	var items []ScoredItem
 	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT e.media_item_id,
 			       1 - (e.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS similarity
 			FROM   media_item_embeddings e
+			JOIN   media_items mi ON mi.content_id = e.media_item_id
 			WHERE  e.media_item_id != ALL($2)
+			  AND  ($4 = '' OR mi.type = $4)
 			ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
 			LIMIT  $3
-		`, pgvector.NewVector(embedding), excludeIDs, limit)
+		`, pgvector.NewVector(embedding), excludeIDs, limit, mediaType)
 		if err != nil {
 			return err
 		}
@@ -382,12 +387,15 @@ func (r *Repo) findTasteProfileCandidates(
 
 // ItemsNeedingEmbedding returns content IDs of media items that either have no
 // embedding or whose embedding was generated with a different model.
+// Audiobooks bypass the status='matched' gate because they don't go through
+// the external-provider match pipeline; their tag-derived metadata is
+// authoritative as soon as the scan completes.
 func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel string, limit int) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT mi.content_id
 		FROM   media_items mi
 		LEFT JOIN media_item_embeddings e ON e.media_item_id = mi.content_id
-		WHERE  mi.status = 'matched'
+		WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
 		  AND  (e.media_item_id IS NULL OR e.model != $1)
 		LIMIT  $2
 	`, currentModel, limit)
@@ -414,6 +422,9 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 	rows, err := r.pool.Query(ctx, `
 		-- Keep current_text in sync with embeddings.BuildEmbeddingText. This lets
 		-- the embedding job page over only missing, model-stale, or text-stale rows.
+		-- Audiobook lines map to embeddings.mediaTypeLabel + the author/narrator
+		-- branch in BuildEmbeddingText; any divergence here forces every audiobook
+		-- to re-embed every job run.
 		WITH text_candidates AS (
 			SELECT mi.content_id,
 			       COALESCE(e.model, '') AS model,
@@ -421,11 +432,11 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			       array_to_string(array_remove(ARRAY[
 			           CASE
 			               WHEN cardinality(COALESCE(mi.genres, ARRAY[]::text[])) > 0 AND COALESCE(mi.overview, '') <> ''
-			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' ELSE 'movie' END || ' about ' || substr(mi.overview, 1, 1000)
+			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END || ' about ' || substr(mi.overview, 1, 1000)
 			               WHEN cardinality(COALESCE(mi.genres, ARRAY[]::text[])) > 0
-			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' ELSE 'movie' END
+			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END
 			               WHEN COALESCE(mi.overview, '') <> ''
-			                   THEN CASE WHEN mi.type = 'series' THEN 'TV series' ELSE 'movie' END || '. ' || substr(mi.overview, 1, 1000)
+			                   THEN CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END || '. ' || substr(mi.overview, 1, 1000)
 			               ELSE NULL
 			           END,
 			           CASE WHEN COALESCE(mi.year, 0) > 0
@@ -434,9 +445,14 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			           END,
 			           CASE WHEN COALESCE(mi.content_rating, '') <> '' THEN 'Rated ' || mi.content_rating ELSE NULL END,
 			           CASE WHEN COALESCE(mi.tagline, '') <> '' THEN '"' || mi.tagline || '"' ELSE NULL END,
-			           CASE WHEN actors.names <> '' THEN 'Cast: ' || actors.names ELSE NULL END,
-			           CASE WHEN directors.names <> '' THEN 'Directed by ' || directors.names ELSE NULL END,
-			           CASE WHEN writers.names <> '' THEN 'Written by ' || writers.names ELSE NULL END,
+			           CASE WHEN mi.type <> 'audiobook' AND actors.names <> '' THEN 'Cast: ' || actors.names ELSE NULL END,
+			           CASE WHEN mi.type <> 'audiobook' AND directors.names <> '' THEN 'Directed by ' || directors.names ELSE NULL END,
+			           CASE
+			               WHEN mi.type = 'audiobook' AND authors.names <> '' THEN 'Written by ' || authors.names
+			               WHEN mi.type <> 'audiobook' AND writers.names <> '' THEN 'Written by ' || writers.names
+			               ELSE NULL
+			           END,
+			           CASE WHEN mi.type = 'audiobook' AND narrators.names <> '' THEN 'Narrated by ' || narrators.names ELSE NULL END,
 			           CASE WHEN cardinality(COALESCE(mi.keywords, ARRAY[]::text[])) > 0 THEN 'Keywords: ' || array_to_string((mi.keywords)[1:5], ', ') ELSE NULL END,
 			           CASE WHEN COALESCE(mi.original_language, '') <> '' THEN 'Original language: ' || mi.original_language ELSE NULL END,
 			           CASE WHEN cardinality(COALESCE(mi.studios, ARRAY[]::text[])) > 0 THEN 'Studios: ' || array_to_string(mi.studios, ', ') ELSE NULL END,
@@ -477,7 +493,21 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 3
 			) writers ON TRUE
-			WHERE  mi.status = 'matched'
+			LEFT JOIN LATERAL (
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				FROM item_people ip
+				JOIN people p ON p.id = ip.person_id
+				WHERE ip.content_id = mi.content_id
+				  AND ip.kind = 7
+			) authors ON TRUE
+			LEFT JOIN LATERAL (
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				FROM item_people ip
+				JOIN people p ON p.id = ip.person_id
+				WHERE ip.content_id = mi.content_id
+				  AND ip.kind = 8
+			) narrators ON TRUE
+			WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
 			  AND  ($1 = '' OR mi.content_id > $1)
 		)
 		SELECT mi.content_id,
@@ -519,10 +549,12 @@ func (r *Repo) EmbeddingCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// TotalMediaItemCount returns the number of matched media items eligible for embedding.
+// TotalMediaItemCount returns the number of media items eligible for embedding.
+// Mirrors the status/type gate in ItemsNeedingEmbedding so progress reporting
+// (used by the admin worker UI) lines up with what the job actually does.
 func (r *Repo) TotalMediaItemCount(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE status = 'matched'`).Scan(&count)
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE status = 'matched' OR type = 'audiobook'`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("total media item count: %w", err)
 	}
@@ -1828,6 +1860,7 @@ func (r *Repo) GetItemMediaTypes(ctx context.Context, itemIDs []string) (map[str
 // ItemMetadata holds lightweight metadata used by the validation pipeline.
 type ItemMetadata struct {
 	Title   string
+	Type    string
 	Genres  []string
 	Year    int
 	Studios []string
@@ -1837,9 +1870,9 @@ type ItemMetadata struct {
 func (r *Repo) GetItemMetadata(ctx context.Context, itemID string) (*ItemMetadata, error) {
 	var m ItemMetadata
 	err := r.pool.QueryRow(ctx, `
-		SELECT title, genres, COALESCE(year, 0), studios
+		SELECT title, COALESCE(type, ''), genres, COALESCE(year, 0), studios
 		FROM media_items WHERE content_id = $1`, itemID,
-	).Scan(&m.Title, &m.Genres, &m.Year, &m.Studios)
+	).Scan(&m.Title, &m.Type, &m.Genres, &m.Year, &m.Studios)
 	if err != nil {
 		return nil, fmt.Errorf("get item metadata %s: %w", itemID, err)
 	}

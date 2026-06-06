@@ -177,6 +177,22 @@ describe("parseLibraryPageState", () => {
     expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it("normalizes video-only sorts away on audiobook libraries", () => {
+    const state = parseLibraryPageState(
+      params("tab=library&sort=rating_imdb&order=desc"),
+      "audiobooks",
+    );
+    expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
+  });
+
+  it("keeps audiobook-applicable sorts on audiobook libraries", () => {
+    const state = parseLibraryPageState(
+      params("tab=library&sort=runtime&order=desc"),
+      "audiobooks",
+    );
+    expect(state.queryDefinition.sort).toEqual({ field: "runtime", order: "desc" });
+  });
+
   it("normalizes legacy sort aliases to canonical values", () => {
     expect(
       parseLibraryPageState(params("tab=library&sort=sort_title"), "mixed").queryDefinition.sort

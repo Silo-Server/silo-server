@@ -10,6 +10,7 @@ import {
 } from "@/api/types";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { Button } from "@/components/ui/button";
+import { FacetSearchSelect } from "@/components/ui/facet-search-select";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCatalogMetadataFilters } from "@/hooks/queries/catalog";
+import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import {
   getDefaultQuerySortOrder,
   normalizeQuerySortForScope,
@@ -38,7 +40,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "movie" | "series" | "episode";
+  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook";
   libraryIds: number[];
   genres: string[];
   decade: string;
@@ -51,6 +53,9 @@ export interface GuidedFormState {
   director: string;
   writer: string;
   producer: string;
+  author: string;
+  narrator: string;
+  series: string;
   studio: string;
   network: string;
   country: string;
@@ -103,6 +108,9 @@ export function queryDefinitionToGuidedState(
     director: "",
     writer: "",
     producer: "",
+    author: "",
+    narrator: "",
+    series: "",
     studio: "",
     network: "",
     country: "",
@@ -176,6 +184,15 @@ export function queryDefinitionToGuidedState(
         break;
       case "producer":
         if (rule.op === "is") state.producer = String(rule.value);
+        break;
+      case "author":
+        if (rule.op === "is") state.author = String(rule.value);
+        break;
+      case "narrator":
+        if (rule.op === "is") state.narrator = String(rule.value);
+        break;
+      case "series":
+        if (rule.op === "is") state.series = String(rule.value);
         break;
       case "studio":
         if (rule.op === "is") state.studio = String(rule.value);
@@ -278,6 +295,15 @@ export function guidedStateToQueryDefinition(
   if (state.producer) {
     rules.push({ field: "producer", op: "is", value: state.producer });
   }
+  if (state.author) {
+    rules.push({ field: "author", op: "is", value: state.author });
+  }
+  if (state.narrator) {
+    rules.push({ field: "narrator", op: "is", value: state.narrator });
+  }
+  if (state.series) {
+    rules.push({ field: "series", op: "is", value: state.series });
+  }
   if (state.studio) {
     rules.push({ field: "studio", op: "is", value: state.studio });
   }
@@ -358,6 +384,16 @@ interface CollectionGuidedRulesEditorProps {
   showSortControls?: boolean;
   filters?: CatalogFiltersResponse;
   filtersLoading?: boolean;
+  // When the editor is scoped to a single library (e.g. on the library
+  // browse page) pass its type so video-only filter sections (Director,
+  // Studio, Network, Content Rating, Video Quality, etc.) can be hidden
+  // for audiobook libraries.
+  libraryType?: string;
+  // When set, the audiobook-native facet sections (Author / Narrator /
+  // Series) switch to typeahead-backed FacetSearchSelect, querying
+  // /api/v1/catalog/filters/search scoped to this state. Without it
+  // they fall back to the bulk filters payload (top 1000 alphabetical).
+  catalogState?: CatalogSearchState;
 }
 
 export default function CollectionGuidedRulesEditor({
@@ -373,11 +409,17 @@ export default function CollectionGuidedRulesEditor({
   showSortControls = true,
   filters: providedFilters,
   filtersLoading: providedFiltersLoading,
+  libraryType,
+  catalogState,
 }: CollectionGuidedRulesEditorProps) {
   const state = useMemo(() => queryDefinitionToGuidedState(value), [value]);
   const metadataFiltersQuery = useCatalogMetadataFilters();
   const filters = providedFilters ?? metadataFiltersQuery.data;
   const filtersLoading = providedFiltersLoading ?? metadataFiltersQuery.isLoading;
+  // Audiobook-only libraries should hide video-only filter sections.
+  // Backend stores type as the plural "audiobooks"; the singular form
+  // shows up in some API surfaces — accept either.
+  const isAudiobookLibrary = libraryType === "audiobook" || libraryType === "audiobooks";
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
@@ -518,32 +560,34 @@ export default function CollectionGuidedRulesEditor({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Minimum IMDb Rating</Label>
-          <Input
-            type="number"
-            min={0}
-            max={10}
-            step={0.1}
-            value={state.minRating}
-            onChange={(e) => update({ minRating: e.target.value })}
-            placeholder="e.g. 7.0"
-            disabled={readOnly}
-          />
+      {isAudiobookLibrary ? null : (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Minimum IMDb Rating</Label>
+            <Input
+              type="number"
+              min={0}
+              max={10}
+              step={0.1}
+              value={state.minRating}
+              onChange={(e) => update({ minRating: e.target.value })}
+              placeholder="e.g. 7.0"
+              disabled={readOnly}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Content Rating</Label>
+            <SearchableSelect
+              options={filters?.content_ratings ?? []}
+              value={state.contentRating}
+              onChange={(contentRating) => update({ contentRating })}
+              placeholder="Select rating..."
+              disabled={readOnly}
+              isLoading={filtersLoading}
+            />
+          </div>
         </div>
-        <div className="space-y-2">
-          <Label>Content Rating</Label>
-          <SearchableSelect
-            options={filters?.content_ratings ?? []}
-            value={state.contentRating}
-            onChange={(contentRating) => update({ contentRating })}
-            placeholder="Select rating..."
-            disabled={readOnly}
-            isLoading={filtersLoading}
-          />
-        </div>
-      </div>
+      )}
 
       <div className="space-y-2">
         <Label>Original Language</Label>
@@ -558,68 +602,147 @@ export default function CollectionGuidedRulesEditor({
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Actor</Label>
-          <PersonSearchSelect
-            value={state.actor}
-            onChange={(actor) => update({ actor })}
-            disabled={readOnly}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Director</Label>
-          <PersonSearchSelect
-            value={state.director}
-            onChange={(director) => update({ director })}
-            disabled={readOnly}
-          />
-        </div>
-      </div>
+      {isAudiobookLibrary ? null : (
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Actor</Label>
+              <PersonSearchSelect
+                value={state.actor}
+                onChange={(actor) => update({ actor })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Director</Label>
+              <PersonSearchSelect
+                value={state.director}
+                onChange={(director) => update({ director })}
+                disabled={readOnly}
+              />
+            </div>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Writer</Label>
-          <PersonSearchSelect
-            value={state.writer}
-            onChange={(writer) => update({ writer })}
-            disabled={readOnly}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Producer</Label>
-          <PersonSearchSelect
-            value={state.producer}
-            onChange={(producer) => update({ producer })}
-            disabled={readOnly}
-          />
-        </div>
-      </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Writer</Label>
+              <PersonSearchSelect
+                value={state.writer}
+                onChange={(writer) => update({ writer })}
+                disabled={readOnly}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Producer</Label>
+              <PersonSearchSelect
+                value={state.producer}
+                onChange={(producer) => update({ producer })}
+                disabled={readOnly}
+              />
+            </div>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label>Studio</Label>
-          <SearchableSelect
-            options={filters?.studios ?? []}
-            value={state.studio}
-            onChange={(studio) => update({ studio })}
-            placeholder="Select studio..."
-            disabled={readOnly}
-            isLoading={filtersLoading}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>Network</Label>
-          <SearchableSelect
-            options={filters?.networks ?? []}
-            value={state.network}
-            onChange={(network) => update({ network })}
-            placeholder="Select network..."
-            disabled={readOnly}
-            isLoading={filtersLoading}
-          />
-        </div>
-      </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Studio</Label>
+              <SearchableSelect
+                options={filters?.studios ?? []}
+                value={state.studio}
+                onChange={(studio) => update({ studio })}
+                placeholder="Select studio..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Network</Label>
+              <SearchableSelect
+                options={filters?.networks ?? []}
+                value={state.network}
+                onChange={(network) => update({ network })}
+                placeholder="Select network..."
+                disabled={readOnly}
+                isLoading={filtersLoading}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {isAudiobookLibrary ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Author</Label>
+              {catalogState ? (
+                <FacetSearchSelect
+                  facet="author"
+                  state={catalogState}
+                  value={state.author}
+                  onChange={(author) => update({ author })}
+                  placeholder="Search authors..."
+                  disabled={readOnly}
+                />
+              ) : (
+                <SearchableSelect
+                  options={filters?.authors ?? []}
+                  value={state.author}
+                  onChange={(author) => update({ author })}
+                  placeholder="Select author..."
+                  disabled={readOnly}
+                  isLoading={filtersLoading}
+                />
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Narrator</Label>
+              {catalogState ? (
+                <FacetSearchSelect
+                  facet="narrator"
+                  state={catalogState}
+                  value={state.narrator}
+                  onChange={(narrator) => update({ narrator })}
+                  placeholder="Search narrators..."
+                  disabled={readOnly}
+                />
+              ) : (
+                <SearchableSelect
+                  options={filters?.narrators ?? []}
+                  value={state.narrator}
+                  onChange={(narrator) => update({ narrator })}
+                  placeholder="Select narrator..."
+                  disabled={readOnly}
+                  isLoading={filtersLoading}
+                />
+              )}
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Series</Label>
+              {catalogState ? (
+                <FacetSearchSelect
+                  facet="series"
+                  state={catalogState}
+                  value={state.series}
+                  onChange={(series) => update({ series })}
+                  placeholder="Search series..."
+                  disabled={readOnly}
+                />
+              ) : (
+                <SearchableSelect
+                  options={filters?.series ?? []}
+                  value={state.series}
+                  onChange={(series) => update({ series })}
+                  placeholder="Select series..."
+                  disabled={readOnly}
+                  isLoading={filtersLoading}
+                />
+              )}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
@@ -681,34 +804,36 @@ export default function CollectionGuidedRulesEditor({
         ) : null}
       </div>
 
-      <div className="space-y-2">
-        <Label>Video Quality</Label>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { key: "fourK", label: "4K" },
-            { key: "hdr", label: "HDR" },
-            { key: "dolbyVision", label: "DOVI" },
-          ].map((option) => {
-            const selected = state[option.key as keyof GuidedFormState] === true;
-            return (
-              <Button
-                key={option.key}
-                type="button"
-                variant={selected ? "default" : "outline"}
-                size="sm"
-                onClick={() =>
-                  update({
-                    [option.key]: !selected,
-                  } as Partial<GuidedFormState>)
-                }
-                disabled={readOnly}
-              >
-                {option.label}
-              </Button>
-            );
-          })}
+      {isAudiobookLibrary ? null : (
+        <div className="space-y-2">
+          <Label>Video Quality</Label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: "fourK", label: "4K" },
+              { key: "hdr", label: "HDR" },
+              { key: "dolbyVision", label: "DOVI" },
+            ].map((option) => {
+              const selected = state[option.key as keyof GuidedFormState] === true;
+              return (
+                <Button
+                  key={option.key}
+                  type="button"
+                  variant={selected ? "default" : "outline"}
+                  size="sm"
+                  onClick={() =>
+                    update({
+                      [option.key]: !selected,
+                    } as Partial<GuidedFormState>)
+                  }
+                  disabled={readOnly}
+                >
+                  {option.label}
+                </Button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">

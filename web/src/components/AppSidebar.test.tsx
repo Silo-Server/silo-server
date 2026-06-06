@@ -55,6 +55,12 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/settings", () => ({
+  useSettings: () => ({
+    data: { "audiobooks.enabled": "false" },
+  }),
+}));
+
 vi.mock("@/hooks/useViewTransition", () => ({
   useViewTransitionNavigate: () => vi.fn(),
 }));

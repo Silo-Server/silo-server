@@ -39,6 +39,29 @@ export interface AudiobookDetailItem {
   year: number;
   overview?: string;
   poster_url?: string;
+  publisher?: string;
+  genres?: string[];
+}
+
+export interface AudiobookRelatedItem {
+  content_id: string;
+  title: string;
+  poster_url?: string;
+  year?: number;
+}
+
+export interface AudiobookSeriesEntry {
+  content_id: string;
+  title: string;
+  poster_url?: string;
+  series_index?: number;
+}
+
+export interface AudiobookNarration {
+  content_id: string;
+  title: string;
+  narrator?: string;
+  year?: number;
 }
 
 export interface AudiobookDetailResponse {
@@ -47,4 +70,11 @@ export interface AudiobookDetailResponse {
   narrator?: string;
   files: AudiobookFile[];
   progress?: AudiobookProgress;
+  similar_audiobooks?: AudiobookRelatedItem[];
+  also_by_author?: AudiobookRelatedItem[];
+  in_series?: {
+    name?: string;
+    entries: AudiobookSeriesEntry[];
+  };
+  other_narrations?: AudiobookNarration[];
 }

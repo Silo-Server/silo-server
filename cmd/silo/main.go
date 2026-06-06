@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,9 +34,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
-	"github.com/Silo-Server/silo-server/internal/audiobooks"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -523,6 +526,13 @@ func main() {
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
 	}
+	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
+	audiobooksEnabled, err := audiobooksService.Enabled(appCtx)
+	if err != nil {
+		slog.Warn("audiobooks feature disabled; failed to read setting", "err", err)
+		audiobooksEnabled = false
+	}
+	deps.AudiobooksEnabled = audiobooksEnabled
 	adminJobCancelRegistry := adminjob.NewCancelRegistry()
 	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
@@ -869,6 +879,7 @@ func main() {
 	var groupClaimRepo *catalog.GroupClaimRepository
 	var seasonRepo *catalog.SeasonRepository
 	var episodeRepo *catalog.EpisodeRepository
+	var audiobookEnricher *audiobooks.Enricher
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
@@ -939,6 +950,18 @@ func main() {
 		personRefreshService = metadata.NewPersonRefreshService(deps.DB, pluginResolver, personRepo)
 		personRefreshService.SetImageResolver(imageResolver)
 
+		// Wire the audiobook enricher. It uses the same plugin resolver and chain
+		// repo as the movie/TV pipeline, but resolves providers at
+		// content_level='audiobook' and sweeps items directly rather than via a queue.
+		audiobookEnricher = audiobooks.NewEnricher(
+			deps.DB,
+			chainRepo,
+			pluginResolver,
+			itemRepo,
+			personRepo,
+			providerIDRepo,
+		)
+
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
 		metadataService.SetImageResolver(imageResolver)
@@ -949,9 +972,16 @@ func main() {
 			imageCacher := imagecache.New(deps.S3Public)
 			metadataService.SetImageCacher(imageCacher)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
+			if deps.Scanner != nil {
+				deps.Scanner.SetImageCacher(imageCacher)
+			}
 			if cfg.Metadata.CacheImages {
 				personRefreshService.SetImageCacher(imageCacher)
 				slog.Info("metadata image caching enabled")
+			}
+			if audiobookEnricher != nil {
+				audiobookEnricher.SetImageCacher(imageCacher)
+				audiobookEnricher.SetFFmpegPath(scanner.FFmpegPathFromFFprobe(scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)))
 			}
 		}
 
@@ -1488,6 +1518,10 @@ func main() {
 		historyReconciler := watchstate.NewHistoryReconciler(deps.DB, historyResolver)
 		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
+		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
+		if audiobooksEnabled && audiobookEnricher != nil {
+			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
+		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {
@@ -1504,11 +1538,56 @@ func main() {
 		slog.Info("task manager started")
 	}
 
-	// Scaffold audiobooks service (sub-plan 1: kill-switch reader only).
-	// audiobooksSettingsAdapter (defined at package level below) bridges
-	// catalog.ServerSettingsRepo.Get to audiobooks.SettingsReader.GetString.
-	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
-	_ = audiobooksService // sub-plan 2+ will register routes / scheduled tasks
+	// Build the ABS-compatible REST + Socket.io handler when a DB pool is
+	// available. Routes are mounted at the root level by NewRouter (not under
+	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
+	// /abs/socket.io/* without path prefix hacks.
+	if audiobooksEnabled && deps.DB != nil {
+		absUserRepo := auth.NewUserRepository(deps.DB)
+		absSessionRepo := auth.NewSessionRepository(deps.DB)
+		absJWTService := auth.NewJWTService(
+			cfg.Auth.JWTSecret,
+			cfg.Auth.AccessTokenExpiry,
+			cfg.Auth.RefreshTokenExpiry,
+		)
+		absAuthSvc := auth.NewService(
+			auth.NewLocalProvider(absUserRepo, absSessionRepo),
+			absJWTService,
+			absSessionRepo,
+			absUserRepo,
+			nil, // invite codes: not needed for ABS compat
+			nil, // settings: not needed here
+			nil, // user store: not needed here
+		)
+		absItemRepo := catalog.NewItemRepository(deps.DB)
+		absEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
+		absSeasonRepo := catalog.NewSeasonRepository(deps.DB)
+		absPersonRepo := catalog.NewPersonRepository(deps.DB)
+		var absFileFetcher catalog.FileVersionFetcher
+		if deps.FileRepo != nil {
+			absFileFetcher = deps.FileRepo
+		}
+		absDetailSvc := catalog.NewDetailService(absItemRepo, absEpisodeRepo, absSeasonRepo, absPersonRepo, absFileFetcher)
+		if deps.ImageResolver != nil {
+			absDetailSvc.SetImageResolver(deps.ImageResolver)
+		}
+		absHDeps := audiobooks.ABSHandlerDeps{
+			Pool:     deps.DB,
+			Items:    absItemRepo,
+			Files:    deps.FileRepo,
+			Settings: settingsRepo,
+			Auth: &audiobooks.SiloCredValidator{
+				Auth: absAuthSvc,
+				Pool: deps.DB,
+			},
+			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider),
+			Recs:           recommendations.NewRepo(deps.DB),
+			Detail:         absDetailSvc,
+		}
+		absH := audiobooksService.BuildABSHandler(absHDeps)
+		deps.ABSHandler = absH
+	}
+	_ = audiobooksService
 
 	if deps.DB != nil && pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && deps.PluginService != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
@@ -1631,6 +1710,11 @@ func main() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	metricsMux.Handle("/api/", router)
+	// ABS-compat is NOT mounted on the main listener — see the "ABS compat
+	// listener" block below. It binds its own port so the discovery probes
+	// (/ping, /healthcheck, /status, /init, /login, /socket.io) own the URL
+	// space without collision with silo's SPA fallback. Mirrors how the
+	// Jellyfin compat server is set up at :8096.
 	metricsMux.Handle("/", server.FrontendHandler())
 
 	// Step 9: Start background workers (if needed).
@@ -1853,6 +1937,28 @@ func main() {
 		compatSrv.IdleTimeout = 120 * time.Second
 	}
 
+	// ABS-compat listener — dedicated http.Server bound to its own port
+	// (default :13378) that hosts the Audiobookshelf-compatible API.
+	// Mirrors the Jellyfin compat layout above. The ABS handler mounts
+	// onto a fresh chi router here so /ping, /healthcheck, /status, /login,
+	// /socket.io, etc. own the URL space at the root — no SPA fallback,
+	// no collision with silo's /api/v1.
+	var absSrv *http.Server
+	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
+		absRouter := chi.NewRouter()
+		absRouter.Use(chimiddleware.Recoverer)
+		absRouter.Use(chimiddleware.Compress(5))
+		deps.ABSHandler.Mount(absRouter)
+		absSrv = &http.Server{
+			Addr:              cfg.AudiobookshelfCompat.Listen,
+			Handler:           absRouter,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      0,
+			IdleTimeout:       120 * time.Second,
+		}
+	}
+
 	// Run non-critical startup work in the background so it doesn't delay the
 	// HTTP listener from accepting connections. Steps run sequentially and stop
 	// early if the app context is cancelled (shutdown).
@@ -1877,7 +1983,7 @@ func main() {
 		}()
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() {
 		slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
 		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
@@ -1889,6 +1995,14 @@ func main() {
 			slog.Info("Jellyfin compat server listening", "addr", compatSrv.Addr)
 			if listenErr := compatSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
 				errCh <- fmt.Errorf("jellyfin compat server error: %w", listenErr)
+			}
+		}()
+	}
+	if absSrv != nil {
+		go func() {
+			slog.Info("ABS compat server listening", "addr", absSrv.Addr)
+			if listenErr := absSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
+				errCh <- fmt.Errorf("abs compat server error: %w", listenErr)
 			}
 		}()
 	}
@@ -1919,6 +2033,11 @@ func main() {
 	if compatSrv != nil {
 		if shutdownErr := compatSrv.Shutdown(shutdownCtx); shutdownErr != nil {
 			slog.Error("jellyfin compat shutdown error", "error", shutdownErr)
+		}
+	}
+	if absSrv != nil {
+		if shutdownErr := absSrv.Shutdown(shutdownCtx); shutdownErr != nil {
+			slog.Error("abs compat shutdown error", "error", shutdownErr)
 		}
 	}
 

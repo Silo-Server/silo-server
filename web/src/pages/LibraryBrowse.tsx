@@ -32,7 +32,17 @@ function getLibrarySortRelevanceScope(
   if (libraryType === "movie" || libraryType === "series") {
     return libraryType;
   }
-  if (mediaScope === "movie" || mediaScope === "series" || mediaScope === "episode") {
+  // The DB stores audiobook library type as the plural "audiobooks";
+  // the sort scope is the singular "audiobook" (matches QueryDefinition.media_scope).
+  if (libraryType === "audiobook" || libraryType === "audiobooks") {
+    return "audiobook";
+  }
+  if (
+    mediaScope === "movie" ||
+    mediaScope === "series" ||
+    mediaScope === "episode" ||
+    mediaScope === "audiobook"
+  ) {
     return mediaScope;
   }
   return "all";
@@ -141,6 +151,7 @@ export default function LibraryBrowse({
         allowPersonalizedFilters
         allowPersonalizedSorts
         sortRelevanceScope={sortRelevanceScope}
+        libraryType={libraryType}
       />
       <ItemGrid
         totalItems={totalItems}

@@ -395,8 +395,16 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 		return nil, nil
 	}
 
+	// Constrain to the source item's media type so "Because you watched" never
+	// mixes movies, series, and audiobooks in one rail.
+	sourceMeta, _ := e.repo.GetItemMetadata(ctx, sourceItemID)
+	sourceType := ""
+	if sourceMeta != nil {
+		sourceType = sourceMeta.Type
+	}
+
 	// Get embedding-based candidates (3x for MMR).
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{sourceItemID}, limit*3)
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{sourceItemID}, sourceType, limit*3)
 	if err != nil {
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
 	}

@@ -1,9 +1,10 @@
-import { useState } from "react";
-
+import { useSearchParams } from "react-router";
+import { X } from "lucide-react";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { Skeleton } from "@/components/ui/skeleton";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { useAudiobookLibrary } from "@/hooks/audiobooks/useAudiobookLibrary";
+import { useInfiniteAudiobookLibrary } from "@/hooks/audiobooks/useAudiobookLibrary";
+import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 
 const PAGE_SIZE = 60;
 
@@ -11,8 +12,15 @@ const GRID_CLASSES =
   "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-3";
 
 export default function AudiobookLibrary() {
-  const [offset, setOffset] = useState(0);
-  const { data, isLoading, error } = useAudiobookLibrary({ limit: PAGE_SIZE, offset });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const genre = searchParams.get("genre") ?? "";
+  const { data, isLoading, error, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteAudiobookLibrary({ limit: PAGE_SIZE, genre });
+
+  const sentinelRef = useIntersectionObserver({
+    onIntersect: fetchNextPage,
+    enabled: Boolean(hasNextPage) && !isFetchingNextPage,
+  });
 
   if (isLoading && !data) {
     return (
@@ -21,7 +29,7 @@ export default function AudiobookLibrary() {
         <div role="list" className={GRID_CLASSES}>
           {Array.from({ length: 24 }).map((_, i) => (
             <div key={i} role="listitem">
-              <Skeleton className="aspect-[2/3] rounded-xl" />
+              <Skeleton className="aspect-square rounded-xl" />
               <Skeleton className="mt-2 h-4 w-3/4" />
             </div>
           ))}
@@ -41,12 +49,35 @@ export default function AudiobookLibrary() {
     );
   }
 
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
+  const items = data?.pages.flatMap((p) => p.items) ?? [];
+  const total = data?.pages[0]?.total ?? 0;
 
   return (
     <div className="space-y-5 py-2 sm:space-y-6">
-      <h1 className="text-3xl font-semibold">Audiobooks</h1>
+      <div className="flex items-baseline justify-between gap-4">
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h1 className="text-3xl font-semibold">Audiobooks</h1>
+          {genre && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.delete("genre");
+                setSearchParams(next);
+              }}
+              className="bg-muted hover:bg-muted/80 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+            >
+              {genre}
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        {total > 0 && (
+          <span className="text-muted-foreground text-sm">
+            {items.length.toLocaleString()} of {total.toLocaleString()}
+          </span>
+        )}
+      </div>
       {items.length === 0 ? (
         <div className="text-muted-foreground py-12 text-center">
           No audiobooks indexed yet. Set a library&apos;s type to{" "}
@@ -61,7 +92,7 @@ export default function AudiobookLibrary() {
                 to={`/audiobooks/book/${item.content_id}`}
                 className="block overflow-hidden rounded-xl"
               >
-                <div className="media-card-image relative aspect-[2/3]">
+                <div className="media-card-image relative aspect-square">
                   {item.poster_url ? (
                     <img
                       src={item.poster_url}
@@ -94,27 +125,11 @@ export default function AudiobookLibrary() {
           ))}
         </div>
       )}
-      {total > PAGE_SIZE && (
-        <div className="mt-8 flex justify-center gap-2">
-          <button
-            type="button"
-            className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            disabled={offset === 0}
-          >
-            Previous
-          </button>
-          <span className="text-muted-foreground self-center text-sm">
-            {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
-          </span>
-          <button
-            type="button"
-            className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
-            onClick={() => setOffset(offset + PAGE_SIZE)}
-            disabled={offset + PAGE_SIZE >= total}
-          >
-            Next
-          </button>
+      {hasNextPage && (
+        <div ref={sentinelRef} className="flex justify-center py-8">
+          {isFetchingNextPage && (
+            <span className="text-muted-foreground text-sm">Loading more…</span>
+          )}
         </div>
       )}
       <ScrollToTopButton />
