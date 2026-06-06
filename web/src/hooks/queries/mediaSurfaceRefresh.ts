@@ -12,9 +12,14 @@ import {
   sectionKeys,
   watchlistKeys,
 } from "./keys";
+import {
+  activeCatalogQueryMatchesLibrary,
+  activeSectionQueryMatchesLibrary,
+} from "@/lib/queryInvalidation";
 
 interface InvalidateMediaSurfaceOptions {
   itemId?: string;
+  libraryId?: number;
   watchedKeys?: Array<readonly unknown[]>;
 }
 
@@ -96,8 +101,14 @@ export async function invalidateMediaSurfaceQueries(
 ) {
   const invalidations: Array<Promise<void>> = [
     queryClient.invalidateQueries({ queryKey: itemKeys.all }),
-    queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
-    queryClient.invalidateQueries({ queryKey: sectionKeys.all }),
+    queryClient.invalidateQueries({
+      queryKey: catalogKeys.all,
+      predicate: (query) => activeCatalogQueryMatchesLibrary(query.queryKey, options.libraryId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: sectionKeys.all,
+      predicate: (query) => activeSectionQueryMatchesLibrary(query.queryKey, options.libraryId),
+    }),
     queryClient.invalidateQueries({ queryKey: progressKeys.all }),
     queryClient.invalidateQueries({ queryKey: historyKeys.all }),
     queryClient.invalidateQueries({ queryKey: favoriteKeys.all }),
