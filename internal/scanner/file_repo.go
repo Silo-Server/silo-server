@@ -1238,6 +1238,33 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 	return true, nil
 }
 
+// ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
+// a file, including their provenance columns. Used by the admin manual-marker
+// API to remove a marker so detection/online fetch can repopulate it. Returns
+// whether a row was updated.
+func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
+	if len(segments) == 0 {
+		return false, nil
+	}
+	allowed := map[string]bool{"intro": true, "credits": true, "recap": true, "preview": true}
+	sets := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		if !allowed[seg] {
+			return false, fmt.Errorf("invalid marker segment %q", seg)
+		}
+		sets = append(sets, fmt.Sprintf(
+			"%[1]s_start = NULL, %[1]s_end = NULL, %[1]s_markers_source = NULL, "+
+				"%[1]s_markers_provider = NULL, %[1]s_markers_confidence = NULL, "+
+				"%[1]s_markers_algorithm = NULL, %[1]s_markers_detected_at = NULL", seg))
+	}
+	query := "UPDATE media_files SET " + strings.Join(sets, ", ") + ", updated_at = NOW() WHERE id = $1"
+	tag, err := r.pool.Exec(ctx, query, fileID)
+	if err != nil {
+		return false, fmt.Errorf("clear markers: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func ptrFloatEqual(a, b *float64) bool {
 	if a == nil || b == nil {
 		return a == b

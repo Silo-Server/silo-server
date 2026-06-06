@@ -772,6 +772,32 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
+	var adminMarkersHandler *handlers.AdminMarkersHandler
+	if deps.FileRepo != nil {
+		var notifier handlers.PlaybackMarkerUpdateNotifier
+		if playbackHandler != nil {
+			notifier = playbackHandler.MarkerUpdateNotifier
+		}
+		var contributor handlers.MarkerContributor
+		if deps.MarkerContributionService != nil {
+			contributor = deps.MarkerContributionService
+		}
+		var contributions handlers.MarkerContributionLister
+		if deps.MarkerContributionStore != nil {
+			contributions = deps.MarkerContributionStore
+		}
+		adminMarkersHandler = handlers.NewAdminMarkersHandler(
+			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
+		)
+	}
+
+	var adminMarkerProvidersHandler *handlers.AdminMarkerProvidersHandler
+	if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
+		adminMarkerProvidersHandler = handlers.NewAdminMarkerProvidersHandler(
+			deps.MarkerRegistry, deps.MarkerProviderConfig, slog.Default(),
+		)
+	}
+
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
 	var adminSubtitleHandler *handlers.AdminSubtitleHandler
 	var subtitleManager *subtitles.Manager
@@ -1845,6 +1871,18 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
 								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
+							}
+							if adminMarkersHandler != nil {
+								r.Get("/files/{fileId}/markers", adminMarkersHandler.HandleGetFileMarkers)
+								r.Put("/files/{fileId}/markers", adminMarkersHandler.HandleSetFileMarkers)
+								r.Delete("/files/{fileId}/markers/{segment}", adminMarkersHandler.HandleClearFileSegment)
+								r.Post("/files/{fileId}/contribute", adminMarkersHandler.HandleContributeFile)
+								r.Get("/files/{fileId}/contributions", adminMarkersHandler.HandleListFileContributions)
+							}
+							if adminMarkerProvidersHandler != nil {
+								r.Get("/markers/providers", adminMarkerProvidersHandler.HandleListProviders)
+								r.Put("/markers/providers/{provider}", adminMarkerProvidersHandler.HandleUpdateProvider)
+								r.Post("/markers/providers/{provider}/validate", adminMarkerProvidersHandler.HandleValidateProvider)
 							}
 							if peopleHandler != nil {
 								r.Post("/people/{id}/refresh", peopleHandler.HandleAdminRefreshPerson)
