@@ -377,7 +377,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if err != nil && err == playback.ErrSegmentNotFound {
+			if err != nil && err == playback.ErrSegmentNotFound && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := session.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
 					slog.Error("resolve transcode node seek target", "error", seekErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
