@@ -36,9 +36,10 @@ const (
 type MediaKind string
 
 const (
-	MediaMovie MediaKind = "movie"
-	MediaTV    MediaKind = "tv"
-	MediaMixed MediaKind = "mixed"
+	MediaMovie     MediaKind = "movie"
+	MediaTV        MediaKind = "tv"
+	MediaMixed     MediaKind = "mixed"
+	MediaAudiobook MediaKind = "audiobook"
 )
 
 // TMDBSpec is the TMDB-specific portion of a template.

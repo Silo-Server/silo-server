@@ -2,24 +2,44 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestAudiobookListItemsDoNotExposeRawPosterKeysWithoutPresigner(t *testing.T) {
+func TestPresignAudiobookPosterDoesNotExposeRawKeysWithoutPresigner(t *testing.T) {
 	h := &AudiobookHandler{}
-	items := h.audiobookListItems(context.Background(), []*models.MediaItem{{
-		ContentID:  "book-1",
-		Title:      "Book",
-		PosterPath: "metadata/audiobooks/book-1/poster/original.webp",
-	}})
-
-	if len(items) != 1 {
-		t.Fatalf("len(items) = %d, want 1", len(items))
+	got := h.presignAudiobookPoster(context.Background(), "metadata/audiobooks/book-1/poster/original.webp")
+	if got != "" {
+		t.Fatalf("PosterURL = %q, want empty without presigner", got)
 	}
-	if items[0].PosterURL != "" {
-		t.Fatalf("PosterURL = %q, want empty without presigner", items[0].PosterURL)
+}
+
+func TestAudiobookListConditionsIncludeAccessPredicates(t *testing.T) {
+	conditions, args, _, empty := audiobookListConditions(catalog.AccessFilter{
+		AllowedLibraryIDs:  []int{1, 2},
+		DisabledLibraryIDs: []int{9},
+		MaxContentRating:   "PG-13",
+	}, "Fantasy")
+	if empty {
+		t.Fatal("empty = true, want false")
+	}
+	sql := strings.Join(conditions, " AND ")
+	for _, want := range []string{
+		"mi.type = 'audiobook'",
+		"ANY(mi.genres)",
+		"EXISTS",
+		"NOT EXISTS",
+		"mi.content_rating = ANY",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("conditions missing %q in:\n%s", want, sql)
+		}
+	}
+	if len(args) != 4 {
+		t.Fatalf("len(args) = %d, want 4", len(args))
 	}
 }
 

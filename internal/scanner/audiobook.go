@@ -5,28 +5,75 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// narratorSuffixRE matches a trailing "read by X" / "(Read by X)" /
+// "(UK Version: Read by X)" / "- read by X" pattern that some audiobook
+// taggers put in the title field. The narrator is already captured as
+// item_people kind=8 from the dedicated narrator tag, so removing this
+// noise yields a clean human-readable title without losing any data.
+//
+// The narrator body deliberately excludes the dash so titles like
+// "Series Name Read by Foo N - Book Title" don't get mistakenly
+// truncated (the "Read by Foo" there is part of the series name, not a
+// narrator credit). Real narrator suffixes never contain a `-` after the
+// "read by".
+var narratorSuffixRE = regexp.MustCompile(`(?i)\s*\(?\s*[-:,]?\s*(UK Version:?|US Version:?)?\s*read by [A-Za-z0-9., '&]+\)?\s*$`)
+
+// unabridgedTokenRE matches a parenthesized "(unabridged)" anywhere in
+// the title (sometimes mid-string between series and book). Stripped
+// because it's a format marker, not part of the work's name.
+var unabridgedTokenRE = regexp.MustCompile(`(?i)\s*\(unabridged\)\s*`)
+
+// collapseSpacesRE squashes any runs of whitespace into a single space.
+// Used after the strip passes since removing a mid-string token can
+// leave double spaces behind.
+var collapseSpacesRE = regexp.MustCompile(`\s+`)
+
+// stripNarratorSuffix removes the narrator-suffix noise and "(unabridged)"
+// markers from a title. Returns the input unchanged when no match.
+// Kept in sync with the SQL `regexp_replace` used by migration 146 so
+// the scanner write path and one-shot backfill produce identical output.
+func stripNarratorSuffix(title string) string {
+	cleaned := narratorSuffixRE.ReplaceAllString(title, "")
+	cleaned = unabridgedTokenRE.ReplaceAllString(cleaned, " ")
+	cleaned = collapseSpacesRE.ReplaceAllString(cleaned, " ")
+	return strings.TrimSpace(cleaned)
+}
 
 // parsedAudiobook is the structured output of parseAudiobookFolder.
 // The scanner write path (Task 8) converts this into media_items +
 // media_files + item_people rows.
 type parsedAudiobook struct {
 	Title    string
-	Author   string
-	Narrator string
-	Series   string
-	Year     int
-	Files    []parsedAudiobookFile
+	Author         string
+	Narrator       string
+	Series         string
+	SeriesPosition string
+	Year           int
+	ASIN           string
+	Overview       string
+	Genres         []string
+	Publisher      string
+	ReleaseDate    string
+	Language       string
+	Files          []parsedAudiobookFile
 }
 
 // parsedAudiobookFile is one audio file belonging to a parsed audiobook.
 // For single-file .m4b audiobooks there is exactly one entry; for
 // multi-file folders (Task 7) there is one per file.
 type parsedAudiobookFile struct {
-	Path     string
-	Chapters []ChapterInfo
+	Path          string
+	Chapters      []ChapterInfo
+	Duration      int    // seconds
+	Bitrate       int    // kbps
+	CodecAudio    string // aac, mp3, opus, flac
+	Container     string // m4b, mp3, mka, ...
+	AudioChannels int
 }
 
 // parseAudiobookFolder reads a single audiobook folder and returns its
@@ -67,8 +114,13 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 		}
 		book.populateFromTags(probed.FormatTags)
 		book.Files = []parsedAudiobookFile{{
-			Path:     audioFiles[0],
-			Chapters: probed.Chapters,
+			Path:          audioFiles[0],
+			Chapters:      probed.Chapters,
+			Duration:      probed.Duration,
+			Bitrate:       probed.Bitrate,
+			CodecAudio:    probed.CodecAudio,
+			Container:     probed.Container,
+			AudioChannels: probed.AudioChannels,
 		}}
 		return book, nil
 	}
@@ -85,14 +137,23 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	book.Files = make([]parsedAudiobookFile, 0, len(audioFiles))
 	for i, path := range audioFiles {
 		stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		probed, err := ProbeFile(ctx, ffprobePath, path)
+		if err != nil {
+			return nil, fmt.Errorf("probe audiobook file %s: %w", path, err)
+		}
 		book.Files = append(book.Files, parsedAudiobookFile{
 			Path: path,
 			Chapters: []ChapterInfo{{
 				Index:        i,
 				Title:        stem,
 				StartSeconds: 0,
-				EndSeconds:   0,
+				EndSeconds:   float64(probed.Duration),
 			}},
+			Duration:      probed.Duration,
+			Bitrate:       probed.Bitrate,
+			CodecAudio:    probed.CodecAudio,
+			Container:     probed.Container,
+			AudioChannels: probed.AudioChannels,
 		})
 	}
 	return book, nil
@@ -103,14 +164,61 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 // lower-cased by normalizeFormatTags upstream.
 func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
 	b.Title = firstNonEmpty(tags["title"], tags["album"])
-	b.Author = firstNonEmpty(tags["artist"], tags["album_artist"], tags["composer"])
-	b.Narrator = firstNonEmpty(tags["narrator"], tags["performer"])
-	b.Series = firstNonEmpty(tags["album"], tags["series"], tags["mvnm"])
-	if year := firstNonEmpty(tags["date"], tags["year"]); year != "" {
+	b.Author = firstNonEmpty(tags["album_artist"], tags["artist"], tags["composer"])
+	b.Narrator = firstNonEmpty(tags["narrator"], tags["performer"], tags["composer"])
+	// Note: do NOT fall back to tags["album"] for Series. In audiobook
+	// tagging, `album` is the book title, not the series name — using it
+	// as the fallback writes series_name = title for every book without
+	// an explicit series tag, producing one fake singleton "series" per
+	// title (~141k of them on this server before this fix).
+	b.Series = firstNonEmpty(tags["series"], tags["mvnm"])
+	b.SeriesPosition = firstNonEmpty(tags["series-part"], tags["mvin"], tags["movement"])
+	b.ASIN = firstNonEmpty(tags["asin"], tags["audible_asin"], tags["com.audible.asin"])
+	b.Overview = firstNonEmpty(tags["description"], tags["summary"], tags["comment"], tags["©cmt"])
+	b.Publisher = firstNonEmpty(tags["publisher"], tags["label"], tags["©pub"])
+	b.ReleaseDate = firstNonEmpty(tags["releasedate"], tags["release_date"], tags["date"], tags["year"], tags["releasetime"])
+	b.Language = firstNonEmpty(tags["language"], tags["lang"])
+	if year := firstNonEmpty(tags["date"], tags["year"], tags["releasetime"]); year != "" {
 		if y := parseTagYear(year); y > 0 {
 			b.Year = y
 		}
 	}
+	b.Genres = parseGenresFromTags(tags)
+}
+
+// parseGenresFromTags pulls genres from the `genre` tag (which is often
+// slash-separated like "Mystery, Thriller & Suspense/Suspense/Fiction")
+// plus tmp_Genre1..tmp_Genre5 sub-tags written by some audiobook taggers.
+// Returns a deduplicated list in input order.
+func parseGenresFromTags(tags map[string]string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(g string) {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			return
+		}
+		key := strings.ToLower(g)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, g)
+	}
+	if raw := tags["genre"]; raw != "" {
+		for _, part := range strings.Split(raw, "/") {
+			for _, sub := range strings.Split(part, ",") {
+				add(sub)
+			}
+		}
+	}
+	for i := 1; i <= 5; i++ {
+		key := fmt.Sprintf("tmp_genre%d", i)
+		if v := tags[key]; v != "" {
+			add(v)
+		}
+	}
+	return out
 }
 
 // parseTagYear extracts a 4-digit year (e.g. 1900-9999) from a tag value

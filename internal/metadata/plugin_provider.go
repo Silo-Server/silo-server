@@ -622,6 +622,10 @@ func personKindFromString(value string) models.PersonKind {
 		return models.PersonKindGuestStar
 	case "composer":
 		return models.PersonKindComposer
+	case "author":
+		return models.PersonKindAuthor
+	case "narrator":
+		return models.PersonKindNarrator
 	default:
 		return models.PersonKindFromJob(value)
 	}

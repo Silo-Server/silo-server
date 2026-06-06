@@ -158,10 +158,26 @@ type Dependencies struct {
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
 	MDBListClient *mdblist.Client
+
+	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
+	// it is mounted at the root router level (not under /api/v1/) so that ABS
+	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
+	// resolve correctly. May be nil; no ABS routes are registered in that case.
+	ABSHandler absHandler
+	// AudiobooksEnabled gates native audiobook admin/UI routes behind the same
+	// server setting as the ABS compatibility listener.
+	AudiobooksEnabled bool
+}
+
+// absHandler is the narrow interface the router needs from the ABS handler.
+// Using an interface avoids a direct import of the abs sub-package from router.go.
+type absHandler interface {
+	Mount(r chi.Router)
 }
 
 // NewRouter creates a chi.Router with all middleware and routes mounted
-// under /api/v1/.
+// under /api/v1/. ABS-compat routes (/abs/*, /login, /socket.io/*) are
+// mounted at the root level when deps.ABSHandler is non-nil.
 func NewRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
@@ -1156,6 +1172,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
+	// ABS-compat routes are NOT mounted here — they live on a dedicated
+	// http.Server (see absCompatSrv in cmd/silo/main.go) so the discovery
+	// probes (/ping, /healthcheck, /status, etc.) don't collide with the
+	// SPA fallback. Same pattern as the Jellyfin compat listener on 8096.
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
@@ -1393,6 +1414,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				if itemsHandler != nil {
 					r.Get("/catalog", catalogHandler.HandleGetCatalog)
 					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
+					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
 					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
@@ -1788,12 +1810,14 @@ func NewRouter(deps Dependencies) chi.Router {
 				r.Get("/sections/recipes/{type}/candidates", recipeHandler.HandleCandidates)
 
 				// Audiobook endpoints (no profile required — catalog-level list/detail).
-				if itemRepo != nil {
+				if deps.AudiobooksEnabled && itemRepo != nil {
 					audiobookHandler := &handlers.AudiobookHandler{
 						Items:         itemRepo,
 						Files:         deps.FileRepo,
 						Detail:        detailSvc,
 						StoreProvider: deps.UserStoreProvider,
+						Detail:        detailSvc,
+						Recs:          recsRepoForStale,
 					}
 					r.Get("/audiobooks", audiobookHandler.HandleListAudiobooks)
 					r.Get("/audiobooks/{id}", audiobookHandler.HandleGetAudiobook)

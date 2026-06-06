@@ -111,7 +111,7 @@ func TestCache_Poster(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -150,7 +150,7 @@ func TestCache_Backdrop(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/backdrop.jpg",
@@ -190,7 +190,7 @@ func TestCache_Logo(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/logo.png",
@@ -230,7 +230,7 @@ func TestCache_DownloadError(t *testing.T) {
 	srv := startImageServer(t, nil, http.StatusNotFound)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/missing.jpg",
@@ -252,7 +252,7 @@ func TestCache_S3UploadError(t *testing.T) {
 		bucket: "media",
 		putErr: errors.New("s3: connection refused"),
 	}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -271,7 +271,7 @@ func TestCache_RejectsEmptyContentID(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -293,7 +293,7 @@ func TestCache_SeasonPoster_NestsUnderSeries(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	season := 2
 	result, err := c.Cache(context.Background(), CacheRequest{
@@ -325,7 +325,7 @@ func TestCache_EpisodeStill_NestsUnderSeasonAndEpisode(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	season, episode := 2, 5
 	result, err := c.Cache(context.Background(), CacheRequest{
@@ -358,7 +358,7 @@ func TestCache_SeasonsDoNotCollide(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	for _, season := range []int{1, 2, 3} {
 		s := season
@@ -389,7 +389,7 @@ func TestCache_SeasonZero_Specials(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	// Season 0 is the conventional "specials" season — must produce a
 	// distinct key, not be confused with a missing season dimension.
@@ -411,7 +411,7 @@ func TestCache_SeasonZero_Specials(t *testing.T) {
 
 	// Cache an item-level series poster (no season dimension) and confirm
 	// it lands under a distinct key from the specials poster.
-	c2 := New(&mockS3{bucket: "media"})
+	c2 := newWithHTTPClient(&mockS3{bucket: "media"}, srv.Client())
 	itemResult, err := c2.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/series-poster.jpg",
 		ProviderID:  "tmdb",
@@ -456,7 +456,7 @@ func TestCache_ResolvesPluginURL(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+	c := newWithHTTPClient(s3, srv.Client())
 
 	resolver := stubResolver{httpURL: srv.URL + "/from-resolver.jpg"}
 	result, err := c.Cache(context.Background(), CacheRequest{

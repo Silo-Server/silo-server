@@ -28,6 +28,18 @@ func MimeFromExtension(name string) string {
 		return "video/x-flv"
 	case ".wmv":
 		return "video/x-ms-wmv"
+	case ".m4b", ".m4a":
+		return "audio/mp4"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".flac":
+		return "audio/flac"
+	case ".opus", ".ogg":
+		return "audio/ogg"
+	case ".wav":
+		return "audio/wav"
+	case ".aac":
+		return "audio/aac"
 	default:
 		return "application/octet-stream"
 	}

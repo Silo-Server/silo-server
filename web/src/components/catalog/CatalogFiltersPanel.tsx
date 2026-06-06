@@ -26,6 +26,7 @@ export interface CatalogFiltersPanelProps {
   sortRelevanceScope?: QuerySortRelevanceScope;
   resultCountLabel?: string;
   resultCountLoading?: boolean;
+  libraryType?: string;
 }
 
 export default function CatalogFiltersPanel({
@@ -39,6 +40,7 @@ export default function CatalogFiltersPanel({
   sortRelevanceScope,
   resultCountLabel,
   resultCountLoading = false,
+  libraryType,
 }: CatalogFiltersPanelProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"guided" | "advanced">("guided");
@@ -107,6 +109,7 @@ export default function CatalogFiltersPanel({
           onQueryDefinitionChange={(nextQd) =>
             onStateChange({ ...state, query_definition: nextQd })
           }
+          libraryType={libraryType}
         />
       ) : null}
     </div>
@@ -129,6 +132,7 @@ export function CatalogFilterSheetContainer({
   onEditorModeChange,
   queryDefinition,
   onQueryDefinitionChange,
+  libraryType,
 }: {
   state: CatalogSearchState;
   open: boolean;
@@ -145,6 +149,7 @@ export function CatalogFilterSheetContainer({
   onEditorModeChange: (mode: "guided" | "advanced") => void;
   queryDefinition: QueryDefinition;
   onQueryDefinitionChange: (nextQd: QueryDefinition) => void;
+  libraryType?: string;
 }) {
   const filtersQuery = useCatalogFilters(state, {
     enabled: editorMode === "guided",
@@ -169,6 +174,8 @@ export function CatalogFilterSheetContainer({
       onQueryDefinitionChange={onQueryDefinitionChange}
       filters={filtersQuery.data}
       filtersLoading={filtersQuery.isLoading}
+      libraryType={libraryType}
+      catalogState={state}
     />
   );
 }
