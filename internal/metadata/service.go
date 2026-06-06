@@ -1218,18 +1218,28 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 
 	// Refresh stale ID records on successful refresh: clear anything resolved,
 	// then keep only the providers that still 404ed during this run.
-	if s.staleIDRepo != nil && req.ContentID != "" {
-		if delErr := s.staleIDRepo.DeleteByContentID(ctx, req.ContentID); delErr != nil {
+	// Stale-ID follow-up targets the canonical content ID the item was
+	// persisted/merged into. When mergeAndPersist canonicalizes this item into
+	// an existing one, req.ContentID is the now-deleted source: clearing or
+	// recording stale IDs against it would touch nothing (or FK-violate), so
+	// the still-404ing providers must be recorded on result.ContentID instead.
+	// provider404s is only allocated when req.ContentID was set (the refresh
+	// targeted a known item). Guarding on it preserves the original gating so a
+	// content-id-less refresh that canonicalizes into an existing item does not
+	// wipe that item's stale rows without re-recording any.
+	followUpContentID := refreshFollowUpContentID(req.ContentID, result)
+	if s.staleIDRepo != nil && followUpContentID != "" && provider404s != nil {
+		if delErr := s.staleIDRepo.DeleteByContentID(ctx, followUpContentID); delErr != nil {
 			slog.Warn("metadata: failed to clear stale IDs after refresh",
-				"content_id", req.ContentID, "error", delErr)
+				"content_id", followUpContentID, "error", delErr)
 		}
 		for slug, providerID := range provider404s {
 			if providerID == "" {
 				continue
 			}
-			if upsertErr := s.staleIDRepo.Upsert(ctx, req.ContentID, slug, providerID); upsertErr != nil {
+			if upsertErr := s.staleIDRepo.Upsert(ctx, followUpContentID, slug, providerID); upsertErr != nil {
 				slog.Warn("metadata: failed to persist stale provider ID after partial refresh",
-					"content_id", req.ContentID,
+					"content_id", followUpContentID,
 					"provider", slug,
 					"provider_id", providerID,
 					"error", upsertErr)
@@ -1245,6 +1255,19 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 
 	return result, nil
+}
+
+// refreshFollowUpContentID returns the content ID that a completed refresh's
+// follow-up writes (stale-ID clear/record, debt sync) should target: the
+// canonical ID the item was persisted or merged into when available, falling
+// back to the requested ID. mergeAndPersist can canonicalize an item into an
+// existing one, deleting the requested ID, so follow-up writes keyed on
+// req.ContentID would miss the surviving item.
+func refreshFollowUpContentID(reqContentID string, result *ProcessResult) string {
+	if result != nil && strings.TrimSpace(result.ContentID) != "" {
+		return result.ContentID
+	}
+	return reqContentID
 }
 
 // mergeAndPersist handles the final merge into existing item and DB persistence.
