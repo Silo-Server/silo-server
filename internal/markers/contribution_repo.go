@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -104,6 +105,38 @@ func (s *ContributionStore) Record(ctx context.Context, row ContributionRow) err
 		return fmt.Errorf("record marker contribution: %w", err)
 	}
 	return nil
+}
+
+// CandidateLocalIntroFiles returns ids of episode files carrying a local
+// (scanner) intro marker at or above minConfidence — the auto-contribution
+// candidates. Iterated by keyset (id > afterID) for stable paging.
+func (s *ContributionStore) CandidateLocalIntroFiles(ctx context.Context, minConfidence float64, afterID, limit int) ([]int, error) {
+	if s == nil || s.pool == nil {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id FROM media_files
+		WHERE episode_id IS NOT NULL
+		  AND intro_markers_source = $1
+		  AND intro_start IS NOT NULL AND intro_end IS NOT NULL
+		  AND COALESCE(intro_markers_confidence, 0) >= $2
+		  AND id > $3
+		ORDER BY id
+		LIMIT $4`, models.MarkerSourceScanner, minConfidence, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query contribution candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan candidate id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // ListByFile returns the contribution history for a file, newest first.
