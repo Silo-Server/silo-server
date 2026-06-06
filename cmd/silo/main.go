@@ -533,7 +533,13 @@ func main() {
 			})
 		}
 		deps.MarkerRegistry = markerRegistry
-		deps.MarkerResolver = markers.NewDBExternalIDResolver(deps.DB)
+		markerResolver := markers.NewDBExternalIDResolver(deps.DB)
+		deps.MarkerResolver = markerResolver
+		markerContributionStore := markers.NewContributionStore(deps.DB)
+		deps.MarkerContributionStore = markerContributionStore
+		deps.MarkerContributionService = markers.NewContributionService(
+			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore, slog.Default(),
+		)
 	}
 	var watchProviderService *watchsync.Service
 	if deps.DB != nil {

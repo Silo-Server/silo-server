@@ -1,6 +1,7 @@
 package introdb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -237,4 +238,110 @@ func cacheKeyMovie(tmdbID, tvdbID, imdbID string, durationMS int64) string {
 	default:
 		return fmt.Sprintf("imdb:movie:%s:d%d", imdbID, durationMS)
 	}
+}
+
+// submitSegment contributes a single segment via POST /v3/submit. The API key
+// is required (submissions are credited to that account); returns an error if
+// none is configured. Submissions are not cached. On 429 the usage-limit reset
+// is surfaced in the error so callers can back off.
+func (c *Client) submitSegment(ctx context.Context, body submitRequest) (*submitResponse, error) {
+	c.mu.RLock()
+	baseURL := c.baseURL
+	apiKey := c.apiKey
+	c.mu.RUnlock()
+	if apiKey == "" {
+		return nil, fmt.Errorf("introdb: submit requires an API key")
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("introdb: marshal submit: %w", err)
+	}
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/submit", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("introdb: create submit request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Silo-Server/markers")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("introdb: submit request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("introdb: submit usage-limited; retry after %ds", usageResetSeconds(resp))
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+		return nil, fmt.Errorf("introdb: submit HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	var out submitResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(&out); err != nil {
+		return nil, fmt.Errorf("introdb: decode submit response: %w", err)
+	}
+	return &out, nil
+}
+
+// fetchUserStats validates the configured key and returns contribution stats
+// via GET /v3/user/stats.
+func (c *Client) fetchUserStats(ctx context.Context) (*userStatsResponse, error) {
+	c.mu.RLock()
+	baseURL := c.baseURL
+	apiKey := c.apiKey
+	c.mu.RUnlock()
+	if apiKey == "" {
+		return nil, fmt.Errorf("introdb: user stats require an API key")
+	}
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/user/stats", nil)
+	if err != nil {
+		return nil, fmt.Errorf("introdb: create stats request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Silo-Server/markers")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("introdb: stats request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+		return nil, fmt.Errorf("introdb: stats HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	var out userStatsResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(&out); err != nil {
+		return nil, fmt.Errorf("introdb: decode stats response: %w", err)
+	}
+	if out.Error != "" {
+		return nil, fmt.Errorf("introdb: stats error: %s", out.Error)
+	}
+	return &out, nil
+}
+
+// usageResetSeconds reads the usage/rate reset hint from a 429 response.
+func usageResetSeconds(resp *http.Response) int {
+	for _, h := range []string{"X-UsageLimit-Reset", "X-RateLimit-Reset", "Retry-After"} {
+		if v := resp.Header.Get(h); v != "" {
+			if s, err := strconv.Atoi(v); err == nil && s > 0 {
+				return s
+			}
+		}
+	}
+	return 0
 }

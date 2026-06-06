@@ -86,6 +86,55 @@ type Marker struct {
 	Algorithm  string
 }
 
+// SubmissionRequest is a single-segment contribution to an online marker
+// source. Start is nil when the segment begins at the start of the file
+// (intro/recap); End is nil when it runs to the end (credits/preview).
+type SubmissionRequest struct {
+	Kind          ItemKind
+	ExternalIDs   map[string]string
+	SeasonNumber  int
+	EpisodeNumber int
+	Segment       MarkerKind
+	Start         *time.Duration
+	End           *time.Duration
+	Duration      time.Duration
+}
+
+// SubmissionStatus values returned by a Submitter.
+const (
+	SubmissionStatusPending  = "pending"
+	SubmissionStatusAccepted = "accepted"
+	SubmissionStatusRejected = "rejected"
+)
+
+// SubmissionResult is the provider's acknowledgement of a submitted segment.
+type SubmissionResult struct {
+	ID     string
+	Status string
+	Weight float64
+}
+
+// UserStats is a contribution-account summary used to validate a key and show
+// contribution totals in the admin UI.
+type UserStats struct {
+	Total          int
+	Accepted       int
+	Pending        int
+	Rejected       int
+	AcceptanceRate float64
+	CurrentStreak  int
+	BestStreak     int
+}
+
+// Submitter is an optional capability implemented by providers that accept
+// marker contributions. The contribution service type-asserts a Provider to
+// Submitter; non-contributing providers simply don't implement it.
+type Submitter interface {
+	Provider
+	SubmitMarker(ctx context.Context, req SubmissionRequest) (SubmissionResult, error)
+	FetchUserStats(ctx context.Context) (UserStats, error)
+}
+
 type Registry struct {
 	providers []Provider
 	logger    *slog.Logger

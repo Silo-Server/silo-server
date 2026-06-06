@@ -124,6 +124,8 @@ type Dependencies struct {
 	MarkerRegistry               *markers.Registry
 	MarkerResolver               markers.ExternalIDResolver
 	MarkerProviderConfig         *markers.ProviderConfigStore
+	MarkerContributionStore      *markers.ContributionStore
+	MarkerContributionService    *markers.ContributionService
 	WatchProviderService         handlers.WatchProviderService
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
