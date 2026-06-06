@@ -8,11 +8,18 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
+
+type filesystemRootContentFinder interface {
+	FindContentIDByRootPath(ctx context.Context, folderID int, rootPath, preferredType string) (string, error)
+}
+
+type filesystemMediaItemWriter interface {
+	Upsert(ctx context.Context, item *models.MediaItem) error
+}
 
 // ScanAudiobookFolder walks an audiobooks-typed media folder and writes
 // one media_items row per subdirectory it can parse as an audiobook,
@@ -75,7 +82,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		return fmt.Errorf("parse audiobook folder %s: %w", folderPath, err)
 	}
 
-	contentID, err := s.upsertAudiobookMediaItem(ctx, parsed)
+	contentID, err := s.upsertAudiobookMediaItem(ctx, folder.ID, folderPath, parsed)
 	if err != nil {
 		return fmt.Errorf("upsert audiobook item: %w", err)
 	}
@@ -96,33 +103,42 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	return nil
 }
 
-// upsertAudiobookMediaItem looks up an existing media_items row by
-// title+year+type, updates it if found, or creates a new row.
+// upsertAudiobookMediaItem reuses an item already linked to the same filesystem
+// root, or creates a new row. It intentionally does not dedupe by title/year:
+// audiobooks often share titles, unknown years, or edition-specific credits.
 // Returns the content_id used.
-func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudiobook) (string, error) {
+func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, folderID int, folderPath string, book *parsedAudiobook) (string, error) {
 	if s.itemRepo == nil {
 		return "", fmt.Errorf("itemRepo not configured on Scanner")
 	}
-
-	existing, err := s.itemRepo.GetByTitleYearType(ctx, book.Title, book.Year, "audiobook")
-	if err == nil && existing != nil {
-		// Found — refresh mutable fields and re-upsert.
-		existing.Title = book.Title
-		existing.Year = book.Year
-		existing.Type = "audiobook"
-		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(book.Title)
-		}
-		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
-			return "", err
-		}
-		return existing.ContentID, nil
+	if s.fileRepo == nil {
+		return "", fmt.Errorf("fileRepo not configured on Scanner")
 	}
-	if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
-		return "", fmt.Errorf("GetByTitleYearType: %w", err)
+	return resolveAudiobookMediaItem(ctx, s.fileRepo, s.itemRepo, folderID, folderPath, book)
+}
+
+func resolveAudiobookMediaItem(
+	ctx context.Context,
+	rootFinder filesystemRootContentFinder,
+	itemWriter filesystemMediaItemWriter,
+	folderID int,
+	folderPath string,
+	book *parsedAudiobook,
+) (string, error) {
+	if rootFinder == nil {
+		return "", fmt.Errorf("root content finder not configured")
+	}
+	if itemWriter == nil {
+		return "", fmt.Errorf("media item writer not configured")
+	}
+	existingID, err := rootFinder.FindContentIDByRootPath(ctx, folderID, folderPath, "audiobook")
+	if err != nil {
+		return "", fmt.Errorf("find audiobook by root path: %w", err)
+	}
+	if existingID != "" {
+		return existingID, nil
 	}
 
-	// Not found — create.
 	id, err := idgen.NextID()
 	if err != nil {
 		return "", fmt.Errorf("generate content_id: %w", err)
@@ -134,7 +150,7 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, book *parsedAudi
 		SortTitle: titleutil.DeriveDefaultSortTitle(book.Title),
 		Year:      book.Year,
 	}
-	if err := s.itemRepo.Upsert(ctx, item); err != nil {
+	if err := itemWriter.Upsert(ctx, item); err != nil {
 		return "", err
 	}
 	return id, nil

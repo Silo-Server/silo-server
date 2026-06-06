@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -26,10 +25,15 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		return fmt.Errorf("ScanPodcastFolder: nil scanner or folder")
 	}
 
+	var attempted int
+	var succeeded int
+	var failures []error
 	for _, root := range folder.Paths {
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			slog.Warn("podcast scan: read root failed", "root", root, "error", err)
+			attempted++
+			failures = append(failures, fmt.Errorf("read root %s: %w", root, err))
 			continue
 		}
 		for _, entry := range entries {
@@ -37,15 +41,22 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				continue
 			}
 			subPath := filepath.Join(root, entry.Name())
+			attempted++
 			if err := s.reconcilePodcastShow(ctx, folder, subPath); err != nil {
 				slog.Warn("podcast scan: show failed",
 					"folder_id", folder.ID,
 					"path", subPath,
 					"error", err,
 				)
+				failures = append(failures, fmt.Errorf("%s: %w", subPath, err))
 				// Continue with siblings — one bad show should not stop the scan.
+				continue
 			}
+			succeeded++
 		}
+	}
+	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
+		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
 	}
 	return nil
 }
@@ -59,7 +70,7 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 		return fmt.Errorf("parse podcast show %s: %w", folderPath, err)
 	}
 
-	showContentID, err := s.upsertPodcastMediaItem(ctx, parsed)
+	showContentID, err := s.upsertPodcastMediaItem(ctx, folder.ID, folderPath, parsed)
 	if err != nil {
 		return fmt.Errorf("upsert podcast item: %w", err)
 	}
@@ -77,32 +88,42 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 	return nil
 }
 
-// upsertPodcastMediaItem looks up an existing media_items row by
-// title+year+type='podcast', updates it if found, or creates a new row.
+// upsertPodcastMediaItem reuses an item already linked to the same filesystem
+// root, or creates a new row. It intentionally avoids title/year-only dedupe
+// because filesystem podcasts can have duplicate titles and missing years.
 // Returns the content_id used.
-func (s *Scanner) upsertPodcastMediaItem(ctx context.Context, show *parsedPodcastShow) (string, error) {
+func (s *Scanner) upsertPodcastMediaItem(ctx context.Context, folderID int, folderPath string, show *parsedPodcastShow) (string, error) {
 	if s.itemRepo == nil {
 		return "", fmt.Errorf("itemRepo not configured on Scanner")
 	}
-
-	existing, err := s.itemRepo.GetByTitleYearType(ctx, show.Title, show.Year, "podcast")
-	if err == nil && existing != nil {
-		existing.Title = show.Title
-		existing.Year = show.Year
-		existing.Type = "podcast"
-		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(show.Title)
-		}
-		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
-			return "", err
-		}
-		return existing.ContentID, nil
+	if s.fileRepo == nil {
+		return "", fmt.Errorf("fileRepo not configured on Scanner")
 	}
-	if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
-		return "", fmt.Errorf("GetByTitleYearType: %w", err)
+	return resolvePodcastMediaItem(ctx, s.fileRepo, s.itemRepo, folderID, folderPath, show)
+}
+
+func resolvePodcastMediaItem(
+	ctx context.Context,
+	rootFinder filesystemRootContentFinder,
+	itemWriter filesystemMediaItemWriter,
+	folderID int,
+	folderPath string,
+	show *parsedPodcastShow,
+) (string, error) {
+	if rootFinder == nil {
+		return "", fmt.Errorf("root content finder not configured")
+	}
+	if itemWriter == nil {
+		return "", fmt.Errorf("media item writer not configured")
+	}
+	existingID, err := rootFinder.FindContentIDByRootPath(ctx, folderID, folderPath, "podcast")
+	if err != nil {
+		return "", fmt.Errorf("find podcast by root path: %w", err)
+	}
+	if existingID != "" {
+		return existingID, nil
 	}
 
-	// Not found — create.
 	id, err := idgen.NextID()
 	if err != nil {
 		return "", fmt.Errorf("generate content_id: %w", err)
@@ -114,7 +135,7 @@ func (s *Scanner) upsertPodcastMediaItem(ctx context.Context, show *parsedPodcas
 		SortTitle: titleutil.DeriveDefaultSortTitle(show.Title),
 		Year:      show.Year,
 	}
-	if err := s.itemRepo.Upsert(ctx, item); err != nil {
+	if err := itemWriter.Upsert(ctx, item); err != nil {
 		return "", err
 	}
 	return id, nil
