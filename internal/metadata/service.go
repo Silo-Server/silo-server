@@ -1137,7 +1137,12 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				Language:    req.Language,
 			})
 			if err != nil {
-				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+				// Pass nil for provider404s: a 404 fetching seasons is a
+				// child-resource failure (e.g. TMDB returns 404 for /tv/{id}/season/0
+				// when a series has no specials season). It must not be recorded
+				// as an item-level stale provider ID — matches the pattern used
+				// by fetchTargetSeasonResults.
+				if handleProvider404(nil, accumulatedIDs, p.Slug(), err,
 					"content_id", req.ContentID,
 					"season", 0,
 				) {
@@ -1170,7 +1175,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						Language:     req.Language,
 					})
 					if err != nil {
-						if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+						// Pass nil for provider404s: episode 404s are normal
+						// (e.g. TMDB returns 404 for episodes that haven't
+						// aired yet). They must not be recorded as item-level
+						// stale provider IDs — matches fetchTargetEpisodeResults.
+						if handleProvider404(nil, accumulatedIDs, p.Slug(), err,
 							"content_id", req.ContentID,
 							"season", season.SeasonNumber,
 						) {
