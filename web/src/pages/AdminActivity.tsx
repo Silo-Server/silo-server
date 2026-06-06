@@ -1,21 +1,31 @@
 import type { ReactNode } from "react";
-import { useState, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
+import { usePageActivity } from "@/hooks/usePageActivity";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types";
 import { useIPUsers } from "@/hooks/queries/admin/ips";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import {
   formatAudioDetail,
+  formatContainerDetail,
+  formatDeliveredAudioSummary,
+  formatDeliveredContainerSummary,
+  formatDeliveredVideoSummary,
   formatAudioSummary,
   formatDecisionLabel,
   formatSessionBitrate,
+  formatSourceContainerSummary,
+  formatTranscodeModeSummary,
   formatVideoDetail,
   formatVideoSummary,
+  normalizeContainerDecision,
+  normalizeStreamDecision,
 } from "@/pages/adminActivityPresentation";
 import {
   Table,
@@ -32,7 +42,9 @@ import {
   Filter,
   X,
   Play,
+  Pause,
   Terminal,
+  FileText,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -40,10 +52,17 @@ import {
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
 
+const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+
 export default function AdminActivity() {
   const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
   const { connectionState } = useRealtimeEvents();
+  const pageActivity = usePageActivity();
   const error = undefined;
+  const manualRefreshStartedAtRef = useRef<number | null>(null);
+  const ipLookupRef = useRef<HTMLDetailsElement | null>(null);
+  const wasRealtimePausedRef = useRef(!pageActivity.canApplyRealtimeUpdates);
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState<string | null>(null);
   const [nodeFilter, setNodeFilter] = useState<string | null>(null);
@@ -52,7 +71,47 @@ export default function AdminActivity() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [ipSearch, setIPSearch] = useState("");
   const [activeIP, setActiveIP] = useState("");
+  const [ipLookupOpen, setIPLookupOpen] = useState(false);
   const { data: ipUsers = [], isLoading: ipLoading } = useIPUsers(activeIP);
+
+  const refreshActivity = useCallback(
+    async ({ manual }: { manual: boolean }) => {
+      if (manual) {
+        manualRefreshStartedAtRef.current = Date.now();
+        setIsManualRefreshPending(true);
+      }
+      try {
+        await refresh();
+      } finally {
+        if (manual) {
+          const startedAt = manualRefreshStartedAtRef.current;
+          if (startedAt !== null) {
+            const elapsed = Date.now() - startedAt;
+            const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
+            if (remaining > 0) {
+              await delay(remaining);
+            }
+          }
+          manualRefreshStartedAtRef.current = null;
+          setIsManualRefreshPending(false);
+        }
+      }
+    },
+    [refresh],
+  );
+
+  useEffect(() => {
+    if (!pageActivity.canApplyRealtimeUpdates) {
+      wasRealtimePausedRef.current = true;
+      return;
+    }
+    if (!wasRealtimePausedRef.current || isManualRefreshPending) {
+      return;
+    }
+
+    wasRealtimePausedRef.current = false;
+    void refreshActivity({ manual: true });
+  }, [isManualRefreshPending, pageActivity.canApplyRealtimeUpdates, refreshActivity]);
 
   // Aggregate counts
   const methods = useMemo(() => {
@@ -120,6 +179,20 @@ export default function AdminActivity() {
 
   const activeFilters = [methodFilter, nodeFilter, typeFilter].filter(Boolean).length;
 
+  const runIPLookup = useCallback((ip: string) => {
+    const trimmed = ip.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setIPSearch(trimmed);
+    setActiveIP(trimmed);
+    setIPLookupOpen(true);
+    window.requestAnimationFrame(() => {
+      ipLookupRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, []);
+
   if (isLoading) return <div className="text-muted-foreground p-8">Loading activity...</div>;
 
   return (
@@ -128,7 +201,7 @@ export default function AdminActivity() {
       <div className="page-header">
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Activity</h1>
+            <h1 className="page-title text-[clamp(2rem,4vw,3.25rem)]">Activity</h1>
             {sessions.length > 0 && (
               <span className="live-badge flex items-center gap-1.5">
                 <Radio className="h-3 w-3" />
@@ -136,29 +209,41 @@ export default function AdminActivity() {
               </span>
             )}
           </div>
-          <p className="text-muted-foreground mt-1 text-[13px]">
+          <p className="page-subtitle text-sm sm:text-base">
             {sessions.length === 0
               ? "No active streams"
               : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${Object.keys(nodes).length} node${Object.keys(nodes).length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-w-[8.25rem] justify-center"
+            onClick={() => void refreshActivity({ manual: true })}
+            disabled={isManualRefreshPending}
+            aria-busy={isManualRefreshPending}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`} />
+            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+          </Button>
+          <div className="min-w-[8.75rem] px-1 text-right">
             <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              Stream
+              Realtime Updates
             </div>
             <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
             {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
           </div>
-          <Button variant="outline" size="sm" onClick={() => void refresh()}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
         </div>
       </div>
 
       {/* IP Lookup */}
-      <details className="surface-panel rounded-2xl border-0">
+      <details
+        ref={ipLookupRef}
+        open={ipLookupOpen}
+        onToggle={(event) => setIPLookupOpen(event.currentTarget.open)}
+        className="surface-panel rounded-2xl border-0"
+      >
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium select-none">
           IP Lookup
         </summary>
@@ -363,7 +448,7 @@ export default function AdminActivity() {
       ) : (
         <div className="bg-card border-border overflow-hidden rounded-lg border">
           {/* Table header */}
-          <div className="border-border bg-surface/50 hidden grid-cols-[minmax(140px,1.5fr)_minmax(220px,2.2fr)_minmax(150px,1.4fr)_minmax(150px,1.4fr)_minmax(90px,1fr)_80px] items-center gap-3 border-b px-4 py-2.5 sm:grid">
+          <div className="border-border bg-surface/50 hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 border-b px-3 py-2.5 sm:grid">
             <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
               User
             </SortHeader>
@@ -371,11 +456,8 @@ export default function AdminActivity() {
               Stream
             </SortHeader>
             <SortHeader field="method" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Video
+              Playback
             </SortHeader>
-            <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              Audio
-            </div>
             <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
               Node
             </SortHeader>
@@ -388,12 +470,20 @@ export default function AdminActivity() {
             >
               Time
             </SortHeader>
+            <div className="text-muted-foreground text-right text-[10px] font-semibold tracking-wider uppercase">
+              Actions
+            </div>
           </div>
 
           {/* Rows */}
-          <div className="max-h-[calc(100vh-420px)] min-h-[200px] overflow-y-auto">
+          <div className="max-h-[calc(100vh-420px)] overflow-y-auto">
             {filtered.map((session, i) => (
-              <StreamRow key={session.session_id} session={session} even={i % 2 === 0} />
+              <StreamRow
+                key={session.session_id}
+                session={session}
+                even={i % 2 === 0}
+                onIPLookup={runIPLookup}
+              />
             ))}
           </div>
         </div>
@@ -404,20 +494,35 @@ export default function AdminActivity() {
 
 // --- Sub-components ---
 
-function StreamRow({ session, even }: { session: AdminSession; even: boolean }) {
+function StreamRow({
+  session,
+  even,
+  onIPLookup,
+}: {
+  session: AdminSession;
+  even: boolean;
+  onIPLookup: (ip: string) => void;
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const title = getDisplayTitle(session);
   const subtitle = getDisplaySubtitle(session);
   const username = session.username || `User #${session.user_id}`;
   const elapsed = getElapsed(session.started_at);
-  const historyHref = `/admin/history?user_id=${session.user_id}${session.profile_id ? `&profile_id=${encodeURIComponent(session.profile_id)}` : ""}`;
+  const profileDisplay = session.profile_name || session.profile_id || "";
+  const userHref = `/admin/users/${session.user_id}`;
+  const itemHref = session.content_id ? `/item/${session.content_id}` : "";
   const sourceContainer = session.source_container?.trim().toUpperCase();
   const streamBitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const streamMeta = [sourceContainer, streamBitrate].filter(Boolean).join(" · ");
-  const userMeta = session.client_ip?.trim() || "—";
-  const videoDecision = session.video_decision || session.play_method;
-  const audioDecision =
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method);
+  const clientIP = session.client_ip?.trim() || "";
+  const playbackPosition = formatPlaybackPosition(session);
+  const transcodeMode = formatTranscodeModeSummary(session);
+  const containerDecision = normalizeContainerDecision(session.play_method);
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  const audioDecision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
   const ffmpegLogsHref = `${logsHref}&component=ffmpeg`;
   const ffmpegLogs = useOperationalLogs(
@@ -429,6 +534,27 @@ function StreamRow({ session, even }: { session: AdminSession; even: boolean }) 
     ffmpegOpen,
   );
   const ffmpegRows = ffmpegLogs.data?.entries ?? [];
+  const expandedOpen = detailsOpen || ffmpegOpen;
+
+  const toggleDetails = () => {
+    setDetailsOpen((open) => {
+      const nextOpen = !open;
+      if (!nextOpen) {
+        setFFmpegOpen(false);
+      }
+      return nextOpen;
+    });
+  };
+
+  const toggleFFmpeg = () => {
+    setFFmpegOpen((open) => {
+      const nextOpen = !open;
+      if (nextOpen) {
+        setDetailsOpen(true);
+      }
+      return nextOpen;
+    });
+  };
 
   return (
     <div
@@ -437,67 +563,104 @@ function StreamRow({ session, even }: { session: AdminSession; even: boolean }) 
       }`}
     >
       {/* Desktop row */}
-      <div className="hidden grid-cols-[minmax(140px,1.5fr)_minmax(220px,2.2fr)_minmax(150px,1.4fr)_minmax(150px,1.4fr)_minmax(90px,1fr)_80px] items-center gap-3 px-4 py-2.5 sm:grid">
+      <div className="hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 px-3 py-2.5 sm:grid">
         {/* User */}
         <div className="flex min-w-0 items-center gap-2">
-          <div
-            className="text-primary-foreground flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
-            style={{ background: "var(--primary)" }}
+          <Link
+            to={userHref}
+            className="hover:text-primary flex min-w-0 items-center gap-2 transition-colors"
           >
-            {username.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <Link
-              to={historyHref}
-              className="hover:text-primary block truncate text-[13px] font-medium transition-colors"
+            <div
+              className="text-primary-foreground flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+              style={{ background: "var(--primary)" }}
             >
-              {username}
-            </Link>
-            <div className="text-muted-foreground truncate text-[10px]">{userMeta}</div>
-          </div>
+              {username.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="block truncate text-[13px] font-medium">{username}</div>
+              {profileDisplay ? (
+                <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                  <span className="border-primary/30 bg-primary/15 text-primary max-w-full truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
+                    {profileDisplay}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </Link>
+          {clientIP ? (
+            <button
+              type="button"
+              onClick={() => onIPLookup(clientIP)}
+              className="text-muted-foreground hover:text-primary min-w-0 cursor-pointer truncate text-[10px] transition-colors"
+            >
+              {clientIP}
+            </button>
+          ) : null}
         </div>
 
         {/* Stream */}
         <div className="min-w-0">
-          {session.content_id ? (
-            <Link
-              to={`/item/${session.content_id}`}
-              className="hover:text-primary block truncate text-[13px] font-medium transition-colors"
-            >
-              {title}
+          {itemHref ? (
+            <Link to={itemHref} className="hover:text-primary block min-w-0 transition-colors">
+              <div className="truncate text-[13px] font-medium">{title}</div>
+              {subtitle && (
+                <div className="text-muted-foreground hover:text-primary truncate text-[10px] transition-colors">
+                  {subtitle}
+                </div>
+              )}
+              {streamMeta && (
+                <div className="text-muted-foreground hover:text-primary truncate text-[10px] transition-colors">
+                  {streamMeta}
+                </div>
+              )}
             </Link>
           ) : (
-            <div className="truncate text-[13px] font-medium">{title}</div>
-          )}
-          {subtitle && <div className="text-muted-foreground truncate text-[10px]">{subtitle}</div>}
-          {streamMeta && (
-            <div className="text-muted-foreground truncate text-[10px]">{streamMeta}</div>
+            <>
+              <div className="truncate text-[13px] font-medium">{title}</div>
+              {subtitle && (
+                <div className="text-muted-foreground truncate text-[10px]">{subtitle}</div>
+              )}
+              {streamMeta && (
+                <div className="text-muted-foreground truncate text-[10px]">{streamMeta}</div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Video */}
+        {/* Playback */}
         <div className="min-w-0">
-          <span
-            className={`mb-1 inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(videoDecision)}`}
-          >
-            {formatDecisionLabel(videoDecision)}
-          </span>
-          <div className="truncate text-[12px] font-medium">{formatVideoSummary(session)}</div>
-          <div className="text-muted-foreground truncate text-[10px]">
-            {formatVideoDetail(session)}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {transcodeMode ? <TranscodeModeBadge label={transcodeMode} /> : null}
+            <button
+              type="button"
+              onClick={toggleDetails}
+              aria-expanded={expandedOpen}
+              className="text-muted-foreground hover:text-primary inline-flex items-center gap-0.5 text-[10px] font-medium transition-colors"
+            >
+              Details
+              {expandedOpen ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+            </button>
           </div>
-        </div>
-
-        {/* Audio */}
-        <div className="min-w-0">
-          <span
-            className={`mb-1 inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(audioDecision)}`}
-          >
-            {formatDecisionLabel(audioDecision)}
-          </span>
-          <div className="truncate text-[12px] font-medium">{formatAudioSummary(session)}</div>
-          <div className="text-muted-foreground truncate text-[10px]">
-            {formatAudioDetail(session)}
+          <div className="mt-1.5 space-y-1">
+            <PlaybackSummaryLine
+              label="Container"
+              decision={containerDecision}
+              value={formatDeliveredContainerSummary(session)}
+            />
+            <PlaybackSummaryLine
+              label="Video"
+              decision={videoDecision}
+              value={formatDeliveredVideoSummary(session)}
+            />
+            <PlaybackSummaryLine
+              label="Audio"
+              decision={audioDecision}
+              value={formatDeliveredAudioSummary(session)}
+            />
           </div>
         </div>
 
@@ -506,52 +669,90 @@ function StreamRow({ session, even }: { session: AdminSession; even: boolean }) 
           <div className="text-muted-foreground truncate text-[12px]">
             {session.node_display_name || session.reporting_node || "—"}
           </div>
-          {(session.profile_name || session.profile_id) && (
-            <div className="text-muted-foreground truncate text-[10px]">
-              {session.profile_name || session.profile_id}
-            </div>
-          )}
         </div>
 
         {/* Duration */}
-        <div className="text-muted-foreground text-right font-mono text-[12px] tabular-nums">
-          <div>{elapsed}</div>
-          <div className="mt-1 flex items-center justify-end gap-2">
-            <AdminSessionActions session={session} compact />
-            <button
-              type="button"
-              onClick={() => setFFmpegOpen((open) => !open)}
-              className="text-primary inline-flex items-center gap-1 text-[11px]"
+        <div className="min-w-0 text-right">
+          <div className="flex items-center justify-end">
+            <span
+              className={`inline-flex min-w-[4.75rem] items-center justify-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
+                session.is_paused
+                  ? "border-amber-400/35 bg-amber-400/10 text-amber-300"
+                  : "border-emerald-400/35 bg-emerald-400/10 text-emerald-300"
+              }`}
             >
-              <Terminal className="h-3 w-3" />
-              FFmpeg
-              {ffmpegOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-            <Link to={logsHref} className="text-primary inline-block text-[11px]">
-              View Logs
-            </Link>
-            <Link to={ffmpegLogsHref} className="text-primary/80 inline-block text-[11px]">
-              FFmpeg Logs
-            </Link>
+              {session.is_paused ? (
+                <Pause className="h-2.5 w-2.5" />
+              ) : (
+                <Play className="h-2.5 w-2.5" />
+              )}
+              {session.is_paused ? "Paused" : "Playing"}
+            </span>
           </div>
+          <div className="text-foreground mt-1 font-mono text-[12px] leading-tight tabular-nums">
+            {playbackPosition}
+          </div>
+          <div className="text-muted-foreground mt-0.5 text-[10px] leading-tight tabular-nums">
+            Session active {elapsed}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="min-w-0">
+          <AdminSessionActions
+            session={session}
+            compact
+            layout="inline"
+            showInlineTerminate
+            inlinePrefixActions={
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-[11px]"
+                onClick={toggleFFmpeg}
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                {ffmpegOpen ? "Hide FFmpeg" : "FFmpeg"}
+              </Button>
+            }
+            extraMenuItems={
+              <>
+                <DropdownMenuItem asChild>
+                  <Link to={logsHref}>
+                    <FileText className="h-4 w-4" />
+                    View Logs
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to={ffmpegLogsHref}>
+                    <Terminal className="h-4 w-4" />
+                    FFmpeg Logs
+                  </Link>
+                </DropdownMenuItem>
+              </>
+            }
+          />
         </div>
       </div>
 
       {/* Mobile row */}
       <div className="flex gap-3 px-4 py-3 sm:hidden">
-        <div
+        <Link
+          to={userHref}
           className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
           style={{ background: "var(--primary)" }}
         >
           {username.charAt(0).toUpperCase()}
-        </div>
+        </Link>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Link
-              to={historyHref}
-              className="hover:text-primary truncate text-[13px] font-semibold transition-colors"
-            >
-              {username}
+            <Link to={userHref} className="hover:text-primary truncate transition-colors">
+              <span className="text-[13px] font-semibold">{username}</span>
+              {profileDisplay ? (
+                <span className="border-primary/30 bg-primary/15 text-primary ml-1.5 rounded border px-1.5 py-0.5 text-[10px] leading-none">
+                  {profileDisplay}
+                </span>
+              ) : null}
             </Link>
             <span
               className={`inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(session.play_method)}`}
@@ -560,11 +761,8 @@ function StreamRow({ session, even }: { session: AdminSession; even: boolean }) 
             </span>
           </div>
           <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
-            {session.content_id ? (
-              <Link
-                to={`/item/${session.content_id}`}
-                className="hover:text-primary truncate transition-colors"
-              >
+            {itemHref ? (
+              <Link to={itemHref} className="hover:text-primary truncate transition-colors">
                 {title}
               </Link>
             ) : (
@@ -573,70 +771,128 @@ function StreamRow({ session, even }: { session: AdminSession; even: boolean }) 
             <span className="flex-shrink-0">·</span>
             <span className="flex-shrink-0 font-mono tabular-nums">{elapsed}</span>
           </div>
-          <div className="text-muted-foreground mt-1 truncate text-[10px]">
-            {[userMeta, streamMeta || null].filter(Boolean).join(" · ")}
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <div className="rounded-md border border-white/6 bg-white/[0.03] px-2 py-1.5">
-              <div className="mb-1 flex items-center gap-1.5">
-                <span
-                  className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(videoDecision)}`}
+          {(clientIP || streamMeta) && (
+            <div className="text-muted-foreground mt-1 flex min-w-0 gap-1.5 text-[10px]">
+              {clientIP ? (
+                <button
+                  type="button"
+                  onClick={() => onIPLookup(clientIP)}
+                  className="hover:text-primary shrink-0 cursor-pointer transition-colors"
                 >
-                  {formatDecisionLabel(videoDecision)}
-                </span>
-                <span className="text-muted-foreground text-[9px] tracking-wide uppercase">
-                  Video
-                </span>
-              </div>
-              <div className="truncate text-[11px] font-medium">{formatVideoSummary(session)}</div>
-              <div className="text-muted-foreground truncate text-[10px]">
-                {formatVideoDetail(session)}
-              </div>
+                  {clientIP}
+                </button>
+              ) : null}
+              {clientIP && streamMeta ? <span className="shrink-0">·</span> : null}
+              {streamMeta ? (
+                itemHref ? (
+                  <Link to={itemHref} className="hover:text-primary min-w-0 truncate">
+                    {streamMeta}
+                  </Link>
+                ) : (
+                  <span className="min-w-0 truncate">{streamMeta}</span>
+                )
+              ) : null}
             </div>
-            <div className="rounded-md border border-white/6 bg-white/[0.03] px-2 py-1.5">
-              <div className="mb-1 flex items-center gap-1.5">
-                <span
-                  className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(audioDecision)}`}
-                >
-                  {formatDecisionLabel(audioDecision)}
-                </span>
-                <span className="text-muted-foreground text-[9px] tracking-wide uppercase">
-                  Audio
-                </span>
-              </div>
-              <div className="truncate text-[11px] font-medium">{formatAudioSummary(session)}</div>
-              <div className="text-muted-foreground truncate text-[10px]">
-                {formatAudioDetail(session)}
-              </div>
+          )}
+          <div className="text-muted-foreground mt-1 flex items-center gap-2 text-[10px]">
+            <span
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
+                session.is_paused
+                  ? "border-amber-400/35 bg-amber-400/10 text-amber-300"
+                  : "border-emerald-400/35 bg-emerald-400/10 text-emerald-300"
+              }`}
+            >
+              {session.is_paused ? (
+                <Pause className="h-2.5 w-2.5" />
+              ) : (
+                <Play className="h-2.5 w-2.5" />
+              )}
+              {session.is_paused ? "Paused" : "Playing"}
+            </span>
+            <span className="font-mono tabular-nums">{playbackPosition}</span>
+          </div>
+          <div className="mt-2 rounded-md border border-white/6 bg-white/[0.03] px-2 py-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {transcodeMode ? <TranscodeModeBadge label={transcodeMode} /> : null}
+              <button
+                type="button"
+                onClick={toggleDetails}
+                aria-expanded={expandedOpen}
+                className="text-muted-foreground hover:text-primary inline-flex items-center gap-0.5 text-[10px] font-medium transition-colors"
+              >
+                Details
+                {expandedOpen ? (
+                  <ChevronUp className="h-3 w-3" />
+                ) : (
+                  <ChevronDown className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+            <div className="mt-1.5 space-y-1">
+              <PlaybackSummaryLine
+                label="Container"
+                decision={containerDecision}
+                value={formatDeliveredContainerSummary(session)}
+              />
+              <PlaybackSummaryLine
+                label="Video"
+                decision={videoDecision}
+                value={formatDeliveredVideoSummary(session)}
+              />
+              <PlaybackSummaryLine
+                label="Audio"
+                decision={audioDecision}
+                value={formatDeliveredAudioSummary(session)}
+              />
             </div>
           </div>
-          <div className="mt-2 flex items-center gap-3">
-            <AdminSessionActions session={session} compact />
-            <button
-              type="button"
-              onClick={() => setFFmpegOpen((open) => !open)}
-              className="text-primary inline-flex items-center gap-1 text-[11px] font-medium"
-            >
-              <Terminal className="h-3 w-3" />
-              FFmpeg
-              {ffmpegOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-            <Link to={logsHref} className="text-primary inline-block text-[11px] font-medium">
-              View Logs
-            </Link>
-            <Link
-              to={ffmpegLogsHref}
-              className="text-primary/80 inline-block text-[11px] font-medium"
-            >
-              FFmpeg Logs
-            </Link>
+          <div className="mt-2 flex items-center justify-end">
+            <AdminSessionActions
+              session={session}
+              compact
+              layout="inline"
+              showInlineTerminate
+              inlinePrefixActions={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-[11px]"
+                  onClick={toggleFFmpeg}
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  {ffmpegOpen ? "Hide FFmpeg" : "FFmpeg"}
+                </Button>
+              }
+              extraMenuItems={
+                <>
+                  <DropdownMenuItem asChild>
+                    <Link to={logsHref}>
+                      <FileText className="h-4 w-4" />
+                      View Logs
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={ffmpegLogsHref}>
+                      <Terminal className="h-4 w-4" />
+                      FFmpeg Logs
+                    </Link>
+                  </DropdownMenuItem>
+                </>
+              }
+            />
           </div>
         </div>
       </div>
 
-      {ffmpegOpen && (
-        <FFmpegLogPanel
+      {expandedOpen && (
+        <PlaybackExpandedPanel
+          session={session}
           sessionID={session.session_id}
+          containerDecision={containerDecision}
+          videoDecision={videoDecision}
+          audioDecision={audioDecision}
+          transcodeMode={transcodeMode}
+          showFFmpeg={ffmpegOpen}
           rows={ffmpegRows}
           isLoading={ffmpegLogs.isLoading}
           isFetching={ffmpegLogs.isFetching}
@@ -647,14 +903,68 @@ function StreamRow({ session, even }: { session: AdminSession; even: boolean }) 
   );
 }
 
-function FFmpegLogPanel({
+function PlaybackSummaryLine({
+  label,
+  decision,
+  value,
+}: {
+  label: string;
+  decision: string;
+  value: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight">
+      <span className="text-muted-foreground w-14 shrink-0 text-[9px] font-semibold tracking-wide uppercase">
+        {label}
+      </span>
+      <span
+        className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[8px] leading-none font-semibold ${methodBadgeColor(decision)}`}
+      >
+        {formatDecisionLabel(decision)}
+      </span>
+      <span className="truncate font-medium">{value}</span>
+    </div>
+  );
+}
+
+function TranscodeModeBadge({ label }: { label: string }) {
+  return (
+    <span
+      className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${transcodeModeBadgeColor(label)}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function transcodeModeBadgeColor(label: string): string {
+  const normalized = label.trim().toLowerCase();
+  if (normalized === "sw" || normalized === "audio sw") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  return "border-cyan-400/20 bg-cyan-400/10 text-cyan-200";
+}
+
+function PlaybackExpandedPanel({
+  session,
   sessionID,
+  containerDecision,
+  videoDecision,
+  audioDecision,
+  transcodeMode,
+  showFFmpeg,
   rows,
   isLoading,
   isFetching,
   logsHref,
 }: {
+  session: AdminSession;
   sessionID: string;
+  containerDecision: string;
+  videoDecision: string;
+  audioDecision: string;
+  transcodeMode: string | null;
+  showFFmpeg: boolean;
   rows: OperationalLogEntry[];
   isLoading: boolean;
   isFetching: boolean;
@@ -666,70 +976,166 @@ function FFmpegLogPanel({
         <div>
           <div className="flex items-center gap-2">
             <div className="rounded-full border border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-2 py-0.5 text-[10px] font-semibold tracking-[0.2em] text-[var(--terminal-fg)] uppercase">
-              FFmpeg
+              Playback
             </div>
-            <div className="text-foreground/85 text-[11px] font-medium">Live transcode console</div>
+            <div className="text-foreground/85 text-[11px] font-medium">
+              Stream details{showFFmpeg ? " and live transcode console" : ""}
+            </div>
           </div>
           <div className="text-muted-foreground mt-1 font-mono text-[10px]">{sessionID}</div>
         </div>
-        <div className="flex items-center gap-3">
-          {isFetching && <div className="text-muted-foreground text-[10px]">Refreshing…</div>}
-          <Link
-            to={logsHref}
-            className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
-          >
-            Open full ffmpeg logs
-          </Link>
-        </div>
+        {showFFmpeg && isFetching ? (
+          <div className="text-muted-foreground text-[10px]">Refreshing…</div>
+        ) : null}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-        {isLoading ? (
-          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-            Loading ffmpeg output…
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-            No ffmpeg rows yet for this session. If the session is direct play or remux without a
-            transcode worker, nothing will appear here.
-          </div>
-        ) : (
-          <div className="max-h-64 overflow-y-auto">
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
-              >
-                <div className="space-y-1">
-                  <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
-                    {formatTimeOnly(row.timestamp)}
-                  </div>
-                  <div className="text-[10px] tracking-[0.18em] text-[var(--terminal-muted)]/60 uppercase">
-                    {row.message.includes("stderr") ? "stderr" : "event"}
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
-                    {ffmpegRowText(row)}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
-                    {row.node_id && <span>{row.node_id}</span>}
-                    {stringAttr(row, "target_resolution") !== "-" && (
-                      <span>{stringAttr(row, "target_resolution")}</span>
-                    )}
-                    {stringAttr(row, "hw_accel") !== "-" && (
-                      <span>{stringAttr(row, "hw_accel")}</span>
-                    )}
-                    {stringAttr(row, "restart_count") !== "-" && (
-                      <span>restart {stringAttr(row, "restart_count")}</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <PlaybackDetailCard
+          label="Container"
+          decision={containerDecision}
+          source={formatSourceContainerSummary(session)}
+          delivered={formatDeliveredContainerSummary(session)}
+          detail={formatContainerDetail(session)}
+        />
+        <PlaybackDetailCard
+          label="Video"
+          decision={videoDecision}
+          source={formatVideoSummary(session)}
+          delivered={formatDeliveredVideoSummary(session)}
+          detail={formatVideoDetail(session)}
+          mode={videoDecision === "transcode" ? transcodeMode : null}
+        />
+        <PlaybackDetailCard
+          label="Audio"
+          decision={audioDecision}
+          source={formatAudioSummary(session)}
+          delivered={formatDeliveredAudioSummary(session)}
+          detail={formatAudioDetail(session)}
+          mode={
+            audioDecision === "transcode" && videoDecision !== "transcode" ? transcodeMode : null
+          }
+        />
       </div>
+
+      {showFFmpeg ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Link
+              to={logsHref}
+              className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
+            >
+              Open full FFmpeg logs
+            </Link>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+            {isLoading ? (
+              <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+                Loading ffmpeg output…
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+                No ffmpeg rows yet for this session. If the session is direct play or remux without
+                a transcode worker, nothing will appear here.
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
+                  >
+                    <div className="space-y-1">
+                      <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
+                        {formatTimeOnly(row.timestamp)}
+                      </div>
+                      <div className="text-[10px] tracking-[0.18em] text-[var(--terminal-muted)]/60 uppercase">
+                        {row.message.includes("stderr") ? "stderr" : "event"}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
+                        {ffmpegRowText(row)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
+                        {row.node_id && <span>{row.node_id}</span>}
+                        {stringAttr(row, "target_resolution") !== "-" && (
+                          <span>{stringAttr(row, "target_resolution")}</span>
+                        )}
+                        {stringAttr(row, "hw_accel") !== "-" && (
+                          <span>{stringAttr(row, "hw_accel")}</span>
+                        )}
+                        {stringAttr(row, "restart_count") !== "-" && (
+                          <span>restart {stringAttr(row, "restart_count")}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PlaybackDetailCard({
+  label,
+  decision,
+  source,
+  delivered,
+  detail,
+  mode,
+}: {
+  label: string;
+  decision: string;
+  source: string;
+  delivered: string;
+  detail: string;
+  mode?: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--terminal-border)]/60 bg-[var(--terminal-bg)]/60 px-3 py-2">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[10px] font-semibold tracking-[0.18em] text-[var(--terminal-muted)] uppercase">
+          {label}
+        </span>
+        <span
+          className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(decision)}`}
+        >
+          {formatDecisionLabel(decision)}
+        </span>
+      </div>
+      <div className="grid gap-1 text-[11px]">
+        <PlaybackDetailLine label="Source" value={source} />
+        <PlaybackDetailLine label="Delivered" value={delivered} />
+        {mode ? <PlaybackDetailLine label="Mode" value={mode} /> : null}
+        <PlaybackDetailLine label="Detail" value={detail} muted />
+      </div>
+    </div>
+  );
+}
+
+function PlaybackDetailLine({
+  label,
+  value,
+  muted = false,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+}) {
+  return (
+    <div className="grid min-w-0 grid-cols-[4.25rem_1fr] gap-2">
+      <span className="text-[10px] text-[var(--terminal-muted)]">{label}</span>
+      <span
+        className={`min-w-0 font-medium break-words ${
+          muted ? "text-[var(--terminal-muted)]" : "text-[var(--terminal-fg)]"
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -772,6 +1178,12 @@ function formatConnectionState(state: "connecting" | "live" | "disconnected") {
     default:
       return "Disconnected";
   }
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function ffmpegRowText(entry: OperationalLogEntry) {
@@ -835,6 +1247,25 @@ function getElapsed(dateStr: string): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function formatPlaybackPosition(session: AdminSession): string {
+  const position = formatClockTime(session.position_seconds);
+  if (session.file_duration == null || session.file_duration <= 0) {
+    return position;
+  }
+  return `${position} / ${formatClockTime(session.file_duration)}`;
+}
+
+function formatClockTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const h = Math.floor(safeSeconds / 3600);
+  const m = Math.floor((safeSeconds % 3600) / 60);
+  const s = safeSeconds % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 function stringAttr(entry: OperationalLogEntry, key: string) {
   const value = entry.attrs?.[key];
   if (typeof value === "string" && value.length > 0) return value;
@@ -846,7 +1277,9 @@ function methodBadgeColor(method: string): string {
   switch (method) {
     case "direct":
       return "bg-success/10 text-success border-success/15";
+    case "copy":
     case "remux":
+    case "hls":
       return "bg-info/10 text-info border-info/15";
     case "transcode":
       return "bg-warning/10 text-warning border-warning/15";
@@ -859,7 +1292,9 @@ function methodBarColor(method: string): string {
   switch (method) {
     case "direct":
       return "bg-success";
+    case "copy":
     case "remux":
+    case "hls":
       return "bg-info";
     case "transcode":
       return "bg-warning";

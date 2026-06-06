@@ -132,6 +132,9 @@ func TestBuildLiveSessionSync_UsesTransportPlayMethod(t *testing.T) {
 				RequestedMediaFileID: 41,
 				PlayMethod:           playback.PlayTranscode,
 				BasePlayMethod:       playback.PlayRemux,
+				TranscodeHWAccel:     "qsv",
+				Position:             125.5,
+				IsPaused:             true,
 			},
 			want: "transcode",
 		},
@@ -163,6 +166,18 @@ func TestBuildLiveSessionSync_UsesTransportPlayMethod(t *testing.T) {
 			}
 			if got.SessionID != tc.session.ID {
 				t.Fatalf("SessionID = %q, want %q", got.SessionID, tc.session.ID)
+			}
+			if got.ProfileID != tc.session.ProfileID {
+				t.Fatalf("ProfileID = %q, want %q", got.ProfileID, tc.session.ProfileID)
+			}
+			if got.PositionSeconds != tc.session.Position {
+				t.Fatalf("PositionSeconds = %v, want %v", got.PositionSeconds, tc.session.Position)
+			}
+			if got.IsPaused != tc.session.IsPaused {
+				t.Fatalf("IsPaused = %v, want %v", got.IsPaused, tc.session.IsPaused)
+			}
+			if got.TranscodeHWAccel != tc.session.TranscodeHWAccel {
+				t.Fatalf("TranscodeHWAccel = %q, want %q", got.TranscodeHWAccel, tc.session.TranscodeHWAccel)
 			}
 		})
 	}

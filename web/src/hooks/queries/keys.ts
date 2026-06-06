@@ -324,6 +324,9 @@ export const adminKeys = {
   libraries: () => ["admin", "libraries"] as const,
   libraryRoots: (libraryId?: number, state?: string) =>
     ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all"] as const,
+  libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
+  libraryMatchQueueDetail: (libraryId: number) =>
+    ["admin", "libraries", "metadataMatchQueue", libraryId] as const,
   filesystemBrowse: (path: string) => ["admin", "filesystem", "browse", path] as const,
   librarySkippedRoots: () => ["admin", "libraries", "skippedRoots"] as const,
   staleMediaIDs: () => ["admin", "libraries", "staleMediaIDs"] as const,

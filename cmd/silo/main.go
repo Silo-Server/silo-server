@@ -485,6 +485,8 @@ func main() {
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
 	}
+	adminJobCancelRegistry := adminjob.NewCancelRegistry()
+	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
 		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
@@ -870,6 +872,8 @@ func main() {
 		providerIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		movieQueueRepo = metadata.NewMovieMatchQueueRepository(deps.DB, deps.FileRepo)
 		seriesQueueRepo = metadata.NewSeriesRootMatchQueueRepository(deps.DB)
+		deps.MovieMatchQueueRepo = movieQueueRepo
+		deps.SeriesRootMatchQueueRepo = seriesQueueRepo
 		matchQueueCoordinator = metadata.NewMatchQueueCoordinator(movieQueueRepo, seriesQueueRepo)
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)
@@ -900,6 +904,7 @@ func main() {
 		}
 
 		matchWorker = metadata.NewMatchWorker(metadataService, deps.FileRepo, cfg.Matcher.Workers, cfg.Matcher.BatchSize, 30*time.Second)
+		matchWorker.SetRealtimeHub(deps.RealtimeHub)
 		if movieQueueRepo != nil {
 			matchWorker.SetMovieFileClaimer(movieQueueRepo)
 		}
@@ -1629,6 +1634,7 @@ func main() {
 			templateBundleApplyExecutor,
 			deps.RealtimeHub,
 		)
+		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
 

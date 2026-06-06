@@ -476,7 +476,9 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 	}
 
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, id, "", "watched", "watched.updated")
+	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, id, "", "watched", userStateEventState{
+		Played: boolPtr(played),
+	})
 
 	writeJSON(w, http.StatusOK, watchedStateResponse{
 		ContentID:     id,

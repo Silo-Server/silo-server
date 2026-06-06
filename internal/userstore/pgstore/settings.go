@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -85,7 +86,65 @@ func (s *PostgresUserStore) GetDeviceSetting(ctx context.Context, profileID, dev
 	return &entry, nil
 }
 
+func (s *PostgresUserStore) RegisterDevice(ctx context.Context, entry userstore.DeviceEntry) error {
+	if strings.TrimSpace(entry.ProfileID) == "" || strings.TrimSpace(entry.DeviceID) == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO user_devices
+			(user_id, profile_id, device_id, device_name, device_platform, last_seen_at)
+		 VALUES ($1, $2, $3, $4, $5, NOW())
+		 ON CONFLICT(user_id, profile_id, device_id) DO UPDATE SET
+			device_name = CASE
+				WHEN excluded.device_name <> '' THEN excluded.device_name
+				ELSE user_devices.device_name
+			END,
+			device_platform = CASE
+				WHEN excluded.device_platform <> '' THEN excluded.device_platform
+				ELSE user_devices.device_platform
+			END,
+			last_seen_at = NOW()`,
+		s.userID, entry.ProfileID, entry.DeviceID, entry.DeviceName, entry.DevicePlatform,
+	)
+	if err != nil {
+		return fmt.Errorf("registering device %q: %w", entry.DeviceID, err)
+	}
+	return nil
+}
+
+func (s *PostgresUserStore) ListDevices(ctx context.Context) ([]userstore.DeviceEntry, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT profile_id, device_id, device_name, device_platform, last_seen_at::text
+		 FROM user_devices
+		 WHERE user_id = $1
+		 ORDER BY last_seen_at DESC, profile_id ASC, device_name ASC, device_id ASC`,
+		s.userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing devices: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []userstore.DeviceEntry
+	for rows.Next() {
+		var entry userstore.DeviceEntry
+		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("scanning device: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
 func (s *PostgresUserStore) SetDeviceSetting(ctx context.Context, entry userstore.DeviceSettingEntry) error {
+	if err := s.RegisterDevice(ctx, userstore.DeviceEntry{
+		ProfileID:      entry.ProfileID,
+		DeviceID:       entry.DeviceID,
+		DeviceName:     entry.DeviceName,
+		DevicePlatform: entry.DevicePlatform,
+	}); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO user_device_settings
 			(user_id, profile_id, device_id, key, value, device_name, device_platform, updated_at)

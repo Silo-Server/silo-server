@@ -222,6 +222,9 @@ func (s *Service) CancelByLibrary(ctx context.Context, libraryID int) (int, erro
 		}
 		if changed {
 			cancelled++
+			if cancelledRun, err := s.repo.GetByID(ctx, run.ID); err == nil {
+				s.publish(ctx, "scan.cancelled", cancelledRun)
+			}
 		}
 	}
 	return cancelled, nil

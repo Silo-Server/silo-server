@@ -171,11 +171,12 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 // rearmTriggers stops and restarts all triggers for a worker.
 func (m *TaskManager) rearmTriggers(w *taskWorker) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	for _, tr := range w.triggers {
 		tr.Stop()
 		tr.Start(w.lastResult)
 	}
+	w.mu.Unlock()
+	w.notify()
 }
 
 // Stop stops all triggers and cancels running tasks.

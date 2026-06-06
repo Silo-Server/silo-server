@@ -57,6 +57,7 @@ type Runner struct {
 	heartbeatInterval   time.Duration
 	staleAfter          time.Duration
 	retention           time.Duration
+	cancelRegistry      *CancelRegistry
 	stop                chan struct{}
 	stopOnce            sync.Once
 }
@@ -99,7 +100,14 @@ func NewRunner(
 		heartbeatInterval:   10 * time.Second,
 		staleAfter:          2 * time.Minute,
 		retention:           7 * 24 * time.Hour,
+		cancelRegistry:      NewCancelRegistry(),
 		stop:                make(chan struct{}),
+	}
+}
+
+func (r *Runner) SetCancelRegistry(registry *CancelRegistry) {
+	if registry != nil {
+		r.cancelRegistry = registry
 	}
 }
 
@@ -329,6 +337,8 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), libraryRefreshTimeout)
 	defer cancel()
+	unregisterCancel := r.cancelRegistry.Register(job.ID, cancel)
+	defer unregisterCancel()
 
 	heartbeatStop := make(chan struct{})
 	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
@@ -357,6 +367,10 @@ func (r *Runner) executeLibraryRefresh(job *models.AdminJob) {
 		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
 	})
 	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			r.cancelJob(job.ID, current, total, "Library metadata refresh cancelled")
+			return
+		}
 		msg := err.Error()
 		if ctx.Err() != nil {
 			msg = fmt.Sprintf("timed out after %s: %s", libraryRefreshTimeout, msg)
@@ -845,4 +859,22 @@ func (r *Runner) failJob(id string, current, total int, message, errorMessage st
 		return
 	}
 	r.publishJobByID(ctx, notifications.TypeJobFailed, id)
+}
+
+func (r *Runner) cancelJob(id string, current, total int, message string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := r.repo.UpdateProgress(ctx, id, current, total, message); err != nil {
+		slog.Warn("admin jobs: failed to update cancellation progress", "job_id", id, "error", err)
+	}
+	job, err := r.repo.Cancel(ctx, id, message, time.Now().UTC().Add(r.retention))
+	if err != nil {
+		slog.Warn("admin jobs: failed to mark job cancelled", "job_id", id, "error", err)
+		return
+	}
+	if r.realtimeHub != nil {
+		if err := r.realtimeHub.PublishJob(ctx, notifications.TypeJobCancelled, job); err != nil {
+			slog.Warn("admin jobs: failed to publish job cancellation", "job_id", id, "error", err)
+		}
+	}
 }

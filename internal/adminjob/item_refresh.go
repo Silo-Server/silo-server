@@ -542,17 +542,19 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	e.publish(cache.EventMetadataUpdated, refreshContentID)
 	if e.realtimeHub != nil {
 		if scanResult != nil && (scanResult.New > 0 || scanResult.Updated > 0 || scanResult.Missing > 0 || matched > 0) {
-			_ = e.realtimeHub.PublishLibraryChanged(ctx, notifications.LibraryChangeEvent{
+			_ = e.realtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{
 				LibraryID:    req.ScanFolderID,
+				Reason:       "item_refresh",
 				New:          scanResult.New,
 				Updated:      scanResult.Updated,
 				Missing:      scanResult.Missing,
 				MatchedFiles: matched,
 			})
 		}
-		_ = e.realtimeHub.PublishMetadataUpdated(ctx, notifications.MetadataUpdateEvent{
+		_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
 			LibraryID: req.ScanFolderID,
 			ContentID: refreshContentID,
+			Change:    "metadata_updated",
 		})
 	}
 

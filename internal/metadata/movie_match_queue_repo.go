@@ -450,6 +450,23 @@ func (r *MovieMatchQueueRepository) Delete(ctx context.Context, mediaFileID int)
 	return nil
 }
 
+func (r *MovieMatchQueueRepository) DeleteByFolder(ctx context.Context, folderID int) (int, error) {
+	if err := r.requireConfigured(); err != nil {
+		return 0, err
+	}
+	if err := requirePositiveMovieQueueID("folder id", folderID); err != nil {
+		return 0, err
+	}
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM movie_match_queue
+		WHERE media_folder_id = $1
+	`, folderID)
+	if err != nil {
+		return 0, fmt.Errorf("deleting movie queue rows for folder: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (r *MovieMatchQueueRepository) UpdateError(ctx context.Context, mediaFileID int, errText string) error {
 	if err := r.requireConfigured(); err != nil {
 		return err
@@ -485,10 +502,20 @@ func (r *MovieMatchQueueRepository) ListByFolder(ctx context.Context, folderID i
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT media_file_id, media_folder_id, first_queued_at, available_at, last_attempted_at, attempt_count, last_error, updated_at
-		FROM movie_match_queue
-		WHERE media_folder_id = $1
-		ORDER BY available_at ASC, last_attempted_at ASC NULLS FIRST, media_file_id ASC
+		SELECT
+			q.media_file_id,
+			q.media_folder_id,
+			COALESCE(mf.file_path, '') AS file_path,
+			q.first_queued_at,
+			q.available_at,
+			q.last_attempted_at,
+			q.attempt_count,
+			q.last_error,
+			q.updated_at
+		FROM movie_match_queue q
+		LEFT JOIN media_files mf ON mf.id = q.media_file_id
+		WHERE q.media_folder_id = $1
+		ORDER BY q.available_at ASC, q.last_attempted_at ASC NULLS FIRST, q.media_file_id ASC
 		LIMIT $2 OFFSET $3
 	`, folderID, limit, offset)
 	if err != nil {
@@ -502,6 +529,7 @@ func (r *MovieMatchQueueRepository) ListByFolder(ctx context.Context, folderID i
 		if err := rows.Scan(
 			&entry.MediaFileID,
 			&entry.MediaFolderID,
+			&entry.FilePath,
 			&entry.FirstQueuedAt,
 			&entry.AvailableAt,
 			&entry.LastAttemptedAt,

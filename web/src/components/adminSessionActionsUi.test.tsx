@@ -97,6 +97,7 @@ const baseSession: AdminSession = {
   file_duration: 3600,
   started_at: "2026-03-24T12:00:00Z",
   updated_at: "2026-03-24T12:05:00Z",
+  position_seconds: 300,
   is_paused: false,
   has_playback_control: true,
   audio_track_index: 0,

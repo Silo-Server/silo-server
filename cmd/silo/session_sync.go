@@ -31,8 +31,10 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TargetVideoCodec:     s.TargetVideoCodec,
 		TargetAudioCodec:     s.TargetAudioCodec,
 		TargetBitrateKbps:    s.TargetBitrateKbps,
+		TranscodeHWAccel:     s.TranscodeHWAccel,
 		StartedAt:            s.StartedAt,
 		UpdatedAt:            s.UpdatedAt,
+		PositionSeconds:      s.Position,
 		IsPaused:             s.IsPaused,
 		HasWebSocket:         s.HasWebSocket,
 	}

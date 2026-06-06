@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   useScanLibrary: vi.fn(),
   useScanAllLibraries: vi.fn(),
   useRefreshLibraryMetadata: vi.fn(),
+  useLibraryMetadataMatchQueues: vi.fn(),
+  useLibraryMetadataMatchQueueDetail: vi.fn(),
+  useRetryLibraryMetadataMatchQueue: vi.fn(),
+  useCancelLibraryMetadataMatchQueue: vi.fn(),
   useConfirmEmptyRootCleanup: vi.fn(),
   useLibraryProviders: vi.fn(),
   useSetLibraryProviders: vi.fn(),
@@ -25,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   useUnmatchedLibraryItems: vi.fn(),
   useAdminPlugins: vi.fn(),
   useCancelLibraryScans: vi.fn(),
+  useCancelAdminJob: vi.fn(),
   useLibraryRoots: vi.fn(),
   useUpsertLibraryRootOverride: vi.fn(),
   useDeleteLibraryRootOverride: vi.fn(),
@@ -44,6 +49,14 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useScanLibrary: (...args: unknown[]) => mocks.useScanLibrary(...args),
   useScanAllLibraries: (...args: unknown[]) => mocks.useScanAllLibraries(...args),
   useRefreshLibraryMetadata: (...args: unknown[]) => mocks.useRefreshLibraryMetadata(...args),
+  useLibraryMetadataMatchQueues: (...args: unknown[]) =>
+    mocks.useLibraryMetadataMatchQueues(...args),
+  useLibraryMetadataMatchQueueDetail: (...args: unknown[]) =>
+    mocks.useLibraryMetadataMatchQueueDetail(...args),
+  useRetryLibraryMetadataMatchQueue: (...args: unknown[]) =>
+    mocks.useRetryLibraryMetadataMatchQueue(...args),
+  useCancelLibraryMetadataMatchQueue: (...args: unknown[]) =>
+    mocks.useCancelLibraryMetadataMatchQueue(...args),
   useConfirmEmptyRootCleanup: (...args: unknown[]) => mocks.useConfirmEmptyRootCleanup(...args),
   useLibraryProviders: (...args: unknown[]) => mocks.useLibraryProviders(...args),
   useSetLibraryProviders: (...args: unknown[]) => mocks.useSetLibraryProviders(...args),
@@ -52,6 +65,7 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useDeleteLibraryPoster: (...args: unknown[]) => mocks.useDeleteLibraryPoster(...args),
   useUnmatchedLibraryItems: (...args: unknown[]) => mocks.useUnmatchedLibraryItems(...args),
   useCancelLibraryScans: (...args: unknown[]) => mocks.useCancelLibraryScans(...args),
+  useCancelAdminJob: (...args: unknown[]) => mocks.useCancelAdminJob(...args),
   useLibraryRoots: (...args: unknown[]) => mocks.useLibraryRoots(...args),
   useUpsertLibraryRootOverride: (...args: unknown[]) => mocks.useUpsertLibraryRootOverride(...args),
   useDeleteLibraryRootOverride: (...args: unknown[]) => mocks.useDeleteLibraryRootOverride(...args),
@@ -128,6 +142,16 @@ describe("AdminLibraries", () => {
     mocks.useScanLibrary.mockReturnValue(queryState);
     mocks.useScanAllLibraries.mockReturnValue(queryState);
     mocks.useRefreshLibraryMetadata.mockReturnValue(queryState);
+    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
+      data: [],
+      isLoading: false,
+    });
+    mocks.useLibraryMetadataMatchQueueDetail.mockReturnValue({
+      data: null,
+      isLoading: false,
+    });
+    mocks.useRetryLibraryMetadataMatchQueue.mockReturnValue(queryState);
+    mocks.useCancelLibraryMetadataMatchQueue.mockReturnValue(queryState);
     mocks.useConfirmEmptyRootCleanup.mockReturnValue(queryState);
     mocks.useLibraryProviders.mockReturnValue({
       data: { levels: {} },
@@ -148,6 +172,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useCancelLibraryScans.mockReturnValue(queryState);
+    mocks.useCancelAdminJob.mockReturnValue(queryState);
     mocks.useLibraryRoots.mockReturnValue({ data: [], isLoading: false });
     mocks.useUpsertLibraryRootOverride.mockReturnValue(queryState);
     mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
@@ -162,13 +187,13 @@ describe("AdminLibraries", () => {
     );
     expect(markup).toContain('title="Scan Library"');
     expect(markup).toContain("Scan All");
-    expect(markup).toContain('title="Refresh metadata"');
+    expect(markup).toContain('title="Rescan Metadata"');
     expect(markup).toContain(
       "Run another scan after storage returns, or confirm deletion before the next empty-root scan.",
     );
   });
 
-  it("renders the Ambiguous Roots section with a populated row", () => {
+  it("renders the collapsed Ambiguous Roots section with a populated count", () => {
     mocks.useLibraryRoots.mockReturnValue({
       data: [
         {
@@ -192,21 +217,77 @@ describe("AdminLibraries", () => {
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain("Inception");
-    expect(markup).toContain("/media/movies/Inception (2010)");
+    expect(markup).toContain("Scanner roots that stay visible");
   });
 
-  it("renders the empty-state inside Ambiguous Roots when no roots exist", () => {
+  it("surfaces pending metadata matcher queue work", () => {
+    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
+      data: [
+        {
+          library_id: 1,
+          movie_count: 1,
+          series_count: 2,
+          raw_file_count: 0,
+          total_count: 3,
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("3 matching");
+    expect(markup).not.toContain("View backlog");
+  });
+
+  it("shows active scan progress in the library task status row", () => {
+    mocks.useActiveScans.mockReturnValue({
+      data: [
+        {
+          id: "scan-1",
+          library_id: 1,
+          mode: "library",
+          trigger: "manual",
+          status: "running",
+          started_at: "2026-03-23T20:00:00Z",
+          result: {
+            new: 0,
+            updated: 0,
+            unchanged: 0,
+            missing: 0,
+            files_deleted: 0,
+            memberships_removed: 0,
+            items_deleted: 0,
+            matched_files: 0,
+            retried_items: 0,
+            still_unmatched_warnings: 0,
+            skipped: 0,
+            errors: 0,
+            message: "Processing files",
+            total_files: 20,
+            files_processed: 10,
+          },
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Processing files · 10 / 20 (50%)");
+    expect(markup).toContain("Full library scan · Entire library");
+  });
+
+  it("renders the collapsed Ambiguous Roots section when no roots exist", () => {
     // Default useLibraryRoots mock returns { data: [], isLoading: false }. The
-    // section itself still renders (it's gated on libraries.length, not on the
-    // root list), and the table body shows the empty-state copy.
+    // section itself still renders because it is gated on libraries.length.
     const markup = renderPage();
 
     expect(markup).toContain("Ambiguous Roots");
-    expect(markup).toContain("No ambiguous roots for this library");
+    expect(markup).toContain("Scanner roots that stay visible");
   });
 
-  it("renders Match instead of Re-match for stale IDs", () => {
+  it("renders Stale External IDs collapsed by default", () => {
     mocks.useStaleMediaIDs.mockReturnValue({
       data: [
         {
@@ -227,11 +308,11 @@ describe("AdminLibraries", () => {
 
     const markup = renderPage();
 
-    expect(markup).toContain("Match");
+    expect(markup).toContain("Stale External IDs");
     expect(markup).not.toContain("Re-match");
   });
 
-  it("renders an unmatched items section when unmatched items exist", () => {
+  it("renders an unmatched items section collapsed by default when unmatched items exist", () => {
     mocks.useUnmatchedLibraryItems.mockReturnValue({
       data: {
         items: [
@@ -253,8 +334,7 @@ describe("AdminLibraries", () => {
     const markup = renderPage();
 
     expect(markup).toContain("Unmatched Items");
-    expect(markup).toContain("Unknown Film");
-    expect(markup).toContain("unmatched");
+    expect(markup).toContain("Items that could not be matched to any metadata provider.");
   });
 
   it("hides unmatched items section when no unmatched items exist", () => {

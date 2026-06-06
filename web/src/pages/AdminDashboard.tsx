@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
-import { useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
+import { fetchAdminStats, useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminLibraries,
@@ -27,6 +28,7 @@ import {
   HardDrive,
   RefreshCw,
   Play,
+  Pause,
   Library,
   ScanLine,
 } from "lucide-react";
@@ -38,17 +40,151 @@ import type {
   AdminUser,
   WatchProviderActivity,
 } from "@/api/types";
+import { useQueryClient } from "@tanstack/react-query";
+import { adminKeys } from "@/hooks/queries/keys";
+import { usePageActivity } from "@/hooks/usePageActivity";
+
+const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+const DASHBOARD_AUTO_REFRESH_MS = 60_000;
+const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
 
 export default function AdminDashboard() {
+  const queryClient = useQueryClient();
   const statsQuery = useAdminStats();
   const sessionsQuery = useAdminSessions();
   const librariesQuery = useAdminLibraries();
   const usersQuery = useAdminUsers();
   const scanAll = useScanAllLibraries();
+  const pageActivity = usePageActivity();
+  const manualRefreshStartedAtRef = useRef<number | null>(null);
+  const wasDashboardPollingPausedRef = useRef(!pageActivity.canPollDashboard);
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState<number | null>(null);
+  const [relativeUpdatedNow, setRelativeUpdatedNow] = useState(() => Date.now());
 
   const sessions = sessionsQuery.data ?? [];
   const libraries = librariesQuery.data ?? [];
   const users = usersQuery.data ?? [];
+  const { refetch: refetchSessions } = sessionsQuery;
+  const { refetch: refetchLibraries } = librariesQuery;
+  const { refetch: refetchUsers } = usersQuery;
+  const hasDashboardData =
+    statsQuery.data !== undefined &&
+    sessionsQuery.data !== undefined &&
+    librariesQuery.data !== undefined &&
+    usersQuery.data !== undefined;
+  const hasStaleDashboardData =
+    statsQuery.isStale || sessionsQuery.isStale || librariesQuery.isStale || usersQuery.isStale;
+  const dashboardDataUpdatedAt = Math.max(
+    statsQuery.dataUpdatedAt,
+    sessionsQuery.dataUpdatedAt,
+    librariesQuery.dataUpdatedAt,
+    usersQuery.dataUpdatedAt,
+  );
+  const lastUpdatedLabel = lastDashboardUpdatedAt
+    ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
+    : null;
+
+  useEffect(() => {
+    if (!lastDashboardUpdatedAt) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setRelativeUpdatedNow(Date.now());
+    }, RELATIVE_UPDATED_LABEL_TICK_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [lastDashboardUpdatedAt]);
+
+  useEffect(() => {
+    if (hasDashboardData && dashboardDataUpdatedAt > 0) {
+      setLastDashboardUpdatedAt(dashboardDataUpdatedAt);
+    }
+  }, [dashboardDataUpdatedAt, hasDashboardData]);
+
+  const refreshDashboard = useCallback(
+    async ({ manual }: { manual: boolean }) => {
+      if (manual) {
+        manualRefreshStartedAtRef.current = Date.now();
+        setIsManualRefreshPending(true);
+      }
+      try {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: adminKeys.stats(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.sessions(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.libraries(), refetchType: "none" }),
+          queryClient.invalidateQueries({ queryKey: adminKeys.users(), refetchType: "none" }),
+        ]);
+        const nextStats = await fetchAdminStats({ refresh: true });
+        queryClient.setQueryData(adminKeys.stats(), nextStats);
+        await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
+        const refreshedAt = Date.now();
+        setLastDashboardUpdatedAt(refreshedAt);
+        setRelativeUpdatedNow(refreshedAt);
+      } finally {
+        if (manual) {
+          const startedAt = manualRefreshStartedAtRef.current;
+          if (startedAt !== null) {
+            const elapsed = Date.now() - startedAt;
+            const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
+            if (remaining > 0) {
+              await delay(remaining);
+            }
+          }
+          manualRefreshStartedAtRef.current = null;
+          setIsManualRefreshPending(false);
+        }
+      }
+    },
+    [queryClient, refetchLibraries, refetchSessions, refetchUsers],
+  );
+
+  useEffect(() => {
+    if (!pageActivity.canPollDashboard) {
+      wasDashboardPollingPausedRef.current = true;
+      return;
+    }
+    if (isManualRefreshPending) {
+      return;
+    }
+    const resumedPolling = wasDashboardPollingPausedRef.current;
+    wasDashboardPollingPausedRef.current = false;
+    if (
+      resumedPolling &&
+      hasDashboardData &&
+      (hasStaleDashboardData ||
+        !lastDashboardUpdatedAt ||
+        Date.now() - lastDashboardUpdatedAt >= DASHBOARD_AUTO_REFRESH_MS)
+    ) {
+      void refreshDashboard({ manual: true });
+      return;
+    }
+
+    if (
+      lastDashboardUpdatedAt &&
+      Date.now() - lastDashboardUpdatedAt >= DASHBOARD_AUTO_REFRESH_MS
+    ) {
+      void refreshDashboard({ manual: false });
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshDashboard({ manual: false });
+    }, DASHBOARD_AUTO_REFRESH_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    hasDashboardData,
+    hasStaleDashboardData,
+    isManualRefreshPending,
+    lastDashboardUpdatedAt,
+    pageActivity.canPollDashboard,
+    refreshDashboard,
+  ]);
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -60,18 +196,29 @@ export default function AdminDashboard() {
             Live sessions, content health, and server activity in one view.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void statsQuery.refetch();
-              void sessionsQuery.refetch();
-            }}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            {lastUpdatedLabel && (
+              <span className="text-muted-foreground text-xs whitespace-nowrap">
+                Updated {lastUpdatedLabel}
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[8.25rem] justify-center"
+              onClick={() => {
+                void refreshDashboard({ manual: true });
+              }}
+              disabled={isManualRefreshPending}
+              aria-busy={isManualRefreshPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
+              />
+              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
           <Button
             variant="default"
             size="sm"
@@ -315,18 +462,26 @@ function StreamCard({ session }: { session: AdminSession }) {
     <div className="surface-panel flex gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
       {/* Poster */}
       <div
-        className="bg-surface border-border flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
+        className="bg-surface border-border relative flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
         style={{ aspectRatio: "2/3" }}
       >
         {session.poster_url ? (
           <img
             src={session.poster_url}
             alt={session.media_title}
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover transition-opacity ${session.is_paused ? "opacity-45" : ""}`}
           />
         ) : (
-          <Play className="text-primary/40 h-5 w-5" />
+          <Play className={`text-primary/40 h-5 w-5 ${session.is_paused ? "opacity-45" : ""}`} />
         )}
+        {session.is_paused ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+            <div className="border-border/40 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm backdrop-blur">
+              <Pause className="h-3 w-3" />
+              Paused
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Info */}
@@ -381,9 +536,7 @@ function StreamCard({ session }: { session: AdminSession }) {
             </span>
           )}
           {(session.profile_name || session.profile_id) && (
-            <span className="border-border bg-surface text-muted-foreground inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold">
-              {session.profile_name || session.profile_id}
-            </span>
+            <SessionProfilePill label={session.profile_name || session.profile_id} />
           )}
         </div>
 
@@ -400,6 +553,14 @@ function StreamCard({ session }: { session: AdminSession }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SessionProfilePill({ label }: { label: string }) {
+  return (
+    <span className="border-primary/30 bg-primary/15 text-primary inline-flex max-w-full shrink-0 items-center rounded border px-1.5 py-0.5 align-middle text-[9px] leading-[1.1] font-semibold whitespace-nowrap">
+      {label}
+    </span>
   );
 }
 
@@ -650,6 +811,7 @@ function ActivityCard({
                 ? s.episode_name || `S${s.season_number}E${s.episode_number}`
                 : s.media_title || `File #${s.media_file_id}`;
               const username = s.username || `User #${s.user_id}`;
+              const profileDisplay = s.profile_name || s.profile_id || "";
               return (
                 <div
                   key={s.session_id}
@@ -661,6 +823,12 @@ function ActivityCard({
                   <div className="min-w-0 flex-1">
                     <div className="text-muted-foreground text-xs leading-relaxed">
                       <span className="text-foreground font-semibold">{username}</span>
+                      {profileDisplay ? (
+                        <>
+                          {" "}
+                          <SessionProfilePill label={profileDisplay} />
+                        </>
+                      ) : null}
                       {" started watching "}
                       <Link
                         to={`/admin/history?user_id=${s.user_id}${s.profile_id ? `&profile_id=${encodeURIComponent(s.profile_id)}` : ""}`}
@@ -699,6 +867,23 @@ function getTimeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function formatRelativeUpdatedLabel(now: number, updatedAt: number) {
+  const elapsedMinutes = Math.floor(Math.max(0, now - updatedAt) / 60_000);
+  if (elapsedMinutes < 1) {
+    return "less than 1 minute ago";
+  }
+  if (elapsedMinutes === 1) {
+    return "1 minute ago";
+  }
+  return `${elapsedMinutes.toLocaleString()} minutes ago`;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function SectionError({ message }: { message: string }) {

@@ -21,6 +21,7 @@ func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
 
 // Compile-time interface check.
 var _ userstore.UserStore = (*SQLiteUserStore)(nil)
+var _ userstore.DeviceRegistry = (*SQLiteUserStore)(nil)
 
 // --- Profiles ---
 
@@ -289,6 +290,14 @@ func (s *SQLiteUserStore) ListSettings(_ context.Context) ([]userstore.SettingEn
 
 func (s *SQLiteUserStore) GetDeviceSetting(_ context.Context, profileID, deviceID, key string) (*userstore.DeviceSettingEntry, error) {
 	return GetDeviceSetting(s.db, profileID, deviceID, key)
+}
+
+func (s *SQLiteUserStore) RegisterDevice(_ context.Context, entry userstore.DeviceEntry) error {
+	return RegisterDevice(s.db, entry)
+}
+
+func (s *SQLiteUserStore) ListDevices(_ context.Context) ([]userstore.DeviceEntry, error) {
+	return ListDevices(s.db)
 }
 
 func (s *SQLiteUserStore) SetDeviceSetting(_ context.Context, entry userstore.DeviceSettingEntry) error {
