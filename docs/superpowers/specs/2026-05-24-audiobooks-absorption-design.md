@@ -41,9 +41,10 @@ Go application. Eliminate it as a plugin. User-visible outcome:
 ### Out
 
 - Audiobook requests flow (`silo-plugin-audiobook-requests` untouched).
-- Smart collections, share links, content restrictions, custom metadata providers.
+- Smart collections, share links, content restrictions, metadata-provider integration.
 - Embedding-powered "similar books" recommender.
-- External enrichment (OpenLibrary / Google Books) — deferred; file tags only for v1.
+- External enrichment through the audiobook metadata plugin/provider — deferred;
+  scanner extracts local tags and identifiers for v1.
 - Group listening / cowatch parity for audiobooks (silo already has cowatch for
   video; revisit later if needed).
 
@@ -90,7 +91,9 @@ media-token signing, CDN, streaming, event bus, migrations runner).
 - ~7.4k LOC ported from the plugin.
 - ~1.5–2k LOC new TypeScript/TSX in silo's SPA.
 - ~400 LOC of new Go glue (scanner branches, router wiring, service.go).
-- Two new SQL migrations (134, 135) and at most one column-add migration.
+- Three new SQL migrations in the current stack (`147_abs_sessions`,
+  `157_podcast_feeds`, `160_audiobooks_feature_flag`) plus one documented
+  no-op migration for the already-present media-folder type column.
 
 ## Data model
 
@@ -111,9 +114,9 @@ media-token signing, CDN, streaming, event bus, migrations runner).
 
 ### New tables (two migrations)
 
-1. **`abs_sessions`** (migration 134) — parallel to existing `jellycompat_sessions`. Tracks ABS client device, token, last-seen so ABS apps reconnect without re-auth. Columns: `id`, `user_id`, `token`, `device_id`, `device_name`, `abs_client_version`, `created_at`, `last_seen_at`. Same shape as `jellycompat_sessions` plus the `abs_client_version` text.
+1. **`abs_sessions`** (migration 147) — parallel to existing `jellycompat_sessions`. Tracks ABS client device, token hash, last-seen so ABS apps reconnect without re-auth. Columns: `id`, `user_id`, `token_hash`, `device_id`, `device_name`, `abs_client_version`, `created_at`, `last_seen_at`. Same shape as `jellycompat_sessions` plus the `abs_client_version` text.
 
-2. **`podcast_feeds`** (migration 135) — one row per subscribed podcast. Columns: `media_item_id` (FK to the podcast `media_items` row), `feed_url`, `etag`, `last_refreshed_at`, `refresh_interval_seconds`. Episode rows live in the reused `episodes` table.
+2. **`podcast_feeds`** (migration 157) — one row per subscribed podcast. Columns: `media_item_id` (FK to the podcast `media_items` row), `feed_url`, `etag`, `last_refreshed_at`, `refresh_interval_seconds`. Episode rows live in the reused `episodes` table.
 
 ### Schema-touch column add
 
@@ -124,8 +127,8 @@ media-token signing, CDN, streaming, event bus, migrations runner).
 
 ### Plugin migrations NOT ported
 
-Smart collections, share links, embeddings, content restrictions, custom
-metadata providers, request provider, file cache, listening stats aggregates,
+Smart collections, share links, embeddings, content restrictions,
+metadata-provider integration, request provider, file cache, listening stats aggregates,
 reading goals, notification prefs, standalone-mode tables, recommender
 embeddings. All represent features dropped from scope.
 
@@ -225,8 +228,9 @@ and directors. No new code, just two more role string constants.
 
 ### External enrichment
 
-Deferred. The plugin's `enrich/` package (OpenLibrary / Google Books lookup)
-is not ported in v1. File tags only. Add later if needed.
+Deferred. The scanner extracts local tags and identity hints only. Canonical
+enrichment remains the responsibility of the audiobook metadata plugin/provider
+path and is not ported in this foundation pass.
 
 ### Scheduled task
 

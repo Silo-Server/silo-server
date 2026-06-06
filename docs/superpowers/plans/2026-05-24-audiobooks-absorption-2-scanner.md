@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make silo's existing scanner recognize audiobook + podcast libraries (`media_folders.type='audiobooks'` or `'podcasts'`), walk them to find audio files, and write `media_items.type='audiobook'` / `media_items.type='podcast'` rows with chapter metadata and author/narrator role links. No external metadata enrichment in this sub-plan — file tags only.
+**Goal:** Make silo's existing scanner recognize audiobook + podcast libraries (`media_folders.type='audiobooks'` or `'podcasts'`), walk them to find audio files, and write `media_items.type='audiobook'` / `media_items.type='podcast'` rows with chapter metadata and author/narrator role links. No external metadata enrichment runs in this sub-plan; the scanner extracts local tags and identity hints, and the audiobook metadata plugin/provider enriches canonical metadata later.
 
-**Architecture:** New constants (`PersonKindAuthor=7`, `PersonKindNarrator=8`, `audioExtensions`). New helpers (`isAudiobookLibraryType`, `isPodcastLibraryType`, `SupportsAudioFile`). New parser file `internal/scanner/audiobook.go` for the folder-to-media-items mapping. The chapter extraction reuses the existing `probe.go` ffprobe helper. Author/narrator names are upserted into the existing `people` and `item_people` tables via the same code paths used for movie actors. No changes to the matching/enrichment metadata queues — those are deferred.
+**Architecture:** New constants (`PersonKindAuthor=7`, `PersonKindNarrator=8`, `audioExtensions`). New helpers (`isAudiobookLibraryType`, `isPodcastLibraryType`, `SupportsAudioFile`). New parser file `internal/scanner/audiobook.go` for the folder-to-media-items mapping. The chapter extraction reuses the existing `probe.go` ffprobe helper. Author/narrator names are upserted into the existing `people` and `item_people` tables via the same code paths used for movie actors. Matching/enrichment queue integration for the audiobook metadata plugin/provider is deferred.
 
 **Tech Stack:** Go 1.26 + pgx; ffprobe via `os/exec` (already vendored as `internal/scanner/probe.go`); ID3/MP4 tag parsing — verify what silo already vendors before introducing a new library (acceptable: `github.com/dhowden/tag` if not already present, OR shell out to ffprobe which exposes tag dictionaries).
 
@@ -1064,7 +1064,7 @@ Otherwise: no commit needed.
 | Multi-file audiobooks | T7 |
 | Filesystem podcasts | T9 |
 | RSS podcasts | deferred to sub-plan 5 |
-| External enrichment (OpenLibrary/Google Books) | dropped per spec |
+| External enrichment through audiobook metadata plugin/provider | deferred per spec |
 
 **Placeholder scan:** Task 8 has language like "grep for upsertMediaItem or similar in scanner.go to find it" — this is intentional. The scanner's write helpers are too deeply embedded for me to enumerate without reading more code; the implementer subagent will discover them. If a subagent reports BLOCKED on Task 8 because the write helpers aren't shaped how this plan assumes, the controller dispatches a discovery sub-task.
 

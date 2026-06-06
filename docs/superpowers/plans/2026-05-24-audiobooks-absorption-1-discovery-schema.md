@@ -328,16 +328,16 @@ main `auth_sessions`.
 - [ ] **Run** (each command should now succeed):
   ```bash
   sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "\d public.abs_sessions"
-  sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "SELECT version FROM schema_versions WHERE version = 139;"
+  sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "SELECT version FROM schema_versions WHERE version = 147;"
   ```
-  Expected: `\d` prints the full column list; the `SELECT` returns one row with `version=139`.
+  Expected: `\d` prints the full column list; the `SELECT` returns one row with `version=147`.
 
 - [ ] **Run** a sample insert/delete to prove constraints work:
   ```bash
   sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "
-  INSERT INTO abs_sessions (user_id, token, device_id, device_name, client_name, client_version)
-  VALUES (1, 'test-token-001', 'test-device-001', 'Test Device', 'AbsTestClient', '1.0.0');
-  DELETE FROM abs_sessions WHERE token = 'test-token-001';
+  INSERT INTO abs_sessions (user_id, token_hash, device_id, device_name, client_name, client_version)
+  VALUES (1, 'test-token-hash-001', 'test-device-001', 'Test Device', 'AbsTestClient', '1.0.0');
+  DELETE FROM abs_sessions WHERE token_hash = 'test-token-hash-001';
   "
   ```
   Expected: `INSERT 0 1` then `DELETE 1`. (User id 1 must exist — silo's first user.)
@@ -348,7 +348,7 @@ main `auth_sessions`.
   ```bash
   git add migrations/147_abs_sessions.up.sql migrations/147_abs_sessions.down.sql
   git commit -m "$(cat <<'EOF'
-feat(audiobooks): migration 139 add abs_sessions table
+feat(audiobooks): migration 147 add abs_sessions table
 
 Parallel of jellycompat_sessions for Audiobookshelf-compatible clients.
 Lets ABS mobile/desktop apps maintain a device-bound session that
@@ -361,15 +361,15 @@ EOF
 
 ---
 
-## Task 3: Migration 140 — `podcast_feeds`
+## Task 3: Migration 157 — `podcast_feeds`
 
 One row per subscribed podcast. The podcast itself lives in `media_items`
 (`type='podcast'`); this side table carries the RSS-specific metadata the
 feed refresher needs.
 
 **Files:**
-- Create: `migrations/140_podcast_feeds.up.sql`
-- Create: `migrations/140_podcast_feeds.down.sql`
+- Create: `migrations/157_podcast_feeds.up.sql`
+- Create: `migrations/157_podcast_feeds.down.sql`
 
 ### Step 3.1: Write the failing assertion
 
@@ -381,7 +381,7 @@ feed refresher needs.
 
 ### Step 3.2: Create the up migration
 
-- [ ] **Create** `migrations/140_podcast_feeds.up.sql` with:
+- [ ] **Create** `migrations/157_podcast_feeds.up.sql` with:
 
   ```sql
   -- RSS-feed metadata for subscribed podcasts. One row per podcast
@@ -416,7 +416,7 @@ feed refresher needs.
 
 ### Step 3.3: Create the down migration
 
-- [ ] **Create** `migrations/140_podcast_feeds.down.sql` with:
+- [ ] **Create** `migrations/157_podcast_feeds.down.sql` with:
 
   ```sql
   DROP INDEX IF EXISTS public.idx_podcast_feeds_due_for_refresh;
@@ -438,17 +438,17 @@ feed refresher needs.
 - [ ] **Run:**
   ```bash
   sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "\d public.podcast_feeds"
-  sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "SELECT version FROM schema_versions WHERE version = 140;"
+  sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "SELECT version FROM schema_versions WHERE version = 157;"
   ```
-  Expected: column list printed; one row with `version=140`.
+  Expected: column list printed; one row with `version=157`.
 
 ### Step 3.6: Commit
 
 - [ ] **Run:**
   ```bash
-  git add migrations/140_podcast_feeds.up.sql migrations/140_podcast_feeds.down.sql
+  git add migrations/157_podcast_feeds.up.sql migrations/157_podcast_feeds.down.sql
   git commit -m "$(cat <<'EOF'
-feat(audiobooks): migration 140 add podcast_feeds table
+feat(audiobooks): migration 157 add podcast_feeds table
 
 Side table on media_items for RSS-subscribed podcasts. Holds feed URL,
 ETag/Last-Modified for conditional fetches, last-refresh timestamp, and

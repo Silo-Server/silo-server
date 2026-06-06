@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,27 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+type fakeRootContentFinder struct {
+	contentID string
+	err       error
+	calls     int
+}
+
+func (f *fakeRootContentFinder) FindContentIDByRootPath(context.Context, int, string, string) (string, error) {
+	f.calls++
+	return f.contentID, f.err
+}
+
+type fakeFilesystemItemWriter struct {
+	upserts []*models.MediaItem
+}
+
+func (f *fakeFilesystemItemWriter) Upsert(_ context.Context, item *models.MediaItem) error {
+	cp := *item
+	f.upserts = append(f.upserts, &cp)
+	return nil
+}
 
 func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 	ffprobePath := FFprobePathFromFFmpeg("ffmpeg")
@@ -124,5 +146,78 @@ func TestScanAudiobookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "folder_id=42") {
 		t.Fatalf("error = %q, want folder id", err)
+	}
+}
+
+func TestResolveAudiobookMediaItemReusesRootScopedContentID(t *testing.T) {
+	finder := &fakeRootContentFinder{contentID: "book-root-id"}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveAudiobookMediaItem(
+		context.Background(),
+		finder,
+		writer,
+		7,
+		"/library/Author/Same Title",
+		&parsedAudiobook{Title: "Same Title", Year: 0, Author: "Author A"},
+	)
+	if err != nil {
+		t.Fatalf("resolveAudiobookMediaItem: %v", err)
+	}
+	if got != "book-root-id" {
+		t.Fatalf("contentID = %q, want root-scoped id", got)
+	}
+	if finder.calls != 1 {
+		t.Fatalf("root finder calls = %d, want 1", finder.calls)
+	}
+	if len(writer.upserts) != 0 {
+		t.Fatalf("unexpected item upsert for existing root: %d", len(writer.upserts))
+	}
+}
+
+func TestResolveAudiobookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
+	finder := &fakeRootContentFinder{}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveAudiobookMediaItem(
+		context.Background(),
+		finder,
+		writer,
+		7,
+		"/library/Other Author/Same Title",
+		&parsedAudiobook{Title: "Same Title", Year: 0, Author: "Author B"},
+	)
+	if err != nil {
+		t.Fatalf("resolveAudiobookMediaItem: %v", err)
+	}
+	if got == "" {
+		t.Fatal("contentID is empty")
+	}
+	if len(writer.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
+	}
+	if writer.upserts[0].ContentID != got || writer.upserts[0].Type != "audiobook" {
+		t.Fatalf("upserted item = %+v, contentID %q", writer.upserts[0], got)
+	}
+}
+
+func TestResolveAudiobookMediaItemPropagatesRootLookupError(t *testing.T) {
+	wantErr := errors.New("root lookup failed")
+	finder := &fakeRootContentFinder{err: wantErr}
+	writer := &fakeFilesystemItemWriter{}
+
+	_, err := resolveAudiobookMediaItem(
+		context.Background(),
+		finder,
+		writer,
+		7,
+		"/library/Author/Book",
+		&parsedAudiobook{Title: "Book"},
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if len(writer.upserts) != 0 {
+		t.Fatalf("upserts = %d, want 0", len(writer.upserts))
 	}
 }
