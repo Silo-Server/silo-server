@@ -197,6 +197,7 @@ func buildBrowseParams(query itemsQuery) url.Values {
 	if query.order != "" {
 		params.Set("order", query.order)
 	}
+	params.Set("include_total", strconv.FormatBool(query.enableTotalRecordCount))
 	if query.personID > 0 {
 		params.Set("person_id", strconv.FormatInt(query.personID, 10))
 	}
