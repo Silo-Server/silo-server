@@ -20,7 +20,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -4431,14 +4430,7 @@ func rebindDeletableStatuses(allowMatchedSource bool) []string {
 }
 
 func isProviderIDUniqueConflict(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-	return pgErr.Code == "23505" && pgErr.ConstraintName == "media_item_provider_ids_provider_provider_id_item_type_key"
+	return isPgConstraintViolation(err, "23505", "media_item_provider_ids_provider_provider_id_item_type_key")
 }
 
 func (s *MetadataService) repairMatchedDuplicateProviderOwnersByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) (int, error) {
