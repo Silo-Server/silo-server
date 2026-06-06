@@ -212,6 +212,7 @@ export default function AdminDevices() {
   const [recency, setRecency] = useState<Set<Exclude<RecencyBucket, "all">>>(new Set());
   const [activeView, setActiveView] = useState<SavedView | null>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>("user");
+  const [overridesOnly, setOverridesOnly] = useState(false);
 
   // ⌘K focuses the global search input
   const searchRef = useRef<HTMLInputElement>(null);
@@ -229,51 +230,55 @@ export default function AdminDevices() {
 
   // anomaly detection
   const anomalies = useMemo(() => detectAnomalies(devices), [devices]);
+  const scopedDevices = useMemo(
+    () => (overridesOnly ? devices.filter((d) => (d.override_count ?? 0) > 0) : devices),
+    [devices, overridesOnly],
+  );
 
-  // facet counts (computed on the full set, not the filtered set, so the
-  // sidebar always shows accurate "what would I get" numbers)
+  // Facet counts follow the top-level device scope, but not the local facet
+  // filters, so each row shows "what would I get inside this scope".
   const platformCounts = useMemo(() => {
     const m = new Map<PlatformKind, number>();
-    devices.forEach((d) => {
+    scopedDevices.forEach((d) => {
       const k = classifyPlatform(d.device_platform);
       m.set(k, (m.get(k) ?? 0) + 1);
     });
     return m;
-  }, [devices]);
+  }, [scopedDevices]);
 
   const overrideRangeCounts = useMemo(() => {
     const m = new Map<Exclude<OverrideRange, "all">, number>();
-    devices.forEach((d) => {
+    scopedDevices.forEach((d) => {
       const b = bucketOverrideCount(d.override_count ?? 0);
       m.set(b, (m.get(b) ?? 0) + 1);
     });
     return m;
-  }, [devices]);
+  }, [scopedDevices]);
 
   const recencyCounts = useMemo(() => {
     const m = new Map<Exclude<RecencyBucket, "all">, number>();
-    devices.forEach((d) => {
+    scopedDevices.forEach((d) => {
       const b = bucketRecency(d.last_updated);
       m.set(b, (m.get(b) ?? 0) + 1);
     });
     return m;
-  }, [devices]);
+  }, [scopedDevices]);
 
   const savedViewCounts = useMemo(
     () => ({
-      anomalies: anomalies.size,
-      recent: devices.filter((d) => (ageInDays(d.last_updated) ?? Infinity) < 7).length,
-      hdr: devices.filter((d) => /tv|appletv|tvos|shield/i.test(deviceKeyHints(d))).length,
-      subtitle: devices.filter((d) => (d.override_count ?? 0) >= 3).length,
-      dormant: devices.filter((d) => (ageInDays(d.last_updated) ?? 0) > 30).length,
+      anomalies: scopedDevices.filter((d) => anomalies.has(d.device_id)).length,
+      recent: scopedDevices.filter((d) => (ageInDays(d.last_updated) ?? Infinity) < 7).length,
+      hdr: scopedDevices.filter((d) => /tv|appletv|tvos|shield/i.test(deviceKeyHints(d))).length,
+      subtitle: scopedDevices.filter((d) => (d.override_count ?? 0) >= 3).length,
+      dormant: scopedDevices.filter((d) => (ageInDays(d.last_updated) ?? 0) > 30).length,
     }),
-    [anomalies, devices],
+    [anomalies, scopedDevices],
   );
 
   // filter pipeline
   const filteredDevices = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return devices.filter((device) => {
+    return scopedDevices.filter((device) => {
       // saved view
       if (activeView === "anomalies" && !anomalies.has(device.device_id)) return false;
       if (activeView === "recent" && (ageInDays(device.last_updated) ?? Infinity) >= 7)
@@ -317,7 +322,7 @@ export default function AdminDevices() {
       }
       return true;
     });
-  }, [devices, anomalies, activeView, platforms, overrideRange, recency, search]);
+  }, [scopedDevices, anomalies, activeView, platforms, overrideRange, recency, search]);
 
   // group pivot
   const groups = useMemo(() => buildGroups(filteredDevices, groupBy), [filteredDevices, groupBy]);
@@ -332,9 +337,14 @@ export default function AdminDevices() {
     () => devices.reduce((sum, d) => sum + (d.override_count ?? 0), 0),
     [devices],
   );
+  const devicesWithOverrides = useMemo(
+    () => devices.filter((d) => (d.override_count ?? 0) > 0).length,
+    [devices],
+  );
 
   const hasAnyFilter =
     activeView !== null ||
+    overridesOnly ||
     platforms.size > 0 ||
     overrideRange.size > 0 ||
     recency.size > 0 ||
@@ -345,6 +355,7 @@ export default function AdminDevices() {
     setPlatforms(new Set());
     setOverrideRange(new Set());
     setRecency(new Set());
+    setOverridesOnly(false);
     setSearch("");
   };
 
@@ -369,7 +380,7 @@ export default function AdminDevices() {
           <Input
             ref={searchRef}
             className="bg-background/60 h-9 pr-14 pl-9 text-[13px]"
-            placeholder="Search devices, users, IDs, override keys…"
+            placeholder="Search devices, users, IDs, profiles…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -403,6 +414,15 @@ export default function AdminDevices() {
           onGroupByChange={setGroupBy}
         />
       )}
+
+      <div className="flex justify-start">
+        <DeviceScopeControl
+          overridesOnly={overridesOnly}
+          totalDevices={devices.length}
+          devicesWithOverrides={devicesWithOverrides}
+          onChange={setOverridesOnly}
+        />
+      </div>
 
       {/* main 3-pane */}
       <div className="grid gap-4 lg:grid-cols-[200px_minmax(300px,360px)_minmax(0,1fr)] xl:grid-cols-[220px_minmax(320px,380px)_minmax(0,1fr)]">
@@ -481,6 +501,7 @@ export default function AdminDevices() {
               deviceId={currentDeviceId}
               initialProfileId={currentProfileId}
               anomaly={anomalies.get(currentDeviceId) ?? null}
+              defaultShowAllSettings={!overridesOnly}
             />
           ) : (
             <EmptyDetail />
@@ -544,7 +565,7 @@ function FleetPulse({
         <Histogram counts={sortedCounts} max={maxCount} />
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
         <span className="text-muted-foreground/70 text-[10px] tracking-[0.08em] uppercase">
           group by
         </span>
@@ -558,6 +579,122 @@ function FleetPulse({
           ]}
         />
       </div>
+    </div>
+  );
+}
+
+function DeviceScopeControl({
+  overridesOnly,
+  totalDevices,
+  devicesWithOverrides,
+  onChange,
+}: {
+  overridesOnly: boolean;
+  totalDevices: number;
+  devicesWithOverrides: number;
+  onChange: (overridesOnly: boolean) => void;
+}) {
+  return (
+    <div className="border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border">
+      <button
+        type="button"
+        onClick={() => onChange(false)}
+        aria-pressed={!overridesOnly}
+        className={cn(
+          "inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors",
+          !overridesOnly
+            ? "bg-surface-hover/70 text-foreground"
+            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+        )}
+      >
+        <span>All Devices</span>
+        <span className="font-mono text-[11.5px] tabular-nums opacity-70">{totalDevices}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(true)}
+        aria-pressed={overridesOnly}
+        className={cn(
+          "border-border/60 inline-flex items-center gap-2 border-l px-3.5 py-2 text-[13px] font-medium transition-colors",
+          overridesOnly
+            ? "bg-surface-hover/70 text-foreground"
+            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+        )}
+      >
+        <span>Devices with Overrides</span>
+        <span className="font-mono text-[11.5px] tabular-nums opacity-70">
+          {devicesWithOverrides}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function SettingsScopeControl({
+  showAllSettings,
+  totalSettings,
+  overrideCount,
+  disabled,
+  lockToAllSettings,
+  onChange,
+}: {
+  showAllSettings: boolean;
+  totalSettings: number;
+  overrideCount: number;
+  disabled: boolean;
+  lockToAllSettings: boolean;
+  onChange: (showAllSettings: boolean) => void;
+}) {
+  const canShowOverrides = !disabled && !lockToAllSettings;
+
+  return (
+    <div
+      className={cn(
+        "border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border",
+        disabled && "opacity-40",
+      )}
+      title={
+        disabled
+          ? "This device does not have a registered profile yet"
+          : lockToAllSettings
+            ? "This device has no overrides yet, so every device setting is shown"
+            : undefined
+      }
+    >
+      <button
+        type="button"
+        onClick={() => {
+          if (!disabled) onChange(true);
+        }}
+        disabled={disabled}
+        aria-pressed={showAllSettings}
+        className={cn(
+          "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed",
+          showAllSettings
+            ? "bg-surface-hover/70 text-foreground"
+            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+        )}
+      >
+        <span>All Settings</span>
+        <span className="font-mono text-[10.5px] tabular-nums opacity-70">{totalSettings}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (canShowOverrides) onChange(false);
+        }}
+        disabled={!canShowOverrides}
+        aria-pressed={!showAllSettings}
+        className={cn(
+          "border-border/60 inline-flex items-center gap-1.5 border-l px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+          !showAllSettings
+            ? "bg-surface-hover/70 text-foreground"
+            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+        )}
+      >
+        <span>Overrides</span>
+        <span className="font-mono text-[10.5px] tabular-nums opacity-70">{overrideCount}</span>
+      </button>
     </div>
   );
 }
@@ -1202,12 +1339,12 @@ function EmptyFleet({ hasDevices, onClear }: { hasDevices: boolean; onClear: () 
   return (
     <div className="flex flex-col items-center gap-3 px-4 py-14 text-center">
       <p className="text-foreground text-sm font-medium">
-        {hasDevices ? "No devices match your filters" : "No device overrides yet"}
+        {hasDevices ? "No devices match your filters" : "No devices seen yet"}
       </p>
       <p className="text-muted-foreground max-w-xs text-[12.5px] leading-relaxed">
         {hasDevices
           ? "Try a different search term or clear a few filters."
-          : "Overrides appear here as soon as a user tunes a per-device setting."}
+          : "Devices appear here after a client connects with a stable device id."}
       </p>
       {hasDevices && (
         <Button variant="outline" size="sm" onClick={onClear}>
@@ -1239,12 +1376,14 @@ function DeviceDetailPanel({
   deviceId,
   initialProfileId,
   anomaly,
+  defaultShowAllSettings,
 }: {
   userId: number;
   deviceId: string;
   initialProfileId: string | null;
   /** Reason this device was flagged, or null if no anomaly. */
   anomaly: DeviceAnomalyReason | null;
+  defaultShowAllSettings: boolean;
 }) {
   const isAnomaly = anomaly !== null;
   const { data, isLoading } = useAdminDeviceDetail(userId, deviceId);
@@ -1269,11 +1408,25 @@ function DeviceDetailPanel({
   // When on, the profile tabs render every device-scoped setting from the
   // manifest — not just the ones currently overridden — so the admin can
   // create overrides on settings that haven't been touched yet.
-  const [showAllSettings, setShowAllSettings] = useState(false);
+  const [showAllSettings, setShowAllSettings] = useState(defaultShowAllSettings);
+  const [prevDefaultShowAllSettings, setPrevDefaultShowAllSettings] =
+    useState(defaultShowAllSettings);
+  if (prevDefaultShowAllSettings !== defaultShowAllSettings) {
+    setPrevDefaultShowAllSettings(defaultShowAllSettings);
+    setShowAllSettings(defaultShowAllSettings);
+  }
 
   const profileTabs = useMemo<DeviceProfileTabEntry[]>(() => {
     if (!data) return [];
     const grouped = new Map<string, DeviceProfileTabEntry>();
+    for (const profile of data.profiles ?? []) {
+      const profileId = profile.profile_id || UNKNOWN_PROFILE_ID;
+      grouped.set(profileId, {
+        profileId,
+        profileName: profile.profile_name || profileId,
+        settings: [],
+      });
+    }
     for (const setting of data.settings) {
       const profileId = setting.profile_id || UNKNOWN_PROFILE_ID;
       const existing = grouped.get(profileId);
@@ -1312,7 +1465,9 @@ function DeviceDetailPanel({
   }
 
   const kind = classifyPlatform(data.device_platform);
-  const totalOverrides = data.settings.length;
+  const totalOverrides = data.override_count ?? data.settings.length;
+  const forceAllSettings = totalOverrides === 0;
+  const effectiveShowAllSettings = forceAllSettings || showAllSettings;
   const lastUpdate = data.settings
     .map((s) => s.updated_at)
     .filter(Boolean)
@@ -1483,31 +1638,14 @@ function DeviceDetailPanel({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowAllSettings((v) => !v)}
+          <SettingsScopeControl
+            showAllSettings={effectiveShowAllSettings}
+            totalSettings={ALL_DEVICE_SETTING_KEYS.length}
+            overrideCount={totalOverrides}
             disabled={profileTabs.length === 0}
-            aria-pressed={showAllSettings}
-            className={cn(
-              "border-border/70 hover:bg-surface-hover/60 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-              showAllSettings
-                ? "bg-foreground/10 text-foreground border-foreground/30"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            title={
-              profileTabs.length === 0
-                ? "Add an override on this device first to surface every setting"
-                : showAllSettings
-                  ? "Collapse to overridden settings only"
-                  : `Show every device setting (${ALL_DEVICE_SETTING_KEYS.length})`
-            }
-          >
-            {showAllSettings ? (
-              <>Overrides only</>
-            ) : (
-              <>Show all {ALL_DEVICE_SETTING_KEYS.length} settings</>
-            )}
-          </button>
+            lockToAllSettings={forceAllSettings}
+            onChange={setShowAllSettings}
+          />
           <Button variant="outline" size="sm" asChild>
             <Link to={`/admin/users/${data.user_id}`}>
               Open user
@@ -1564,12 +1702,12 @@ function DeviceDetailPanel({
         appears next to the rows, not next to the profiles strip.
       */}
       <div className="flex min-h-0 flex-1 flex-col">
-        {totalOverrides === 0 ? (
+        {profileTabs.length === 0 ? (
           <div className="px-5 py-5 sm:px-6">
             <div className="border-border/60 rounded-md border border-dashed px-6 py-12 text-center">
-              <p className="text-foreground text-sm font-medium">No overrides on this device</p>
+              <p className="text-foreground text-sm font-medium">No profiles registered</p>
               <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-xs leading-relaxed">
-                This device has been seen but isn't overriding any per-profile playback settings.
+                The device exists, but it does not have enough profile context to create overrides.
               </p>
             </div>
           </div>
@@ -1578,7 +1716,7 @@ function DeviceDetailPanel({
             key={initialProfileId ?? "default"}
             profiles={profileTabs}
             initialProfileId={initialProfileId}
-            showAllSettings={showAllSettings}
+            showAllSettings={effectiveShowAllSettings}
             device={{
               userId: data.user_id,
               deviceId: data.device_id,

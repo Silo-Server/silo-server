@@ -22,9 +22,26 @@ if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCap
   window.HTMLElement.prototype.scrollIntoView = () => {};
 }
 
-const fetchMock = vi.fn();
+const apiClientMocks = vi.hoisted(() => {
+  class ApiClientErrorMock extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  return {
+    ApiClientErrorMock,
+    fetchMock: vi.fn(),
+  };
+});
+
+const { fetchMock } = apiClientMocks;
 
 vi.mock("@/api/client", () => ({
+  ApiClientError: apiClientMocks.ApiClientErrorMock,
   api: (path: string, options?: unknown) => fetchMock(path, options),
 }));
 
@@ -328,7 +345,7 @@ describe("CollectionTemplateGallery", () => {
     });
   });
 
-  it("applies the core defaults bundle and displays failures", async () => {
+  it("queues the core defaults bundle apply job", async () => {
     const user = userEvent.setup();
     renderGallery();
 
@@ -339,21 +356,11 @@ describe("CollectionTemplateGallery", () => {
     fetchMock.mockImplementation((path: string) => {
       if (path === "/admin/collections/templates") return Promise.resolve(catalogResponse);
       if (path === "/admin/collections/template-bundles") return Promise.resolve(bundlesResponse);
-      if (path === "/admin/collections/template-bundles/core_defaults/apply") {
+      if (path === "/admin/collections/template-bundles/core_defaults/apply-job") {
         return Promise.resolve({
-          bundle_id: "core_defaults",
-          dry_run: false,
-          created: [],
-          skipped: [],
-          failed: [
-            {
-              template_id: "mdblist_top_horror",
-              template_title: "Top Horror Movies",
-              library_id: 1,
-              library_name: "Movies",
-              reason: "sync failed",
-            },
-          ],
+          id: "job-1",
+          job_type: "template_bundle_apply",
+          status: "queued",
         });
       }
       throw new Error(`unexpected path: ${path}`);
@@ -363,8 +370,13 @@ describe("CollectionTemplateGallery", () => {
     await user.click(screen.getByRole("button", { name: /Apply Defaults/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Created 0; skipped 0; failed 1/i)).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/admin/collections/template-bundles/core_defaults/apply-job",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining('"library_ids":[1]'),
+        }),
+      );
     });
-    expect(screen.getByText(/Movies \/ Top Horror Movies: sync failed/i)).toBeInTheDocument();
   });
 });

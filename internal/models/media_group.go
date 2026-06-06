@@ -94,6 +94,7 @@ type SeriesRootMatchJob struct {
 type MovieMatchQueueEntry struct {
 	MediaFileID     int
 	MediaFolderID   int
+	FilePath        string
 	FirstQueuedAt   time.Time
 	AvailableAt     time.Time
 	LastAttemptedAt *time.Time

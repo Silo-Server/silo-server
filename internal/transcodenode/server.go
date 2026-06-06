@@ -44,6 +44,7 @@ type TranscodeStartRequest struct {
 type TranscodeStartResponse struct {
 	SessionID string `json:"session_id"`
 	Status    string `json:"status"`
+	HWAccel   string `json:"hw_accel,omitempty"`
 }
 
 // HealthResponse is the JSON response for GET /api/v1/health.
@@ -238,6 +239,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(1)
 
 	// Track session in Redis
+	effectiveHWAccel := session.Opts().HWAccel
 	s.tracker.Track(r.Context(), nodesessions.SessionInfo{
 		SessionID:  req.SessionID,
 		NodeURL:    s.tracker.NodeURL(),
@@ -246,7 +248,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		CodecVideo: req.TargetCodecVideo,
 		CodecAudio: req.TargetCodecAudio,
 		Resolution: req.TargetResolution,
-		HWAccel:    opts.HWAccel,
+		HWAccel:    effectiveHWAccel,
 		StartedAt:  time.Now().UTC().Format(time.RFC3339),
 	})
 
@@ -254,6 +256,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(TranscodeStartResponse{
 		SessionID: req.SessionID,
 		Status:    "started",
+		HWAccel:   effectiveHWAccel,
 	})
 }
 

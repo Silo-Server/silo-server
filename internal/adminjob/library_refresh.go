@@ -251,8 +251,9 @@ func (e *LibraryRefreshExecutor) Execute(
 	if result.RefreshedOK > 0 || result.PipelineOK > 0 {
 		e.publish(cache.EventMetadataUpdated, strconv.Itoa(req.LibraryID))
 		if e.realtimeHub != nil {
-			_ = e.realtimeHub.PublishMetadataUpdated(ctx, notifications.MetadataUpdateEvent{
+			_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
 				LibraryID: req.LibraryID,
+				Change:    "metadata_updated",
 			})
 		}
 	}
@@ -321,6 +322,7 @@ func (e *LibraryRefreshExecutor) refreshItemsWithIDs(
 				result.RefreshedFailed++
 			} else {
 				result.RefreshedOK++
+				e.publishCatalogItemChanged(ctx, result.LibraryID, itemResult.contentID)
 			}
 			advance("Refreshing items with external IDs")
 		}
@@ -386,6 +388,7 @@ func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libra
 	if err := e.refresher.RefreshItemForLibrary(ctx, req.RefreshContentID, req.ScanFolderID); err != nil {
 		return fmt.Errorf("refresh metadata: %w", err)
 	}
+	e.publishCatalogItemChanged(ctx, libraryID, req.RefreshContentID)
 	return nil
 }
 
@@ -396,6 +399,17 @@ func (e *LibraryRefreshExecutor) publish(eventType, payload string) {
 	_ = e.eventBus.Publish(context.Background(), cache.ChannelCatalog, cache.Event{
 		Type:    eventType,
 		Payload: payload,
+	})
+}
+
+func (e *LibraryRefreshExecutor) publishCatalogItemChanged(ctx context.Context, libraryID int, contentID string) {
+	if e == nil || e.realtimeHub == nil || contentID == "" {
+		return
+	}
+	_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
+		LibraryID: libraryID,
+		ContentID: contentID,
+		Change:    "metadata_updated",
 	})
 }
 

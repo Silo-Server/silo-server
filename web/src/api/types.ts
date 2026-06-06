@@ -1972,6 +1972,7 @@ export interface AdminSession {
   file_duration: number | null;
   started_at: string;
   updated_at: string;
+  position_seconds: number;
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
@@ -1982,6 +1983,7 @@ export interface AdminSession {
   target_video_codec?: string;
   target_audio_codec?: string;
   target_bitrate_kbps: number | null;
+  transcode_hw_accel?: string;
   source_container?: string;
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
@@ -2186,6 +2188,9 @@ export interface AdminDeviceDetail {
   device_id: string;
   device_name: string;
   device_platform: string;
+  override_count: number;
+  profile_count: number;
+  profiles: AdminDeviceProfileSummary[];
   last_updated: string;
   settings: {
     user_id: number;
@@ -2248,6 +2253,66 @@ export interface LibraryMountCheckResponse {
   checked_at: string;
   summary: string;
   roots: LibraryMountCheckRoot[];
+}
+
+export interface LibraryMetadataMatchQueueStatus {
+  library_id: number;
+  movie_count: number;
+  series_count: number;
+  raw_file_count: number;
+  total_count: number;
+}
+
+export interface LibraryMovieMatchQueueEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibrarySeriesMatchQueueEntry {
+  media_folder_id: number;
+  observed_root_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibraryRawMatchBacklogEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  base_title?: string;
+  base_year?: number;
+  base_type?: string;
+  last_attempted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryMetadataMatchQueueDetail extends LibraryMetadataMatchQueueStatus {
+  movies: LibraryMovieMatchQueueEntry[];
+  series: LibrarySeriesMatchQueueEntry[];
+  raw_files: LibraryRawMatchBacklogEntry[];
+}
+
+export interface LibraryMetadataMatchQueueActionResponse {
+  status: "queued" | "cancelled";
+  library_id: number;
+  movie_cancelled?: number;
+  series_cancelled?: number;
+  raw_file_cancelled?: number;
+  raw_file_retried?: number;
+  total_cancelled?: number;
+  queue: LibraryMetadataMatchQueueStatus;
 }
 
 export interface LibrarySkippedRoot {
@@ -2402,7 +2467,7 @@ export interface CatalogSeedImportResponse {
   unmatched_roots?: string[];
 }
 
-export type AdminJobStatus = "queued" | "running" | "completed" | "failed";
+export type AdminJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface LibraryRefreshJobRequest {
   library_id: number;

@@ -230,9 +230,10 @@ export function useUpdateItemMetadata(contentId: string) {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
-    onSuccess: (updatedItem) => {
-      queryClient.setQueryData(catalogKeys.itemDetail(contentId), updatedItem);
-      queryClient.invalidateQueries({ queryKey: ["items", "detail", contentId] });
+    onSuccess: () => {
+      void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
+        bumpHomeRefreshSignal(queryClient);
+      });
       toast.success("Metadata saved");
     },
     onError: (err) => {

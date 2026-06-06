@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -372,6 +373,7 @@ func (h *SettingsHandler) HandleGetDeviceSetting(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
 	}
+	registerRequestDevice(r.Context(), store, profileID, device)
 
 	value, err := store.GetDeviceSetting(r.Context(), profileID, device.DeviceID, key)
 	if err != nil {
@@ -471,6 +473,7 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
 	}
+	registerRequestDevice(r.Context(), store, profileID, device)
 
 	if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, key); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
@@ -500,6 +503,7 @@ func (h *SettingsHandler) HandleGetEffectiveSettings(w http.ResponseWriter, r *h
 	}
 
 	device := deviceMetadataFromRequest(r)
+	registerRequestDevice(r.Context(), store, profileID, device)
 	keys := parseSettingKeys(keysParam)
 	resp := effectiveSettingsResponse{
 		Settings: make([]effectiveSettingResponse, 0, len(keys)),
@@ -530,6 +534,7 @@ func (h *SettingsHandler) HandleGetEffectiveSubtitleAppearance(w http.ResponseWr
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
 	}
+	registerRequestDevice(r.Context(), store, profileID, device)
 
 	resolved, err := h.resolveEffectiveSetting(r.Context(), store, profileID, device, subtitleAppearanceSettingKey)
 	if err != nil {
@@ -587,6 +592,36 @@ func deviceMetadataFromRequest(r *http.Request) requestDeviceMetadata {
 		DeviceID:       clampHeaderValue(r.Header.Get(deviceIDHeader), 128),
 		DeviceName:     clampHeaderValue(r.Header.Get(deviceNameHeader), 120),
 		DevicePlatform: clampHeaderValue(r.Header.Get(devicePlatformHeader), 40),
+	}
+}
+
+func registerRequestDevice(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	device requestDeviceMetadata,
+) {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(device.DeviceID) == "" {
+		return
+	}
+	if store == nil {
+		return
+	}
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		return
+	}
+	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{
+		ProfileID:      profileID,
+		DeviceID:       device.DeviceID,
+		DeviceName:     device.DeviceName,
+		DevicePlatform: device.DevicePlatform,
+	}); err != nil {
+		slog.Warn("failed to register request device",
+			"profile_id", profileID,
+			"device_id", device.DeviceID,
+			"error", err,
+		)
 	}
 }
 

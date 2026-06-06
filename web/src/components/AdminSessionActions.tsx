@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { MoreHorizontal, MessageSquare, Pause, Play, Square, OctagonAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -27,6 +28,10 @@ type SessionActionKind = "pause" | "resume" | "stop" | "terminate" | "message";
 interface AdminSessionActionsProps {
   session: AdminSession;
   compact?: boolean;
+  layout?: "menu" | "inline";
+  extraMenuItems?: ReactNode;
+  inlinePrefixActions?: ReactNode;
+  showInlineTerminate?: boolean;
 }
 
 type SessionCommandResponse = {
@@ -52,7 +57,14 @@ const fallbackMessages: Record<Exclude<SessionActionKind, "message">, string> = 
 const unsupportedPlaybackControlCopy =
   "This session does not support live pause, resume, or messages. Stop and Terminate can still end playback.";
 
-export function AdminSessionActions({ session, compact = false }: AdminSessionActionsProps) {
+export function AdminSessionActions({
+  session,
+  compact = false,
+  layout = "menu",
+  extraMenuItems,
+  inlinePrefixActions,
+  showInlineTerminate = false,
+}: AdminSessionActionsProps) {
   const [pendingAction, setPendingAction] = useState<SessionActionKind | null>(null);
   const [messageOpen, setMessageOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -123,58 +135,110 @@ export function AdminSessionActions({ session, compact = false }: AdminSessionAc
     }
   }
 
+  const terminateButton = showInlineTerminate ? (
+    <Button
+      variant="outline"
+      size="sm"
+      className={
+        compact
+          ? "border-destructive/40 text-destructive hover:bg-destructive/10 h-7 gap-1.5 px-2 text-[11px]"
+          : "border-destructive/40 text-destructive hover:bg-destructive/10"
+      }
+      onClick={() => void runAction("terminate")}
+      disabled={pendingAction !== null}
+    >
+      <OctagonAlert className="h-3.5 w-3.5" />
+      Terminate
+    </Button>
+  ) : null;
+
+  const menu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={compact ? "h-7 w-7" : "h-8 w-8"}
+          aria-label="Session actions"
+          disabled={pendingAction !== null}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        {layout === "menu" ? (
+          <>
+            <DropdownMenuLabel>
+              {supportsPlaybackControl ? "Playback Actions" : "Limited Playback Actions"}
+            </DropdownMenuLabel>
+            {supportsPlaybackControl ? (
+              <DropdownMenuItem onSelect={() => void runAction(primaryAction.action)}>
+                {primaryAction.action === "pause" ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                {primaryAction.label}
+              </DropdownMenuItem>
+            ) : (
+              <>
+                <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
+                  {unsupportedPlaybackControlCopy}
+                </div>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuItem onSelect={() => void runAction("stop")}>
+              <Square className="h-4 w-4" />
+              Stop
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <DropdownMenuLabel>Session Actions</DropdownMenuLabel>
+        )}
+        {extraMenuItems ? (
+          <>
+            {layout === "menu" ? <DropdownMenuSeparator /> : null}
+            {extraMenuItems}
+          </>
+        ) : null}
+        {supportsPlaybackControl ? (
+          <DropdownMenuItem onSelect={() => setMessageOpen(true)}>
+            <MessageSquare className="h-4 w-4" />
+            Message…
+          </DropdownMenuItem>
+        ) : layout === "inline" ? (
+          <>
+            <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
+              {unsupportedPlaybackControlCopy}
+            </div>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        {showInlineTerminate ? null : (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={() => void runAction("terminate")}>
+              <OctagonAlert className="h-4 w-4" />
+              Terminate
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={compact ? "h-7 w-7" : "h-8 w-8"}
-            aria-label="Session actions"
-            disabled={pendingAction !== null}
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel>
-            {supportsPlaybackControl ? "Playback Actions" : "Limited Playback Actions"}
-          </DropdownMenuLabel>
-          {supportsPlaybackControl ? (
-            <DropdownMenuItem onSelect={() => void runAction(primaryAction.action)}>
-              {primaryAction.action === "pause" ? (
-                <Pause className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              {primaryAction.label}
-            </DropdownMenuItem>
-          ) : (
-            <>
-              <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
-                {unsupportedPlaybackControlCopy}
-              </div>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          <DropdownMenuItem onSelect={() => void runAction("stop")}>
-            <Square className="h-4 w-4" />
-            Stop
-          </DropdownMenuItem>
-          {supportsPlaybackControl ? (
-            <DropdownMenuItem onSelect={() => setMessageOpen(true)}>
-              <MessageSquare className="h-4 w-4" />
-              Message…
-            </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => void runAction("terminate")}>
-            <OctagonAlert className="h-4 w-4" />
-            Terminate
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {layout === "inline" ? (
+        <div className="flex items-center justify-end gap-1.5">
+          {inlinePrefixActions}
+          {terminateButton}
+          {menu}
+        </div>
+      ) : (
+        menu
+      )}
 
       <Dialog
         open={supportsPlaybackControl && messageOpen}
