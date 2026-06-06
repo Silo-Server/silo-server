@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -11,8 +12,9 @@ import (
 // OutcomeStatus values for a contribution attempt, in addition to the provider
 // SubmissionStatus* values.
 const (
-	OutcomeStatusError   = "error"
-	OutcomeStatusSkipped = "skipped"
+	OutcomeStatusError       = "error"
+	OutcomeStatusRateLimited = "rate_limited"
+	OutcomeStatusSkipped     = "skipped"
 )
 
 // ContributeOptions scopes a contribution run.
@@ -31,9 +33,10 @@ type ContributeOptions struct {
 type ContributionOutcome struct {
 	Provider     string
 	Segment      MarkerKind
-	Status       string // pending | accepted | rejected | error | skipped
+	Status       string // pending | accepted | rejected | error | rate_limited | skipped
 	SubmissionID string
 	Reason       string // skip reason or error message
+	RetryAfter   time.Duration
 }
 
 // providerConfigReader is the read surface ContributionService needs from the
@@ -102,7 +105,7 @@ func (s *ContributionService) submitters() []Submitter {
 // ContributeFile submits the file's eligible markers and returns one outcome
 // per (provider, segment) attempted (including explicit skips).
 func (s *ContributionService) ContributeFile(ctx context.Context, file *models.MediaFile, opts ContributeOptions) ([]ContributionOutcome, error) {
-	if s == nil || file == nil || s.registry == nil || s.resolver == nil {
+	if s == nil || file == nil || s.registry == nil || s.resolver == nil || s.config == nil || s.store == nil {
 		return nil, nil
 	}
 	ids, err := s.resolver.ResolveForFile(ctx, file)
@@ -141,6 +144,9 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 			}
 			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, opts.Auto); attempted {
 				outcomes = append(outcomes, outcome)
+				if outcome.Status == OutcomeStatusRateLimited {
+					return outcomes, nil
+				}
 			}
 		}
 	}
@@ -179,6 +185,9 @@ func (s *ContributionService) contributeSegment(
 		if confidence < cfg.ContributeMinConfidence {
 			return ContributionOutcome{}, false
 		}
+	}
+	if strings.TrimSpace(ids.TmdbID) == "" {
+		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "tmdb id required"}, true
 	}
 
 	startMs := int64(*seg.start * 1000)
@@ -225,6 +234,9 @@ func (s *ContributionService) contributeSegment(
 		row.Error = &msg
 		if recErr := s.store.Record(ctx, row); recErr != nil {
 			s.logger.Warn("record contribution error failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", recErr)
+		}
+		if after, ok := RetryAfter(err); ok {
+			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusRateLimited, Reason: msg, RetryAfter: after}, true
 		}
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: msg}, true
 	}

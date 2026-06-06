@@ -108,3 +108,24 @@ func TestCanWriteMarkerHigherPriorityWinsRegardless(t *testing.T) {
 		t.Error("lower priority should not overwrite higher")
 	}
 }
+
+func TestCanWriteMarkerManualAlwaysWinsLastWriter(t *testing.T) {
+	manual := models.MarkerSourceManual
+	conf := 1.0
+
+	// A manual edit must overwrite an existing manual marker even though both
+	// share priority 4 and confidence 1.0 — otherwise corrections silently fail.
+	if !CanWriteMarker(&manual, &conf, models.MarkerSourceManual, &conf) {
+		t.Error("manual edit should overwrite an existing manual marker (last-writer-wins)")
+	}
+	// Manual still wins over lower-priority sources.
+	online := models.MarkerSourceOnline
+	highConf := 0.99
+	if !CanWriteMarker(&online, &highConf, models.MarkerSourceManual, &conf) {
+		t.Error("manual edit should overwrite a high-confidence online marker")
+	}
+	// A non-manual source still cannot displace a manual marker.
+	if CanWriteMarker(&manual, &conf, models.MarkerSourceOnline, &highConf) {
+		t.Error("online source should never overwrite a manual marker")
+	}
+}

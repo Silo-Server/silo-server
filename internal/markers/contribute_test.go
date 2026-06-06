@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -148,6 +149,58 @@ func TestContributeSkipsDuplicate(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
 		t.Errorf("expected skipped outcome, got %+v", outcomes)
+	}
+}
+
+func TestContributeSkipsWhenTMDBMissing(t *testing.T) {
+	sub := &fakeSubmitter{id: "introdb"}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+
+	reg := NewRegistry(nil)
+	_ = reg.Register(sub)
+	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TvdbID: "777", SeasonNumber: 1, EpisodeNumber: 3}}
+	svc := NewContributionService(reg, resolver, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec, nil)
+
+	outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 0 || len(rec.recorded) != 0 {
+		t.Fatalf("tmdb-missing marker should be skipped before submit/record, submitted=%d recorded=%d", len(sub.submitted), len(rec.recorded))
+	}
+	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped || outcomes[0].Reason != "tmdb id required" {
+		t.Fatalf("outcomes = %+v, want skipped tmdb id required", outcomes)
+	}
+}
+
+func TestContributeStopsOnRetryAfterError(t *testing.T) {
+	sub := &fakeSubmitter{
+		id:  "introdb",
+		err: &RetryAfterError{Provider: "introdb", RetryAfter: 45 * time.Second, Message: "usage limited"},
+	}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	file.CreditsStart, file.CreditsEnd = floatPtr(1700), floatPtr(1800)
+	file.CreditsMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 {
+		t.Fatalf("expected contribution loop to stop after first rate limit, submitted=%d", len(sub.submitted))
+	}
+	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusRateLimited || outcomes[0].RetryAfter != 45*time.Second {
+		t.Fatalf("outcomes = %+v, want one rate_limited retry-after outcome", outcomes)
+	}
+	if len(rec.recorded) != 1 || rec.recorded[0].Status != OutcomeStatusError {
+		t.Fatalf("recorded = %+v, want one error audit row", rec.recorded)
 	}
 }
 

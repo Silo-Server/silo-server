@@ -11,6 +11,12 @@ import (
 // wins; an equal-priority source wins only if its confidence is strictly
 // higher than what's already stored. Unknown/empty existing source is treated
 // as priority zero so any defined source can replace it.
+//
+// A manual write is the exception: an explicit human edit is authoritative and
+// always applies at equal-or-higher priority (last-writer-wins). Without this,
+// correcting a previously hand-set marker — whose confidence is fixed at 1.0 —
+// would be silently rejected by the strictly-higher-confidence rule, leaving
+// users unable to fix their own (or each other's) edits.
 func CanWriteMarker(existingSource *string, existingConfidence *float64, newSource string, newConfidence *float64) bool {
 	currentSource := ""
 	if existingSource != nil {
@@ -23,6 +29,9 @@ func CanWriteMarker(existingSource *string, existingConfidence *float64, newSour
 	}
 	if newPriority < existingPriority {
 		return false
+	}
+	if newSource == models.MarkerSourceManual {
+		return true
 	}
 	if existingConfidence != nil && newConfidence != nil {
 		return *newConfidence > *existingConfidence

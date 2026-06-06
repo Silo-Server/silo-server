@@ -3,6 +3,7 @@ package introdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -105,5 +106,37 @@ func TestFetchUserStatsParses(t *testing.T) {
 	}
 	if stats.Total != 10 || stats.Accepted != 7 || stats.AcceptanceRate != 0.7 || stats.BestStreak != 5 {
 		t.Errorf("stats = %+v", stats)
+	}
+}
+
+func TestSubmitMarkerReturnsRetryAfterOnUsageLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-UsageLimit-Reset", "120")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	c := NewClient("secret-key")
+	c.SetBaseURL(srv.URL)
+	p := NewProvider(c)
+
+	_, err := p.SubmitMarker(context.Background(), markers.SubmissionRequest{
+		Kind:          markers.ItemKindEpisode,
+		ExternalIDs:   map[string]string{markers.ExternalIDKeyTMDB: "1234"},
+		SeasonNumber:  1,
+		EpisodeNumber: 2,
+		Segment:       markers.MarkerKindIntro,
+		End:           ptrDur(60 * time.Second),
+		Duration:      30 * time.Minute,
+	})
+	if err == nil {
+		t.Fatal("expected usage-limit error")
+	}
+	var retryErr *markers.RetryAfterError
+	if !errors.As(err, &retryErr) {
+		t.Fatalf("error = %T %v, want RetryAfterError", err, err)
+	}
+	if retryErr.RetryAfter != 120*time.Second {
+		t.Fatalf("retry after = %v, want 120s", retryErr.RetryAfter)
 	}
 }

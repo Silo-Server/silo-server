@@ -36,6 +36,16 @@ type providerConfigResponse struct {
 	ContributeMinConfidence float64 `json:"contribute_min_confidence"`
 }
 
+type markerUserStatsResponse struct {
+	Total          int     `json:"total"`
+	Accepted       int     `json:"accepted"`
+	Pending        int     `json:"pending"`
+	Rejected       int     `json:"rejected"`
+	AcceptanceRate float64 `json:"acceptance_rate"`
+	CurrentStreak  int     `json:"current_streak"`
+	BestStreak     int     `json:"best_streak"`
+}
+
 func (h *AdminMarkerProvidersHandler) submitterIDs() map[string]bool {
 	out := map[string]bool{}
 	if h.Registry == nil {
@@ -138,7 +148,7 @@ func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWrit
 		writeJSON(w, http.StatusOK, map[string]any{"valid": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": stats})
+	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": toMarkerUserStatsResponse(stats)})
 }
 
 func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool) providerConfigResponse {
@@ -150,5 +160,17 @@ func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool) provid
 		ContributeEnabled:       c.ContributeEnabled,
 		ContributeAutoLocal:     c.ContributeAutoLocal,
 		ContributeMinConfidence: c.ContributeMinConfidence,
+	}
+}
+
+func toMarkerUserStatsResponse(s markers.UserStats) markerUserStatsResponse {
+	return markerUserStatsResponse{
+		Total:          s.Total,
+		Accepted:       s.Accepted,
+		Pending:        s.Pending,
+		Rejected:       s.Rejected,
+		AcceptanceRate: s.AcceptanceRate,
+		CurrentStreak:  s.CurrentStreak,
+		BestStreak:     s.BestStreak,
 	}
 }

@@ -126,6 +126,36 @@ type UserStats struct {
 	BestStreak     int
 }
 
+// RetryAfterError marks provider errors that should pause contribution work
+// until RetryAfter has elapsed, such as TheIntroDB usage-limit responses.
+type RetryAfterError struct {
+	Provider   string
+	RetryAfter time.Duration
+	Message    string
+}
+
+func (e *RetryAfterError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Provider != "" {
+		return fmt.Sprintf("%s: retry after %s", e.Provider, e.RetryAfter)
+	}
+	return fmt.Sprintf("retry after %s", e.RetryAfter)
+}
+
+// RetryAfter extracts a provider backoff duration from err.
+func RetryAfter(err error) (time.Duration, bool) {
+	var retryErr *RetryAfterError
+	if errors.As(err, &retryErr) && retryErr != nil {
+		return retryErr.RetryAfter, true
+	}
+	return 0, false
+}
+
 // Submitter is an optional capability implemented by providers that accept
 // marker contributions. The contribution service type-asserts a Provider to
 // Submitter; non-contributing providers simply don't implement it.

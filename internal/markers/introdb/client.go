@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"golang.org/x/time/rate"
 )
 
@@ -277,7 +278,12 @@ func (c *Client) submitSegment(ctx context.Context, body submitRequest) (*submit
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("introdb: submit usage-limited; retry after %ds", usageResetSeconds(resp))
+		after := time.Duration(usageResetSeconds(resp)) * time.Second
+		return nil, &markers.RetryAfterError{
+			Provider:   ProviderID,
+			RetryAfter: after,
+			Message:    fmt.Sprintf("introdb: submit usage-limited; retry after %s", after),
+		}
 	}
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))

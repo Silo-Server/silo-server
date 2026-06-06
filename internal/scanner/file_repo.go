@@ -1248,21 +1248,156 @@ func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments 
 	}
 	allowed := map[string]bool{"intro": true, "credits": true, "recap": true, "preview": true}
 	sets := make([]string, 0, len(segments))
+	seen := make(map[string]bool, len(segments))
 	for _, seg := range segments {
 		if !allowed[seg] {
 			return false, fmt.Errorf("invalid marker segment %q", seg)
 		}
+		if seen[seg] {
+			continue
+		}
+		seen[seg] = true
 		sets = append(sets, fmt.Sprintf(
 			"%[1]s_start = NULL, %[1]s_end = NULL, %[1]s_markers_source = NULL, "+
 				"%[1]s_markers_provider = NULL, %[1]s_markers_confidence = NULL, "+
 				"%[1]s_markers_algorithm = NULL, %[1]s_markers_detected_at = NULL", seg))
 	}
-	query := "UPDATE media_files SET " + strings.Join(sets, ", ") + ", updated_at = NOW() WHERE id = $1"
-	tag, err := r.pool.Exec(ctx, query, fileID)
+	if len(sets) == 0 {
+		return false, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin marker clear transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		existingSource     *string
+		existingConfidence *float64
+		intro              segmentState
+		credits            segmentState
+		recap              segmentState
+		preview            segmentState
+	)
+	if err := tx.QueryRow(ctx, `
+		SELECT markers_source,
+		       markers_confidence,
+		       intro_start, intro_end, intro_markers_source, intro_markers_confidence,
+		       credits_start, credits_end, credits_markers_source, credits_markers_confidence,
+		       recap_start, recap_end, recap_markers_source, recap_markers_confidence,
+		       preview_start, preview_end, preview_markers_source, preview_markers_confidence
+		FROM media_files
+		WHERE id = $1
+		FOR UPDATE`, fileID).Scan(
+		&existingSource,
+		&existingConfidence,
+		&intro.start, &intro.end, &intro.source, &intro.confidence,
+		&credits.start, &credits.end, &credits.source, &credits.confidence,
+		&recap.start, &recap.end, &recap.source, &recap.confidence,
+		&preview.start, &preview.end, &preview.source, &preview.confidence,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrFileNotFound
+		}
+		return false, fmt.Errorf("load existing markers for clear: %w", err)
+	}
+
+	for seg := range seen {
+		switch seg {
+		case "intro":
+			clearSegmentState(&intro)
+		case "credits":
+			clearSegmentState(&credits)
+		case "recap":
+			clearSegmentState(&recap)
+		case "preview":
+			clearSegmentState(&preview)
+		}
+	}
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(existingSource, existingConfidence, intro, credits, recap, preview)
+
+	query := "UPDATE media_files SET " + strings.Join(sets, ", ") +
+		", markers_source = $2, markers_confidence = $3, updated_at = NOW() WHERE id = $1"
+	tag, err := tx.Exec(ctx, query, fileID, nextSource, nextConfidence)
 	if err != nil {
 		return false, fmt.Errorf("clear markers: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	if tag.RowsAffected() == 0 {
+		return false, ErrFileNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit marker clear transaction: %w", err)
+	}
+	return true, nil
+}
+
+func clearSegmentState(state *segmentState) {
+	state.start = nil
+	state.end = nil
+	state.source = nil
+	state.provider = nil
+	state.confidence = nil
+	state.algorithm = nil
+}
+
+func recomputeSharedMarkerAttribution(
+	legacySource *string,
+	legacyConfidence *float64,
+	states ...segmentState,
+) (*string, *float64) {
+	var (
+		bestSource     *string
+		bestConfidence *float64
+		bestPriority   int
+		found          bool
+	)
+	for _, state := range states {
+		if state.start == nil || state.end == nil {
+			continue
+		}
+		source := state.source
+		confidence := state.confidence
+		if source == nil {
+			source = legacySource
+			if confidence == nil {
+				confidence = legacyConfidence
+			}
+		}
+		if source == nil || *source == "" {
+			continue
+		}
+		priority := models.MarkerSourcePriority(*source)
+		if !found || priority > bestPriority || (priority == bestPriority && confidenceGreater(confidence, bestConfidence)) {
+			sourceCopy := *source
+			bestSource = &sourceCopy
+			bestConfidence = cloneFloat(confidence)
+			bestPriority = priority
+			found = true
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+	return bestSource, bestConfidence
+}
+
+func confidenceGreater(a, b *float64) bool {
+	if a == nil {
+		return false
+	}
+	if b == nil {
+		return true
+	}
+	return *a > *b
+}
+
+func cloneFloat(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
 }
 
 func ptrFloatEqual(a, b *float64) bool {

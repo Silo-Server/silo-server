@@ -511,8 +511,9 @@ func main() {
 		if err := markerProviderConfig.Reload(appCtx); err != nil {
 			slog.Warn("load marker provider config failed; falling back to registration-order fetch",
 				"error", err)
+		} else {
+			markerRegistry.UseConfigStore(markerProviderConfig)
 		}
-		markerRegistry.UseConfigStore(markerProviderConfig)
 		deps.MarkerProviderConfig = markerProviderConfig
 		deps.OnServerSettingUpdated = func(_ context.Context, key, value string) {
 			if key == "introdb.api_key" {

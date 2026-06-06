@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -120,6 +121,11 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 				switch o.Status {
 				case markers.OutcomeStatusSkipped:
 					skipped++
+				case markers.OutcomeStatusRateLimited:
+					failed++
+					writeContributionTaskResult(progress, submitted, skipped, failed, o.RetryAfter)
+					progress.Report(100, fmt.Sprintf("Contribution usage-limited; retry after %s", formatRetryAfter(o.RetryAfter)))
+					return nil
 				case markers.OutcomeStatusError:
 					failed++
 				default:
@@ -132,9 +138,24 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 		}
 	}
 
-	if data, err := json.Marshal(map[string]int{"submitted": submitted, "skipped": skipped, "failed": failed}); err == nil {
-		progress.SetResultData(data)
-	}
+	writeContributionTaskResult(progress, submitted, skipped, failed, 0)
 	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, failed %d", submitted, skipped, failed))
 	return nil
+}
+
+func writeContributionTaskResult(progress taskmanager.ProgressReporter, submitted, skipped, failed int, retryAfter time.Duration) {
+	result := map[string]int{"submitted": submitted, "skipped": skipped, "failed": failed}
+	if retryAfter > 0 {
+		result["retry_after_seconds"] = int(retryAfter.Seconds())
+	}
+	if data, err := json.Marshal(result); err == nil {
+		progress.SetResultData(data)
+	}
+}
+
+func formatRetryAfter(d time.Duration) string {
+	if d <= 0 {
+		return "later"
+	}
+	return d.String()
 }

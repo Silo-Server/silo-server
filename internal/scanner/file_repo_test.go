@@ -78,3 +78,40 @@ func TestNextSharedMarkerAttributionDoesNotDowngradeConfidenceWhenMarkerRejected
 	}
 }
 
+func TestRecomputeSharedMarkerAttributionDropsClearedManualSegment(t *testing.T) {
+	manual := models.MarkerSourceManual
+	scannerSource := models.MarkerSourceScanner
+	manualConfidence := 1.0
+	scannerConfidence := 0.8
+
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(
+		&manual,
+		&manualConfidence,
+		segmentState{},
+		segmentState{
+			start:      floatPtr(120),
+			end:        floatPtr(180),
+			source:     &scannerSource,
+			confidence: &scannerConfidence,
+		},
+	)
+
+	if nextSource == nil || *nextSource != models.MarkerSourceScanner {
+		t.Fatalf("next source = %v, want scanner after manual segment clear", nextSource)
+	}
+	if nextConfidence == nil || *nextConfidence != scannerConfidence {
+		t.Fatalf("next confidence = %v, want %v", nextConfidence, scannerConfidence)
+	}
+}
+
+func TestRecomputeSharedMarkerAttributionClearsWhenNoSegmentsRemain(t *testing.T) {
+	manual := models.MarkerSourceManual
+	manualConfidence := 1.0
+
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(&manual, &manualConfidence, segmentState{})
+	if nextSource != nil || nextConfidence != nil {
+		t.Fatalf("shared attribution = %v/%v, want nil/nil with no remaining segments", nextSource, nextConfidence)
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }

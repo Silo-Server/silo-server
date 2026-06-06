@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -89,5 +90,29 @@ func TestContributeMarkersTaskSubmitsCandidates(t *testing.T) {
 	}
 	if prog.data == nil {
 		t.Error("expected result summary data")
+	}
+}
+
+func TestContributeMarkersTaskStopsOnRateLimit(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{
+		Status: markers.OutcomeStatusRateLimited, RetryAfter: 90 * time.Second,
+	}}}
+	cands := &fakeCandidates{ids: []int{10, 11}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.95}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	prog := &contribTestProgress{}
+	if err := task.Execute(context.Background(), prog); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected task to stop after rate limit, calls=%d", len(runner.calls))
+	}
+	var data map[string]int
+	if err := json.Unmarshal(prog.data, &data); err != nil {
+		t.Fatalf("decode result data: %v", err)
+	}
+	if data["retry_after_seconds"] != 90 {
+		t.Fatalf("retry_after_seconds = %d, want 90", data["retry_after_seconds"])
 	}
 }

@@ -772,7 +772,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
-	var adminMarkersHandler *handlers.AdminMarkersHandler
+	var markersHandler *handlers.MarkersHandler
 	if deps.FileRepo != nil {
 		var notifier handlers.PlaybackMarkerUpdateNotifier
 		if playbackHandler != nil {
@@ -786,9 +786,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.MarkerContributionStore != nil {
 			contributions = deps.MarkerContributionStore
 		}
-		adminMarkersHandler = handlers.NewAdminMarkersHandler(
+		markersHandler = handlers.NewMarkersHandler(
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
+		markersHandler.BaseContext = deps.AppContext
+		if itemRepo != nil {
+			markersHandler.Authorizer = &handlers.MediaFileAuthorizer{
+				FileResolver:  deps.FileRepo,
+				ItemAccess:    itemRepo,
+				EpisodeLookup: episodeRepo,
+			}
+		}
 	}
 
 	var adminMarkerProvidersHandler *handlers.AdminMarkerProvidersHandler
@@ -1326,6 +1334,21 @@ func NewRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
+				}
+
+				// Marker read/write/clear for any authenticated viewer: users
+				// fix and create intro/recap/credits/preview markers from the
+				// player. Writes are stamped source="manual" and contributed to
+				// enabled providers in the background. Contribution + provider
+				// config stay admin-only (see the /admin group below).
+				if markersHandler != nil {
+					r.Route("/markers", func(r chi.Router) {
+						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
+						r.Put("/items/{id}", markersHandler.HandleSetItemMarkers)
+						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
+						r.Put("/files/{fileId}", markersHandler.HandleSetFileMarkers)
+						r.Delete("/files/{fileId}/{segment}", markersHandler.HandleClearFileSegment)
+					})
 				}
 
 				// Library management routes (admin-only).
@@ -1872,12 +1895,12 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
 								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
 							}
-							if adminMarkersHandler != nil {
-								r.Get("/files/{fileId}/markers", adminMarkersHandler.HandleGetFileMarkers)
-								r.Put("/files/{fileId}/markers", adminMarkersHandler.HandleSetFileMarkers)
-								r.Delete("/files/{fileId}/markers/{segment}", adminMarkersHandler.HandleClearFileSegment)
-								r.Post("/files/{fileId}/contribute", adminMarkersHandler.HandleContributeFile)
-								r.Get("/files/{fileId}/contributions", adminMarkersHandler.HandleListFileContributions)
+							if markersHandler != nil {
+								// Marker read/write/clear live on the authenticated
+								// /markers routes (any viewer can edit). Contribution
+								// to external providers stays an admin operation.
+								r.Post("/files/{fileId}/contribute", markersHandler.HandleContributeFile)
+								r.Get("/files/{fileId}/contributions", markersHandler.HandleListFileContributions)
 							}
 							if adminMarkerProvidersHandler != nil {
 								r.Get("/markers/providers", adminMarkerProvidersHandler.HandleListProviders)
