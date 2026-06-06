@@ -95,6 +95,37 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (*Target, error) {
 	return r.resolve(ctx, req, nil, false)
 }
 
+// ResolveMissingSubtree resolves a subtree path that may no longer exist on
+// disk. This is intentionally narrower than Resolve: it never stats the path
+// and only returns ModeSubtree for paths below a configured library root.
+func (r *Resolver) ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*Target, error) {
+	if r == nil || r.folders == nil {
+		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available"}
+	}
+	cleanPath := filepath.Clean(subtreePath)
+	if strings.TrimSpace(subtreePath) == "" || cleanPath == "." {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path is required"}
+	}
+	folders, err := r.folders.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing libraries for scan: %w", err)
+	}
+	folder, matchedRoot, err := MatchFolderForPath(cleanPath, folders)
+	if err != nil {
+		return nil, err
+	}
+	if folder != nil && !folder.Enabled {
+		return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled"}
+	}
+	if filepath.Clean(cleanPath) == filepath.Clean(matchedRoot) {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Subtree path must be below a library root"}
+	}
+	if trigger = strings.TrimSpace(trigger); trigger == "" {
+		trigger = "path"
+	}
+	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: trigger}, nil
+}
+
 func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*models.MediaFolder, usePathFolders bool) (*Target, error) {
 	if r == nil || r.folders == nil {
 		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available"}

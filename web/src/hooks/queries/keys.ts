@@ -393,4 +393,13 @@ export const adminKeys = {
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,
+  autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
+  autoscanConnections: () => ["admin", "autoscan", "connections"] as const,
+  autoscanSources: () => ["admin", "autoscan", "sources"] as const,
+  autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
+  autoscanStatus: () => ["admin", "autoscan", "status"] as const,
+  autoscanScans: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "scans", params ?? {}] as const,
+  autoscanEvents: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "events", params ?? {}] as const,
 };

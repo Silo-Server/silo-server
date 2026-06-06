@@ -14,9 +14,14 @@ const (
 	DefaultMetadataTimeout     = 30 * time.Second
 	DefaultAnalyzerTimeout     = 5 * time.Minute
 	DefaultControlTimeout      = 10 * time.Second
-	DefaultEventTimeout        = 10 * time.Second
-	DefaultAuthTimeout         = 10 * time.Second
-	DefaultRouteTimeout        = 10 * time.Second
+	// DefaultScanSourceTimeout covers a single PollChanges call. Most scan
+	// sources return quickly, but filesystem-backed sources may need a longer
+	// bounded window for an initial baseline; cooperative plugins should still
+	// checkpoint progress and return before this deadline.
+	DefaultScanSourceTimeout = 5 * time.Minute
+	DefaultEventTimeout      = 10 * time.Second
+	DefaultAuthTimeout       = 10 * time.Second
+	DefaultRouteTimeout      = 10 * time.Second
 )
 
 func HandshakeConfig() plugin.HandshakeConfig {

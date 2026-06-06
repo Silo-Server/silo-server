@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -340,6 +341,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var calendarRepo *catalog.CalendarRepository
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	var autoscanHandler *handlers.AutoscanHandler
 	if deps.DB != nil {
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -403,8 +405,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
+		requestsRepo := mediarequests.NewRepository(deps.DB)
 		requestSvc := mediarequests.NewService(
-			mediarequests.NewRepository(deps.DB),
+			requestsRepo,
 			tmdb.NewClient(tmdbAPIKey, 40),
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
@@ -414,6 +417,26 @@ func NewRouter(deps Dependencies) chi.Router {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
+
+		autoscanRepo := autoscan.NewRepository(deps.DB)
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
+			autoscanSvc := BuildAutoscanService(
+				autoscanRepo,
+				deps.PluginService,
+				plugins.NewInstallationStore(deps.DB),
+				requestsRepo,
+				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
+			)
+			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc)
+			// Wire the optional poll-task rescheduler so a settings change
+			// re-applies the poll interval without a restart.
+			if deps.TaskManager != nil {
+				autoscanHandler.SetTriggerUpdater(deps.TaskManager)
+			}
+		}
 
 		if deps.PersonRepo != nil {
 			peopleHandler = handlers.NewPeopleHandler(deps.PersonRepo, browseRepo, itemRepo, detailSvc)
@@ -2047,6 +2070,26 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
 								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
 								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
+							}
+
+							if autoscanHandler != nil {
+								r.Get("/autoscan/settings", autoscanHandler.HandleGetSettings)
+								r.Put("/autoscan/settings", autoscanHandler.HandleUpdateSettings)
+								r.Get("/autoscan/connections", autoscanHandler.HandleListConnections)
+								r.Post("/autoscan/connections", autoscanHandler.HandleCreateConnection)
+								r.Put("/autoscan/connections/{id}", autoscanHandler.HandleUpdateConnection)
+								r.Delete("/autoscan/connections/{id}", autoscanHandler.HandleDeleteConnection)
+								r.Post("/autoscan/connections/test", autoscanHandler.HandleTestConnection)
+								r.Get("/autoscan/scan-source-plugins", autoscanHandler.HandleListAvailableScanSources)
+								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
+								r.Post("/autoscan/sources", autoscanHandler.HandleCreateSource)
+								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
+								r.Delete("/autoscan/sources/{id}", autoscanHandler.HandleDeleteSource)
+								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
+								r.Get("/autoscan/scans", autoscanHandler.HandleListScans)
+								r.Get("/autoscan/events", autoscanHandler.HandleListEvents)
+								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
+								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
 							}
 
 							if deps.ActivityLogRepo != nil {

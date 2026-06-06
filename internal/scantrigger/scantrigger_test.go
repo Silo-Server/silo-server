@@ -71,6 +71,44 @@ func TestResolverClassifiesSubtree(t *testing.T) {
 	}
 }
 
+func TestResolverResolvesMissingSubtreeWithoutStat(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "Missing Movie")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      18,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	target, err := NewResolver(repo).ResolveMissingSubtree(context.Background(), missing, "autoscan")
+	if err != nil {
+		t.Fatalf("ResolveMissingSubtree returned error: %v", err)
+	}
+	if target.Folder == nil || target.Folder.ID != 18 || target.Mode != ModeSubtree || target.Path != filepath.Clean(missing) {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+}
+
+func TestResolverRejectsMissingSubtreeAtLibraryRoot(t *testing.T) {
+	root := t.TempDir()
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      19,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveMissingSubtree(context.Background(), root, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusBadRequest || reqErr.Code != "bad_request" {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
 func TestResolverClassifiesVideoFile(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "Movie (2024).mkv")
