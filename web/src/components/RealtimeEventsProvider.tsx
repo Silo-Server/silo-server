@@ -20,12 +20,11 @@ import {
 } from "@/components/realtimeEventsContext";
 import { useAuth } from "@/hooks/useAuth";
 import { usePageActivity } from "@/hooks/usePageActivity";
-import { adminKeys, catalogKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
+import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
   invalidateMediaSurfaceQueries,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
-import { activeCatalogQueryMatchesLibrary } from "@/lib/queryInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -191,11 +190,6 @@ function invalidateCatalogState(
   const { itemId, libraryId, allowDashboardRefetch, includeLibraryLists = true } = options;
   void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId }).then(() => {
     bumpHomeRefreshSignal(queryClient);
-  });
-  void queryClient.refetchQueries({
-    queryKey: catalogKeys.all,
-    type: "active",
-    predicate: (query) => activeCatalogQueryMatchesLibrary(query.queryKey, libraryId),
   });
   if (includeLibraryLists) {
     void queryClient.invalidateQueries({
