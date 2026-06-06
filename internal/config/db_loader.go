@@ -355,10 +355,17 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Auth.RefreshTokenExpiry = refreshTokenExpiry
 
-	// AudiobookshelfCompat — dedicated listener for ABS client apps.
-	// Default :13378 mirrors the real Audiobookshelf server convention.
-	cfg.AudiobookshelfCompat.Listen = stringOr(m, "audiobookshelf_compat.listen", ":13378")
-	cfg.AudiobookshelfCompat.PublicURL = stringOr(m, "audiobookshelf_compat.public_url", "http://127.0.0.1:13378")
+	// AudiobookshelfCompat — dedicated listener for ABS client apps. Keep the
+	// listener off unless the audiobooks feature flag is explicitly enabled.
+	audiobooksEnabled, err := boolOr(m, "audiobooks.enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	if audiobooksEnabled {
+		// Default :13378 mirrors the real Audiobookshelf server convention.
+		cfg.AudiobookshelfCompat.Listen = stringOr(m, "audiobookshelf_compat.listen", ":13378")
+		cfg.AudiobookshelfCompat.PublicURL = stringOr(m, "audiobookshelf_compat.public_url", "http://127.0.0.1:13378")
+	}
 
 	// JellyfinCompat
 	cfg.JellyfinCompat.Listen = stringOr(m, "jellyfin_compat.listen", ":8096")
