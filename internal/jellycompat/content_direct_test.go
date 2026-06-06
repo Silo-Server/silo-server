@@ -2,7 +2,9 @@ package jellycompat
 
 import (
 	"context"
+	"fmt"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -53,6 +55,95 @@ func TestItemEtagIncludesPremiereDate(t *testing.T) {
 
 	if itemEtag(base) == itemEtag(updated) {
 		t.Fatal("expected date changes to alter the compat item etag")
+	}
+}
+
+type countingCompatImageResolver struct {
+	singleCalls int
+	batchCalls  int
+	variants    []string
+	paths       []string
+}
+
+func (r *countingCompatImageResolver) ResolveImageURL(_ context.Context, path string, variant string) string {
+	r.singleCalls++
+	return "single:" + variant + ":" + path
+}
+
+func (r *countingCompatImageResolver) ResolveImageURLs(_ context.Context, paths []string, variant string) map[string]string {
+	resolved := r.ResolveImageURLsWithExpiry(context.Background(), paths, variant)
+	urls := make(map[string]string, len(resolved))
+	for path, value := range resolved {
+		urls[path] = value.URL
+	}
+	return urls
+}
+
+func (r *countingCompatImageResolver) ResolveImageURLWithExpiry(_ context.Context, path string, variant string) catalog.ResolvedImageURL {
+	r.singleCalls++
+	return catalog.ResolvedImageURL{URL: "single:" + variant + ":" + path}
+}
+
+func (r *countingCompatImageResolver) ResolveImageURLsWithExpiry(_ context.Context, paths []string, variant string) map[string]catalog.ResolvedImageURL {
+	r.batchCalls++
+	r.variants = append(r.variants, variant)
+	r.paths = append(r.paths, paths...)
+	resolved := make(map[string]catalog.ResolvedImageURL, len(paths))
+	for _, path := range paths {
+		resolved[path] = catalog.ResolvedImageURL{URL: "batch:" + variant + ":" + path}
+	}
+	return resolved
+}
+
+func TestPresignListItemsBatchResolvesImages(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	svc := &directContentService{detailSvc: detailSvc}
+
+	items := []upstreamListItem{
+		{
+			ContentID:   "movie-1",
+			PosterURL:   "plug://poster-1",
+			BackdropURL: "plug://backdrop-1",
+			LogoURL:     "plug://logo-1",
+		},
+		{
+			ContentID: "movie-2",
+			PosterURL: "plug://poster-2",
+			StillURL:  "plug://still-2",
+		},
+	}
+
+	svc.presignListItems(context.Background(), items)
+
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	if resolver.batchCalls != 4 {
+		t.Fatalf("batch image resolver calls = %d, want 4", resolver.batchCalls)
+	}
+	for _, variant := range resolver.variants {
+		if variant != "card" {
+			t.Fatalf("batch variant = %q, want card", variant)
+		}
+	}
+	for _, path := range []string{"plug://poster-1", "plug://poster-2", "plug://backdrop-1", "plug://logo-1", "plug://still-2"} {
+		if !slices.Contains(resolver.paths, path) {
+			t.Fatalf("batch paths %v missing %q", resolver.paths, path)
+		}
+	}
+	if items[0].PosterPath != "plug://poster-1" {
+		t.Fatalf("PosterPath = %q, want original path", items[0].PosterPath)
+	}
+	if got := items[0].PosterURL; got != "batch:card:plug://poster-1" {
+		t.Fatalf("PosterURL = %q", got)
+	}
+	if got := items[0].BackdropURL; got != "batch:card:plug://backdrop-1" {
+		t.Fatalf("BackdropURL = %q", got)
+	}
+	if got := items[1].StillURL; got != "batch:card:plug://still-2" {
+		t.Fatalf("StillURL = %q", got)
 	}
 }
 
@@ -329,10 +420,28 @@ func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context,
 type stubBrowseSource struct {
 	items []*models.MediaItem
 	total int
+	calls []stubBrowseCall
 }
 
-func (s *stubBrowseSource) Browse(_ context.Context, _ catalog.BrowseFilters) (*catalog.BrowseResult, error) {
-	return &catalog.BrowseResult{Items: s.items, Total: s.total}, nil
+type stubBrowseCall struct {
+	filters      catalog.BrowseFilters
+	includeTotal bool
+}
+
+func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error) {
+	s.calls = append(s.calls, stubBrowseCall{filters: filters, includeTotal: includeTotal})
+
+	start := min(max(filters.Offset, 0), len(s.items))
+	end := min(start+max(filters.Limit, 0), len(s.items))
+	total := 0
+	if includeTotal {
+		total = s.total
+	}
+	return &catalog.BrowseResult{
+		Items:   append([]*models.MediaItem(nil), s.items[start:end]...),
+		Total:   total,
+		HasMore: end < len(s.items),
+	}, nil
 }
 
 func (s *stubBrowseSource) ListGenres(_ context.Context, _ catalog.BrowseFilters) ([]string, error) {
@@ -413,6 +522,84 @@ func TestBrowseItems_FetchesProgressWhenPlayedFilterSet(t *testing.T) {
 	}
 }
 
+func TestBrowseItems_FillsLargeJellyfinLimitInSingleCatalogPage(t *testing.T) {
+	provider := newProgressCountingStoreProvider()
+	browse := &stubBrowseSource{
+		items: makeBrowseTestMediaItems(400),
+		total: 400,
+	}
+	svc := newDirectContentServiceForTest(browse, provider)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	params := url.Values{}
+	params.Set("limit", "250")
+	params.Set("offset", "10")
+	params.Set("include_total", "true")
+
+	result, err := svc.BrowseItems(context.Background(), session, params)
+	if err != nil {
+		t.Fatalf("BrowseItems returned error: %v", err)
+	}
+	if got, want := len(result.Items), 250; got != want {
+		t.Fatalf("items length = %d, want %d", got, want)
+	}
+	if result.Total != 400 {
+		t.Fatalf("Total = %d, want 400", result.Total)
+	}
+	if !result.HasMore {
+		t.Fatal("HasMore = false, want true")
+	}
+	if got, want := len(browse.calls), 1; got != want {
+		t.Fatalf("BrowsePage calls = %d, want %d", got, want)
+	}
+
+	call := browse.calls[0]
+	if call.filters.Limit != 250 {
+		t.Fatalf("Limit = %d, want 250", call.filters.Limit)
+	}
+	if call.filters.MaxLimit != compatBrowseMaxLimit {
+		t.Fatalf("MaxLimit = %d, want %d", call.filters.MaxLimit, compatBrowseMaxLimit)
+	}
+	if call.filters.Offset != 10 {
+		t.Fatalf("Offset = %d, want 10", call.filters.Offset)
+	}
+	if !call.includeTotal {
+		t.Fatal("includeTotal = false, want true")
+	}
+}
+
+func TestBrowseItems_HonorsIncludeTotalFalse(t *testing.T) {
+	browse := &stubBrowseSource{
+		items: makeBrowseTestMediaItems(300),
+		total: 300,
+	}
+	svc := newDirectContentServiceForTest(browse, nil)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	params := url.Values{}
+	params.Set("limit", "150")
+	params.Set("include_total", "false")
+
+	result, err := svc.BrowseItems(context.Background(), session, params)
+	if err != nil {
+		t.Fatalf("BrowseItems returned error: %v", err)
+	}
+	if got, want := len(result.Items), 150; got != want {
+		t.Fatalf("items length = %d, want %d", got, want)
+	}
+	if result.Total != 0 {
+		t.Fatalf("Total = %d, want 0 when include_total=false", result.Total)
+	}
+	if got, want := len(browse.calls), 1; got != want {
+		t.Fatalf("BrowsePage calls = %d, want %d", got, want)
+	}
+	for i, call := range browse.calls {
+		if call.includeTotal {
+			t.Fatalf("call %d includeTotal = true, want false", i)
+		}
+	}
+}
+
 // TestEnrichListItemsUserData_BatchesIntoSingleFetch verifies that
 // enrichListItemsUserData makes exactly one batched ListProgressByMediaItems
 // call regardless of batch size — not N+1 per-item fetches.
@@ -436,4 +623,16 @@ func TestEnrichListItemsUserData_BatchesIntoSingleFetch(t *testing.T) {
 		t.Fatalf("ListProgressByMediaItems should receive all %d ids in one batch; got %d",
 			want, got)
 	}
+}
+
+func makeBrowseTestMediaItems(count int) []*models.MediaItem {
+	items := make([]*models.MediaItem, 0, count)
+	for i := range count {
+		items = append(items, &models.MediaItem{
+			ContentID: fmt.Sprintf("movie-%03d", i),
+			Type:      "movie",
+			Title:     fmt.Sprintf("Movie %03d", i),
+		})
+	}
+	return items
 }
