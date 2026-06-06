@@ -40,6 +40,7 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   useDeletePluginRepository: () => ({ mutate: vi.fn(), isPending: false }),
   useInstallPlugin: () => ({ mutate: vi.fn(), isPending: false }),
   useUploadPlugin: () => ({ mutate: vi.fn(), isPending: false }),
+  usePluginUpload: () => ({ upload: vi.fn(), progress: null, isPending: false }),
   useUpdatePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useDeletePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginConfig: () => ({ mutate: vi.fn(), isPending: false }),

@@ -172,6 +172,10 @@ export function WatchPage({
       if (!seriesId) return;
 
       const track = index !== null ? playableSubtitles.find((s) => s.index === index) : null;
+      // Never persist an index we can't resolve to a real track (e.g. the
+      // in-progress AI live track's sentinel index): it would store a
+      // nonexistent track with empty language and clobber the saved preference.
+      if (index !== null && !track) return;
       const trackSignature: PlayerSubtitleTrackSignature | null = track
         ? {
             source: track.source,

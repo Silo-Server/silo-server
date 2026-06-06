@@ -23,6 +23,7 @@ type pluginClient interface {
 	MetadataProvider(capabilityID string) (*pluginhost.MetadataProviderClient, error)
 	MediaAnalyzer(capabilityID string) (*pluginhost.MediaAnalyzerClient, error)
 	ScheduledTask(capabilityID string) (*pluginhost.ScheduledTaskClient, error)
+	ScanSource(capabilityID string) (*pluginhost.ScanSourceClient, error)
 	EventConsumer(capabilityID string) (*pluginhost.EventConsumerClient, error)
 	AuthProvider(capabilityID string) (*pluginhost.AuthProviderClient, error)
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
@@ -420,6 +421,18 @@ func (s *Service) ScheduledTaskClient(
 		return nil, err
 	}
 	return client.ScheduledTask(capabilityID)
+}
+
+func (s *Service) ScanSourceClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.ScanSourceClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ScanSource(capabilityID)
 }
 
 func (s *Service) EventConsumerClient(

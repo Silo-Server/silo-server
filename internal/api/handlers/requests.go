@@ -35,8 +35,9 @@ type RequestService interface {
 	GetUserLimit(ctx context.Context, viewer mediarequests.Viewer, userID int) (*mediarequests.UserLimit, error)
 	UpsertUserLimit(ctx context.Context, viewer mediarequests.Viewer, limit mediarequests.UserLimit) (*mediarequests.UserLimit, error)
 	ListIntegrations(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.Integration, error)
-	UpsertIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
-	UpsertIntegrations(ctx context.Context, viewer mediarequests.Viewer, integrations []mediarequests.Integration) ([]mediarequests.Integration, error)
+	CreateIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
+	UpdateIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
+	DeleteIntegration(ctx context.Context, viewer mediarequests.Viewer, id string) error
 	LoadIntegrationOptions(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.IntegrationOptions, error)
 
 	ListStudios(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
@@ -422,26 +423,53 @@ func (h *RequestsHandler) HandleListIntegrations(w http.ResponseWriter, r *http.
 	}{Integrations: toIntegrationResponses(integrations)})
 }
 
-func (h *RequestsHandler) HandleUpdateIntegrations(w http.ResponseWriter, r *http.Request) {
+func (h *RequestsHandler) HandleCreateIntegration(w http.ResponseWriter, r *http.Request) {
 	viewer, ok := requestViewer(w, r, false)
 	if !ok {
 		return
 	}
-	var body struct {
-		Integrations []mediarequests.Integration `json:"integrations"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var integration mediarequests.Integration
+	if err := json.NewDecoder(r.Body).Decode(&integration); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	updated, err := h.service.UpsertIntegrations(r.Context(), viewer, body.Integrations)
+	created, err := h.service.CreateIntegration(r.Context(), viewer, integration)
 	if err != nil {
 		writeRequestServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Integrations []requestIntegrationResponse `json:"integrations"`
-	}{Integrations: toIntegrationResponses(updated)})
+	writeJSON(w, http.StatusCreated, requestIntegrationResponseFrom(*created))
+}
+
+func (h *RequestsHandler) HandleUpdateIntegration(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, false)
+	if !ok {
+		return
+	}
+	var integration mediarequests.Integration
+	if err := json.NewDecoder(r.Body).Decode(&integration); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	integration.ID = chi.URLParam(r, "id")
+	updated, err := h.service.UpdateIntegration(r.Context(), viewer, integration)
+	if err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestIntegrationResponseFrom(*updated))
+}
+
+func (h *RequestsHandler) HandleDeleteIntegration(w http.ResponseWriter, r *http.Request) {
+	viewer, ok := requestViewer(w, r, false)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteIntegration(r.Context(), viewer, chi.URLParam(r, "id")); err != nil {
+		writeRequestServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *RequestsHandler) HandleLoadIntegrationOptions(w http.ResponseWriter, r *http.Request) {
@@ -456,7 +484,9 @@ func (h *RequestsHandler) HandleLoadIntegrationOptions(w http.ResponseWriter, r 
 			return
 		}
 	}
-	integration.Kind = chi.URLParam(r, "kind")
+	if id := strings.TrimSpace(chi.URLParam(r, "id")); id != "" {
+		integration.ID = id
+	}
 	options, err := h.service.LoadIntegrationOptions(r.Context(), viewer, integration)
 	if err != nil {
 		writeRequestServiceError(w, err)
@@ -558,37 +588,69 @@ func parsePositivePathInt(w http.ResponseWriter, r *http.Request, key string) (i
 }
 
 type requestIntegrationResponse struct {
-	Kind             string         `json:"kind"`
-	Enabled          bool           `json:"enabled"`
-	BaseURL          string         `json:"base_url"`
-	HasAPIKey        bool           `json:"has_api_key"`
-	RootFolder       string         `json:"root_folder"`
-	QualityProfileID *int           `json:"quality_profile_id,omitempty"`
-	Tags             []int          `json:"tags"`
-	Options          map[string]any `json:"options"`
-	LastCheckAt      *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckStatus  string         `json:"last_check_status,omitempty"`
-	LastCheckError   string         `json:"last_check_error,omitempty"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID                    string         `json:"id"`
+	Name                  string         `json:"name"`
+	Kind                  string         `json:"kind"`
+	Enabled               bool           `json:"enabled"`
+	Is4K                  bool           `json:"is_4k"`
+	IsDefault             bool           `json:"is_default"`
+	IsDefault4K           bool           `json:"is_default_4k"`
+	AnimeEnabled          bool           `json:"anime_enabled"`
+	AnimeQualityProfileID *int           `json:"anime_quality_profile_id,omitempty"`
+	AnimeRootFolder       string         `json:"anime_root_folder,omitempty"`
+	AnimeTags             []int          `json:"anime_tags"`
+	BaseURL               string         `json:"base_url"`
+	HasAPIKey             bool           `json:"has_api_key"`
+	RootFolder            string         `json:"root_folder"`
+	QualityProfileID      *int           `json:"quality_profile_id,omitempty"`
+	Tags                  []int          `json:"tags"`
+	Options               map[string]any `json:"options"`
+	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
+	LastCheckStatus       string         `json:"last_check_status,omitempty"`
+	LastCheckError        string         `json:"last_check_error,omitempty"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+func requestIntegrationResponseFrom(integration mediarequests.Integration) requestIntegrationResponse {
+	// Normalize nil slices so they serialize as [] (not null); the frontend
+	// types them as number[] and indexes/maps over them.
+	tags := integration.Tags
+	if tags == nil {
+		tags = []int{}
+	}
+	animeTags := integration.AnimeTags
+	if animeTags == nil {
+		animeTags = []int{}
+	}
+	return requestIntegrationResponse{
+		ID:                    integration.ID,
+		Name:                  integration.Name,
+		Kind:                  integration.Kind,
+		Enabled:               integration.Enabled,
+		Is4K:                  integration.Is4K,
+		IsDefault:             integration.IsDefault,
+		IsDefault4K:           integration.IsDefault4K,
+		AnimeEnabled:          integration.AnimeEnabled,
+		AnimeQualityProfileID: integration.AnimeQualityProfileID,
+		AnimeRootFolder:       integration.AnimeRootFolder,
+		AnimeTags:             animeTags,
+		BaseURL:               integration.BaseURL,
+		HasAPIKey:             strings.TrimSpace(integration.APIKeyRef) != "",
+		RootFolder:            integration.RootFolder,
+		QualityProfileID:      integration.QualityProfileID,
+		Tags:                  tags,
+		Options:               integration.Options,
+		LastCheckAt:           integration.LastCheckAt,
+		LastCheckStatus:       integration.LastCheckStatus,
+		LastCheckError:        integration.LastCheckError,
+		UpdatedAt:             integration.UpdatedAt,
+	}
 }
 
 func toIntegrationResponses(integrations []mediarequests.Integration) []requestIntegrationResponse {
 	out := make([]requestIntegrationResponse, 0, len(integrations))
 	for _, integration := range integrations {
-		out = append(out, requestIntegrationResponse{
-			Kind:             integration.Kind,
-			Enabled:          integration.Enabled,
-			BaseURL:          integration.BaseURL,
-			HasAPIKey:        strings.TrimSpace(integration.APIKeyRef) != "",
-			RootFolder:       integration.RootFolder,
-			QualityProfileID: integration.QualityProfileID,
-			Tags:             integration.Tags,
-			Options:          integration.Options,
-			LastCheckAt:      integration.LastCheckAt,
-			LastCheckStatus:  integration.LastCheckStatus,
-			LastCheckError:   integration.LastCheckError,
-			UpdatedAt:        integration.UpdatedAt,
-		})
+		out = append(out, requestIntegrationResponseFrom(integration))
 	}
 	return out
 }

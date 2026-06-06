@@ -19,6 +19,8 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@fontsource/noto-sans-arabic": "^5.2.10",
+    "@fontsource/noto-sans-thai": "^5.2.8",
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-virtual": "^3.13.19",
     "class-variance-authority": "^0.7.1",
@@ -60,7 +62,7 @@
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.57.0",
     "vite": "^6.0.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

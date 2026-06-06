@@ -230,7 +230,9 @@ export function useCatalogWindow(
     let highestPageIndex = -1;
     let highestPageHasMore = false;
     pageResults.forEach((page, pageIndex) => {
-      maxLoadedEnd = Math.max(maxLoadedEnd, pageIndex * limit + page.items.length);
+      if (page.items.length > 0) {
+        maxLoadedEnd = Math.max(maxLoadedEnd, pageIndex * limit + page.items.length);
+      }
       if (pageIndex >= highestPageIndex) {
         highestPageIndex = pageIndex;
         highestPageHasMore = page.has_more;

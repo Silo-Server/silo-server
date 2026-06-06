@@ -29,6 +29,17 @@ func TestParseItemsQueryAcceptsIsFavoriteParam(t *testing.T) {
 	}
 }
 
+func TestBuildBrowseParamsPropagatesEnableTotalRecordCount(t *testing.T) {
+	req := httptest.NewRequest("GET", "/Items?EnableTotalRecordCount=false", nil)
+
+	query := parseItemsQuery(req, NewResourceIDCodec())
+	params := buildBrowseParams(query)
+
+	if got := params.Get("include_total"); got != "false" {
+		t.Fatalf("include_total = %q, want false", got)
+	}
+}
+
 func TestMapSortByReleaseDate(t *testing.T) {
 	tests := []string{
 		"PremiereDate",

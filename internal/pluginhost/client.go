@@ -44,6 +44,11 @@ type ScheduledTaskClient struct {
 	timeout time.Duration
 }
 
+type ScanSourceClient struct {
+	client  pluginv1.ScanSourceClient
+	timeout time.Duration
+}
+
 type EventConsumerClient struct {
 	client  pluginv1.EventConsumerClient
 	timeout time.Duration
@@ -115,6 +120,16 @@ func (c *Client) ScheduledTask(capabilityID string) (*ScheduledTaskClient, error
 	return &ScheduledTaskClient{
 		client:  c.rpc.ScheduledTask(),
 		timeout: DefaultControlTimeout,
+	}, nil
+}
+
+func (c *Client) ScanSource(capabilityID string) (*ScanSourceClient, error) {
+	if err := c.requireCapability("scan_source.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &ScanSourceClient{
+		client:  c.rpc.ScanSource(),
+		timeout: DefaultScanSourceTimeout,
 	}, nil
 }
 
@@ -227,6 +242,12 @@ func (c *ScheduledTaskClient) Run(ctx context.Context, req *pluginv1.RunSchedule
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.Run(callCtx, req)
+}
+
+func (c *ScanSourceClient) PollChanges(ctx context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.PollChanges(callCtx, req)
 }
 
 func (c *EventConsumerClient) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequest) (*pluginv1.HandleEventResponse, error) {

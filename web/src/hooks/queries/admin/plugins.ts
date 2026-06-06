@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/api/client";
@@ -16,6 +17,11 @@ import type {
   UpdatePluginInstallationRequest,
   UpdatePluginRepositoryRequest,
 } from "@/api/types";
+import {
+  DEFAULT_UPLOAD_CHUNK_SIZE,
+  type ChunkedUploadProgress,
+  uploadFileInChunks,
+} from "@/lib/chunkedUpload";
 import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
@@ -139,10 +145,29 @@ export function useInstallPlugin() {
   });
 }
 
+export interface UploadPluginRequest {
+  file: File;
+  onProgress?: (progress: ChunkedUploadProgress) => void;
+}
+
 export function useUploadPlugin() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => {
+    mutationFn: ({ file, onProgress }: UploadPluginRequest) => {
+      if (file.size > DEFAULT_UPLOAD_CHUNK_SIZE) {
+        return uploadFileInChunks<PluginInstallation>({
+          file,
+          createPath: "/admin/plugins/uploads/chunked",
+          chunkPath: (uploadId, chunkIndex) =>
+            `/admin/plugins/uploads/chunked/${encodeURIComponent(uploadId)}/chunks/${chunkIndex}`,
+          completePath: (uploadId) =>
+            `/admin/plugins/uploads/chunked/${encodeURIComponent(uploadId)}/complete`,
+          cancelPath: (uploadId) =>
+            `/admin/plugins/uploads/chunked/${encodeURIComponent(uploadId)}`,
+          onProgress,
+        });
+      }
+
       const formData = new FormData();
       formData.append("archive", file);
       return api<PluginInstallation>("/admin/plugins/uploads", {
@@ -158,6 +183,34 @@ export function useUploadPlugin() {
       toast.error(error instanceof Error ? error.message : "Failed to upload plugin");
     },
   });
+}
+
+/**
+ * Wraps {@link useUploadPlugin} with the upload-progress state and reset wiring
+ * shared by the admin plugin upload forms.
+ */
+export function usePluginUpload() {
+  const uploadPlugin = useUploadPlugin();
+  const [progress, setProgress] = useState<number | null>(null);
+
+  const upload = useCallback(
+    (file: File, options?: { onSuccess?: () => void }) => {
+      setProgress(0);
+      uploadPlugin.mutate(
+        { file, onProgress: (next) => setProgress(next.percent) },
+        {
+          onSuccess: () => {
+            setProgress(null);
+            options?.onSuccess?.();
+          },
+          onError: () => setProgress(null),
+        },
+      );
+    },
+    [uploadPlugin],
+  );
+
+  return { upload, progress, isPending: uploadPlugin.isPending };
 }
 
 export function useUpdatePluginInstallation() {

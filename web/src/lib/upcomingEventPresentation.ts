@@ -2,6 +2,7 @@ interface UpcomingPresentationEvent {
   type: "movie" | "episode" | "season_premiere";
   air_date: string;
   air_time?: string | null;
+  air_at?: string | null;
   episode_title?: string | null;
   season_number?: number | null;
   episode_number?: number | null;
@@ -61,7 +62,16 @@ export function formatUpcomingDate(airDate: string): string {
   });
 }
 
-export function formatUpcomingTime(airTime?: string | null): string | null {
+export function formatUpcomingTime(airTime?: string | null, airAt?: string | null): string | null {
+  if (airAt) {
+    const date = new Date(airAt);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
+  }
   if (!airTime) {
     return null;
   }

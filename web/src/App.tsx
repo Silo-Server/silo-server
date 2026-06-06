@@ -18,6 +18,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
 import { Toaster } from "@/components/ui/sonner";
+import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
+import { useEventChannel } from "@/components/realtimeEventsContext";
 import Layout from "@/components/Layout";
 import AdminLayout from "@/components/AdminLayout";
 import Home from "@/pages/Home";
@@ -40,6 +42,7 @@ import AdminActivity from "@/pages/AdminActivity";
 import AdminLogs from "@/pages/AdminLogs";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminRequests from "@/pages/AdminRequests";
+import AdminAutoscan from "@/pages/AdminAutoscan";
 import AdminDevices from "@/pages/AdminDevices";
 import AdminLibraries from "@/pages/AdminLibraries";
 import AdminSettingsLayout from "@/pages/admin-settings/AdminSettingsLayout";
@@ -374,6 +377,7 @@ function AppRoutes() {
                   <Route path="collections/new" element={<AdminCollectionEditor />} />
                   <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
                   <Route path="requests" element={<AdminRequests />} />
+                  <Route path="autoscan" element={<AdminAutoscan />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />
@@ -539,6 +543,23 @@ function AppRoutes() {
   );
 }
 
+function RealtimeEventChannels() {
+  const { user } = useAuth();
+
+  useEventChannel("catalog");
+  useEventChannel("user_state");
+
+  return user?.role === "admin" ? <AdminRealtimeEventChannels /> : null;
+}
+
+function AdminRealtimeEventChannels() {
+  useEventChannel("jobs");
+  useEventChannel("sessions");
+  useEventChannel("tasks");
+  useEventChannel("scans");
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -548,14 +569,17 @@ export default function App() {
             <ThemeProvider>
               <CustomThemeProvider>
                 <WatchPlaybackProvider>
-                  <ScrollRestorationManager />
-                  <RouteAnnouncer />
-                  <QueryCacheManager />
-                  <AppChrome />
-                  <AppRoutes />
-                  <WatchPlaybackHost />
-                  <WatchPlaybackBar />
-                  <Toaster />
+                  <RealtimeEventsProvider>
+                    <RealtimeEventChannels />
+                    <ScrollRestorationManager />
+                    <RouteAnnouncer />
+                    <QueryCacheManager />
+                    <AppChrome />
+                    <AppRoutes />
+                    <WatchPlaybackHost />
+                    <WatchPlaybackBar />
+                    <Toaster />
+                  </RealtimeEventsProvider>
                 </WatchPlaybackProvider>
               </CustomThemeProvider>
             </ThemeProvider>

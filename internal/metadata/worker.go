@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -12,7 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
 // MatchWorker processes unmatched files in the background.
@@ -23,6 +26,7 @@ type MatchWorker struct {
 	movieClaimer            MovieFileClaimer
 	seriesClaimer           SeriesRootClaimer
 	enableTVSeriesRootQueue bool
+	realtimeHub             *notifications.Hub
 	workers                 int
 	batchSize               int
 	interval                time.Duration
@@ -36,6 +40,10 @@ type NonSeriesFileClaimer interface {
 type MixedFileClaimer interface {
 	ClaimUnmatchedMixed(ctx context.Context, limit int) ([]*models.MediaFile, error)
 	ClaimUnmatchedMixedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int, attemptBefore time.Time) ([]*models.MediaFile, error)
+}
+
+type MatchSuppressionChecker interface {
+	IsMatchSuppressed(ctx context.Context, fileID int) (bool, error)
 }
 
 type MovieFileClaimer interface {
@@ -94,6 +102,14 @@ func (w *MatchWorker) SetMovieFileClaimer(claimer MovieFileClaimer) {
 		return
 	}
 	w.movieClaimer = claimer
+}
+
+// SetRealtimeHub publishes catalog item changes as metadata enrichment commits.
+func (w *MatchWorker) SetRealtimeHub(hub *notifications.Hub) {
+	if w == nil {
+		return
+	}
+	w.realtimeHub = hub
 }
 
 // Run starts the match worker loop. It blocks until ctx is cancelled.
@@ -232,7 +248,9 @@ func (w *MatchWorker) processFileWithFolderCache(ctx context.Context, file *mode
 					"content_id", skeleton.ContentID, "error", fbErr)
 			}
 		}
+		return
 	}
+	w.publishCatalogItemChanged(ctx, file.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 }
 
 func (w *MatchWorker) buildProcessRequestForGroup(ctx context.Context, representative *models.MediaFile, skeleton *skeletonResult, preloadedGroupFiles []*models.MediaFile) ProcessRequest {
@@ -490,6 +508,9 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 				if ctx.Err() != nil {
 					return
 				}
+				if w.isMatchSuppressed(ctx, file) {
+					continue
+				}
 				w.processFileWithFolderCache(ctx, file, &folders, &deferredSeriesLinks)
 				processed.Add(1)
 			}
@@ -513,6 +534,32 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 	}
 
 	return claimedCount
+}
+
+func (w *MatchWorker) isMatchSuppressed(ctx context.Context, file *models.MediaFile) bool {
+	if file == nil {
+		return true
+	}
+	checker, ok := w.fileLister.(MatchSuppressionChecker)
+	if !ok {
+		return false
+	}
+	suppressed, err := checker.IsMatchSuppressed(ctx, file.ID)
+	if err != nil {
+		slog.Warn("metadata: failed to check match suppression",
+			"file_id", file.ID,
+			"path", file.FilePath,
+			"error", err,
+		)
+		return true
+	}
+	if suppressed {
+		slog.Info("metadata: skipping suppressed unmatched file",
+			"file_id", file.ID,
+			"path", file.FilePath,
+		)
+	}
+	return suppressed
 }
 
 func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, files []*models.MediaFile) int {
@@ -625,6 +672,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 			w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched", "content_id", skeleton.ContentID, "file_id", file.ID, "path", file.FilePath)
 			return false
 		}
+		w.publishCatalogItemChanged(ctx, file.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 	}
 
 	if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
@@ -835,12 +883,24 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					}
 					return 0, nil
 				}
+				w.publishCatalogItemChanged(ctx, job.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 			}
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, representative.ContentID); err != nil {
-				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
-					return 0, updateErr
+				if errors.Is(err, catalog.ErrItemNotFound) {
+					// The series item was concurrently merged into another (provider-ID
+					// dedup moves its seasons+episodes to the survivor, then deletes the
+					// source row). The episodes are already reattached, so there is nothing
+					// to link here — benign; finish normally instead of failing the batch.
+					slog.Info("metadata: series item gone during episode-link ensure (likely concurrent merge); skipping",
+						"content_id", representative.ContentID,
+						"folder_id", job.MediaFolderID,
+						"observed_root_path", job.ObservedRootPath)
+				} else {
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+						return 0, updateErr
+					}
+					return 0, fmt.Errorf("ensuring series episode links for %s: %w", representative.ContentID, err)
 				}
-				return 0, fmt.Errorf("ensuring series episode links for %s: %w", representative.ContentID, err)
 			}
 		}
 		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
@@ -919,6 +979,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 			}
 			return 0, nil
 		}
+		w.publishCatalogItemChanged(ctx, job.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 	}
 
 	finalContentID, err := w.service.fileRepo.FindContentIDByObservedRootPath(ctx, job.MediaFolderID, job.ObservedRootPath, "series")
@@ -933,10 +994,17 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	}
 	if strings.TrimSpace(finalContentID) != "" {
 		if err := w.service.ensureSeriesEpisodeLinks(ctx, finalContentID); err != nil {
-			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
-				return 0, updateErr
+			if errors.Is(err, catalog.ErrItemNotFound) {
+				slog.Info("metadata: series item gone during episode-link ensure (likely concurrent merge); skipping",
+					"content_id", finalContentID,
+					"folder_id", job.MediaFolderID,
+					"observed_root_path", job.ObservedRootPath)
+			} else {
+				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+					return 0, updateErr
+				}
+				return 0, fmt.Errorf("ensuring series episode links for %s: %w", finalContentID, err)
 			}
-			return 0, fmt.Errorf("ensuring series episode links for %s: %w", finalContentID, err)
 		}
 		if _, ok := w.service.confirmedOwnershipItem(ctx, finalContentID); ok {
 			w.service.claimConfirmedSeriesRootOwnership(ctx, job.MediaFolderID, job.ObservedRootPath, finalContentID, groupFiles)
@@ -1222,7 +1290,9 @@ func (w *MatchWorker) RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Conte
 		}
 		if result == nil || !result.Updated {
 			stillUnmatched++
+			continue
 		}
+		w.publishCatalogItemChanged(ctx, folderID, resultContentID(result, contentID), "metadata_updated")
 	}
 
 	if repaired, repairErr := w.service.repairMatchedDuplicateProviderOwnersByFolderAndPathPrefix(ctx, folderID, pathPrefix); repairErr != nil {
@@ -1241,4 +1311,29 @@ func (w *MatchWorker) RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Conte
 
 func formatFolderID(id int) string {
 	return strconv.Itoa(id)
+}
+
+func (w *MatchWorker) publishCatalogItemChanged(ctx context.Context, libraryID int, contentID string, change string) {
+	if w == nil || w.realtimeHub == nil || libraryID <= 0 || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	if err := w.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
+		LibraryID: libraryID,
+		ContentID: contentID,
+		Change:    change,
+	}); err != nil {
+		slog.Warn("metadata: failed to publish catalog item change",
+			"content_id", contentID,
+			"library_id", libraryID,
+			"change", change,
+			"error", err,
+		)
+	}
+}
+
+func resultContentID(result *ProcessResult, fallback string) string {
+	if result != nil && strings.TrimSpace(result.ContentID) != "" {
+		return result.ContentID
+	}
+	return fallback
 }

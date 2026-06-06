@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -54,6 +55,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subdl"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
@@ -87,11 +89,13 @@ type Dependencies struct {
 	SessionMgr                   *playback.SessionManager         // playback session manager (may be nil)
 	SkippedRootRepo              *metadata.SkippedRootRepository  // skipped root repository (may be nil)
 	StaleIDRepo                  *metadata.StaleMediaIDRepository // stale media ID repository (may be nil)
-	Refresher                    handlers.AdminMetadataRefresher  // metadata refresher (may be nil)
-	NodeRepo                     *nodepool.Repository             // stream node repository (may be nil)
-	ProxyPool                    *nodepool.ProxyPool              // proxy node pool (may be nil)
-	TranscodePool                *nodepool.TranscodePool          // transcode node pool (may be nil)
-	SessionSyncer                handlers.PlaybackSessionSyncer   // optional; immediate playback session sync trigger
+	MovieMatchQueueRepo          *metadata.MovieMatchQueueRepository
+	SeriesRootMatchQueueRepo     *metadata.SeriesRootMatchQueueRepository
+	Refresher                    handlers.AdminMetadataRefresher // metadata refresher (may be nil)
+	NodeRepo                     *nodepool.Repository            // stream node repository (may be nil)
+	ProxyPool                    *nodepool.ProxyPool             // proxy node pool (may be nil)
+	TranscodePool                *nodepool.TranscodePool         // transcode node pool (may be nil)
+	SessionSyncer                handlers.PlaybackSessionSyncer  // optional; immediate playback session sync trigger
 	EventBus                     cache.EventBus
 	AdminStatsProvider           handlers.AdminStatsSource
 	Recommender                  recommendations.Recommender // nil when disabled
@@ -114,6 +118,7 @@ type Dependencies struct {
 	FFmpegLogSink                playback.FFmpegLogSink
 	RedisClient                  *redis.Client            // for session listing (may be nil)
 	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
+	AdminJobCancelRegistry       *adminjob.CancelRegistry
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
 	MarkerRegistry               *markers.Registry
@@ -140,6 +145,11 @@ type Dependencies struct {
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
+
+	// TrendingRefresher refreshes the persisted trending_discover snapshots.
+	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
+	// router.go once the Trakt adapter exists (mirrors UserCollectionSync).
+	TrendingRefresher *sections.TrendingRefresher
 
 	// MDBListClient is used by user-facing list discovery endpoints
 	// (search/top). May be nil; the handlers report "not configured" in
@@ -296,6 +306,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		libraryHandler.EventsHub = deps.EventsHub
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
+		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
+		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
+		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
+		if deps.Config != nil {
+			libraryHandler.TVSeriesRootQueue = deps.Config.Matcher.TVSeriesRootQueueEnabled()
+		}
 		if deps.DB != nil {
 			libraryHandler.JobRepo = adminjob.NewRepository(deps.DB)
 		}
@@ -350,6 +366,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var calendarRepo *catalog.CalendarRepository
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	var autoscanHandler *handlers.AutoscanHandler
 	if deps.DB != nil {
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -413,14 +430,38 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
+		requestsRepo := mediarequests.NewRepository(deps.DB)
 		requestSvc := mediarequests.NewService(
-			mediarequests.NewRepository(deps.DB),
+			requestsRepo,
 			tmdb.NewClient(tmdbAPIKey, 40),
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
 		requestSvc.SetSecretResolver(settingsRepo)
 		requestSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		if viewerResolver != nil {
+			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
+		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
+
+		autoscanRepo := autoscan.NewRepository(deps.DB)
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
+			autoscanSvc := BuildAutoscanService(
+				autoscanRepo,
+				deps.PluginService,
+				plugins.NewInstallationStore(deps.DB),
+				requestsRepo,
+				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
+			)
+			autoscanHandler = handlers.NewAutoscanHandler(autoscanRepo, autoscanSvc)
+			// Wire the optional poll-task rescheduler so a settings change
+			// re-applies the poll interval without a restart.
+			if deps.TaskManager != nil {
+				autoscanHandler.SetTriggerUpdater(deps.TaskManager)
+			}
+		}
 
 		if deps.PersonRepo != nil {
 			peopleHandler = handlers.NewPeopleHandler(deps.PersonRepo, browseRepo, itemRepo, detailSvc)
@@ -483,6 +524,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
+		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
 		libraryPlaybackPrefHandler = handlers.NewLibraryPlaybackPrefHandler(deps.UserStoreProvider)
@@ -525,6 +567,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB)
 	}
+
+	// Notifier that pushes "subtitle ready" events to active sessions when an AI
+	// translation completes. Assigned inside the playback handler block where the
+	// realtime hub and session manager are in scope; nil when playback is off.
+	var subtitleAINotifier *playback.SubtitleReadyNotifier
 
 	// Build playback handler if session manager is available.
 	var playbackHandler *handlers.PlaybackHandler
@@ -620,6 +667,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.MarkerUpserter = deps.FileRepo
 		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
+		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub)
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
@@ -684,6 +732,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
+		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry
+		adminJobsHandler.RealtimeHub = deps.RealtimeHub
 		if adminHandler != nil && deps.FolderRepo != nil && deps.FileRepo != nil && itemRepo != nil && episodeRepo != nil {
 			adminHandler.JobRepo = jobRepo
 			adminHandler.ItemRefreshResolver = adminjob.NewItemRefreshResolver(
@@ -781,6 +831,40 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	if adminSubtitleHandler != nil && deps.DB != nil && subtitleManager != nil {
 		adminSubtitleHandler.SetDownloadedSubtitleDeps(deps.DB, subtitleManager)
+	}
+
+	// Build the AI subtitle handler (on-demand translation). Generated tracks are
+	// stored as ordinary downloaded subtitles, so they reach every client through
+	// the existing subtitle pipeline with no client changes.
+	var subtitleAIHandler *handlers.SubtitleAIHandler
+	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
+		aiCfg := subtitleai.Config{
+			Enabled:           deps.Config.SubtitleAI.Enabled,
+			BaseURL:           deps.Config.SubtitleAI.BaseURL,
+			APIKey:            deps.Config.SubtitleAI.APIKey,
+			ChatModel:         deps.Config.SubtitleAI.ChatModel,
+			MaxConcurrentJobs: deps.Config.SubtitleAI.MaxConcurrentJobs,
+			BatchSize:         deps.Config.SubtitleAI.BatchSize,
+			ContextNeighbors:  deps.Config.SubtitleAI.ContextNeighbors,
+		}
+		var aiNotifier subtitleai.Notifier
+		if subtitleAINotifier != nil {
+			aiNotifier = subtitleAINotifier
+		}
+		aiService := subtitleai.NewService(
+			deps.AppContext,
+			aiCfg,
+			subtitleai.NewPgJobRepository(deps.DB),
+			subtitleai.NewLLMTranslator(subtitleai.NewClient(aiCfg), aiCfg.BatchSize, aiCfg.ContextNeighbors),
+			subtitleManager,
+			subtitleRepo,
+			deps.FileRepo,
+			aiNotifier,
+			deps.Config.Playback.FFmpegPath,
+			slog.Default(),
+		)
+		aiService.Recover()
+		subtitleAIHandler = handlers.NewSubtitleAIHandler(aiService)
 	}
 
 	// Build section handler if DB is available.
@@ -893,6 +977,18 @@ func NewRouter(deps Dependencies) chi.Router {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
 			}
 		}
+
+		// Propagate the now-wired Trakt fetcher to the trending refresher (built
+		// in main.go with TMDB only, before the Trakt adapter existed).
+		if deps.TrendingRefresher != nil && deps.TrendingRefresher.TraktTrending == nil {
+			deps.TrendingRefresher.TraktTrending = libraryCollectionService.TraktCollections
+		}
+
+		// Wire the trending snapshot reader into the section fetcher. The
+		// trending_discover home section reads its list from the persisted
+		// snapshot table; the upstream fetch happens out-of-band in the refresh
+		// task, so the read path never calls the provider.
+		sectionFetcher.TrendingSnapshots = sections.NewTrendingSnapshotRepository(deps.DB)
 
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,
@@ -1124,6 +1220,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					StateTTL:        10 * time.Minute,
 				})
 			}
+			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
 
 			r.Route("/auth", func(r chi.Router) {
 				if deps.RateLimitMW != nil {
@@ -1237,12 +1334,16 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/stale-ids", libraryHandler.HandleListStaleIDs)
 							r.Post("/stale-ids/{contentID}/rematch", libraryHandler.HandleRematchStaleID)
 							r.Get("/unmatched-items", libraryHandler.HandleListUnmatchedItems)
+							r.Get("/metadata-match-queue", libraryHandler.HandleListMetadataMatchQueues)
 							r.Post("/", libraryHandler.HandleCreateLibrary)
 							r.Put("/reorder", libraryHandler.HandleReorderLibraries)
 							r.Put("/{id}", libraryHandler.HandleUpdateLibrary)
 							r.Delete("/{id}", libraryHandler.HandleDeleteLibrary)
 							r.Post("/{id}/check-mount", libraryHandler.HandleCheckLibraryMount)
 							r.Post("/{id}/confirm-empty-root-cleanup", libraryHandler.HandleConfirmEmptyRootCleanup)
+							r.Get("/{id}/metadata-match-queue", libraryHandler.HandleGetMetadataMatchQueue)
+							r.Post("/{id}/metadata-match-queue/retry", libraryHandler.HandleRetryMetadataMatchQueue)
+							r.Post("/{id}/metadata-match-queue/cancel", libraryHandler.HandleCancelMetadataMatchQueue)
 							r.Post("/{id}/refresh-metadata", libraryHandler.HandleRefreshLibraryMetadata)
 							r.Get("/{id}/providers", libraryHandler.HandleGetLibraryProviders)
 							r.Put("/{id}/providers", libraryHandler.HandleSetLibraryProviders)
@@ -1273,7 +1374,9 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 
 				if calendarRepo != nil {
-					calendarHandler := handlers.NewCalendarHandler(calendarRepo, detailSvc)
+					calendarPopular := recommendations.NewRepo(deps.DB)
+					calendarTrending := sections.NewTrendingSnapshotRepository(deps.DB)
+					calendarHandler := handlers.NewCalendarHandler(calendarRepo, detailSvc, calendarPopular, calendarTrending)
 					r.With(apimw.RequireProfile).Get("/calendar", calendarHandler.HandleGetCalendar)
 				}
 
@@ -1544,13 +1647,17 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				// Subtitle search routes.
+				// Subtitle search + AI translation routes.
 				if subtitleSearchHandler != nil {
 					if deps.FileRepo != nil && itemRepo != nil {
-						subtitleSearchHandler.FileAuthorizer = &handlers.MediaFileAuthorizer{
+						fileAuthorizer := &handlers.MediaFileAuthorizer{
 							FileResolver:  deps.FileRepo,
 							ItemAccess:    itemRepo,
 							EpisodeLookup: episodeRepo,
+						}
+						subtitleSearchHandler.FileAuthorizer = fileAuthorizer
+						if subtitleAIHandler != nil {
+							subtitleAIHandler.FileAuthorizer = fileAuthorizer
 						}
 					}
 					r.Route("/subtitles", func(r chi.Router) {
@@ -1558,6 +1665,18 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Post("/download", subtitleSearchHandler.HandleDownload)
 						r.Post("/upload", subtitleSearchHandler.HandleUpload)
 						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
+						if subtitleAIHandler != nil {
+							r.Get("/ai/status", subtitleAIHandler.HandleStatus)
+							r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
+							r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
+							r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
+							r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
+						} else {
+							// Answer the capability probe with 200 {"enabled": false}
+							// when AI translation isn't wired, so the client gets a
+							// clean negative instead of a 404.
+							r.Get("/ai/status", handlers.WriteSubtitleAIDisabledStatus)
+						}
 						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
 						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
 					})
@@ -1618,6 +1737,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/stream/{session_id}", streamHandler.HandleStream)
 					r.Head("/stream/{session_id}", streamHandler.HandleStream)
 					r.Get("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
+					r.Get("/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts)
 				}
 
 				// Download routes.
@@ -1787,6 +1907,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminJobsHandler != nil {
 								r.Route("/jobs", func(r chi.Router) {
 									r.Get("/", adminJobsHandler.HandleList)
+									r.Post("/{id}/cancel", adminJobsHandler.HandleCancel)
 								})
 							}
 
@@ -1810,6 +1931,10 @@ func NewRouter(deps Dependencies) chi.Router {
 									r.Get("/installations", pluginHandler.HandleListInstallations)
 									r.Post("/installations", pluginHandler.HandleCreateInstallation)
 									r.Post("/uploads", pluginHandler.HandleUploadInstallation)
+									r.Post("/uploads/chunked", pluginHandler.HandleCreateChunkedUpload)
+									r.Put("/uploads/chunked/{upload_id}/chunks/{chunk_index}", pluginHandler.HandleUploadChunk)
+									r.Post("/uploads/chunked/{upload_id}/complete", pluginHandler.HandleCompleteChunkedUpload)
+									r.Delete("/uploads/chunked/{upload_id}", pluginHandler.HandleCancelChunkedUpload)
 									r.Put("/installations/{id}", pluginHandler.HandleUpdateInstallation)
 									r.Post("/installations/{id}/update", pluginHandler.HandleApplyUpdate)
 									r.Post("/installations/{id}/config/test", pluginHandler.HandleTestInstallationConfig)
@@ -1998,8 +2123,30 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
 								r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
 								r.Get("/request-integrations", requestHandler.HandleListIntegrations)
-								r.Put("/request-integrations", requestHandler.HandleUpdateIntegrations)
-								r.Post("/request-integrations/{kind}/options", requestHandler.HandleLoadIntegrationOptions)
+								r.Post("/request-integrations", requestHandler.HandleCreateIntegration)
+								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
+								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
+								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
+							}
+
+							if autoscanHandler != nil {
+								r.Get("/autoscan/settings", autoscanHandler.HandleGetSettings)
+								r.Put("/autoscan/settings", autoscanHandler.HandleUpdateSettings)
+								r.Get("/autoscan/connections", autoscanHandler.HandleListConnections)
+								r.Post("/autoscan/connections", autoscanHandler.HandleCreateConnection)
+								r.Put("/autoscan/connections/{id}", autoscanHandler.HandleUpdateConnection)
+								r.Delete("/autoscan/connections/{id}", autoscanHandler.HandleDeleteConnection)
+								r.Post("/autoscan/connections/test", autoscanHandler.HandleTestConnection)
+								r.Get("/autoscan/scan-source-plugins", autoscanHandler.HandleListAvailableScanSources)
+								r.Get("/autoscan/sources", autoscanHandler.HandleListSources)
+								r.Post("/autoscan/sources", autoscanHandler.HandleCreateSource)
+								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
+								r.Delete("/autoscan/sources/{id}", autoscanHandler.HandleDeleteSource)
+								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
+								r.Get("/autoscan/scans", autoscanHandler.HandleListScans)
+								r.Get("/autoscan/events", autoscanHandler.HandleListEvents)
+								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)
+								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
 							}
 
 							if deps.ActivityLogRepo != nil {

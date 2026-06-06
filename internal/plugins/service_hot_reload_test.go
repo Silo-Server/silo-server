@@ -207,6 +207,10 @@ func (f *fakePluginClient) ScheduledTask(string) (*pluginhost.ScheduledTaskClien
 	return nil, nil
 }
 
+func (f *fakePluginClient) ScanSource(string) (*pluginhost.ScanSourceClient, error) {
+	return nil, nil
+}
+
 func (f *fakePluginClient) EventConsumer(string) (*pluginhost.EventConsumerClient, error) {
 	return nil, nil
 }

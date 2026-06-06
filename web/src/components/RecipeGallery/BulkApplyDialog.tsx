@@ -9,12 +9,13 @@ interface Library {
 interface Props {
   open: boolean;
   onClose: () => void;
-  onConfirm: (libraryIDs: number[]) => void;
+  onConfirm: (libraryIDs: number[]) => void | Promise<void>;
 }
 
 export default function BulkApplyDialog({ open, onClose, onConfirm }: Props) {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -28,6 +29,18 @@ export default function BulkApplyDialog({ open, onClose, onConfirm }: Props) {
         console.error("BulkApplyDialog: failed to load libraries", err);
       });
   }, [open]);
+
+  async function handleConfirm() {
+    setSubmitting(true);
+    try {
+      await onConfirm(Array.from(selected));
+    } catch {
+      // The caller owns user-facing error reporting. Keep the dialog open so
+      // the selection can be retried.
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   if (!open) return null;
   return (
@@ -55,17 +68,18 @@ export default function BulkApplyDialog({ open, onClose, onConfirm }: Props) {
           <button
             type="button"
             onClick={onClose}
+            disabled={submitting}
             className="rounded border border-white/15 px-3 py-1 text-sm"
           >
             Cancel
           </button>
           <button
             type="button"
-            disabled={selected.size === 0}
-            onClick={() => onConfirm(Array.from(selected))}
+            disabled={selected.size === 0 || submitting}
+            onClick={() => void handleConfirm()}
             className="rounded bg-indigo-600 px-3 py-1 text-sm text-white disabled:opacity-50"
           >
-            Apply ({selected.size})
+            {submitting ? "Applying..." : `Apply (${selected.size})`}
           </button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
+  removeItemFromHomeSectionCaches: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   useMutation: vi.fn(),
@@ -28,6 +29,8 @@ vi.mock("@/api/client", () => ({
 vi.mock("./mediaSurfaceRefresh", () => ({
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
     mocks.invalidateMediaSurfaceQueries(...args),
+  removeItemFromHomeSectionCaches: (...args: unknown[]) =>
+    mocks.removeItemFromHomeSectionCaches(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -57,6 +60,7 @@ describe("home dismissal query hooks", () => {
 
     mocks.api.mockReset();
     mocks.invalidateMediaSurfaceQueries.mockReset();
+    mocks.removeItemFromHomeSectionCaches.mockReset();
     mocks.toastError.mockReset();
     mocks.toastSuccess.mockReset();
     mocks.useMutation.mockReset();
@@ -117,6 +121,11 @@ describe("home dismissal query hooks", () => {
 
     await mutation.onSuccess?.(undefined, variables);
 
+    expect(mocks.removeItemFromHomeSectionCaches).toHaveBeenCalledWith(
+      queryClient,
+      "ep-1",
+      "continue_watching",
+    );
     expect(mocks.invalidateMediaSurfaceQueries).toHaveBeenCalledWith(queryClient, {
       itemId: "ep-1",
     });

@@ -45,6 +45,8 @@ interface PlayerControlsProps {
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
+  sessionId?: string;
+  getSubtitleStartPosition?: () => number;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -103,6 +105,8 @@ export function PlayerControls({
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
+  sessionId,
+  getSubtitleStartPosition,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
@@ -305,6 +309,8 @@ export function PlayerControls({
               mediaFileId={mediaFileId}
               playerConfig={playerConfig}
               onRefreshSubtitles={onRefreshSubtitles}
+              sessionId={sessionId}
+              getSubtitleStartPosition={getSubtitleStartPosition}
             />
 
             <QualityMenu

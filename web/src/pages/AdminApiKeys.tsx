@@ -94,7 +94,7 @@ export default function AdminApiKeys() {
       />
       <div className="page-header gap-5">
         <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">API keys</h1>
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">API Keys</h1>
           <p className="page-subtitle text-sm sm:text-base">
             Create and manage machine credentials for integrations, automation, and internal tools.
           </p>
@@ -148,9 +148,10 @@ export default function AdminApiKeys() {
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
+                      aria-label={`Copy API key ${key.label}`}
                       onClick={() => handleCopy(key.key)}
                     >
-                      <Copy className="h-3 w-3" />
+                      <Copy className="h-3 w-3" aria-hidden="true" />
                     </Button>
                   </div>
                 </TableCell>
@@ -179,9 +180,10 @@ export default function AdminApiKeys() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
+                    aria-label={`Revoke API key ${key.label}`}
                     onClick={() => handleRevoke(key)}
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3 w-3" aria-hidden="true" />
                   </Button>
                 </TableCell>
               </TableRow>

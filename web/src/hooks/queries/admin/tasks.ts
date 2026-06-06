@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { api, ApiClientError } from "@/api/client";
 import type { ExecutionResult, TaskInfo, TriggerConfig } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
+import { usePageActivity } from "@/hooks/usePageActivity";
 
 export interface MetadataRefreshReasonCount {
   reason: string;
@@ -63,12 +64,14 @@ export function useTaskHistory(key: string) {
 }
 
 export function useTaskMetrics(key: string) {
+  const pageActivity = usePageActivity();
+
   return useQuery({
     queryKey: adminKeys.taskMetrics(key),
     queryFn: () => api<MetadataRefreshMetrics>(`/admin/tasks/${encodeURIComponent(key)}/metrics`),
     enabled: key === "refresh_metadata",
     staleTime: 0,
-    refetchInterval: 30_000,
+    refetchInterval: pageActivity.canApplyRealtimeUpdates ? 30_000 : false,
   });
 }
 

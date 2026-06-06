@@ -29,6 +29,7 @@ type Session struct {
 	TargetVideoCodec  string // requested output video codec for transcodes
 	TargetAudioCodec  string // requested output audio codec when audio is transcoded
 	TargetBitrateKbps int    // requested output bitrate cap for transcodes
+	TranscodeHWAccel  string // effective hardware acceleration mode for transcodes
 
 	Position              float64
 	IsPaused              bool
@@ -54,6 +55,7 @@ type SessionStreamState struct {
 	TargetVideoCodec  string
 	TargetAudioCodec  string
 	TargetBitrateKbps int
+	TranscodeHWAccel  string
 }
 
 // SessionManager tracks active playback sessions and enforces stream limits.
@@ -299,6 +301,7 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
 	s.TargetBitrateKbps = state.TargetBitrateKbps
+	s.TranscodeHWAccel = state.TranscodeHWAccel
 	m.touchSessionLocked(s)
 	return nil
 }

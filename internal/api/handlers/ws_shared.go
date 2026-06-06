@@ -28,11 +28,22 @@ func checkWebSocketOrigin(r *http.Request) bool {
 	}
 
 	originURL, err := url.Parse(origin)
-	if err != nil {
+	if err != nil || originURL.Host == "" {
 		return false
 	}
 
-	return strings.EqualFold(originURL.Host, r.Host)
+	if strings.EqualFold(originURL.Host, r.Host) {
+		return true
+	}
+
+	// Behind a TLS-terminating CDN/proxy, r.Host is the internal origin host
+	// while the public host the browser used arrives as X-Forwarded-Host. The
+	// browser's Origin reflects that public host, so accept it too.
+	if fwd := forwardedHost(r); fwd != "" && strings.EqualFold(originURL.Host, fwd) {
+		return true
+	}
+
+	return false
 }
 
 func configureWebSocket(conn *websocket.Conn) {

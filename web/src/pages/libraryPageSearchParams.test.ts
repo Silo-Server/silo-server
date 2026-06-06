@@ -1,6 +1,14 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
-import { updateLibraryPageSearchParams, parseLibraryPageState } from "./libraryPageSearchParams";
+import {
+  applySavedLibraryPageSearchParams,
+  hasLibraryPageSearchParams,
+  parseLibraryPageState,
+  serializeLibraryPageSearchParams,
+  updateLibraryPageSearchParams,
+} from "./libraryPageSearchParams";
 
 function params(search: string) {
   return new URLSearchParams(search);
@@ -314,6 +322,46 @@ describe("updateLibraryPageSearchParams", () => {
       foo: "bar",
       tab: "library",
       type: "episode",
+    });
+  });
+});
+
+describe("library page saved state helpers", () => {
+  it("detects explicit library state params", () => {
+    expect(hasLibraryPageSearchParams(params(""))).toBe(false);
+    expect(hasLibraryPageSearchParams(params("foo=bar"))).toBe(false);
+    expect(hasLibraryPageSearchParams(params("tab=collections"))).toBe(true);
+    expect(hasLibraryPageSearchParams(params("sort=year"))).toBe(true);
+    expect(hasLibraryPageSearchParams(params("groups[0][rules][0][field]=genre"))).toBe(true);
+  });
+
+  it("serializes only library state params", () => {
+    const serialized = serializeLibraryPageSearchParams(
+      params(
+        "foo=bar&tab=library&sort=year&order=desc&groups[0][match]=all&groups[0][rules][0][field]=genre",
+      ),
+    );
+
+    expect(Object.fromEntries(new URLSearchParams(serialized).entries())).toEqual({
+      tab: "library",
+      sort: "year",
+      order: "desc",
+      "groups[0][match]": "all",
+      "groups[0][rules][0][field]": "genre",
+    });
+  });
+
+  it("applies saved library state while preserving unrelated params", () => {
+    const next = applySavedLibraryPageSearchParams(
+      params("foo=bar"),
+      "tab=library&sort=year&order=desc",
+    );
+
+    expect(asObject(next)).toEqual({
+      foo: "bar",
+      tab: "library",
+      sort: "year",
+      order: "desc",
     });
   });
 });

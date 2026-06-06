@@ -142,8 +142,8 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 
 	cols := []string{"email", "username", "password_hash", "local_password_login_enabled", "role", "permissions", "library_ids", "max_playback_quality"}
 	args := []any{
-		input.Email,
-		input.Username,
+		NormalizeEmail(input.Email),
+		NormalizeUsername(input.Username),
 		string(hash),
 		localPasswordLoginEnabled,
 		input.Role,
@@ -205,33 +205,34 @@ func (r *UserRepository) GetByID(ctx context.Context, id int) (*models.User, err
 	return scanUser(r.pool.QueryRow(ctx, query, id))
 }
 
-// GetByUsername retrieves a user by their username.
+// GetByUsername retrieves a user by their username (case-insensitive).
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*models.User, error) {
 	query := `SELECT ` + allColumns + ` FROM users WHERE username = $1`
-	return scanUser(r.pool.QueryRow(ctx, query, username))
+	return scanUser(r.pool.QueryRow(ctx, query, NormalizeUsername(username)))
 }
 
-// GetByEmail retrieves a user by their email address.
+// GetByEmail retrieves a user by their email address (case-insensitive).
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*models.User, error) {
 	query := `SELECT ` + allColumns + ` FROM users WHERE email = $1`
-	return scanUser(r.pool.QueryRow(ctx, query, email))
+	return scanUser(r.pool.QueryRow(ctx, query, NormalizeEmail(email)))
 }
 
 // Update modifies a user's fields. Only non-nil fields in the input are updated.
 // If the input contains a Password, it is bcrypt-hashed before storage.
 func (r *UserRepository) Update(ctx context.Context, id int, input models.UpdateUserInput) error {
 	setClauses := []string{}
+	accessPolicyPredicates := []string{}
 	args := []any{}
 	argIndex := 1
 
 	if input.Email != nil {
 		setClauses = append(setClauses, fmt.Sprintf("email = $%d", argIndex))
-		args = append(args, *input.Email)
+		args = append(args, NormalizeEmail(*input.Email))
 		argIndex++
 	}
 	if input.Username != nil {
 		setClauses = append(setClauses, fmt.Sprintf("username = $%d", argIndex))
-		args = append(args, *input.Username)
+		args = append(args, NormalizeUsername(*input.Username))
 		argIndex++
 	}
 	if input.Password != nil {
@@ -250,6 +251,7 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	}
 	if input.Role != nil {
 		setClauses = append(setClauses, fmt.Sprintf("role = $%d", argIndex))
+		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("role IS DISTINCT FROM $%d", argIndex))
 		args = append(args, *input.Role)
 		argIndex++
 	}
@@ -259,21 +261,26 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 			return err
 		}
 		setClauses = append(setClauses, fmt.Sprintf("permissions = $%d", argIndex))
+		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("permissions IS DISTINCT FROM $%d", argIndex))
 		args = append(args, permissions)
 		argIndex++
 	}
 	if input.Enabled != nil {
 		setClauses = append(setClauses, fmt.Sprintf("enabled = $%d", argIndex))
+		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("enabled IS DISTINCT FROM $%d", argIndex))
 		args = append(args, *input.Enabled)
 		argIndex++
 	}
 	if input.LibraryIDs != nil {
 		setClauses = append(setClauses, fmt.Sprintf("library_ids = $%d", argIndex))
+		// Library scope is resolved from users.library_ids on each request, so
+		// changing it must not invalidate durable profile/session tokens.
 		args = append(args, *input.LibraryIDs)
 		argIndex++
 	}
 	if input.MaxPlaybackQuality != nil {
 		setClauses = append(setClauses, fmt.Sprintf("max_playback_quality = $%d", argIndex))
+		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("max_playback_quality IS DISTINCT FROM $%d", argIndex))
 		args = append(args, *input.MaxPlaybackQuality)
 		argIndex++
 	}
@@ -309,12 +316,11 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 		return err
 	}
 
-	if input.Role != nil ||
-		input.Enabled != nil ||
-		input.LibraryIDs != nil ||
-		input.MaxPlaybackQuality != nil ||
-		input.Permissions != nil {
-		setClauses = append(setClauses, "access_policy_revision = access_policy_revision + 1")
+	if len(accessPolicyPredicates) > 0 {
+		setClauses = append(setClauses, fmt.Sprintf(
+			"access_policy_revision = CASE WHEN %s THEN access_policy_revision + 1 ELSE access_policy_revision END",
+			strings.Join(accessPolicyPredicates, " OR "),
+		))
 	}
 
 	// Always bump updated_at.

@@ -25,9 +25,82 @@ func TestSelectInitialMatchCandidate_IgnoresLocalContentIDForTrustedSelection(t 
 				Sources:     []string{"tmdb"},
 			},
 		},
+		nil,
 	)
 	if !ok || winner == nil {
 		t.Fatal("expected local content_id not to force trusted-ID matching")
+	}
+}
+
+func TestSelectInitialMatchCandidate_SoleExactTitleYearOffByTwoMatches(t *testing.T) {
+	t.Parallel()
+
+	// Sole distinct candidate, exact title, year off by 2 (e.g. "Stasi FC (2023)"
+	// vs TMDB's 2025). Scores in the 55-69 band — below the single-candidate >=70
+	// gate — but the exact title on a lone result should now match via title
+	// corroboration without lowering any threshold.
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{Title: "Stasi FC", Year: 2023, Type: "movie"},
+		[]MatchCandidate{
+			{
+				Title:       "Stasi FC",
+				Year:        2025,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "111"},
+				Sources:     []string{"tmdb"},
+			},
+		},
+		nil,
+	)
+	if !ok || winner == nil || winner.ProviderIDs["tmdb"] != "111" {
+		t.Fatalf("expected sole exact-title year-off-by-2 candidate to match, got ok=%v winner=%+v", ok, winner)
+	}
+}
+
+func TestSelectInitialMatchCandidate_SoleExactTitleYearOffByThreeRejected(t *testing.T) {
+	t.Parallel()
+
+	// A 3-year gap exceeds the ±2 bound: a same-title film three years apart is
+	// not corroborated and stays subject to the single-candidate >=70 gate.
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{Title: "Stasi FC", Year: 2023, Type: "movie"},
+		[]MatchCandidate{
+			{
+				Title:       "Stasi FC",
+				Year:        2026,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "111"},
+				Sources:     []string{"tmdb"},
+			},
+		},
+		nil,
+	)
+	if ok || winner != nil {
+		t.Fatalf("expected year-off-by-3 sole candidate to be rejected, got ok=%v winner=%+v", ok, winner)
+	}
+}
+
+func TestSelectInitialMatchCandidate_SoleDifferentTitleExactYearStillFloored(t *testing.T) {
+	t.Parallel()
+
+	// "Hotel Transylvania Puppy!" vs TMDB's "Puppy!" (same year) scores below the
+	// 55 floor on title similarity, so it must stay rejected — title corroboration
+	// must not rescue a low-similarity title just because the year matches.
+	winner, ok := selectInitialMatchCandidate(
+		&MatchHints{Title: "Hotel Transylvania Puppy!", Year: 2017, Type: "movie"},
+		[]MatchCandidate{
+			{
+				Title:       "Puppy!",
+				Year:        2017,
+				ContentType: "movie",
+				ProviderIDs: map[string]string{"tmdb": "222"},
+				Sources:     []string{"tmdb"},
+			},
+		},
+		nil,
+	)
+	if ok || winner != nil {
+		t.Fatalf("expected low-similarity sole candidate to stay rejected, got ok=%v winner=%+v", ok, winner)
 	}
 }
 
@@ -377,6 +450,7 @@ func TestSelectInitialMatchCandidate_AcceptsSinglePunctuationEquivalentCandidate
 						Sources:     []string{"tmdb"},
 					},
 				},
+				nil,
 			)
 			if !ok || winner == nil {
 				t.Fatalf("expected lone punctuation-equivalent candidate to be accepted")
@@ -411,6 +485,7 @@ func TestSelectInitialMatchCandidate_AcceptsProviderTitleWithRepeatedYear(t *tes
 				Sources:     []string{"tmdb"},
 			},
 		},
+		nil,
 	)
 	if !ok || winner == nil {
 		t.Fatal("expected provider title with repeated release year to be accepted")
@@ -445,6 +520,7 @@ func TestSelectInitialMatchCandidate_UsesDetailScoreForDuplicateProviderTie(t *t
 				DetailScore: 46,
 			},
 		},
+		nil,
 	)
 	if !ok || winner == nil {
 		t.Fatal("expected richer duplicate TMDB candidate to be accepted")
@@ -479,6 +555,7 @@ func TestSelectInitialMatchCandidate_RejectsDuplicateTieWithoutClearDetailGap(t 
 				DetailScore: 34,
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatal("expected duplicate tie without clear detail gap to remain unmatched")
@@ -508,6 +585,7 @@ func TestSelectInitialMatchCandidate_UsesProviderOrderForExactCrossProviderTie(t
 				Sources:     []string{"tmdb"},
 			},
 		},
+		nil,
 	)
 	if !ok || winner == nil {
 		t.Fatal("expected exact cross-provider tie to use provider order")
@@ -540,6 +618,7 @@ func TestSelectInitialMatchCandidate_ProviderOrderTieRequiresExactTitleYear(t *t
 				Sources:     []string{"imdb", "metadb", "tmdb", "xattr"},
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatal("expected non-equivalent cross-provider tie to remain unmatched")
@@ -571,6 +650,7 @@ func TestSelectInitialMatchCandidate_DetailScoreDoesNotOverrideDifferentTitleTie
 				DetailScore: 80,
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatal("expected richer different-title candidate to be rejected")
@@ -600,6 +680,7 @@ func TestSelectInitialMatchCandidate_DetailScoreRequiresDatedDuplicateCandidates
 				DetailScore: 46,
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatal("expected duplicate detail tie-breaker to reject candidates without matching years")
@@ -631,6 +712,7 @@ func TestSelectInitialMatchCandidate_DetailScoreRequiresHintCompatibleType(t *te
 				DetailScore: 46,
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatal("expected duplicate detail tie-breaker to reject candidates with hint-incompatible type")
@@ -653,6 +735,7 @@ func TestSelectInitialMatchCandidate_RejectsWeakSingleCandidate(t *testing.T) {
 				Sources:     []string{"tmdb"},
 			},
 		},
+		nil,
 	)
 	if ok || winner != nil {
 		t.Fatalf("expected weak lone candidate to be rejected")

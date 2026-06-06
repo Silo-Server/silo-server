@@ -358,8 +358,9 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		}
 	}
 	if shouldPublish(result) && e.realtime != nil {
-		if err := e.realtime.PublishLibraryChanged(scanCtx, notifications.LibraryChangeEvent{
+		if err := e.realtime.PublishCatalogLibraryChanged(scanCtx, notifications.LibraryChangeEvent{
 			LibraryID:              folder.ID,
+			Reason:                 "scan",
 			New:                    scanResultCount(scanResult, func(value *scanner.ScanResult) int { return value.New }),
 			Updated:                scanResultCount(scanResult, func(value *scanner.ScanResult) int { return value.Updated }),
 			Missing:                scanResultCount(scanResult, func(value *scanner.ScanResult) int { return value.Missing }),

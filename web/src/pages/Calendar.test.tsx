@@ -83,7 +83,7 @@ describe("Calendar page", () => {
     renderCalendar("/calendar?week=2026-04-06&library=7");
 
     expect(mockUseCalendarWeek).toHaveBeenCalledWith("2026-04-06", {
-      filter: "all",
+      filter: "following",
       libraryId: 7,
     });
   });

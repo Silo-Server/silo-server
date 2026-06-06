@@ -305,6 +305,7 @@ type subtitleURL struct {
 	Forced          bool   `json:"forced"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	URL             string `json:"url"`
+	FontBundleURL   string `json:"font_bundle_url,omitempty"`
 }
 
 // changeAudioRequest represents the JSON body for PATCH /playback/{session_id}/audio.
@@ -1403,7 +1404,11 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 					if resp.SubtitleURLs[i].Source == "embedded" {
 						// Pass the ffmpeg-relative subtitle stream index to the proxy.
 						embeddedIdx := resp.SubtitleURLs[i].Index - embeddedOffset
-						resp.SubtitleURLs[i].URL = proxyNode.URL + "/stream/subtitles/" + token + "/" + strconv.Itoa(embeddedIdx) + subtitleURLExt(resp.SubtitleURLs[i].Codec)
+						proxySubtitleURL := proxyNode.URL + "/stream/subtitles/" + token + "/" + strconv.Itoa(embeddedIdx)
+						resp.SubtitleURLs[i].URL = proxySubtitleURL + subtitleURLExt(resp.SubtitleURLs[i].Codec)
+						if resp.SubtitleURLs[i].FontBundleURL != "" {
+							resp.SubtitleURLs[i].FontBundleURL = proxySubtitleURL + "/fonts"
+						}
 					}
 				}
 			}
@@ -1459,6 +1464,7 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 			Forced:          track.Forced,
 			HearingImpaired: track.HearingImpaired,
 			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, embeddedOffset+i, subtitleURLExt(track.Codec)),
+			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec),
 		})
 	}
 
@@ -1476,6 +1482,13 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 	}
 
 	return urls
+}
+
+func subtitleFontBundleURL(sessionID string, trackIndex int, codec string) string {
+	if !playback.IsASS(codec) {
+		return ""
+	}
+	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts", sessionID, trackIndex)
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -1531,6 +1544,7 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update progress")
 		return
 	}
+	h.syncSessionsNow(r.Context(), "progress")
 
 	// Persist progress to UserStore (best-effort).
 	if sess, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil {
@@ -1838,6 +1852,7 @@ type transcodeStartState struct {
 	file           *models.MediaFile
 	session        *playback.Session
 	switchedFileID *int
+	hwAccel        string
 }
 
 // finalizeTranscodeStart updates the playback session state after a transcode
@@ -1878,6 +1893,7 @@ func (h *PlaybackHandler) finalizeTranscodeStart(r *http.Request, st transcodeSt
 		TargetVideoCodec:  st.req.TargetCodecVideo,
 		TargetAudioCodec:  st.req.TargetCodecAudio,
 		TargetBitrateKbps: st.req.TargetBitrateKbps,
+		TranscodeHWAccel:  st.hwAccel,
 	}); err != nil {
 		slog.Error("failed to update transcode stream state", "session", st.req.SessionID, "error", err, "playback_session_id", st.req.SessionID)
 	}
@@ -2052,16 +2068,35 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadGateway, "transcode_node_unavailable", "Transcode node is unavailable")
 			return
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusAccepted {
 			slog.Error("remote transcode start rejected", "status", resp.StatusCode, "node", tcNode.URL)
 			writeError(w, http.StatusBadGateway, "transcode_start_failed", "Transcode node rejected the request")
 			return
 		}
+		var nodeResp transcodenode.TranscodeStartResponse
+		if err := json.NewDecoder(resp.Body).Decode(&nodeResp); err != nil {
+			slog.Warn("remote transcode start response decode failed",
+				"error", err,
+				"node", tcNode.URL,
+				"session", req.SessionID,
+				"playback_session_id", req.SessionID,
+			)
+		}
+		effectiveHWAccel := strings.TrimSpace(nodeResp.HWAccel)
+		if effectiveHWAccel == "" {
+			effectiveHWAccel = strings.TrimSpace(nodeReq.HWAccel)
+		}
 
 		manifestURL := h.buildProxyManifestURL(req.SessionID, session, tcNode.URL)
-		h.finalizeTranscodeStart(r, transcodeStartState{req: req, file: file, session: session, switchedFileID: switchedFileID})
+		h.finalizeTranscodeStart(r, transcodeStartState{
+			req:            req,
+			file:           file,
+			session:        session,
+			switchedFileID: switchedFileID,
+			hwAccel:        effectiveHWAccel,
+		})
 		writeJSON(w, http.StatusAccepted, buildTranscodeStartResponse(req, file, switchedFileID, manifestURL))
 		return
 	}
@@ -2109,7 +2144,13 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	h.monitorLocalTranscodeExit(req.SessionID, transcodeSession)
 
 	manifestURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", req.SessionID)
-	h.finalizeTranscodeStart(r, transcodeStartState{req: req, file: file, session: session, switchedFileID: switchedFileID})
+	h.finalizeTranscodeStart(r, transcodeStartState{
+		req:            req,
+		file:           file,
+		session:        session,
+		switchedFileID: switchedFileID,
+		hwAccel:        transcodeSession.Opts().HWAccel,
+	})
 	writeJSON(w, http.StatusAccepted, buildTranscodeStartResponse(req, file, switchedFileID, manifestURL))
 }
 

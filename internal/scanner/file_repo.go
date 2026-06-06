@@ -25,6 +25,14 @@ type FileRepository struct {
 	pool *pgxpool.Pool
 }
 
+type RawMatchBacklogMode string
+
+const (
+	RawMatchBacklogGeneric   RawMatchBacklogMode = "generic"
+	RawMatchBacklogNonSeries RawMatchBacklogMode = "non_series"
+	RawMatchBacklogMixed     RawMatchBacklogMode = "mixed"
+)
+
 // Pool returns the underlying connection pool (used by tests).
 func (r *FileRepository) Pool() *pgxpool.Pool { return r.pool }
 
@@ -819,6 +827,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		multi_episode_end = EXCLUDED.multi_episode_end,
 		probe_source = EXCLUDED.probe_source,
 		probe_updated_at = EXCLUDED.probe_updated_at,
+		match_suppressed_at = NULL,
 		missing_since = NULL,
 		updated_at = NOW()
 	RETURNING ` + fileColumns
@@ -1285,6 +1294,7 @@ func (r *FileRepository) GetUnmatched(ctx context.Context, limit int) ([]*models
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE (mf.content_id IS NULL OR mf.content_id = '')
 		  AND mf.missing_since IS NULL
+		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
 		ORDER BY mf.match_attempted_at ASC NULLS FIRST, mf.id ASC
 		LIMIT $1`
@@ -1322,6 +1332,7 @@ func (r *FileRepository) ClaimUnmatched(ctx context.Context, limit int) ([]*mode
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			WHERE (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
 			ORDER BY mf.match_attempted_at ASC NULLS FIRST, mf.id ASC
 			LIMIT $1
@@ -1352,6 +1363,7 @@ func (r *FileRepository) ClaimUnmatched(ctx context.Context, limit int) ([]*mode
 			SET match_attempted_at = NOW()
 			WHERE (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND EXISTS (
 				SELECT 1
 				FROM representatives rep
@@ -1391,6 +1403,7 @@ func (r *FileRepository) ClaimUnmatchedNonSeries(ctx context.Context, limit int)
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			WHERE (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
 			  AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows')
 			ORDER BY mf.match_attempted_at ASC NULLS FIRST, mf.id ASC
@@ -1435,6 +1448,7 @@ func (r *FileRepository) ClaimUnmatchedMixed(ctx context.Context, limit int) ([]
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			WHERE (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
 			  AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
 			  AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
@@ -1473,6 +1487,173 @@ func (r *FileRepository) MarkMatchAttempted(ctx context.Context, fileID int) err
 	return err
 }
 
+// IsMatchSuppressed reports whether a raw unmatched file has been cancelled
+// from background matching.
+func (r *FileRepository) IsMatchSuppressed(ctx context.Context, fileID int) (bool, error) {
+	var suppressed bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT match_suppressed_at IS NOT NULL
+		FROM media_files
+		WHERE id = $1
+	`, fileID).Scan(&suppressed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("checking match suppression: %w", err)
+	}
+	return suppressed, nil
+}
+
+// CountUnmatchedMatchBacklogByFolder counts raw unmatched files that the
+// background matcher can still claim for a library.
+func (r *FileRepository) CountUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode RawMatchBacklogMode) (int, error) {
+	var total int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.media_folder_id = $1
+		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND mf.missing_since IS NULL
+		  AND mf.match_suppressed_at IS NULL
+		  AND folders.enabled = true
+		  AND (
+			$2 = 'generic'
+			OR ($2 = 'non_series' AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows'))
+			OR (
+				$2 = 'mixed'
+				AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+				AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
+			)
+		  )
+	`, folderID, string(normalizeRawMatchBacklogMode(mode))).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("counting unmatched match backlog: %w", err)
+	}
+	return total, nil
+}
+
+// ListUnmatchedMatchBacklogByFolder lists raw unmatched files that are still
+// eligible for the background matcher.
+func (r *FileRepository) ListUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode RawMatchBacklogMode, limit int, offset int) ([]*models.MediaFile, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	normalizedMode := normalizeRawMatchBacklogMode(mode)
+	total, err := r.CountUnmatchedMatchBacklogByFolder(ctx, folderID, normalizedMode)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+mfFileColumns+`
+		FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.media_folder_id = $1
+		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND mf.missing_since IS NULL
+		  AND mf.match_suppressed_at IS NULL
+		  AND folders.enabled = true
+		  AND (
+			$2 = 'generic'
+			OR ($2 = 'non_series' AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows'))
+			OR (
+				$2 = 'mixed'
+				AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+				AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
+			)
+		  )
+		ORDER BY mf.match_attempted_at ASC NULLS FIRST, mf.id ASC
+		LIMIT $3 OFFSET $4
+	`, folderID, string(normalizedMode), limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing unmatched match backlog: %w", err)
+	}
+	defer rows.Close()
+
+	files, err := scanMediaFiles(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return files, total, nil
+}
+
+// SuppressUnmatchedMatchBacklogByFolder prevents raw unmatched files in a
+// library from being claimed by the background matcher until they are retried
+// or seen by a new scan.
+func (r *FileRepository) SuppressUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode RawMatchBacklogMode) (int, error) {
+	normalizedMode := string(normalizeRawMatchBacklogMode(mode))
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_files mf
+		SET match_suppressed_at = NOW(), updated_at = NOW()
+		FROM media_folders folders
+		WHERE folders.id = mf.media_folder_id
+		  AND mf.media_folder_id = $1
+		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND mf.missing_since IS NULL
+		  AND mf.match_suppressed_at IS NULL
+		  AND folders.enabled = true
+		  AND (
+			$2 = 'generic'
+			OR ($2 = 'non_series' AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows'))
+			OR (
+				$2 = 'mixed'
+				AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+				AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
+			)
+		  )
+	`, folderID, normalizedMode)
+	if err != nil {
+		return 0, fmt.Errorf("suppressing unmatched match backlog: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// RetryUnmatchedMatchBacklogByFolder re-enables raw unmatched files in a
+// library and moves them to the front of the background matcher order.
+func (r *FileRepository) RetryUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode RawMatchBacklogMode) (int, error) {
+	normalizedMode := string(normalizeRawMatchBacklogMode(mode))
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_files mf
+		SET match_suppressed_at = NULL,
+		    match_attempted_at = NULL,
+		    updated_at = NOW()
+		FROM media_folders folders
+		WHERE folders.id = mf.media_folder_id
+		  AND mf.media_folder_id = $1
+		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND (
+			$2 = 'generic'
+			OR ($2 = 'non_series' AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows'))
+			OR (
+				$2 = 'mixed'
+				AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+				AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
+			)
+		  )
+	`, folderID, normalizedMode)
+	if err != nil {
+		return 0, fmt.Errorf("retrying unmatched match backlog: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func normalizeRawMatchBacklogMode(mode RawMatchBacklogMode) RawMatchBacklogMode {
+	switch mode {
+	case RawMatchBacklogNonSeries, RawMatchBacklogMixed:
+		return mode
+	default:
+		return RawMatchBacklogGeneric
+	}
+}
+
 // GetUnmatchedByFolderAndPathPrefix returns unmatched files for a single media
 // folder restricted to a subtree path.
 func (r *FileRepository) GetUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]*models.MediaFile, error) {
@@ -1481,6 +1662,7 @@ func (r *FileRepository) GetUnmatchedByFolderAndPathPrefix(ctx context.Context, 
 		WHERE mf.media_folder_id = $1
 		  AND (mf.content_id IS NULL OR mf.content_id = '')
 		  AND mf.missing_since IS NULL
+		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
 		  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 		ORDER BY mf.id ASC`
@@ -1535,6 +1717,7 @@ func (r *FileRepository) ClaimUnmatchedByFolderAndPathPrefix(
 			WHERE mf.media_folder_id = $1
 			  AND (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
 			  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 	`)
@@ -1575,6 +1758,7 @@ func (r *FileRepository) ClaimUnmatchedByFolderAndPathPrefix(
 			WHERE mf.media_folder_id = $1
 			  AND (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND EXISTS (
 				SELECT 1
 				FROM representatives rep
@@ -1627,6 +1811,7 @@ func (r *FileRepository) ClaimUnmatchedNonSeriesByFolderAndPathPrefix(
 			WHERE mf.media_folder_id = $1
 			  AND (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
 			  AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows')
 			  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
@@ -1693,6 +1878,7 @@ func (r *FileRepository) ClaimUnmatchedMixedByFolderAndPathPrefix(
 			WHERE mf.media_folder_id = $1
 			  AND (mf.content_id IS NULL OR mf.content_id = '')
 			  AND mf.missing_since IS NULL
+			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
 			  AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
 			  AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
@@ -1959,6 +2145,33 @@ func (r *FileRepository) ListByContentIDs(ctx context.Context, contentIDs []stri
 	}
 	for _, file := range files {
 		grouped[file.ContentID] = append(grouped[file.ContentID], file)
+	}
+	return grouped, nil
+}
+
+// ListByEpisodeIDs returns media files grouped by episode ID for the given
+// episode IDs, excluding files that are marked missing.
+func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
+	if len(episodeIDs) == 0 {
+		return grouped, nil
+	}
+
+	query := `SELECT ` + fileColumns + ` FROM media_files
+		WHERE episode_id = ANY($1) AND missing_since IS NULL
+		ORDER BY episode_id ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, episodeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying files by episode_ids: %w", err)
+	}
+	defer rows.Close()
+
+	files, err := scanMediaFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		grouped[file.EpisodeID] = append(grouped[file.EpisodeID], file)
 	}
 	return grouped, nil
 }

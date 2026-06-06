@@ -16,26 +16,50 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import WeekNavigator from "@/components/calendar/WeekNavigator";
 import DayGroup from "@/components/calendar/DayGroup";
 import { addWeeks, formatDayHeading, getWeekDays, getWeekStart } from "@/lib/calendarWeek";
+import { storage } from "@/utils/storage";
 
-type CalendarFilter = "all" | "favorites" | "watchlist";
+type CalendarFilter = "following" | "popular" | "trending" | "everything";
 
-const FILTER_OPTIONS: { value: CalendarFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "favorites", label: "Favorites" },
-  { value: "watchlist", label: "Watchlist" },
+// "popular" (server-wide most-watched) is hidden for now — it's sparse until the
+// server has enough watch history. Re-add the entry here and in KNOWN_FILTERS to
+// surface it; the backend filter remains supported.
+const PRESET_OPTIONS: { value: CalendarFilter; label: string }[] = [
+  { value: "following", label: "Following" },
+  { value: "trending", label: "Trending" },
+  { value: "everything", label: "All" },
 ];
+
+const DEFAULT_PRESET: CalendarFilter = "following";
+
+// The selectable presets plus legacy server values so old shared links keep working.
+const KNOWN_FILTERS = new Set<string>([
+  ...PRESET_OPTIONS.map((o) => o.value),
+  "all",
+  "favorites",
+  "watchlist",
+]);
 
 /** Skeleton rows mirror a full week; enough slides per row to fill wide viewports. */
 const CALENDAR_SKELETON_DAY_ROWS = 7;
 const CALENDAR_SKELETON_ITEMS_PER_ROW = 18;
+
+function readStoredPreset(): CalendarFilter {
+  const stored = storage.get(storage.KEYS.CALENDAR_PRESET);
+  return stored && PRESET_OPTIONS.some((o) => o.value === stored)
+    ? (stored as CalendarFilter)
+    : DEFAULT_PRESET;
+}
+
+function writeStoredPreset(value: string) {
+  storage.set(storage.KEYS.CALENDAR_PRESET, value);
+}
 
 function parseCalendarParams(searchParams: URLSearchParams) {
   const weekRaw = searchParams.get("week");
   const weekStart =
     weekRaw && /^\d{4}-\d{2}-\d{2}$/.test(weekRaw) ? weekRaw : getWeekStart(new Date());
   const rawFilter = searchParams.get("filter");
-  const filter: CalendarFilter =
-    rawFilter === "favorites" || rawFilter === "watchlist" ? rawFilter : "all";
+  const filter = rawFilter && KNOWN_FILTERS.has(rawFilter) ? rawFilter : readStoredPreset();
   const libraryIdRaw = searchParams.get("library");
   const libraryId = libraryIdRaw ? Number(libraryIdRaw) : undefined;
   return { weekStart, filter, libraryId };
@@ -77,7 +101,10 @@ export default function Calendar() {
   }
 
   const goToWeek = (w: string) => setParams({ week: w });
-  const setFilter = (f: string) => setParams({ filter: f === "all" ? undefined : f });
+  const setFilter = (f: string) => {
+    writeStoredPreset(f);
+    setParams({ filter: f === DEFAULT_PRESET ? undefined : f });
+  };
   const setLibrary = (id: string) => setParams({ library: id === "all" ? undefined : id });
 
   const onSelectDay = (date: string) => {
@@ -101,13 +128,13 @@ export default function Calendar() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Calendar</h1>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Filter toggle */}
+            {/* Preset pills (desktop) */}
             <div
               role="group"
-              aria-label="Filter"
-              className="surface-panel-subtle flex items-center gap-0.5 rounded-full p-1"
+              aria-label="Calendar preset"
+              className="surface-panel-subtle hidden items-center gap-0.5 rounded-full p-1 lg:flex"
             >
-              {FILTER_OPTIONS.map((opt) => (
+              {PRESET_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
@@ -122,6 +149,22 @@ export default function Calendar() {
                   {opt.label}
                 </button>
               ))}
+            </div>
+
+            {/* Preset dropdown (smaller displays) */}
+            <div className="lg:hidden">
+              <Select value={filter} onValueChange={setFilter}>
+                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[130px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:text-[13px]">
+                  <SelectValue placeholder="Following" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRESET_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Library filter */}
@@ -186,7 +229,7 @@ export default function Calendar() {
         </div>
       ) : (
         <div className="px-4 sm:px-6 lg:px-10 xl:px-12">
-          <CalendarEmpty filter={filter} onClearFilter={() => setFilter("all")} />
+          <CalendarEmpty filter={filter} onSelectPreset={setFilter} />
         </div>
       )}
     </div>
@@ -210,19 +253,43 @@ function CalendarSkeleton() {
   );
 }
 
-function CalendarEmpty({ filter, onClearFilter }: { filter: string; onClearFilter: () => void }) {
+function CalendarEmpty({
+  filter,
+  onSelectPreset,
+}: {
+  filter: string;
+  onSelectPreset: (f: string) => void;
+}) {
+  const isEverything = filter === "everything" || filter === "all";
   return (
     <div className="surface-panel flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-[1.8rem] border-0 px-6 py-16 text-center">
       <CalendarDays className="text-muted-foreground h-10 w-10" strokeWidth={1.5} />
       <p className="text-muted-foreground text-sm">
-        {filter !== "all"
-          ? `No events this week matching your ${filter} filter.`
-          : "Nothing scheduled this week."}
+        {filter === "following"
+          ? "Nothing upcoming from shows you follow this week."
+          : isEverything
+            ? "Nothing scheduled this week."
+            : "No events this week for this view."}
       </p>
-      {filter !== "all" && (
-        <Button variant="link" size="sm" className="text-primary text-sm" onClick={onClearFilter}>
-          Show all
-        </Button>
+      {!isEverything && (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            variant="link"
+            size="sm"
+            className="text-primary text-sm"
+            onClick={() => onSelectPreset("trending")}
+          >
+            Trending
+          </Button>
+          <Button
+            variant="link"
+            size="sm"
+            className="text-primary text-sm"
+            onClick={() => onSelectPreset("everything")}
+          >
+            Show everything
+          </Button>
+        </div>
       )}
     </div>
   );

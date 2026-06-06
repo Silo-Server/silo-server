@@ -70,6 +70,8 @@ type ItemRecord struct {
 	ReleaseDate       *string    `json:"release_date,omitempty"`
 	FirstAirDate      *string    `json:"first_air_date,omitempty"`
 	LastAirDate       *string    `json:"last_air_date,omitempty"`
+	AirTime           *string    `json:"air_time,omitempty"`
+	AirTimezone       *string    `json:"air_timezone,omitempty"`
 	MatchedAt         *time.Time `json:"matched_at,omitempty"`
 	LastRefreshed     *time.Time `json:"last_refreshed,omitempty"`
 	RefreshFailures   int        `json:"refresh_failures"`

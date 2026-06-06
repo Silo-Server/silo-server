@@ -28,6 +28,7 @@ type MetadataUpdate struct {
 	FirstAirDate      *string
 	LastAirDate       *string
 	AirTime           *string
+	AirTimezone       *string
 	AirDate           *string
 	Status            *string
 	ShowStatus        *string

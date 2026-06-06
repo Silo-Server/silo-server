@@ -80,6 +80,17 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 	overlaySummaries := h.itemsH.listOverlaySummaries(r.Context(), result.Items, h.itemsH.accessFilter(r))
 	userStates := h.itemsH.listItemUserStates(r, result.Items)
 	episodeMetadata := h.itemsH.listEpisodeBrowseMetadata(r.Context(), result.Items)
+	sortField := catalog.NormalizeQuerySort(req.Query.Sort).Field
+	store, profileID, _ := h.itemsH.userStoreForRequest(r)
+	sortMetrics := h.itemsH.listSortMetrics(
+		r.Context(),
+		result.Items,
+		sortField,
+		h.itemsH.accessFilter(r),
+		overlaySummaries,
+		store,
+		profileID,
+	)
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
 		resp := h.itemsH.toItemListResponseWithOverlay(
@@ -93,6 +104,7 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 			resp.SeasonNumber = meta.SeasonNumber
 			resp.EpisodeNumber = meta.EpisodeNumber
 		}
+		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
 	}
 

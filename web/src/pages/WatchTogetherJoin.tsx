@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { ApiClientError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import {
   createWatchTogetherRoom,
   joinWatchTogetherRoom,
@@ -24,6 +25,7 @@ function describeJoinError(error: unknown) {
 }
 
 export default function WatchTogetherJoin() {
+  useDocumentTitle("Watch Party");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token")?.trim() ?? "";

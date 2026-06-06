@@ -327,6 +327,7 @@ type MediaItem struct {
 	FirstAirDate                 *string // ISO date (series only), nullable
 	LastAirDate                  *string // ISO date (series only), nullable
 	AirTime                      *string // Series broadcast time (e.g. "20:00"), nullable
+	AirTimezone                  *string // Series broadcast timezone (IANA name, e.g. "America/New_York"), nullable
 	ShowStatus                   string  // Series lifecycle: "returning", "ended", "cancelled", "in_production", or "" if unknown (series only)
 	People                       []ItemPerson
 	AudiobookSeries              []AudiobookSeriesMembership

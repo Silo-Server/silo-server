@@ -70,6 +70,13 @@ function getLibraryIcon(type: string) {
   }
 }
 
+function getLibraryIdFromPathname(pathname: string): number | null {
+  const match = pathname.match(/^\/library\/(\d+)(?:\/|$)/);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 function SidebarLabel({ children, show }: { children: ReactNode; show: boolean }) {
   return (
     <span
@@ -191,13 +198,15 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
         : null,
     [location.pathname, location.search],
   );
-  const activeLibraryId = params.libraryId
-    ? Number(params.libraryId)
-    : catalogState?.source === "section" && catalogState.scope === "library"
-      ? (catalogState.library_id ?? null)
-      : catalogState?.source === "library_collection"
-        ? (catalogState.library_id ?? null)
-        : null;
+  const activeLibraryId =
+    params.libraryId && Number.isInteger(Number(params.libraryId))
+      ? Number(params.libraryId)
+      : (getLibraryIdFromPathname(location.pathname) ??
+        (catalogState?.source === "section" && catalogState.scope === "library"
+          ? (catalogState.library_id ?? null)
+          : catalogState?.source === "library_collection"
+            ? (catalogState.library_id ?? null)
+            : null));
   // Hover-to-expand when collapsed (150ms enter delay prevents accidental expansion)
   const [hovered, setHovered] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -342,8 +351,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
             {(showLabels ? librariesExpanded : true) && (
               <ul className="list-none space-y-0.5">
                 {libraries.map((lib) => {
-                  const href = `/library/${lib.id}`;
+                  const baseHref = `/library/${lib.id}`;
                   const active = activeLibraryId === lib.id;
+                  const href =
+                    active && location.pathname === baseHref
+                      ? `${baseHref}${location.search}`
+                      : baseHref;
                   const libraryPins = pins[String(lib.id)] ?? [];
                   const hasPins = libraryPins.length > 0;
                   const isExpanded = hasPins && !expandedLibraries.has(lib.id);

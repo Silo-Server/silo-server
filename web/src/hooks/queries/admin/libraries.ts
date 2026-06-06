@@ -12,6 +12,9 @@ import type {
   CreateLibraryRequest,
   DeleteLibraryRootOverrideRequest,
   Library,
+  LibraryMetadataMatchQueueActionResponse,
+  LibraryMetadataMatchQueueDetail,
+  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibraryRootsResponse,
@@ -27,6 +30,7 @@ import type {
 import { adminKeys, libraryKeys } from "../keys";
 import { toast } from "sonner";
 import type { LibraryReorderEntry } from "@/pages/adminLibraryOrder";
+import { usePageActivity } from "@/hooks/usePageActivity";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -388,6 +392,7 @@ export function useScanAllLibraries() {
 }
 
 export function useCancelLibraryScans() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) =>
       api<{ cancelled: number; library_id: number }>("/scan/cancel", {
@@ -396,9 +401,74 @@ export function useCancelLibraryScans() {
       }),
     onSuccess: () => {
       toast.success("Scan cancellation requested");
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to cancel scans");
+    },
+  });
+}
+
+export function useLibraryMetadataMatchQueues() {
+  const pageActivity = usePageActivity();
+
+  return useQuery({
+    queryKey: adminKeys.libraryMatchQueueStatuses(),
+    queryFn: () =>
+      api<LibraryMetadataMatchQueueStatus[]>("/libraries/metadata-match-queue").then(
+        (data) => data ?? [],
+      ),
+    staleTime: 0,
+    refetchInterval: pageActivity.canApplyRealtimeUpdates ? 10_000 : false,
+  });
+}
+
+export function useLibraryMetadataMatchQueueDetail(libraryId: number | null) {
+  return useQuery({
+    queryKey: adminKeys.libraryMatchQueueDetail(libraryId ?? 0),
+    queryFn: () =>
+      api<LibraryMetadataMatchQueueDetail>(
+        `/libraries/${encodeURIComponent(String(libraryId))}/metadata-match-queue?limit=10`,
+      ),
+    enabled: libraryId !== null,
+    staleTime: 0,
+  });
+}
+
+export function useRetryLibraryMetadataMatchQueue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<LibraryMetadataMatchQueueActionResponse>(`/libraries/${id}/metadata-match-queue/retry`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, id) => {
+      toast.success("Metadata matcher backlog queued");
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to rebuild metadata matcher backlog",
+      );
+    },
+  });
+}
+
+export function useCancelLibraryMetadataMatchQueue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      api<LibraryMetadataMatchQueueActionResponse>(`/libraries/${id}/metadata-match-queue/cancel`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, id) => {
+      toast.success("Metadata matcher backlog cancelled");
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel metadata matcher backlog");
     },
   });
 }
@@ -508,15 +578,34 @@ export function useRefreshLibraryMetadata() {
   });
 }
 
+export function useCancelAdminJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<AdminJob>(`/admin/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Cancellation requested");
+      queryClient.invalidateQueries({ queryKey: adminKeys.jobs("library_refresh") });
+      queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to cancel job");
+    },
+  });
+}
+
 const UNMATCHED_PAGE_SIZE = 10;
 
-export function useUnmatchedLibraryItems(page = 0) {
+export function useUnmatchedLibraryItems(page = 0, search = "") {
   const offset = page * UNMATCHED_PAGE_SIZE;
+  const trimmed = search.trim();
   return useQuery({
-    queryKey: adminKeys.unmatchedItems(page),
+    queryKey: adminKeys.unmatchedItems(page, trimmed),
     queryFn: () =>
       api<UnmatchedLibraryItemsResponse>(
-        `/libraries/unmatched-items?limit=${UNMATCHED_PAGE_SIZE}&offset=${offset}`,
+        `/libraries/unmatched-items?limit=${UNMATCHED_PAGE_SIZE}&offset=${offset}${
+          trimmed ? `&q=${encodeURIComponent(trimmed)}` : ""
+        }`,
       ).then((d) => d ?? { items: [], total: 0 }),
     staleTime: ADMIN_STALE_TIME,
     placeholderData: (prev) => prev,

@@ -291,8 +291,8 @@ export const recKeys = {
 
 export const calendarKeys = {
   all: ["calendar"] as const,
-  week: (weekStart: string, filter: string, libraryId?: number) =>
-    ["calendar", "week", weekStart, filter, libraryId ?? "all"] as const,
+  week: (weekStart: string, filter: string, libraryId?: number, timezone?: string) =>
+    ["calendar", "week", weekStart, filter, libraryId ?? "all", timezone ?? "UTC"] as const,
 };
 
 export const downloadKeys = {
@@ -324,6 +324,9 @@ export const adminKeys = {
   libraries: () => ["admin", "libraries"] as const,
   libraryRoots: (libraryId?: number, state?: string) =>
     ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all"] as const,
+  libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
+  libraryMatchQueueDetail: (libraryId: number) =>
+    ["admin", "libraries", "metadataMatchQueue", libraryId] as const,
   filesystemBrowse: (path: string) => ["admin", "filesystem", "browse", path] as const,
   librarySkippedRoots: () => ["admin", "libraries", "skippedRoots"] as const,
   staleMediaIDs: () => ["admin", "libraries", "staleMediaIDs"] as const,
@@ -386,11 +389,20 @@ export const adminKeys = {
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
-  unmatchedItems: (page?: number) =>
+  unmatchedItems: (page?: number, search?: string) =>
     page != null
-      ? (["admin", "libraries", "unmatchedItems", page] as const)
+      ? (["admin", "libraries", "unmatchedItems", page, search ?? ""] as const)
       : (["admin", "libraries", "unmatchedItems"] as const),
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,
+  autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
+  autoscanConnections: () => ["admin", "autoscan", "connections"] as const,
+  autoscanSources: () => ["admin", "autoscan", "sources"] as const,
+  autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
+  autoscanStatus: () => ["admin", "autoscan", "status"] as const,
+  autoscanScans: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "scans", params ?? {}] as const,
+  autoscanEvents: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "events", params ?? {}] as const,
 };

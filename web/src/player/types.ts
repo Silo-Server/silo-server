@@ -110,6 +110,12 @@ export interface PlaybackSessionPlaybackInfo {
 /** Subtitle track information. */
 export interface PlayerSubtitleInfo {
   index: number;
+  /**
+   * Downloaded-subtitle row id, when this track is a stored downloaded subtitle.
+   * Lets the player match a translation-completed / `subtitle_ready` event
+   * (which carries the DB id) to a track after a list refresh.
+   */
+  id?: number;
   language: string;
   codec?: string;
   label: string;
@@ -117,6 +123,18 @@ export interface PlayerSubtitleInfo {
   forced?: boolean;
   hearing_impaired?: boolean;
   url: string;
+  /**
+   * Optional endpoint returning base64-encoded container font attachments for
+   * ASS/SSA rendering. Present for embedded ASS tracks when the backend can
+   * extract attachments from the source media file.
+   */
+  font_bundle_url?: string;
+  /**
+   * When true, this is an in-progress AI translation whose cues arrive over the
+   * realtime websocket rather than from `url`. `useSubtitleTracks` feeds it from
+   * the `liveCues` source instead of fetching.
+   */
+  live?: boolean;
 }
 
 export interface PlayerSubtitleTrackSignature {

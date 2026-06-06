@@ -364,9 +364,10 @@ export default function AdminCatalogMaintenance() {
                         variant="ghost"
                         size="icon"
                         className="shrink-0"
+                        aria-label="Remove path rewrite"
                         onClick={() => removeRewrite(index)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </div>
                   ))}

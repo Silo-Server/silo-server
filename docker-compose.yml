@@ -2,7 +2,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg18
     restart: unless-stopped
-    shm_size: 1gb
+    shm_size: ${POSTGRES_SHM_SIZE:-8gb}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-silo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
@@ -11,8 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}/postgres:/var/lib/postgresql
-      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    command: ["postgres", "-c", "listen_addresses=*"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
       interval: 5s
@@ -40,6 +39,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
+      POSTGRES_TUNE: ${POSTGRES_TUNE:-auto}
     ports:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
@@ -51,6 +51,7 @@ services:
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
       - ${SILO_DATA_ROOT:-/opt/silo}/audiobook-covers:/var/lib/silo/audiobook-covers
+      - /proc/meminfo:/host/proc/meminfo:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,6 +60,8 @@ services:
     env_file:
       - path: .env
         required: false
+    devices:
+      - /dev/dri:/dev/dri
 
   # Optional distributed-mode example. Most single-host installs should
   # just use the integrated service above.

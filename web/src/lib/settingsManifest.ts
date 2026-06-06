@@ -129,6 +129,15 @@ const definitions: SettingDefinition[] = [
     summary: (value) => (value ? "Custom subtitle appearance" : "Using fallback"),
   },
   {
+    key: "ui.remember_library_page_state",
+    scope: "device",
+    label: "Remember library pages",
+    description:
+      "Return each library to the last tab, sort, and filters used on this profile and device.",
+    control: "switch",
+    defaultValue: "true",
+  },
+  {
     key: "player.hdr_enabled",
     scope: "device",
     label: "HDR enabled",

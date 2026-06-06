@@ -33,10 +33,11 @@ const (
 var ErrScanRunNotFound = errors.New("scan run not found")
 
 type CreateInput struct {
-	LibraryID int
-	Mode      string
-	Path      string
-	Trigger   string
+	LibraryID       int
+	Mode            string
+	Path            string
+	Trigger         string
+	AutoscanEventID *int64
 }
 
 type Repository struct {
@@ -48,7 +49,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 const scanRunColumns = `id, media_folder_id, mode, path, trigger, status, result_payload,
-	error_message, requested_at, started_at, completed_at, heartbeat_at, updated_at`
+	error_message, autoscan_event_id, requested_at, started_at, completed_at, heartbeat_at, updated_at`
 
 func scanRunRow(row pgx.Row) (*models.ScanRun, error) {
 	var run models.ScanRun
@@ -61,6 +62,7 @@ func scanRunRow(row pgx.Row) (*models.ScanRun, error) {
 		&run.Status,
 		&run.ResultPayload,
 		&run.ErrorMessage,
+		&run.AutoscanEventID,
 		&run.RequestedAt,
 		&run.StartedAt,
 		&run.CompletedAt,
@@ -95,8 +97,8 @@ func scanRunRows(rows pgx.Rows) ([]*models.ScanRun, error) {
 func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.ScanRun, bool, error) {
 	run, err := scanRunRow(r.pool.QueryRow(ctx, `
 		INSERT INTO scan_runs (
-			id, media_folder_id, mode, path, trigger, status
-		) VALUES ($1, $2, $3, $4, $5, $6)
+			id, media_folder_id, mode, path, trigger, status, autoscan_event_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING `+scanRunColumns,
 		ulid.Make().String(),
 		input.LibraryID,
@@ -104,6 +106,7 @@ func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.Sca
 		input.Path,
 		input.Trigger,
 		StatusAccepted,
+		input.AutoscanEventID,
 	))
 	if err == nil {
 		return run, true, nil
@@ -136,8 +139,8 @@ func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*
 	for _, input := range inputs {
 		run, err := scanRunRow(tx.QueryRow(ctx, `
 			INSERT INTO scan_runs (
-				id, media_folder_id, mode, path, trigger, status
-			) VALUES ($1, $2, $3, $4, $5, $6)
+				id, media_folder_id, mode, path, trigger, status, autoscan_event_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT DO NOTHING
 			RETURNING `+scanRunColumns,
 			ulid.Make().String(),
@@ -146,6 +149,7 @@ func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*
 			input.Path,
 			input.Trigger,
 			StatusAccepted,
+			input.AutoscanEventID,
 		))
 		if err == nil {
 			runs = append(runs, run)

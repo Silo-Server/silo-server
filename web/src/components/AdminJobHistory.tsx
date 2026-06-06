@@ -127,8 +127,16 @@ export default function AdminJobHistory() {
           ) : (
             <Badge variant="secondary">{jobs.length}</Badge>
           )}
-          <Button variant="ghost" size="icon" onClick={() => jobsQuery.refetch()}>
-            <RefreshCw className={`h-4 w-4 ${jobsQuery.isFetching ? "animate-spin" : ""}`} />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh job history"
+            onClick={() => jobsQuery.refetch()}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${jobsQuery.isFetching ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
           </Button>
         </div>
       </div>

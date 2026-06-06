@@ -417,6 +417,31 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
 
+	// Subtitle AI (on-demand translation; Whisper ASR generation in a follow-up)
+	subtitleAIEnabled, err := boolOr(m, "subtitle_ai.enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.Enabled = subtitleAIEnabled
+	cfg.SubtitleAI.BaseURL = stringOr(m, "subtitle_ai.base_url", "https://api.openai.com")
+	cfg.SubtitleAI.APIKey = stringOr(m, "subtitle_ai.api_key", "")
+	cfg.SubtitleAI.ChatModel = stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini")
+	subtitleAIMaxConcurrent, err := intOr(m, "subtitle_ai.max_concurrent_jobs", 2)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.MaxConcurrentJobs = subtitleAIMaxConcurrent
+	subtitleAIBatchSize, err := intOr(m, "subtitle_ai.batch_size", 40)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.BatchSize = subtitleAIBatchSize
+	subtitleAIContextNeighbors, err := intOr(m, "subtitle_ai.context_neighbors", 2)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.ContextNeighbors = subtitleAIContextNeighbors
+
 	// Download
 	downloadEnabled, err := boolOr(m, "download.enabled", false)
 	if err != nil {

@@ -12,6 +12,7 @@ import type { CalendarEvent } from "@/hooks/queries/calendar";
 export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = event.poster_thumbhash ? decodeThumbhash(event.poster_thumbhash) : "";
+  const watched = event.watched === true;
 
   const href =
     event.type === "movie"
@@ -19,13 +20,13 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
       : `/item/${event.series_id ?? event.content_id}`;
 
   const subtitle = formatUpcomingSubtitle(event);
-  const airTime = formatUpcomingTime(event.air_time);
+  const airTime = formatUpcomingTime(event.air_time, event.air_at);
 
   return (
     <div className="media-card group/card">
       <ViewTransitionLink to={href} className="block overflow-hidden rounded-xl">
         <div
-          className="media-card-image relative aspect-[2/3]"
+          className={`media-card-image relative aspect-[2/3] ${watched ? "opacity-60 grayscale" : ""}`}
           style={
             thumbhashUrl
               ? {
@@ -62,10 +63,24 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
               ))}
             </div>
           )}
+          {watched && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <span
+                className="bg-background/70 text-foreground flex h-8 w-8 items-center justify-center rounded-full text-base backdrop-blur-sm"
+                aria-label="Watched"
+              >
+                ✓
+              </span>
+            </div>
+          )}
         </div>
       </ViewTransitionLink>
       <ViewTransitionLink to={href} className="block px-1 pt-3">
-        <div className="truncate text-[14px] font-semibold tracking-tight">{event.title}</div>
+        <div
+          className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
+        >
+          {event.title}
+        </div>
         {subtitle && (
           <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
             {subtitle}

@@ -21,6 +21,7 @@ type CalendarEvent struct {
 	EpisodeNumber   *int
 	AirDate         time.Time
 	AirTime         *string
+	AirTimezone     *string
 	PosterPath      string
 	PosterThumbhash string
 	IsPremiere      bool
@@ -31,13 +32,17 @@ type CalendarEvent struct {
 type CalendarFilter struct {
 	Start              time.Time
 	End                time.Time
-	Filter             string // "all" | "favorites" | "watchlist"
 	LibraryID          *int
 	AllowedLibraryIDs  []int
 	DisabledLibraryIDs []int
 	MaxContentRating   string
-	UserID             int
-	ProfileID          string
+
+	// RestrictByIDs limits results to items whose movie content_id (movies) or
+	// series_id (episodes / season premieres) is in RestrictToIDs. When
+	// RestrictByIDs is true and RestrictToIDs is empty, no rows match. Callers
+	// resolve the id-set (Following / Popular / Trending) before querying.
+	RestrictByIDs bool
+	RestrictToIDs []string
 }
 
 // CalendarRepository provides calendar queries across movies, episodes, and seasons.
@@ -70,7 +75,7 @@ func (r *CalendarRepository) ListEvents(ctx context.Context, f CalendarFilter) (
 		var seasonNum, episodeNum *int
 		if err := rows.Scan(
 			&ev.ContentID, &ev.Type, &ev.Title, &episodeTitle, &seriesID,
-			&seasonNum, &episodeNum, &ev.AirDate, &ev.AirTime,
+			&seasonNum, &episodeNum, &ev.AirDate, &ev.AirTime, &ev.AirTimezone,
 			&ev.PosterPath, &ev.PosterThumbhash,
 			&ev.IsPremiere, &ev.IsFinale,
 		); err != nil {
@@ -101,9 +106,18 @@ func (r *CalendarRepository) buildListEventsQuery(f CalendarFilter) (string, []a
 	args = append(args, f.End)
 	argIdx++
 
-	movieBranch := r.buildMovieBranch(startArg, endArg, f, &args, &argIdx)
-	filteredEpisodes := r.buildFilteredEpisodesCTE(startArg, endArg, f, &args, &argIdx)
-	filteredSeasons := r.buildFilteredSeasonsCTE(startArg, endArg, f, &args, &argIdx)
+	// Optional id-set restriction, appended once and shared by all branches.
+	// restrictArg stays 0 when the set is empty so branches short-circuit.
+	restrictArg := 0
+	if f.RestrictByIDs && len(f.RestrictToIDs) > 0 {
+		restrictArg = argIdx
+		args = append(args, f.RestrictToIDs)
+		argIdx++
+	}
+
+	movieBranch := r.buildMovieBranch(startArg, endArg, restrictArg, f, &args, &argIdx)
+	filteredEpisodes := r.buildFilteredEpisodesCTE(startArg, endArg, restrictArg, f, &args, &argIdx)
+	filteredSeasons := r.buildFilteredSeasonsCTE(startArg, endArg, restrictArg, f, &args, &argIdx)
 	episodeBranch := r.buildEpisodeBranch()
 	seasonBranch := r.buildSeasonBranch()
 
@@ -126,7 +140,7 @@ func (r *CalendarRepository) buildListEventsQuery(f CalendarFilter) (string, []a
        WHERE e.episode_number = 1 AND e.air_date IS NOT NULL
      )
 SELECT content_id, type, title, episode_title, series_id,
-       season_number, episode_number, air_date, air_time,
+       season_number, episode_number, air_date, air_time, air_timezone,
        poster_path, poster_thumbhash,
        is_premiere, is_finale
 FROM (
@@ -138,37 +152,37 @@ FROM (
 	return query, args
 }
 
-func (r *CalendarRepository) buildMovieBranch(startArg, endArg int, f CalendarFilter, args *[]any, argIdx *int) string {
+func (r *CalendarRepository) buildMovieBranch(startArg, endArg, restrictArg int, f CalendarFilter, args *[]any, argIdx *int) string {
 	conditions := []string{
 		"mi.type = 'movie'",
 		fmt.Sprintf("mi.release_date BETWEEN $%d::date AND $%d::date", startArg, endArg),
 	}
 	r.appendLibraryExistsClauses("mi.content_id", f, &conditions, args, argIdx)
 	r.appendContentRatingClause("mi", f, &conditions, args, argIdx)
-	r.appendPersonalFilterClause("mi.content_id", f, &conditions, args, argIdx)
+	r.appendRestrictClause("mi.content_id", restrictArg, f, &conditions)
 
 	return fmt.Sprintf(`SELECT mi.content_id, 'movie'::text AS type,
        mi.title, NULL::text AS episode_title, NULL::text AS series_id,
        NULL::int AS season_number, NULL::int AS episode_number,
-       mi.release_date AS air_date, NULL::text AS air_time,
+       mi.release_date AS air_date, NULL::text AS air_time, NULL::text AS air_timezone,
        mi.poster_path, mi.poster_thumbhash,
        FALSE AS is_premiere, FALSE AS is_finale
 FROM media_items mi
 WHERE %s`, strings.Join(conditions, " AND "))
 }
 
-func (r *CalendarRepository) buildFilteredEpisodesCTE(startArg, endArg int, f CalendarFilter, args *[]any, argIdx *int) string {
+func (r *CalendarRepository) buildFilteredEpisodesCTE(startArg, endArg, restrictArg int, f CalendarFilter, args *[]any, argIdx *int) string {
 	conditions := []string{
 		fmt.Sprintf("e.air_date BETWEEN $%d::date AND $%d::date", startArg, endArg),
 		"e.season_number > 0", // exclude specials
 	}
 	r.appendLibraryExistsClauses("e.series_id", f, &conditions, args, argIdx)
 	r.appendContentRatingClause("mi", f, &conditions, args, argIdx)
-	r.appendPersonalFilterClause("e.series_id", f, &conditions, args, argIdx)
+	r.appendRestrictClause("e.series_id", restrictArg, f, &conditions)
 
 	return fmt.Sprintf(`SELECT e.content_id, e.series_id, e.season_number,
        e.episode_number, e.title AS episode_title, e.air_date,
-       mi.title AS title, mi.air_time,
+       mi.title AS title, mi.air_time, mi.air_timezone,
        mi.poster_path, mi.poster_thumbhash
 FROM episodes e
 JOIN media_items mi ON mi.content_id = e.series_id
@@ -179,7 +193,7 @@ func (r *CalendarRepository) buildEpisodeBranch() string {
 	return `SELECT fe.content_id, 'episode'::text AS type,
        fe.title, fe.episode_title, fe.series_id,
        fe.season_number, fe.episode_number,
-       fe.air_date, fe.air_time,
+       fe.air_date, fe.air_time, fe.air_timezone,
        fe.poster_path, fe.poster_thumbhash,
        (fe.episode_number = 1) AS is_premiere,
        (fe.episode_number = sf.max_episode_number) AS is_finale
@@ -187,17 +201,17 @@ FROM filtered_episodes fe
 LEFT JOIN season_finales sf ON sf.series_id = fe.series_id AND sf.season_number = fe.season_number`
 }
 
-func (r *CalendarRepository) buildFilteredSeasonsCTE(startArg, endArg int, f CalendarFilter, args *[]any, argIdx *int) string {
+func (r *CalendarRepository) buildFilteredSeasonsCTE(startArg, endArg, restrictArg int, f CalendarFilter, args *[]any, argIdx *int) string {
 	conditions := []string{
 		fmt.Sprintf("s.air_date BETWEEN $%d::date AND $%d::date", startArg, endArg),
 		"s.season_number > 0", // exclude specials
 	}
 	r.appendLibraryExistsClauses("s.series_id", f, &conditions, args, argIdx)
 	r.appendContentRatingClause("mi", f, &conditions, args, argIdx)
-	r.appendPersonalFilterClause("s.series_id", f, &conditions, args, argIdx)
+	r.appendRestrictClause("s.series_id", restrictArg, f, &conditions)
 
 	return fmt.Sprintf(`SELECT s.content_id, s.series_id, s.season_number,
-       s.title AS episode_title, s.air_date, mi.title AS title, mi.air_time,
+       s.title AS episode_title, s.air_date, mi.title AS title, mi.air_time, mi.air_timezone,
        COALESCE(NULLIF(s.poster_path, ''), mi.poster_path) AS poster_path,
        COALESCE(NULLIF(s.poster_thumbhash, ''), mi.poster_thumbhash) AS poster_thumbhash
 FROM seasons s
@@ -209,7 +223,7 @@ func (r *CalendarRepository) buildSeasonBranch() string {
 	return `SELECT fs.content_id, 'season_premiere'::text AS type,
        fs.title, fs.episode_title, fs.series_id,
        fs.season_number, NULL::int AS episode_number,
-       fs.air_date, fs.air_time,
+       fs.air_date, fs.air_time, fs.air_timezone,
        fs.poster_path, fs.poster_thumbhash,
        TRUE AS is_premiere, FALSE AS is_finale
 FROM filtered_seasons fs
@@ -281,30 +295,16 @@ func (r *CalendarRepository) appendLibraryExistsClauses(contentIDExpr string, f 
 	*argIdx++
 }
 
-// appendPersonalFilterClause adds favorites/watchlist EXISTS subqueries.
-func (r *CalendarRepository) appendPersonalFilterClause(itemIDExpr string, f CalendarFilter, conditions *[]string, args *[]any, argIdx *int) {
-	switch f.Filter {
-	case "favorites":
-		userArg := *argIdx
-		*args = append(*args, f.UserID)
-		*argIdx++
-		profileArg := *argIdx
-		*args = append(*args, f.ProfileID)
-		*argIdx++
-		*conditions = append(*conditions, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM user_favorites uf WHERE uf.user_id = $%d AND uf.profile_id = $%d AND uf.media_item_id = %s)",
-			userArg, profileArg, itemIDExpr,
-		))
-	case "watchlist":
-		userArg := *argIdx
-		*args = append(*args, f.UserID)
-		*argIdx++
-		profileArg := *argIdx
-		*args = append(*args, f.ProfileID)
-		*argIdx++
-		*conditions = append(*conditions, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM user_watchlist uw WHERE uw.user_id = $%d AND uw.profile_id = $%d AND uw.media_item_id = %s)",
-			userArg, profileArg, itemIDExpr,
-		))
+// appendRestrictClause limits a branch to the id-set in CalendarFilter. restrictArg
+// is the positional parameter holding the id array (0 when the set is empty). An
+// empty restriction matches nothing.
+func (r *CalendarRepository) appendRestrictClause(itemIDExpr string, restrictArg int, f CalendarFilter, conditions *[]string) {
+	if !f.RestrictByIDs {
+		return
 	}
+	if restrictArg == 0 {
+		*conditions = append(*conditions, "1 = 0")
+		return
+	}
+	*conditions = append(*conditions, fmt.Sprintf("%s = ANY($%d)", itemIDExpr, restrictArg))
 }

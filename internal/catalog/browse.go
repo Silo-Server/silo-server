@@ -33,6 +33,7 @@ type BrowseFilters struct {
 	Sort               string   // created_at, release_date, rating_imdb, rating_tmdb, year, sort_title, recently_added
 	Order              string   // asc, desc
 	Limit              int
+	MaxLimit           int // optional caller-specific cap; zero keeps the default browse cap
 	Offset             int
 	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
 }
@@ -77,7 +78,7 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		return &BrowseResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false}, nil
 	}
 
-	dataQuery, queryArgs := plan.pagedSQL(includeTotal)
+	dataQuery, queryArgs := plan.pagedSQL(false)
 	rows, err := r.pool.Query(ctx, dataQuery, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("browsing media items: %w", err)
@@ -88,32 +89,31 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		items []*models.MediaItem
 		total int
 	)
-	if includeTotal {
-		items, total, err = scanBrowseItemsWithTotal(rows)
-	} else {
-		items, err = scanBrowseItems(rows)
-	}
+	items, err = scanBrowseItems(rows)
 	if err != nil {
 		return nil, err
 	}
 
 	hasMore := false
+	hasExtraRow := len(items) > plan.limit
+	if hasExtraRow {
+		items = items[:plan.limit]
+	}
 	if includeTotal {
-		// COUNT(*) OVER () emits no rows when the data SELECT is empty, so
-		// total stays 0 even when the broader result set has matching rows
-		// (e.g. OFFSET past the last page). Re-query the count to give
-		// callers the real total. Skip when offset == 0 because in that
-		// case an empty page genuinely means total = 0.
-		if len(items) == 0 && plan.offset > 0 {
+		switch {
+		case plan.offset == 0 && len(items) == 0:
+			total = 0
+		case !hasExtraRow && len(items) > 0:
+			total = plan.offset + len(items)
+		default:
 			countSQL, countArgs := plan.countSQL()
 			if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-				return nil, fmt.Errorf("count fallback for empty browse page: %w", err)
+				return nil, fmt.Errorf("count browse page: %w", err)
 			}
 		}
 		hasMore = total > plan.offset+plan.limit
-	} else if len(items) > plan.limit {
+	} else if hasExtraRow {
 		hasMore = true
-		items = items[:plan.limit]
 	}
 
 	return &BrowseResult{
@@ -151,12 +151,9 @@ type browseQueryPlan struct {
 
 // countSQL renders a count-only query that returns the total number of rows
 // matching the plan's FROM/WHERE/GROUP BY, ignoring LIMIT/OFFSET/ORDER BY.
-// Used as a fallback when pagedSQL(true) returned an empty page past offset 0:
-// COUNT(*) OVER () emits no rows when the data SELECT is empty, so the
-// caller would otherwise see total=0 even when the broader result set has
-// matching rows. Wraps the inner query in `SELECT COUNT(*) FROM (...) sub`
-// so any GROUP BY in the inner query is preserved (we count groups, matching
-// what COUNT(*) OVER () would compute).
+// Used by exact-total callers so the data SELECT can remain a pure page query.
+// Wraps the inner query in `SELECT COUNT(*) FROM (...) sub` so any GROUP BY in
+// the inner query is preserved.
 //
 // Binds only p.args (FROM/WHERE/GROUP BY values). orderArgs are deliberately
 // excluded — the count SQL has no ORDER BY clause to reference them, and
@@ -172,16 +169,12 @@ func (p browseQueryPlan) countSQL() (string, []any) {
 }
 
 // pagedSQL renders the final paged SELECT and returns it together with the
-// fully-bound arg list. When includeTotal is true the SELECT list is appended
-// with COUNT(*) OVER () AS total_count so the caller can read the total from
-// the first scanned row in a single round trip. When includeTotal is false the
-// caller has already requested a single-pass page, so we ask for one extra row
-// to detect whether more pages exist without an exact count.
-func (p browseQueryPlan) pagedSQL(includeTotal bool) (string, []any) {
+// fully-bound arg list. The query always asks for one extra row so callers can
+// detect whether more pages exist without coupling the sorted page fetch to an
+// exact count.
+func (p browseQueryPlan) pagedSQL(_ bool) (string, []any) {
 	queryLimit := p.limit
-	if !includeTotal {
-		queryLimit++
-	}
+	queryLimit++
 	// Bind order: where/from args, then order-by args, then LIMIT, then OFFSET.
 	// limitArgIdx is computed by buildBrowsePlan after consuming order args, so
 	// it correctly points at LIMIT after the orderArgs are bound below.
@@ -191,9 +184,6 @@ func (p browseQueryPlan) pagedSQL(includeTotal bool) (string, []any) {
 	offsetArgIdx := p.limitArgIdx + 1
 
 	selectList := p.selectClause
-	if includeTotal {
-		selectList += ", COUNT(*) OVER () AS total_count"
-	}
 	sql := fmt.Sprintf(
 		"SELECT %s FROM %s %s %s %s LIMIT $%d OFFSET $%d",
 		selectList, p.fromClause, p.whereClause, p.groupByClause, p.orderBy,
@@ -212,8 +202,12 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	if filters.Limit <= 0 {
 		filters.Limit = 20
 	}
-	if filters.Limit > 100 {
-		filters.Limit = 100
+	maxLimit := filters.MaxLimit
+	if maxLimit <= 0 {
+		maxLimit = 100
+	}
+	if filters.Limit > maxLimit {
+		filters.Limit = maxLimit
 	}
 	if filters.Offset < 0 {
 		filters.Offset = 0
@@ -367,7 +361,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	// bind only its FROM/WHERE/GROUP BY values; pagedSQL binds them together.
 	// argIdx still advances past them so limitArgIdx points at the right
 	// LIMIT placeholder once orderArgs are bound positionally before LIMIT.
-	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup)
+	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup, browseFiltersAreMovieOnly(filters))
 	argIdx += len(orderArgs)
 
 	selectClause := browseItemColumns("mi")
@@ -1204,81 +1198,13 @@ func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 	return items, nil
 }
 
-// scanBrowseItemsWithTotal scans rows that include a trailing total_count column
-// emitted by COUNT(*) OVER (). Used by browse() in the includeTotal path so we
-// don't fire a separate count query.
-func scanBrowseItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
-	var (
-		items []*models.MediaItem
-		total int
-	)
-	for rows.Next() {
-		var item models.MediaItem
-		var rowTotal int
-		err := rows.Scan(
-			&item.ContentID,
-			&item.Type,
-			&item.Title,
-			&item.SortTitle,
-			&item.OriginalTitle,
-			&item.Year,
-			&item.Genres,
-			&item.ContentRating,
-			&item.Runtime,
-			&item.Overview,
-			&item.Tagline,
-			&item.RatingIMDB,
-			&item.RatingTMDB,
-			&item.RatingRTCritic,
-			&item.RatingRTAudience,
-			&item.ImdbID,
-			&item.TmdbID,
-			&item.TvdbID,
-			&item.PosterPath,
-			&item.PosterThumbhash,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
-			&item.MetadataS3Path,
-			&item.MetadataEtag,
-			&item.SeasonCount,
-			&item.Studios,
-			&item.Networks,
-			&item.Countries,
-			&item.Keywords,
-			&item.OriginalLanguage,
-			&item.ReleaseDate,
-			&item.FirstAirDate,
-			&item.LastAirDate,
-			&item.ShowStatus,
-			&item.MatchedAt,
-			&item.EpisodeMetadataIncomplete,
-			&item.EpisodeMetadataLastCheckedAt,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-			&item.AddedAt,
-			&rowTotal,
-		)
-		if err != nil {
-			return nil, 0, fmt.Errorf("scanning browse item row with total: %w", err)
-		}
-		items = append(items, &item)
-		total = rowTotal
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterating browse item rows: %w", err)
-	}
-	return items, total, nil
-}
-
 // buildOrderBy constructs the ORDER BY clause from sort and order parameters.
 func buildOrderBy(sort, order string) string {
-	clause, _ := buildOrderByPlan(sort, order, nil, 0, false)
+	clause, _ := buildOrderByPlan(sort, order, nil, 0, false, false)
 	return clause
 }
 
-func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singleLibraryNoDedup bool) (string, []any) {
+func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singleLibraryNoDedup bool, movieOnly bool) (string, []any) {
 	direction := "DESC"
 	if strings.EqualFold(order, "asc") {
 		direction = "ASC"
@@ -1299,6 +1225,9 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 		}
 		return "ORDER BY RANDOM()", nil
 	case "release_date":
+		if movieOnly {
+			return fmt.Sprintf("ORDER BY mi.release_date %s%s, mi.content_id ASC", direction, nullsClause), nil
+		}
 		return fmt.Sprintf(
 			"ORDER BY COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), '')) %s%s, mi.content_id ASC",
 			direction,
@@ -1337,6 +1266,11 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 	default:
 		return fmt.Sprintf("ORDER BY mi.created_at %s, mi.content_id ASC", direction), nil
 	}
+}
+
+func browseFiltersAreMovieOnly(filters BrowseFilters) bool {
+	types := splitTypes(filters.Type)
+	return len(types) == 1 && types[0] == "movie"
 }
 
 // ParseContentRatings splits a comma-separated content rating string into

@@ -51,6 +51,10 @@ type LibraryHandler struct {
 	PluginInstallations   pluginInstallationLister
 	SkippedRootRepo       *metadata.SkippedRootRepository
 	StaleIDRepo           *metadata.StaleMediaIDRepository
+	MovieMatchQueueRepo   libraryMovieMatchQueue
+	SeriesMatchQueueRepo  librarySeriesMatchQueue
+	RawMatchBacklogRepo   libraryRawMatchBacklog
+	TVSeriesRootQueue     bool
 	ScannedGroupRepo      *scanner.ScannedGroupRepository
 	GroupOverrideRepo     *scanner.MediaGroupOverrideRepository
 	ObservedLocationRepo  *scanner.ObservedLocationRepository
@@ -92,6 +96,27 @@ type libraryScanQueuer interface {
 	EnqueueScan(ctx context.Context, folderID int, mode, path, trigger string) (bool, error)
 	CancelAcceptedByLibrary(ctx context.Context, libraryID int) (int, error)
 	CancelByLibrary(ctx context.Context, libraryID int) (int, error)
+}
+
+type libraryMovieMatchQueue interface {
+	SyncForFolder(ctx context.Context, folderID int) error
+	DeleteByFolder(ctx context.Context, folderID int) (int, error)
+	CountByFolder(ctx context.Context, folderID int) (int, error)
+	ListByFolder(ctx context.Context, folderID int, limit int, offset int) ([]models.MovieMatchQueueEntry, int, error)
+}
+
+type librarySeriesMatchQueue interface {
+	SyncForFolder(ctx context.Context, folderID int) error
+	DeleteByFolder(ctx context.Context, folderID int) (int, error)
+	CountByFolder(ctx context.Context, folderID int) (int, error)
+	ListByFolder(ctx context.Context, folderID int, limit int, offset int) ([]models.SeriesRootMatchQueueEntry, int, error)
+}
+
+type libraryRawMatchBacklog interface {
+	CountUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode scanner.RawMatchBacklogMode) (int, error)
+	ListUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode scanner.RawMatchBacklogMode, limit int, offset int) ([]*models.MediaFile, int, error)
+	SuppressUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode scanner.RawMatchBacklogMode) (int, error)
+	RetryUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode scanner.RawMatchBacklogMode) (int, error)
 }
 
 // NewLibraryHandler creates a new LibraryHandler backed by the given folder
@@ -1061,6 +1086,9 @@ func (h *LibraryHandler) recordAcceptedScan(scanID string, target *scantrigger.T
 		Trigger:   target.Trigger,
 		Status:    "accepted",
 	})
+	if run, ok := h.ScanRegistry.Get(scanID); ok {
+		h.publishScanEvent(context.Background(), "scan.accepted", run)
+	}
 }
 
 func (h *LibraryHandler) markScanRunning(scanID string) {
@@ -1277,6 +1305,371 @@ func (h *LibraryHandler) publishCatalogStatsInvalidation(eventType, payload stri
 
 type refreshLibraryMetadataRequest struct {
 	Mode string `json:"mode"`
+}
+
+type libraryMetadataMatchQueueStatusResponse struct {
+	LibraryID    int `json:"library_id"`
+	MovieCount   int `json:"movie_count"`
+	SeriesCount  int `json:"series_count"`
+	RawFileCount int `json:"raw_file_count"`
+	TotalCount   int `json:"total_count"`
+}
+
+type libraryMetadataMatchQueueActionResponse struct {
+	Status           string                                  `json:"status"`
+	LibraryID        int                                     `json:"library_id"`
+	MovieCancelled   int                                     `json:"movie_cancelled,omitempty"`
+	SeriesCancelled  int                                     `json:"series_cancelled,omitempty"`
+	RawFileCancelled int                                     `json:"raw_file_cancelled,omitempty"`
+	RawFileRetried   int                                     `json:"raw_file_retried,omitempty"`
+	TotalCancelled   int                                     `json:"total_cancelled,omitempty"`
+	Queue            libraryMetadataMatchQueueStatusResponse `json:"queue"`
+}
+
+type libraryMetadataMatchQueueDetailResponse struct {
+	libraryMetadataMatchQueueStatusResponse
+	Movies   []libraryMovieMatchQueueEntryResponse  `json:"movies"`
+	Series   []librarySeriesMatchQueueEntryResponse `json:"series"`
+	RawFiles []libraryRawMatchBacklogEntryResponse  `json:"raw_files"`
+}
+
+type libraryMovieMatchQueueEntryResponse struct {
+	MediaFileID     int        `json:"media_file_id"`
+	MediaFolderID   int        `json:"media_folder_id"`
+	FilePath        string     `json:"file_path"`
+	FirstQueuedAt   time.Time  `json:"first_queued_at"`
+	AvailableAt     time.Time  `json:"available_at"`
+	LastAttemptedAt *time.Time `json:"last_attempted_at,omitempty"`
+	AttemptCount    int        `json:"attempt_count"`
+	LastError       string     `json:"last_error,omitempty"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type librarySeriesMatchQueueEntryResponse struct {
+	MediaFolderID    int        `json:"media_folder_id"`
+	ObservedRootPath string     `json:"observed_root_path"`
+	FirstQueuedAt    time.Time  `json:"first_queued_at"`
+	AvailableAt      time.Time  `json:"available_at"`
+	LastAttemptedAt  *time.Time `json:"last_attempted_at,omitempty"`
+	AttemptCount     int        `json:"attempt_count"`
+	LastError        string     `json:"last_error,omitempty"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type libraryRawMatchBacklogEntryResponse struct {
+	MediaFileID     int        `json:"media_file_id"`
+	MediaFolderID   int        `json:"media_folder_id"`
+	FilePath        string     `json:"file_path"`
+	BaseTitle       string     `json:"base_title,omitempty"`
+	BaseYear        int        `json:"base_year,omitempty"`
+	BaseType        string     `json:"base_type,omitempty"`
+	LastAttemptedAt *time.Time `json:"last_attempted_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+func (h *LibraryHandler) HandleListMetadataMatchQueues(w http.ResponseWriter, r *http.Request) {
+	if h.folderRepo == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Library repository is not configured")
+		return
+	}
+
+	folders, err := h.folderRepo.List(r.Context())
+	if err != nil {
+		slog.Error("metadata queue: failed to list libraries", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher queues")
+		return
+	}
+
+	resp := make([]libraryMetadataMatchQueueStatusResponse, 0, len(folders))
+	for _, folder := range folders {
+		if folder == nil {
+			continue
+		}
+		status, err := h.metadataMatchQueueStatus(r.Context(), folder.ID)
+		if err != nil {
+			slog.Error("metadata queue: failed to load queue status", "library_id", folder.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+			return
+		}
+		resp = append(resp, status)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *LibraryHandler) HandleGetMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
+	if !h.metadataMatchBacklogConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
+		return
+	}
+
+	id, err := parseIDParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
+		return
+	}
+	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
+		if errors.Is(err, catalog.ErrFolderNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Library not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
+		return
+	}
+
+	limit := 10
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 && parsed <= 50 {
+			limit = parsed
+		}
+	}
+
+	status, err := h.metadataMatchQueueStatus(r.Context(), id)
+	if err != nil {
+		slog.Error("metadata queue: failed to load queue status", "library_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+		return
+	}
+
+	resp := libraryMetadataMatchQueueDetailResponse{
+		libraryMetadataMatchQueueStatusResponse: status,
+		Movies:                                  []libraryMovieMatchQueueEntryResponse{},
+		Series:                                  []librarySeriesMatchQueueEntryResponse{},
+		RawFiles:                                []libraryRawMatchBacklogEntryResponse{},
+	}
+	if h.MovieMatchQueueRepo != nil {
+		movies, _, err := h.MovieMatchQueueRepo.ListByFolder(r.Context(), id, limit, 0)
+		if err != nil {
+			slog.Error("metadata queue: failed to list movie queue", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher queue")
+			return
+		}
+		for _, entry := range movies {
+			resp.Movies = append(resp.Movies, libraryMovieMatchQueueEntryResponse{
+				MediaFileID:     entry.MediaFileID,
+				MediaFolderID:   entry.MediaFolderID,
+				FilePath:        entry.FilePath,
+				FirstQueuedAt:   entry.FirstQueuedAt,
+				AvailableAt:     entry.AvailableAt,
+				LastAttemptedAt: entry.LastAttemptedAt,
+				AttemptCount:    entry.AttemptCount,
+				LastError:       entry.LastError,
+				UpdatedAt:       entry.UpdatedAt,
+			})
+		}
+	}
+	if h.SeriesMatchQueueRepo != nil {
+		series, _, err := h.SeriesMatchQueueRepo.ListByFolder(r.Context(), id, limit, 0)
+		if err != nil {
+			slog.Error("metadata queue: failed to list series queue", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher queue")
+			return
+		}
+		for _, entry := range series {
+			resp.Series = append(resp.Series, librarySeriesMatchQueueEntryResponse{
+				MediaFolderID:    entry.MediaFolderID,
+				ObservedRootPath: entry.ObservedRootPath,
+				FirstQueuedAt:    entry.FirstQueuedAt,
+				AvailableAt:      entry.AvailableAt,
+				LastAttemptedAt:  entry.LastAttemptedAt,
+				AttemptCount:     entry.AttemptCount,
+				LastError:        entry.LastError,
+				UpdatedAt:        entry.UpdatedAt,
+			})
+		}
+	}
+	if h.RawMatchBacklogRepo != nil {
+		rawFiles, _, err := h.RawMatchBacklogRepo.ListUnmatchedMatchBacklogByFolder(r.Context(), id, h.rawMatchBacklogMode(), limit, 0)
+		if err != nil {
+			slog.Error("metadata queue: failed to list raw backlog", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list metadata matcher backlog")
+			return
+		}
+		for _, file := range rawFiles {
+			if file == nil {
+				continue
+			}
+			resp.RawFiles = append(resp.RawFiles, libraryRawMatchBacklogEntryResponse{
+				MediaFileID:     file.ID,
+				MediaFolderID:   file.MediaFolderID,
+				FilePath:        file.FilePath,
+				BaseTitle:       file.BaseTitle,
+				BaseYear:        file.BaseYear,
+				BaseType:        file.BaseType,
+				LastAttemptedAt: file.MatchAttemptedAt,
+				CreatedAt:       file.CreatedAt,
+				UpdatedAt:       file.UpdatedAt,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *LibraryHandler) HandleRetryMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
+	if !h.metadataMatchBacklogConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
+		return
+	}
+
+	id, err := parseIDParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
+		return
+	}
+	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
+		if errors.Is(err, catalog.ErrFolderNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Library not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
+		return
+	}
+
+	if h.SeriesMatchQueueRepo != nil {
+		if err := h.SeriesMatchQueueRepo.SyncForFolder(r.Context(), id); err != nil {
+			slog.Error("metadata queue: failed to retry series queue", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
+			return
+		}
+	}
+	if h.MovieMatchQueueRepo != nil {
+		if err := h.MovieMatchQueueRepo.SyncForFolder(r.Context(), id); err != nil {
+			slog.Error("metadata queue: failed to retry movie queue", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
+			return
+		}
+	}
+	rawFileRetried := 0
+	if h.RawMatchBacklogRepo != nil {
+		rawFileRetried, err = h.RawMatchBacklogRepo.RetryUnmatchedMatchBacklogByFolder(r.Context(), id, h.rawMatchBacklogMode())
+		if err != nil {
+			slog.Error("metadata queue: failed to retry raw backlog", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retry metadata matcher")
+			return
+		}
+	}
+
+	status, err := h.metadataMatchQueueStatus(r.Context(), id)
+	if err != nil {
+		slog.Error("metadata queue: failed to load retried queue status", "library_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+		return
+	}
+	writeJSON(w, http.StatusOK, libraryMetadataMatchQueueActionResponse{
+		Status:         "queued",
+		LibraryID:      id,
+		RawFileRetried: rawFileRetried,
+		Queue:          status,
+	})
+}
+
+func (h *LibraryHandler) HandleCancelMetadataMatchQueue(w http.ResponseWriter, r *http.Request) {
+	if !h.metadataMatchBacklogConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Metadata matcher backlog is not configured")
+		return
+	}
+
+	id, err := parseIDParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
+		return
+	}
+	if _, err := h.folderRepo.GetByID(r.Context(), id); err != nil {
+		if errors.Is(err, catalog.ErrFolderNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Library not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch library")
+		return
+	}
+
+	seriesCancelled := 0
+	if h.SeriesMatchQueueRepo != nil {
+		seriesCancelled, err = h.SeriesMatchQueueRepo.DeleteByFolder(r.Context(), id)
+		if err != nil {
+			slog.Error("metadata queue: failed to cancel series queue", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel metadata matcher")
+			return
+		}
+	}
+	movieCancelled := 0
+	if h.MovieMatchQueueRepo != nil {
+		movieCancelled, err = h.MovieMatchQueueRepo.DeleteByFolder(r.Context(), id)
+		if err != nil {
+			slog.Error("metadata queue: failed to cancel movie queue", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel metadata matcher")
+			return
+		}
+	}
+	rawFileCancelled := 0
+	if h.RawMatchBacklogRepo != nil {
+		rawFileCancelled, err = h.RawMatchBacklogRepo.SuppressUnmatchedMatchBacklogByFolder(r.Context(), id, h.rawMatchBacklogMode())
+		if err != nil {
+			slog.Error("metadata queue: failed to suppress raw backlog", "library_id", id, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to cancel metadata matcher")
+			return
+		}
+	}
+
+	status, err := h.metadataMatchQueueStatus(r.Context(), id)
+	if err != nil {
+		slog.Error("metadata queue: failed to load cancelled queue status", "library_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load metadata matcher queue")
+		return
+	}
+	writeJSON(w, http.StatusOK, libraryMetadataMatchQueueActionResponse{
+		Status:           "cancelled",
+		LibraryID:        id,
+		MovieCancelled:   movieCancelled,
+		SeriesCancelled:  seriesCancelled,
+		RawFileCancelled: rawFileCancelled,
+		TotalCancelled:   movieCancelled + seriesCancelled + rawFileCancelled,
+		Queue:            status,
+	})
+}
+
+func (h *LibraryHandler) metadataMatchBacklogConfigured() bool {
+	return h.folderRepo != nil &&
+		(h.MovieMatchQueueRepo != nil || h.SeriesMatchQueueRepo != nil || h.RawMatchBacklogRepo != nil)
+}
+
+func (h *LibraryHandler) metadataMatchQueueStatus(ctx context.Context, libraryID int) (libraryMetadataMatchQueueStatusResponse, error) {
+	resp := libraryMetadataMatchQueueStatusResponse{LibraryID: libraryID}
+	if h.MovieMatchQueueRepo != nil {
+		count, err := h.MovieMatchQueueRepo.CountByFolder(ctx, libraryID)
+		if err != nil {
+			return resp, err
+		}
+		resp.MovieCount = count
+	}
+	if h.SeriesMatchQueueRepo != nil {
+		count, err := h.SeriesMatchQueueRepo.CountByFolder(ctx, libraryID)
+		if err != nil {
+			return resp, err
+		}
+		resp.SeriesCount = count
+	}
+	if h.RawMatchBacklogRepo != nil {
+		count, err := h.RawMatchBacklogRepo.CountUnmatchedMatchBacklogByFolder(ctx, libraryID, h.rawMatchBacklogMode())
+		if err != nil {
+			return resp, err
+		}
+		resp.RawFileCount = count
+	}
+	resp.TotalCount = resp.MovieCount + resp.SeriesCount + resp.RawFileCount
+	return resp, nil
+}
+
+func (h *LibraryHandler) rawMatchBacklogMode() scanner.RawMatchBacklogMode {
+	if h.TVSeriesRootQueue && h.MovieMatchQueueRepo != nil {
+		return scanner.RawMatchBacklogMixed
+	}
+	if h.TVSeriesRootQueue {
+		return scanner.RawMatchBacklogNonSeries
+	}
+	return scanner.RawMatchBacklogGeneric
 }
 
 // HandleRefreshLibraryMetadata handles POST /libraries/{id}/refresh-metadata.
@@ -2058,16 +2451,45 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 		}
 	}
 
+	// Optional case-insensitive search across title, library name, type, and
+	// status. Applied server-side so it spans the whole table, not just the
+	// current page. The displayed folder still comes from the lateral join below,
+	// but the search predicate checks every membership so multi-library items are
+	// found when any linked library name matches.
+	search := strings.TrimSpace(q.Get("q"))
+	filter := ""
+	filterArgs := []any{}
+	if search != "" {
+		filterArgs = append(filterArgs, "%"+search+"%")
+		filter = ` AND (
+			mi.title ILIKE $1
+			OR mi.type ILIKE $1
+			OR mi.status ILIKE $1
+			OR EXISTS (
+				SELECT 1
+				FROM media_item_libraries search_mil
+				JOIN media_folders search_f ON search_f.id = search_mil.media_folder_id
+				WHERE search_mil.content_id = mi.content_id
+				  AND search_f.name ILIKE $1
+			)
+		)`
+	}
+
+	countSQL := `
+		SELECT COUNT(*)
+		FROM media_items mi
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')`
+	countSQL += filter
+
 	var total int
-	if err := h.pool.QueryRow(r.Context(),
-		`SELECT COUNT(*) FROM media_items WHERE status IN ('unmatched', 'pending', 'ambiguous')`,
-	).Scan(&total); err != nil {
+	if err := h.pool.QueryRow(r.Context(), countSQL, filterArgs...).Scan(&total); err != nil {
 		slog.Error("counting unmatched items", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to count unmatched items")
 		return
 	}
 
-	rows, err := h.pool.Query(r.Context(), `
+	listArgs := append(append([]any{}, filterArgs...), limit, offset)
+	listSQL := fmt.Sprintf(`
 		SELECT mi.content_id, mi.title, mi.year, mi.type, mi.status,
 		       COALESCE(lib.folder_id, 0),
 		       COALESCE(lib.folder_name, '')
@@ -2079,10 +2501,12 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			WHERE mil.content_id = mi.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s
 		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $%d OFFSET $%d
+	`, filter, len(filterArgs)+1, len(filterArgs)+2)
+
+	rows, err := h.pool.Query(r.Context(), listSQL, listArgs...)
 	if err != nil {
 		slog.Error("listing unmatched items", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list unmatched items")

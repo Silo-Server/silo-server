@@ -207,6 +207,7 @@ export interface UpdateItemMetadataRequest {
   first_air_date?: string | null;
   last_air_date?: string | null;
   air_time?: string | null;
+  air_timezone?: string | null;
   air_date?: string | null;
   status?: string;
   rating_imdb?: number | null;
@@ -229,9 +230,10 @@ export function useUpdateItemMetadata(contentId: string) {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
-    onSuccess: (updatedItem) => {
-      queryClient.setQueryData(catalogKeys.itemDetail(contentId), updatedItem);
-      queryClient.invalidateQueries({ queryKey: ["items", "detail", contentId] });
+    onSuccess: () => {
+      void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
+        bumpHomeRefreshSignal(queryClient);
+      });
       toast.success("Metadata saved");
     },
     onError: (err) => {

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,6 +31,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
@@ -37,6 +39,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -186,6 +189,70 @@ func configureOperationalLogging(
 	return operationalWriter, opslog.NewRepo(pool), opsPM
 }
 
+func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxConnections int, mode string) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "integrated", "api":
+	default:
+		return
+	}
+
+	opts, err := database.LoadPostgresTuneOptionsFromEnv(appMaxConnections)
+	if err != nil {
+		slog.Warn("postgres auto-tuning disabled", "error", err)
+		return
+	}
+	if !opts.Enabled {
+		return
+	}
+
+	tuneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := database.ApplyPostgresTuning(tuneCtx, pool, opts)
+	for _, failure := range result.Failures {
+		slog.Warn("postgres auto-tuning setting failed",
+			"name", failure.Name,
+			"value", failure.Value,
+			"error", failure.Err,
+		)
+	}
+	if err != nil {
+		slog.Warn("postgres auto-tuning failed",
+			"error", err,
+			"applied", result.Applied,
+			"failures", len(result.Failures),
+		)
+		return
+	}
+
+	slog.Info("postgres auto-tuning applied",
+		"profile", opts.Profile,
+		"postgres_major", result.PostgresMajorVersion,
+		"settings", result.Applied,
+		"resets", len(result.Reset),
+		"failures", len(result.Failures),
+		"memory_budget_bytes", opts.MemoryBudgetBytes,
+		"detected_memory_bytes", opts.DetectedMemoryBytes,
+		"memory_source", opts.MemorySource,
+		"memory_budget_percent", opts.MemoryBudgetPercent,
+		"cpus", opts.CPUs,
+		"connections", opts.Connections,
+		"storage", opts.Storage,
+		"db_size", result.DBSize,
+		"database_size_bytes", result.DatabaseSizeBytes,
+	)
+	if len(result.RestartRequired) > 0 {
+		slog.Warn("postgres restart required to finish applying auto-tuned settings",
+			"settings", strings.Join(result.RestartRequired, ","),
+		)
+	}
+	if len(result.Reset) > 0 {
+		slog.Info("postgres auto-tuning reset stale settings",
+			"settings", strings.Join(result.Reset, ","),
+		)
+	}
+}
+
 func main() {
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	flag.Parse()
@@ -316,6 +383,7 @@ func main() {
 	slog.SetDefault(slog.New(logfilter.New(baseHandler, cfg.Server.LogQuiet)))
 
 	mode := cfg.Server.Mode
+	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
 	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
 
 	appCtx, appCancel := context.WithCancel(ctx)
@@ -428,6 +496,8 @@ func main() {
 		audiobooksEnabled = false
 	}
 	deps.AudiobooksEnabled = audiobooksEnabled
+	adminJobCancelRegistry := adminjob.NewCancelRegistry()
+	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
 		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
@@ -735,6 +805,12 @@ func main() {
 		pluginService.OnLifecycleChange(appCtx)
 	}
 
+	// backgroundInit collects non-critical startup work (catalog-size-dependent
+	// seeding, network-bound reconciliation) that must not block the HTTP
+	// listener. The steps run sequentially in a background goroutine once the
+	// server is ready to serve. Failures are logged, never fatal.
+	var backgroundInit []func(context.Context)
+
 	// Step 4b: Create metadata service and match worker (if needed).
 	var metadataService *metadata.MetadataService
 	var personRefreshService *metadata.PersonRefreshService
@@ -808,6 +884,8 @@ func main() {
 		providerIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		movieQueueRepo = metadata.NewMovieMatchQueueRepository(deps.DB, deps.FileRepo)
 		seriesQueueRepo = metadata.NewSeriesRootMatchQueueRepository(deps.DB)
+		deps.MovieMatchQueueRepo = movieQueueRepo
+		deps.SeriesRootMatchQueueRepo = seriesQueueRepo
 		matchQueueCoordinator = metadata.NewMatchQueueCoordinator(movieQueueRepo, seriesQueueRepo)
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)
@@ -857,27 +935,33 @@ func main() {
 		}
 
 		matchWorker = metadata.NewMatchWorker(metadataService, deps.FileRepo, cfg.Matcher.Workers, cfg.Matcher.BatchSize, 30*time.Second)
+		matchWorker.SetRealtimeHub(deps.RealtimeHub)
 		if movieQueueRepo != nil {
 			matchWorker.SetMovieFileClaimer(movieQueueRepo)
 		}
 		if seriesQueueRepo != nil {
-			if cleaned, err := seriesQueueRepo.CleanupLegacySeriesGroupQueue(appCtx); err != nil {
-				slog.Warn("failed to clean legacy series group queue rows", "error", err)
-			} else if cleaned > 0 {
-				slog.Info("cleaned legacy series group queue rows", "count", cleaned)
-			}
 			matchWorker.SetSeriesRootClaimer(seriesQueueRepo, cfg.Matcher.TVSeriesRootQueueEnabled())
+			backgroundInit = append(backgroundInit, func(ctx context.Context) {
+				if cleaned, err := seriesQueueRepo.CleanupLegacySeriesGroupQueue(ctx); err != nil {
+					slog.Warn("failed to clean legacy series group queue rows", "error", err)
+				} else if cleaned > 0 {
+					slog.Info("cleaned legacy series group queue rows", "count", cleaned)
+				}
+			})
 		}
 		if deps.FolderRepo != nil {
-			enabledFolders, err := deps.FolderRepo.GetEnabled(appCtx)
-			if err != nil {
-				slog.Warn("failed to seed metadata queues", "error", err)
-			} else {
+			backgroundInit = append(backgroundInit, func(ctx context.Context) {
+				start := time.Now()
+				enabledFolders, err := deps.FolderRepo.GetEnabled(ctx)
+				if err != nil {
+					slog.Warn("failed to seed metadata queues", "error", err)
+					return
+				}
 				seedMovieQueue := func(folderID int) {
 					if movieQueueRepo == nil {
 						return
 					}
-					if err := movieQueueRepo.SyncForFolder(appCtx, folderID); err != nil {
+					if err := movieQueueRepo.SyncForFolder(ctx, folderID); err != nil {
 						slog.Warn("failed to seed movie match queue", "folder_id", folderID, "error", err)
 					}
 				}
@@ -885,7 +969,7 @@ func main() {
 					if seriesQueueRepo == nil {
 						return
 					}
-					if err := seriesQueueRepo.SyncForFolder(appCtx, folderID); err != nil {
+					if err := seriesQueueRepo.SyncForFolder(ctx, folderID); err != nil {
 						slog.Warn("failed to seed series root queue", "folder_id", folderID, "error", err)
 					}
 				}
@@ -903,7 +987,8 @@ func main() {
 						seedMovieQueue(folder.ID)
 					}
 				}
-			}
+				slog.Info("deferred init: metadata match queues seeded", "folders", len(enabledFolders), "duration", time.Since(start))
+			})
 		}
 
 		deps.SkippedRootRepo = skippedRootRepo
@@ -1042,9 +1127,11 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider)
-		if err := watchProviderService.SweepOpenScrobbles(appCtx); err != nil {
-			slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
-		}
+		backgroundInit = append(backgroundInit, func(ctx context.Context) {
+			if err := watchProviderService.SweepOpenScrobbles(ctx); err != nil {
+				slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
+			}
+		})
 	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
@@ -1250,6 +1337,7 @@ func main() {
 	// Construct collection service for both the router and the collection sync scheduler.
 	var collectionSyncScheduler *catalog.CollectionSyncScheduler
 	var userCollectionScheduler *usercollections.Scheduler
+	var trendingRefresher *sections.TrendingRefresher
 	if needsWorkers && deps.DB != nil {
 		collectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
 		collItemRepo := catalog.NewItemRepository(deps.DB)
@@ -1258,6 +1346,19 @@ func main() {
 		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(cfg.TMDBAPIKey)
 		deps.CollectionService = collectionService
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
+
+		// The trending refresher reuses the section repo (to find used source/
+		// window combos), a snapshot repo, an item repo (external-ID matching),
+		// and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
+		// propagated onto deps.TrendingRefresher later in router.go.
+		trendingRefresher = sections.NewTrendingRefresher(
+			sectionRepo,
+			sections.NewTrendingSnapshotRepository(pool),
+			catalog.NewItemRepository(deps.DB),
+			collectionService.TMDBCollections,
+			collectionService.TraktCollections,
+		)
+		deps.TrendingRefresher = trendingRefresher
 
 		if deps.UserStoreProvider != nil {
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, nil, slog.Default())
@@ -1303,6 +1404,9 @@ func main() {
 		if collectionSyncScheduler != nil {
 			taskMgr.Register(tasks.NewSyncCollectionsTask(collectionSyncScheduler))
 		}
+		if trendingRefresher != nil {
+			taskMgr.Register(tasks.NewRefreshTrendingDiscoverTask(trendingRefresher))
+		}
 		if userCollectionScheduler != nil {
 			taskMgr.Register(tasks.NewSyncUserCollectionsTask(userCollectionScheduler))
 		}
@@ -1319,7 +1423,39 @@ func main() {
 		)
 		requestReconcileSvc.SetSecretResolver(settingsRepo)
 		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		if userStoreProvider != nil {
+			reconcileResolver := access.NewResolver(
+				auth.NewUserRepository(deps.DB),
+				userStoreProvider,
+				access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
+			)
+			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
+		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
+			autoscanRepo := autoscan.NewRepository(deps.DB)
+			autoscanSvc := api.BuildAutoscanService(
+				autoscanRepo,
+				pluginService,
+				pluginInstallationStore,
+				mediarequests.NewRepository(deps.DB),
+				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
+			)
+			// The poll task's default interval seeds the schedule from the stored
+			// settings (DefaultPollIntervalSeconds); per-cycle gating still runs
+			// off the live settings inside PollOnce. Seed in MILLISECONDS as
+			// seconds*1000 — the SAME computation HandleUpdateSettings uses to
+			// reschedule — so startup and reschedule agree for sub-minute and
+			// non-60-multiple intervals (the old seconds/60 minutes path diverged).
+			var intervalMs int64 = 10 * 60 * 1000
+			if settings, serr := autoscanRepo.GetSettings(appCtx); serr == nil && settings.DefaultPollIntervalSeconds > 0 {
+				intervalMs = int64(settings.DefaultPollIntervalSeconds) * 1000
+			}
+			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMs))
+		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)
@@ -1589,6 +1725,7 @@ func main() {
 			templateBundleApplyExecutor,
 			deps.RealtimeHub,
 		)
+		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
 
@@ -1764,6 +1901,30 @@ func main() {
 			WriteTimeout:      0,
 			IdleTimeout:       120 * time.Second,
 		}
+	}
+
+	// Run non-critical startup work in the background so it doesn't delay the
+	// HTTP listener from accepting connections. Steps run sequentially and stop
+	// early if the app context is cancelled (shutdown).
+	if len(backgroundInit) > 0 {
+		go func() {
+			start := time.Now()
+			for _, step := range backgroundInit {
+				if appCtx.Err() != nil {
+					return
+				}
+				func() {
+					defer func() {
+						if p := recover(); p != nil {
+							slog.Error("deferred startup init step panicked; continuing",
+								"panic", p, "stack", string(debug.Stack()))
+						}
+					}()
+					step(appCtx)
+				}()
+			}
+			slog.Info("deferred startup init completed", "steps", len(backgroundInit), "duration", time.Since(start))
+		}()
 	}
 
 	errCh := make(chan error, 3)

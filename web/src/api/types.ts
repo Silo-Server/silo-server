@@ -596,6 +596,16 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
 }
 
+export interface BrowseItemSortMetrics {
+  release_date?: string;
+  runtime_minutes?: number;
+  resolution?: string;
+  bitrate_kbps?: number;
+  progress_ratio?: number;
+  viewed_at?: string;
+  play_count?: number;
+}
+
 export interface BrowseItem {
   content_id: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook";
@@ -625,6 +635,7 @@ export interface BrowseItem {
   release_date?: string | null;
   last_air_date?: string | null;
   overlay_summary?: OverlaySummary | null;
+  sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
 }
 
@@ -836,6 +847,7 @@ export interface ItemDetail {
   first_air_date: string | null;
   last_air_date: string | null;
   air_time?: string | null;
+  air_timezone?: string | null;
 
   // Presigned image URLs.
   poster_url: string;
@@ -1527,6 +1539,22 @@ export interface CreateMediaRequestInput {
   backdrop_path?: string;
 }
 
+export interface RequestTarget {
+  id: number;
+  request_id: string;
+  integration_id?: string;
+  integration_kind?: string;
+  instance_name?: string;
+  quality: "1080p" | "2160p";
+  is_anime: boolean;
+  external_id?: string;
+  external_status?: string;
+  status: MediaRequestStatus | "failed";
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MediaRequest {
   id: string;
   provider: string;
@@ -1543,6 +1571,8 @@ export interface MediaRequest {
   outcome: MediaRequestOutcome;
   requested_by_user_id?: number;
   requested_by_profile_id?: string;
+  is_anime?: boolean;
+  targets?: RequestTarget[];
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
@@ -1566,6 +1596,7 @@ export interface RequestSettings {
   global_max_requests: number;
   global_window_days: number;
   global_auto_approval_enabled: boolean;
+  force_dual_quality: boolean;
   updated_at: string;
 }
 
@@ -1579,14 +1610,23 @@ export interface RequestUserLimit {
 }
 
 export interface RequestIntegration {
+  id: string;
+  name: string;
   kind: string;
   enabled: boolean;
+  is_4k: boolean;
+  is_default: boolean;
+  is_default_4k: boolean;
   base_url: string;
   api_key_ref?: string;
   has_api_key?: boolean;
   root_folder: string;
   quality_profile_id?: number | null;
   tags: number[];
+  anime_enabled: boolean;
+  anime_quality_profile_id?: number | null;
+  anime_root_folder?: string;
+  anime_tags: number[];
   options: Record<string, unknown>;
   last_check_at?: string | null;
   last_check_status?: string;
@@ -1619,12 +1659,215 @@ export interface RequestIntegrationOptions {
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
+  kind: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
 }
 
 export interface RequestIntegrationsResponse {
   integrations: RequestIntegration[];
+}
+
+// --- Autoscan v2 types (matched to autoscan.go handler DTOs) ---
+
+export interface AutoscanSettings {
+  enabled: boolean;
+  default_poll_interval_seconds: number;
+  debounce_seconds: number;
+}
+
+export interface AutoscanConnection {
+  id: string;
+  name: string;
+  kind: string;
+  base_url?: string;
+  request_integration_id?: string | null;
+  has_api_key: boolean;
+}
+
+export interface AutoscanConnectionInput {
+  name: string;
+  kind: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionsResponse {
+  connections: AutoscanConnection[];
+}
+
+export interface AutoscanPathRewrite {
+  from: string;
+  to: string;
+}
+
+export interface AutoscanSource {
+  id: string;
+  installation_id: number;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  poll_interval_seconds: number | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  path_rewrites: AutoscanPathRewrite[];
+  source_config: Record<string, string>;
+  label: string;
+}
+
+export interface AutoscanSourceInput {
+  connection_id: string | null;
+  enabled: boolean;
+  poll_interval_seconds: number | null;
+  path_rewrites?: AutoscanPathRewrite[];
+  source_config?: Record<string, string>;
+  label?: string;
+}
+
+export interface AutoscanSourcesResponse {
+  sources: AutoscanSource[];
+}
+
+export interface AutoscanAvailableSource {
+  installation_id: number;
+  capability_id: string;
+  plugin_id: string;
+  display_name: string;
+}
+
+export interface AutoscanAvailableSourcesResponse {
+  plugins: AutoscanAvailableSource[];
+}
+
+export interface AutoscanSourceCreateInput {
+  installation_id: number;
+  capability_id: string;
+  connection_id?: string | null;
+  enabled: boolean;
+  poll_interval_seconds?: number | null;
+  path_rewrites: AutoscanPathRewrite[];
+  source_config?: Record<string, string>;
+}
+
+export interface AutoscanConnectionTestInput {
+  connection_id?: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionTestResult {
+  ok: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface AutoscanProposedRewrite {
+  from: string;
+  to: string;
+  match_depth: number;
+}
+
+export interface AutoscanAmbiguousRoot {
+  root: string;
+  candidates: string[];
+}
+
+export interface AutoscanRewriteSuggestions {
+  proposed: AutoscanProposedRewrite[];
+  unmatched: string[];
+  ambiguous: AutoscanAmbiguousRoot[];
+  covered: string[];
+}
+
+export interface AutoscanStatusSource {
+  id: string;
+  installation_id: number;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  label: string;
+  last_run_at: string | null;
+  last_error: string | null;
+}
+
+export interface AutoscanStatus {
+  enabled: boolean;
+  sources: AutoscanStatusSource[];
+  active_scans: number;
+  accepted_scans: number;
+  running_scans: number;
+  latest_event_at?: string;
+}
+
+export type AutoscanEventStatus = "success" | "error" | "unresolved";
+
+export interface AutoscanEventScanRun {
+  id: string;
+  library_id: number;
+  mode: "library" | "subtree" | "file";
+  path?: string;
+  trigger: string;
+  status: "accepted" | "running" | "completed" | "failed" | "cancelled";
+  requested_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+}
+
+export interface AutoscanEvent {
+  id: number;
+  source_id: string | null;
+  installation_id: number;
+  capability_id: string;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  status: AutoscanEventStatus;
+  changes_returned: number;
+  changes_resolved: number;
+  targets_claimed: number;
+  scans_created: number;
+  scans_reused: number;
+  scans_suppressed: number;
+  error_message?: string;
+  scan_runs: AutoscanEventScanRun[];
+}
+
+export interface AutoscanEventsResponse {
+  events: AutoscanEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type AutoscanScanStatus = "accepted" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AutoscanScan {
+  id: string;
+  library_id: number;
+  mode: "library" | "subtree" | "file";
+  path?: string;
+  trigger: string;
+  status: AutoscanScanStatus;
+  error_message?: string;
+  requested_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  autoscan_event_id?: number;
+  source_id?: string;
+  installation_id?: number;
+  capability_id?: string;
+  event_status?: AutoscanEventStatus;
+  event_completed_at?: string;
+}
+
+export interface AutoscanScansResponse {
+  scans: AutoscanScan[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface RequestListParams {
@@ -1737,6 +1980,7 @@ export interface AdminSession {
   file_duration: number | null;
   started_at: string;
   updated_at: string;
+  position_seconds: number;
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
@@ -1747,6 +1991,7 @@ export interface AdminSession {
   target_video_codec?: string;
   target_audio_codec?: string;
   target_bitrate_kbps: number | null;
+  transcode_hw_accel?: string;
   source_container?: string;
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
@@ -1951,6 +2196,9 @@ export interface AdminDeviceDetail {
   device_id: string;
   device_name: string;
   device_platform: string;
+  override_count: number;
+  profile_count: number;
+  profiles: AdminDeviceProfileSummary[];
   last_updated: string;
   settings: {
     user_id: number;
@@ -2013,6 +2261,66 @@ export interface LibraryMountCheckResponse {
   checked_at: string;
   summary: string;
   roots: LibraryMountCheckRoot[];
+}
+
+export interface LibraryMetadataMatchQueueStatus {
+  library_id: number;
+  movie_count: number;
+  series_count: number;
+  raw_file_count: number;
+  total_count: number;
+}
+
+export interface LibraryMovieMatchQueueEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibrarySeriesMatchQueueEntry {
+  media_folder_id: number;
+  observed_root_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibraryRawMatchBacklogEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  base_title?: string;
+  base_year?: number;
+  base_type?: string;
+  last_attempted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryMetadataMatchQueueDetail extends LibraryMetadataMatchQueueStatus {
+  movies: LibraryMovieMatchQueueEntry[];
+  series: LibrarySeriesMatchQueueEntry[];
+  raw_files: LibraryRawMatchBacklogEntry[];
+}
+
+export interface LibraryMetadataMatchQueueActionResponse {
+  status: "queued" | "cancelled";
+  library_id: number;
+  movie_cancelled?: number;
+  series_cancelled?: number;
+  raw_file_cancelled?: number;
+  raw_file_retried?: number;
+  total_cancelled?: number;
+  queue: LibraryMetadataMatchQueueStatus;
 }
 
 export interface LibrarySkippedRoot {
@@ -2167,7 +2475,7 @@ export interface CatalogSeedImportResponse {
   unmatched_roots?: string[];
 }
 
-export type AdminJobStatus = "queued" | "running" | "completed" | "failed";
+export type AdminJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface LibraryRefreshJobRequest {
   library_id: number;
@@ -2513,6 +2821,9 @@ export interface SectionItemUpcomingEvent {
   type: "movie" | "episode" | "season_premiere";
   air_date: string;
   air_time?: string;
+  air_at?: string | null;
+  air_timezone?: string | null;
+  local_air_date?: string;
   episode_title?: string | null;
   season_number?: number | null;
   episode_number?: number | null;
