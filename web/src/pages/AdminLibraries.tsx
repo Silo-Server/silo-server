@@ -1,11 +1,12 @@
-import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
-import type { FormEvent } from "react";
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
   AdminJob,
   CreateLibraryRequest,
   Library,
+  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibrarySkippedRoot,
@@ -30,8 +31,10 @@ import {
   useScanAllLibraries,
   useLibraryRefreshJobs,
   useRefreshLibraryMetadata,
+  useCancelAdminJob,
   useConfirmEmptyRootCleanup,
   useLibraryProviders,
+  useLibraryMetadataMatchQueues,
   useSetLibraryProviders,
   useUploadLibraryPoster,
   useDeleteLibraryPoster,
@@ -78,7 +81,9 @@ import {
   Pencil,
   Trash2,
   RefreshCw,
+  ScanLine,
   DatabaseBackup,
+  CheckCircle2,
   ArrowUp,
   ArrowDown,
   GripVertical,
@@ -101,6 +106,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import FolderBrowser from "@/components/FolderBrowser";
 import PathAutocompleteInput from "@/components/PathAutocompleteInput";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { getLibraryRefreshLibraryID } from "@/lib/adminJobs";
 import {
   compareActiveScans,
   formatActiveScanMode,
@@ -128,11 +135,16 @@ import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
 
+// Keep toast lifetime and delayed state cleanup coordinated so visible feedback
+// disappears before state is cleared.
+const MOUNT_CHECK_FEEDBACK_MS = 5_000;
+
 export default function AdminLibraries() {
   useEventChannel("scans");
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
+  const { data: metadataMatchQueues = [] } = useLibraryMetadataMatchQueues();
   const { data: skippedRoots = [] } = useSkippedLibraryRoots();
   const { data: staleIDs = [] } = useStaleMediaIDs();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -142,11 +154,13 @@ export default function AdminLibraries() {
   const [lastMountCheckByLibraryId, setLastMountCheckByLibraryId] = useState<
     Record<number, LibraryMountCheckResponse>
   >({});
+  const mountCheckClearTimeoutsRef = useRef<Record<number, number>>({});
   const deleteMutation = useDeleteLibrary();
   const mountCheckMutation = useCheckLibraryMount();
   const scanMutation = useScanLibrary();
   const scanAllMutation = useScanAllLibraries();
   const cancelScansMutation = useCancelLibraryScans();
+  const cancelAdminJobMutation = useCancelAdminJob();
 
   // DnD reorder state
   const reorderMutation = useReorderLibraries();
@@ -160,6 +174,16 @@ export default function AdminLibraries() {
   useEffect(() => {
     setOrderedLibraries(libraries);
   }, [libraries]);
+
+  useEffect(() => {
+    return () => {
+      // Cancel pending mount-check cleanup timers so unmount cannot clear state
+      // after the page leaves.
+      for (const timeoutID of Object.values(mountCheckClearTimeoutsRef.current)) {
+        window.clearTimeout(timeoutID);
+      }
+    };
+  }, []);
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as number);
@@ -213,6 +237,15 @@ export default function AdminLibraries() {
     }
     return scansByLibraryID;
   }, [activeScans]);
+  const metadataMatchQueueByLibraryId = useMemo(() => {
+    const queuesByLibraryID = new Map<number, LibraryMetadataMatchQueueStatus>();
+    for (const queue of metadataMatchQueues) {
+      if (queue.total_count > 0) {
+        queuesByLibraryID.set(queue.library_id, queue);
+      }
+    }
+    return queuesByLibraryID;
+  }, [metadataMatchQueues]);
   const activeScanGroups = useMemo(() => {
     return Array.from(activeScansByLibraryId.entries())
       .map(([libraryID, scans]) => {
@@ -251,6 +284,25 @@ export default function AdminLibraries() {
           ...current,
           [libraryId]: result,
         }));
+        if (result.healthy) {
+          toast.success(formatMountCheckMessage(result), { duration: MOUNT_CHECK_FEEDBACK_MS });
+        } else {
+          toast.error(formatMountCheckMessage(result), { duration: MOUNT_CHECK_FEEDBACK_MS });
+        }
+        const existingTimeout = mountCheckClearTimeoutsRef.current[libraryId];
+        if (existingTimeout) {
+          window.clearTimeout(existingTimeout);
+        }
+        // Match the toast duration so the inline mount-check result stays visible
+        // for the same window.
+        mountCheckClearTimeoutsRef.current[libraryId] = window.setTimeout(() => {
+          setLastMountCheckByLibraryId((current) => {
+            const next = { ...current };
+            delete next[libraryId];
+            return next;
+          });
+          delete mountCheckClearTimeoutsRef.current[libraryId];
+        }, MOUNT_CHECK_FEEDBACK_MS);
       },
     });
   }
@@ -310,10 +362,8 @@ export default function AdminLibraries() {
             onClick={() => scanAllMutation.mutate()}
             disabled={scanAllMutation.isPending}
           >
-            <RefreshCw
-              className={`mr-1 h-4 w-4 ${scanAllMutation.isPending ? "animate-spin" : ""}`}
-            />{" "}
-            Scan All
+            <ScanLine className="h-3.5 w-3.5" />
+            Scan All Libraries
           </Button>
           <Button variant="outline" size="sm" asChild>
             <Link to="/admin/maintenance">
@@ -376,7 +426,7 @@ export default function AdminLibraries() {
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Last Scanned</TableHead>
-                <TableHead className="w-32">Actions</TableHead>
+                <TableHead className="w-[15rem]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <SortableContext
@@ -388,187 +438,230 @@ export default function AdminLibraries() {
                   const isScanning = scanMutation.isPending && scanMutation.variables === lib.id;
                   const activeRefreshJob = activeRefreshJobsByLibraryId.get(lib.id);
                   const activeLibraryScans = activeScansByLibraryId.get(lib.id) ?? [];
+                  const metadataMatchQueue = metadataMatchQueueByLibraryId.get(lib.id);
+                  const hasMetadataMatchQueue = (metadataMatchQueue?.total_count ?? 0) > 0;
                   const runningLibraryScans = activeLibraryScans.filter(
                     (scan) => scan.status === "running",
                   ).length;
                   const queuedLibraryScans = activeLibraryScans.length - runningLibraryScans;
-                  const isRefreshing =
-                    (refreshMutation.isPending && refreshMutation.variables === lib.id) ||
-                    activeRefreshJob !== undefined;
+                  const isRefreshStarting =
+                    refreshMutation.isPending && refreshMutation.variables === lib.id;
                   const isCheckingMount =
                     mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
                   const mountCheck = lastMountCheckByLibraryId[lib.id];
+                  const hasActiveWork =
+                    activeRefreshJob !== undefined || activeLibraryScans.length > 0;
+                  const isCancellingLibraryScans =
+                    cancelScansMutation.isPending && cancelScansMutation.variables === lib.id;
+                  const isCancellingRefreshJob =
+                    activeRefreshJob !== undefined &&
+                    cancelAdminJobMutation.isPending &&
+                    cancelAdminJobMutation.variables === activeRefreshJob.id;
                   return (
-                    <SortableLibraryRow key={lib.id} id={lib.id}>
-                      <TableCell className="font-medium">{lib.name}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {lib.paths.length === 1 ? (
-                          <span className="text-muted-foreground">{lib.paths[0]}</span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-muted-foreground hover:text-foreground text-left transition-colors"
-                            onClick={() => {
-                              setEditingLib(lib);
-                              setDialogOpen(true);
-                            }}
-                          >
-                            {lib.paths.length} folders
-                          </button>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{lib.type}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <Badge variant={lib.enabled ? "outline" : "destructive"}>
-                            {lib.enabled ? "Enabled" : "Disabled"}
-                          </Badge>
-                          {runningLibraryScans > 0 ? (
-                            <Badge variant="secondary">{runningLibraryScans} running</Badge>
-                          ) : null}
-                          {queuedLibraryScans > 0 ? (
-                            <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
-                          ) : null}
-                          {lib.scan_warning_code === "empty_root" ? (
-                            <Badge variant="destructive">Empty root guarded</Badge>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        <div className="space-y-1">
-                          <div>
-                            {lib.last_scanned_at
-                              ? new Date(lib.last_scanned_at).toLocaleString()
-                              : "Never"}
-                          </div>
-                          {lib.scan_warning_at ? (
-                            <div className="text-destructive text-[11px]">
-                              Warning: {new Date(lib.scan_warning_at).toLocaleString()}
-                            </div>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            title="Check mount"
-                            disabled={isCheckingMount}
-                            onClick={() => handleMountCheck(lib.id)}
-                          >
-                            <HardDrive
-                              className={`h-3 w-3 ${isCheckingMount ? "animate-pulse" : ""}`}
-                            />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            title="Scan Library"
-                            disabled={isScanning}
-                            onClick={() => scanMutation.mutate(lib.id)}
-                          >
-                            <RefreshCw className={`h-3 w-3 ${isScanning ? "animate-spin" : ""}`} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            title="Refresh metadata"
-                            disabled={isRefreshing}
-                            onClick={() => refreshMutation.mutate(lib.id)}
-                          >
-                            <DatabaseBackup
-                              className={cn("h-3 w-3", isRefreshing && "animate-spin")}
-                            />
-                          </Button>
-                          {lib.scan_warning_code === "empty_root" ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive h-7 w-7"
-                              title="Confirm deletion for the next empty-root scan"
-                              disabled={
-                                confirmEmptyRootCleanupMutation.isPending &&
-                                confirmEmptyRootCleanupMutation.variables === lib.id
-                              }
-                              onClick={() => handleConfirmEmptyRootCleanup(lib)}
+                    <Fragment key={lib.id}>
+                      <SortableLibraryRow id={lib.id}>
+                        <TableCell className="font-medium">{lib.name}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {lib.paths.length === 1 ? (
+                            <span className="text-muted-foreground">{lib.paths[0]}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground text-left transition-colors"
+                              onClick={() => {
+                                setEditingLib(lib);
+                                setDialogOpen(true);
+                              }}
                             >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          ) : null}
-                          {activeLibraryScans.length > 0 ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive h-7 w-7"
-                              title="Cancel queued and running scans for this library"
-                              disabled={
-                                cancelScansMutation.isPending &&
-                                cancelScansMutation.variables === lib.id
-                              }
-                              onClick={() => cancelScansMutation.mutate(lib.id)}
-                            >
-                              <Square className="h-3 w-3" />
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label={`Edit ${lib.name}`}
-                            onClick={() => {
-                              setEditingLib(lib);
-                              setDialogOpen(true);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3" aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label={`Delete ${lib.name}`}
-                            onClick={() => handleDelete(lib)}
-                          >
-                            <Trash2 className="h-3 w-3" aria-hidden="true" />
-                          </Button>
-                        </div>
-                        {mountCheck ? (
-                          <MountCheckInlineResult result={mountCheck} warning={false} />
-                        ) : null}
-                        {activeRefreshJob ? (
-                          <div className="text-muted-foreground mt-2 space-y-1 text-[11px]">
-                            <div>{activeRefreshJob.message || "Metadata refresh queued"}</div>
-                            <div>Progress: {formatJobProgress(activeRefreshJob)}</div>
-                          </div>
-                        ) : null}
-                        {activeLibraryScans.length > 0 ? (
-                          <div className="text-muted-foreground mt-2 space-y-1 text-[11px]">
-                            {activeLibraryScans.slice(0, 2).map((scan) => (
-                              <div key={scan.id}>
-                                {formatActiveScanMode(scan)}
-                                {scan.status === "running" ? " running" : " queued"}
-                                {scan.path ? ` · ${scan.path}` : ""}
-                              </div>
-                            ))}
-                            {activeLibraryScans.length > 2 ? (
-                              <div>+{activeLibraryScans.length - 2} more scan(s)</div>
+                              {lib.paths.length} folders
+                            </button>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{lib.type}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant={lib.enabled ? "outline" : "destructive"}>
+                              {lib.enabled ? "Enabled" : "Disabled"}
+                            </Badge>
+                            {runningLibraryScans > 0 ? (
+                              <Badge variant="secondary">{runningLibraryScans} running</Badge>
+                            ) : null}
+                            {queuedLibraryScans > 0 ? (
+                              <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
+                            ) : null}
+                            {hasMetadataMatchQueue ? (
+                              <Badge variant="secondary">
+                                {metadataMatchQueue?.total_count.toLocaleString()} matching
+                              </Badge>
+                            ) : null}
+                            {lib.scan_warning_code === "empty_root" ? (
+                              <Badge variant="destructive">Empty root guarded</Badge>
                             ) : null}
                           </div>
-                        ) : null}
-                      </TableCell>
-                    </SortableLibraryRow>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          <div className="space-y-1">
+                            <div>
+                              {lib.last_scanned_at
+                                ? new Date(lib.last_scanned_at).toLocaleString()
+                                : "Never"}
+                            </div>
+                            {lib.scan_warning_at ? (
+                              <div className="text-destructive text-[11px]">
+                                Warning: {new Date(lib.scan_warning_at).toLocaleString()}
+                              </div>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="w-[15rem] align-middle">
+                          <div className="flex flex-nowrap items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                "h-7 w-7",
+                                activeLibraryScans.length > 0 && "text-destructive",
+                              )}
+                              title={
+                                activeLibraryScans.length > 0
+                                  ? "Stop Library Scans"
+                                  : "Scan Library"
+                              }
+                              aria-label={
+                                activeLibraryScans.length > 0
+                                  ? "Stop Library Scans"
+                                  : "Scan Library"
+                              }
+                              disabled={
+                                activeLibraryScans.length > 0
+                                  ? isCancellingLibraryScans
+                                  : isScanning
+                              }
+                              onClick={() => {
+                                if (activeLibraryScans.length > 0) {
+                                  cancelScansMutation.mutate(lib.id);
+                                  return;
+                                }
+                                scanMutation.mutate(lib.id);
+                              }}
+                            >
+                              {activeLibraryScans.length > 0 ? (
+                                <Square className="h-3 w-3 fill-current" />
+                              ) : (
+                                <RefreshCw
+                                  className={`h-3 w-3 ${isScanning ? "animate-spin" : ""}`}
+                                />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn("h-7 w-7", activeRefreshJob && "text-destructive")}
+                              title={activeRefreshJob ? "Stop Metadata Refresh" : "Rescan Metadata"}
+                              aria-label={
+                                activeRefreshJob ? "Stop Metadata Refresh" : "Rescan Metadata"
+                              }
+                              disabled={
+                                activeRefreshJob ? isCancellingRefreshJob : isRefreshStarting
+                              }
+                              onClick={() => {
+                                if (activeRefreshJob) {
+                                  cancelAdminJobMutation.mutate(activeRefreshJob.id);
+                                  return;
+                                }
+                                refreshMutation.mutate(lib.id);
+                              }}
+                            >
+                              {activeRefreshJob ? (
+                                <Square className="h-3 w-3 fill-current" />
+                              ) : (
+                                <DatabaseBackup className="h-3 w-3" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title={
+                                mountCheck ? formatMountCheckMessage(mountCheck) : "Verify Mounts"
+                              }
+                              aria-label={
+                                mountCheck ? formatMountCheckMessage(mountCheck) : "Verify Mounts"
+                              }
+                              disabled={isCheckingMount}
+                              onClick={() => handleMountCheck(lib.id)}
+                            >
+                              <MountCheckButtonIcon pending={isCheckingMount} result={mountCheck} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              aria-label={`Edit ${lib.name}`}
+                              onClick={() => {
+                                setEditingLib(lib);
+                                setDialogOpen(true);
+                              }}
+                            >
+                              <Pencil className="h-3 w-3" aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              aria-label={`Delete ${lib.name}`}
+                              onClick={() => handleDelete(lib)}
+                            >
+                              <Trash2 className="h-3 w-3" aria-hidden="true" />
+                            </Button>
+                            {lib.scan_warning_code === "empty_root" ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive h-7 w-7"
+                                title="Confirm deletion for the next empty-root scan"
+                                disabled={
+                                  confirmEmptyRootCleanupMutation.isPending &&
+                                  confirmEmptyRootCleanupMutation.variables === lib.id
+                                }
+                                onClick={() => handleConfirmEmptyRootCleanup(lib)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </SortableLibraryRow>
+                      {hasActiveWork ? (
+                        <LibraryActiveWorkRow
+                          activeLibraryScans={activeLibraryScans}
+                          activeRefreshJob={activeRefreshJob}
+                          cancellingJobID={
+                            cancelAdminJobMutation.isPending
+                              ? cancelAdminJobMutation.variables
+                              : undefined
+                          }
+                          cancellingLibraryID={
+                            cancelScansMutation.isPending
+                              ? cancelScansMutation.variables
+                              : undefined
+                          }
+                          libraryID={lib.id}
+                          onCancelJob={(jobID) => cancelAdminJobMutation.mutate(jobID)}
+                          onCancelScans={(libraryID) => cancelScansMutation.mutate(libraryID)}
+                        />
+                      ) : null}
+                    </Fragment>
                   );
                 })}
                 {orderedLibraries
                   .filter((lib) => lib.scan_warning_code === "empty_root")
                   .map((lib) => {
                     const mountCheck = lastMountCheckByLibraryId[lib.id];
+                    const isCheckingMount =
+                      mountCheckMutation.isPending && mountCheckMutation.variables === lib.id;
                     return (
                       <TableRow key={`${lib.id}-warning`}>
                         <TableCell colSpan={7} className="bg-destructive/5 text-sm">
@@ -585,26 +678,20 @@ export default function AdminLibraries() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                disabled={
-                                  mountCheckMutation.isPending &&
-                                  mountCheckMutation.variables === lib.id
+                                title={
+                                  mountCheck ? formatMountCheckMessage(mountCheck) : "Check mount"
                                 }
+                                disabled={isCheckingMount}
                                 onClick={() => handleMountCheck(lib.id)}
                               >
-                                <HardDrive
-                                  className={cn(
-                                    "mr-1 h-3.5 w-3.5",
-                                    mountCheckMutation.isPending &&
-                                      mountCheckMutation.variables === lib.id &&
-                                      "animate-pulse",
-                                  )}
+                                <MountCheckButtonIcon
+                                  className="mr-1 h-3.5 w-3.5"
+                                  pending={isCheckingMount}
+                                  result={mountCheck}
                                 />
                                 Check Mount
                               </Button>
                             </div>
-                            {mountCheck ? (
-                              <MountCheckInlineResult result={mountCheck} warning={true} />
-                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -809,18 +896,6 @@ function getLibraryScanGroupName(library: Library | null, libraryID: number) {
   return library?.name ?? `Library #${libraryID}`;
 }
 
-function getLibraryRefreshLibraryID(job: AdminJob): number | null {
-  const value = (job.request_payload as { library_id?: unknown }).library_id;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
 function SortableLibraryRow({ id, children }: { id: number; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
@@ -850,43 +925,155 @@ function SortableLibraryRow({ id, children }: { id: number; children: React.Reac
   );
 }
 
-function MountCheckInlineResult({
-  result,
-  warning,
+function LibraryActiveWorkRow({
+  activeRefreshJob,
+  activeLibraryScans,
+  cancellingJobID,
+  cancellingLibraryID,
+  libraryID,
+  onCancelJob,
+  onCancelScans,
 }: {
-  result: LibraryMountCheckResponse;
-  warning: boolean;
+  activeRefreshJob: AdminJob | undefined;
+  activeLibraryScans: ScanRun[];
+  cancellingJobID?: string;
+  cancellingLibraryID?: number;
+  libraryID: number;
+  onCancelJob: (jobID: string) => void;
+  onCancelScans: (libraryID: number) => void;
 }) {
-  const failingRoots = result.roots.filter((root) => !root.reachable);
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell colSpan={7} className="bg-muted/20 px-4 py-2">
+        <div className="text-muted-foreground flex flex-col gap-1.5 pl-12 text-[11px]">
+          {activeRefreshJob ? (
+            <div className="flex min-w-0 items-start gap-1.5">
+              <StopTaskButton
+                disabled={cancellingJobID === activeRefreshJob.id}
+                label="Cancel metadata refresh"
+                onClick={() => onCancelJob(activeRefreshJob.id)}
+              />
+              <DatabaseBackup className="mt-0.5 h-3 w-3 shrink-0" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="text-foreground/80 font-medium">Metadata</span>
+                  <span className="truncate">
+                    {activeRefreshJob.message || "Metadata refresh queued"}
+                  </span>
+                </div>
+                <div className="text-muted-foreground/80 truncate text-[10px]">
+                  {formatJobProgress(activeRefreshJob)}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {activeLibraryScans.map((scan) => (
+            <LibraryScanTaskRow
+              key={scan.id}
+              scan={scan}
+              cancelling={cancellingLibraryID === libraryID}
+              libraryID={libraryID}
+              onCancelScans={onCancelScans}
+            />
+          ))}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function LibraryScanTaskRow({
+  scan,
+  cancelling,
+  libraryID,
+  onCancelScans,
+}: {
+  scan: ScanRun;
+  cancelling: boolean;
+  libraryID: number;
+  onCancelScans: (libraryID: number) => void;
+}) {
+  const progress = formatActiveScanProgress(scan);
 
   return (
-    <div
-      className={cn(
-        "mt-2 space-y-1 rounded-md border px-2 py-1.5 text-xs",
-        result.healthy
-          ? "border-success/25 bg-success/5 text-success"
-          : "border-destructive/25 bg-destructive/5 text-destructive",
-      )}
-    >
-      <div className="font-medium">{result.summary}</div>
-      {result.healthy && warning ? (
-        <div className="text-foreground/70">
-          Storage looks available again. Run Scan Library to verify contents and clear the warning.
+    <div className="flex min-w-0 items-start gap-1.5">
+      <StopTaskButton
+        disabled={cancelling}
+        label="Cancel library scans"
+        onClick={() => onCancelScans(libraryID)}
+      />
+      <RefreshCw
+        className={cn("mt-0.5 h-3 w-3 shrink-0", scan.status === "running" && "animate-spin")}
+      />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="text-foreground/80 font-medium">Scan</span>
+          <span className="shrink-0">{scan.status === "running" ? "Running" : "Queued"}</span>
         </div>
-      ) : null}
-      {!result.healthy
-        ? failingRoots.map((root) => (
-            <div key={root.path} className="text-foreground/70">
-              <span className="font-mono">{root.path}</span>
-              {root.error_message ? `: ${root.error_message}` : ""}
-            </div>
-          ))
-        : null}
-      <div className="text-foreground/50">
-        Checked {new Date(result.checked_at).toLocaleString()}
+        <div className="text-muted-foreground/80 truncate text-[10px]">
+          {formatActiveScanMode(scan)}
+          {scan.path ? ` · ${scan.path}` : " · Entire library"}
+        </div>
+        {progress ? (
+          <div className="text-muted-foreground/80 truncate text-[10px]">{progress}</div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function StopTaskButton({
+  disabled,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-ring flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Square className="h-3 w-3 fill-current" />
+    </button>
+  );
+}
+
+function MountCheckButtonIcon({
+  result,
+  pending,
+  className = "h-3 w-3",
+}: {
+  result?: LibraryMountCheckResponse;
+  pending: boolean;
+  className?: string;
+}) {
+  if (pending) {
+    return <HardDrive className={cn(className, "animate-pulse")} />;
+  }
+  if (result?.healthy) {
+    return <CheckCircle2 className={cn(className, "text-success")} />;
+  }
+  if (result) {
+    return <AlertTriangle className={cn(className, "text-destructive")} />;
+  }
+  return <HardDrive className={className} />;
+}
+
+function formatMountCheckMessage(result: LibraryMountCheckResponse) {
+  const failingRoots = result.roots.filter((root) => !root.reachable);
+  const firstFailure = failingRoots[0];
+  if (!result.healthy && firstFailure) {
+    const detail = firstFailure.error_message ? ` (${firstFailure.error_message})` : "";
+    return `${result.summary}: ${firstFailure.path}${detail}`;
+  }
+  return result.summary;
 }
 
 /* ─── Pagination helper ─────────────────────────────────────────── */
@@ -919,6 +1106,64 @@ function usePagination<T>(items: T[], pageSize = PAGE_SIZE) {
     rangeStart: items.length === 0 ? 0 : clamped * pageSize + 1,
     rangeEnd: Math.min((clamped + 1) * pageSize, items.length),
   };
+}
+
+function CollapsibleDiagnosticsSection({
+  title,
+  description,
+  count,
+  icon,
+  iconClassName,
+  open,
+  onOpenChange,
+  children,
+}: {
+  title: string;
+  description: string;
+  count: number;
+  icon: ReactNode;
+  iconClassName?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
+      <button
+        type="button"
+        className="hover:bg-surface-hover/40 flex w-full items-center gap-3 px-5 py-4 text-left transition-colors"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+      >
+        <div
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+            iconClassName ?? "bg-amber-500/10",
+          )}
+        >
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <h2 className="text-sm font-semibold tracking-wide">{title}</h2>
+          <p className="text-muted-foreground text-xs leading-relaxed">{description}</p>
+        </div>
+        {open ? (
+          <Badge variant="secondary" className="text-[11px] tabular-nums">
+            {count}
+          </Badge>
+        ) : (
+          <div className="text-2xl leading-none font-bold tabular-nums">{count}</div>
+        )}
+        <ChevronDown
+          className={cn(
+            "text-muted-foreground h-4 w-4 shrink-0 transition-transform",
+            !open && "-rotate-90",
+          )}
+        />
+      </button>
+      {open ? <div className="px-3 pb-3">{children}</div> : null}
+    </section>
+  );
 }
 
 function PaginationBar({
@@ -1058,6 +1303,7 @@ function useSort<K extends string>(defaultField: K, defaultDir: SortDir = "desc"
 /* ─── Skipped Roots (Troubleshooting) ───────────────────────────── */
 
 function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
+  const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
   const [editingRoot, setEditingRoot] = useState<LibraryRoot | null>(null);
@@ -1082,121 +1328,111 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   }
 
   return (
-    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
-      <div className="flex items-start gap-3 px-5 pt-5 pb-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-          <FolderOpen className="h-4 w-4 text-amber-500" />
-        </div>
-        <div className="space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">Ambiguous Roots</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Scanner roots that stay visible but do not enter unattended metadata matching.
-          </p>
-        </div>
-        <Badge variant="secondary" className="ml-auto text-[11px] tabular-nums">
-          {roots.length}
-        </Badge>
-      </div>
-
-      <div className="px-3 pb-3">
-        <div className="mb-2 flex flex-col gap-2 sm:flex-row">
-          <Select
-            value={
-              effectiveSelectedLibraryId != null ? String(effectiveSelectedLibraryId) : undefined
-            }
-            onValueChange={(value) => {
-              setSelectedLibraryId(Number.parseInt(value, 10));
+    <CollapsibleDiagnosticsSection
+      title="Ambiguous Roots"
+      description="Scanner roots that stay visible but do not enter unattended metadata matching."
+      count={roots.length}
+      icon={<FolderOpen className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row">
+        <Select
+          value={
+            effectiveSelectedLibraryId != null ? String(effectiveSelectedLibraryId) : undefined
+          }
+          onValueChange={(value) => {
+            setSelectedLibraryId(Number.parseInt(value, 10));
+            pag.setPage(0);
+          }}
+        >
+          <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
+            <SelectValue placeholder="Select library" />
+          </SelectTrigger>
+          <SelectContent>
+            {libraries.map((library) => (
+              <SelectItem key={library.id} value={String(library.id)}>
+                {library.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="relative flex-1">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Input
+            placeholder="Filter by path, title, or sample file..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
               pag.setPage(0);
             }}
-          >
-            <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
-              <SelectValue placeholder="Select library" />
-            </SelectTrigger>
-            <SelectContent>
-              {libraries.map((library) => (
-                <SelectItem key={library.id} value={String(library.id)}>
-                  {library.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="relative flex-1">
-            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
-            <Input
-              placeholder="Filter by path, title, or sample file..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                pag.setPage(0);
-              }}
-              className="h-8 pl-8 text-xs"
-            />
-          </div>
+            className="h-8 pl-8 text-xs"
+          />
         </div>
+      </div>
 
-        <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Root</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Confidence</TableHead>
-                <TableHead className="text-right">Files</TableHead>
-                <TableHead className="w-[120px]">Actions</TableHead>
+      <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Root</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Confidence</TableHead>
+              <TableHead className="text-right">Files</TableHead>
+              <TableHead className="w-[120px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredRoots.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
+                  No ambiguous roots for this library.
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredRoots.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                    No ambiguous roots for this library.
+            ) : (
+              pag.rows.map((root) => (
+                <TableRow key={`${root.library_id}:${root.root_path}`}>
+                  <TableCell className="max-w-[28rem]">
+                    <div className="space-y-1">
+                      <div className="truncate text-sm font-medium">
+                        {root.title || root.root_path.split("/").filter(Boolean).pop()}
+                      </div>
+                      <code className="text-muted-foreground block truncate text-[11px]">
+                        {root.root_path}
+                      </code>
+                      {root.evidence_json ? (
+                        <div className="text-muted-foreground truncate text-[11px]">
+                          {buildRootEvidenceSummary(root)}
+                        </div>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{root.inferred_type || "unknown"}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{root.type_confidence}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                    {root.observed_file_count}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setEditingRoot(root)}
+                    >
+                      Override
+                    </Button>
                   </TableCell>
                 </TableRow>
-              ) : (
-                pag.rows.map((root) => (
-                  <TableRow key={`${root.library_id}:${root.root_path}`}>
-                    <TableCell className="max-w-[28rem]">
-                      <div className="space-y-1">
-                        <div className="truncate text-sm font-medium">
-                          {root.title || root.root_path.split("/").filter(Boolean).pop()}
-                        </div>
-                        <code className="text-muted-foreground block truncate text-[11px]">
-                          {root.root_path}
-                        </code>
-                        {root.evidence_json ? (
-                          <div className="text-muted-foreground truncate text-[11px]">
-                            {buildRootEvidenceSummary(root)}
-                          </div>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{root.inferred_type || "unknown"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{root.type_confidence}</Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
-                      {root.observed_file_count}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setEditingRoot(root)}
-                      >
-                        Override
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-        <PaginationBar {...pag} />
+              ))
+            )}
+          </TableBody>
+        </Table>
       </div>
+      <PaginationBar {...pag} />
 
       {editingRoot ? (
         <RootOverrideDialog
@@ -1207,7 +1443,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           }}
         />
       ) : null}
-    </section>
+    </CollapsibleDiagnosticsSection>
   );
 }
 
@@ -1578,6 +1814,7 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
 /* ─── Unmatched Items ──────────────────────────────────────────── */
 
 function UnmatchedItemsSection() {
+  const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -1596,107 +1833,97 @@ function UnmatchedItemsSection() {
   if (total === 0 && page === 0 && search.trim() === "") return null;
 
   return (
-    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
-      <div className="flex items-start gap-3 px-5 pt-5 pb-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-          <Search className="h-4 w-4 text-amber-500" />
-        </div>
-        <div className="space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">Unmatched Items</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Items that could not be matched to any metadata provider.
-          </p>
-        </div>
-        <Badge variant="secondary" className="ml-auto text-[11px] tabular-nums">
-          {total}
-        </Badge>
+    <CollapsibleDiagnosticsSection
+      title="Unmatched Items"
+      description="Items that could not be matched to any metadata provider."
+      count={total}
+      icon={<Search className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <div className="relative mb-2">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Input
+          placeholder="Search all unmatched items by title, library, or type..."
+          value={search}
+          onChange={(e) => {
+            // Search is server-side and spans the whole table; jump back to
+            // the first page so results start at the top as the query changes.
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          className="h-8 pl-8 text-xs"
+        />
       </div>
-
-      <div className="px-3 pb-3">
-        <div className="relative mb-2">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
-          <Input
-            placeholder="Search all unmatched items by title, library, or type..."
-            value={search}
-            onChange={(e) => {
-              // Search is server-side and spans the whole table; jump back to
-              // the first page so results start at the top as the query changes.
-              setSearch(e.target.value);
-              setPage(0);
-            }}
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
-        <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Title</TableHead>
-                <TableHead>Library</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
+      <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Title</TableHead>
+              <TableHead>Library</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-[100px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
+                  No unmatched items match your search.
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                    No unmatched items match your search.
+            ) : (
+              items.map((u) => (
+                <TableRow key={u.content_id}>
+                  <TableCell className="font-medium">
+                    <Link
+                      to={`/item/${u.content_id}`}
+                      className="hover:text-primary underline-offset-2 hover:underline"
+                    >
+                      {u.title}
+                    </Link>
+                    {u.year ? (
+                      <span className="text-muted-foreground ml-1 text-xs">({u.year})</span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-sm">{u.library_name}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{u.content_type}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{u.status}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1 text-xs"
+                      onClick={() => setMatchItem(u)}
+                    >
+                      <Search className="h-3 w-3" />
+                      Match
+                    </Button>
                   </TableCell>
                 </TableRow>
-              ) : (
-                items.map((u) => (
-                  <TableRow key={u.content_id}>
-                    <TableCell className="font-medium">
-                      <Link
-                        to={`/item/${u.content_id}`}
-                        className="hover:text-primary underline-offset-2 hover:underline"
-                      >
-                        {u.title}
-                      </Link>
-                      {u.year ? (
-                        <span className="text-muted-foreground ml-1 text-xs">({u.year})</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-sm">{u.library_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{u.content_type}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{u.status}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 gap-1 text-xs"
-                        onClick={() => setMatchItem(u)}
-                      >
-                        <Search className="h-3 w-3" />
-                        Match
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-        {total > UNMATCHED_PAGE_SIZE && (
-          <PaginationBar
-            total={total}
-            rangeStart={rangeStart}
-            rangeEnd={rangeEnd}
-            canPrev={clamped > 0}
-            canNext={clamped < totalPages - 1}
-            first={() => setPage(0)}
-            prev={() => setPage((p) => Math.max(0, p - 1))}
-            next={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            last={() => setPage(totalPages - 1)}
-          />
-        )}
+              ))
+            )}
+          </TableBody>
+        </Table>
       </div>
+      {total > UNMATCHED_PAGE_SIZE && (
+        <PaginationBar
+          total={total}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          canPrev={clamped > 0}
+          canNext={clamped < totalPages - 1}
+          first={() => setPage(0)}
+          prev={() => setPage((p) => Math.max(0, p - 1))}
+          next={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+          last={() => setPage(totalPages - 1)}
+        />
+      )}
       {matchItem && (
         <MatchItemDialog
           item={{
@@ -1712,7 +1939,7 @@ function UnmatchedItemsSection() {
           }}
         />
       )}
-    </section>
+    </CollapsibleDiagnosticsSection>
   );
 }
 
@@ -1721,6 +1948,7 @@ function UnmatchedItemsSection() {
 type StaleSortField = "title" | "year" | "library" | "provider" | "first_seen" | "last_seen";
 
 function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
+  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [matchItem, setMatchItem] = useState<StaleMediaID | null>(null);
   const { sortField, sortDir, toggle } = useSort<StaleSortField>("last_seen", "desc");
@@ -1762,125 +1990,116 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
   const pag = usePagination(sorted);
 
   return (
-    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
-      <div className="flex items-start gap-3 px-5 pt-5 pb-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
-          <Unlink className="h-4 w-4 text-red-400" />
-        </div>
-        <div className="space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">Stale External IDs</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Provider IDs no longer resolve &mdash; metadata refresh will fail until re-matched.
-          </p>
-        </div>
-        <Badge variant="secondary" className="ml-auto text-[11px] tabular-nums">
-          {staleIDs.length}
-        </Badge>
+    <CollapsibleDiagnosticsSection
+      title="Stale External IDs"
+      description="Provider IDs no longer resolve; metadata refresh will fail until re-matched."
+      count={staleIDs.length}
+      icon={<Unlink className="h-4 w-4 text-red-400" />}
+      iconClassName="bg-red-500/10"
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <div className="relative mb-2">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Input
+          placeholder="Filter by title, provider, or ID..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            pag.setPage(0);
+          }}
+          className="h-8 pl-8 text-xs"
+        />
       </div>
-
-      <div className="px-3 pb-3">
-        <div className="relative mb-2">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
-          <Input
-            placeholder="Filter by title, provider, or ID..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              pag.setPage(0);
-            }}
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
-        <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <SortableHead
-                  field="title"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Title
-                </SortableHead>
-                <SortableHead
-                  field="year"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Year
-                </SortableHead>
-                <SortableHead
-                  field="library"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Library
-                </SortableHead>
-                <SortableHead
-                  field="provider"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Provider
-                </SortableHead>
-                <TableHead>Provider ID</TableHead>
-                <SortableHead
-                  field="first_seen"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  First seen
-                </SortableHead>
-                <SortableHead
-                  field="last_seen"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Last seen
-                </SortableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
+      <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <SortableHead
+                field="title"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Title
+              </SortableHead>
+              <SortableHead
+                field="year"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Year
+              </SortableHead>
+              <SortableHead
+                field="library"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Library
+              </SortableHead>
+              <SortableHead
+                field="provider"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Provider
+              </SortableHead>
+              <TableHead>Provider ID</TableHead>
+              <SortableHead
+                field="first_seen"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                First seen
+              </SortableHead>
+              <SortableHead
+                field="last_seen"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Last seen
+              </SortableHead>
+              <TableHead className="w-[100px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pag.rows.map((s) => (
+              <TableRow key={`${s.content_id}:${s.provider}`}>
+                <TableCell className="font-medium">{s.title}</TableCell>
+                <TableCell className="tabular-nums">{s.year}</TableCell>
+                <TableCell className="text-sm">{s.library_name}</TableCell>
+                <TableCell>
+                  <Badge variant="outline">{s.provider}</Badge>
+                </TableCell>
+                <TableCell className="font-mono text-xs">{s.provider_id}</TableCell>
+                <TableCell className="text-muted-foreground text-xs tabular-nums">
+                  {new Date(s.first_seen_at).toLocaleString()}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs tabular-nums">
+                  {new Date(s.last_seen_at).toLocaleString()}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    onClick={() => setMatchItem(s)}
+                  >
+                    <Search className="h-3 w-3" />
+                    Match
+                  </Button>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pag.rows.map((s) => (
-                <TableRow key={`${s.content_id}:${s.provider}`}>
-                  <TableCell className="font-medium">{s.title}</TableCell>
-                  <TableCell className="tabular-nums">{s.year}</TableCell>
-                  <TableCell className="text-sm">{s.library_name}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{s.provider}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{s.provider_id}</TableCell>
-                  <TableCell className="text-muted-foreground text-xs tabular-nums">
-                    {new Date(s.first_seen_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs tabular-nums">
-                    {new Date(s.last_seen_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 gap-1 text-xs"
-                      onClick={() => setMatchItem(s)}
-                    >
-                      <Search className="h-3 w-3" />
-                      Match
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        <PaginationBar {...pag} />
+            ))}
+          </TableBody>
+        </Table>
       </div>
+      <PaginationBar {...pag} />
       {matchItem && (
         <MatchItemDialog
           item={{
@@ -1896,7 +2115,7 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
           }}
         />
       )}
-    </section>
+    </CollapsibleDiagnosticsSection>
   );
 }
 

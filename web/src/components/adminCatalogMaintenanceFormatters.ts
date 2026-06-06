@@ -28,5 +28,8 @@ export function formatJobProgress(job: AdminJob) {
   if (job.status === "completed") {
     return "Complete";
   }
+  if (job.status === "cancelled") {
+    return "Cancelled";
+  }
   return "Starting";
 }

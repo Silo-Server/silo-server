@@ -28,7 +28,7 @@ func (t *MatchMediaTask) Description() string {
 	return "Matches unmatched media files to metadata from providers"
 }
 func (t *MatchMediaTask) Category() taskmanager.TaskCategory { return taskmanager.TaskCategoryMetadata }
-func (t *MatchMediaTask) IsHidden() bool                     { return true }
+func (t *MatchMediaTask) IsHidden() bool                     { return false }
 
 func (t *MatchMediaTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{

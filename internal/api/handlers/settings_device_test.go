@@ -47,6 +47,14 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 	return r.users[id], nil
 }
 
+func TestRegisterRequestDeviceNilStore(t *testing.T) {
+	registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
+		DeviceID:       "device-1",
+		DeviceName:     "Living Room",
+		DevicePlatform: "web",
+	})
+}
+
 type mappedTestUserStoreProvider struct {
 	stores map[int]userstore.UserStore
 }
@@ -472,6 +480,18 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetDeviceSetting store1 second: %v", err)
 	}
+	store1Registry, ok := store1.(userstore.DeviceRegistry)
+	if !ok {
+		t.Fatalf("store1 does not support device registry")
+	}
+	if err := store1Registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID:      "profile-1",
+		DeviceID:       "bedroom",
+		DeviceName:     "Bedroom TV",
+		DevicePlatform: "Android TV",
+	}); err != nil {
+		t.Fatalf("RegisterDevice store1: %v", err)
+	}
 	if err := store2.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
 		ProfileID:      "profile-1",
 		DeviceID:       "phone",
@@ -508,8 +528,21 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&listResp); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if len(listResp.Devices) != 2 {
-		t.Fatalf("devices len = %d, want 2", len(listResp.Devices))
+	if len(listResp.Devices) != 3 {
+		t.Fatalf("devices len = %d, want 3", len(listResp.Devices))
+	}
+	var bedroom *adminDeviceSummaryResponse
+	for i := range listResp.Devices {
+		if listResp.Devices[i].DeviceID == "bedroom" {
+			bedroom = &listResp.Devices[i]
+			break
+		}
+	}
+	if bedroom == nil {
+		t.Fatalf("registered device without overrides missing: %#v", listResp.Devices)
+	}
+	if bedroom.OverrideCount != 0 || bedroom.ProfileCount != 1 || bedroom.DeviceName != "Bedroom TV" {
+		t.Fatalf("registered device summary = %#v", bedroom)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/admin/devices/7/living-room", nil)
@@ -528,6 +561,26 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}
 	if len(detailResp.Settings) != 2 {
 		t.Fatalf("detail settings len = %d, want 2", len(detailResp.Settings))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/admin/devices/7/bedroom", nil)
+	req = withRouteParams(req, map[string]string{"user_id": "7", "device_id": "bedroom"})
+	rec = httptest.NewRecorder()
+	handler.HandleGetDevice(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("registered detail status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&detailResp); err != nil {
+		t.Fatalf("decode registered detail: %v", err)
+	}
+	if detailResp.DeviceName != "Bedroom TV" || detailResp.OverrideCount != 0 {
+		t.Fatalf("registered detail response = %#v", detailResp)
+	}
+	if len(detailResp.Settings) != 0 {
+		t.Fatalf("registered detail settings len = %d, want 0", len(detailResp.Settings))
+	}
+	if len(detailResp.Profiles) != 1 || detailResp.Profiles[0].ProfileID != "profile-1" {
+		t.Fatalf("registered detail profiles = %#v", detailResp.Profiles)
 	}
 }
 
@@ -558,6 +611,24 @@ func TestAdminCanResetAllOverridesForOneDevice(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].DeviceID != "phone" {
 		t.Fatalf("entries after delete = %#v", entries)
+	}
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		t.Fatalf("store does not support device registry")
+	}
+	devices, err := registry.ListDevices(context.Background())
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	foundLivingRoom := false
+	for _, device := range devices {
+		if device.ProfileID == "profile-1" && device.DeviceID == "living-room" {
+			foundLivingRoom = true
+			break
+		}
+	}
+	if !foundLivingRoom {
+		t.Fatalf("registry devices after delete = %#v", devices)
 	}
 }
 

@@ -211,6 +211,42 @@ func TestBuildFFmpegArgs_MPEG4Part2DisablesHardwareDecode(t *testing.T) {
 	}
 }
 
+func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		opts TranscodeOpts
+		want string
+	}{
+		{
+			name: "hardware video transcode",
+			opts: TranscodeOpts{HWAccel: "qsv", SourceVideoCodec: "h264", TargetCodecVideo: "h264"},
+			want: "qsv",
+		},
+		{
+			name: "copy video does not use hardware encode",
+			opts: TranscodeOpts{HWAccel: "qsv", SourceVideoCodec: "h264", TargetCodecVideo: "copy"},
+			want: "none",
+		},
+		{
+			name: "mpeg4 part 2 falls back to software",
+			opts: TranscodeOpts{HWAccel: "vaapi", SourceVideoCodec: "mpeg4", TargetCodecVideo: "h264"},
+			want: "none",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resolveEffectiveTranscodeHWAccel(tt.opts); got != tt.want {
+				t.Fatalf("resolveEffectiveTranscodeHWAccel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildFFmpegArgs_VAAPIScalingUsesHardwareFilter(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:         "/media/movie.mkv",

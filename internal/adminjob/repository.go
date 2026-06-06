@@ -24,11 +24,13 @@ const (
 	StatusRunning   = "running"
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
+	StatusCancelled = "cancelled"
 )
 
 var (
 	ErrJobNotFound       = errors.New("admin job not found")
 	ErrActiveJobConflict = errors.New("admin job already active for type")
+	ErrJobNotCancellable = errors.New("admin job is not cancellable")
 )
 
 type ActiveJobConflictError struct {
@@ -469,6 +471,83 @@ func (r *Repository) Fail(ctx context.Context, id string, input FailJobInput) er
 		return ErrJobNotFound
 	}
 	return nil
+}
+
+func (r *Repository) Cancel(ctx context.Context, id, message string, expiresAt time.Time) (*models.AdminJob, error) {
+	if message == "" {
+		message = "Admin job cancelled"
+	}
+	job, err := scanAdminJob(r.pool.QueryRow(ctx, `
+		UPDATE admin_jobs
+		SET status = $2,
+			message = $3,
+			error_message = '',
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			expires_at = $4,
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status IN ($5, $6)
+		RETURNING `+adminJobColumns,
+		id,
+		StatusCancelled,
+		message,
+		expiresAt,
+		StatusQueued,
+		StatusRunning,
+	))
+	if err == nil {
+		return job, nil
+	}
+	if !errors.Is(err, ErrJobNotFound) {
+		return nil, err
+	}
+	existing, lookupErr := r.GetByID(ctx, id)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if existing.Status != StatusQueued && existing.Status != StatusRunning {
+		return nil, ErrJobNotCancellable
+	}
+	return nil, ErrJobNotFound
+}
+
+func (r *Repository) CancelQueued(ctx context.Context, id, message string, expiresAt time.Time) (*models.AdminJob, error) {
+	if message == "" {
+		message = "Admin job cancelled"
+	}
+	job, err := scanAdminJob(r.pool.QueryRow(ctx, `
+		UPDATE admin_jobs
+		SET status = $2,
+			message = $3,
+			error_message = '',
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			expires_at = $4,
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status = $5
+		RETURNING `+adminJobColumns,
+		id,
+		StatusCancelled,
+		message,
+		expiresAt,
+		StatusQueued,
+	))
+	if err == nil {
+		return job, nil
+	}
+	if !errors.Is(err, ErrJobNotFound) {
+		return nil, err
+	}
+	existing, lookupErr := r.GetByID(ctx, id)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if existing.Status != StatusQueued {
+		return nil, ErrJobNotCancellable
+	}
+	return nil, ErrJobNotFound
 }
 
 func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) (int, error) {

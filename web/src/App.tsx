@@ -18,6 +18,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
 import { Toaster } from "@/components/ui/sonner";
+import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
+import { useEventChannel } from "@/components/realtimeEventsContext";
 import Layout from "@/components/Layout";
 import AdminLayout from "@/components/AdminLayout";
 import Home from "@/pages/Home";
@@ -537,6 +539,23 @@ function AppRoutes() {
   );
 }
 
+function RealtimeEventChannels() {
+  const { user } = useAuth();
+
+  useEventChannel("catalog");
+  useEventChannel("user_state");
+
+  return user?.role === "admin" ? <AdminRealtimeEventChannels /> : null;
+}
+
+function AdminRealtimeEventChannels() {
+  useEventChannel("jobs");
+  useEventChannel("sessions");
+  useEventChannel("tasks");
+  useEventChannel("scans");
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -546,14 +565,17 @@ export default function App() {
             <ThemeProvider>
               <CustomThemeProvider>
                 <WatchPlaybackProvider>
-                  <ScrollRestorationManager />
-                  <RouteAnnouncer />
-                  <QueryCacheManager />
-                  <AppChrome />
-                  <AppRoutes />
-                  <WatchPlaybackHost />
-                  <WatchPlaybackBar />
-                  <Toaster />
+                  <RealtimeEventsProvider>
+                    <RealtimeEventChannels />
+                    <ScrollRestorationManager />
+                    <RouteAnnouncer />
+                    <QueryCacheManager />
+                    <AppChrome />
+                    <AppRoutes />
+                    <WatchPlaybackHost />
+                    <WatchPlaybackBar />
+                    <Toaster />
+                  </RealtimeEventsProvider>
                 </WatchPlaybackProvider>
               </CustomThemeProvider>
             </ThemeProvider>

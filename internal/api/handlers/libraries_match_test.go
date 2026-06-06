@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestLibraryMatchUnmatchedItems_NilPool verifies that the unmatched-items
@@ -164,6 +167,79 @@ func TestLibraryMatchRematch_DeprecatedStillRoutes(t *testing.T) {
 			t.Errorf("expected route %q to be registered, registered routes: %v", route, found)
 		}
 	}
+}
+
+func TestLibraryMetadataMatchQueueHandlers_NilFolderRepo(t *testing.T) {
+	h := &LibraryHandler{MovieMatchQueueRepo: noopMovieMatchQueue{}}
+
+	tests := []struct {
+		name    string
+		method  string
+		path    string
+		handler http.HandlerFunc
+	}{
+		{
+			name:    "get",
+			method:  http.MethodGet,
+			path:    "/libraries/1/metadata-match-queue",
+			handler: h.HandleGetMetadataMatchQueue,
+		},
+		{
+			name:    "retry",
+			method:  http.MethodPost,
+			path:    "/libraries/1/metadata-match-queue/retry",
+			handler: h.HandleRetryMetadataMatchQueue,
+		},
+		{
+			name:    "cancel",
+			method:  http.MethodDelete,
+			path:    "/libraries/1/metadata-match-queue",
+			handler: h.HandleCancelMetadataMatchQueue,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := chi.NewRouter()
+			r.Method(tt.method, "/libraries/{id}/metadata-match-queue", tt.handler)
+			r.Method(tt.method, "/libraries/{id}/metadata-match-queue/retry", tt.handler)
+
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			r.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("expected 503 for nil folderRepo, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			var resp errorResponse
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decoding error response: %v", err)
+			}
+			if resp.Error != "unavailable" {
+				t.Errorf("expected error code 'unavailable', got %q", resp.Error)
+			}
+		})
+	}
+}
+
+type noopMovieMatchQueue struct{}
+
+func (noopMovieMatchQueue) SyncForFolder(context.Context, int) error {
+	return nil
+}
+
+func (noopMovieMatchQueue) DeleteByFolder(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (noopMovieMatchQueue) CountByFolder(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (noopMovieMatchQueue) ListByFolder(context.Context, int, int, int) ([]models.MovieMatchQueueEntry, int, error) {
+	return nil, 0, nil
 }
 
 func keys(m map[string]any) []string {

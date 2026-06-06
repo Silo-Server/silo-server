@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router";
 import { Play, Square, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -54,10 +55,10 @@ function describeTrigger(t: TriggerConfig): string {
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainSec = Math.round(seconds % 60);
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainSec = totalSeconds - minutes * 60;
   return `${minutes}m ${remainSec}s`;
 }
 
@@ -76,20 +77,26 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <div className="surface-panel rounded-2xl border-0 p-4">
-          <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">Queue</div>
+          <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
+            Refresh Backlog
+          </div>
           <div className="mt-2 text-2xl font-semibold">{metrics.total}</div>
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
-          <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">Due Now</div>
+          <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
+            Due for Refresh
+          </div>
           <div className="mt-2 text-2xl font-semibold">{metrics.due}</div>
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
-          <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">Leased</div>
+          <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
+            Processing
+          </div>
           <div className="mt-2 text-2xl font-semibold">{metrics.leased}</div>
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Oldest Due
+            Waiting Since
           </div>
           <div className="mt-2 text-sm font-medium">
             {formatOptionalDateTime(metrics.oldest_due_at)}
@@ -97,7 +104,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Oldest Lease
+            Next Claim Timeout
           </div>
           <div className="mt-2 text-sm font-medium">
             {formatOptionalDateTime(metrics.oldest_lease_expires_at)}
@@ -388,17 +395,7 @@ function HistoryRow({
         </td>
         <td className="px-4 py-2">{formatDuration(result.duration_ms)}</td>
         <td className="px-4 py-2">
-          <Badge
-            variant={
-              result.status === "failed"
-                ? "destructive"
-                : result.status === "cancelled"
-                  ? "outline"
-                  : "secondary"
-            }
-          >
-            {result.status}
-          </Badge>
+          <TaskStatusBadge result={result} />
         </td>
         <td className="text-muted-foreground max-w-xs truncate px-4 py-2">
           {result.error_message || "—"}

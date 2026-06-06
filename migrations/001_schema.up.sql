@@ -90,7 +90,7 @@ CREATE TABLE public.admin_jobs (
     heartbeat_at timestamp with time zone,
     expires_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT admin_jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'completed'::text, 'failed'::text])))
+    CONSTRAINT admin_jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
 );
 
 
@@ -945,12 +945,22 @@ CREATE TABLE public.user_settings (
 
 CREATE TABLE public.user_device_settings (
     user_id integer NOT NULL,
+    profile_id text NOT NULL,
     device_id text NOT NULL,
     key text NOT NULL,
     value text NOT NULL,
     device_name text DEFAULT ''::text NOT NULL,
     device_platform text DEFAULT ''::text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE public.user_devices (
+    user_id integer NOT NULL,
+    profile_id text NOT NULL,
+    device_id text NOT NULL,
+    device_name text DEFAULT ''::text NOT NULL,
+    device_platform text DEFAULT ''::text NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1578,7 +1588,10 @@ ALTER TABLE ONLY public.user_settings
     ADD CONSTRAINT user_settings_pkey PRIMARY KEY (user_id, key);
 
 ALTER TABLE ONLY public.user_device_settings
-    ADD CONSTRAINT user_device_settings_pkey PRIMARY KEY (user_id, device_id, key);
+    ADD CONSTRAINT user_device_settings_pkey PRIMARY KEY (user_id, profile_id, device_id, key);
+
+ALTER TABLE ONLY public.user_devices
+    ADD CONSTRAINT user_devices_pkey PRIMARY KEY (user_id, profile_id, device_id);
 
 
 --
@@ -2018,6 +2031,13 @@ CREATE INDEX idx_user_favorites_profile ON public.user_favorites USING btree (us
 
 
 --
+-- Name: idx_user_device_settings_user_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_device_settings_user_key ON public.user_device_settings USING btree (user_id, key);
+
+
+--
 -- Name: idx_user_profile_allowed_libraries_lookup; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2347,6 +2367,15 @@ ALTER TABLE ONLY public.user_settings
 
 ALTER TABLE ONLY public.user_device_settings
     ADD CONSTRAINT user_device_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.user_device_settings
+    ADD CONSTRAINT user_device_settings_profile_fkey FOREIGN KEY (user_id, profile_id) REFERENCES public.user_profiles(user_id, id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.user_devices
+    ADD CONSTRAINT user_devices_profile_fkey FOREIGN KEY (user_id, profile_id) REFERENCES public.user_profiles(user_id, id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.user_devices
+    ADD CONSTRAINT user_devices_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --

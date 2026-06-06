@@ -195,6 +195,15 @@ CREATE TABLE IF NOT EXISTS user_device_settings (
     PRIMARY KEY (profile_id, device_id, key)
 );
 
+CREATE TABLE IF NOT EXISTS user_devices (
+    profile_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    device_name TEXT NOT NULL DEFAULT '',
+    device_platform TEXT NOT NULL DEFAULT '',
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, device_id)
+);
+
 CREATE TABLE IF NOT EXISTS downloads (
     id TEXT PRIMARY KEY,
     profile_id TEXT NOT NULL,
@@ -275,7 +284,10 @@ func InitSchema(db *sql.DB) error {
 	if err := ensureWatchHistoryIdentityColumn(db); err != nil {
 		return err
 	}
-	return migratePlaybackSettingsToDeviceScope(db)
+	if err := migratePlaybackSettingsToDeviceScope(db); err != nil {
+		return err
+	}
+	return backfillUserDevices(db)
 }
 
 func ensureAutoSkipRecapPreviewColumns(db *sql.DB) error {
@@ -425,6 +437,40 @@ func ensureDeviceSettingsProfileColumn(db *sql.DB) error {
 	}
 
 	return tx.Commit()
+}
+
+func backfillUserDevices(db *sql.DB) error {
+	_, err := db.Exec(`
+		INSERT INTO user_devices (
+			profile_id, device_id, device_name, device_platform, last_seen_at
+		)
+		SELECT
+			profile_id,
+			device_id,
+			COALESCE(MAX(device_name), ''),
+			COALESCE(MAX(device_platform), ''),
+			MAX(updated_at)
+		FROM user_device_settings
+		WHERE TRIM(device_id) <> ''
+		GROUP BY profile_id, device_id
+		ON CONFLICT(profile_id, device_id) DO UPDATE SET
+			device_name = CASE
+				WHEN excluded.device_name <> '' THEN excluded.device_name
+				ELSE user_devices.device_name
+			END,
+			device_platform = CASE
+				WHEN excluded.device_platform <> '' THEN excluded.device_platform
+				ELSE user_devices.device_platform
+			END,
+			last_seen_at = CASE
+				WHEN excluded.last_seen_at > user_devices.last_seen_at THEN excluded.last_seen_at
+				ELSE user_devices.last_seen_at
+			END
+	`)
+	if err != nil {
+		return fmt.Errorf("backfilling user_devices: %w", err)
+	}
+	return nil
 }
 
 func ensureProfileSectionOverridesRemovedColumn(db *sql.DB) error {

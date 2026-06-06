@@ -89,11 +89,13 @@ type Dependencies struct {
 	SessionMgr                   *playback.SessionManager         // playback session manager (may be nil)
 	SkippedRootRepo              *metadata.SkippedRootRepository  // skipped root repository (may be nil)
 	StaleIDRepo                  *metadata.StaleMediaIDRepository // stale media ID repository (may be nil)
-	Refresher                    handlers.AdminMetadataRefresher  // metadata refresher (may be nil)
-	NodeRepo                     *nodepool.Repository             // stream node repository (may be nil)
-	ProxyPool                    *nodepool.ProxyPool              // proxy node pool (may be nil)
-	TranscodePool                *nodepool.TranscodePool          // transcode node pool (may be nil)
-	SessionSyncer                handlers.PlaybackSessionSyncer   // optional; immediate playback session sync trigger
+	MovieMatchQueueRepo          *metadata.MovieMatchQueueRepository
+	SeriesRootMatchQueueRepo     *metadata.SeriesRootMatchQueueRepository
+	Refresher                    handlers.AdminMetadataRefresher // metadata refresher (may be nil)
+	NodeRepo                     *nodepool.Repository            // stream node repository (may be nil)
+	ProxyPool                    *nodepool.ProxyPool             // proxy node pool (may be nil)
+	TranscodePool                *nodepool.TranscodePool         // transcode node pool (may be nil)
+	SessionSyncer                handlers.PlaybackSessionSyncer  // optional; immediate playback session sync trigger
 	EventBus                     cache.EventBus
 	AdminStatsProvider           handlers.AdminStatsSource
 	Recommender                  recommendations.Recommender // nil when disabled
@@ -116,6 +118,7 @@ type Dependencies struct {
 	FFmpegLogSink                playback.FFmpegLogSink
 	RedisClient                  *redis.Client            // for session listing (may be nil)
 	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
+	AdminJobCancelRegistry       *adminjob.CancelRegistry
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
 	MarkerRegistry               *markers.Registry
@@ -287,6 +290,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		libraryHandler.EventsHub = deps.EventsHub
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
+		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
+		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
+		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
+		if deps.Config != nil {
+			libraryHandler.TVSeriesRootQueue = deps.Config.Matcher.TVSeriesRootQueueEnabled()
+		}
 		if deps.DB != nil {
 			libraryHandler.JobRepo = adminjob.NewRepository(deps.DB)
 		}
@@ -499,6 +508,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
+		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
 		libraryPlaybackPrefHandler = handlers.NewLibraryPlaybackPrefHandler(deps.UserStoreProvider)
@@ -706,6 +716,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
+		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry
+		adminJobsHandler.RealtimeHub = deps.RealtimeHub
 		if adminHandler != nil && deps.FolderRepo != nil && deps.FileRepo != nil && itemRepo != nil && episodeRepo != nil {
 			adminHandler.JobRepo = jobRepo
 			adminHandler.ItemRefreshResolver = adminjob.NewItemRefreshResolver(
@@ -1301,12 +1313,16 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/stale-ids", libraryHandler.HandleListStaleIDs)
 							r.Post("/stale-ids/{contentID}/rematch", libraryHandler.HandleRematchStaleID)
 							r.Get("/unmatched-items", libraryHandler.HandleListUnmatchedItems)
+							r.Get("/metadata-match-queue", libraryHandler.HandleListMetadataMatchQueues)
 							r.Post("/", libraryHandler.HandleCreateLibrary)
 							r.Put("/reorder", libraryHandler.HandleReorderLibraries)
 							r.Put("/{id}", libraryHandler.HandleUpdateLibrary)
 							r.Delete("/{id}", libraryHandler.HandleDeleteLibrary)
 							r.Post("/{id}/check-mount", libraryHandler.HandleCheckLibraryMount)
 							r.Post("/{id}/confirm-empty-root-cleanup", libraryHandler.HandleConfirmEmptyRootCleanup)
+							r.Get("/{id}/metadata-match-queue", libraryHandler.HandleGetMetadataMatchQueue)
+							r.Post("/{id}/metadata-match-queue/retry", libraryHandler.HandleRetryMetadataMatchQueue)
+							r.Post("/{id}/metadata-match-queue/cancel", libraryHandler.HandleCancelMetadataMatchQueue)
 							r.Post("/{id}/refresh-metadata", libraryHandler.HandleRefreshLibraryMetadata)
 							r.Get("/{id}/providers", libraryHandler.HandleGetLibraryProviders)
 							r.Put("/{id}/providers", libraryHandler.HandleSetLibraryProviders)
@@ -1855,6 +1871,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminJobsHandler != nil {
 								r.Route("/jobs", func(r chi.Router) {
 									r.Get("/", adminJobsHandler.HandleList)
+									r.Post("/{id}/cancel", adminJobsHandler.HandleCancel)
 								})
 							}
 

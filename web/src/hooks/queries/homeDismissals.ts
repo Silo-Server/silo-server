@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
-import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
+import {
+  invalidateMediaSurfaceQueries,
+  removeItemFromHomeSectionCaches,
+} from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 export type HomeDismissalSurface = "continue_watching" | "next_up";
@@ -56,6 +59,7 @@ export function useDismissHomeItem() {
       toast.error(error instanceof Error ? error.message : "Failed to remove item");
     },
     onSuccess: async (_data, variables) => {
+      removeItemFromHomeSectionCaches(queryClient, variables.itemId, variables.surface);
       await invalidateMediaSurfaceQueries(queryClient, { itemId: variables.itemId });
       bumpHomeRefreshSignal(queryClient);
       toast.success(dismissalSuccessLabel(variables.surface), {
