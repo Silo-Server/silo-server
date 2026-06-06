@@ -21,6 +21,7 @@ import {
   Blocks,
   Puzzle,
   Send,
+  RefreshCw,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -112,6 +113,11 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
           label: "Requests",
           icon: <Send className="h-[18px] w-[18px]" />,
           href: "/admin/requests",
+        },
+        {
+          label: "Autoscan",
+          icon: <RefreshCw className="h-[18px] w-[18px]" />,
+          href: "/admin/autoscan",
         },
         {
           label: "Sections",

@@ -40,6 +40,7 @@ import AdminActivity from "@/pages/AdminActivity";
 import AdminLogs from "@/pages/AdminLogs";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminRequests from "@/pages/AdminRequests";
+import AdminAutoscan from "@/pages/AdminAutoscan";
 import AdminDevices from "@/pages/AdminDevices";
 import AdminLibraries from "@/pages/AdminLibraries";
 import AdminSettingsLayout from "@/pages/admin-settings/AdminSettingsLayout";
@@ -372,6 +373,7 @@ function AppRoutes() {
                   <Route path="collections/new" element={<AdminCollectionEditor />} />
                   <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
                   <Route path="requests" element={<AdminRequests />} />
+                  <Route path="autoscan" element={<AdminAutoscan />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />

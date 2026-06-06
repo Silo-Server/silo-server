@@ -112,12 +112,43 @@ func TestScanStateUpdateReasons_DetectsMissingExternalSubtitle(t *testing.T) {
 		ExternalSubtitlePaths: []string{filepath.Join(t.TempDir(), "Movie.en.srt")},
 	}
 
-	reasons := scanStateUpdateReasons(existing, 1_000, modifiedAt, fileRootAssignment{}, fileGroupAssignment{}, "movies", false)
+	reasons := scanStateUpdateReasons(existing, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", false)
 	if !testStringSliceContains(reasons, "external_subtitle_missing") {
 		t.Fatalf("expected external_subtitle_missing reason, got %#v", reasons)
 	}
 	if shouldSkipStableConfirmedScanState(existing, "matched", 1_000, modifiedAt, reasons, false) {
 		t.Fatal("expected missing external subtitle to bypass stable scan-state skip")
+	}
+}
+
+func TestScanStateUpdateReasons_DetectsExternalSubtitleInventoryChange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
+	existing := &scanStateFile{
+		ContentID:             "matched-content",
+		FileSize:              1_000,
+		FileModifiedAt:        &modifiedAt,
+		ExternalSubtitlePaths: []string{filepath.Join(dir, "Movie.en.srt")},
+	}
+
+	reasons := scanStateUpdateReasons(
+		existing,
+		1_000,
+		modifiedAt,
+		[]string{filepath.Join(dir, "Movie.en.srt"), filepath.Join(dir, "Movie.fr.srt")},
+		true,
+		fileRootAssignment{},
+		fileGroupAssignment{},
+		"movies",
+		false,
+	)
+	if !testStringSliceContains(reasons, "external_subtitle_changed") {
+		t.Fatalf("expected external_subtitle_changed reason, got %#v", reasons)
+	}
+	if shouldSkipStableConfirmedScanState(existing, "matched", 1_000, modifiedAt, reasons, false) {
+		t.Fatal("expected external subtitle change to bypass stable scan-state skip")
 	}
 }
 

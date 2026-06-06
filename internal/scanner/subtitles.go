@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
 )
@@ -16,6 +17,49 @@ var subtitleExtensions = map[string]bool{
 	".ass": true,
 	".ssa": true,
 	".sub": true,
+}
+
+type externalSubtitleDirCache struct {
+	mu   sync.Mutex
+	dirs map[string]externalSubtitleDirListing
+}
+
+type externalSubtitleDirListing struct {
+	entries []os.DirEntry
+	err     error
+}
+
+func newExternalSubtitleDirCache() *externalSubtitleDirCache {
+	return &externalSubtitleDirCache{
+		dirs: make(map[string]externalSubtitleDirListing),
+	}
+}
+
+func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubtitleInfo, error) {
+	if c == nil {
+		return DetectExternalSubtitles(mediaFilePath)
+	}
+
+	dir := filepath.Dir(mediaFilePath)
+	c.mu.Lock()
+	listing, ok := c.dirs[dir]
+	c.mu.Unlock()
+	if !ok {
+		entries, err := os.ReadDir(dir)
+		listing = externalSubtitleDirListing{entries: entries, err: err}
+		c.mu.Lock()
+		if existing, found := c.dirs[dir]; found {
+			listing = existing
+		} else {
+			c.dirs[dir] = listing
+		}
+		c.mu.Unlock()
+	}
+	if listing.err != nil {
+		return nil, fmt.Errorf("subtitles: read dir %s: %w", dir, listing.err)
+	}
+
+	return externalSubtitlesFromEntries(mediaFilePath, listing.entries), nil
 }
 
 // DetectExternalSubtitles scans the directory containing the media file for
@@ -30,13 +74,18 @@ var subtitleExtensions = map[string]bool{
 //	Movie.forced.eng.srt  -> language: "eng", forced: true
 func DetectExternalSubtitles(mediaFilePath string) ([]ExternalSubtitleInfo, error) {
 	dir := filepath.Dir(mediaFilePath)
-	mediaBase := stripExtension(filepath.Base(mediaFilePath))
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("subtitles: read dir %s: %w", dir, err)
 	}
 
+	return externalSubtitlesFromEntries(mediaFilePath, entries), nil
+}
+
+func externalSubtitlesFromEntries(mediaFilePath string, entries []os.DirEntry) []ExternalSubtitleInfo {
+	dir := filepath.Dir(mediaFilePath)
+	mediaBase := stripExtension(filepath.Base(mediaFilePath))
 	var results []ExternalSubtitleInfo
 
 	for _, entry := range entries {
@@ -75,7 +124,7 @@ func DetectExternalSubtitles(mediaFilePath string) ([]ExternalSubtitleInfo, erro
 		results = append(results, info)
 	}
 
-	return results, nil
+	return results
 }
 
 // parseSuffix extracts the language and forced flag from the suffix portion

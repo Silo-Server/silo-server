@@ -1660,6 +1660,208 @@ export interface RequestIntegrationsResponse {
   integrations: RequestIntegration[];
 }
 
+// --- Autoscan v2 types (matched to autoscan.go handler DTOs) ---
+
+export interface AutoscanSettings {
+  enabled: boolean;
+  default_poll_interval_seconds: number;
+  debounce_seconds: number;
+}
+
+export interface AutoscanConnection {
+  id: string;
+  name: string;
+  kind: string;
+  base_url?: string;
+  request_integration_id?: string | null;
+  has_api_key: boolean;
+}
+
+export interface AutoscanConnectionInput {
+  name: string;
+  kind: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionsResponse {
+  connections: AutoscanConnection[];
+}
+
+export interface AutoscanPathRewrite {
+  from: string;
+  to: string;
+}
+
+export interface AutoscanSource {
+  id: string;
+  installation_id: number;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  poll_interval_seconds: number | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  path_rewrites: AutoscanPathRewrite[];
+  source_config: Record<string, string>;
+  label: string;
+}
+
+export interface AutoscanSourceInput {
+  connection_id: string | null;
+  enabled: boolean;
+  poll_interval_seconds: number | null;
+  path_rewrites?: AutoscanPathRewrite[];
+  source_config?: Record<string, string>;
+  label?: string;
+}
+
+export interface AutoscanSourcesResponse {
+  sources: AutoscanSource[];
+}
+
+export interface AutoscanAvailableSource {
+  installation_id: number;
+  capability_id: string;
+  plugin_id: string;
+  display_name: string;
+}
+
+export interface AutoscanAvailableSourcesResponse {
+  plugins: AutoscanAvailableSource[];
+}
+
+export interface AutoscanSourceCreateInput {
+  installation_id: number;
+  capability_id: string;
+  connection_id?: string | null;
+  enabled: boolean;
+  poll_interval_seconds?: number | null;
+  path_rewrites: AutoscanPathRewrite[];
+  source_config?: Record<string, string>;
+}
+
+export interface AutoscanConnectionTestInput {
+  connection_id?: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionTestResult {
+  ok: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface AutoscanProposedRewrite {
+  from: string;
+  to: string;
+  match_depth: number;
+}
+
+export interface AutoscanAmbiguousRoot {
+  root: string;
+  candidates: string[];
+}
+
+export interface AutoscanRewriteSuggestions {
+  proposed: AutoscanProposedRewrite[];
+  unmatched: string[];
+  ambiguous: AutoscanAmbiguousRoot[];
+  covered: string[];
+}
+
+export interface AutoscanStatusSource {
+  id: string;
+  installation_id: number;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  label: string;
+  last_run_at: string | null;
+  last_error: string | null;
+}
+
+export interface AutoscanStatus {
+  enabled: boolean;
+  sources: AutoscanStatusSource[];
+  active_scans: number;
+  accepted_scans: number;
+  running_scans: number;
+  latest_event_at?: string;
+}
+
+export type AutoscanEventStatus = "success" | "error" | "unresolved";
+
+export interface AutoscanEventScanRun {
+  id: string;
+  library_id: number;
+  mode: "library" | "subtree" | "file";
+  path?: string;
+  trigger: string;
+  status: "accepted" | "running" | "completed" | "failed" | "cancelled";
+  requested_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+}
+
+export interface AutoscanEvent {
+  id: number;
+  source_id: string | null;
+  installation_id: number;
+  capability_id: string;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  status: AutoscanEventStatus;
+  changes_returned: number;
+  changes_resolved: number;
+  targets_claimed: number;
+  scans_created: number;
+  scans_reused: number;
+  scans_suppressed: number;
+  error_message?: string;
+  scan_runs: AutoscanEventScanRun[];
+}
+
+export interface AutoscanEventsResponse {
+  events: AutoscanEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type AutoscanScanStatus = "accepted" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AutoscanScan {
+  id: string;
+  library_id: number;
+  mode: "library" | "subtree" | "file";
+  path?: string;
+  trigger: string;
+  status: AutoscanScanStatus;
+  error_message?: string;
+  requested_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  autoscan_event_id?: number;
+  source_id?: string;
+  installation_id?: number;
+  capability_id?: string;
+  event_status?: AutoscanEventStatus;
+  event_completed_at?: string;
+}
+
+export interface AutoscanScansResponse {
+  scans: AutoscanScan[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface RequestListParams {
   status?: MediaRequestStatus | "all";
   outcome?: MediaRequestOutcome | "all";

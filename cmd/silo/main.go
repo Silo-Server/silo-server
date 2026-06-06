@@ -35,6 +35,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -1395,6 +1396,30 @@ func main() {
 			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
+			autoscanRepo := autoscan.NewRepository(deps.DB)
+			autoscanSvc := api.BuildAutoscanService(
+				autoscanRepo,
+				pluginService,
+				pluginInstallationStore,
+				mediarequests.NewRepository(deps.DB),
+				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
+			)
+			// The poll task's default interval seeds the schedule from the stored
+			// settings (DefaultPollIntervalSeconds); per-cycle gating still runs
+			// off the live settings inside PollOnce. Seed in MILLISECONDS as
+			// seconds*1000 — the SAME computation HandleUpdateSettings uses to
+			// reschedule — so startup and reschedule agree for sub-minute and
+			// non-60-multiple intervals (the old seconds/60 minutes path diverged).
+			var intervalMs int64 = 10 * 60 * 1000
+			if settings, serr := autoscanRepo.GetSettings(appCtx); serr == nil && settings.DefaultPollIntervalSeconds > 0 {
+				intervalMs = int64(settings.DefaultPollIntervalSeconds) * 1000
+			}
+			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMs))
+		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)
