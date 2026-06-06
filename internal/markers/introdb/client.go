@@ -75,44 +75,51 @@ func (c *Client) Close() {
 }
 
 // FetchEpisode looks up segment timestamps for a TV episode.
-// At least one of tmdbID or imdbID must be non-empty.
-func (c *Client) FetchEpisode(ctx context.Context, tmdbID, imdbID string, season, episode int, durationMS int64) (*mediaResponse, error) {
-	if tmdbID == "" && imdbID == "" {
-		return nil, fmt.Errorf("introdb: tmdb_id or imdb_id required")
+// At least one of tmdbID, tvdbID, or imdbID must be non-empty. When several are
+// present the preference order is tmdb → tvdb → imdb (matching TheIntroDB's own
+// clients).
+func (c *Client) FetchEpisode(ctx context.Context, tmdbID, tvdbID, imdbID string, season, episode int, durationMS int64) (*mediaResponse, error) {
+	if tmdbID == "" && tvdbID == "" && imdbID == "" {
+		return nil, fmt.Errorf("introdb: tmdb_id, tvdb_id, or imdb_id required")
 	}
 	if season <= 0 || episode <= 0 {
 		return nil, fmt.Errorf("introdb: episode lookup requires season and episode > 0 (got %d/%d)", season, episode)
 	}
 	q := url.Values{}
-	if tmdbID != "" {
-		q.Set("tmdb_id", tmdbID)
-	} else {
-		q.Set("imdb_id", imdbID)
-	}
+	setPreferredID(q, tmdbID, tvdbID, imdbID)
 	q.Set("season", strconv.Itoa(season))
 	q.Set("episode", strconv.Itoa(episode))
 	if durationMS > 0 {
 		q.Set("duration_ms", strconv.FormatInt(durationMS, 10))
 	}
-	return c.fetch(ctx, q, cacheKeyEpisode(tmdbID, imdbID, season, episode, durationMS))
+	return c.fetch(ctx, q, cacheKeyEpisode(tmdbID, tvdbID, imdbID, season, episode, durationMS))
 }
 
 // FetchMovie looks up segment timestamps for a movie.
-// At least one of tmdbID or imdbID must be non-empty.
-func (c *Client) FetchMovie(ctx context.Context, tmdbID, imdbID string, durationMS int64) (*mediaResponse, error) {
-	if tmdbID == "" && imdbID == "" {
-		return nil, fmt.Errorf("introdb: tmdb_id or imdb_id required")
+// At least one of tmdbID, tvdbID, or imdbID must be non-empty.
+func (c *Client) FetchMovie(ctx context.Context, tmdbID, tvdbID, imdbID string, durationMS int64) (*mediaResponse, error) {
+	if tmdbID == "" && tvdbID == "" && imdbID == "" {
+		return nil, fmt.Errorf("introdb: tmdb_id, tvdb_id, or imdb_id required")
 	}
 	q := url.Values{}
-	if tmdbID != "" {
-		q.Set("tmdb_id", tmdbID)
-	} else {
-		q.Set("imdb_id", imdbID)
-	}
+	setPreferredID(q, tmdbID, tvdbID, imdbID)
 	if durationMS > 0 {
 		q.Set("duration_ms", strconv.FormatInt(durationMS, 10))
 	}
-	return c.fetch(ctx, q, cacheKeyMovie(tmdbID, imdbID, durationMS))
+	return c.fetch(ctx, q, cacheKeyMovie(tmdbID, tvdbID, imdbID, durationMS))
+}
+
+// setPreferredID writes exactly one id query parameter, preferring tmdb, then
+// tvdb, then imdb. At least one is assumed non-empty by the callers.
+func setPreferredID(q url.Values, tmdbID, tvdbID, imdbID string) {
+	switch {
+	case tmdbID != "":
+		q.Set("tmdb_id", tmdbID)
+	case tvdbID != "":
+		q.Set("tvdb_id", tvdbID)
+	default:
+		q.Set("imdb_id", imdbID)
+	}
 }
 
 func (c *Client) fetch(ctx context.Context, q url.Values, key string) (*mediaResponse, error) {
@@ -210,16 +217,24 @@ func retryAfterOrDefault(resp *http.Response, attempt int) time.Duration {
 	return time.Duration(1<<attempt) * time.Second
 }
 
-func cacheKeyEpisode(tmdbID, imdbID string, season, episode int, durationMS int64) string {
-	if tmdbID != "" {
+func cacheKeyEpisode(tmdbID, tvdbID, imdbID string, season, episode int, durationMS int64) string {
+	switch {
+	case tmdbID != "":
 		return fmt.Sprintf("tmdb:%s:s%de%d:d%d", tmdbID, season, episode, durationMS)
+	case tvdbID != "":
+		return fmt.Sprintf("tvdb:%s:s%de%d:d%d", tvdbID, season, episode, durationMS)
+	default:
+		return fmt.Sprintf("imdb:%s:s%de%d:d%d", imdbID, season, episode, durationMS)
 	}
-	return fmt.Sprintf("imdb:%s:s%de%d:d%d", imdbID, season, episode, durationMS)
 }
 
-func cacheKeyMovie(tmdbID, imdbID string, durationMS int64) string {
-	if tmdbID != "" {
+func cacheKeyMovie(tmdbID, tvdbID, imdbID string, durationMS int64) string {
+	switch {
+	case tmdbID != "":
 		return fmt.Sprintf("tmdb:movie:%s:d%d", tmdbID, durationMS)
+	case tvdbID != "":
+		return fmt.Sprintf("tvdb:movie:%s:d%d", tvdbID, durationMS)
+	default:
+		return fmt.Sprintf("imdb:movie:%s:d%d", imdbID, durationMS)
 	}
-	return fmt.Sprintf("imdb:movie:%s:d%d", imdbID, durationMS)
 }

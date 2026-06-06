@@ -39,8 +39,9 @@ func (p *Provider) FetchMarkers(ctx context.Context, req markers.Request) (marke
 	}
 
 	tmdbID := strings.TrimSpace(req.ExternalIDs[markers.ExternalIDKeyTMDB])
+	tvdbID := strings.TrimSpace(req.ExternalIDs[markers.ExternalIDKeyTVDB])
 	imdbID := strings.TrimSpace(req.ExternalIDs[markers.ExternalIDKeyIMDB])
-	if tmdbID == "" && imdbID == "" {
+	if tmdbID == "" && tvdbID == "" && imdbID == "" {
 		return markers.Result{}, nil
 	}
 
@@ -53,9 +54,9 @@ func (p *Provider) FetchMarkers(ctx context.Context, req markers.Request) (marke
 		if req.SeasonNumber <= 0 || req.EpisodeNumber <= 0 {
 			return markers.Result{}, nil
 		}
-		resp, err = p.client.FetchEpisode(ctx, tmdbID, imdbID, req.SeasonNumber, req.EpisodeNumber, durationMS)
+		resp, err = p.client.FetchEpisode(ctx, tmdbID, tvdbID, imdbID, req.SeasonNumber, req.EpisodeNumber, durationMS)
 	case markers.ItemKindMovie:
-		resp, err = p.client.FetchMovie(ctx, tmdbID, imdbID, durationMS)
+		resp, err = p.client.FetchMovie(ctx, tmdbID, tvdbID, imdbID, durationMS)
 	default:
 		return markers.Result{}, nil
 	}
@@ -86,12 +87,19 @@ func (p *Provider) FetchMarkers(ctx context.Context, req markers.Request) (marke
 	return result, nil
 }
 
-// pickMarker selects the first usable segment from a TheIntroDB response
-// array. `requireEnd` is true for segments where the end timestamp is the
-// load-bearing field (intro, recap) — they're allowed to start at 0 if
-// `start_ms` is omitted. For trailing segments (credits, preview) the
-// start is required but the end defaults to the file duration.
+// pickMarker selects the best usable segment from a TheIntroDB response array.
+// `requireEnd` is true for segments where the end timestamp is the load-bearing
+// field (intro, recap) — they're allowed to start at 0 if `start_ms` is omitted.
+// For trailing segments (credits, preview) the start is required but the end
+// defaults to the file duration. When several candidates are usable (e.g. no
+// duration match narrowed the set), the most-submitted one wins, with higher
+// confidence breaking ties; with a single candidate this is the previous
+// first-usable behavior. Real per-segment confidence is used when present,
+// falling back to defaultConfidence only when the API omits it.
 func pickMarker(stamps []segmentTimestamps, kind markers.MarkerKind, totalDuration time.Duration, requireEnd bool) (markers.Marker, bool) {
+	best := markers.Marker{}
+	bestSubs := -1
+	found := false
 	for _, s := range stamps {
 		start := time.Duration(0)
 		end := totalDuration
@@ -110,7 +118,19 @@ func pickMarker(stamps []segmentTimestamps, kind markers.MarkerKind, totalDurati
 		if end <= start {
 			continue
 		}
-		return markers.Marker{Kind: kind, Start: start, End: end, Confidence: 0.9}, true
+		confidence := defaultConfidence
+		if s.Confidence != nil {
+			confidence = *s.Confidence
+		}
+		subs := 0
+		if s.SubmissionCount != nil {
+			subs = *s.SubmissionCount
+		}
+		if !found || subs > bestSubs || (subs == bestSubs && confidence > best.Confidence) {
+			best = markers.Marker{Kind: kind, Start: start, End: end, Confidence: confidence, SubmissionCount: subs}
+			bestSubs = subs
+			found = true
+		}
 	}
-	return markers.Marker{}, false
+	return best, found
 }

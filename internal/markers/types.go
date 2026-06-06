@@ -72,10 +72,11 @@ type Result struct {
 }
 
 type Marker struct {
-	Kind       MarkerKind
-	Start      time.Duration
-	End        time.Duration
-	Confidence float64
+	Kind            MarkerKind
+	Start           time.Duration
+	End             time.Duration
+	Confidence      float64
+	SubmissionCount int
 }
 
 type Registry struct {

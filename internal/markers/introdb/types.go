@@ -13,6 +13,10 @@ const ProviderID = "introdb"
 // changes.
 const Algorithm = "introdb:v3"
 
+// defaultConfidence is applied when TheIntroDB omits a per-segment confidence
+// in the /media response. Real per-segment confidence is preferred when present.
+const defaultConfidence = 0.9
+
 // DefaultBaseURL is the production TheIntroDB v3 endpoint. Overridable
 // in tests via Client.SetBaseURL.
 const DefaultBaseURL = "https://api.theintrodb.org/v3"
@@ -34,8 +38,11 @@ type mediaResponse struct {
 // segmentTimestamps is the per-occurrence shape returned by TheIntroDB.
 // Either bound may be nil — for intro/recap, start may be omitted (segment
 // begins at file start); for credits/preview, end may be omitted (segment
-// runs to file end).
+// runs to file end). Confidence and SubmissionCount are optional per-segment
+// quality signals used to rank multiple candidates for the same segment kind.
 type segmentTimestamps struct {
-	StartMs *int64 `json:"start_ms,omitempty"`
-	EndMs   *int64 `json:"end_ms,omitempty"`
+	StartMs         *int64   `json:"start_ms,omitempty"`
+	EndMs           *int64   `json:"end_ms,omitempty"`
+	Confidence      *float64 `json:"confidence,omitempty"`
+	SubmissionCount *int     `json:"submission_count,omitempty"`
 }
