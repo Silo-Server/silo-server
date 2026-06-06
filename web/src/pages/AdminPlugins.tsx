@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -52,12 +53,12 @@ import {
   useDeletePluginInstallation,
   useDeletePluginRepository,
   useInstallPlugin,
+  usePluginUpload,
   useSavePluginAuthBinding,
   useSavePluginConfig,
   useSavePluginTaskBinding,
   useUpdatePluginInstallation,
   useUpdatePluginRepository,
-  useUploadPlugin,
 } from "@/hooks/queries/admin/plugins";
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
@@ -618,14 +619,13 @@ function RepositorySection() {
 /* ─── Upload section ────────────────────────────────────────────── */
 
 function UploadSection() {
-  const uploadPlugin = useUploadPlugin();
+  const { upload, progress, isPending } = usePluginUpload();
   const [file, setFile] = useState<File | null>(null);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!file) return;
-    uploadPlugin.mutate(file);
-    setFile(null);
+    upload(file, { onSuccess: () => setFile(null) });
   }
 
   return (
@@ -649,16 +649,12 @@ function UploadSection() {
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
         </label>
-        <Button
-          type="submit"
-          variant="outline"
-          size="sm"
-          disabled={!file || uploadPlugin.isPending}
-        >
+        <Button type="submit" variant="outline" size="sm" disabled={!file || isPending}>
           <Upload className="mr-1.5 h-3.5 w-3.5" />
-          Upload
+          {isPending ? "Uploading..." : "Upload"}
         </Button>
       </form>
+      {progress !== null && <Progress value={progress} aria-label="Plugin upload progress" />}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import type { PluginInstallation } from "@/api/types";
@@ -16,13 +17,13 @@ import {
   useDeletePluginInstallation,
   useDeletePluginRepository,
   useInstallPlugin,
+  usePluginUpload,
   useSavePluginAuthBinding,
   useSavePluginConfig,
   useSavePluginTaskBinding,
   useTestPluginConfig,
   useUpdatePluginInstallation,
   useUpdatePluginRepository,
-  useUploadPlugin,
 } from "@/hooks/queries/admin/plugins";
 
 function PluginInstallationCard({ installation }: { installation: PluginInstallation }) {
@@ -226,7 +227,7 @@ export default function PluginsSettings() {
   const updateRepository = useUpdatePluginRepository();
   const deleteRepository = useDeletePluginRepository();
   const installPlugin = useInstallPlugin();
-  const uploadPlugin = useUploadPlugin();
+  const uploadPlugin = usePluginUpload();
 
   const [repositoryName, setRepositoryName] = useState("");
   const [repositoryURL, setRepositoryURL] = useState("");
@@ -251,8 +252,7 @@ export default function PluginsSettings() {
     if (!uploadFile) {
       return;
     }
-    uploadPlugin.mutate(uploadFile);
-    setUploadFile(null);
+    uploadPlugin.upload(uploadFile, { onSuccess: () => setUploadFile(null) });
   }
 
   if (isLoading) {
@@ -336,11 +336,18 @@ export default function PluginsSettings() {
           onSubmit={handleUploadSubmit}
           className="flex flex-col gap-3 rounded-md border p-3 lg:flex-row lg:items-center"
         >
-          <input type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-          <Button type="submit" variant="outline">
-            Upload package
+          <input
+            type="file"
+            disabled={uploadPlugin.isPending}
+            onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+          />
+          <Button type="submit" variant="outline" disabled={!uploadFile || uploadPlugin.isPending}>
+            {uploadPlugin.isPending ? "Uploading..." : "Upload package"}
           </Button>
         </form>
+        {uploadPlugin.progress !== null && (
+          <Progress value={uploadPlugin.progress} aria-label="Plugin upload progress" />
+        )}
         <div className="space-y-2">
           {catalog.map((entry) => (
             <div
