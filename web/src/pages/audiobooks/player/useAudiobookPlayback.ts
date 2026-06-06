@@ -71,7 +71,7 @@ export function useAudiobookPlayback({
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
   const [rate, setRateState] = useState(1);
 
-  const reportProgress = useReportAudiobookProgress();
+  const { mutate: reportProgress } = useReportAudiobookProgress();
   const file = files[0];
   const fileId = file?.id;
   const streamUrl = fileId ? buildDirectDownloadUrl(fileId) : "";
@@ -80,7 +80,7 @@ export function useAudiobookPlayback({
   const reportRef = useRef<(pos: number) => void>(() => {});
   reportRef.current = (posSeconds: number) => {
     if (!fileId) return;
-    reportProgress.mutate({
+    reportProgress({
       contentId,
       positionSeconds: Math.floor(posSeconds),
       mediaFileId: fileId,
