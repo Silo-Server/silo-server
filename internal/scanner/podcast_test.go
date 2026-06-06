@@ -39,3 +39,23 @@ func TestParsePodcastShow(t *testing.T) {
 		}
 	}
 }
+
+func TestPodcastIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
+	show := &parsedPodcastShow{Title: "Tagged Show", Author: "Host", Year: 2024}
+	episode := parsedPodcastEpisode{Title: "Episode", Track: 3}
+	if got := podcastIdentityConfidence(show, episode); got != "high" {
+		t.Fatalf("complete metadata confidence = %q, want high", got)
+	}
+
+	show = &parsedPodcastShow{Title: "Tagged Show"}
+	episode = parsedPodcastEpisode{Title: "Episode"}
+	if got := podcastIdentityConfidence(show, episode); got != "medium" {
+		t.Fatalf("partial metadata confidence = %q, want medium", got)
+	}
+
+	show = &parsedPodcastShow{}
+	episode = parsedPodcastEpisode{}
+	if got := podcastIdentityConfidence(show, episode); got != "low" {
+		t.Fatalf("empty metadata confidence = %q, want low", got)
+	}
+}

@@ -52,3 +52,25 @@ func TestServiceEnabledPropagatesError(t *testing.T) {
 		t.Fatalf("Enabled error = %v, want %v wrapped", err, wantErr)
 	}
 }
+
+func TestServiceEnabledNilReceiverReturnsFalse(t *testing.T) {
+	var svc *Service
+	got, err := svc.Enabled(context.Background())
+	if err != nil {
+		t.Fatalf("Enabled returned error: %v", err)
+	}
+	if got {
+		t.Fatal("Enabled = true, want false")
+	}
+}
+
+func TestServiceEnabledNilSettingsReturnsFalse(t *testing.T) {
+	svc := New(nil)
+	got, err := svc.Enabled(context.Background())
+	if err != nil {
+		t.Fatalf("Enabled returned error: %v", err)
+	}
+	if got {
+		t.Fatal("Enabled = true, want false")
+	}
+}

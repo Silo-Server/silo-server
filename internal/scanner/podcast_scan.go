@@ -169,7 +169,7 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 			BaseTitle:          show.Title,
 			BaseYear:           show.Year,
 			BaseType:           "podcast",
-			IdentityConfidence: "high",
+			IdentityConfidence: podcastIdentityConfidence(show, ep),
 			FilePath:           ep.Path,
 			ProbeSource:        "local",
 		}
@@ -178,4 +178,36 @@ func (s *Scanner) upsertPodcastEpisodesAndFiles(
 		}
 	}
 	return nil
+}
+
+func podcastIdentityConfidence(show *parsedPodcastShow, episode parsedPodcastEpisode) string {
+	if show == nil {
+		return "low"
+	}
+
+	score := 0
+	if show.Title != "" {
+		score++
+	}
+	if show.Author != "" {
+		score++
+	}
+	if show.Year > 0 {
+		score++
+	}
+	if episode.Title != "" {
+		score++
+	}
+	if episode.Track > 0 {
+		score++
+	}
+
+	switch {
+	case score >= 5:
+		return "high"
+	case score > 0:
+		return "medium"
+	default:
+		return "low"
+	}
 }

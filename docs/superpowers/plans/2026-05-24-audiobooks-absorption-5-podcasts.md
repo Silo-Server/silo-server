@@ -2,12 +2,12 @@
 
 **Goal:** Port the plugin's `podcastfeed` package as a first-party scheduled task in silo, so RSS-subscribed podcasts get their episode lists kept up to date.
 
-**Source plugin:** `/opt/silo_plugins/silo-plugin-audiobooks/internal/podcastfeed/refresher.go` (353 LOC) + `refresher_test.go` (295 LOC)
+**Source plugin:** `../silo-plugin-audiobooks/internal/podcastfeed/refresher.go` (353 LOC) + `refresher_test.go` (295 LOC)
 
 ## Tasks
 
 ### Task 1: Port the refresher package
-- Copy `refresher.go` + `refresher_test.go` from plugin to `/opt/silo-server/internal/audiobooks/podcastfeed/`
+- Copy `refresher.go` + `refresher_test.go` from plugin to `internal/audiobooks/podcastfeed/`
 - Update imports (drop plugin SDK; use silo's `pgxpool` + `log/slog`)
 - Rewrite SQL queries against silo's `podcast_feeds` table (created in sub-plan 1 migration 140), `media_items` (type='podcast'), and `episodes`
 - Drop the plugin's `presentation_libraries` reference; subscriptions are tracked by `podcast_feeds.media_item_id`

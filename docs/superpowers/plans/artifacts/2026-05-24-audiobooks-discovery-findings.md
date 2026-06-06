@@ -1,13 +1,14 @@
 # Audiobooks Absorption — Discovery Findings
 
 Produced by sub-plan 1, Task 1. Locks data-model and integration
-decisions for migrations 139–142 and downstream sub-plans.
+decisions for the audiobook foundation migrations and downstream sub-plans.
 
 ## D1 — Next migration number
 
-Highest existing migration: 138_search_number_word_normalization.up.sql
-Next available number: 139
-Sub-plan 1 will use migrations 139 through 142.
+Original snapshot: `138_search_number_word_normalization.up.sql` was the
+highest existing migration. The landed implementation was renumbered to
+`147_abs_sessions`, `157_podcast_feeds`, `159_media_folders_kind_noop`, and
+`160_audiobooks_feature_flag`.
 
 ## D2 — `media_libraries` kind/type column
 
@@ -16,10 +17,10 @@ The spec refers to `media_libraries` but the actual table is `media_folders`.
 library content. Current values in production: `movies`, `series`, `mixed`.
 
 Existing column 'type' (text) discriminates library content on `media_folders`.
-Task 4 (migration 141) should ADD the value `audiobooks` to the type vocabulary
+Task 4 (migration 159) should ADD the value `audiobooks` to the type vocabulary
 rather than add a new column. The audiobook scanner branch will set
 `media_folders.type = 'audiobooks'` for audiobook libraries. No schema change
-needed for the column itself; migration 141 becomes a no-op DDL migration that
+needed for the column itself; migration 159 becomes a no-op DDL migration that
 documents the new allowed value and adds any supporting indexes if needed.
 
 No CHECK constraint or enum enforces the `type` column values, so adding

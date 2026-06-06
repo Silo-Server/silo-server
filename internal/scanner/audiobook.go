@@ -74,7 +74,8 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	}
 
 	// Multi-file case: read header from the first file, synthesize one
-	// chapter per file with title = filename stem.
+	// chapter per file with title = filename stem. A 0..0 range means the
+	// chapter duration is unknown; consumers should treat it as non-seekable.
 	probedFirst, err := ProbeFile(ctx, ffprobePath, audioFiles[0])
 	if err != nil {
 		return nil, fmt.Errorf("probe first audiobook file %s: %w", audioFiles[0], err)

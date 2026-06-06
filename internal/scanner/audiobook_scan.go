@@ -30,10 +30,15 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
 	}
 
+	var attempted int
+	var succeeded int
+	var failures []error
 	for _, root := range folder.Paths {
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			slog.Warn("audiobook scan: read root failed", "root", root, "error", err)
+			attempted++
+			failures = append(failures, fmt.Errorf("read root %s: %w", root, err))
 			continue
 		}
 		for _, entry := range entries {
@@ -41,15 +46,22 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 				continue
 			}
 			subPath := filepath.Join(root, entry.Name())
+			attempted++
 			if err := s.reconcileAudiobookFolder(ctx, folder, subPath); err != nil {
 				slog.Warn("audiobook scan: folder failed",
 					"folder_id", folder.ID,
 					"path", subPath,
 					"error", err,
 				)
+				failures = append(failures, fmt.Errorf("%s: %w", subPath, err))
 				// Continue with siblings — one bad audiobook should not stop the scan.
+				continue
 			}
+			succeeded++
 		}
+	}
+	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
+		return fmt.Errorf("audiobook scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
 	}
 	return nil
 }
@@ -151,19 +163,19 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 		}
 
 		mf := models.MediaFile{
-			ContentID:         contentID,
-			MediaFolderID:     folder.ID,
-			CanonicalRootPath: folderPath,
-			ObservedRootPath:  folderPath,
-			ContentGroupKey:   contentID,
-			GroupKeyVersion:   1,
-			BaseTitle:         book.Title,
-			BaseYear:          book.Year,
-			BaseType:          "audiobook",
-			IdentityConfidence: "high",
-			FilePath:          af.Path,
-			Chapters:          chapters,
-			ProbeSource:       "local",
+			ContentID:          contentID,
+			MediaFolderID:      folder.ID,
+			CanonicalRootPath:  folderPath,
+			ObservedRootPath:   folderPath,
+			ContentGroupKey:    contentID,
+			GroupKeyVersion:    1,
+			BaseTitle:          book.Title,
+			BaseYear:           book.Year,
+			BaseType:           "audiobook",
+			IdentityConfidence: audiobookIdentityConfidence(book, af),
+			FilePath:           af.Path,
+			Chapters:           chapters,
+			ProbeSource:        "local",
 		}
 
 		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
@@ -214,4 +226,36 @@ func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, b
 	// For audiobook scanning this is acceptable — we re-derive all credits
 	// from the file metadata on every scan, so the set is authoritative.
 	return s.itemRepo.ReplacePeople(ctx, contentID, people)
+}
+
+func audiobookIdentityConfidence(book *parsedAudiobook, file parsedAudiobookFile) string {
+	if book == nil {
+		return "low"
+	}
+
+	score := 0
+	if book.Title != "" {
+		score++
+	}
+	if book.Author != "" || book.Narrator != "" {
+		score++
+	}
+	if book.Year > 0 {
+		score++
+	}
+	for _, ch := range file.Chapters {
+		if ch.Title != "" && ch.EndSeconds > ch.StartSeconds {
+			score++
+			break
+		}
+	}
+
+	switch {
+	case score >= 4:
+		return "high"
+	case score > 0:
+		return "medium"
+	default:
+		return "low"
+	}
 }
