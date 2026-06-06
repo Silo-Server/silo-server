@@ -93,10 +93,11 @@ type SegmentProgress struct {
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
 // for ffmpeg or seek-restart immediately.
 type SegmentRecoveryDecision struct {
-	Wait        bool
-	WaitTimeout time.Duration
-	Reason      string
-	Progress    SegmentProgress
+	Wait             bool
+	WaitTimeout      time.Duration
+	RestartOnTimeout bool
+	Reason           string
+	Progress         SegmentProgress
 }
 
 // defaultSegmentDuration is the segment length when not specified. Short
@@ -109,6 +110,7 @@ const maxPersistedFFmpegChars = 2000
 
 const (
 	maxSequentialMissingSegments = 2
+	activeSegmentWait            = 12 * time.Second
 	segmentWaitGrace             = 1500 * time.Millisecond
 	maxSegmentWait               = 6 * time.Second
 	minSegmentWait               = 3 * time.Second
@@ -1096,8 +1098,9 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) SegmentRecoveryDecision {
 	progress := s.SegmentProgress(now)
 	decision := SegmentRecoveryDecision{
-		WaitTimeout: segmentWaitTimeout(progress.SegmentDuration),
-		Progress:    progress,
+		WaitTimeout:      segmentWaitTimeout(progress.SegmentDuration),
+		RestartOnTimeout: true,
+		Progress:         progress,
 	}
 
 	switch {
@@ -1112,6 +1115,8 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	case !progress.HasManifest:
 		if segNum <= progress.StartSegmentNumber+1 {
 			decision.Wait = true
+			decision.WaitTimeout = activeSegmentWait
+			decision.RestartOnTimeout = false
 			decision.Reason = "startup_manifest_not_ready"
 		} else {
 			decision.Reason = "startup_request_beyond_window"
@@ -1122,6 +1127,8 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		decision.Reason = "produced_output_stale"
 	default:
 		decision.Wait = true
+		decision.WaitTimeout = activeSegmentWait
+		decision.RestartOnTimeout = false
 		decision.Reason = "near_produced_head"
 	}
 
