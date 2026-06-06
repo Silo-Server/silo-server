@@ -33,6 +33,36 @@ type Provider interface {
 	FetchMarkers(ctx context.Context, req Request) (Result, error)
 }
 
+const (
+	ProviderSourceBuiltIn = "built_in"
+	ProviderSourcePlugin  = "plugin"
+)
+
+// ProviderDescriptor is optional provider metadata surfaced by admin APIs.
+type ProviderDescriptor struct {
+	ID                   string
+	DisplayName          string
+	SourceType           string
+	PluginID             string
+	PluginInstallationID int
+	CapabilityID         string
+}
+
+type DescribedProvider interface {
+	ProviderDescription() ProviderDescriptor
+}
+
+// SubmissionRequirements describes IDs the generic contribution path can
+// validate before calling a provider. Providers may still perform richer
+// validation inside SubmitMarker.
+type SubmissionRequirements struct {
+	RequiredExternalIDs []string
+}
+
+type SubmissionRequirementProvider interface {
+	SubmissionRequirements() SubmissionRequirements
+}
+
 type ItemKind int
 
 const (
@@ -78,10 +108,11 @@ type Marker struct {
 	End             time.Duration
 	Confidence      float64
 	SubmissionCount int
+	SourceClass     string
 	// ProviderID and Algorithm identify the source of this individual marker.
 	// They are usually empty for a single-provider Result (the Result-level
-	// ProviderID/Algorithm apply); FetchMerged sets them per marker so a merged
-	// result records correct per-segment provenance.
+	// SourceClass/ProviderID/Algorithm apply); FetchMerged sets them per marker
+	// so a merged result records correct per-segment provenance.
 	ProviderID string
 	Algorithm  string
 }
@@ -166,6 +197,7 @@ type Submitter interface {
 }
 
 type Registry struct {
+	mu        sync.RWMutex
 	providers []Provider
 	logger    *slog.Logger
 	config    *ProviderConfigStore
@@ -186,6 +218,8 @@ func (r *Registry) Register(provider Provider) error {
 	if id == "" {
 		return fmt.Errorf("marker provider ID is required")
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, existing := range r.providers {
 		if existing.ID() == id {
 			return fmt.Errorf("marker provider %q already registered", id)
@@ -196,7 +230,12 @@ func (r *Registry) Register(provider Provider) error {
 }
 
 func (r *Registry) Providers() []Provider {
-	if r == nil || len(r.providers) == 0 {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.providers) == 0 {
 		return nil
 	}
 	out := make([]Provider, len(r.providers))
@@ -204,13 +243,42 @@ func (r *Registry) Providers() []Provider {
 	return out
 }
 
+// SetProviders atomically replaces the registered provider set. It is used when
+// plugin lifecycle changes require rebuilding the marker-provider list.
+func (r *Registry) SetProviders(providers []Provider) error {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(providers))
+	next := make([]Provider, 0, len(providers))
+	for _, provider := range providers {
+		if provider == nil {
+			return fmt.Errorf("marker provider is nil")
+		}
+		id := strings.TrimSpace(provider.ID())
+		if id == "" {
+			return fmt.Errorf("marker provider ID is required")
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("marker provider %q already registered", id)
+		}
+		seen[id] = struct{}{}
+		next = append(next, provider)
+	}
+	r.mu.Lock()
+	r.providers = next
+	r.mu.Unlock()
+	return nil
+}
+
 func (r *Registry) FetchFirstHit(ctx context.Context, req Request) (Result, bool, error) {
-	if r == nil || len(r.providers) == 0 {
+	providers := r.Providers()
+	if len(providers) == 0 {
 		return Result{}, false, nil
 	}
 
 	var lastErr error
-	for _, provider := range r.providers {
+	for _, provider := range providers {
 		result, err := provider.FetchMarkers(ctx, req)
 		if err != nil {
 			lastErr = err
@@ -242,13 +310,15 @@ func (r *Registry) UseConfigStore(store *ProviderConfigStore) {
 }
 
 // FetchMerged queries every fetch-enabled provider concurrently and keeps, per
-// segment kind, the best candidate — ranked by submission count, then
-// confidence, then the provider's fetch priority (lower preferred). The winning
-// markers are stamped with their provider/algorithm so the write path records
-// correct per-segment provenance. With a single enabled provider this returns
-// the same result as FetchFirstHit.
+// segment kind, the best candidate — ranked by provider fetch priority (lower
+// preferred), then submission count, then confidence, then provider id for
+// deterministic output. Submission count and confidence are provider-local
+// quality signals; explicit admin priority is the cross-provider winner rule.
+// The winning markers are stamped with source/provider/algorithm so the write
+// path records correct per-segment provenance. With a single enabled provider
+// this returns the same result as FetchFirstHit.
 func (r *Registry) FetchMerged(ctx context.Context, req Request) (Result, bool, error) {
-	if r == nil || len(r.providers) == 0 {
+	if r == nil || len(r.Providers()) == 0 {
 		return Result{}, false, nil
 	}
 
@@ -283,6 +353,7 @@ func (r *Registry) FetchMerged(ctx context.Context, req Request) (Result, bool, 
 			continue
 		}
 		for _, m := range f.result.Markers {
+			m.SourceClass = firstNonEmpty(m.SourceClass, f.result.SourceClass, models.MarkerSourceOnline)
 			m.ProviderID = firstNonEmpty(m.ProviderID, f.result.ProviderID, f.entry.provider.ID())
 			m.Algorithm = firstNonEmpty(m.Algorithm, f.result.Algorithm)
 			cand := mergeCandidate{marker: m, priority: f.entry.priority}
@@ -313,9 +384,10 @@ type fetchEntry struct {
 // config store is set only fetch-enabled providers participate, ordered by
 // fetch_priority; otherwise all providers participate in registration order.
 func (r *Registry) fetchEntries() []fetchEntry {
+	providers := r.Providers()
 	if r.config == nil {
-		entries := make([]fetchEntry, 0, len(r.providers))
-		for i, p := range r.providers {
+		entries := make([]fetchEntry, 0, len(providers))
+		for i, p := range providers {
 			entries = append(entries, fetchEntry{provider: p, priority: i})
 		}
 		return entries
@@ -324,8 +396,8 @@ func (r *Registry) fetchEntries() []fetchEntry {
 	for _, c := range r.config.EnabledForFetch() {
 		priority[c.Provider] = c.FetchPriority
 	}
-	entries := make([]fetchEntry, 0, len(r.providers))
-	for _, p := range r.providers {
+	entries := make([]fetchEntry, 0, len(providers))
+	for _, p := range providers {
 		if prio, ok := priority[p.ID()]; ok {
 			entries = append(entries, fetchEntry{provider: p, priority: prio})
 		}
@@ -339,15 +411,19 @@ type mergeCandidate struct {
 }
 
 // better reports whether a should win over b for the same segment kind: more
-// submissions, then higher confidence, then lower (preferred) fetch priority.
+// preferred fetch priority, then more submissions, then higher confidence, then
+// deterministic provider id ordering.
 func (a mergeCandidate) better(b mergeCandidate) bool {
+	if a.priority != b.priority {
+		return a.priority < b.priority
+	}
 	if a.marker.SubmissionCount != b.marker.SubmissionCount {
 		return a.marker.SubmissionCount > b.marker.SubmissionCount
 	}
 	if a.marker.Confidence != b.marker.Confidence {
 		return a.marker.Confidence > b.marker.Confidence
 	}
-	return a.priority < b.priority
+	return a.marker.ProviderID < b.marker.ProviderID
 }
 
 func firstNonEmpty(values ...string) string {

@@ -105,3 +105,42 @@ func TestClient_ScanSource_CapabilityGate(t *testing.T) {
 		}
 	})
 }
+
+func TestClient_MarkerProvider_CapabilityGate(t *testing.T) {
+	t.Run("absent capability returns error", func(t *testing.T) {
+		c := makeTestClient(t, nil)
+		_, err := c.MarkerProvider("missing")
+		if err == nil {
+			t.Fatal("expected error for missing marker_provider.v1 capability, got nil")
+		}
+		if !errors.Is(err, ErrCapabilityNotFound) {
+			t.Errorf("expected ErrCapabilityNotFound, got %v", err)
+		}
+	})
+
+	t.Run("declared capability returns no error", func(t *testing.T) {
+		c := makeTestClient(t, []*pluginv1.CapabilityDescriptor{
+			{Type: "marker_provider.v1", Id: "markers"},
+		})
+		got, err := c.MarkerProvider("markers")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil MarkerProviderClient")
+		}
+	})
+
+	t.Run("wrong id returns error", func(t *testing.T) {
+		c := makeTestClient(t, []*pluginv1.CapabilityDescriptor{
+			{Type: "marker_provider.v1", Id: "markers"},
+		})
+		_, err := c.MarkerProvider("other")
+		if err == nil {
+			t.Fatal("expected error for mismatched marker_provider.v1 capability id, got nil")
+		}
+		if !errors.Is(err, ErrCapabilityNotFound) {
+			t.Errorf("expected ErrCapabilityNotFound, got %v", err)
+		}
+	})
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 
 	"github.com/go-chi/chi/v5"
 
@@ -28,6 +29,11 @@ func NewAdminMarkerProvidersHandler(registry *markers.Registry, config *markers.
 
 type providerConfigResponse struct {
 	Provider                string  `json:"provider"`
+	DisplayName             string  `json:"display_name,omitempty"`
+	SourceType              string  `json:"source_type,omitempty"`
+	PluginID                string  `json:"plugin_id,omitempty"`
+	PluginInstallationID    int     `json:"plugin_installation_id,omitempty"`
+	CapabilityID            string  `json:"capability_id,omitempty"`
 	IsSubmitter             bool    `json:"is_submitter"`
 	FetchEnabled            bool    `json:"fetch_enabled"`
 	FetchPriority           int     `json:"fetch_priority"`
@@ -59,6 +65,24 @@ func (h *AdminMarkerProvidersHandler) submitterIDs() map[string]bool {
 	return out
 }
 
+func (h *AdminMarkerProvidersHandler) providerDescriptions() map[string]markers.ProviderDescriptor {
+	out := map[string]markers.ProviderDescriptor{}
+	if h.Registry == nil {
+		return out
+	}
+	for _, p := range h.Registry.Providers() {
+		desc := markers.ProviderDescriptor{ID: p.ID()}
+		if described, ok := p.(markers.DescribedProvider); ok {
+			desc = described.ProviderDescription()
+		}
+		if desc.ID == "" {
+			desc.ID = p.ID()
+		}
+		out[p.ID()] = desc
+	}
+	return out
+}
+
 // HandleListProviders lists registered providers with their config + capability.
 func (h *AdminMarkerProvidersHandler) HandleListProviders(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.Config == nil {
@@ -66,10 +90,27 @@ func (h *AdminMarkerProvidersHandler) HandleListProviders(w http.ResponseWriter,
 		return
 	}
 	submitters := h.submitterIDs()
+	descriptions := h.providerDescriptions()
 	out := []providerConfigResponse{}
-	for _, c := range h.Config.List() {
-		out = append(out, toProviderConfigResponse(c, submitters[c.Provider]))
+	if h.Registry != nil {
+		for _, provider := range h.Registry.Providers() {
+			c, ok := h.Config.Get(provider.ID())
+			if !ok {
+				continue
+			}
+			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
+		}
+	} else {
+		for _, c := range h.Config.List() {
+			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
+		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FetchPriority != out[j].FetchPriority {
+			return out[i].FetchPriority < out[j].FetchPriority
+		}
+		return out[i].Provider < out[j].Provider
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
 
@@ -121,7 +162,7 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update provider")
 		return
 	}
-	writeJSON(w, http.StatusOK, toProviderConfigResponse(existing, h.submitterIDs()[provider]))
+	writeJSON(w, http.StatusOK, toProviderConfigResponse(existing, h.submitterIDs()[provider], h.providerDescriptions()[provider]))
 }
 
 // HandleValidateProvider validates the provider's configured key and returns stats.
@@ -151,9 +192,14 @@ func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWrit
 	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": toMarkerUserStatsResponse(stats)})
 }
 
-func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool) providerConfigResponse {
+func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool, desc markers.ProviderDescriptor) providerConfigResponse {
 	return providerConfigResponse{
 		Provider:                c.Provider,
+		DisplayName:             desc.DisplayName,
+		SourceType:              desc.SourceType,
+		PluginID:                desc.PluginID,
+		PluginInstallationID:    desc.PluginInstallationID,
+		CapabilityID:            desc.CapabilityID,
 		IsSubmitter:             isSubmitter,
 		FetchEnabled:            c.FetchEnabled,
 		FetchPriority:           c.FetchPriority,

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { CircleAlert, CircleCheck, ExternalLink, Loader2, Play, RefreshCw } from "lucide-react";
+import { Loader2, Play, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import type { MarkerProviderConfig, TaskInfo } from "@/api/types";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTasks, useRunTask } from "@/hooks/queries/admin/tasks";
-import { useAdminSensitiveStatus, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
 import {
   useMarkerProviders,
   useUpdateMarkerProvider,
@@ -22,108 +21,184 @@ import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
 
 const INTRO_SETTING_KEYS = ["markers.mode", "markers.lazy_playback"];
-const INTRODB_PROVIDER = "introdb";
-
-function ConfiguredStatus({ configured }: { configured: boolean }) {
-  if (configured) {
-    return (
-      <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
-        <CircleCheck className="h-3.5 w-3.5 text-green-500" />
-        Configured
-      </span>
-    );
-  }
-
-  return (
-    <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
-      <CircleAlert className="h-3.5 w-3.5 text-yellow-500" />
-      Not configured
-    </span>
-  );
-}
 
 function formatRate(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
-function IntroDBAccountCard() {
-  const { data: sensitive } = useAdminSensitiveStatus();
-  const updateSetting = useUpdateServerSetting();
-  const validateProvider = useValidateMarkerProvider();
-  const [apiKey, setApiKey] = useState("");
+function ProviderSettingsCard() {
+  const providers = useMarkerProviders();
 
-  const configured = new Set(sensitive?.configured ?? []).has("introdb.api_key");
-  const validation = validateProvider.data;
+  if (providers.isLoading) {
+    return (
+      <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
+        <Skeleton className="h-5 w-40" />
+        <div className="mt-4 space-y-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  const providerList = providers.data?.providers ?? [];
+  if (providerList.length === 0) {
+    return (
+      <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
+        <h3 className="text-sm font-semibold">Marker Providers</h3>
+        <p className="text-muted-foreground mt-2 text-sm">
+          No marker provider plugins are installed or enabled.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      {providerList.map((provider) => (
+        <ProviderSettingsForm
+          key={[
+            provider.provider,
+            provider.fetch_enabled,
+            provider.fetch_priority,
+            provider.contribute_enabled,
+            provider.contribute_auto_local,
+            provider.contribute_min_confidence,
+            provider.is_submitter,
+          ].join(":")}
+          provider={provider}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ProviderSettingsForm({ provider }: { provider: MarkerProviderConfig }) {
+  const updateProvider = useUpdateMarkerProvider();
+  const validateProvider = useValidateMarkerProvider();
+  const displayName = provider.display_name || provider.provider;
+  const minConfidenceID = `marker-min-confidence-${provider.provider.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const priorityID = `marker-priority-${provider.provider.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const [fetchEnabled, setFetchEnabled] = useState(provider.fetch_enabled);
+  const [fetchPriority, setFetchPriority] = useState(String(provider.fetch_priority));
+  const [contributeEnabled, setContributeEnabled] = useState(provider.contribute_enabled);
+  const [autoLocal, setAutoLocal] = useState(provider.contribute_auto_local);
+  const [minConfidence, setMinConfidence] = useState(
+    String(provider.contribute_min_confidence ?? 0.95),
+  );
+
+  const parsedMinConfidence = Number.parseFloat(minConfidence);
+  const confidenceValid =
+    Number.isFinite(parsedMinConfidence) && parsedMinConfidence >= 0 && parsedMinConfidence <= 1;
+  const parsedFetchPriority = Number.parseInt(fetchPriority, 10);
+  const priorityValid = Number.isInteger(parsedFetchPriority);
+  const dirty =
+    provider.fetch_enabled !== fetchEnabled ||
+    provider.fetch_priority !== parsedFetchPriority ||
+    provider.contribute_enabled !== contributeEnabled ||
+    provider.contribute_auto_local !== autoLocal ||
+    provider.contribute_min_confidence !== parsedMinConfidence;
 
   function save() {
-    const trimmed = apiKey.trim();
-    if (trimmed === "") {
-      toast.error("Enter a TheIntroDB API key to save.");
+    if (!priorityValid) {
+      toast.error("Fetch priority must be a whole number.");
+      return;
+    }
+    if (!confidenceValid) {
+      toast.error("Minimum confidence must be between 0 and 1.");
       return;
     }
 
-    void updateSetting.mutateAsync({ key: "introdb.api_key", value: trimmed }).then(() => {
-      setApiKey("");
+    updateProvider.mutate({
+      provider: provider.provider,
+      patch: {
+        fetch_enabled: fetchEnabled,
+        fetch_priority: parsedFetchPriority,
+        contribute_enabled: contributeEnabled,
+        contribute_auto_local: contributeEnabled && autoLocal,
+        contribute_min_confidence: parsedMinConfidence,
+      },
     });
   }
 
   function validate() {
-    validateProvider.mutate(INTRODB_PROVIDER);
+    validateProvider.mutate({ provider: provider.provider, displayName });
   }
+
+  const validation = validateProvider.data;
 
   return (
     <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold">TheIntroDB Account</h3>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Read access works without a key. A key enables pending submissions and contribution.
-          </p>
-          <a
-            href="https://theintrodb.org/profile"
-            target="_blank"
-            rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs underline"
-          >
-            TheIntroDB profile
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-        <ConfiguredStatus configured={configured} />
+      <div className="mb-3 flex flex-col gap-1">
+        <h3 className="text-sm font-semibold">{displayName}</h3>
+        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
+          Controls online marker lookup and whether locally generated markers can be submitted.
+        </p>
+        <p className="text-muted-foreground text-xs">
+          {provider.source_type === "plugin" && provider.plugin_id
+            ? `Plugin ${provider.plugin_id} / ${provider.capability_id || provider.provider}`
+            : provider.provider}
+        </p>
       </div>
 
-      <SettingField
-        label="API Key"
-        type="password"
-        value={apiKey}
-        onChange={setApiKey}
-        sensitiveConfigured={configured}
-        hint="Leave blank to keep the current value."
-      />
-
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-        <Button
-          type="button"
-          size="sm"
-          onClick={save}
-          disabled={updateSetting.isPending || apiKey.trim() === ""}
-        >
-          {updateSetting.isPending ? "Saving..." : "Save API Key"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={validate}
-          disabled={validateProvider.isPending || !configured}
-        >
-          {validateProvider.isPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5" />
-          )}
-          Validate
-        </Button>
+      <div className="divide-border divide-y">
+        <SettingField
+          label="Use for Online Marker Lookup"
+          type="toggle"
+          value={fetchEnabled ? "true" : "false"}
+          onChange={(value) => setFetchEnabled(value === "true")}
+        />
+        <div className="space-y-1 py-2">
+          <Label htmlFor={priorityID}>Fetch Priority</Label>
+          <Input
+            id={priorityID}
+            type="number"
+            value={fetchPriority}
+            step={1}
+            onChange={(event) => setFetchPriority(event.target.value)}
+            className="w-full sm:w-40"
+            aria-invalid={!priorityValid}
+          />
+          <p className="text-muted-foreground text-xs">Lower numbers win when providers overlap.</p>
+        </div>
+        <SettingField
+          label="Allow Contributions"
+          type="toggle"
+          value={contributeEnabled ? "true" : "false"}
+          onChange={(value) => {
+            const next = value === "true";
+            setContributeEnabled(next);
+            if (!next) setAutoLocal(false);
+          }}
+          disabled={!provider.is_submitter}
+        />
+        <SettingField
+          label="Auto-submit Local Markers"
+          type="toggle"
+          value={autoLocal ? "true" : "false"}
+          onChange={(value) => setAutoLocal(value === "true")}
+          disabled={!provider.is_submitter || !contributeEnabled}
+          hint="Scheduled contribution only sends scanner markers that meet the confidence floor."
+        />
+        <div className="space-y-1 py-2">
+          <Label htmlFor={minConfidenceID}>Minimum Confidence</Label>
+          <Input
+            id={minConfidenceID}
+            type="number"
+            value={minConfidence}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(event) => setMinConfidence(event.target.value)}
+            className="w-full sm:w-40"
+            aria-invalid={!confidenceValid}
+            disabled={!provider.is_submitter}
+          />
+          <p className="text-muted-foreground text-xs">
+            Use a decimal from 0 to 1. The default recommendation is 0.95.
+          </p>
+        </div>
       </div>
 
       {validation && (
@@ -160,147 +235,29 @@ function IntroDBAccountCard() {
           )}
         </div>
       )}
-    </div>
-  );
-}
 
-function ProviderSettingsCard() {
-  const providers = useMarkerProviders();
-  const provider = providers.data?.providers.find((entry) => entry.provider === INTRODB_PROVIDER);
-
-  if (providers.isLoading) {
-    return (
-      <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
-        <Skeleton className="h-5 w-40" />
-        <div className="mt-4 space-y-3">
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-9 w-full" />
-        </div>
-      </div>
-    );
-  }
-
-  if (!provider) {
-    return (
-      <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
-        <h3 className="text-sm font-semibold">TheIntroDB Provider</h3>
-        <p className="text-muted-foreground mt-2 text-sm">
-          The marker provider registry is not available.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <ProviderSettingsForm
-      key={[
-        provider.fetch_enabled,
-        provider.contribute_enabled,
-        provider.contribute_auto_local,
-        provider.contribute_min_confidence,
-        provider.is_submitter,
-      ].join(":")}
-      provider={provider}
-    />
-  );
-}
-
-function ProviderSettingsForm({ provider }: { provider: MarkerProviderConfig }) {
-  const updateProvider = useUpdateMarkerProvider();
-  const [fetchEnabled, setFetchEnabled] = useState(provider.fetch_enabled);
-  const [contributeEnabled, setContributeEnabled] = useState(provider.contribute_enabled);
-  const [autoLocal, setAutoLocal] = useState(provider.contribute_auto_local);
-  const [minConfidence, setMinConfidence] = useState(
-    String(provider.contribute_min_confidence ?? 0.95),
-  );
-
-  const parsedMinConfidence = Number.parseFloat(minConfidence);
-  const confidenceValid =
-    Number.isFinite(parsedMinConfidence) && parsedMinConfidence >= 0 && parsedMinConfidence <= 1;
-  const dirty =
-    provider.fetch_enabled !== fetchEnabled ||
-    provider.contribute_enabled !== contributeEnabled ||
-    provider.contribute_auto_local !== autoLocal ||
-    provider.contribute_min_confidence !== parsedMinConfidence;
-
-  function save() {
-    if (!confidenceValid) {
-      toast.error("Minimum confidence must be between 0 and 1.");
-      return;
-    }
-
-    updateProvider.mutate({
-      provider: INTRODB_PROVIDER,
-      patch: {
-        fetch_enabled: fetchEnabled,
-        contribute_enabled: contributeEnabled,
-        contribute_auto_local: contributeEnabled && autoLocal,
-        contribute_min_confidence: parsedMinConfidence,
-      },
-    });
-  }
-
-  return (
-    <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">TheIntroDB Provider</h3>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-          Controls online marker lookup and whether locally generated markers can be submitted.
-        </p>
-      </div>
-
-      <div className="divide-border divide-y">
-        <SettingField
-          label="Use for Online Marker Lookup"
-          type="toggle"
-          value={fetchEnabled ? "true" : "false"}
-          onChange={(value) => setFetchEnabled(value === "true")}
-        />
-        <SettingField
-          label="Allow Contributions"
-          type="toggle"
-          value={contributeEnabled ? "true" : "false"}
-          onChange={(value) => {
-            const next = value === "true";
-            setContributeEnabled(next);
-            if (!next) setAutoLocal(false);
-          }}
-          disabled={!provider.is_submitter}
-        />
-        <SettingField
-          label="Auto-submit Local Markers"
-          type="toggle"
-          value={autoLocal ? "true" : "false"}
-          onChange={(value) => setAutoLocal(value === "true")}
-          disabled={!provider.is_submitter || !contributeEnabled}
-          hint="Scheduled contribution only sends scanner markers that meet the confidence floor."
-        />
-        <div className="space-y-1 py-2">
-          <Label htmlFor="introdb-min-confidence">Minimum Confidence</Label>
-          <Input
-            id="introdb-min-confidence"
-            type="number"
-            value={minConfidence}
-            min={0}
-            max={1}
-            step={0.01}
-            onChange={(event) => setMinConfidence(event.target.value)}
-            className="w-full sm:w-40"
-            aria-invalid={!confidenceValid}
-          />
-          <p className="text-muted-foreground text-xs">
-            Use a decimal from 0 to 1. The default recommendation is 0.95.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 flex justify-end">
+      <div className="mt-4 flex flex-col justify-end gap-2 sm:flex-row">
+        {provider.is_submitter && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={validate}
+            disabled={validateProvider.isPending}
+          >
+            {validateProvider.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Validate
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
           onClick={save}
-          disabled={!dirty || !confidenceValid || updateProvider.isPending}
+          disabled={!dirty || !priorityValid || !confidenceValid || updateProvider.isPending}
         >
           {updateProvider.isPending ? "Saving..." : "Save Provider Settings"}
         </Button>
@@ -441,7 +398,7 @@ export default function IntroSettings() {
       <div className="mb-6 space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">Intro Markers</h2>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Configure marker lookup, local marker generation, and TheIntroDB contribution.
+          Configure marker lookup, local marker generation, and provider contribution.
         </p>
       </div>
 
@@ -467,7 +424,6 @@ export default function IntroSettings() {
           />
         </FieldGroup>
 
-        <IntroDBAccountCard />
         <ProviderSettingsCard />
         <IntroTasksCard />
       </div>

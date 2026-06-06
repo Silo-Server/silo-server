@@ -34,6 +34,11 @@ type MetadataProviderClient struct {
 	timeout time.Duration
 }
 
+type MarkerProviderClient struct {
+	client  pluginv1.MarkerProviderClient
+	timeout time.Duration
+}
+
 type MediaAnalyzerClient struct {
 	client  pluginv1.MediaAnalyzerClient
 	timeout time.Duration
@@ -100,6 +105,16 @@ func (c *Client) MetadataProvider(capabilityID string) (*MetadataProviderClient,
 	return &MetadataProviderClient{
 		client:  c.rpc.MetadataProvider(),
 		timeout: DefaultMetadataTimeout,
+	}, nil
+}
+
+func (c *Client) MarkerProvider(capabilityID string) (*MarkerProviderClient, error) {
+	if err := c.requireCapability("marker_provider.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &MarkerProviderClient{
+		client:  c.rpc.MarkerProvider(),
+		timeout: DefaultMarkerProviderTimeout,
 	}, nil
 }
 
@@ -230,6 +245,24 @@ func (c *MetadataProviderClient) ResolveImageURLs(ctx context.Context, req *plug
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.ResolveImageURLs(callCtx, req)
+}
+
+func (c *MarkerProviderClient) FetchMarkers(ctx context.Context, req *pluginv1.FetchMarkersRequest) (*pluginv1.FetchMarkersResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.FetchMarkers(callCtx, req)
+}
+
+func (c *MarkerProviderClient) SubmitMarker(ctx context.Context, req *pluginv1.SubmitMarkerRequest) (*pluginv1.SubmitMarkerResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.SubmitMarker(callCtx, req)
+}
+
+func (c *MarkerProviderClient) GetMarkerProviderStats(ctx context.Context, req *pluginv1.GetMarkerProviderStatsRequest) (*pluginv1.MarkerProviderStatsResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.GetMarkerProviderStats(callCtx, req)
 }
 
 func (c *MediaAnalyzerClient) Analyze(ctx context.Context, req *pluginv1.AnalyzeMediaRequest) (*pluginv1.AnalyzeMediaResponse, error) {

@@ -1052,6 +1052,9 @@ func resolveSegmentProvenance(update MarkerUpdate, override *SegmentProvenance) 
 	confidence = update.MarkersConfidence
 	algorithm = update.MarkersAlgorithm
 	if override != nil {
+		if override.Source != "" {
+			source = override.Source
+		}
 		provider = override.Provider
 		confidence = override.Confidence
 		if override.Algorithm != "" {
@@ -1165,7 +1168,10 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 	}
 
 	anyApplied := introApplied || creditsApplied || recapApplied || previewApplied
-	nextSource, nextConfidence := nextSharedMarkerAttribution(existingSource, existingConfidence, update, anyApplied)
+	nextSource, nextConfidence := existingSource, existingConfidence
+	if anyApplied {
+		nextSource, nextConfidence = recomputeSharedMarkerAttribution(existingSource, existingConfidence, intro, credits, recap, preview)
+	}
 
 	if segmentEqual(intro, originalIntro) &&
 		segmentEqual(credits, originalCredits) &&
@@ -1405,24 +1411,6 @@ func ptrFloatEqual(a, b *float64) bool {
 		return a == b
 	}
 	return *a == *b
-}
-
-func nextSharedMarkerAttribution(
-	existingSource *string,
-	existingConfidence *float64,
-	update MarkerUpdate,
-	markerApplied bool,
-) (*string, *float64) {
-	if !markerApplied {
-		return existingSource, existingConfidence
-	}
-	if existingSource == nil || models.MarkerSourcePriority(update.MarkersSource) > models.MarkerSourcePriority(*existingSource) {
-		return &update.MarkersSource, update.MarkersConfidence
-	}
-	if models.MarkerSourcePriority(update.MarkersSource) == models.MarkerSourcePriority(*existingSource) && update.MarkersConfidence != nil {
-		return existingSource, update.MarkersConfidence
-	}
-	return existingSource, existingConfidence
 }
 
 func ptrStringEqual(a, b *string) bool {

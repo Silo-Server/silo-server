@@ -3395,6 +3395,11 @@ export interface SubtitleProviderTestResponse {
 
 export interface MarkerProviderConfig {
   provider: string;
+  display_name?: string;
+  source_type?: string;
+  plugin_id?: string;
+  plugin_installation_id?: number;
+  capability_id?: string;
   is_submitter: boolean;
   fetch_enabled: boolean;
   fetch_priority: number;

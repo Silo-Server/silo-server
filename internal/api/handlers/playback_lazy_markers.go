@@ -381,7 +381,7 @@ func markerUpdateFromPayload(p markers.MarkerUpdatePayload) scanner.MarkerUpdate
 		RecapEnd:          p.Recap.End,
 		PreviewStart:      p.Preview.Start,
 		PreviewEnd:        p.Preview.End,
-		MarkersSource:     p.Source,
+		MarkersSource:     p.SummarySource(),
 		MarkersConfidence: p.SummaryConfidence(),
 		IntroProvenance:   segmentProvenance(p.Intro),
 		CreditsProvenance: segmentProvenance(p.Credits),
@@ -395,6 +395,7 @@ func segmentProvenance(s markers.SegmentPayload) *scanner.SegmentProvenance {
 		return nil
 	}
 	return &scanner.SegmentProvenance{
+		Source:     s.Source,
 		Provider:   s.Provider,
 		Confidence: s.Confidence,
 		Algorithm:  s.Algorithm,

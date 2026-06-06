@@ -50,23 +50,25 @@ export function useValidateMarkerProvider() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (provider: string) =>
+    mutationFn: ({ provider }: { provider: string; displayName?: string }) =>
       api<MarkerProviderValidationResponse>(
         `/admin/markers/providers/${encodeURIComponent(provider)}/validate`,
         {
           method: "POST",
         },
       ),
-    onSuccess: (data, provider) => {
+    onSuccess: (data, variables) => {
+      const label = variables.displayName || "Marker provider";
+      const provider = variables.provider;
       queryClient.setQueryData(adminKeys.markerProviderValidation(provider), data);
       if (data.valid) {
-        toast.success("TheIntroDB key validated");
+        toast.success(`${label} validated`);
       } else {
-        toast.error(data.error || "TheIntroDB validation failed");
+        toast.error(data.error || `${label} validation failed`);
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "TheIntroDB validation failed");
+      toast.error(err instanceof Error ? err.message : "Marker provider validation failed");
     },
   });
 }

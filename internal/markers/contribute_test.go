@@ -13,6 +13,7 @@ type fakeSubmitter struct {
 	submitted []SubmissionRequest
 	result    SubmissionResult
 	err       error
+	required  []string
 }
 
 func (f *fakeSubmitter) ID() string                                            { return f.id }
@@ -28,6 +29,9 @@ func (f *fakeSubmitter) SubmitMarker(_ context.Context, req SubmissionRequest) (
 	return f.result, nil
 }
 func (f *fakeSubmitter) FetchUserStats(context.Context) (UserStats, error) { return UserStats{}, nil }
+func (f *fakeSubmitter) SubmissionRequirements() SubmissionRequirements {
+	return SubmissionRequirements{RequiredExternalIDs: f.required}
+}
 
 type fakeResolver struct{ ids ExternalIDs }
 
@@ -152,8 +156,8 @@ func TestContributeSkipsDuplicate(t *testing.T) {
 	}
 }
 
-func TestContributeSkipsWhenTMDBMissing(t *testing.T) {
-	sub := &fakeSubmitter{id: "introdb"}
+func TestContributeSkipsWhenProviderRequiredIDMissing(t *testing.T) {
+	sub := &fakeSubmitter{id: "introdb", required: []string{ExternalIDKeyTMDB}}
 	file := newContribFile()
 	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
 	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
@@ -173,6 +177,30 @@ func TestContributeSkipsWhenTMDBMissing(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped || outcomes[0].Reason != "tmdb id required" {
 		t.Fatalf("outcomes = %+v, want skipped tmdb id required", outcomes)
+	}
+}
+
+func TestContributeAllowsTVDBOnlyWhenProviderDoesNotRequireTMDB(t *testing.T) {
+	sub := &fakeSubmitter{id: "plugin:1:markers"}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+
+	reg := NewRegistry(nil)
+	_ = reg.Register(sub)
+	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TvdbID: "777", SeasonNumber: 1, EpisodeNumber: 3}}
+	svc := NewContributionService(reg, resolver, fakeConfig{"plugin:1:markers": {Provider: "plugin:1:markers", ContributeEnabled: true}}, rec, nil)
+
+	outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 || sub.submitted[0].ExternalIDs[ExternalIDKeyTVDB] != "777" {
+		t.Fatalf("tvdb-only marker should submit to provider without tmdb requirement, submitted=%+v", sub.submitted)
+	}
+	if len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending {
+		t.Fatalf("outcomes = %+v, want pending", outcomes)
 	}
 }
 

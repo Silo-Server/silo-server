@@ -6,69 +6,110 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestNextSharedMarkerAttributionPreservesHigherPriorityConfidence(t *testing.T) {
-	existingSource := models.MarkerSourceManual
-	existingConfidence := 1.0
-	updateConfidence := 0.5
+func TestRecomputeSharedMarkerAttributionPreservesHigherPrioritySegment(t *testing.T) {
+	manual := models.MarkerSourceManual
+	scannerSource := models.MarkerSourceScanner
+	manualConfidence := 1.0
+	scannerConfidence := 0.5
 
-	nextSource, nextConfidence := nextSharedMarkerAttribution(&existingSource, &existingConfidence, MarkerUpdate{
-		MarkersSource:     models.MarkerSourceScanner,
-		MarkersConfidence: &updateConfidence,
-	}, true)
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(
+		nil,
+		nil,
+		segmentState{
+			start:      floatPtr(0),
+			end:        floatPtr(10),
+			source:     &manual,
+			confidence: &manualConfidence,
+		},
+		segmentState{
+			start:      floatPtr(20),
+			end:        floatPtr(30),
+			source:     &scannerSource,
+			confidence: &scannerConfidence,
+		},
+	)
 
 	if nextSource == nil || *nextSource != models.MarkerSourceManual {
 		t.Fatalf("next source = %v, want manual", nextSource)
 	}
-	if nextConfidence == nil || *nextConfidence != existingConfidence {
-		t.Fatalf("next confidence = %v, want %v", nextConfidence, existingConfidence)
+	if nextConfidence == nil || *nextConfidence != manualConfidence {
+		t.Fatalf("next confidence = %v, want %v", nextConfidence, manualConfidence)
 	}
 }
 
-func TestNextSharedMarkerAttributionUpdatesSamePriorityConfidence(t *testing.T) {
-	existingSource := models.MarkerSourceScanner
-	existingConfidence := 0.5
-	updateConfidence := 0.8
+func TestRecomputeSharedMarkerAttributionUpdatesSamePriorityConfidence(t *testing.T) {
+	scannerSource := models.MarkerSourceScanner
+	lowerConfidence := 0.5
+	higherConfidence := 0.8
 
-	nextSource, nextConfidence := nextSharedMarkerAttribution(&existingSource, &existingConfidence, MarkerUpdate{
-		MarkersSource:     models.MarkerSourceScanner,
-		MarkersConfidence: &updateConfidence,
-	}, true)
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(
+		nil,
+		nil,
+		segmentState{
+			start:      floatPtr(0),
+			end:        floatPtr(10),
+			source:     &scannerSource,
+			confidence: &lowerConfidence,
+		},
+		segmentState{
+			start:      floatPtr(20),
+			end:        floatPtr(30),
+			source:     &scannerSource,
+			confidence: &higherConfidence,
+		},
+	)
 
 	if nextSource == nil || *nextSource != models.MarkerSourceScanner {
 		t.Fatalf("next source = %v, want scanner", nextSource)
 	}
-	if nextConfidence == nil || *nextConfidence != updateConfidence {
-		t.Fatalf("next confidence = %v, want %v", nextConfidence, updateConfidence)
+	if nextConfidence == nil || *nextConfidence != higherConfidence {
+		t.Fatalf("next confidence = %v, want %v", nextConfidence, higherConfidence)
 	}
 }
 
-func TestNextSharedMarkerAttributionPromotesHigherPrioritySource(t *testing.T) {
-	existingSource := models.MarkerSourceScanner
-	existingConfidence := 0.5
-	updateConfidence := 0.9
+func TestRecomputeSharedMarkerAttributionPromotesHigherPrioritySource(t *testing.T) {
+	scannerSource := models.MarkerSourceScanner
+	manual := models.MarkerSourceManual
+	scannerConfidence := 0.5
+	manualConfidence := 0.9
 
-	nextSource, nextConfidence := nextSharedMarkerAttribution(&existingSource, &existingConfidence, MarkerUpdate{
-		MarkersSource:     models.MarkerSourceManual,
-		MarkersConfidence: &updateConfidence,
-	}, true)
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(
+		nil,
+		nil,
+		segmentState{
+			start:      floatPtr(0),
+			end:        floatPtr(10),
+			source:     &scannerSource,
+			confidence: &scannerConfidence,
+		},
+		segmentState{
+			start:      floatPtr(20),
+			end:        floatPtr(30),
+			source:     &manual,
+			confidence: &manualConfidence,
+		},
+	)
 
 	if nextSource == nil || *nextSource != models.MarkerSourceManual {
 		t.Fatalf("next source = %v, want manual", nextSource)
 	}
-	if nextConfidence == nil || *nextConfidence != updateConfidence {
-		t.Fatalf("next confidence = %v, want %v", nextConfidence, updateConfidence)
+	if nextConfidence == nil || *nextConfidence != manualConfidence {
+		t.Fatalf("next confidence = %v, want %v", nextConfidence, manualConfidence)
 	}
 }
 
-func TestNextSharedMarkerAttributionDoesNotDowngradeConfidenceWhenMarkerRejected(t *testing.T) {
+func TestRecomputeSharedMarkerAttributionUsesLegacyAttributionForUnattributedSegment(t *testing.T) {
 	existingSource := models.MarkerSourceScanner
 	existingConfidence := 0.9
-	updateConfidence := 0.4
 
-	nextSource, nextConfidence := nextSharedMarkerAttribution(&existingSource, &existingConfidence, MarkerUpdate{
-		MarkersSource:     models.MarkerSourceScanner,
-		MarkersConfidence: &updateConfidence,
-	}, false)
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(
+		&existingSource,
+		&existingConfidence,
+		segmentState{
+			start: floatPtr(0),
+			end:   floatPtr(10),
+		},
+	)
 
 	if nextSource == nil || *nextSource != models.MarkerSourceScanner {
 		t.Fatalf("next source = %v, want scanner", nextSource)

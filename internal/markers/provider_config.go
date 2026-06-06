@@ -136,3 +136,28 @@ func (s *ProviderConfigStore) Update(ctx context.Context, c ProviderConfig) erro
 	}
 	return s.Reload(ctx)
 }
+
+// Ensure inserts a default provider config row if one does not already exist.
+// Existing rows are left untouched so admin choices survive plugin restarts and
+// upgrades.
+func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("marker provider config store unavailable")
+	}
+	if _, ok := s.Get(c.Provider); ok {
+		return nil
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO marker_provider_config (
+			provider, fetch_enabled, fetch_priority,
+			contribute_enabled, contribute_auto_local, contribute_min_confidence, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
+		ON CONFLICT (provider) DO NOTHING`,
+		c.Provider, c.FetchEnabled, c.FetchPriority,
+		c.ContributeEnabled, c.ContributeAutoLocal, c.ContributeMinConfidence,
+	); err != nil {
+		return fmt.Errorf("ensure marker provider config: %w", err)
+	}
+	return s.Reload(ctx)
+}

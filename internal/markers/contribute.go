@@ -186,8 +186,13 @@ func (s *ContributionService) contributeSegment(
 			return ContributionOutcome{}, false
 		}
 	}
-	if strings.TrimSpace(ids.TmdbID) == "" {
-		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "tmdb id required"}, true
+	if missing := missingRequiredExternalIDs(sub, ids); len(missing) > 0 {
+		return ContributionOutcome{
+			Provider: providerID,
+			Segment:  seg.kind,
+			Status:   OutcomeStatusSkipped,
+			Reason:   strings.Join(missing, ",") + " id required",
+		}, true
 	}
 
 	startMs := int64(*seg.start * 1000)
@@ -253,4 +258,23 @@ func (s *ContributionService) contributeSegment(
 		s.logger.Warn("record contribution failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", err)
 	}
 	return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, SubmissionID: result.ID}, true
+}
+
+func missingRequiredExternalIDs(sub Submitter, ids ExternalIDs) []string {
+	reqProvider, ok := sub.(SubmissionRequirementProvider)
+	if !ok {
+		return nil
+	}
+	reqs := reqProvider.SubmissionRequirements()
+	if len(reqs.RequiredExternalIDs) == 0 {
+		return nil
+	}
+	values := ids.AsRequestMap()
+	var missing []string
+	for _, key := range reqs.RequiredExternalIDs {
+		if strings.TrimSpace(values[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	return missing
 }
