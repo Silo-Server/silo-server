@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 type AudiobookHandler struct {
 	Items         *catalog.ItemRepository
 	Files         *scanner.FileRepository
+	Detail        *catalog.DetailService
 	StoreProvider userstore.UserStoreProvider
 }
 
@@ -44,7 +46,7 @@ func (h *AudiobookHandler) HandleListAudiobooks(w http.ResponseWriter, r *http.R
 		Limit  int                 `json:"limit"`
 		Offset int                 `json:"offset"`
 	}{
-		Items:  audiobookListItems(items),
+		Items:  h.audiobookListItems(r.Context(), items),
 		Total:  total,
 		Limit:  limit,
 		Offset: offset,
@@ -60,15 +62,22 @@ type audiobookListItem struct {
 	PosterURL string `json:"poster_url,omitempty"`
 }
 
-func audiobookListItems(items []*models.MediaItem) []audiobookListItem {
+func (h *AudiobookHandler) audiobookListItems(ctx context.Context, items []*models.MediaItem) []audiobookListItem {
 	out := make([]audiobookListItem, 0, len(items))
 	for _, it := range items {
 		out = append(out, audiobookListItem{
 			ContentID: it.ContentID,
 			Title:     it.Title,
 			Year:      it.Year,
-			PosterURL: it.PosterPath,
+			PosterURL: h.presignAudiobookPoster(ctx, it.PosterPath),
 		})
 	}
 	return out
+}
+
+func (h *AudiobookHandler) presignAudiobookPoster(ctx context.Context, path string) string {
+	if h == nil || h.Detail == nil || path == "" {
+		return ""
+	}
+	return h.Detail.PresignURL(ctx, cardThumbnailPath(path), "card")
 }

@@ -1792,6 +1792,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					audiobookHandler := &handlers.AudiobookHandler{
 						Items:         itemRepo,
 						Files:         deps.FileRepo,
+						Detail:        detailSvc,
 						StoreProvider: deps.UserStoreProvider,
 					}
 					r.Get("/audiobooks", audiobookHandler.HandleListAudiobooks)
