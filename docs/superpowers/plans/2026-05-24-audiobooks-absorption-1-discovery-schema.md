@@ -17,14 +17,14 @@
 | Path | Created/Modified | Purpose |
 |---|---|---|
 | `docs/superpowers/plans/artifacts/2026-05-24-audiobooks-discovery-findings.md` | Create | Findings doc produced by Task 1. Locks the remaining schema/code decisions. |
-| `migrations/139_abs_sessions.up.sql` | Create | New table parallel to `jellycompat_sessions`. |
-| `migrations/139_abs_sessions.down.sql` | Create | Drop the table. |
-| `migrations/140_podcast_feeds.up.sql` | Create | New table for RSS-subscribed podcast metadata. |
-| `migrations/140_podcast_feeds.down.sql` | Create | Drop the table. |
-| `migrations/141_media_libraries_kind.up.sql` | Create (conditional — see Task 4 step 1) | Add `kind` column to `media_libraries`. |
-| `migrations/141_media_libraries_kind.down.sql` | Create (same condition) | Drop the column. |
-| `migrations/142_audiobooks_feature_flag.up.sql` | Create | Insert `audiobooks.enabled='false'` into `server_settings`. |
-| `migrations/142_audiobooks_feature_flag.down.sql` | Create | Delete the setting row. |
+| `migrations/147_abs_sessions.up.sql` | Create | New table parallel to `jellycompat_sessions`. |
+| `migrations/147_abs_sessions.down.sql` | Create | Drop the table. |
+| `migrations/157_podcast_feeds.up.sql` | Create | New table for RSS-subscribed podcast metadata. |
+| `migrations/157_podcast_feeds.down.sql` | Create | Drop the table. |
+| `migrations/159_media_folders_kind_noop.up.sql` | Create (conditional — see Task 4 step 1) | Document `media_folders.type='audiobooks'`; no column change needed. |
+| `migrations/159_media_folders_kind_noop.down.sql` | Create (same condition) | No-op rollback. |
+| `migrations/160_audiobooks_feature_flag.up.sql` | Create | Insert `audiobooks.enabled='false'` into `server_settings`. |
+| `migrations/160_audiobooks_feature_flag.down.sql` | Create | Delete the setting row. |
 | `internal/audiobooks/doc.go` | Create | Package comment + intent. |
 | `internal/audiobooks/service.go` | Create | Empty `Service` struct, `New` constructor, `Enabled()` reader. |
 | `internal/audiobooks/service_test.go` | Create | One unit test proving the package compiles and `Enabled()` returns the setting value. |
@@ -240,15 +240,15 @@ EOF
 
 ---
 
-## Task 2: Migration 139 — `abs_sessions`
+## Task 2: Migration 147 — `abs_sessions`
 
 Parallel of `jellycompat_sessions` for Audiobookshelf clients. Lets ABS
 mobile/desktop apps reconnect without re-authenticating against silo's
 main `auth_sessions`.
 
 **Files:**
-- Create: `migrations/139_abs_sessions.up.sql`
-- Create: `migrations/139_abs_sessions.down.sql`
+- Create: `migrations/147_abs_sessions.up.sql`
+- Create: `migrations/147_abs_sessions.down.sql`
 
 > **Note:** If Task 1, Step 1.2 found the next number is not 139, rename
 > both filenames to match. All other tasks downstream of 139 shift by the
@@ -266,7 +266,7 @@ main `auth_sessions`.
 
 ### Step 2.2: Create the up migration
 
-- [ ] **Create** `migrations/139_abs_sessions.up.sql` with:
+- [ ] **Create** `migrations/147_abs_sessions.up.sql` with:
 
   ```sql
   -- Audiobookshelf-compatible client sessions. Parallel to
@@ -277,7 +277,7 @@ main `auth_sessions`.
   CREATE TABLE IF NOT EXISTS public.abs_sessions (
       id           BIGSERIAL PRIMARY KEY,
       user_id      INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-      token        TEXT NOT NULL,
+      token_hash   TEXT NOT NULL,
       device_id    TEXT NOT NULL,
       device_name  TEXT,
       client_name  TEXT,
@@ -287,8 +287,8 @@ main `auth_sessions`.
       revoked_at   TIMESTAMP WITH TIME ZONE
   );
 
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_abs_sessions_token
-      ON public.abs_sessions (token);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_abs_sessions_token_hash
+      ON public.abs_sessions (token_hash);
 
   CREATE INDEX IF NOT EXISTS idx_abs_sessions_user_device
       ON public.abs_sessions (user_id, device_id);
@@ -299,12 +299,12 @@ main `auth_sessions`.
 
 ### Step 2.3: Create the down migration
 
-- [ ] **Create** `migrations/139_abs_sessions.down.sql` with:
+- [ ] **Create** `migrations/147_abs_sessions.down.sql` with:
 
   ```sql
   DROP INDEX IF EXISTS public.idx_abs_sessions_last_seen;
   DROP INDEX IF EXISTS public.idx_abs_sessions_user_device;
-  DROP INDEX IF EXISTS public.idx_abs_sessions_token;
+  DROP INDEX IF EXISTS public.idx_abs_sessions_token_hash;
   DROP TABLE IF EXISTS public.abs_sessions;
   ```
 
@@ -346,7 +346,7 @@ main `auth_sessions`.
 
 - [ ] **Run:**
   ```bash
-  git add migrations/139_abs_sessions.up.sql migrations/139_abs_sessions.down.sql
+  git add migrations/147_abs_sessions.up.sql migrations/147_abs_sessions.down.sql
   git commit -m "$(cat <<'EOF'
 feat(audiobooks): migration 139 add abs_sessions table
 
@@ -462,7 +462,7 @@ EOF
 
 ---
 
-## Task 4: Migration 141 — `media_libraries.kind` (conditional)
+## Task 4: Migration 159 — `media_folders.type` audiobook value (no-op)
 
 Adds a discriminator column so the scanner can branch on
 `audiobooks`/`podcasts` libraries without filename heuristics.
@@ -474,8 +474,8 @@ Adds a discriminator column so the scanner can branch on
 > Otherwise, proceed with the steps below.
 
 **Files:**
-- Create: `migrations/141_media_libraries_kind.up.sql`
-- Create: `migrations/141_media_libraries_kind.down.sql`
+- Create: `migrations/159_media_folders_kind_noop.up.sql`
+- Create: `migrations/159_media_folders_kind_noop.down.sql`
 
 ### Step 4.1: Write the failing assertion
 
@@ -487,7 +487,7 @@ Adds a discriminator column so the scanner can branch on
 
 ### Step 4.2: Create the up migration
 
-- [ ] **Create** `migrations/141_media_libraries_kind.up.sql` with:
+- [ ] **Create** `migrations/159_media_folders_kind_noop.up.sql` with:
 
   ```sql
   -- Per-library content discriminator. Lets the scanner choose the right
@@ -509,7 +509,7 @@ Adds a discriminator column so the scanner can branch on
 
 ### Step 4.3: Create the down migration
 
-- [ ] **Create** `migrations/141_media_libraries_kind.down.sql` with:
+- [ ] **Create** `migrations/159_media_folders_kind_noop.down.sql` with:
 
   ```sql
   DROP INDEX IF EXISTS public.idx_media_libraries_kind;
@@ -551,9 +551,9 @@ Adds a discriminator column so the scanner can branch on
 
 - [ ] **Run:**
   ```bash
-  git add migrations/141_media_libraries_kind.up.sql migrations/141_media_libraries_kind.down.sql
+  git add migrations/159_media_folders_kind_noop.up.sql migrations/159_media_folders_kind_noop.down.sql
   git commit -m "$(cat <<'EOF'
-feat(audiobooks): migration 141 add media_libraries.kind
+feat(audiobooks): migration 159 document audiobooks media folder type
 
 Per-library discriminator that lets the scanner pick the right parser
 ('movies', 'tv', 'audiobooks', 'podcasts') instead of inferring from
@@ -567,15 +567,15 @@ EOF
 
 ---
 
-## Task 5: Migration 142 — `audiobooks.enabled` feature flag
+## Task 5: Migration 160 — `audiobooks.enabled` feature flag
 
 Adds a `server_settings` row so subsequent sub-plans can branch on
 "audiobooks compiled in but turned off" vs "fully live". Default is
 `false` so this sub-plan's landing is a strict no-op for users.
 
 **Files:**
-- Create: `migrations/142_audiobooks_feature_flag.up.sql`
-- Create: `migrations/142_audiobooks_feature_flag.down.sql`
+- Create: `migrations/160_audiobooks_feature_flag.up.sql`
+- Create: `migrations/160_audiobooks_feature_flag.down.sql`
 
 ### Step 5.1: Write the failing assertion
 
@@ -589,11 +589,11 @@ Adds a `server_settings` row so subsequent sub-plans can branch on
 
 ### Step 5.2: Create the up migration
 
-- [ ] **Create** `migrations/142_audiobooks_feature_flag.up.sql` with:
+- [ ] **Create** `migrations/160_audiobooks_feature_flag.up.sql` with:
 
   ```sql
   -- Master kill-switch for the absorbed audiobooks feature. Defaults to
-  -- 'false' so landing migrations 139-142 is a no-op for users; operators
+  -- 'false' so landing migrations 147/157/159/160 is a no-op for users; operators
   -- flip this to 'true' at cutover.
 
   INSERT INTO server_settings (key, value) VALUES ('audiobooks.enabled', 'false')
@@ -602,7 +602,7 @@ Adds a `server_settings` row so subsequent sub-plans can branch on
 
 ### Step 5.3: Create the down migration
 
-- [ ] **Create** `migrations/142_audiobooks_feature_flag.down.sql` with:
+- [ ] **Create** `migrations/160_audiobooks_feature_flag.down.sql` with:
 
   ```sql
   DELETE FROM server_settings WHERE key = 'audiobooks.enabled';
@@ -625,9 +625,9 @@ Adds a `server_settings` row so subsequent sub-plans can branch on
 
 - [ ] **Run:**
   ```bash
-  git add migrations/142_audiobooks_feature_flag.up.sql migrations/142_audiobooks_feature_flag.down.sql
+  git add migrations/160_audiobooks_feature_flag.up.sql migrations/160_audiobooks_feature_flag.down.sql
   git commit -m "$(cat <<'EOF'
-feat(audiobooks): migration 142 add audiobooks.enabled flag
+feat(audiobooks): migration 160 add audiobooks.enabled flag
 
 Server-settings row that gates the absorbed audiobooks feature.
 Defaults to 'false' so sub-plan 1 lands as a strict no-op; subsequent
@@ -646,7 +646,7 @@ EOF
 Creates an empty but compiling Go package, wires its constructor into
 `cmd/silo/main.go` so the package is referenced from the binary, and
 ships a unit test that proves the `Enabled()` reader returns the flag
-value seeded by migration 142.
+value seeded by migration 160.
 
 This task proves the package compiles inside the rest of silo without
 changing any runtime behavior. No routes are mounted. No scheduled
@@ -721,7 +721,7 @@ tasks are registered. No DB writes happen.
 
 ### Step 6.2: Run the test to verify it fails
 
-- [ ] **Run:** `cd /opt/silo-server && go test ./internal/audiobooks/...`
+- [ ] **Run:** `go test ./internal/audiobooks/...`
 
   Expected: build failure with messages like `undefined: New` and
   `package audiobooks not found`.
@@ -777,9 +777,9 @@ tasks are registered. No DB writes happen.
   	return &Service{settings: settings}
   }
 
-  // Enabled reports whether the audiobooks feature flag (set by migration
-  // 142 and toggled by operators) is currently true. Any value other than
-  // the literal string "true" reads as false; this matches how silo
+  // Enabled reports whether the audiobooks feature flag (set by
+  // 160_audiobooks_feature_flag and toggled by operators) is currently true.
+  // Any value other than the literal string "true" reads as false; this matches how silo
   // treats other boolean server_settings rows.
   func (s *Service) Enabled(ctx context.Context) (bool, error) {
   	if s == nil || s.settings == nil {
@@ -795,7 +795,7 @@ tasks are registered. No DB writes happen.
 
 ### Step 6.5: Run the test to verify it passes
 
-- [ ] **Run:** `cd /opt/silo-server && go test ./internal/audiobooks/...`
+- [ ] **Run:** `go test ./internal/audiobooks/...`
   Expected: `ok  github.com/Silo-Server/silo-server/internal/audiobooks ...`
 
 ### Step 6.6: Wire the constructor into `cmd/silo/main.go`
@@ -831,13 +831,13 @@ are constructed and pass a settings store to.
 
 ### Step 6.7: Verify everything still compiles and tests pass
 
-- [ ] **Run:** `cd /opt/silo-server && go build ./...`
+- [ ] **Run:** `go build ./...`
   Expected: exit 0, no output.
 
-- [ ] **Run:** `cd /opt/silo-server && go test ./internal/audiobooks/... ./cmd/...`
+- [ ] **Run:** `go test ./internal/audiobooks/... ./cmd/...`
   Expected: all passes.
 
-- [ ] **Run:** `cd /opt/silo-server && make lint`
+- [ ] **Run:** `make lint`
   Expected: no new lint findings introduced by this task.
 
 ### Step 6.8: Smoke-test the running binary
@@ -883,9 +883,9 @@ EOF
 | Spec section | Task(s) that cover it |
 |---|---|
 | Data model: reused tables | Task 1 (verification only) |
-| Data model: `abs_sessions` (mig 134→139) | Task 2 |
-| Data model: `podcast_feeds` (mig 135→140) | Task 3 |
-| Data model: `media_libraries.kind` (mig 136→141) | Task 4 |
+| Data model: `abs_sessions` (migration 147) | Task 2 |
+| Data model: `podcast_feeds` (migration 157) | Task 3 |
+| Data model: `media_folders.type` audiobook value (migration 159 no-op) | Task 4 |
 | Data model: data migration = none | n/a — confirmed in spec |
 | Feature flag (`audiobooks.enabled`) | Task 5 |
 | Architecture: `internal/audiobooks/` package | Task 6 |
@@ -909,9 +909,8 @@ fires).
 test matches the production interface defined in `service.go`. Method
 name `GetString`, signature `(ctx context.Context, key string) (string, error)` — consistent across both files.
 
-**Note on migration numbering:** Tasks 2–5 use numbers `139..142` based
-on a snapshot showing `138_search_number_word_normalization.up.sql` as
-the highest existing migration. Task 1 Step 1.2 re-verifies this; if
-the executing agent finds the highest existing number has moved, it
-must shift filenames in Tasks 2–5 by the same delta and update the
-matching task headings and commit-message references.
+**Note on migration numbering:** Tasks 2–5 originally used numbers `139..142`
+based on a snapshot showing `138_search_number_word_normalization.up.sql` as
+the highest existing migration. The landed implementation was renumbered to
+`147_abs_sessions`, `157_podcast_feeds`, `159_media_folders_kind_noop`, and
+`160_audiobooks_feature_flag`.

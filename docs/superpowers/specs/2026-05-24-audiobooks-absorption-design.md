@@ -53,7 +53,7 @@ Go application. Eliminate it as a plugin. User-visible outcome:
 
 New top-level Go package: `internal/audiobooks/`.
 
-```
+```text
 internal/audiobooks/
   abs/          ← ported from plugin's internal/abs/         (~6.8k LOC)
                   ABS-compatible REST handlers, mounted under /abs/* and the

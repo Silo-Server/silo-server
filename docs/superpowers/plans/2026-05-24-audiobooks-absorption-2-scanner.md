@@ -408,8 +408,8 @@ ffmpeg -y -f lavfi -i "anullsrc=r=22050:cl=mono" -t 10 -metadata title="Test Aud
   -metadata artist="Test Author" -metadata album="Test Series" \
   -metadata:s:a:0 language=eng \
   internal/scanner/testdata/audiobook_fixtures/single_book/raw.m4a
-# Add chapters via a temporary metadata file
-cat > /tmp/chapters.ffmeta <<'EOF'
+# Add chapters via a repo-local metadata fixture
+cat > internal/scanner/testdata/audiobook_fixtures/single_book/chapters.ffmeta <<'EOF'
 ;FFMETADATA1
 [CHAPTER]
 TIMEBASE=1/1000
@@ -423,9 +423,9 @@ END=10000
 title=Outro
 EOF
 ffmpeg -y -i internal/scanner/testdata/audiobook_fixtures/single_book/raw.m4a \
-  -i /tmp/chapters.ffmeta -map_metadata 1 -codec copy \
+  -i internal/scanner/testdata/audiobook_fixtures/single_book/chapters.ffmeta -map_metadata 1 -codec copy \
   internal/scanner/testdata/audiobook_fixtures/single_book/book.m4b
-rm internal/scanner/testdata/audiobook_fixtures/single_book/raw.m4a /tmp/chapters.ffmeta
+rm internal/scanner/testdata/audiobook_fixtures/single_book/raw.m4a internal/scanner/testdata/audiobook_fixtures/single_book/chapters.ffmeta
 ```
 
 Add a test that calls the chapter-extraction function on `book.m4b` and asserts:
@@ -1008,7 +1008,6 @@ Verify the full sub-plan landed cleanly.
 ### Step 10.1: Full tests + build
 
 ```bash
-cd /opt/silo-server
 go build ./...
 go test ./internal/scanner/... ./internal/models/... ./internal/audiobooks/...
 go vet ./...
@@ -1019,7 +1018,7 @@ All green.
 ### Step 10.2: Rebuild + recreate silo container
 
 ```bash
-sudo docker build -t silo:latest /opt/silo-server
+sudo docker build -t silo:latest .
 sudo docker compose -p silo-prod up -d --force-recreate silo
 until [ "$(sudo docker inspect -f '{{.State.Health.Status}}' silo-prod-silo-1 2>/dev/null)" = "healthy" ]; do sleep 2; done; echo healthy
 ```

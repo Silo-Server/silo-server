@@ -12,6 +12,7 @@ func TestSupportsAudioFile(t *testing.T) {
 		{"audio.M4A", true},
 		{"sample.flac", true},
 		{"podcast.opus", true},
+		{"track.ogg", true},
 		{"poster.jpg", false},
 		{"movie.mkv", false},
 		{"", false},

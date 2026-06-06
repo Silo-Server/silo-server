@@ -27,9 +27,9 @@ func New(settings SettingsReader) *Service {
 	return &Service{settings: settings}
 }
 
-// Enabled reports whether the audiobooks feature flag (set by migration
-// 142 and toggled by operators) is currently true. Any value other than
-// the literal string "true" reads as false; this matches how silo
+// Enabled reports whether the audiobooks feature flag (set by
+// 160_audiobooks_feature_flag and toggled by operators) is currently true.
+// Any value other than the literal string "true" reads as false; this matches how silo
 // treats other boolean server_settings rows.
 func (s *Service) Enabled(ctx context.Context) (bool, error) {
 	if s == nil || s.settings == nil {

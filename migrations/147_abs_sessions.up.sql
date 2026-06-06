@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS public.abs_sessions (
     id           bigserial PRIMARY KEY,
     user_id      integer NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    token        text NOT NULL,
+    token_hash   text NOT NULL,
     device_id    text NOT NULL,
     device_name  text,
     client_name  text,
@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS public.abs_sessions (
     revoked_at   timestamp with time zone
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_abs_sessions_token
-    ON public.abs_sessions (token);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_abs_sessions_token_hash
+    ON public.abs_sessions (token_hash);
 
 CREATE INDEX IF NOT EXISTS idx_abs_sessions_user_device
     ON public.abs_sessions (user_id, device_id);
