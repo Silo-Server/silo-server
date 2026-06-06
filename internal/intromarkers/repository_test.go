@@ -57,3 +57,81 @@ func TestShouldApplyIntroPatchRejectsLowerPrioritySource(t *testing.T) {
 		t.Fatal("scanner patch should not overwrite manual marker")
 	}
 }
+
+func TestShouldApplyIntroPatchRejectsLowerConfidenceAlgorithmChange(t *testing.T) {
+	start := 331.5
+	end := 362.5
+	source := models.MarkerSourceScanner
+	confidence := 0.95
+	algorithm := ChapterAlgorithm
+	row := markerRow{
+		IntroStart:             &start,
+		IntroEnd:               &end,
+		IntroMarkersSource:     &source,
+		IntroMarkersConfidence: &confidence,
+		IntroMarkersAlgorithm:  &algorithm,
+	}
+	patch := IntroMarkerPatch{
+		Start:      322.014,
+		End:        363.465,
+		Source:     models.MarkerSourceScanner,
+		Confidence: 0.85,
+		Algorithm:  ChromaprintAlgorithm,
+	}
+
+	if shouldApplyIntroPatch(row, patch) {
+		t.Fatal("lower-confidence chromaprint patch should not overwrite chapter marker")
+	}
+}
+
+func TestShouldApplyIntroPatchRejectsEqualConfidenceLowerRankAlgorithm(t *testing.T) {
+	start := 331.5
+	end := 362.5
+	source := models.MarkerSourceScanner
+	confidence := 0.85
+	algorithm := EpisodeVersionCopyAlgorithm
+	row := markerRow{
+		IntroStart:             &start,
+		IntroEnd:               &end,
+		IntroMarkersSource:     &source,
+		IntroMarkersConfidence: &confidence,
+		IntroMarkersAlgorithm:  &algorithm,
+	}
+	patch := IntroMarkerPatch{
+		Start:      322.014,
+		End:        363.465,
+		Source:     models.MarkerSourceScanner,
+		Confidence: 0.85,
+		Algorithm:  ChromaprintAlgorithm,
+	}
+
+	if shouldApplyIntroPatch(row, patch) {
+		t.Fatal("equal-confidence chromaprint patch should not overwrite copied chapter marker")
+	}
+}
+
+func TestShouldApplyIntroPatchAllowsHigherConfidenceLowerRankAlgorithm(t *testing.T) {
+	start := 331.5
+	end := 362.5
+	source := models.MarkerSourceScanner
+	confidence := 0.85
+	algorithm := EpisodeVersionCopyAlgorithm
+	row := markerRow{
+		IntroStart:             &start,
+		IntroEnd:               &end,
+		IntroMarkersSource:     &source,
+		IntroMarkersConfidence: &confidence,
+		IntroMarkersAlgorithm:  &algorithm,
+	}
+	patch := IntroMarkerPatch{
+		Start:      322.014,
+		End:        363.465,
+		Source:     models.MarkerSourceScanner,
+		Confidence: 0.90,
+		Algorithm:  ChromaprintAlgorithm,
+	}
+
+	if !shouldApplyIntroPatch(row, patch) {
+		t.Fatal("higher-confidence chromaprint patch should be allowed to replace copied marker")
+	}
+}
