@@ -37,7 +37,7 @@ export default function AudiobookPlayer({
   const [currentTime, setCurrentTime] = useState(initialPositionSeconds);
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
-  const reportProgress = useReportAudiobookProgress();
+  const { mutate: reportProgress } = useReportAudiobookProgress();
   const lastReportedRef = useRef<number>(initialPositionSeconds);
   const reportTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -52,7 +52,7 @@ export default function AudiobookPlayer({
     (posSeconds: number) => {
       if (!file) return;
       lastReportedRef.current = posSeconds;
-      reportProgress.mutate({
+      reportProgress({
         contentId,
         positionSeconds: Math.floor(posSeconds),
         mediaFileId: file.id,

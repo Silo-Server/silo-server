@@ -2,13 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -23,15 +21,16 @@ func (h *AudiobookHandler) HandleGetAudiobook(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	item, err := h.Items.GetByID(r.Context(), contentID)
+	items, err := h.Items.GetByIDsWithAccess(r.Context(), []string{contentID}, requestAccessFilter(r))
 	if err != nil {
-		if errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "audiobook not found")
-			return
-		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "load audiobook failed")
 		return
 	}
+	if len(items) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "audiobook not found")
+		return
+	}
+	item := items[0]
 	if item == nil || item.Type != "audiobook" {
 		writeError(w, http.StatusNotFound, "not_found", "audiobook not found")
 		return
@@ -57,7 +56,7 @@ func (h *AudiobookHandler) HandleGetAudiobook(w http.ResponseWriter, r *http.Req
 			Title:     item.Title,
 			Year:      item.Year,
 			Overview:  item.Overview,
-			PosterURL: item.PosterPath,
+			PosterURL: h.presignAudiobookPoster(r.Context(), item.PosterPath),
 		},
 		Author:   author,
 		Narrator: narrator,
@@ -142,10 +141,10 @@ type audiobookDetailItem struct {
 }
 
 type audiobookDetailFile struct {
-	ID              int                    `json:"id"`
-	Path            string                 `json:"path"`
-	DurationSeconds int                    `json:"duration_seconds"`
-	Chapters        []models.MediaChapter  `json:"chapters,omitempty"`
+	ID              int                   `json:"id"`
+	Path            string                `json:"path"`
+	DurationSeconds int                   `json:"duration_seconds"`
+	Chapters        []models.MediaChapter `json:"chapters,omitempty"`
 }
 
 type audiobookDetailProgress struct {
