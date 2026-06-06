@@ -471,6 +471,18 @@ export function WatchPage({
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
       autoPlayNextPreview={autoPlayNextPreview}
+      onMarkersEdited={(fileId, markers) =>
+        setPlaybackVersions((current) =>
+          patchVersionMarkers(
+            current,
+            fileId,
+            markers.intro,
+            markers.credits,
+            markers.recap,
+            markers.preview,
+          ),
+        )
+      }
       duration={selectedDuration}
       qualityPreference={qualityPreference}
       seriesContext={seriesContext}

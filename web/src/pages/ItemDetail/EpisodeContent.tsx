@@ -315,6 +315,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             isRedetectingIntro={redetectIntroMutation.isPending}
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
+            canEditMarkers={canCurateMetadata}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             versions={item.versions ?? []}
             playbackVariants={item.playback_variants}

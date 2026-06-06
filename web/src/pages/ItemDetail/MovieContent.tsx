@@ -255,6 +255,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             isRefreshing={refreshMetadataMutation.isPending}
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
+            canEditMarkers={canCurateMetadata}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
             versions={item.versions}

@@ -11,8 +11,6 @@ const KEYS = [
   "matcher.workers",
   "matcher.batch_size",
   "metadata.cache_images",
-  "markers.mode",
-  "markers.lazy_playback",
 ];
 
 export default function ScannerSettings() {
@@ -86,27 +84,6 @@ export default function ScannerSettings() {
             hint="Download artwork from metadata providers and store resized variants in public asset S3 storage. Private bucket + presigned URLs is fully supported."
             value={form.getValue("metadata.cache_images")}
             onChange={(v) => form.setValue("metadata.cache_images", v)}
-          />
-        </FieldGroup>
-
-        <FieldGroup label="Markers">
-          <SettingField
-            label="Mode"
-            type="select"
-            options={[
-              { value: "off", label: "Off" },
-              { value: "local", label: "Local" },
-              { value: "both", label: "Local + Online" },
-              { value: "online", label: "Online Only" },
-            ]}
-            value={form.getValue("markers.mode") || "local"}
-            onChange={(v) => form.setValue("markers.mode", v)}
-          />
-          <SettingField
-            label="Fetch Markers at Playback if Missing"
-            type="toggle"
-            value={form.getValue("markers.lazy_playback") || "false"}
-            onChange={(v) => form.setValue("markers.lazy_playback", v)}
           />
         </FieldGroup>
       </div>
