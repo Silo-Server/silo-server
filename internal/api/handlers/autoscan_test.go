@@ -28,7 +28,9 @@ type fakeAutoscanStore struct {
 	updateSourceFn     func(autoscan.Source) (autoscan.Source, error)
 	deleteSourceFn     func(string) error
 	listScansFn        func(autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error)
+	countScansFn       func(autoscan.ScanListFilter) (int, error)
 	listEventsFn       func(autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
+	countEventsFn      func(autoscan.EventListFilter) (int, error)
 	queueSummaryFn     func() (autoscan.QueueSummary, error)
 	latestEventAtFn    func() (*time.Time, error)
 }
@@ -117,11 +119,25 @@ func (f *fakeAutoscanStore) ListAutoscanScans(_ context.Context, filter autoscan
 	return nil, nil
 }
 
+func (f *fakeAutoscanStore) CountAutoscanScans(_ context.Context, filter autoscan.ScanListFilter) (int, error) {
+	if f.countScansFn != nil {
+		return f.countScansFn(filter)
+	}
+	return 0, nil
+}
+
 func (f *fakeAutoscanStore) ListEvents(_ context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
 	if f.listEventsFn != nil {
 		return f.listEventsFn(filter)
 	}
 	return nil, nil
+}
+
+func (f *fakeAutoscanStore) CountEvents(_ context.Context, filter autoscan.EventListFilter) (int, error) {
+	if f.countEventsFn != nil {
+		return f.countEventsFn(filter)
+	}
+	return 0, nil
 }
 
 func (f *fakeAutoscanStore) GetQueueSummary(context.Context) (autoscan.QueueSummary, error) {
@@ -1006,6 +1022,7 @@ func TestAutoscanHandleListScansSerializesFiltersAndEventContext(t *testing.T) {
 	sourceID := "src-1"
 	installationID := 7
 	var gotFilter autoscan.ScanListFilter
+	var gotCountFilter autoscan.ScanListFilter
 	store := &fakeAutoscanStore{
 		listScansFn: func(filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error) {
 			gotFilter = filter
@@ -1029,22 +1046,33 @@ func TestAutoscanHandleListScansSerializesFiltersAndEventContext(t *testing.T) {
 				EventCompletedAt: &eventCompleted,
 			}}, nil
 		},
+		countScansFn: func(filter autoscan.ScanListFilter) (int, error) {
+			gotCountFilter = filter
+			return 137, nil
+		},
 	}
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
-	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/scans?status=completed&limit=25&q=Show", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/scans?status=completed&limit=25&offset=50&q=Show", nil)
 	rec := httptest.NewRecorder()
 	h.HandleListScans(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if gotFilter.Status != "completed" || gotFilter.Limit != 25 || gotFilter.Search != "Show" {
+	if gotFilter.Status != "completed" || gotFilter.Limit != 25 || gotFilter.Offset != 50 || gotFilter.Search != "Show" {
 		t.Fatalf("filter = %+v", gotFilter)
+	}
+	// Count must filter identically to the list, minus the page window.
+	if gotCountFilter.Status != "completed" || gotCountFilter.Search != "Show" {
+		t.Fatalf("count filter = %+v", gotCountFilter)
 	}
 	var body autoscanScansResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	if body.Total != 137 || body.Limit != 25 || body.Offset != 50 {
+		t.Fatalf("pagination = total %d limit %d offset %d", body.Total, body.Limit, body.Offset)
 	}
 	if len(body.Scans) != 1 {
 		t.Fatalf("scans = %+v", body.Scans)
@@ -1074,6 +1102,7 @@ func TestAutoscanHandleListScansRejectsBadFilters(t *testing.T) {
 	for _, target := range []string{
 		"/api/v1/admin/autoscan/scans?status=unknown",
 		"/api/v1/admin/autoscan/scans?limit=0",
+		"/api/v1/admin/autoscan/scans?offset=-1",
 	} {
 		rec := httptest.NewRecorder()
 		h.HandleListScans(rec, httptest.NewRequest("GET", target, nil))
@@ -1091,6 +1120,7 @@ func TestAutoscanHandleListEventsSerializesFiltersAndRuns(t *testing.T) {
 	completed := started.Add(1500 * time.Millisecond)
 	sourceID := "src-1"
 	var gotFilter autoscan.EventListFilter
+	var gotCountFilter autoscan.EventListFilter
 	store := &fakeAutoscanStore{
 		listEventsFn: func(filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error) {
 			gotFilter = filter
@@ -1123,10 +1153,14 @@ func TestAutoscanHandleListEventsSerializesFiltersAndRuns(t *testing.T) {
 				}},
 			}}, nil
 		},
+		countEventsFn: func(filter autoscan.EventListFilter) (int, error) {
+			gotCountFilter = filter
+			return 88, nil
+		},
 	}
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
-	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/events?source_id=src-1&status=success&limit=25&q=Show", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/autoscan/events?source_id=src-1&status=success&limit=25&offset=25&q=Show", nil)
 	rec := httptest.NewRecorder()
 	h.HandleListEvents(rec, req)
 
@@ -1136,12 +1170,20 @@ func TestAutoscanHandleListEventsSerializesFiltersAndRuns(t *testing.T) {
 	if gotFilter.SourceID != "src-1" ||
 		gotFilter.Status != autoscan.EventStatusSuccess ||
 		gotFilter.Limit != 25 ||
+		gotFilter.Offset != 25 ||
 		gotFilter.Search != "Show" {
 		t.Fatalf("filter = %+v", gotFilter)
+	}
+	// Count must filter identically to the list, minus the page window.
+	if gotCountFilter.SourceID != "src-1" || gotCountFilter.Status != autoscan.EventStatusSuccess || gotCountFilter.Search != "Show" {
+		t.Fatalf("count filter = %+v", gotCountFilter)
 	}
 	var body autoscanEventsResponse
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	if body.Total != 88 || body.Limit != 25 || body.Offset != 25 {
+		t.Fatalf("pagination = total %d limit %d offset %d", body.Total, body.Limit, body.Offset)
 	}
 	if len(body.Events) != 1 {
 		t.Fatalf("events = %+v", body.Events)
@@ -1171,6 +1213,7 @@ func TestAutoscanHandleListEventsRejectsBadFilters(t *testing.T) {
 	for _, target := range []string{
 		"/api/v1/admin/autoscan/events?status=unknown",
 		"/api/v1/admin/autoscan/events?limit=0",
+		"/api/v1/admin/autoscan/events?offset=-1",
 	} {
 		rec := httptest.NewRecorder()
 		h.HandleListEvents(rec, httptest.NewRequest("GET", target, nil))

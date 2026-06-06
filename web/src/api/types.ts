@@ -1829,6 +1829,9 @@ export interface AutoscanEvent {
 
 export interface AutoscanEventsResponse {
   events: AutoscanEvent[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export type AutoscanScanStatus = "accepted" | "running" | "completed" | "failed" | "cancelled";
@@ -1854,6 +1857,9 @@ export interface AutoscanScan {
 
 export interface AutoscanScansResponse {
   scans: AutoscanScan[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface RequestListParams {

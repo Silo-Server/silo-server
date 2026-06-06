@@ -122,12 +122,14 @@ type EventListFilter struct {
 	Status   EventStatus
 	Search   string
 	Limit    int
+	Offset   int
 }
 
 type ScanListFilter struct {
 	Status string
 	Search string
 	Limit  int
+	Offset int
 }
 
 type EventWithRuns struct {

@@ -33,7 +33,9 @@ type autoscanStore interface {
 	UpdateSource(ctx context.Context, s autoscan.Source) (autoscan.Source, error)
 	DeleteSource(ctx context.Context, id string) error
 	ListAutoscanScans(ctx context.Context, filter autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, error)
+	CountAutoscanScans(ctx context.Context, filter autoscan.ScanListFilter) (int, error)
 	ListEvents(ctx context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
+	CountEvents(ctx context.Context, filter autoscan.EventListFilter) (int, error)
 	GetQueueSummary(ctx context.Context) (autoscan.QueueSummary, error)
 	LatestEventAt(ctx context.Context) (*time.Time, error)
 }
@@ -726,6 +728,9 @@ type autoscanEventResponse struct {
 
 type autoscanEventsResponse struct {
 	Events []autoscanEventResponse `json:"events"`
+	Total  int                     `json:"total"`
+	Limit  int                     `json:"limit"`
+	Offset int                     `json:"offset"`
 }
 
 func eventResponse(event autoscan.EventWithRuns) autoscanEventResponse {
@@ -780,6 +785,14 @@ func (h *AutoscanHandler) HandleListEvents(w http.ResponseWriter, r *http.Reques
 		}
 		filter.Limit = limit
 	}
+	if rawOffset := strings.TrimSpace(r.URL.Query().Get("offset")); rawOffset != "" {
+		offset, err := strconv.Atoi(rawOffset)
+		if err != nil || offset < 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "offset must be a non-negative integer")
+			return
+		}
+		filter.Offset = offset
+	}
 	switch filter.Status {
 	case "", autoscan.EventStatusSuccess, autoscan.EventStatusError, autoscan.EventStatusUnresolved:
 	default:
@@ -792,11 +805,21 @@ func (h *AutoscanHandler) HandleListEvents(w http.ResponseWriter, r *http.Reques
 		writeAutoscanError(w, err)
 		return
 	}
+	total, err := h.repo.CountEvents(r.Context(), filter)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
 	out := make([]autoscanEventResponse, 0, len(events))
 	for _, event := range events {
 		out = append(out, eventResponse(event))
 	}
-	writeJSON(w, http.StatusOK, autoscanEventsResponse{Events: out})
+	writeJSON(w, http.StatusOK, autoscanEventsResponse{
+		Events: out,
+		Total:  total,
+		Limit:  filter.Limit,
+		Offset: filter.Offset,
+	})
 }
 
 type autoscanScanResponse struct {
@@ -819,7 +842,10 @@ type autoscanScanResponse struct {
 }
 
 type autoscanScansResponse struct {
-	Scans []autoscanScanResponse `json:"scans"`
+	Scans  []autoscanScanResponse `json:"scans"`
+	Total  int                    `json:"total"`
+	Limit  int                    `json:"limit"`
+	Offset int                    `json:"offset"`
 }
 
 func autoscanScanRunResponse(scan autoscan.ScanWithEvent) autoscanScanResponse {
@@ -857,6 +883,14 @@ func (h *AutoscanHandler) HandleListScans(w http.ResponseWriter, r *http.Request
 		}
 		filter.Limit = limit
 	}
+	if rawOffset := strings.TrimSpace(r.URL.Query().Get("offset")); rawOffset != "" {
+		offset, err := strconv.Atoi(rawOffset)
+		if err != nil || offset < 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "offset must be a non-negative integer")
+			return
+		}
+		filter.Offset = offset
+	}
 	switch filter.Status {
 	case "", "accepted", "running", "completed", "failed", "cancelled":
 	default:
@@ -869,11 +903,21 @@ func (h *AutoscanHandler) HandleListScans(w http.ResponseWriter, r *http.Request
 		writeAutoscanError(w, err)
 		return
 	}
+	total, err := h.repo.CountAutoscanScans(r.Context(), filter)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
 	out := make([]autoscanScanResponse, 0, len(scans))
 	for _, scan := range scans {
 		out = append(out, autoscanScanRunResponse(scan))
 	}
-	writeJSON(w, http.StatusOK, autoscanScansResponse{Scans: out})
+	writeJSON(w, http.StatusOK, autoscanScansResponse{
+		Scans:  out,
+		Total:  total,
+		Limit:  filter.Limit,
+		Offset: filter.Offset,
+	})
 }
 
 // --- Status ---

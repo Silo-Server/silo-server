@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type {
@@ -8,8 +8,10 @@ import type {
   AutoscanConnectionsResponse,
   AutoscanConnectionTestInput,
   AutoscanConnectionTestResult,
+  AutoscanEvent,
   AutoscanEventsResponse,
   AutoscanEventStatus,
+  AutoscanScan,
   AutoscanScansResponse,
   AutoscanScanStatus,
   AutoscanRewriteSuggestions,
@@ -241,11 +243,18 @@ export function useAutoscanStatus() {
   });
 }
 
+/** A single page of history rows plus the total matching count for pagination. */
+export interface AutoscanPage<T> {
+  rows: T[];
+  total: number;
+}
+
 export function useAutoscanEvents(params?: {
   sourceId?: string;
   status?: AutoscanEventStatus;
   query?: string;
   limit?: number;
+  offset?: number;
   enabled?: boolean;
 }) {
   const queryParams = new URLSearchParams();
@@ -253,13 +262,21 @@ export function useAutoscanEvents(params?: {
   if (params?.status) queryParams.set("status", params.status);
   if (params?.query) queryParams.set("q", params.query);
   if (params?.limit != null) queryParams.set("limit", String(params.limit));
+  if (params?.offset != null) queryParams.set("offset", String(params.offset));
   const suffix = queryParams.toString();
   const path = suffix ? `/admin/autoscan/events?${suffix}` : "/admin/autoscan/events";
   return useQuery({
     queryKey: adminKeys.autoscanEvents(params ?? {}),
-    queryFn: () => api<AutoscanEventsResponse>(path).then((data) => data.events ?? []),
+    queryFn: (): Promise<AutoscanPage<AutoscanEvent>> =>
+      api<AutoscanEventsResponse>(path).then((data) => ({
+        rows: data.events ?? [],
+        total: data.total ?? data.events?.length ?? 0,
+      })),
     staleTime: AUTOSCAN_ACTIVITY_REFRESH_MS,
     refetchInterval: AUTOSCAN_ACTIVITY_REFRESH_MS,
+    // Hold the prior page on screen while the next one loads so paging through
+    // history never flashes an empty/loading state.
+    placeholderData: keepPreviousData,
     enabled: params?.enabled ?? true,
   });
 }
@@ -268,19 +285,26 @@ export function useAutoscanScans(params?: {
   status?: AutoscanScanStatus;
   query?: string;
   limit?: number;
+  offset?: number;
   enabled?: boolean;
 }) {
   const queryParams = new URLSearchParams();
   if (params?.status) queryParams.set("status", params.status);
   if (params?.query) queryParams.set("q", params.query);
   if (params?.limit != null) queryParams.set("limit", String(params.limit));
+  if (params?.offset != null) queryParams.set("offset", String(params.offset));
   const suffix = queryParams.toString();
   const path = suffix ? `/admin/autoscan/scans?${suffix}` : "/admin/autoscan/scans";
   return useQuery({
     queryKey: adminKeys.autoscanScans(params ?? {}),
-    queryFn: () => api<AutoscanScansResponse>(path).then((data) => data.scans ?? []),
+    queryFn: (): Promise<AutoscanPage<AutoscanScan>> =>
+      api<AutoscanScansResponse>(path).then((data) => ({
+        rows: data.scans ?? [],
+        total: data.total ?? data.scans?.length ?? 0,
+      })),
     staleTime: AUTOSCAN_ACTIVITY_REFRESH_MS,
     refetchInterval: AUTOSCAN_ACTIVITY_REFRESH_MS,
+    placeholderData: keepPreviousData,
     enabled: params?.enabled ?? true,
   });
 }

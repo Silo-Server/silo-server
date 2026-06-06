@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -23,6 +23,7 @@ import type {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TablePagination } from "@/components/ui/pagination";
 import {
   Select,
   SelectContent,
@@ -30,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -64,8 +66,9 @@ import {
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
 
-const HISTORY_PAGE_SIZE = 50;
-const HISTORY_MAX_LIMIT = 200;
+const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
+const DEFAULT_HISTORY_PAGE_SIZE = 25;
+const QUEUE_PAGE_SIZE = 8;
 
 type HistoryView = "scans" | "polls";
 
@@ -168,9 +171,24 @@ function PollStatusBadge({ status }: { status: AutoscanEventStatus }) {
 
 function ScanStatusBadge({ status }: { status: AutoscanScanStatus | ScanRun["status"] }) {
   return (
-    <Badge variant="outline" className={scanStatusClass(status)}>
+    <Badge variant="outline" className={cn("capitalize tabular-nums", scanStatusClass(status))}>
       {scanStatusLabel(status)}
     </Badge>
+  );
+}
+
+// Shared desktop table chrome so the queue, scan history, and poll log read as
+// one family: clipped rounded border, muted sticky-feeling header band.
+function DataTable({ head, children }: { head: ReactNode; children: ReactNode }) {
+  return (
+    <div className="hidden overflow-hidden rounded-lg border lg:block">
+      <Table>
+        <TableHeader className="bg-muted/40">
+          <TableRow className="hover:bg-transparent">{head}</TableRow>
+        </TableHeader>
+        <TableBody>{children}</TableBody>
+      </Table>
+    </div>
   );
 }
 
@@ -192,7 +210,7 @@ function RunList({ runs }: { runs: AutoscanEventScanRun[] }) {
               {run.path || "Entire library"}
             </div>
           </div>
-          <div className="text-muted-foreground whitespace-nowrap">
+          <div className="text-muted-foreground whitespace-nowrap tabular-nums">
             {formatTime(run.completed_at ?? run.started_at ?? run.requested_at)}
           </div>
         </div>
@@ -203,7 +221,7 @@ function RunList({ runs }: { runs: AutoscanEventScanRun[] }) {
 
 function PollMetricStrip({ event }: { event: AutoscanEvent }) {
   return (
-    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
       <span>{event.changes_returned} changes</span>
       <span>{event.targets_claimed} targets</span>
       <span>{event.scans_created} created</span>
@@ -279,6 +297,14 @@ function AutoscanQueue({
   cancellingLibraryID: number | null;
   onCancel: (libraryID: number) => void;
 }) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(scans.length / QUEUE_PAGE_SIZE));
+  // Live scans complete out from under us; the active set length is known
+  // synchronously, so derive the in-range page during render (no effect needed)
+  // and the view self-heals when the queue shrinks below the current offset.
+  const safePage = Math.min(page, pageCount - 1);
+  const rows = scans.slice(safePage * QUEUE_PAGE_SIZE, (safePage + 1) * QUEUE_PAGE_SIZE);
+
   if (scans.length === 0) {
     return (
       <div className="border-border rounded-lg border border-dashed p-6">
@@ -313,7 +339,7 @@ function AutoscanQueue({
       </div>
 
       <div className="space-y-3 lg:hidden">
-        {scans.map((scan) => (
+        {rows.map((scan) => (
           <QueueCard
             key={scan.id}
             scan={scan}
@@ -324,60 +350,67 @@ function AutoscanQueue({
         ))}
       </div>
 
-      <div className="hidden rounded-lg border lg:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Status</TableHead>
-              <TableHead>Library</TableHead>
-              <TableHead>Scope</TableHead>
-              <TableHead>Progress</TableHead>
-              <TableHead className="w-20">Action</TableHead>
+      <DataTable
+        head={
+          <>
+            <TableHead>Status</TableHead>
+            <TableHead>Library</TableHead>
+            <TableHead>Scope</TableHead>
+            <TableHead>Progress</TableHead>
+            <TableHead className="w-20 text-right">Action</TableHead>
+          </>
+        }
+      >
+        {rows.map((scan) => {
+          const progress = formatActiveScanProgress(scan);
+          return (
+            <TableRow key={scan.id}>
+              <TableCell>
+                <ScanStatusBadge status={scan.status} />
+              </TableCell>
+              <TableCell className="font-medium">
+                {libraryName(librariesByID, scan.library_id)}
+                <div className="text-muted-foreground mt-1 text-xs">
+                  {scan.status === "running"
+                    ? formatActiveScanTime(scan.started_at, "Started")
+                    : "Waiting for capacity"}
+                </div>
+              </TableCell>
+              <TableCell className="max-w-xl">
+                <div className="text-sm">{formatActiveScanMode(scan)}</div>
+                <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
+                  {scan.path || "Entire library"}
+                </div>
+              </TableCell>
+              <TableCell className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
+                {progress || formatActiveScanTrigger(scan.trigger)}
+              </TableCell>
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-destructive h-8 w-8"
+                  disabled={cancellingLibraryID === scan.library_id}
+                  onClick={() => onCancel(scan.library_id)}
+                  aria-label="Cancel scans for this library"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                </Button>
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {scans.map((scan) => {
-              const progress = formatActiveScanProgress(scan);
-              return (
-                <TableRow key={scan.id}>
-                  <TableCell>
-                    <ScanStatusBadge status={scan.status} />
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {libraryName(librariesByID, scan.library_id)}
-                    <div className="text-muted-foreground mt-1 text-xs">
-                      {scan.status === "running"
-                        ? formatActiveScanTime(scan.started_at, "Started")
-                        : "Waiting for capacity"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="max-w-xl">
-                    <div className="text-sm">{formatActiveScanMode(scan)}</div>
-                    <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
-                      {scan.path || "Entire library"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
-                    {progress || formatActiveScanTrigger(scan.trigger)}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive h-8 w-8"
-                      disabled={cancellingLibraryID === scan.library_id}
-                      onClick={() => onCancel(scan.library_id)}
-                      aria-label="Cancel scans for this library"
-                    >
-                      <Square className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+          );
+        })}
+      </DataTable>
+
+      {scans.length > QUEUE_PAGE_SIZE ? (
+        <TablePagination
+          page={safePage}
+          pageSize={QUEUE_PAGE_SIZE}
+          total={scans.length}
+          onPageChange={setPage}
+          itemNoun="scan"
+        />
+      ) : null}
     </section>
   );
 }
@@ -417,7 +450,7 @@ function ScanHistoryCard({
           {scan.error_message}
         </div>
       ) : null}
-      <div className="text-muted-foreground mt-3 text-[11px] [overflow-wrap:anywhere]">
+      <div className="text-muted-foreground mt-3 font-mono text-[11px] [overflow-wrap:anywhere]">
         {scan.id}
       </div>
     </div>
@@ -445,51 +478,48 @@ function ScanHistoryTable({
           />
         ))}
       </div>
-      <div className="hidden rounded-lg border lg:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Status</TableHead>
-              <TableHead>Library</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Scope</TableHead>
-              <TableHead>Time</TableHead>
-              <TableHead>Poll</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {scans.map((scan) => (
-              <TableRow key={scan.id}>
-                <TableCell>
-                  <ScanStatusBadge status={scan.status} />
-                </TableCell>
-                <TableCell className="font-medium">
-                  {libraryName(librariesByID, scan.library_id)}
-                  <div className="text-muted-foreground mt-1 text-[11px]">{scan.id}</div>
-                </TableCell>
-                <TableCell className="whitespace-nowrap">{scanSourceName(scan, lookups)}</TableCell>
-                <TableCell className="max-w-xl">
-                  <div className="text-sm">{formatActiveScanMode(scan)}</div>
-                  <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
-                    {scan.path || "Entire library"}
-                  </div>
-                  {scan.error_message ? (
-                    <div className="text-destructive mt-1 text-xs [overflow-wrap:anywhere]">
-                      {scan.error_message}
-                    </div>
-                  ) : null}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {formatTimestamp(scan.completed_at ?? scan.started_at ?? scan.requested_at)}
-                </TableCell>
-                <TableCell>
-                  {scan.event_status ? <PollStatusBadge status={scan.event_status} /> : "-"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        head={
+          <>
+            <TableHead>Status</TableHead>
+            <TableHead>Library</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Scope</TableHead>
+            <TableHead>Time</TableHead>
+            <TableHead>Poll</TableHead>
+          </>
+        }
+      >
+        {scans.map((scan) => (
+          <TableRow key={scan.id}>
+            <TableCell>
+              <ScanStatusBadge status={scan.status} />
+            </TableCell>
+            <TableCell className="font-medium">
+              {libraryName(librariesByID, scan.library_id)}
+              <div className="text-muted-foreground mt-1 font-mono text-[11px]">{scan.id}</div>
+            </TableCell>
+            <TableCell className="whitespace-nowrap">{scanSourceName(scan, lookups)}</TableCell>
+            <TableCell className="max-w-xl">
+              <div className="text-sm">{formatActiveScanMode(scan)}</div>
+              <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
+                {scan.path || "Entire library"}
+              </div>
+              {scan.error_message ? (
+                <div className="text-destructive mt-1 text-xs [overflow-wrap:anywhere]">
+                  {scan.error_message}
+                </div>
+              ) : null}
+            </TableCell>
+            <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
+              {formatTimestamp(scan.completed_at ?? scan.started_at ?? scan.requested_at)}
+            </TableCell>
+            <TableCell>
+              {scan.event_status ? <PollStatusBadge status={scan.event_status} /> : "-"}
+            </TableCell>
+          </TableRow>
+        ))}
+      </DataTable>
     </>
   );
 }
@@ -505,7 +535,7 @@ function PollEventCard({ event, lookups }: { event: AutoscanEvent; lookups: Sour
           </div>
           <PollMetricStrip event={event} />
         </div>
-        <div className="text-muted-foreground text-right text-xs">
+        <div className="text-muted-foreground text-right text-xs tabular-nums">
           <div>{formatTimestamp(event.completed_at)}</div>
           <div>{formatDuration(event.duration_ms)}</div>
         </div>
@@ -541,55 +571,82 @@ function PollEventTable({
           <PollEventCard key={event.id} event={event} lookups={lookups} />
         ))}
       </div>
-      <div className="hidden rounded-lg border lg:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Status</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Counts</TableHead>
-              <TableHead>Scans</TableHead>
-              <TableHead>Duration</TableHead>
-              <TableHead>Completed</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {events.map((event) => (
-              <TableRow key={event.id}>
-                <TableCell>
-                  <PollStatusBadge status={event.status} />
-                </TableCell>
-                <TableCell className="font-medium">{pollSourceName(event, lookups)}</TableCell>
-                <TableCell>
-                  <PollMetricStrip event={event} />
-                  {event.error_message ? (
-                    <div className="text-destructive mt-1 max-w-md text-xs [overflow-wrap:anywhere]">
-                      {event.error_message}
-                    </div>
-                  ) : null}
-                </TableCell>
-                <TableCell>
-                  <details>
-                    <summary className="text-muted-foreground cursor-pointer text-xs">
-                      {event.scan_runs.length} linked
-                    </summary>
-                    <div className="mt-2 w-[min(42rem,70vw)]">
-                      <RunList runs={event.scan_runs} />
-                    </div>
-                  </details>
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {formatDuration(event.duration_ms)}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {formatTimestamp(event.completed_at)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        head={
+          <>
+            <TableHead>Status</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Counts</TableHead>
+            <TableHead>Scans</TableHead>
+            <TableHead>Duration</TableHead>
+            <TableHead>Completed</TableHead>
+          </>
+        }
+      >
+        {events.map((event) => (
+          <TableRow key={event.id}>
+            <TableCell>
+              <PollStatusBadge status={event.status} />
+            </TableCell>
+            <TableCell className="font-medium">{pollSourceName(event, lookups)}</TableCell>
+            <TableCell>
+              <PollMetricStrip event={event} />
+              {event.error_message ? (
+                <div className="text-destructive mt-1 max-w-md text-xs [overflow-wrap:anywhere]">
+                  {event.error_message}
+                </div>
+              ) : null}
+            </TableCell>
+            <TableCell>
+              <details>
+                <summary className="text-muted-foreground cursor-pointer text-xs">
+                  {event.scan_runs.length} linked
+                </summary>
+                <div className="mt-2 w-[min(42rem,70vw)]">
+                  <RunList runs={event.scan_runs} />
+                </div>
+              </details>
+            </TableCell>
+            <TableCell className="whitespace-nowrap tabular-nums">
+              {formatDuration(event.duration_ms)}
+            </TableCell>
+            <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
+              {formatTimestamp(event.completed_at)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </DataTable>
     </>
+  );
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="space-y-3" aria-hidden="true">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Skeleton key={i} className="h-16 w-full rounded-lg" />
+      ))}
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: ReactNode;
+  icon?: typeof ScanLine;
+}) {
+  return (
+    <div>
+      <div className="text-muted-foreground flex items-center gap-2 text-xs">
+        {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+        {label}
+      </div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
   );
 }
 
@@ -599,17 +656,20 @@ export default function ActivityPanel() {
   const [historyQuery, setHistoryQuery] = useState("");
   const [scanStatus, setScanStatus] = useState<AutoscanScanStatus | "all">("all");
   const [pollStatus, setPollStatus] = useState<AutoscanEventStatus | "all">("all");
-  const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_HISTORY_PAGE_SIZE);
   const debouncedHistoryQuery = useDebounce(historyQuery.trim(), 300);
 
   const scanHistory = useAutoscanScans({
-    limit: historyLimit,
+    limit: pageSize,
+    offset: page * pageSize,
     query: debouncedHistoryQuery || undefined,
     status: scanStatus === "all" ? undefined : scanStatus,
     enabled: historyView === "scans",
   });
   const pollEvents = useAutoscanEvents({
-    limit: historyLimit,
+    limit: pageSize,
+    offset: page * pageSize,
     query: debouncedHistoryQuery || undefined,
     status: pollStatus === "all" ? undefined : pollStatus,
     enabled: historyView === "polls",
@@ -644,12 +704,22 @@ export default function ActivityPanel() {
     [activeScans],
   );
 
-  const activeRows = historyView === "scans" ? (scanHistory.data ?? []) : (pollEvents.data ?? []);
-  const activeStatus = historyView === "scans" ? scanStatus : pollStatus;
   const activeQuery = historyView === "scans" ? scanHistory : pollEvents;
+  const activeRows = activeQuery.data?.rows ?? [];
+  const activeTotal = activeQuery.data?.total ?? 0;
+  const activeStatus = historyView === "scans" ? scanStatus : pollStatus;
   const hasHistoryFilters = debouncedHistoryQuery !== "" || activeStatus !== "all";
-  const canLoadMore = activeRows.length >= historyLimit && historyLimit < HISTORY_MAX_LIMIT;
   const isRefreshing = status.isFetching || activeQuery.isFetching;
+  const itemNoun = historyView === "scans" ? "scan" : "poll";
+
+  // If a background refresh shrinks the result set below the current page,
+  // pull the viewer back to the last page that still has rows. Adjusting state
+  // during render (React's escape hatch) converges in one guarded step and
+  // avoids an extra effect pass; the offset query then refetches the valid page.
+  const historyPageCount = Math.max(1, Math.ceil(activeTotal / pageSize));
+  if (page > 0 && page >= historyPageCount && !activeQuery.isFetching) {
+    setPage(historyPageCount - 1);
+  }
 
   function refresh() {
     void status.refetch();
@@ -660,40 +730,22 @@ export default function ActivityPanel() {
     setHistoryQuery("");
     setScanStatus("all");
     setPollStatus("all");
-    setHistoryLimit(HISTORY_PAGE_SIZE);
+    setPage(0);
   }
 
   function switchHistoryView(nextView: HistoryView) {
     setHistoryView(nextView);
-    setHistoryLimit(HISTORY_PAGE_SIZE);
+    setPage(0);
   }
 
   return (
     <div className="space-y-6">
-      <div className="border-border grid gap-3 rounded-lg border p-4 sm:grid-cols-4">
-        <div>
-          <div className="text-muted-foreground flex items-center gap-2 text-xs">
-            <ScanLine className="h-3.5 w-3.5" />
-            Active
-          </div>
-          <div className="mt-1 text-2xl font-semibold">{queue?.active_scans ?? 0}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground text-xs">Queued</div>
-          <div className="mt-1 text-2xl font-semibold">{queue?.accepted_scans ?? 0}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground text-xs">Running</div>
-          <div className="mt-1 text-2xl font-semibold">{queue?.running_scans ?? 0}</div>
-        </div>
+      <div className="border-border grid gap-4 rounded-lg border p-4 sm:grid-cols-4">
+        <StatTile label="Active" value={queue?.active_scans ?? 0} icon={ScanLine} />
+        <StatTile label="Queued" value={queue?.accepted_scans ?? 0} />
+        <StatTile label="Running" value={queue?.running_scans ?? 0} />
         <div className="flex items-start justify-between gap-3 sm:block">
-          <div>
-            <div className="text-muted-foreground flex items-center gap-2 text-xs">
-              <Clock className="h-3.5 w-3.5" />
-              Latest poll
-            </div>
-            <div className="mt-1 text-sm font-medium">{formatTime(queue?.latest_event_at)}</div>
-          </div>
+          <StatTile label="Latest poll" value={formatTime(queue?.latest_event_at)} icon={Clock} />
           <Button
             variant="outline"
             size="icon"
@@ -759,7 +811,7 @@ export default function ActivityPanel() {
                 value={historyQuery}
                 onChange={(event) => {
                   setHistoryQuery(event.target.value);
-                  setHistoryLimit(HISTORY_PAGE_SIZE);
+                  setPage(0);
                 }}
                 placeholder={historyView === "scans" ? "Search scan history" : "Search poll log"}
                 className="pr-9 pl-9"
@@ -780,7 +832,7 @@ export default function ActivityPanel() {
                 value={scanStatus}
                 onValueChange={(value) => {
                   setScanStatus(value as AutoscanScanStatus | "all");
-                  setHistoryLimit(HISTORY_PAGE_SIZE);
+                  setPage(0);
                 }}
               >
                 <SelectTrigger className="w-full">
@@ -800,7 +852,7 @@ export default function ActivityPanel() {
                 value={pollStatus}
                 onValueChange={(value) => {
                   setPollStatus(value as AutoscanEventStatus | "all");
-                  setHistoryLimit(HISTORY_PAGE_SIZE);
+                  setPage(0);
                 }}
               >
                 <SelectTrigger className="w-full">
@@ -821,9 +873,14 @@ export default function ActivityPanel() {
         </div>
 
         {activeQuery.isLoading ? (
-          <p className="text-muted-foreground py-4 text-sm">Loading activity...</p>
+          <HistorySkeleton />
         ) : activeQuery.isError ? (
-          <p className="text-destructive py-4 text-sm">Failed to load autoscan activity.</p>
+          <div className="border-destructive/30 bg-destructive/5 rounded-lg border p-8 text-center">
+            <p className="text-destructive text-sm">Failed to load autoscan activity.</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={refresh}>
+              Try again
+            </Button>
+          </div>
         ) : activeRows.length === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center">
             <p className="text-muted-foreground text-sm">
@@ -835,37 +892,31 @@ export default function ActivityPanel() {
             </p>
           </div>
         ) : (
-          <>
+          <div className="space-y-4">
             {historyView === "scans" ? (
               <ScanHistoryTable
-                scans={scanHistory.data ?? []}
+                scans={activeRows as AutoscanScan[]}
                 librariesByID={librariesByID}
                 lookups={labelLookups}
               />
             ) : (
-              <PollEventTable events={pollEvents.data ?? []} lookups={labelLookups} />
+              <PollEventTable events={activeRows as AutoscanEvent[]} lookups={labelLookups} />
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-muted-foreground text-xs">
-                Showing {activeRows.length} {historyView === "scans" ? "scan" : "poll"}
-                {activeRows.length === 1 ? "" : "s"}
-                {hasHistoryFilters ? " matching filters" : ""}
-              </div>
-              {canLoadMore ? (
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    setHistoryLimit((current) =>
-                      Math.min(HISTORY_MAX_LIMIT, current + HISTORY_PAGE_SIZE),
-                    )
-                  }
-                >
-                  Load more
-                </Button>
-              ) : null}
-            </div>
-          </>
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={activeTotal}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(0);
+              }}
+              pageSizeOptions={HISTORY_PAGE_SIZE_OPTIONS}
+              itemNoun={itemNoun}
+              isFetching={activeQuery.isFetching}
+            />
+          </div>
         )}
       </section>
     </div>

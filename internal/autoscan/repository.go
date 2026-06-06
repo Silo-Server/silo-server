@@ -565,15 +565,22 @@ func (r *Repository) FinishEvent(ctx context.Context, in EventFinish) error {
 	return nil
 }
 
-func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]EventWithRuns, error) {
-	limit := filter.Limit
+// clampAutoscanLimit bounds a requested page size to a sane window: the
+// default page when unset, capped so a single query can never fan out.
+func clampAutoscanLimit(limit int) int {
 	if limit <= 0 {
-		limit = 50
+		return 50
 	}
 	if limit > 200 {
-		limit = 200
+		return 200
 	}
+	return limit
+}
 
+// eventFilterClauses builds the shared WHERE clauses (and positional args) for
+// autoscan event queries, so listing and counting filter identically and the
+// search SQL lives in exactly one place.
+func eventFilterClauses(filter EventListFilter) ([]string, []any) {
 	clauses := []string{"true"}
 	args := []any{}
 	if strings.TrimSpace(filter.SourceID) != "" {
@@ -606,14 +613,88 @@ func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]
 			)
 		)`)
 	}
+	return clauses, args
+}
+
+// scanFilterClauses builds the shared WHERE clauses for autoscan scan queries.
+// The clauses reference the `sr` (scan_runs) and `e` (autoscan_events) aliases,
+// so callers must select FROM scan_runs sr LEFT JOIN autoscan_events e.
+func scanFilterClauses(filter ScanListFilter) ([]string, []any) {
+	clauses := []string{"sr.trigger = 'autoscan'"}
+	args := []any{}
+	if strings.TrimSpace(filter.Status) != "" {
+		args = append(args, strings.TrimSpace(filter.Status))
+		clauses = append(clauses, fmt.Sprintf("sr.status = $%d", len(args)))
+	}
+	if search := strings.ToLower(strings.TrimSpace(filter.Search)); search != "" {
+		args = append(args, "%"+search+"%")
+		param := fmt.Sprintf("$%d", len(args))
+		clauses = append(clauses, `(
+			lower(sr.id) LIKE `+param+`
+			OR lower(sr.mode) LIKE `+param+`
+			OR lower(sr.path) LIKE `+param+`
+			OR lower(sr.status) LIKE `+param+`
+			OR lower(COALESCE(sr.error_message, '')) LIKE `+param+`
+			OR lower(COALESCE(e.capability_id, '')) LIKE `+param+`
+			OR lower(COALESCE(e.status, '')) LIKE `+param+`
+			OR lower(COALESCE(e.source_id::text, '')) LIKE `+param+`
+		)`)
+	}
+	return clauses, args
+}
+
+// CountEvents returns the total number of autoscan events matching filter,
+// ignoring limit/offset. It powers the "of N" total in paginated views.
+func (r *Repository) CountEvents(ctx context.Context, filter EventListFilter) (int, error) {
+	clauses, args := eventFilterClauses(filter)
+	var total int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM autoscan_events
+		WHERE `+strings.Join(clauses, " AND "),
+		args...,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count autoscan events: %w", err)
+	}
+	return total, nil
+}
+
+// CountAutoscanScans returns the total number of autoscan scan runs matching
+// filter, ignoring limit/offset. It powers the "of N" total in paginated views.
+func (r *Repository) CountAutoscanScans(ctx context.Context, filter ScanListFilter) (int, error) {
+	clauses, args := scanFilterClauses(filter)
+	var total int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM scan_runs sr
+		LEFT JOIN autoscan_events e ON e.id = sr.autoscan_event_id
+		WHERE `+strings.Join(clauses, " AND "),
+		args...,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count autoscan scans: %w", err)
+	}
+	return total, nil
+}
+
+func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]EventWithRuns, error) {
+	limit := clampAutoscanLimit(filter.Limit)
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	clauses, args := eventFilterClauses(filter)
 	args = append(args, limit)
+	limitParam := len(args)
+	args = append(args, offset)
+	offsetParam := len(args)
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+eventColumns+`
 		FROM autoscan_events
 		WHERE `+strings.Join(clauses, " AND ")+`
 		ORDER BY completed_at DESC, id DESC
-		LIMIT $`+fmt.Sprint(len(args)),
+		LIMIT $`+fmt.Sprint(limitParam)+` OFFSET $`+fmt.Sprint(offsetParam),
 		args...,
 	)
 	if err != nil {
@@ -678,35 +759,17 @@ func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]
 }
 
 func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilter) ([]ScanWithEvent, error) {
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 200 {
-		limit = 200
+	limit := clampAutoscanLimit(filter.Limit)
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
 	}
 
-	clauses := []string{"sr.trigger = 'autoscan'"}
-	args := []any{}
-	if strings.TrimSpace(filter.Status) != "" {
-		args = append(args, strings.TrimSpace(filter.Status))
-		clauses = append(clauses, fmt.Sprintf("sr.status = $%d", len(args)))
-	}
-	if search := strings.ToLower(strings.TrimSpace(filter.Search)); search != "" {
-		args = append(args, "%"+search+"%")
-		param := fmt.Sprintf("$%d", len(args))
-		clauses = append(clauses, `(
-			lower(sr.id) LIKE `+param+`
-			OR lower(sr.mode) LIKE `+param+`
-			OR lower(sr.path) LIKE `+param+`
-			OR lower(sr.status) LIKE `+param+`
-			OR lower(COALESCE(sr.error_message, '')) LIKE `+param+`
-			OR lower(COALESCE(e.capability_id, '')) LIKE `+param+`
-			OR lower(COALESCE(e.status, '')) LIKE `+param+`
-			OR lower(COALESCE(e.source_id::text, '')) LIKE `+param+`
-		)`)
-	}
+	clauses, args := scanFilterClauses(filter)
 	args = append(args, limit)
+	limitParam := len(args)
+	args = append(args, offset)
+	offsetParam := len(args)
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT
@@ -730,7 +793,7 @@ func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilte
 		LEFT JOIN autoscan_events e ON e.id = sr.autoscan_event_id
 		WHERE `+strings.Join(clauses, " AND ")+`
 		ORDER BY COALESCE(sr.completed_at, sr.started_at, sr.requested_at) DESC, sr.id DESC
-		LIMIT $`+fmt.Sprint(len(args)),
+		LIMIT $`+fmt.Sprint(limitParam)+` OFFSET $`+fmt.Sprint(offsetParam),
 		args...,
 	)
 	if err != nil {
