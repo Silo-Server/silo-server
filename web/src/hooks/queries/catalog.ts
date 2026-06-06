@@ -115,10 +115,7 @@ export async function fetchCatalogFacetSearch(
   params.set("facet", facet);
   params.set("q", prefix);
   params.set("limit", String(limit));
-  return api<CatalogFacetSearchResponse>(
-    `/catalog/filters/search?${params.toString()}`,
-    options,
-  );
+  return api<CatalogFacetSearchResponse>(`/catalog/filters/search?${params.toString()}`, options);
 }
 
 export function createCatalogSearchState(

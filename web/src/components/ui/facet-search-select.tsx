@@ -3,10 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Check, ChevronsUpDown } from "lucide-react";
 
-import {
-  fetchCatalogFacetSearch,
-  type CatalogFacetName,
-} from "@/hooks/queries/catalog";
+import { fetchCatalogFacetSearch, type CatalogFacetName } from "@/hooks/queries/catalog";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import { cn } from "@/lib/utils";

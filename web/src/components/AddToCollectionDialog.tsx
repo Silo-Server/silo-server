@@ -121,7 +121,9 @@ export default function AddToCollectionDialog({
         <DialogHeader>
           <DialogTitle>Add to Collection</DialogTitle>
           <DialogDescription>
-            {itemTitle ? `Pick a manual collection to add "${itemTitle}" to.` : "Pick a manual collection."}
+            {itemTitle
+              ? `Pick a manual collection to add "${itemTitle}" to.`
+              : "Pick a manual collection."}
           </DialogDescription>
         </DialogHeader>
 
