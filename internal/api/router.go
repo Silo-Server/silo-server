@@ -123,6 +123,7 @@ type Dependencies struct {
 	IntroAnalyzer                *intromarkers.Analyzer
 	MarkerRegistry               *markers.Registry
 	MarkerResolver               markers.ExternalIDResolver
+	MarkerProviderConfig         *markers.ProviderConfigStore
 	WatchProviderService         handlers.WatchProviderService
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy

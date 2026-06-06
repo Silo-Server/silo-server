@@ -993,7 +993,10 @@ type segmentState struct {
 func applySegmentPatch(
 	state *segmentState,
 	legacySharedSource *string,
-	update MarkerUpdate,
+	source string,
+	provider *string,
+	confidence *float64,
+	algorithm string,
 	patchStart, patchEnd *float64,
 	duration float64,
 	segmentName string,
@@ -1024,19 +1027,41 @@ func applySegmentPatch(
 	if effectiveSource == nil && state.start != nil && state.end != nil {
 		effectiveSource = legacySharedSource
 	}
-	if !markers.CanWriteMarker(effectiveSource, state.confidence, update.MarkersSource, update.MarkersConfidence) {
+	if !markers.CanWriteMarker(effectiveSource, state.confidence, source, confidence) {
 		return false, nil
 	}
 
-	src := update.MarkersSource
-	algo := markerAlgorithm(update)
+	src := source
+	algo := algorithm
 	state.start = nextStart
 	state.end = nextEnd
 	state.source = &src
-	state.provider = update.MarkersProvider
-	state.confidence = update.MarkersConfidence
+	state.provider = provider
+	state.confidence = confidence
 	state.algorithm = &algo
 	return true, nil
+}
+
+// resolveSegmentProvenance returns the source/provider/confidence/algorithm to
+// write for a segment: the per-segment override when present, otherwise the
+// update's shared Markers* values. The algorithm always falls back to
+// external:<source> so writes carry an algorithm tag.
+func resolveSegmentProvenance(update MarkerUpdate, override *SegmentProvenance) (source string, provider *string, confidence *float64, algorithm string) {
+	source = update.MarkersSource
+	provider = update.MarkersProvider
+	confidence = update.MarkersConfidence
+	algorithm = update.MarkersAlgorithm
+	if override != nil {
+		provider = override.Provider
+		confidence = override.Confidence
+		if override.Algorithm != "" {
+			algorithm = override.Algorithm
+		}
+	}
+	if algorithm == "" {
+		algorithm = "external:" + source
+	}
+	return source, provider, confidence, algorithm
 }
 
 // segmentEqual reports whether two segment states are byte-equivalent. Used to
@@ -1118,19 +1143,23 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 
 	originalIntro, originalCredits, originalRecap, originalPreview := intro, credits, recap, preview
 
-	introApplied, err := applySegmentPatch(&intro, existingSource, update, update.IntroStart, update.IntroEnd, duration, "intro")
+	introSrc, introProv, introConf, introAlgo := resolveSegmentProvenance(update, update.IntroProvenance)
+	introApplied, err := applySegmentPatch(&intro, existingSource, introSrc, introProv, introConf, introAlgo, update.IntroStart, update.IntroEnd, duration, "intro")
 	if err != nil {
 		return false, err
 	}
-	creditsApplied, err := applySegmentPatch(&credits, existingSource, update, update.CreditsStart, update.CreditsEnd, duration, "credits")
+	creditsSrc, creditsProv, creditsConf, creditsAlgo := resolveSegmentProvenance(update, update.CreditsProvenance)
+	creditsApplied, err := applySegmentPatch(&credits, existingSource, creditsSrc, creditsProv, creditsConf, creditsAlgo, update.CreditsStart, update.CreditsEnd, duration, "credits")
 	if err != nil {
 		return false, err
 	}
-	recapApplied, err := applySegmentPatch(&recap, existingSource, update, update.RecapStart, update.RecapEnd, duration, "recap")
+	recapSrc, recapProv, recapConf, recapAlgo := resolveSegmentProvenance(update, update.RecapProvenance)
+	recapApplied, err := applySegmentPatch(&recap, existingSource, recapSrc, recapProv, recapConf, recapAlgo, update.RecapStart, update.RecapEnd, duration, "recap")
 	if err != nil {
 		return false, err
 	}
-	previewApplied, err := applySegmentPatch(&preview, existingSource, update, update.PreviewStart, update.PreviewEnd, duration, "preview")
+	previewSrc, previewProv, previewConf, previewAlgo := resolveSegmentProvenance(update, update.PreviewProvenance)
+	previewApplied, err := applySegmentPatch(&preview, existingSource, previewSrc, previewProv, previewConf, previewAlgo, update.PreviewStart, update.PreviewEnd, duration, "preview")
 	if err != nil {
 		return false, err
 	}
@@ -1232,13 +1261,6 @@ func nextSharedMarkerAttribution(
 		return existingSource, update.MarkersConfidence
 	}
 	return existingSource, existingConfidence
-}
-
-func markerAlgorithm(update MarkerUpdate) string {
-	if update.MarkersAlgorithm != "" {
-		return update.MarkersAlgorithm
-	}
-	return "external:" + update.MarkersSource
 }
 
 func ptrStringEqual(a, b *string) bool {

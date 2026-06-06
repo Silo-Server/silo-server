@@ -30,53 +30,68 @@ func CanWriteMarker(existingSource *string, existingConfidence *float64, newSour
 	return false
 }
 
+// SegmentPayload is the storage-agnostic per-segment marker write: its bounds
+// plus the provenance (provider/confidence/algorithm) of the marker that
+// produced it. A merged multi-provider result carries a different provider per
+// segment; a single-source result repeats the same provider across segments.
+type SegmentPayload struct {
+	Start, End *float64
+	Provider   *string
+	Confidence *float64
+	Algorithm  string
+}
+
+// Present reports whether the segment carries a bound to write.
+func (s SegmentPayload) Present() bool { return s.Start != nil || s.End != nil }
+
 // MarkerUpdatePayload is the storage-agnostic shape produced from a provider
-// Result. Repositories convert it into their concrete write column set.
-// Pointer fields are nil when the result didn't carry that segment kind.
+// Result. Repositories convert it into their concrete write column set. Source
+// is the shared source class (online/scanner/manual/...); each SegmentPayload
+// carries its own provider/confidence/algorithm so a merged multi-provider
+// result records correct per-segment provenance.
 type MarkerUpdatePayload struct {
-	IntroStart, IntroEnd     *float64
-	CreditsStart, CreditsEnd *float64
-	RecapStart, RecapEnd     *float64
-	PreviewStart, PreviewEnd *float64
-	Source                   string
-	Provider                 *string
-	Confidence               *float64
-	Algorithm                string
+	Intro   SegmentPayload
+	Credits SegmentPayload
+	Recap   SegmentPayload
+	Preview SegmentPayload
+	Source  string
 }
 
 // HasAnySegment reports whether the payload carries at least one segment
 // range. Callers can short-circuit empty writes without touching the DB.
 func (p MarkerUpdatePayload) HasAnySegment() bool {
-	return p.IntroStart != nil || p.IntroEnd != nil ||
-		p.CreditsStart != nil || p.CreditsEnd != nil ||
-		p.RecapStart != nil || p.RecapEnd != nil ||
-		p.PreviewStart != nil || p.PreviewEnd != nil
+	return p.Intro.Present() || p.Credits.Present() || p.Recap.Present() || p.Preview.Present()
 }
 
-// BuildUpdatePayload converts a provider Result into the storage payload.
-// All four segment kinds in the result map to the corresponding *Start/*End
-// pointer pair; absent kinds remain nil. The Result's Algorithm field is
-// authoritative; the falls back to `external:<source>` if absent so writes
-// always carry an algorithm tag for provenance.
-//
-// Confidence: the highest per-marker confidence in the result is promoted to
-// the shared write-time confidence. Per-segment confidence values are not
-// preserved individually — the write path uses a single confidence per
-// upsert, and providers today return uniform confidence across all segments
-// of a single fetch.
-func BuildUpdatePayload(result Result) MarkerUpdatePayload {
-	payload := MarkerUpdatePayload{
-		Source:    result.SourceClass,
-		Algorithm: result.Algorithm,
+// SummaryConfidence returns the highest per-segment confidence present, for the
+// legacy shared markers_confidence column. Returns nil when no segment carries
+// a confidence.
+func (p MarkerUpdatePayload) SummaryConfidence() *float64 {
+	var max float64
+	found := false
+	for _, s := range []SegmentPayload{p.Intro, p.Credits, p.Recap, p.Preview} {
+		if s.Confidence != nil && (!found || *s.Confidence > max) {
+			max = *s.Confidence
+			found = true
+		}
 	}
-	if payload.Algorithm == "" && payload.Source != "" {
-		payload.Algorithm = "external:" + payload.Source
+	if !found {
+		return nil
 	}
-	if provider := strings.TrimSpace(result.ProviderID); provider != "" {
-		payload.Provider = &provider
-	}
+	return &max
+}
 
-	var maxConfidence float64
+// BuildUpdatePayload converts a provider Result into the storage payload. Each
+// marker maps to its segment with its own provenance: ProviderID/Algorithm fall
+// back to the Result-level values (used for single-provider results), and the
+// algorithm finally falls back to external:<source> so every write carries an
+// algorithm tag.
+func BuildUpdatePayload(result Result) MarkerUpdatePayload {
+	payload := MarkerUpdatePayload{Source: result.SourceClass}
+	resultAlgorithm := result.Algorithm
+	if resultAlgorithm == "" && result.SourceClass != "" {
+		resultAlgorithm = "external:" + result.SourceClass
+	}
 	for _, m := range result.Markers {
 		start := m.Start.Seconds()
 		end := m.End.Seconds()
@@ -84,26 +99,48 @@ func BuildUpdatePayload(result Result) MarkerUpdatePayload {
 			continue
 		}
 		startPtr, endPtr := start, end
+		seg := SegmentPayload{
+			Start:     &startPtr,
+			End:       &endPtr,
+			Provider:  markerProvider(m, result),
+			Algorithm: markerAlgorithm(m, resultAlgorithm),
+		}
+		if m.Confidence > 0 {
+			conf := m.Confidence
+			seg.Confidence = &conf
+		}
 		switch m.Kind {
 		case MarkerKindIntro:
-			payload.IntroStart = &startPtr
-			payload.IntroEnd = &endPtr
+			payload.Intro = seg
 		case MarkerKindCredits:
-			payload.CreditsStart = &startPtr
-			payload.CreditsEnd = &endPtr
+			payload.Credits = seg
 		case MarkerKindRecap:
-			payload.RecapStart = &startPtr
-			payload.RecapEnd = &endPtr
+			payload.Recap = seg
 		case MarkerKindPreview:
-			payload.PreviewStart = &startPtr
-			payload.PreviewEnd = &endPtr
+			payload.Preview = seg
 		}
-		if m.Confidence > maxConfidence {
-			maxConfidence = m.Confidence
-		}
-	}
-	if maxConfidence > 0 {
-		payload.Confidence = &maxConfidence
 	}
 	return payload
+}
+
+// markerProvider returns the per-marker provider, falling back to the
+// Result-level provider (single-provider results), or nil when neither is set.
+func markerProvider(m Marker, result Result) *string {
+	provider := strings.TrimSpace(m.ProviderID)
+	if provider == "" {
+		provider = strings.TrimSpace(result.ProviderID)
+	}
+	if provider == "" {
+		return nil
+	}
+	return &provider
+}
+
+// markerAlgorithm returns the per-marker algorithm, falling back to the
+// already-resolved Result-level algorithm.
+func markerAlgorithm(m Marker, resultAlgorithm string) string {
+	if a := strings.TrimSpace(m.Algorithm); a != "" {
+		return a
+	}
+	return resultAlgorithm
 }

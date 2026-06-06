@@ -507,6 +507,13 @@ func main() {
 		if err := markerRegistry.Register(introdb.NewProvider(introdbClient)); err != nil {
 			log.Fatalf("register introdb marker provider: %v", err)
 		}
+		markerProviderConfig := markers.NewProviderConfigStore(deps.DB)
+		if err := markerProviderConfig.Reload(appCtx); err != nil {
+			slog.Warn("load marker provider config failed; falling back to registration-order fetch",
+				"error", err)
+		}
+		markerRegistry.UseConfigStore(markerProviderConfig)
+		deps.MarkerProviderConfig = markerProviderConfig
 		deps.OnServerSettingUpdated = func(_ context.Context, key, value string) {
 			if key == "introdb.api_key" {
 				introdbClient.SetAPIKey(value)

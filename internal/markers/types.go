@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -77,11 +78,18 @@ type Marker struct {
 	End             time.Duration
 	Confidence      float64
 	SubmissionCount int
+	// ProviderID and Algorithm identify the source of this individual marker.
+	// They are usually empty for a single-provider Result (the Result-level
+	// ProviderID/Algorithm apply); FetchMerged sets them per marker so a merged
+	// result records correct per-segment provenance.
+	ProviderID string
+	Algorithm  string
 }
 
 type Registry struct {
 	providers []Provider
 	logger    *slog.Logger
+	config    *ProviderConfigStore
 }
 
 func NewRegistry(logger *slog.Logger) *Registry {
@@ -143,6 +151,133 @@ func (r *Registry) FetchFirstHit(ctx context.Context, req Request) (Result, bool
 	}
 
 	return Result{}, false, lastErr
+}
+
+// UseConfigStore attaches a per-provider config store so FetchMerged consults
+// fetch_enabled / fetch_priority. Without one, all registered providers
+// participate in registration order.
+func (r *Registry) UseConfigStore(store *ProviderConfigStore) {
+	if r != nil {
+		r.config = store
+	}
+}
+
+// FetchMerged queries every fetch-enabled provider concurrently and keeps, per
+// segment kind, the best candidate — ranked by submission count, then
+// confidence, then the provider's fetch priority (lower preferred). The winning
+// markers are stamped with their provider/algorithm so the write path records
+// correct per-segment provenance. With a single enabled provider this returns
+// the same result as FetchFirstHit.
+func (r *Registry) FetchMerged(ctx context.Context, req Request) (Result, bool, error) {
+	if r == nil || len(r.providers) == 0 {
+		return Result{}, false, nil
+	}
+
+	entries := r.fetchEntries()
+	if len(entries) == 0 {
+		return Result{}, false, nil
+	}
+
+	type fetched struct {
+		entry  fetchEntry
+		result Result
+		err    error
+	}
+	out := make([]fetched, len(entries))
+	var wg sync.WaitGroup
+	for i, e := range entries {
+		wg.Add(1)
+		go func(i int, e fetchEntry) {
+			defer wg.Done()
+			res, err := e.provider.FetchMarkers(ctx, req)
+			out[i] = fetched{entry: e, result: res, err: err}
+		}(i, e)
+	}
+	wg.Wait()
+
+	best := make(map[MarkerKind]mergeCandidate)
+	var lastErr error
+	for _, f := range out {
+		if f.err != nil {
+			lastErr = f.err
+			r.logProviderError(f.entry.provider.ID(), req, f.err)
+			continue
+		}
+		for _, m := range f.result.Markers {
+			m.ProviderID = firstNonEmpty(m.ProviderID, f.result.ProviderID, f.entry.provider.ID())
+			m.Algorithm = firstNonEmpty(m.Algorithm, f.result.Algorithm)
+			cand := mergeCandidate{marker: m, priority: f.entry.priority}
+			if cur, ok := best[m.Kind]; !ok || cand.better(cur) {
+				best[m.Kind] = cand
+			}
+		}
+	}
+	if len(best) == 0 {
+		return Result{}, false, lastErr
+	}
+
+	merged := Result{SourceClass: models.MarkerSourceOnline}
+	for _, kind := range []MarkerKind{MarkerKindIntro, MarkerKindCredits, MarkerKindRecap, MarkerKindPreview} {
+		if cand, ok := best[kind]; ok {
+			merged.Markers = append(merged.Markers, cand.marker)
+		}
+	}
+	return merged, true, nil
+}
+
+type fetchEntry struct {
+	provider Provider
+	priority int
+}
+
+// fetchEntries returns the providers to query with their priorities. When a
+// config store is set only fetch-enabled providers participate, ordered by
+// fetch_priority; otherwise all providers participate in registration order.
+func (r *Registry) fetchEntries() []fetchEntry {
+	if r.config == nil {
+		entries := make([]fetchEntry, 0, len(r.providers))
+		for i, p := range r.providers {
+			entries = append(entries, fetchEntry{provider: p, priority: i})
+		}
+		return entries
+	}
+	priority := make(map[string]int)
+	for _, c := range r.config.EnabledForFetch() {
+		priority[c.Provider] = c.FetchPriority
+	}
+	entries := make([]fetchEntry, 0, len(r.providers))
+	for _, p := range r.providers {
+		if prio, ok := priority[p.ID()]; ok {
+			entries = append(entries, fetchEntry{provider: p, priority: prio})
+		}
+	}
+	return entries
+}
+
+type mergeCandidate struct {
+	marker   Marker
+	priority int
+}
+
+// better reports whether a should win over b for the same segment kind: more
+// submissions, then higher confidence, then lower (preferred) fetch priority.
+func (a mergeCandidate) better(b mergeCandidate) bool {
+	if a.marker.SubmissionCount != b.marker.SubmissionCount {
+		return a.marker.SubmissionCount > b.marker.SubmissionCount
+	}
+	if a.marker.Confidence != b.marker.Confidence {
+		return a.marker.Confidence > b.marker.Confidence
+	}
+	return a.priority < b.priority
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (r *Registry) logProviderError(providerID string, req Request, err error) {

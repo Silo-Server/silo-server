@@ -272,7 +272,7 @@ func (h *PlaybackHandler) fetchOnlineMarkersForPlayback(ctx context.Context, fil
 		EpisodeNumber: ids.EpisodeNumber,
 		Duration:      time.Duration(file.Duration) * time.Second,
 	}
-	result, ok, err := h.MarkerRegistry.FetchFirstHit(ctx, req)
+	result, ok, err := h.MarkerRegistry.FetchMerged(ctx, req)
 	if err != nil {
 		return false, err
 	}
@@ -373,17 +373,30 @@ func hasLocalDetectionMarkers(file *models.MediaFile) bool {
 // each other.
 func markerUpdateFromPayload(p markers.MarkerUpdatePayload) scanner.MarkerUpdate {
 	return scanner.MarkerUpdate{
-		IntroStart:        p.IntroStart,
-		IntroEnd:          p.IntroEnd,
-		CreditsStart:      p.CreditsStart,
-		CreditsEnd:        p.CreditsEnd,
-		RecapStart:        p.RecapStart,
-		RecapEnd:          p.RecapEnd,
-		PreviewStart:      p.PreviewStart,
-		PreviewEnd:        p.PreviewEnd,
+		IntroStart:        p.Intro.Start,
+		IntroEnd:          p.Intro.End,
+		CreditsStart:      p.Credits.Start,
+		CreditsEnd:        p.Credits.End,
+		RecapStart:        p.Recap.Start,
+		RecapEnd:          p.Recap.End,
+		PreviewStart:      p.Preview.Start,
+		PreviewEnd:        p.Preview.End,
 		MarkersSource:     p.Source,
-		MarkersProvider:   p.Provider,
-		MarkersConfidence: p.Confidence,
-		MarkersAlgorithm:  p.Algorithm,
+		MarkersConfidence: p.SummaryConfidence(),
+		IntroProvenance:   segmentProvenance(p.Intro),
+		CreditsProvenance: segmentProvenance(p.Credits),
+		RecapProvenance:   segmentProvenance(p.Recap),
+		PreviewProvenance: segmentProvenance(p.Preview),
+	}
+}
+
+func segmentProvenance(s markers.SegmentPayload) *scanner.SegmentProvenance {
+	if !s.Present() {
+		return nil
+	}
+	return &scanner.SegmentProvenance{
+		Provider:   s.Provider,
+		Confidence: s.Confidence,
+		Algorithm:  s.Algorithm,
 	}
 }
