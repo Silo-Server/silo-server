@@ -27,8 +27,28 @@ SELECT DISTINCT ON (user_id, profile_id, device_id)
     COALESCE(device_name, ''),
     COALESCE(device_platform, ''),
     updated_at
-FROM public.user_device_settings
-WHERE device_id <> ''
+FROM (
+    SELECT
+        settings.user_id,
+        COALESCE(valid_profiles.id, fallback_profiles.id) AS profile_id,
+        settings.device_id,
+        settings.device_name,
+        settings.device_platform,
+        settings.updated_at
+    FROM public.user_device_settings AS settings
+    LEFT JOIN public.user_profiles AS valid_profiles
+        ON valid_profiles.user_id = settings.user_id
+       AND valid_profiles.id = settings.profile_id
+    LEFT JOIN LATERAL (
+        SELECT profiles.id
+        FROM public.user_profiles AS profiles
+        WHERE profiles.user_id = settings.user_id
+        ORDER BY profiles.is_primary DESC, profiles.created_at ASC, profiles.id ASC
+        LIMIT 1
+    ) AS fallback_profiles ON true
+    WHERE settings.device_id <> ''
+) AS resolved_settings
+WHERE profile_id IS NOT NULL
 ORDER BY user_id, profile_id, device_id, updated_at DESC
 ON CONFLICT (user_id, profile_id, device_id) DO UPDATE SET
     device_name = CASE
