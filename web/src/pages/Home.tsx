@@ -2,12 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { LayoutDashboard, Sparkles } from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 import HeroBanner from "@/components/HeroBanner";
 import SectionRow from "@/components/SectionRow";
 import TasteSeedBanner from "@/components/TasteSeedBanner";
-import WatchTonightDialog from "@/components/WatchTonightDialog";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -36,7 +34,6 @@ export default function Home() {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, refetch } = useHomeLayout();
   const { data: homeRefreshSignal = 0 } = useHomeRefreshSignal();
-  const [watchTonightOpen, setWatchTonightOpen] = useState(false);
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [inFlightIds, setInFlightIds] = useState<Set<string>>(new Set());
@@ -199,18 +196,6 @@ export default function Home() {
       <div className={`space-y-10 ${hasHeroSlot ? "pb-2" : "pt-6 pb-2"}`}>
         {heroSlot}
         <TasteSeedBanner />
-
-        {/* Watch Tonight trigger — pulled tight against the neighboring rows on
-          mobile so a small button doesn't eat a full `space-y-10` band of
-          vertical space on a narrow viewport. */}
-        <div className="-mt-4 -mb-4 flex justify-end px-4 sm:mt-0 sm:mb-0 sm:px-6 lg:pr-12 lg:pl-10 xl:pr-14 xl:pl-12">
-          <Button variant="glass" onClick={() => setWatchTonightOpen(true)}>
-            <Sparkles className="size-4" />
-            Watch Tonight
-          </Button>
-        </div>
-
-        <WatchTonightDialog open={watchTonightOpen} onOpenChange={setWatchTonightOpen} />
 
         {viewModel.rows.map((slot) => {
           if (slot.state === "empty") {
