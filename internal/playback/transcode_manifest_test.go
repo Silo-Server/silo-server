@@ -486,11 +486,43 @@ func TestSegmentRecoveryDecisionWaitsForFreshNextSegment(t *testing.T) {
 	if !decision.Wait {
 		t.Fatalf("Wait = false, want true (reason=%s)", decision.Reason)
 	}
-	if decision.WaitTimeout != 3500*time.Millisecond {
-		t.Fatalf("WaitTimeout = %s, want 3.5s", decision.WaitTimeout)
+	if decision.WaitTimeout != 12*time.Second {
+		t.Fatalf("WaitTimeout = %s, want 12s", decision.WaitTimeout)
 	}
 	if decision.Reason != "near_produced_head" {
 		t.Fatalf("Reason = %q, want near_produced_head", decision.Reason)
+	}
+	if decision.RestartOnTimeout {
+		t.Fatal("RestartOnTimeout = true, want false")
+	}
+}
+
+func TestSegmentRecoveryDecisionUsesLongerWaitForStartupSegment(t *testing.T) {
+	tempDir := t.TempDir()
+	now := time.Now()
+
+	session := &TranscodeSession{
+		outputDir: tempDir,
+		running:   true,
+		opts: TranscodeOpts{
+			TargetCodecVideo:   "h264",
+			SegmentDuration:    2,
+			StartSegmentNumber: 0,
+		},
+	}
+
+	decision := session.SegmentRecoveryDecision(0, now)
+	if !decision.Wait {
+		t.Fatalf("Wait = false, want true (reason=%s)", decision.Reason)
+	}
+	if decision.WaitTimeout != 12*time.Second {
+		t.Fatalf("WaitTimeout = %s, want 12s", decision.WaitTimeout)
+	}
+	if decision.Reason != "startup_manifest_not_ready" {
+		t.Fatalf("Reason = %q, want startup_manifest_not_ready", decision.Reason)
+	}
+	if decision.RestartOnTimeout {
+		t.Fatal("RestartOnTimeout = true, want false")
 	}
 }
 
@@ -515,6 +547,9 @@ func TestSegmentRecoveryDecisionRestartsWhenProducedOutputIsStale(t *testing.T) 
 	decision := session.SegmentRecoveryDecision(226, now)
 	if decision.Wait {
 		t.Fatal("Wait = true, want false")
+	}
+	if !decision.RestartOnTimeout {
+		t.Fatal("RestartOnTimeout = false, want true")
 	}
 	if decision.Reason != "produced_output_stale" {
 		t.Fatalf("Reason = %q, want produced_output_stale", decision.Reason)
