@@ -1482,6 +1482,7 @@ export interface RequestMediaResult {
   popularity?: number;
   vote_average?: number;
   availability: RequestAvailability;
+  library_content_id?: string;
   request: RequestState;
 }
 
@@ -1530,6 +1531,7 @@ export interface RequestMediaDetail {
   creators?: string[];
   recommendations?: RequestMediaResult[];
   availability: RequestAvailability;
+  library_content_id?: string;
   request: RequestState;
 }
 
@@ -1627,6 +1629,7 @@ export interface MediaRequest {
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
+  library_content_id?: string;
   last_error?: string;
   created_at: string;
   updated_at: string;

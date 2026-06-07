@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -353,6 +354,34 @@ func TestListMineAttachesTargets(t *testing.T) {
 	}
 }
 
+func TestListMineAttachesLibraryContentID(t *testing.T) {
+	store := newFakeStore()
+	store.mine = []*Request{{
+		ID:                "req-1",
+		Provider:          "tmdb",
+		MediaType:         MediaTypeMovie,
+		TMDBID:            42,
+		Title:             "Test Movie",
+		Status:            StatusCompleted,
+		Outcome:           OutcomeActive,
+		RequestedByUserID: 1,
+	}}
+	presence := &fakePresence{available: map[MediaType]map[int]bool{
+		MediaTypeMovie: {42: true},
+	}}
+
+	got, err := NewService(store, &fakeTMDBClient{}, presence).ListMine(context.Background(), testViewer(1), ListFilter{})
+	if err != nil {
+		t.Fatalf("ListMine returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListMine returned %d requests, want 1", len(got))
+	}
+	if got[0].LibraryContentID != "movie-42" {
+		t.Fatalf("library content id = %q, want movie-42", got[0].LibraryContentID)
+	}
+}
+
 func TestCreateRequestBlocksWhenHydratedTVDBIDIsAvailable(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -459,6 +488,9 @@ func TestSearchMarksSeriesAvailableByHydratedTVDBID(t *testing.T) {
 	}
 	if got := page.Results[0].Availability; got != AvailabilityAvailable {
 		t.Fatalf("availability = %q, want available", got)
+	}
+	if got := page.Results[0].LibraryContentID; got != "series-201992" {
+		t.Fatalf("library content id = %q, want series-201992", got)
 	}
 	if page.Results[0].Request.Reason != "already_available" {
 		t.Fatalf("request reason = %q, want already_available", page.Results[0].Request.Reason)
@@ -1594,16 +1626,28 @@ func (f *fakePresence) Lookup(_ context.Context, mediaType MediaType, candidates
 	f.got = append(f.got, candidates...)
 	for _, candidate := range candidates {
 		if f.available != nil && f.available[mediaType][candidate.TMDBID] {
-			out[candidate.TMDBID] = PresenceMatch{Available: true, MatchedProvider: "tmdb"}
+			out[candidate.TMDBID] = PresenceMatch{
+				Available:       true,
+				ContentID:       fakePresenceContentID(mediaType, candidate.TMDBID),
+				MatchedProvider: "tmdb",
+			}
 			continue
 		}
 		if candidate.TVDBID != nil && f.byTVDB != nil {
 			if tmdbID, ok := f.byTVDB[mediaType][*candidate.TVDBID]; ok && tmdbID == candidate.TMDBID {
-				out[candidate.TMDBID] = PresenceMatch{Available: true, MatchedProvider: "tvdb"}
+				out[candidate.TMDBID] = PresenceMatch{
+					Available:       true,
+					ContentID:       fakePresenceContentID(mediaType, candidate.TMDBID),
+					MatchedProvider: "tvdb",
+				}
 			}
 		}
 	}
 	return out, nil
+}
+
+func fakePresenceContentID(mediaType MediaType, tmdbID int) string {
+	return fmt.Sprintf("%s-%d", mediaType, tmdbID)
 }
 
 func (f *fakePresence) LookupTMDB(_ context.Context, mediaType MediaType, ids []int) (map[int]bool, error) {
