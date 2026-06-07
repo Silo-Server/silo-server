@@ -2700,6 +2700,7 @@ export interface AdminSettingsConnectionCheckRequest {
 export interface PluginAdminForm {
   fields: PluginAdminFormField[];
   submit_label?: string;
+  sections?: PluginAdminFormSection[];
 }
 
 export interface PluginAdminFormFieldOption {
@@ -2708,11 +2709,36 @@ export interface PluginAdminFormFieldOption {
   description?: string;
 }
 
+export interface PluginAdminFormCondition {
+  field: string;
+  equals: string[];
+}
+
+export interface PluginAdminFormValidation {
+  has_min?: boolean;
+  min?: number;
+  has_max?: boolean;
+  max?: number;
+  pattern?: string;
+  min_length?: number;
+  max_length?: number;
+}
+
+export interface PluginAdminFormSection {
+  key: string;
+  title: string;
+  description?: string;
+  collapsible: boolean;
+  collapsed_default: boolean;
+  field_keys: string[];
+  show_when?: PluginAdminFormCondition[];
+}
+
 export interface PluginAdminFormField {
   key: string;
   label: string;
   description?: string;
-  control: "TEXT" | "TEXTAREA" | "PASSWORD" | "NUMBER" | "SWITCH" | "SELECT";
+  control: "TEXT" | "TEXTAREA" | "PASSWORD" | "NUMBER" | "SWITCH" | "SELECT" | "MULTI_SELECT";
   placeholder?: string;
   required: boolean;
   secret: boolean;
@@ -2720,6 +2746,9 @@ export interface PluginAdminFormField {
   default_value?: unknown;
   options?: PluginAdminFormFieldOption[];
   rows?: number;
+  dynamic_options?: boolean;
+  show_when?: PluginAdminFormCondition[];
+  validation?: PluginAdminFormValidation;
 }
 
 export interface PluginCapability {
