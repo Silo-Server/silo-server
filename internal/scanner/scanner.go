@@ -115,6 +115,7 @@ type Scanner struct {
 	itemRepo            *catalog.ItemRepository
 	personRepo          *catalog.PersonRepository
 	episodeRepo         *catalog.EpisodeRepository
+	ebookDetailsRepo    *catalog.EbookDetailsRepository
 	ffprobePath         string
 	s3Client            *s3client.Client // public assets bucket (may be nil)
 	imageCacher         scannerImageCacher
@@ -178,6 +179,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		itemRepo:            catalog.NewItemRepository(fileRepo.Pool()),
 		personRepo:          catalog.NewPersonRepository(fileRepo.Pool()),
 		episodeRepo:         catalog.NewEpisodeRepository(fileRepo.Pool()),
+		ebookDetailsRepo:    catalog.NewEbookDetailsRepository(fileRepo.Pool()),
 		ffprobePath:         ffprobePath,
 		s3Client:            s3Client,
 		workers:             workers,

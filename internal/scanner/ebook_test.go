@@ -180,6 +180,114 @@ func TestScanFolderRoutesEbookLibrariesToEbookScanner(t *testing.T) {
 	}
 }
 
+func TestResolveEbookMediaItemReusesRootScopedContentID(t *testing.T) {
+	finder := &fakeRootContentFinder{contentID: "ebook-root-id"}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveEbookMediaItem(
+		context.Background(),
+		finder,
+		writer,
+		7,
+		"/library/Author/Same Title/book.epub",
+		&parsedEbook{Title: "Same Title", Year: 2024, Authors: []string{"Author A"}},
+	)
+	if err != nil {
+		t.Fatalf("resolveEbookMediaItem: %v", err)
+	}
+	if got != "ebook-root-id" {
+		t.Fatalf("contentID = %q, want root-scoped id", got)
+	}
+	if finder.calls != 1 {
+		t.Fatalf("root finder calls = %d, want 1", finder.calls)
+	}
+	if len(writer.upserts) != 0 {
+		t.Fatalf("unexpected item upsert for existing root: %d", len(writer.upserts))
+	}
+}
+
+func TestResolveEbookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
+	finder := &fakeRootContentFinder{}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveEbookMediaItem(
+		context.Background(),
+		finder,
+		writer,
+		7,
+		"/library/Other Author/Same Title/book.epub",
+		&parsedEbook{
+			Title:       "The Same Title",
+			Year:        2024,
+			Authors:     []string{"Author B"},
+			Description: "Description D",
+			Genres:      []string{"Fiction"},
+			Publisher:   "Publisher P",
+			Language:    "en",
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolveEbookMediaItem: %v", err)
+	}
+	if got == "" {
+		t.Fatal("contentID is empty")
+	}
+	if len(writer.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
+	}
+	item := writer.upserts[0]
+	if item.ContentID != got || item.Type != "ebook" {
+		t.Fatalf("upserted item = %+v, contentID %q", item, got)
+	}
+	if item.Title != "The Same Title" || item.SortTitle != "Same Title, The" || item.Year != 2024 {
+		t.Fatalf("item title/sort/year = %+v", item)
+	}
+	if item.Overview != "Description D" || len(item.Genres) != 1 || item.Genres[0] != "Fiction" {
+		t.Fatalf("item descriptive metadata = %+v", item)
+	}
+	if len(item.Studios) != 1 || item.Studios[0] != "Publisher P" || item.OriginalLanguage != "en" {
+		t.Fatalf("item publisher/language = %+v", item)
+	}
+}
+
+func TestResolveEbookMediaItemDefaultsBlankTitle(t *testing.T) {
+	finder := &fakeRootContentFinder{}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveEbookMediaItem(
+		context.Background(),
+		finder,
+		writer,
+		7,
+		"/library/untitled.epub",
+		&parsedEbook{},
+	)
+	if err != nil {
+		t.Fatalf("resolveEbookMediaItem: %v", err)
+	}
+	if got == "" {
+		t.Fatal("contentID is empty")
+	}
+	if len(writer.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
+	}
+	if writer.upserts[0].Title != "Untitled Ebook" {
+		t.Fatalf("title = %q, want default", writer.upserts[0].Title)
+	}
+}
+
+func TestEbookIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
+	if got := ebookIdentityConfidence(&parsedEbook{ISBN: "9781402894626"}); got != "high" {
+		t.Fatalf("ISBN confidence = %q, want high", got)
+	}
+	if got := ebookIdentityConfidence(&parsedEbook{Title: "Tagged Book", Authors: []string{"Author"}, Year: 2024}); got != "medium" {
+		t.Fatalf("title/author/year confidence = %q, want medium", got)
+	}
+	if got := ebookIdentityConfidence(&parsedEbook{Title: "Tagged Book"}); got != "low" {
+		t.Fatalf("partial confidence = %q, want low", got)
+	}
+}
+
 func TestParseEbookFB2ReadsDescriptionMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.fb2")
 	xml := `<?xml version="1.0" encoding="utf-8"?>
