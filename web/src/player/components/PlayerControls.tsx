@@ -9,6 +9,7 @@ import {
   RotateCw,
   SkipBack,
   SkipForward,
+  Tags,
 } from "lucide-react";
 import { SeekBar, formatTime } from "./SeekBar";
 import { VolumeControl } from "./VolumeControl";
@@ -16,7 +17,14 @@ import { QualityMenu } from "./QualityMenu";
 import { SubtitleMenu } from "./SubtitleMenu";
 import { AudioTrackMenu } from "./AudioTrackMenu";
 import { ChaptersMenu } from "./ChaptersMenu";
-import type { PlayerAudioTrack, PlayerChapter, PlayerSubtitleInfo, QualityOption } from "../types";
+import type {
+  MarkerKind,
+  MarkerRegionView,
+  PlayerAudioTrack,
+  PlayerChapter,
+  PlayerSubtitleInfo,
+  QualityOption,
+} from "../types";
 import type { VersionInfo } from "./QualityMenu";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 
@@ -30,8 +38,14 @@ interface PlayerControlsProps {
   buffered: TimeRanges | null;
   // Seek bar markers
   chapters?: PlayerChapter[];
-  introRegion?: { start: number; end: number } | null;
-  creditsRegion?: { start: number; end: number } | null;
+  regions?: MarkerRegionView[];
+  // Marker editing
+  editing?: boolean;
+  activeEditKind?: MarkerKind | null;
+  onRegionEdgeChange?: (kind: MarkerKind, edge: "start" | "end", seconds: number) => void;
+  markerEditAvailable?: boolean;
+  markerEditActive?: boolean;
+  onToggleMarkerEdit?: () => void;
   volume: number;
   muted: boolean;
   isFullscreen: boolean;
@@ -91,8 +105,13 @@ export function PlayerControls({
   duration,
   buffered,
   chapters,
-  introRegion,
-  creditsRegion,
+  regions,
+  editing,
+  activeEditKind,
+  onRegionEdgeChange,
+  markerEditAvailable = false,
+  markerEditActive = false,
+  onToggleMarkerEdit,
   volume,
   muted,
   isFullscreen,
@@ -164,8 +183,10 @@ export function PlayerControls({
           duration={duration}
           buffered={buffered}
           chapters={chapters}
-          introRegion={introRegion}
-          creditsRegion={creditsRegion}
+          regions={regions}
+          editing={editing}
+          activeEditKind={activeEditKind}
+          onRegionEdgeChange={onRegionEdgeChange}
           onSeek={onSeek}
         />
 
@@ -321,6 +342,20 @@ export function PlayerControls({
               versions={versions}
               onSwitchVersion={onSwitchVersion}
             />
+
+            {markerEditAvailable && onToggleMarkerEdit && (
+              <button
+                type="button"
+                className="player-utility-btn"
+                onClick={onToggleMarkerEdit}
+                aria-label="Edit markers"
+                aria-pressed={markerEditActive}
+                title="Edit markers"
+                data-active={markerEditActive ? "true" : "false"}
+              >
+                <Tags className="h-[18px] w-[18px]" />
+              </button>
+            )}
 
             <button
               type="button"

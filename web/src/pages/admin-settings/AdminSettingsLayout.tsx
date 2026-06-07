@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router";
 import {
   Settings2,
+  Captions,
   PlayCircle,
   ScanSearch,
   Gauge,
@@ -18,6 +19,7 @@ import type { LucideIcon } from "lucide-react";
 import GeneralSettings from "./GeneralSettings";
 import PlaybackSettings from "./PlaybackSettings";
 import ScannerSettings from "./ScannerSettings";
+import IntroSettings from "./IntroSettings";
 import RateLimitSettings from "./RateLimitSettings";
 import IntegrationsSettings from "./IntegrationsSettings";
 import JellyfinSettings from "./JellyfinSettings";
@@ -39,6 +41,7 @@ const SETTINGS_NAV: SettingsNav[] = [
   { id: "general", label: "General", icon: Settings2, component: GeneralSettings },
   { id: "theming", label: "Theming", icon: Paintbrush, component: ThemeSettings },
   { id: "playback", label: "Playback", icon: PlayCircle, component: PlaybackSettings },
+  { id: "intro", label: "Intro Markers", icon: Captions, component: IntroSettings },
   { id: "scanner", label: "Scanner & Matcher", icon: ScanSearch, component: ScannerSettings },
   { id: "rate-limiting", label: "Rate Limiting", icon: Gauge, component: RateLimitSettings },
   { id: "downloads", label: "Downloads", icon: Download, component: DownloadSettings },

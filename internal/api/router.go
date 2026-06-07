@@ -123,6 +123,9 @@ type Dependencies struct {
 	IntroAnalyzer                *intromarkers.Analyzer
 	MarkerRegistry               *markers.Registry
 	MarkerResolver               markers.ExternalIDResolver
+	MarkerProviderConfig         *markers.ProviderConfigStore
+	MarkerContributionStore      *markers.ContributionStore
+	MarkerContributionService    *markers.ContributionService
 	WatchProviderService         handlers.WatchProviderService
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
@@ -769,6 +772,42 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
+	var markersHandler *handlers.MarkersHandler
+	if deps.FileRepo != nil {
+		var notifier handlers.PlaybackMarkerUpdateNotifier
+		if playbackHandler != nil {
+			notifier = playbackHandler.MarkerUpdateNotifier
+		}
+		var contributor handlers.MarkerContributor
+		if deps.MarkerContributionService != nil {
+			contributor = deps.MarkerContributionService
+		}
+		var contributions handlers.MarkerContributionLister
+		if deps.MarkerContributionStore != nil {
+			contributions = deps.MarkerContributionStore
+		}
+		markersHandler = handlers.NewMarkersHandler(
+			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
+		)
+		markersHandler.BaseContext = deps.AppContext
+		markersHandler.AuditHistory = deps.FileRepo
+		markersHandler.Users = userRepo
+		if itemRepo != nil {
+			markersHandler.Authorizer = &handlers.MediaFileAuthorizer{
+				FileResolver:  deps.FileRepo,
+				ItemAccess:    itemRepo,
+				EpisodeLookup: episodeRepo,
+			}
+		}
+	}
+
+	var adminMarkerProvidersHandler *handlers.AdminMarkerProvidersHandler
+	if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
+		adminMarkerProvidersHandler = handlers.NewAdminMarkerProvidersHandler(
+			deps.MarkerRegistry, deps.MarkerProviderConfig, deps.EventBus, slog.Default(),
+		)
+	}
+
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
 	var adminSubtitleHandler *handlers.AdminSubtitleHandler
 	var subtitleManager *subtitles.Manager
@@ -1297,6 +1336,21 @@ func NewRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
+				}
+
+				// Marker read/write/clear for any authenticated viewer: users
+				// fix and create intro/recap/credits/preview markers from the
+				// player. Writes are stamped source="manual" and contributed to
+				// enabled providers in the background. Contribution + provider
+				// config stay admin-only (see the /admin group below).
+				if markersHandler != nil {
+					r.Route("/markers", func(r chi.Router) {
+						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
+						r.Put("/items/{id}", markersHandler.HandleSetItemMarkers)
+						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
+						r.Put("/files/{fileId}", markersHandler.HandleSetFileMarkers)
+						r.Delete("/files/{fileId}/{segment}", markersHandler.HandleClearFileSegment)
+					})
 				}
 
 				// Library management routes (admin-only).
@@ -1842,6 +1896,21 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
 								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
+							}
+							if markersHandler != nil {
+								// Marker read/write/clear live on the authenticated
+								// /markers routes; writes require marker_edit.
+								// Contribution and audit history stay admin operations.
+								r.Post("/files/{fileId}/contribute", markersHandler.HandleContributeFile)
+								r.Get("/files/{fileId}/contributions", markersHandler.HandleListFileContributions)
+								r.Get("/markers/history", markersHandler.HandleListMarkerHistory)
+								r.Get("/markers/files/{fileId}/history", markersHandler.HandleListFileMarkerHistory)
+								r.Get("/markers/items/{id}/history", markersHandler.HandleListItemMarkerHistory)
+							}
+							if adminMarkerProvidersHandler != nil {
+								r.Get("/markers/providers", adminMarkerProvidersHandler.HandleListProviders)
+								r.Put("/markers/providers/{provider}", adminMarkerProvidersHandler.HandleUpdateProvider)
+								r.Post("/markers/providers/{provider}/validate", adminMarkerProvidersHandler.HandleValidateProvider)
 							}
 							if peopleHandler != nil {
 								r.Post("/people/{id}/refresh", peopleHandler.HandleAdminRefreshPerson)

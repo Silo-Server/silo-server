@@ -13,6 +13,7 @@ import {
   Pencil,
   Search,
   RotateCcw,
+  Tags,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +38,7 @@ import type {
   SubtitleMode,
 } from "@/player/types";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
+import { MarkerEditor } from "@/components/markers/MarkerEditor";
 import StarRating from "@/components/StarRating";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
@@ -72,6 +74,8 @@ interface ActionBarProps {
   onMatchItem?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
+  /** Enables the "Edit Markers" action (playable items only: movies/episodes). */
+  canEditMarkers?: boolean;
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
@@ -121,6 +125,7 @@ export default function ActionBar({
   onMatchItem,
   isAdmin = false,
   canCurateMetadata = false,
+  canEditMarkers = false,
   versions,
   playbackVariants,
   selectedVersion,
@@ -149,6 +154,8 @@ export default function ActionBar({
   const playbackController = useWatchPlaybackController();
   const [playChoiceOpen, setPlayChoiceOpen] = useState(false);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
+  const [markerEditorOpen, setMarkerEditorOpen] = useState(false);
+  const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
   const showPlayChoiceDialog =
     !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
@@ -227,7 +234,7 @@ export default function ActionBar({
   );
   const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectIntro));
   const hasMetadataActions = Boolean(
-    canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem),
+    (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem)) || showMarkerEditor,
   );
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
@@ -411,6 +418,12 @@ export default function ActionBar({
                     Edit Metadata
                   </DropdownMenuItem>
                 )}
+                {showMarkerEditor && (
+                  <DropdownMenuItem onSelect={() => setMarkerEditorOpen(true)}>
+                    <Tags className="size-4" />
+                    Edit Markers
+                  </DropdownMenuItem>
+                )}
                 {canCurateMetadata && onMatchItem && (
                   <DropdownMenuItem onSelect={onMatchItem}>
                     <Search className="size-4" />
@@ -447,6 +460,13 @@ export default function ActionBar({
               </div>
             </DialogContent>
           </Dialog>
+        )}
+        {showMarkerEditor && contentId && (
+          <MarkerEditor
+            itemId={contentId}
+            open={markerEditorOpen}
+            onOpenChange={setMarkerEditorOpen}
+          />
         )}
         <RefreshMetadataDialog
           open={refreshDialogOpen}

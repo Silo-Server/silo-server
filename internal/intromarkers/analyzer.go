@@ -12,11 +12,12 @@ import (
 )
 
 type Analyzer struct {
-	repo      introRepository
-	extractor fingerprintExtractor
-	refiner   boundaryRefiner
-	config    Config
-	logger    *slog.Logger
+	repo               introRepository
+	extractor          fingerprintExtractor
+	refiner            boundaryRefiner
+	chromaprintRefiner chromaprintStartRefiner
+	config             Config
+	logger             *slog.Logger
 }
 
 type introRepository interface {
@@ -43,11 +44,12 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 		logger = slog.Default()
 	}
 	return &Analyzer{
-		repo:      repo,
-		extractor: NewChromaprintExtractor(config),
-		refiner:   NewSilenceBoundaryRefiner(config),
-		config:    config,
-		logger:    logger,
+		repo:               repo,
+		extractor:          NewChromaprintExtractor(config),
+		refiner:            NewSilenceBoundaryRefiner(config),
+		chromaprintRefiner: NewDialogueBoundaryRefiner(config),
+		config:             config,
+		logger:             logger,
 	}
 }
 
@@ -144,6 +146,9 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 		summary.FingerprintsComputed += groupSummary.FingerprintsComputed
 		summary.FingerprintCacheHits += groupSummary.FingerprintCacheHits
 		summary.ChromaprintMarkersWritten += groupSummary.ChromaprintMarkersWritten
+		summary.DialogueRefinementsAttempted += groupSummary.DialogueRefinementsAttempted
+		summary.DialogueRefinementsApplied += groupSummary.DialogueRefinementsApplied
+		summary.DialogueRefinementErrors += groupSummary.DialogueRefinementErrors
 		summary.GroupsNotFound += groupSummary.GroupsNotFound
 		summary.GroupsSkipped += groupSummary.GroupsSkipped
 		summary.Errors = append(summary.Errors, groupSummary.Errors...)
@@ -249,6 +254,9 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 		summary.FingerprintsComputed += groupSummary.FingerprintsComputed
 		summary.FingerprintCacheHits += groupSummary.FingerprintCacheHits
 		summary.ChromaprintMarkersWritten += groupSummary.ChromaprintMarkersWritten
+		summary.DialogueRefinementsAttempted += groupSummary.DialogueRefinementsAttempted
+		summary.DialogueRefinementsApplied += groupSummary.DialogueRefinementsApplied
+		summary.DialogueRefinementErrors += groupSummary.DialogueRefinementErrors
 		summary.GroupsNotFound += groupSummary.GroupsNotFound
 		summary.GroupsSkipped += groupSummary.GroupsSkipped
 		summary.Errors = append(summary.Errors, groupSummary.Errors...)
@@ -276,6 +284,8 @@ type chapterSourceMarker struct {
 	candidate Candidate
 	segment   Segment
 }
+
+const episodeVersionCopyDurationToleranceSeconds = 3.0
 
 func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Candidate, opts chapterProcessingOptions) ([]Candidate, RunSummary) {
 	summary := RunSummary{}
@@ -438,7 +448,7 @@ func compatibleEpisodeVersionDuration(source, target Candidate) bool {
 	if diff < 0 {
 		diff = -diff
 	}
-	return diff <= 1.0
+	return diff <= episodeVersionCopyDurationToleranceSeconds
 }
 
 func ownDetectionCandidates(candidates []Candidate) []Candidate {
@@ -594,6 +604,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			continue
 		}
 		candidate := byFileID[fileID]
+		segment = a.refineChromaprintSegment(ctx, candidate, segment, &summary)
 		applied, patchErr := a.repo.PatchIntroMarker(ctx, IntroMarkerPatch{
 			FileID:     fileID,
 			Start:      segment.Start,
@@ -622,6 +633,24 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		}
 	}
 	return summary, nil
+}
+
+func (a *Analyzer) refineChromaprintSegment(ctx context.Context, candidate Candidate, segment Segment, summary *RunSummary) Segment {
+	if a.chromaprintRefiner == nil || !a.config.normalized().DialogueRefinementEnabled {
+		return segment
+	}
+	summary.DialogueRefinementsAttempted++
+	refined, ok, err := a.chromaprintRefiner.RefineChromaprintStart(ctx, candidate, segment)
+	if err != nil {
+		summary.DialogueRefinementErrors++
+		a.logger.Warn("intro marker dialogue refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+		return segment
+	}
+	if ok {
+		summary.DialogueRefinementsApplied++
+		return refined
+	}
+	return segment
 }
 
 func candidateFileIDs(candidates []Candidate) map[int]struct{} {
@@ -758,4 +787,7 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.SilenceRefinementErrors += src.SilenceRefinementErrors
 	dst.EpisodeVersionMarkersCopied += src.EpisodeVersionMarkersCopied
 	dst.SilenceBackfillConsidered += src.SilenceBackfillConsidered
+	dst.DialogueRefinementsAttempted += src.DialogueRefinementsAttempted
+	dst.DialogueRefinementsApplied += src.DialogueRefinementsApplied
+	dst.DialogueRefinementErrors += src.DialogueRefinementErrors
 }

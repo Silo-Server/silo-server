@@ -6,17 +6,14 @@ package ai
 
 import (
 	"context"
-	"time"
+
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 // SubtitleCue is one timed subtitle entry. Times are absolute media positions.
 // Translation only rewrites Lines; Start/End are preserved verbatim so timing
 // can never drift.
-type SubtitleCue struct {
-	Start time.Duration
-	End   time.Duration
-	Lines []string
-}
+type SubtitleCue = subtitles.SubtitleCue
 
 // Translator converts subtitle cues from one language to another, preserving
 // cue count, order, and timing. The built-in implementation is LLMTranslator

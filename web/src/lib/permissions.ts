@@ -1,6 +1,7 @@
 import type { User } from "@/api/types";
 
 export const PERMISSION_METADATA_CURATION = "metadata_curation";
+export const PERMISSION_MARKER_EDIT = "marker_edit";
 
 export function hasPermission(
   user: Pick<User, "role" | "permissions"> | null | undefined,
@@ -13,6 +14,10 @@ export function hasPermission(
 
 export function canCurateMetadata(user: Pick<User, "role" | "permissions"> | null | undefined) {
   return hasPermission(user, PERMISSION_METADATA_CURATION);
+}
+
+export function canEditMarkers(user: Pick<User, "role" | "permissions"> | null | undefined) {
+  return hasPermission(user, PERMISSION_MARKER_EDIT);
 }
 
 export function hasAssignedPermission(permissions: string[] | undefined, permission: string) {
