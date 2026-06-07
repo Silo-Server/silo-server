@@ -2257,6 +2257,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 				"start_segment_number", decision.Progress.StartSegmentNumber,
 				"last_produced_age_ms", lastProducedAgeMS,
 				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
+				"restart_on_timeout", decision.RestartOnTimeout,
 				"reason", decision.Reason,
 				"session", sessionID,
 				"playback_session_id", sessionID,
@@ -2270,6 +2271,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					"start_segment_number", decision.Progress.StartSegmentNumber,
 					"last_produced_age_ms", lastProducedAgeMS,
 					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
+					"restart_on_timeout", decision.RestartOnTimeout,
 					"reason", decision.Reason,
 					"session", sessionID,
 					"playback_session_id", sessionID,
@@ -2284,6 +2286,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						"start_segment_number", decision.Progress.StartSegmentNumber,
 						"last_produced_age_ms", lastProducedAgeMS,
 						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
+						"restart_on_timeout", decision.RestartOnTimeout,
 						"reason", decision.Reason,
 						"session", sessionID,
 						"playback_session_id", sessionID,
@@ -2295,7 +2298,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			// active encode range), either restart at the exact manifest-derived
 			// timeline position or return 404 for copy-mode segments outside the
 			// current manifest window.
-			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
+			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := transcodeSession.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
 					slog.Error("resolve transcode seek target", "error", seekErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
@@ -2310,6 +2313,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						"start_segment_number", decision.Progress.StartSegmentNumber,
 						"last_produced_age_ms", lastProducedAgeMS,
 						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
+						"restart_on_timeout", decision.RestartOnTimeout,
 						"reason", decision.Reason,
 						"seek_seconds", seekSeconds,
 						"session", sessionID,
