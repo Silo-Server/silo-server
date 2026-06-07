@@ -2,8 +2,11 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -215,6 +218,116 @@ func TestRemoveWebComponentOnlyRemovesGeneratedAssets(t *testing.T) {
 	}
 }
 
+func TestWebComponentStatusRecoversLegacyStaleOperationLock(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, webInstallLock), []byte("installing"), 0o644); err != nil {
+		t.Fatalf("write legacy lock: %v", err)
+	}
+
+	status := webComponentStatus(root, filepath.Join(root, "current"), "10.11.6", DefaultWebSourceURL)
+
+	if status.WebState == WebComponentInstalling {
+		t.Fatalf("WebState = %q, want non-installing state after stale lock recovery", status.WebState)
+	}
+	if status.Operation != nil {
+		t.Fatalf("Operation = %+v, want nil after stale lock recovery", status.Operation)
+	}
+	if _, err := os.Stat(filepath.Join(root, webInstallLock)); !os.IsNotExist(err) {
+		t.Fatalf("legacy lock still exists or stat failed unexpectedly: %v", err)
+	}
+	if !strings.Contains(status.LastError, "recovered stale Jellyfin Web") {
+		t.Fatalf("LastError = %q, want recovered stale lock message", status.LastError)
+	}
+}
+
+func TestBeginWebOperationRecoversDeadProcessLock(t *testing.T) {
+	root := t.TempDir()
+	host, _ := os.Hostname()
+	stale := WebComponentOperationStatus{
+		ID:        "install-dead",
+		Kind:      WebComponentOperationInstall,
+		State:     WebComponentOperationRunning,
+		PID:       999999,
+		Process:   "dead-process-token",
+		Host:      host,
+		StartedAt: "2026-06-07T00:00:00Z",
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := writeWebOperationLock(root, stale); err != nil {
+		t.Fatalf("write stale lock: %v", err)
+	}
+
+	op, err := beginWebOperation(root, WebComponentOperationInstall)
+	if err != nil {
+		t.Fatalf("beginWebOperation: %v", err)
+	}
+	defer finishWebOperation(root, op.ID, nil)
+
+	if op.ID == stale.ID {
+		t.Fatalf("operation ID was not replaced: %q", op.ID)
+	}
+	if op.PID != os.Getpid() || op.Process == "" {
+		t.Fatalf("operation process identity = pid %d token %q, want current process", op.PID, op.Process)
+	}
+}
+
+func TestBeginWebOperationRecoversDeadProcessLockFromDifferentHost(t *testing.T) {
+	root := t.TempDir()
+	stale := WebComponentOperationStatus{
+		ID:        "install-dead-host",
+		Kind:      WebComponentOperationInstall,
+		State:     WebComponentOperationRunning,
+		PID:       999999,
+		Process:   "dead-process-token",
+		Host:      "previous-container",
+		StartedAt: "2026-06-07T00:00:00Z",
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := writeWebOperationLock(root, stale); err != nil {
+		t.Fatalf("write stale lock: %v", err)
+	}
+
+	op, err := beginWebOperation(root, WebComponentOperationRemove)
+	if err != nil {
+		t.Fatalf("beginWebOperation: %v", err)
+	}
+	defer finishWebOperation(root, op.ID, nil)
+
+	if op.ID == stale.ID {
+		t.Fatalf("operation ID was not replaced: %q", op.ID)
+	}
+}
+
+func TestBeginWebOperationRejectsLiveProcessLock(t *testing.T) {
+	root := t.TempDir()
+	host, _ := os.Hostname()
+	live := WebComponentOperationStatus{
+		ID:        "install-live",
+		Kind:      WebComponentOperationInstall,
+		State:     WebComponentOperationRunning,
+		PID:       os.Getpid(),
+		Process:   currentProcessToken(),
+		Host:      host,
+		StartedAt: "2026-06-07T00:00:00Z",
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := writeWebOperationLock(root, live); err != nil {
+		t.Fatalf("write live lock: %v", err)
+	}
+	defer clearWebInstallState(root)
+
+	_, err := beginWebOperation(root, WebComponentOperationRemove)
+	if !errors.Is(err, ErrWebComponentOperationActive) {
+		t.Fatalf("beginWebOperation error = %v, want ErrWebComponentOperationActive", err)
+	}
+}
+
 func TestResolveCompatWebFSDoesNotFallbackToVendoredDirectory(t *testing.T) {
 	cfg := &config.Config{}
 
@@ -225,4 +338,12 @@ func TestResolveCompatWebFSDoesNotFallbackToVendoredDirectory(t *testing.T) {
 	if webFS != nil {
 		t.Fatal("resolveCompatWebFS returned a web filesystem without configured assets")
 	}
+}
+
+func writeWebOperationLock(root string, op WebComponentOperationStatus) error {
+	data, err := json.Marshal(op)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, webInstallLock), data, 0o644)
 }

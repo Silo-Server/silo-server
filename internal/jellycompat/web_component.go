@@ -15,8 +15,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -91,6 +93,9 @@ type WebComponentOperationStatus struct {
 	ID          string                     `json:"id"`
 	Kind        WebComponentOperationKind  `json:"kind"`
 	State       WebComponentOperationState `json:"state"`
+	PID         int                        `json:"pid,omitempty"`
+	Process     string                     `json:"process,omitempty"`
+	Host        string                     `json:"host,omitempty"`
 	StartedAt   string                     `json:"started_at"`
 	CompletedAt string                     `json:"completed_at,omitempty"`
 	Error       string                     `json:"error,omitempty"`
@@ -563,10 +568,14 @@ func beginWebOperation(root string, kind WebComponentOperationKind) (*WebCompone
 	}
 
 	now := time.Now().UTC()
+	host, _ := os.Hostname()
 	op := &WebComponentOperationStatus{
 		ID:        fmt.Sprintf("%s-%d", kind, now.UnixNano()),
 		Kind:      kind,
 		State:     WebComponentOperationRunning,
+		PID:       os.Getpid(),
+		Process:   currentProcessToken(),
+		Host:      host,
 		StartedAt: now.Format(time.RFC3339),
 	}
 
@@ -580,10 +589,25 @@ func beginWebOperation(root string, kind WebComponentOperationKind) (*WebCompone
 	file, err := os.OpenFile(filepath.Join(root, webInstallLock), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return copyWebOperation(readWebOperationState(root)), ErrWebComponentOperationActive
+			existing := readWebOperationState(root)
+			if isRecoverableWebOperation(existing) {
+				if recoverErr := recoverStaleWebOperation(root, existing); recoverErr != nil {
+					return copyWebOperation(existing), recoverErr
+				}
+				file, err = os.OpenFile(filepath.Join(root, webInstallLock), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+				if err == nil {
+					goto writeOperation
+				}
+				if !os.IsExist(err) {
+					return nil, err
+				}
+			}
+			return copyWebOperation(existing), ErrWebComponentOperationActive
 		}
 		return nil, err
 	}
+
+writeOperation:
 	if err := json.NewEncoder(file).Encode(op); err != nil {
 		_ = file.Close()
 		_ = os.Remove(filepath.Join(root, webInstallLock))
@@ -596,6 +620,74 @@ func beginWebOperation(root string, kind WebComponentOperationKind) (*WebCompone
 
 	webOperations[root] = op
 	return copyWebOperation(op), nil
+}
+
+func isRecoverableWebOperation(op *WebComponentOperationStatus) bool {
+	if op == nil {
+		return true
+	}
+	if op.State != "" && op.State != WebComponentOperationRunning {
+		return true
+	}
+	if op.PID <= 0 {
+		return true
+	}
+	if op.Process != "" {
+		if token := processToken(op.PID); token != "" {
+			return op.Process != token
+		}
+	}
+	return !processIsRunning(op.PID)
+}
+
+func recoverStaleWebOperation(root string, op *WebComponentOperationStatus) error {
+	operationLabel := "unknown Jellyfin Web operation"
+	if op != nil && op.Kind != "" {
+		operationLabel = fmt.Sprintf("stale Jellyfin Web %s operation", op.Kind)
+	}
+	err := fmt.Errorf("recovered %s lock after process restart", operationLabel)
+	writeWebInstallError(root, err)
+	clearWebInstallState(root)
+	return nil
+}
+
+func processIsRunning(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	if pid == os.Getpid() {
+		return true
+	}
+	return processIsRunningBySignal(pid)
+}
+
+func processIsRunningBySignal(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func currentProcessToken() string {
+	return processToken(os.Getpid())
+}
+
+func processToken(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return ""
+	}
+	stat := string(data)
+	commEnd := strings.LastIndex(stat, ") ")
+	if commEnd == -1 || commEnd+2 >= len(stat) {
+		return ""
+	}
+	fields := strings.Fields(stat[commEnd+2:])
+	if len(fields) < 20 {
+		return ""
+	}
+	return fields[19]
 }
 
 func finishWebOperation(root, id string, err error) {
@@ -630,7 +722,12 @@ func currentWebOperation(root string) *WebComponentOperationStatus {
 	if op != nil {
 		return op
 	}
-	return readWebOperationState(root)
+	op = readWebOperationState(root)
+	if op != nil && isRecoverableWebOperation(op) {
+		_ = recoverStaleWebOperation(root, op)
+		return nil
+	}
+	return op
 }
 
 func copyWebOperation(op *WebComponentOperationStatus) *WebComponentOperationStatus {
