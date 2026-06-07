@@ -99,22 +99,31 @@ func (s *Service) allowedQualities(ctx context.Context, req Request, settings Se
 
 // resolveRouterConnections turns enabled request_router integrations into
 // ResolvedRouterConnections (api key resolved to plaintext, plugin_config attached),
-// and returns the installation+capability to dispatch to. Assumes a single router
-// plugin for the first cut; if multiple are installed this uses the last one — TODO
-// group by installation_id.
+// and returns the installation+capability to dispatch to.
+//
+// Multi-installation routing isn't supported yet: this picks the first eligible
+// connection's installation and includes ONLY connections belonging to it.
+// Connections from any other installation are ignored so a second installation's
+// resolved plaintext credentials are never handed to the first plugin.
 func (s *Service) resolveRouterConnections(ctx context.Context, integrations []Integration) ([]ResolvedRouterConnection, int, string, error) {
 	var conns []ResolvedRouterConnection
 	installationID, capabilityID := 0, ""
+	chosen := false
 	for _, in := range integrations {
 		if !in.Enabled || in.CapabilityID != "request_router.v1" || in.InstallationID == nil {
 			continue
+		}
+		if !chosen {
+			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
+		}
+		if *in.InstallationID != installationID {
+			continue // single-router assumption: ignore other installations
 		}
 		apiKey, err := s.resolveAPIKey(ctx, in)
 		if err != nil {
 			return nil, 0, "", err
 		}
 		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
-		installationID, capabilityID = *in.InstallationID, in.CapabilityID
 	}
 	return conns, installationID, capabilityID, nil
 }
@@ -1204,7 +1213,14 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	}
 	connKind := connectionKindByID(conns)
 	latest := &req
+	// A misbehaving plugin may return two targets for the same quality; persist
+	// each quality once so we never violate UNIQUE(request_id, quality).
+	returned := map[Quality]bool{}
 	for _, rt := range targets {
+		if returned[rt.Quality] {
+			continue
+		}
+		returned[rt.Quality] = true
 		created, err := s.store.CreateTarget(ctx, Target{
 			RequestID: req.ID, IntegrationID: rt.ConnectionID, IntegrationKind: connKind[rt.ConnectionID],
 			Quality: rt.Quality, IsAnime: req.IsAnime, Status: StatusQueued,
@@ -1217,6 +1233,28 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			status = StatusQueued
 		}
 		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, rt.Message, actor)
+		if err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			latest = updated
+		}
+	}
+	// Any wanted quality the plugin did not fulfill is recorded as a failed target
+	// rather than silently dropped, so it stays visible and Retry re-attempts it
+	// (a failed target is not "healthy").
+	const noTargetMsg = "fulfillment backend returned no target for this quality"
+	for _, q := range want {
+		if returned[q] {
+			continue
+		}
+		created, err := s.store.CreateTarget(ctx, Target{
+			RequestID: req.ID, Quality: q, IsAnime: req.IsAnime, Status: StatusFailed, LastError: noTargetMsg,
+		})
+		if err != nil {
+			return nil, err
+		}
+		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, StatusFailed, "", "", noTargetMsg, actor)
 		if err != nil {
 			return nil, err
 		}
