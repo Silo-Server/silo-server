@@ -38,7 +38,7 @@ type RequestService interface {
 	CreateIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
 	UpdateIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
 	DeleteIntegration(ctx context.Context, viewer mediarequests.Viewer, id string) error
-	LoadIntegrationOptions(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.IntegrationOptions, error)
+	LoadIntegrationOptions(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (map[string][]mediarequests.RouterOption, error)
 
 	ListStudios(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
 	ListNetworks(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
@@ -435,6 +435,15 @@ func (h *RequestsHandler) HandleCreateIntegration(w http.ResponseWriter, r *http
 	}
 	created, err := h.service.CreateIntegration(r.Context(), viewer, integration)
 	if err != nil {
+		var verr *mediarequests.ValidationError
+		if errors.As(err, &verr) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":        "validation_failed",
+				"field_errors": verr.FieldErrors,
+				"form_error":   verr.FormError,
+			})
+			return
+		}
 		writeRequestServiceError(w, err)
 		return
 	}
@@ -454,6 +463,15 @@ func (h *RequestsHandler) HandleUpdateIntegration(w http.ResponseWriter, r *http
 	integration.ID = chi.URLParam(r, "id")
 	updated, err := h.service.UpdateIntegration(r.Context(), viewer, integration)
 	if err != nil {
+		var verr *mediarequests.ValidationError
+		if errors.As(err, &verr) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":        "validation_failed",
+				"field_errors": verr.FieldErrors,
+				"form_error":   verr.FormError,
+			})
+			return
+		}
 		writeRequestServiceError(w, err)
 		return
 	}

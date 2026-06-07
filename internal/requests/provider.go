@@ -52,8 +52,8 @@ type RouterTargetStatus struct {
 }
 
 type RouterOption struct {
-	Value string
-	Label string
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 // RouterClientResolver yields a per-(installation, capability) router client.
