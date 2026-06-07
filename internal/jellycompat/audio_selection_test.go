@@ -142,6 +142,7 @@ func TestBuildPlaybackSource_SeedsRequestedAudioStreamIndex(t *testing.T) {
 		version,
 		DeviceProfile{},
 		playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(requestedAudioStreamIndex)},
+		true,
 	)
 
 	if source.SelectedAudioStreamIndex == nil {
