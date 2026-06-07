@@ -17,10 +17,10 @@ interface TasteSeedSubmitResponse {
 const TASTE_SEED_PAGE_SIZE = 30;
 
 /**
- * Fetches popular catalog posters for the taste-seeding picker. Blends
- * server-engagement popularity with TMDB rating so even a fresh server with no
- * watch history surfaces meaningful posters. Items already favorited by the
- * profile carry user_state.is_favorite=true so the UI can pre-select them.
+ * Fetches catalog posters for the taste-seeding picker. Blends server engagement
+ * with rating reliability and recency so even a fresh server with no watch
+ * history surfaces meaningful posters. Items already favorited by the profile
+ * carry user_state.is_favorite=true so the UI can pre-select them.
  */
 export function useTasteSeedItems(enabled = true) {
   return useInfiniteQuery({

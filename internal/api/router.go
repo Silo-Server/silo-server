@@ -123,6 +123,9 @@ type Dependencies struct {
 	IntroAnalyzer                *intromarkers.Analyzer
 	MarkerRegistry               *markers.Registry
 	MarkerResolver               markers.ExternalIDResolver
+	MarkerProviderConfig         *markers.ProviderConfigStore
+	MarkerContributionStore      *markers.ContributionStore
+	MarkerContributionService    *markers.ContributionService
 	WatchProviderService         handlers.WatchProviderService
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
@@ -140,6 +143,7 @@ type Dependencies struct {
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
+	RequestServerRestart   func(ctx context.Context) error
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
@@ -155,10 +159,23 @@ type Dependencies struct {
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
 	MDBListClient *mdblist.Client
+
+	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
+	// it is mounted at the root router level (not under /api/v1/) so that ABS
+	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
+	// resolve correctly. May be nil; no ABS routes are registered in that case.
+	ABSHandler absHandler
+}
+
+// absHandler is the narrow interface the router needs from the ABS handler.
+// Using an interface avoids a direct import of the abs sub-package from router.go.
+type absHandler interface {
+	Mount(r chi.Router)
 }
 
 // NewRouter creates a chi.Router with all middleware and routes mounted
-// under /api/v1/.
+// under /api/v1/. ABS-compat routes (/abs/*, /login, /socket.io/*) are
+// mounted at the root level when deps.ABSHandler is non-nil.
 func NewRouter(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
@@ -560,6 +577,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build playback handler if session manager is available.
 	var playbackHandler *handlers.PlaybackHandler
 	var adminPlaybackControlHandler *handlers.AdminPlaybackControlHandler
+	var playbackCommandDispatcher *playback.CommandDispatcher
 	var streamHandler *handlers.StreamHandler
 	var watchTogetherHandler *handlers.WatchTogetherHandler
 	if deps.SessionMgr != nil {
@@ -643,6 +661,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.RealtimeHub = realtimeHub
 		playbackHandler.CommandTracker = commandTracker
 		playbackHandler.CommandDispatcher = playback.NewCommandDispatcher(deps.SessionMgr, realtimeHub, commandTracker)
+		playbackCommandDispatcher = playbackHandler.CommandDispatcher
 		playbackHandler.IntroAnalyzer = deps.IntroAnalyzer
 		playbackHandler.IntroRepository = deps.IntroRepository
 		playbackHandler.MarkerRegistry = deps.MarkerRegistry
@@ -680,6 +699,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	if streamHandler != nil && deps.Config != nil {
 		streamHandler.FFmpegPath = deps.Config.Playback.FFmpegPath
 	}
+
+	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher)
 
 	// Build admin handler if we have a user repo.
 	var adminHandler *handlers.AdminHandler
@@ -767,6 +788,42 @@ func NewRouter(deps Dependencies) chi.Router {
 		if playbackHandler != nil {
 			adminIntroHandler.MarkerUpdateNotifier = playbackHandler.MarkerUpdateNotifier
 		}
+	}
+
+	var markersHandler *handlers.MarkersHandler
+	if deps.FileRepo != nil {
+		var notifier handlers.PlaybackMarkerUpdateNotifier
+		if playbackHandler != nil {
+			notifier = playbackHandler.MarkerUpdateNotifier
+		}
+		var contributor handlers.MarkerContributor
+		if deps.MarkerContributionService != nil {
+			contributor = deps.MarkerContributionService
+		}
+		var contributions handlers.MarkerContributionLister
+		if deps.MarkerContributionStore != nil {
+			contributions = deps.MarkerContributionStore
+		}
+		markersHandler = handlers.NewMarkersHandler(
+			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
+		)
+		markersHandler.BaseContext = deps.AppContext
+		markersHandler.AuditHistory = deps.FileRepo
+		markersHandler.Users = userRepo
+		if itemRepo != nil {
+			markersHandler.Authorizer = &handlers.MediaFileAuthorizer{
+				FileResolver:  deps.FileRepo,
+				ItemAccess:    itemRepo,
+				EpisodeLookup: episodeRepo,
+			}
+		}
+	}
+
+	var adminMarkerProvidersHandler *handlers.AdminMarkerProvidersHandler
+	if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
+		adminMarkerProvidersHandler = handlers.NewAdminMarkerProvidersHandler(
+			deps.MarkerRegistry, deps.MarkerProviderConfig, deps.EventBus, slog.Default(),
+		)
 	}
 
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
@@ -1117,6 +1174,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
+	// ABS-compat routes are NOT mounted here — they live on a dedicated
+	// http.Server (see absCompatSrv in cmd/silo/main.go) so the discovery
+	// probes (/ping, /healthcheck, /status, etc.) don't collide with the
+	// SPA fallback. Same pattern as the Jellyfin compat listener on 8096.
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
@@ -1299,6 +1361,21 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 				}
 
+				// Marker read/write/clear for any authenticated viewer: users
+				// fix and create intro/recap/credits/preview markers from the
+				// player. Writes are stamped source="manual" and contributed to
+				// enabled providers in the background. Contribution + provider
+				// config stay admin-only (see the /admin group below).
+				if markersHandler != nil {
+					r.Route("/markers", func(r chi.Router) {
+						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
+						r.Put("/items/{id}", markersHandler.HandleSetItemMarkers)
+						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
+						r.Put("/files/{fileId}", markersHandler.HandleSetFileMarkers)
+						r.Delete("/files/{fileId}/{segment}", markersHandler.HandleClearFileSegment)
+					})
+				}
+
 				// Library management routes (admin-only).
 				if libraryHandler != nil {
 					r.Group(func(r chi.Router) {
@@ -1339,6 +1416,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				if itemsHandler != nil {
 					r.Get("/catalog", catalogHandler.HandleGetCatalog)
 					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
+					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
 					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
@@ -1830,6 +1908,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
+							r.Post("/server/restart", serverControlHandler.HandleRestart)
 							r.Get("/settings/sensitive-status", adminHandler.HandleGetSensitiveStatus)
 							r.Post("/settings/check/{kind}", adminHandler.HandleCheckSettingsConnection)
 							if sectionSettingsHandler != nil {
@@ -1842,6 +1921,21 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
 								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)
+							}
+							if markersHandler != nil {
+								// Marker read/write/clear live on the authenticated
+								// /markers routes; writes require marker_edit.
+								// Contribution and audit history stay admin operations.
+								r.Post("/files/{fileId}/contribute", markersHandler.HandleContributeFile)
+								r.Get("/files/{fileId}/contributions", markersHandler.HandleListFileContributions)
+								r.Get("/markers/history", markersHandler.HandleListMarkerHistory)
+								r.Get("/markers/files/{fileId}/history", markersHandler.HandleListFileMarkerHistory)
+								r.Get("/markers/items/{id}/history", markersHandler.HandleListItemMarkerHistory)
+							}
+							if adminMarkerProvidersHandler != nil {
+								r.Get("/markers/providers", adminMarkerProvidersHandler.HandleListProviders)
+								r.Put("/markers/providers/{provider}", adminMarkerProvidersHandler.HandleUpdateProvider)
+								r.Post("/markers/providers/{provider}/validate", adminMarkerProvidersHandler.HandleValidateProvider)
 							}
 							if peopleHandler != nil {
 								r.Post("/people/{id}/refresh", peopleHandler.HandleAdminRefreshPerson)

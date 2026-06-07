@@ -91,8 +91,7 @@ func (s *Service) SetSuggesterDeps(rootFolders RootFolderClient, folders FolderL
 // from scan_source plugins; connres resolves a source's connection to concrete
 // credentials; resolver/queue/suppress drive the resolve→suppress→enqueue loop.
 // lister enumerates installed scan_source capabilities so the Add-source picker
-// can offer them and PollOnce can skip orphaned source rows; it may be nil
-// (the picker then returns an empty list and orphan-pruning is disabled).
+// can offer them; it may be nil (the picker then returns an empty list).
 func NewService(
 	store Store,
 	provider ScanSourceProvider,
@@ -113,24 +112,15 @@ func NewService(
 	}
 }
 
-// PollOnce runs one autoscan cycle. Per-source failures are logged and skipped;
-// only settings/listing errors propagate. The opaque next marker returned by the
+// PollOnce runs one autoscan cycle. Per-source failures are logged, recorded on
+// the source/event, and the loop continues; only settings/listing errors
+// propagate. The opaque next marker returned by the
 // provider is stored verbatim, but only when the cycle's work is genuinely
 // consumed: the provider returned no paths, or it returned paths and at least one
 // resolved+enqueued. When paths come back but NONE resolve to a library folder
 // (e.g. a freshly-enabled source with unconfigured rewrites) the marker is held
 // and an error recorded, so those imports aren't skipped forever.
 func (s *Service) PollOnce(ctx context.Context) error {
-	// Fetch the set of currently-installed scan_source capabilities so we can skip
-	// orphaned source rows (their plugin was uninstalled). Listing failures are
-	// non-fatal: a nil set means the installed set is unavailable, in which case
-	// we do NOT prune orphans — every enabled source is assumed present.
-	present, derr := s.installedScanSources(ctx)
-	if derr != nil {
-		slog.WarnContext(ctx, "autoscan: list installed scan sources failed", "err", derr)
-		present = nil
-	}
-
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return err
@@ -146,16 +136,6 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	now := time.Now()
 
 	for _, src := range sources {
-		// Skip orphaned sources: an enabled source whose scan_source plugin has
-		// been uninstalled/disabled is no longer in the discovered set, so polling
-		// it would error every cycle. Skip it quietly (no RecordError) so the spam
-		// stops; the operator can delete it via the source delete endpoint. A nil
-		// `present` set means discovery is unavailable — don't prune in that case.
-		if present != nil {
-			if _, ok := present[installedKey{InstallationID: src.InstallationID, CapabilityID: src.CapabilityID}]; !ok {
-				continue
-			}
-		}
 		// Honor the per-source poll interval as a "poll at most every N seconds"
 		// floor: the global task fires at the default cadence, so a source with a
 		// longer interval is skipped until enough time has elapsed.
@@ -170,7 +150,10 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if src.Marker != nil {
 			marker = *src.Marker
 		}
-		eventID := s.createEvent(ctx, src, marker, time.Now())
+		eventID, started := s.createEvent(ctx, src, marker, time.Now())
+		if !started {
+			continue
+		}
 		// A connection is OPTIONAL. Server-based providers (Sonarr/Radarr) bind a
 		// connection and the resolved {base_url, api_key} is handed to the plugin.
 		// Other providers (e.g. a filesystem/CephFS watcher) need none and get an
@@ -195,7 +178,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			}
 			conn = resolved
 		}
-		changes, next, perr := s.provider.PollChanges(ctx, src.InstallationID, src.CapabilityID, marker, conn, src.SourceConfig)
+		changes, next, perr := s.provider.PollChanges(ctx, src.PluginID, src.CapabilityID, marker, conn, src.SourceConfig)
 		if perr != nil {
 			slog.WarnContext(ctx, "autoscan: poll changes failed", "source_id", src.ID, "err", perr)
 			if rerr := s.store.RecordError(ctx, src.ID, perr.Error()); rerr != nil {
@@ -295,22 +278,26 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) int64 {
+func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) (int64, bool) {
 	if s == nil || s.store == nil {
-		return 0
+		return 0, true
 	}
 	id, err := s.store.CreateEvent(ctx, EventCreate{
-		SourceID:       src.ID,
-		InstallationID: src.InstallationID,
-		CapabilityID:   src.CapabilityID,
-		StartedAt:      startedAt,
-		MarkerBefore:   marker,
+		SourceID:     src.ID,
+		PluginID:     src.PluginID,
+		CapabilityID: src.CapabilityID,
+		StartedAt:    startedAt,
+		MarkerBefore: marker,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPollAlreadyRunning) {
+			slog.DebugContext(ctx, "autoscan: source poll already running", "source_id", src.ID)
+			return 0, false
+		}
 		slog.WarnContext(ctx, "autoscan: create event failed", "source_id", src.ID, "err", err)
-		return 0
+		return 0, true
 	}
-	return id
+	return id, true
 }
 
 func (s *Service) finishEvent(ctx context.Context, eventID int64, finish EventFinish) {

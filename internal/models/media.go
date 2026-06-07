@@ -212,6 +212,8 @@ const (
 	PersonKindProducer  PersonKind = 4
 	PersonKindGuestStar PersonKind = 5
 	PersonKindComposer  PersonKind = 6
+	PersonKindAuthor    PersonKind = 7
+	PersonKindNarrator  PersonKind = 8
 )
 
 // String returns the Jellyfin-compatible type string for this PersonKind.
@@ -229,6 +231,10 @@ func (k PersonKind) String() string {
 		return "GuestStar"
 	case PersonKindComposer:
 		return "Composer"
+	case PersonKindAuthor:
+		return "Author"
+	case PersonKindNarrator:
+		return "Narrator"
 	default:
 		return "Unknown"
 	}
@@ -276,6 +282,13 @@ type ItemPerson struct {
 	SortOrder int
 }
 
+// AudiobookSeriesMembership captures a book's membership in an audiobook
+// series and its optional sequence number within that series.
+type AudiobookSeriesMembership struct {
+	Name  string
+	Index *float64
+}
+
 // MediaItem represents a row in the media_items table.
 type MediaItem struct {
 	ContentID                    string // Sonyflake ID (PK)
@@ -317,6 +330,7 @@ type MediaItem struct {
 	AirTimezone                  *string // Series broadcast timezone (IANA name, e.g. "America/New_York"), nullable
 	ShowStatus                   string  // Series lifecycle: "returning", "ended", "cancelled", "in_production", or "" if unknown (series only)
 	People                       []ItemPerson
+	AudiobookSeries              []AudiobookSeriesMembership
 	MatchedAt                    *time.Time
 	EpisodeMetadataIncomplete    bool
 	EpisodeMetadataLastCheckedAt *time.Time

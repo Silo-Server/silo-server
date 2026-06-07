@@ -163,6 +163,27 @@ export interface PlayerTimeRange {
   end: number;
 }
 
+/**
+ * The four editable marker/segment kinds. Note "credits" is what the
+ * Jellyfin-compatible API exposes as "Outro" — there is no separate outro kind.
+ */
+export type MarkerKind = "intro" | "recap" | "credits" | "preview";
+
+/** A full set of editable marker ranges for one file (null = no marker). */
+export interface MarkerDraft {
+  intro: PlayerTimeRange | null;
+  recap: PlayerTimeRange | null;
+  credits: PlayerTimeRange | null;
+  preview: PlayerTimeRange | null;
+}
+
+/** A marker range positioned on the seek bar, tagged with its kind for color. */
+export interface MarkerRegionView {
+  kind: MarkerKind;
+  start: number;
+  end: number;
+}
+
 /** Response from POST /playback/start. */
 export interface PlaybackSessionResponse {
   session_id: string;
@@ -264,6 +285,7 @@ export interface WatchPageProps {
   preview?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
   autoPlayNextPreview?: boolean;
+  canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
   onEnded?: (state?: PlaybackExitState) => void | Promise<void>;

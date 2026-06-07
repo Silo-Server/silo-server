@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	DefaultHealthCheckInterval = 30 * time.Second
-	DefaultHealthFailureLimit  = 3
-	DefaultMetadataTimeout     = 30 * time.Second
-	DefaultAnalyzerTimeout     = 5 * time.Minute
-	DefaultControlTimeout      = 10 * time.Second
+	DefaultHealthCheckInterval   = 30 * time.Second
+	DefaultHealthFailureLimit    = 3
+	DefaultMetadataTimeout       = 30 * time.Second
+	DefaultMarkerProviderTimeout = 30 * time.Second
+	DefaultAnalyzerTimeout       = 5 * time.Minute
+	DefaultControlTimeout        = 10 * time.Second
 	// DefaultScanSourceTimeout covers a single PollChanges call. Most scan
 	// sources return quickly, but filesystem-backed sources may need a longer
 	// bounded window for an initial baseline; cooperative plugins should still

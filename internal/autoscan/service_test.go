@@ -2,6 +2,7 @@ package autoscan
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,13 +13,14 @@ import (
 )
 
 type fakeStore struct {
-	settings      Settings
-	sources       []Source
-	connection    Connection
-	advanced      map[string]string // source ID -> marker
-	recorded      map[string]string // source ID -> error message
-	createdEvents []EventCreate
-	events        []EventFinish
+	settings       Settings
+	sources        []Source
+	connection     Connection
+	advanced       map[string]string // source ID -> marker
+	recorded       map[string]string // source ID -> error message
+	createdEvents  []EventCreate
+	events         []EventFinish
+	createEventErr error
 }
 
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
@@ -51,6 +53,9 @@ func (f *fakeStore) RecordError(_ context.Context, sourceID, msg string) error {
 	return nil
 }
 func (f *fakeStore) CreateEvent(_ context.Context, event EventCreate) (int64, error) {
+	if f.createEventErr != nil {
+		return 0, f.createEventErr
+	}
 	f.createdEvents = append(f.createdEvents, event)
 	return int64(len(f.createdEvents)), nil
 }
@@ -65,13 +70,19 @@ type fakeProvider struct {
 	changes    map[string][]Change // key: capabilityID, structured changes
 	nextMarker string
 	err        error
+	errByCap   map[string]error
 	lastConfig map[string]string
+	calls      int
 }
 
-func (f *fakeProvider) PollChanges(_ context.Context, _ int, capabilityID, _ string, _ ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
+func (f *fakeProvider) PollChanges(_ context.Context, _ string, capabilityID, _ string, _ ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
+	f.calls++
 	f.lastConfig = sourceConfig
 	if f.err != nil {
 		return nil, "", f.err
+	}
+	if err := f.errByCap[capabilityID]; err != nil {
+		return nil, "", err
 	}
 	if changes, ok := f.changes[capabilityID]; ok {
 		return changes, f.nextMarker, nil
@@ -87,7 +98,7 @@ func TestPollOncePassesSourceConfigToProvider(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "cephfs", Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
 			SourceConfig: map[string]string{"exclusions": ".downloads\n.recyclebin"},
 		}},
 	}
@@ -98,6 +109,38 @@ func TestPollOncePassesSourceConfigToProvider(t *testing.T) {
 	}
 	if got := prov.lastConfig["exclusions"]; got != ".downloads\n.recyclebin" {
 		t.Fatalf("source config = %#v", prov.lastConfig)
+	}
+}
+
+func TestPollOnceSkipsSourceWhenPollAlreadyRunning(t *testing.T) {
+	store := &fakeStore{
+		settings:       Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		createEventErr: ErrPollAlreadyRunning,
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"cephfs": {"/mnt/media/Movie/movie.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", prov.calls)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("enqueued scans = %+v, want none", q.enqueued)
+	}
+	if len(store.events) != 0 {
+		t.Fatalf("finished events = %+v, want none", store.events)
+	}
+	if len(store.recorded) != 0 {
+		t.Fatalf("recorded source errors = %+v, want none", store.recorded)
+	}
+	if len(store.advanced) != 0 {
+		t.Fatalf("advanced markers = %+v, want none", store.advanced)
 	}
 }
 
@@ -210,7 +253,7 @@ func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -241,7 +284,7 @@ func TestPollOnceRecordsSuccessfulEvent(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true, Marker: &marker,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true, Marker: &marker,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -283,7 +326,7 @@ func TestPollOnceRecordsReusedScanCounts(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -318,7 +361,7 @@ func TestPollOnceAppliesSourceRewritesBeforeEnqueue(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 			PathRewrites: []PathRewrite{{From: "/data/tv", To: "/mnt/media/tv"}},
 		}},
 	}
@@ -347,7 +390,7 @@ func TestPollOnceStructuredFileChangeEnqueuesExactFile(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "cephfs", Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
 			PathRewrites: []PathRewrite{{From: "/ceph/tv", To: "/mnt/media/tv"}},
 		}},
 	}
@@ -380,7 +423,7 @@ func TestPollOnceStructuredSubtreeChangeEnqueuesExactSubtree(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "cephfs", Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
 			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
 		}},
 	}
@@ -416,7 +459,7 @@ func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -446,7 +489,7 @@ func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	const opaque = "eyJjdXJzb3IiOiJhYmMxMjMifQ==|2026-06-02T14:10:00Z"
@@ -470,7 +513,7 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
@@ -523,7 +566,7 @@ func TestPollOnceAdvancesMarkerWhenResolvedButAllSuppressed(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 			// rewrite /data/tv -> /mnt/media/tv so fakeResolver resolves the paths.
 			PathRewrites: []PathRewrite{{From: "/data/tv", To: "/mnt/media/tv"}},
 		}},
@@ -556,7 +599,7 @@ func TestPollOnceAdvancesMarkerWhenZeroPathsReturned(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{"arr": {}}, nextMarker: "m1"}
@@ -588,7 +631,7 @@ func TestPollOnceDisabledNoop(t *testing.T) {
 func TestPollOnceProviderErrorKeepsMarker(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true}},
+		sources:  []Source{{ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true}},
 	}
 	prov := &fakeProvider{err: context.DeadlineExceeded}
 	q := &recordingQueuer{}
@@ -607,7 +650,7 @@ func TestPollOnceProviderErrorKeepsMarker(t *testing.T) {
 func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources:  []Source{{ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true}},
+		sources:  []Source{{ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
 	sup := &recordingSuppressor{}
@@ -640,7 +683,7 @@ func TestPollOncePollsConnectionlessSource(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: nil, Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: nil, Enabled: true,
 		}},
 	}
 	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
@@ -666,7 +709,7 @@ func TestPollOnceSkipsSourcePolledTooRecently(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 			PollIntervalSeconds: &interval, LastRunAt: &recent,
 		}},
 	}
@@ -690,7 +733,7 @@ func TestPollOnceRunsSourcePastItsInterval(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", InstallationID: 1, CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
 			PollIntervalSeconds: &interval, LastRunAt: &old,
 		}},
 	}
@@ -708,25 +751,23 @@ func TestPollOnceRunsSourcePastItsInterval(t *testing.T) {
 	}
 }
 
-func TestPollOnceSkipsOrphanedSourceQuietly(t *testing.T) {
-	// Two enabled sources: only "arr-live" is still discovered; "arr-gone"'s
-	// plugin has been uninstalled. The orphan must be skipped quietly — no poll,
-	// no RecordError spam — while the live source still polls normally.
+func TestPollOnceRecordsScanSourceResolutionFailure(t *testing.T) {
+	// Two enabled sources: one polls normally, while the other simulates the
+	// production resolver failing because the plugin cannot be resolved.
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{
-			{ID: "live", InstallationID: 1, CapabilityID: "arr-live", ConnectionID: strptr("c1"), Enabled: true},
-			{ID: "gone", InstallationID: 2, CapabilityID: "arr-gone", ConnectionID: strptr("c1"), Enabled: true},
+			{ID: "live", PluginID: "silo.autoscan.live", CapabilityID: "arr-live", ConnectionID: strptr("c1"), Enabled: true},
+			{ID: "gone", PluginID: "silo.autoscan.gone", CapabilityID: "arr-gone", ConnectionID: strptr("c1"), Enabled: true},
 		},
 	}
 	prov := &fakeProvider{paths: map[string][]string{
 		"arr-live": {"/mnt/media/Show/S01/E01.mkv"},
-		"arr-gone": {"/mnt/media/Other/S01/E01.mkv"},
+	}, errByCap: map[string]error{
+		"arr-gone": errors.New("scan source plugin \"silo.autoscan.gone\" is not installed"),
 	}, nextMarker: "m1"}
 	q := &recordingQueuer{}
-	// Lister reports only the live capability; the orphan is absent.
-	lister := fakeLister{sources: []DiscoveredSource{{InstallationID: 1, CapabilityID: "arr-live"}}}
-	svc := NewService(store, prov, passthroughConnRes{}, fakeResolver{}, q, allowSuppressor{}, lister)
+	svc := newService(store, prov, q, allowSuppressor{})
 
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
@@ -738,9 +779,15 @@ func TestPollOnceSkipsOrphanedSourceQuietly(t *testing.T) {
 		t.Fatalf("expected live source marker advanced")
 	}
 	if _, ok := store.advanced["gone"]; ok {
-		t.Fatalf("orphaned source must NOT poll/advance")
+		t.Fatalf("failed source must NOT advance")
 	}
-	if _, ok := store.recorded["gone"]; ok {
-		t.Fatalf("orphaned source must be skipped quietly, but an error was recorded: %q", store.recorded["gone"])
+	if got := store.recorded["gone"]; !strings.Contains(got, "not installed") {
+		t.Fatalf("failed source error = %q", got)
+	}
+	if len(store.events) != 2 {
+		t.Fatalf("expected one event per source, got %+v", store.events)
+	}
+	if store.events[1].Status != EventStatusError || !strings.Contains(store.events[1].ErrorMessage, "not installed") {
+		t.Fatalf("failed source event = %+v", store.events[1])
 	}
 }

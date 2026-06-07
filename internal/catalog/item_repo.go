@@ -474,6 +474,28 @@ func (r *ItemRepository) GetByIDs(ctx context.Context, contentIDs []string) ([]*
 	return scanItems(rows)
 }
 
+// GetStatusByIDs returns a map of content_id → status for the requested IDs.
+// Missing IDs are absent from the result rather than returned with empty values.
+func (r *ItemRepository) GetStatusByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT content_id, status FROM media_items WHERE content_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("querying media_items statuses: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, fmt.Errorf("scanning status row: %w", err)
+		}
+		out[id] = status
+	}
+	return out, rows.Err()
+}
+
 // GetByIDsWithAccess fetches multiple media items by content_id, filtered by
 // the access policy in a single query. Returns only items the viewer is
 // allowed to see — replaces a per-item EnsureAccessible loop alongside the

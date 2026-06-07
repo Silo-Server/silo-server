@@ -20,7 +20,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -239,6 +238,28 @@ func handleProvider404(
 	}
 	logAttrs = append(logAttrs, "error", err)
 	slog.Info("metadata: provider returned 404 for stale or invalid external id", logAttrs...)
+	return true
+}
+
+func handleChildProvider404(
+	provider string,
+	providerIDs map[string]string,
+	err error,
+	attrs ...any,
+) bool {
+	if !isProvider404(err) {
+		return false
+	}
+
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	logAttrs := append([]any{"provider", provider}, attrs...)
+	if provider != "" && providerIDs != nil {
+		if providerID := strings.TrimSpace(providerIDs[provider]); providerID != "" {
+			logAttrs = append(logAttrs, "provider_id", providerID)
+		}
+	}
+	logAttrs = append(logAttrs, "error", err)
+	slog.Info("metadata: provider returned 404 for unavailable child metadata", logAttrs...)
 	return true
 }
 
@@ -1137,7 +1158,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				Language:    req.Language,
 			})
 			if err != nil {
-				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+				// Pass nil for provider404s so this refresh can drop the
+				// provider from the in-memory merge without recording a durable
+				// stale item ID from the season chain.
+				if handleProvider404(nil, accumulatedIDs, p.Slug(), err,
 					"content_id", req.ContentID,
 					"season", 0,
 				) {
@@ -1170,7 +1194,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						Language:     req.Language,
 					})
 					if err != nil {
-						if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+						if handleChildProvider404(p.Slug(), accumulatedIDs, err,
 							"content_id", req.ContentID,
 							"season", season.SeasonNumber,
 						) {
@@ -1210,18 +1234,28 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 
 	// Refresh stale ID records on successful refresh: clear anything resolved,
 	// then keep only the providers that still 404ed during this run.
-	if s.staleIDRepo != nil && req.ContentID != "" {
-		if delErr := s.staleIDRepo.DeleteByContentID(ctx, req.ContentID); delErr != nil {
+	// Stale-ID follow-up targets the canonical content ID the item was
+	// persisted/merged into. When mergeAndPersist canonicalizes this item into
+	// an existing one, req.ContentID is the now-deleted source: clearing or
+	// recording stale IDs against it would touch nothing (or FK-violate), so
+	// the still-404ing providers must be recorded on result.ContentID instead.
+	// provider404s is only allocated when req.ContentID was set (the refresh
+	// targeted a known item). Guarding on it preserves the original gating so a
+	// content-id-less refresh that canonicalizes into an existing item does not
+	// wipe that item's stale rows without re-recording any.
+	followUpContentID := refreshFollowUpContentID(req.ContentID, result)
+	if s.staleIDRepo != nil && followUpContentID != "" && provider404s != nil {
+		if delErr := s.staleIDRepo.DeleteByContentID(ctx, followUpContentID); delErr != nil {
 			slog.Warn("metadata: failed to clear stale IDs after refresh",
-				"content_id", req.ContentID, "error", delErr)
+				"content_id", followUpContentID, "error", delErr)
 		}
 		for slug, providerID := range provider404s {
 			if providerID == "" {
 				continue
 			}
-			if upsertErr := s.staleIDRepo.Upsert(ctx, req.ContentID, slug, providerID); upsertErr != nil {
+			if upsertErr := s.staleIDRepo.Upsert(ctx, followUpContentID, slug, providerID); upsertErr != nil {
 				slog.Warn("metadata: failed to persist stale provider ID after partial refresh",
-					"content_id", req.ContentID,
+					"content_id", followUpContentID,
 					"provider", slug,
 					"provider_id", providerID,
 					"error", upsertErr)
@@ -1237,6 +1271,19 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 
 	return result, nil
+}
+
+// refreshFollowUpContentID returns the content ID that a completed refresh's
+// follow-up writes (stale-ID clear/record, debt sync) should target: the
+// canonical ID the item was persisted or merged into when available, falling
+// back to the requested ID. mergeAndPersist can canonicalize an item into an
+// existing one, deleting the requested ID, so follow-up writes keyed on
+// req.ContentID would miss the surviving item.
+func refreshFollowUpContentID(reqContentID string, result *ProcessResult) string {
+	if result != nil && strings.TrimSpace(result.ContentID) != "" {
+		return result.ContentID
+	}
+	return reqContentID
 }
 
 // mergeAndPersist handles the final merge into existing item and DB persistence.
@@ -1917,7 +1964,7 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	reasonMask := int64(0)
 	now := time.Now().UTC()
 	for _, episode := range episodes {
-		if EpisodeHasIncompleteMetadata(episode, now) {
+		if EpisodeHasActionableMetadataDebt(episode, now) {
 			reasonMask = RefreshDebtReasonEpisodeIncomplete
 			break
 		}
@@ -1952,7 +1999,7 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 	}
 	reasonMask := int64(0)
 	now := time.Now().UTC()
-	if EpisodeHasIncompleteMetadata(episode, now) {
+	if EpisodeHasActionableMetadataDebt(episode, now) {
 		reasonMask = RefreshDebtReasonEpisodeIncomplete
 	}
 	if reasonMask == 0 {
@@ -2336,7 +2383,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			Language:     language,
 		})
 		if err != nil {
-			if handleProvider404(nil, providerIDs, p.Slug(), err, "season", seasonNumber) {
+			if handleChildProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}
 			slog.Warn("metadata: target episode provider error",
@@ -3468,7 +3515,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 
 	incomplete := false
 	for _, episode := range episodes {
-		if EpisodeHasIncompleteMetadata(episode, now) {
+		if EpisodeHasActionableMetadataDebt(episode, now) {
 			incomplete = true
 		}
 		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
@@ -3487,7 +3534,7 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	if s == nil || s.refreshDebtRepo == nil || episode == nil || strings.TrimSpace(episode.ContentID) == "" {
 		return nil
 	}
-	if !EpisodeHasIncompleteMetadata(episode, now) {
+	if !EpisodeHasActionableMetadataDebt(episode, now) {
 		return s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetEpisode, episode.ContentID)
 	}
 	reasonMask := RefreshDebtReasonEpisodeIncomplete
@@ -4422,14 +4469,7 @@ func rebindDeletableStatuses(allowMatchedSource bool) []string {
 }
 
 func isProviderIDUniqueConflict(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-	return pgErr.Code == "23505" && pgErr.ConstraintName == "media_item_provider_ids_provider_provider_id_item_type_key"
+	return isPgConstraintViolation(err, "23505", "media_item_provider_ids_provider_provider_id_item_type_key")
 }
 
 func (s *MetadataService) repairMatchedDuplicateProviderOwnersByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) (int, error) {

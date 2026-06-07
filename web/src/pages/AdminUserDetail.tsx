@@ -67,6 +67,7 @@ import {
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
 import {
+  PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
   hasAssignedPermission,
   setAssignedPermission,
@@ -280,6 +281,14 @@ function OverviewTab({ user }: { user: AdminUser }) {
         </div>
         <div className="divide-border divide-y">
           <DetailRow label="Library Access" value={libraryNames} />
+          <DetailRow
+            label="Marker Editing"
+            value={
+              hasAssignedPermission(user.permissions, PERMISSION_MARKER_EDIT)
+                ? "Allowed"
+                : "Not allowed"
+            }
+          />
           <DetailRow
             label="Metadata Curation"
             value={
@@ -903,6 +912,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [downloadTranscodeAllowed, setDownloadTranscodeAllowed] = useState(
     user.download_transcode_allowed,
   );
+  const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
 
@@ -998,6 +1008,23 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
               value={libraryIDs}
               onChange={setLibraryIDs}
             />
+            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <Label htmlFor={markerEditId}>Marker Editing</Label>
+                <p className="text-muted-foreground text-xs">
+                  Edit intro, recap, credits, and preview markers within assigned libraries.
+                </p>
+              </div>
+              <Switch
+                id={markerEditId}
+                checked={hasAssignedPermission(permissions, PERMISSION_MARKER_EDIT)}
+                onCheckedChange={(checked) =>
+                  setPermissions((current) =>
+                    setAssignedPermission(current, PERMISSION_MARKER_EDIT, checked),
+                  )
+                }
+              />
+            </div>
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
               <div>
                 <Label htmlFor={metadataCurationId}>Metadata Curation</Label>

@@ -43,9 +43,6 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(_ context.Context, file *models.Me
 	credits := rangePayload(file.CreditsStart, file.CreditsEnd)
 	recap := rangePayload(file.RecapStart, file.RecapEnd)
 	preview := rangePayload(file.PreviewStart, file.PreviewEnd)
-	if intro == nil && credits == nil && recap == nil && preview == nil {
-		return
-	}
 
 	for _, session := range n.sessions.GetSessionsByMediaFileID(file.ID) {
 		if session == nil || session.ID == "" || !session.HasRealtimeConnection {

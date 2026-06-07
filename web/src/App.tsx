@@ -51,6 +51,7 @@ import AdminSections from "@/pages/AdminSections";
 import AdminCollections from "@/pages/AdminCollections";
 import AdminCollectionEditor from "@/pages/AdminCollectionEditor";
 import AdminPlaybackHistory from "@/pages/AdminPlaybackHistory";
+import AdminMarkerHistory from "@/pages/AdminMarkerHistory";
 import AdminMaintenance from "@/pages/AdminMaintenance";
 import AdminApiKeys from "@/pages/AdminApiKeys";
 import AdminSubtitles from "@/pages/AdminSubtitles";
@@ -377,6 +378,7 @@ function AppRoutes() {
                   <Route path="requests" element={<AdminRequests />} />
                   <Route path="autoscan" element={<AdminAutoscan />} />
                   <Route path="history" element={<AdminPlaybackHistory />} />
+                  <Route path="marker-history" element={<AdminMarkerHistory />} />
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />
                   <Route path="users/:id" element={<AdminUserDetail />} />

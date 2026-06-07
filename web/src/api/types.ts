@@ -528,6 +528,46 @@ export interface CrewMember {
   photo_thumbhash?: string;
 }
 
+export interface AudiobookPerson {
+  person_id?: string;
+  name: string;
+  photo_url?: string;
+  photo_thumbhash?: string;
+}
+
+export interface AudiobookRelatedItem {
+  content_id: string;
+  title: string;
+  year?: number;
+  poster_url?: string;
+  series_index?: number;
+}
+
+export interface AudiobookSeriesGroup {
+  name?: string;
+  entries: AudiobookRelatedItem[];
+}
+
+export interface AudiobookNarration {
+  content_id: string;
+  title: string;
+  year?: number;
+  narrators: string[];
+}
+
+export interface AudiobookDetailExtension {
+  authors: AudiobookPerson[];
+  narrators: AudiobookPerson[];
+  publisher?: string;
+  total_duration_seconds: number;
+  series?: AudiobookSeriesGroup;
+  other_narrations: AudiobookNarration[];
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -608,7 +648,7 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -675,6 +715,11 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   audio_languages?: string[];
   subtitle_languages?: string[];
   original_languages?: string[];
+  // Audiobook-native facets — populated when the scope contains audiobook
+  // items, empty otherwise. The UI gates these on libraryType=audiobook[s].
+  authors?: string[];
+  narrators?: string[];
+  series?: string[];
 }
 
 // Item Detail
@@ -696,6 +741,7 @@ export interface FileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
   multi_episode_start?: number;
   multi_episode_end?: number;
   effective_audio_track_index?: number;
@@ -810,9 +856,68 @@ export interface TimeRange {
   end: number;
 }
 
+/** The four editable marker kinds. "credits" is exposed as Jellyfin's "Outro". */
+export type MarkerKind = "intro" | "credits" | "recap" | "preview";
+
+/** A marker segment with provenance, as returned by the markers API. */
+export interface MarkerSegment {
+  start: number | null;
+  end: number | null;
+  source: string | null;
+  provider: string | null;
+  confidence: number | null;
+  algorithm: string | null;
+  detected_at: string | null;
+}
+
+/** Response shape from GET/PUT /markers/{items,files}/{id}. */
+export interface FileMarkersResponse {
+  file_id: number;
+  intro: MarkerSegment;
+  credits: MarkerSegment;
+  recap: MarkerSegment;
+  preview: MarkerSegment;
+}
+
+export interface MarkerEditAuditEntry {
+  id: number;
+  media_file_id: number;
+  item_id?: string;
+  item_type?: string;
+  media_title?: string;
+  file_path?: string;
+  segment: MarkerKind;
+  action: "set" | "clear";
+  before: MarkerSegment | null;
+  after: MarkerSegment | null;
+  user_id?: number;
+  username?: string;
+  impersonator_user_id?: number;
+  impersonator_username?: string;
+  api_key_id?: number;
+  request_id?: string;
+  client_ip?: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface MarkerEditAuditResponse {
+  history: MarkerEditAuditEntry[];
+}
+
+/** A single segment in a set-markers request: object to set, null to clear. */
+export type MarkerSegmentInput = { start?: number | null; end?: number | null };
+
+/**
+ * Request body for PUT /markers/{items,files}/{id}. Only present keys are
+ * acted on: an object sets the segment, null clears it, an absent key is
+ * left unchanged.
+ */
+export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | null>>;
+
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -885,6 +990,7 @@ export interface ItemDetail {
   effective_version_hdr?: boolean;
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
+  audiobook?: AudiobookDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1055,13 +1161,16 @@ export interface QuerySort {
     | "progress"
     | "date_viewed"
     | "plays"
+    | "author"
+    | "narrator"
+    | "series"
     | "relevance";
   order: "asc" | "desc";
 }
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode";
+  media_scope?: "movie" | "series" | "episode" | "audiobook";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -1423,6 +1532,7 @@ export interface RequestMediaResult {
   popularity?: number;
   vote_average?: number;
   availability: RequestAvailability;
+  library_content_id?: string;
   request: RequestState;
 }
 
@@ -1471,6 +1581,7 @@ export interface RequestMediaDetail {
   creators?: string[];
   recommendations?: RequestMediaResult[];
   availability: RequestAvailability;
+  library_content_id?: string;
   request: RequestState;
 }
 
@@ -1568,6 +1679,7 @@ export interface MediaRequest {
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
+  library_content_id?: string;
   last_error?: string;
   created_at: string;
   updated_at: string;
@@ -1696,7 +1808,7 @@ export interface AutoscanPathRewrite {
 
 export interface AutoscanSource {
   id: string;
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   connection_id: string | null;
   enabled: boolean;
@@ -1722,9 +1834,8 @@ export interface AutoscanSourcesResponse {
 }
 
 export interface AutoscanAvailableSource {
-  installation_id: number;
-  capability_id: string;
   plugin_id: string;
+  capability_id: string;
   display_name: string;
 }
 
@@ -1733,7 +1844,7 @@ export interface AutoscanAvailableSourcesResponse {
 }
 
 export interface AutoscanSourceCreateInput {
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   connection_id?: string | null;
   enabled: boolean;
@@ -1775,7 +1886,7 @@ export interface AutoscanRewriteSuggestions {
 
 export interface AutoscanStatusSource {
   id: string;
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   connection_id: string | null;
   enabled: boolean;
@@ -1784,16 +1895,27 @@ export interface AutoscanStatusSource {
   last_error: string | null;
 }
 
+export interface AutoscanRunningPoll {
+  id: number;
+  source_id: string | null;
+  plugin_id: string;
+  capability_id: string;
+  started_at: string;
+  elapsed_ms: number;
+  marker_before?: string;
+}
+
 export interface AutoscanStatus {
   enabled: boolean;
   sources: AutoscanStatusSource[];
+  running_polls: AutoscanRunningPoll[];
   active_scans: number;
   accepted_scans: number;
   running_scans: number;
   latest_event_at?: string;
 }
 
-export type AutoscanEventStatus = "success" | "error" | "unresolved";
+export type AutoscanEventStatus = "running" | "success" | "error" | "unresolved";
 
 export interface AutoscanEventScanRun {
   id: string;
@@ -1811,7 +1933,7 @@ export interface AutoscanEventScanRun {
 export interface AutoscanEvent {
   id: number;
   source_id: string | null;
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   started_at: string;
   completed_at: string;
@@ -1849,7 +1971,7 @@ export interface AutoscanScan {
   completed_at?: string;
   autoscan_event_id?: number;
   source_id?: string;
-  installation_id?: number;
+  plugin_id?: string;
   capability_id?: string;
   event_status?: AutoscanEventStatus;
   event_completed_at?: string;
@@ -2824,7 +2946,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -2983,7 +3105,8 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
     media_scope:
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
-      value?.media_scope === "episode"
+      value?.media_scope === "episode" ||
+      value?.media_scope === "audiobook"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
@@ -3043,7 +3166,9 @@ export function queryDefinitionFromSectionConfig(
         ? "series"
         : config.media_scope === "episode" || config.filter_type === "episode"
           ? "episode"
-          : undefined;
+          : config.media_scope === "audiobook" || config.filter_type === "audiobook"
+            ? "audiobook"
+            : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;
@@ -3355,6 +3480,51 @@ export interface SubtitleProviderTestRequest {
 
 export interface SubtitleProviderTestResponse {
   success: boolean;
+  error?: string;
+}
+
+// --- Marker Providers ---
+
+export interface MarkerProviderConfig {
+  provider: string;
+  display_name?: string;
+  source_type?: string;
+  plugin_id?: string;
+  plugin_installation_id?: number;
+  capability_id?: string;
+  is_submitter: boolean;
+  fetch_enabled: boolean;
+  fetch_priority: number;
+  contribute_enabled: boolean;
+  contribute_auto_local: boolean;
+  contribute_min_confidence: number;
+}
+
+export interface MarkerProviderUpdateRequest {
+  fetch_enabled?: boolean;
+  fetch_priority?: number;
+  contribute_enabled?: boolean;
+  contribute_auto_local?: boolean;
+  contribute_min_confidence?: number;
+}
+
+export interface MarkerProviderListResponse {
+  providers: MarkerProviderConfig[];
+}
+
+export interface MarkerUserStats {
+  total: number;
+  accepted: number;
+  pending: number;
+  rejected: number;
+  acceptance_rate: number;
+  current_streak: number;
+  best_streak: number;
+}
+
+export interface MarkerProviderValidationResponse {
+  valid: boolean;
+  stats?: MarkerUserStats;
   error?: string;
 }
 

@@ -178,7 +178,35 @@ Technical notes:
 | `make dev-backend` | Run Go backend (integrated mode) |
 | `make dev-proxy` | Run a standalone proxy node |
 | `make dev-transcode` | Run a standalone transcode node |
+| `make migrate-create NAME=add_thing` | Create a timestamped Goose SQL migration |
+| `make migrate-validate` | Validate Goose migration files without touching a database |
+| `make migrate-status` | Show Goose migration status using Silo's bootstrapping runner |
+| `make migrate-up` | Apply pending Goose migrations using Silo's bootstrapping runner |
 | `make clean` | Remove build artifacts |
+
+### Database Migrations
+
+PostgreSQL schema migrations are managed by Goose. Migration SQL files live in
+`migrations/sql/` and use Goose annotations. Converted legacy migrations keep
+their original numeric versions so existing `schema_versions` rows can bootstrap
+cleanly into Goose without replaying old SQL. New migrations should be created
+with timestamped filenames:
+
+```sh
+make migrate-create NAME=add_thing
+make migrate-validate
+```
+
+Do not run `goose fix`; timestamped migrations are the repository policy because
+they avoid version collisions across parallel PRs. The existing `001`-style
+files are historical compatibility records, not the naming pattern for new work.
+Runtime migrations are applied by the integrated/API server only. Proxy and
+transcode modes never mutate schema.
+For existing installs, use `make migrate-status` and `make migrate-up` rather
+than invoking the Goose CLI directly; those targets copy legacy
+`schema_versions` rows into `public.goose_db_version` under the migration lock
+before reading or applying migrations. Set `ENV_FILE=path/to/.env` when the
+database URL should be read from a non-default env file.
 
 ### Running Tests
 
@@ -285,5 +313,5 @@ internal/
   scanner/           Media file discovery and FFProbe
   worker/            Background jobs (scan, match, reconcile)
 web/                 React + TypeScript frontend (Vite, Tailwind, shadcn/ui)
-migrations/          PostgreSQL schema migrations
+migrations/sql/      Goose-managed PostgreSQL schema migrations
 ```

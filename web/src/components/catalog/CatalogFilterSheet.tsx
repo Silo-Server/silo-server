@@ -5,6 +5,7 @@ import type { GuidedFormState } from "@/components/collections/CollectionGuidedR
 import CollectionGuidedRulesEditor from "@/components/collections/CollectionGuidedRulesEditor";
 import CollectionRulesEditor from "@/components/collections/CollectionRulesEditor";
 import type { QuerySortRelevanceScope } from "@/lib/querySortOptions";
+import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import { Button } from "@/components/ui/button";
 import { PortalContainerContext } from "@/components/ui/portal-container-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -33,6 +34,9 @@ const EMPTY_SECONDARY_FILTERS: Partial<GuidedFormState> = {
   director: "",
   writer: "",
   producer: "",
+  author: "",
+  narrator: "",
+  series: "",
   studio: "",
   network: "",
   country: "",
@@ -62,6 +66,10 @@ interface CatalogFilterSheetProps {
   onQueryDefinitionChange: (qd: QueryDefinition) => void;
   filters?: CatalogFiltersResponse;
   filtersLoading?: boolean;
+  libraryType?: string;
+  // Forwarded into the editor so audiobook-native facet sections can
+  // typeahead-search /api/v1/catalog/filters/search at the same scope.
+  catalogState?: CatalogSearchState;
 }
 
 export default function CatalogFilterSheet({
@@ -80,6 +88,8 @@ export default function CatalogFilterSheet({
   onQueryDefinitionChange,
   filters,
   filtersLoading = false,
+  libraryType,
+  catalogState,
 }: CatalogFilterSheetProps) {
   // Portal container inside the Sheet's DOM so that react-remove-scroll
   // (activated by the Dialog/Sheet) does not block scroll events inside
@@ -152,6 +162,8 @@ export default function CatalogFilterSheet({
                   showSortControls={false}
                   filters={filters}
                   filtersLoading={filtersLoading}
+                  libraryType={libraryType}
+                  catalogState={catalogState}
                 />
               )}
             </div>

@@ -82,3 +82,32 @@ func TestMarkerUpdateNotifierTargetsMatchingSessions(t *testing.T) {
 		t.Fatalf("payload.Credits = %#v, want credits range", payload.Credits)
 	}
 }
+
+func TestMarkerUpdateNotifierSendsAllClearedMarkers(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	_ = sessions.SetRealtimeConnection(session.ID, true)
+
+	hub := NewRealtimeHub()
+	conn := &dispatchTestConn{}
+	reg := hub.Register(session.ID, conn)
+	defer hub.Unregister(reg)
+
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+	notifier.MarkersUpdated(context.Background(), &models.MediaFile{ID: 100})
+
+	if len(conn.messages) != 1 {
+		t.Fatalf("messages = %d, want 1 all-cleared marker update", len(conn.messages))
+	}
+	event, ok := conn.messages[0].(EventEnvelope)
+	if !ok {
+		t.Fatalf("message type = %T, want EventEnvelope", conn.messages[0])
+	}
+	var payload MarkersUpdatedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload): %v", err)
+	}
+	if payload.Intro != nil || payload.Credits != nil || payload.Recap != nil || payload.Preview != nil {
+		t.Fatalf("payload markers = %#v, want all nil", payload)
+	}
+}

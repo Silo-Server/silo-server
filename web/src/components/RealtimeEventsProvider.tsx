@@ -110,13 +110,18 @@ function sortJobs(jobs: AdminJob[]) {
     const leftTime = Date.parse(left.requested_at);
     const rightTime = Date.parse(right.requested_at);
     if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
-      return right.id.localeCompare(left.id);
+      const leftID = left.id ?? "";
+      const rightID = right.id ?? "";
+      return rightID.localeCompare(leftID);
     }
     return rightTime - leftTime;
   });
 }
 
 function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 50) {
+  if (!nextJob || !nextJob.id) {
+    return existing ?? [];
+  }
   const jobs = existing ? [...existing] : [];
   const index = jobs.findIndex((job) => job.id === nextJob.id);
   if (index >= 0) {
@@ -347,11 +352,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
   const pageActivity = usePageActivity();
   const location = useLocation();
+  const authenticatedUserID = user?.id ?? null;
   const isDashboardRoute = location.pathname === "/admin" || location.pathname === "/admin/";
   const allowDashboardRealtimeUpdates = !isDashboardRoute || pageActivity.canPollDashboard;
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
   const reconnectTimerRef = useRef<number | undefined>(undefined);
-  const closingRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const helloReceivedRef = useRef(false);
   const requestCounterRef = useRef(0);
@@ -531,7 +536,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    if (!user) {
+    if (!authenticatedUserID) {
       return;
     }
     if (!pageActivity.canApplyRealtimeUpdates) {
@@ -547,15 +552,16 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
     });
-  }, [pageActivity.canApplyRealtimeUpdates, queryClient, user]);
+  }, [authenticatedUserID, pageActivity.canApplyRealtimeUpdates, queryClient]);
 
   useEffect(() => {
-    if (!user || !pageActivity.canApplyRealtimeUpdates) {
+    if (!authenticatedUserID || !pageActivity.canApplyRealtimeUpdates) {
       setConnectionState("disconnected");
       return;
     }
 
-    closingRef.current = false;
+    let closedByEffect = false;
+    let activeSocket: WebSocket | null = null;
 
     const clearReconnect = () => {
       if (reconnectTimerRef.current !== undefined) {
@@ -565,16 +571,22 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     };
 
     const scheduleReconnect = () => {
-      if (closingRef.current || reconnectTimerRef.current !== undefined) {
+      if (closedByEffect || reconnectTimerRef.current !== undefined) {
         return;
       }
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = undefined;
+        if (closedByEffect) {
+          return;
+        }
         connect();
       }, 1_000);
     };
 
     const connect = () => {
+      if (closedByEffect) {
+        return;
+      }
       setConnectionState("connecting");
       helloReceivedRef.current = false;
 
@@ -587,13 +599,20 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      activeSocket = socket;
       socketRef.current = socket;
 
       socket.onopen = () => {
+        if (closedByEffect || socketRef.current !== socket) {
+          return;
+        }
         setConnectionState("live");
       };
 
       socket.onmessage = (event) => {
+        if (closedByEffect || socketRef.current !== socket) {
+          return;
+        }
         if (!canApplyRealtimeUpdatesRef.current) {
           return;
         }
@@ -621,13 +640,21 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       };
 
       socket.onerror = () => {
+        if (closedByEffect || socketRef.current !== socket) {
+          return;
+        }
         setConnectionState("disconnected");
       };
 
       socket.onclose = () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+        socketRef.current = null;
+        activeSocket = null;
         helloReceivedRef.current = false;
         setConnectionState("disconnected");
-        if (!closingRef.current) {
+        if (!closedByEffect) {
           scheduleReconnect();
         }
       };
@@ -636,15 +663,18 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     connect();
 
     return () => {
-      closingRef.current = true;
+      closedByEffect = true;
       clearReconnect();
       for (const [jobId, waiter] of waitersRef.current) {
         window.clearTimeout(waiter.timeoutId);
         waiter.reject(new Error(`Realtime events provider closed before job ${jobId} finished`));
       }
       waitersRef.current.clear();
-      const socket = socketRef.current;
-      socketRef.current = null;
+      const socket = activeSocket;
+      if (socket && socketRef.current === socket) {
+        socketRef.current = null;
+      }
+      activeSocket = null;
       if (
         socket &&
         (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
@@ -652,7 +682,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         socket.close();
       }
     };
-  }, [pageActivity.canApplyRealtimeUpdates, queryClient, user]);
+  }, [authenticatedUserID, pageActivity.canApplyRealtimeUpdates, queryClient]);
 
   const value = useMemo<RealtimeEventsContextValue>(
     () => ({

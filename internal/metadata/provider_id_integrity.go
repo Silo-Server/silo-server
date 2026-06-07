@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -577,25 +579,59 @@ func betterCanonicalCandidate(left, right canonicalCandidate) bool {
 	return left.ContentID < right.ContentID
 }
 
-func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID, canonicalID string) error {
-	if sourceID == "" || canonicalID == "" || sourceID == canonicalID {
-		return nil
+// mediaItemMergeStep is one statement in the ordered media-item merge sequence
+// run by canonicalizeMediaItemReferencesTx. Every step references $1 (the
+// source content ID); steps that move data onto the canonical row also
+// reference $2 (the canonical content ID).
+type mediaItemMergeStep struct {
+	name string
+	sql  string
+}
+
+// mergeStepPlaceholderRe matches positional query placeholders ($1, $2, …).
+var mergeStepPlaceholderRe = regexp.MustCompile(`\$(\d+)`)
+
+// maxPlaceholder returns the highest positional placeholder number referenced
+// in sql (0 if none). It reads the full placeholder number, so "$20" is 20 and
+// is never confused with "$2" — unlike a substring check.
+func maxPlaceholder(sql string) int {
+	highest := 0
+	for _, m := range mergeStepPlaceholderRe.FindAllStringSubmatch(sql, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > highest {
+			highest = n
+		}
 	}
-	if err := ensureSeriesCanMove(ctx, tx, sourceID, canonicalID); err != nil {
-		return err
+	return highest
+}
+
+// mergeStepArgs returns the positional arguments for a merge step, sized to the
+// placeholders the SQL actually binds. Passing too many args (e.g. an unused
+// $2) makes pgx reject the Exec with "mismatched param and argument count"
+// under the default QueryExecModeCacheStatement, aborting the whole merge
+// transaction. Every merge step binds $1 (source) and optionally $2
+// (canonical); TestMergeStepPlaceholdersAreBounded enforces that contract, so
+// the default branch is unreachable for the defined steps and fails loud if a
+// future step violates it.
+func mergeStepArgs(sql, sourceID, canonicalID string) []any {
+	switch n := maxPlaceholder(sql); n {
+	case 1:
+		return []any{sourceID}
+	case 2:
+		return []any{sourceID, canonicalID}
+	default:
+		panic(fmt.Sprintf("merge step binds unsupported placeholder count %d: %q", n, sql))
 	}
-	steps := []struct {
-		name string
-		sql  string
-	}{
-		{"merge provider ids", `
+}
+
+var mediaItemMergeSteps = []mediaItemMergeStep{
+	{"merge provider ids", `
 			INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
 			SELECT $2, item_type, provider, provider_id, created_at, NOW()
 			FROM media_item_provider_ids
 			WHERE content_id = $1
 			ON CONFLICT DO NOTHING`},
-		{"drop source provider ids", `DELETE FROM media_item_provider_ids WHERE content_id = $1`},
-		{"merge legacy provider columns", `
+	{"drop source provider ids", `DELETE FROM media_item_provider_ids WHERE content_id = $1`},
+	{"merge legacy provider columns", `
 			UPDATE media_items dest
 			SET imdb_id = COALESCE(NULLIF(dest.imdb_id, ''), src.imdb_id),
 			    tmdb_id = COALESCE(NULLIF(dest.tmdb_id, ''), src.tmdb_id),
@@ -603,10 +639,10 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			    updated_at = NOW()
 			FROM media_items src
 			WHERE dest.content_id = $2 AND src.content_id = $1`},
-		{"move media files", `UPDATE media_files SET content_id = $2, updated_at = NOW() WHERE content_id = $1`},
-		{"move seasons", `UPDATE seasons SET series_id = $2, updated_at = NOW() WHERE series_id = $1`},
-		{"move episodes", `UPDATE episodes SET series_id = $2, updated_at = NOW() WHERE series_id = $1`},
-		{"merge library memberships", `
+	{"move media files", `UPDATE media_files SET content_id = $2, updated_at = NOW() WHERE content_id = $1`},
+	{"move seasons", `UPDATE seasons SET series_id = $2, updated_at = NOW() WHERE series_id = $1`},
+	{"move episodes", `UPDATE episodes SET series_id = $2, updated_at = NOW() WHERE series_id = $1`},
+	{"merge library memberships", `
 			INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
 			SELECT $2, media_folder_id, MIN(first_seen_at)
 			FROM media_item_libraries
@@ -614,10 +650,10 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			GROUP BY media_folder_id
 			ON CONFLICT (content_id, media_folder_id) DO UPDATE
 			SET first_seen_at = LEAST(media_item_libraries.first_seen_at, EXCLUDED.first_seen_at)`},
-		{"delete source library memberships", `DELETE FROM media_item_libraries WHERE content_id = $1`},
-		{"move root claims", `UPDATE media_item_roots SET content_id = $2, last_seen_at = NOW() WHERE content_id = $1`},
-		{"move group claims", `UPDATE media_item_groups SET content_id = $2, last_seen_at = NOW() WHERE content_id = $1`},
-		{"merge collection items", `
+	{"delete source library memberships", `DELETE FROM media_item_libraries WHERE content_id = $1`},
+	{"move root claims", `UPDATE media_item_roots SET content_id = $2, last_seen_at = NOW() WHERE content_id = $1`},
+	{"move group claims", `UPDATE media_item_groups SET content_id = $2, last_seen_at = NOW() WHERE content_id = $1`},
+	{"merge collection items", `
 			INSERT INTO library_collection_items (collection_id, media_item_id, position, source_rank, created_at, updated_at)
 			SELECT collection_id, $2, MIN(position), MIN(source_rank), MIN(created_at), NOW()
 			FROM library_collection_items
@@ -627,8 +663,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			SET position = LEAST(library_collection_items.position, EXCLUDED.position),
 			    source_rank = LEAST(library_collection_items.source_rank, EXCLUDED.source_rank),
 			    updated_at = NOW()`},
-		{"delete source collection items", `DELETE FROM library_collection_items WHERE media_item_id = $1`},
-		{"merge personal collection items", `
+	{"delete source collection items", `DELETE FROM library_collection_items WHERE media_item_id = $1`},
+	{"merge personal collection items", `
 			INSERT INTO user_personal_collection_items (user_id, collection_id, media_item_id, position, added_at)
 			SELECT user_id, collection_id, $2, MIN(position), MIN(added_at)
 			FROM user_personal_collection_items
@@ -637,8 +673,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			ON CONFLICT (user_id, collection_id, media_item_id) DO UPDATE
 			SET position = LEAST(user_personal_collection_items.position, EXCLUDED.position),
 			    added_at = LEAST(user_personal_collection_items.added_at, EXCLUDED.added_at)`},
-		{"delete source personal collection items", `DELETE FROM user_personal_collection_items WHERE media_item_id = $1`},
-		{"merge favorites", `
+	{"delete source personal collection items", `DELETE FROM user_personal_collection_items WHERE media_item_id = $1`},
+	{"merge favorites", `
 			INSERT INTO user_favorites (user_id, profile_id, media_item_id, added_at)
 			SELECT user_id, profile_id, $2, MIN(added_at)
 			FROM user_favorites
@@ -646,8 +682,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			GROUP BY user_id, profile_id
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET added_at = LEAST(user_favorites.added_at, EXCLUDED.added_at)`},
-		{"delete source favorites", `DELETE FROM user_favorites WHERE media_item_id = $1`},
-		{"merge watchlist", `
+	{"delete source favorites", `DELETE FROM user_favorites WHERE media_item_id = $1`},
+	{"merge watchlist", `
 			INSERT INTO user_watchlist (user_id, profile_id, media_item_id, added_at)
 			SELECT user_id, profile_id, $2, MIN(added_at)
 			FROM user_watchlist
@@ -655,8 +691,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			GROUP BY user_id, profile_id
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET added_at = LEAST(user_watchlist.added_at, EXCLUDED.added_at)`},
-		{"delete source watchlist", `DELETE FROM user_watchlist WHERE media_item_id = $1`},
-		{"merge ratings", `
+	{"delete source watchlist", `DELETE FROM user_watchlist WHERE media_item_id = $1`},
+	{"merge ratings", `
 			INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
 			SELECT DISTINCT ON (user_id, profile_id) user_id, profile_id, $2, rating, rated_at
 			FROM user_ratings
@@ -665,8 +701,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET rating = CASE WHEN EXCLUDED.rated_at >= user_ratings.rated_at THEN EXCLUDED.rating ELSE user_ratings.rating END,
 			    rated_at = GREATEST(user_ratings.rated_at, EXCLUDED.rated_at)`},
-		{"delete source ratings", `DELETE FROM user_ratings WHERE media_item_id = $1`},
-		{"merge progress", `
+	{"delete source ratings", `DELETE FROM user_ratings WHERE media_item_id = $1`},
+	{"merge progress", `
 			INSERT INTO user_watch_progress (
 				user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed,
 				updated_at, last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
@@ -685,9 +721,9 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			    last_hdr = CASE WHEN EXCLUDED.updated_at >= user_watch_progress.updated_at THEN EXCLUDED.last_hdr ELSE user_watch_progress.last_hdr END,
 			    last_codec_video = CASE WHEN EXCLUDED.updated_at >= user_watch_progress.updated_at THEN EXCLUDED.last_codec_video ELSE user_watch_progress.last_codec_video END,
 			    last_edition_key = CASE WHEN EXCLUDED.updated_at >= user_watch_progress.updated_at THEN EXCLUDED.last_edition_key ELSE user_watch_progress.last_edition_key END`},
-		{"delete source progress", `DELETE FROM user_watch_progress WHERE media_item_id = $1`},
-		{"move history", `UPDATE user_watch_history SET media_item_id = $2 WHERE media_item_id = $1`},
-		{"merge hidden history", `
+	{"delete source progress", `DELETE FROM user_watch_progress WHERE media_item_id = $1`},
+	{"move history", `UPDATE user_watch_history SET media_item_id = $2 WHERE media_item_id = $1`},
+	{"merge hidden history", `
 			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)
 			SELECT user_id, profile_id, $2, MAX(hidden_before), MAX(updated_at)
 			FROM user_history_hidden_items
@@ -696,8 +732,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET hidden_before = GREATEST(user_history_hidden_items.hidden_before, EXCLUDED.hidden_before),
 			    updated_at = GREATEST(user_history_hidden_items.updated_at, EXCLUDED.updated_at)`},
-		{"delete source hidden history", `DELETE FROM user_history_hidden_items WHERE media_item_id = $1`},
-		{"delete duplicate home item dismissals", `
+	{"delete source hidden history", `DELETE FROM user_history_hidden_items WHERE media_item_id = $1`},
+	{"delete duplicate home item dismissals", `
 			DELETE FROM user_home_item_dismissals src
 			USING user_home_item_dismissals dest
 			WHERE src.media_item_id = $1
@@ -705,33 +741,33 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			  AND dest.user_id = src.user_id
 			  AND dest.profile_id = src.profile_id
 			  AND dest.surface = src.surface`},
-		{"move home item dismissals", `UPDATE user_home_item_dismissals SET media_item_id = $2 WHERE media_item_id = $1`},
-		{"remap home item dismissals series", `UPDATE user_home_item_dismissals SET series_id = $2 WHERE series_id = $1`},
-		{"delete duplicate audio preferences", `
+	{"move home item dismissals", `UPDATE user_home_item_dismissals SET media_item_id = $2 WHERE media_item_id = $1`},
+	{"remap home item dismissals series", `UPDATE user_home_item_dismissals SET series_id = $2 WHERE series_id = $1`},
+	{"delete duplicate audio preferences", `
 			DELETE FROM user_audio_preferences src
 			USING user_audio_preferences dest
 			WHERE src.series_id = $1
 			  AND dest.series_id = $2
 			  AND dest.user_id = src.user_id
 			  AND dest.profile_id = src.profile_id`},
-		{"move audio preferences", `UPDATE user_audio_preferences SET series_id = $2 WHERE series_id = $1`},
-		{"delete duplicate subtitle preferences", `
+	{"move audio preferences", `UPDATE user_audio_preferences SET series_id = $2 WHERE series_id = $1`},
+	{"delete duplicate subtitle preferences", `
 			DELETE FROM user_subtitle_preferences src
 			USING user_subtitle_preferences dest
 			WHERE src.series_id = $1
 			  AND dest.series_id = $2
 			  AND dest.user_id = src.user_id
 			  AND dest.profile_id = src.profile_id`},
-		{"move subtitle preferences", `UPDATE user_subtitle_preferences SET series_id = $2 WHERE series_id = $1`},
-		{"delete duplicate series playback preferences", `
+	{"move subtitle preferences", `UPDATE user_subtitle_preferences SET series_id = $2 WHERE series_id = $1`},
+	{"delete duplicate series playback preferences", `
 			DELETE FROM user_series_playback_preferences src
 			USING user_series_playback_preferences dest
 			WHERE src.series_id = $1
 			  AND dest.series_id = $2
 			  AND dest.user_id = src.user_id
 			  AND dest.profile_id = src.profile_id`},
-		{"move series playback preferences", `UPDATE user_series_playback_preferences SET series_id = $2 WHERE series_id = $1`},
-		{"merge plex sync item bindings timestamps", `
+	{"move series playback preferences", `UPDATE user_series_playback_preferences SET series_id = $2 WHERE series_id = $1`},
+	{"merge plex sync item bindings timestamps", `
 			UPDATE plex_sync_item_bindings dest
 			SET last_seen_at = GREATEST(dest.last_seen_at, src.last_seen_at),
 			    updated_at = NOW()
@@ -740,35 +776,35 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			  AND dest.connection_id = src.connection_id
 			  AND (dest.media_item_id = $2 OR dest.plex_rating_key = src.plex_rating_key)
 			  AND dest.media_item_id <> src.media_item_id`},
-		{"delete duplicate plex sync item bindings", `
+	{"delete duplicate plex sync item bindings", `
 			DELETE FROM plex_sync_item_bindings src
 			USING plex_sync_item_bindings dest
 			WHERE src.media_item_id = $1
 			  AND dest.connection_id = src.connection_id
 			  AND (dest.media_item_id = $2 OR dest.plex_rating_key = src.plex_rating_key)
 			  AND dest.media_item_id <> src.media_item_id`},
-		{"move remaining plex sync item bindings", `UPDATE plex_sync_item_bindings SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-		{"delete duplicate plex sync item state", `
+	{"move remaining plex sync item bindings", `UPDATE plex_sync_item_bindings SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"delete duplicate plex sync item state", `
 			DELETE FROM plex_sync_item_state src
 			USING plex_sync_item_state dest
 			WHERE src.media_item_id = $1
 			  AND dest.media_item_id = $2
 			  AND dest.mapping_id = src.mapping_id`},
-		{"move plex sync item state", `UPDATE plex_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-		{"move webhook sync item state", `UPDATE webhook_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-		{"move watch together rooms selected", `UPDATE watch_together_rooms SET selected_content_id = $2 WHERE selected_content_id = $1`},
-		{"move watch together suggestions", `UPDATE watch_together_suggestions SET content_id = $2 WHERE content_id = $1`},
-		{"move admin playback history", `UPDATE playback_history_admin SET media_item_id = $2 WHERE media_item_id = $1`},
-		{"move user downloads", `UPDATE user_downloads SET media_item_id = $2 WHERE media_item_id = $1`},
-		{"move downloads", `UPDATE downloads SET content_id = $2, updated_at = NOW() WHERE content_id = $1`},
-		{"merge embeddings", `
+	{"move plex sync item state", `UPDATE plex_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"move webhook sync item state", `UPDATE webhook_sync_item_state SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"move watch together rooms selected", `UPDATE watch_together_rooms SET selected_content_id = $2 WHERE selected_content_id = $1`},
+	{"move watch together suggestions", `UPDATE watch_together_suggestions SET content_id = $2 WHERE content_id = $1`},
+	{"move admin playback history", `UPDATE playback_history_admin SET media_item_id = $2 WHERE media_item_id = $1`},
+	{"move user downloads", `UPDATE user_downloads SET media_item_id = $2 WHERE media_item_id = $1`},
+	{"move downloads", `UPDATE downloads SET content_id = $2, updated_at = NOW() WHERE content_id = $1`},
+	{"merge embeddings", `
 			INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text, created_at, updated_at)
 			SELECT $2, embedding, model, canonical_text, created_at, updated_at
 			FROM media_item_embeddings
 			WHERE media_item_id = $1
 			ON CONFLICT (media_item_id) DO NOTHING`},
-		{"delete source embeddings", `DELETE FROM media_item_embeddings WHERE media_item_id = $1`},
-		{"merge item localizations", `
+	{"delete source embeddings", `DELETE FROM media_item_embeddings WHERE media_item_id = $1`},
+	{"merge item localizations", `
 			INSERT INTO media_item_localizations (
 				content_id, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
 				backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
@@ -778,8 +814,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			FROM media_item_localizations
 			WHERE content_id = $1
 			ON CONFLICT (content_id, language) DO NOTHING`},
-		{"delete source localizations", `DELETE FROM media_item_localizations WHERE content_id = $1`},
-		{"dedupe people", `
+	{"delete source localizations", `DELETE FROM media_item_localizations WHERE content_id = $1`},
+	{"dedupe people", `
 			DELETE FROM item_people src
 			USING item_people dest
 			WHERE src.content_id = $1
@@ -787,8 +823,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			  AND dest.person_id = src.person_id
 			  AND dest.kind = src.kind
 			  AND dest.character = src.character`},
-		{"move people", `UPDATE item_people SET content_id = $2 WHERE content_id = $1`},
-		{"merge refresh debt", `
+	{"move people", `UPDATE item_people SET content_id = $2 WHERE content_id = $1`},
+	{"merge refresh debt", `
 			INSERT INTO metadata_refresh_debt (
 				target_type, content_id, priority, reason_mask, next_refresh_at,
 				claimed_at, lease_expires_at, last_attempt_at, last_success_at,
@@ -806,8 +842,8 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			    attempt_count = GREATEST(metadata_refresh_debt.attempt_count, EXCLUDED.attempt_count),
 			    last_error = COALESCE(NULLIF(metadata_refresh_debt.last_error, ''), EXCLUDED.last_error),
 			    updated_at = NOW()`},
-		{"delete source refresh debt", `DELETE FROM metadata_refresh_debt WHERE target_type = 'item' AND content_id = $1`},
-		{"merge stale media ids", `
+	{"delete source refresh debt", `DELETE FROM metadata_refresh_debt WHERE target_type = 'item' AND content_id = $1`},
+	{"merge stale media ids", `
 			INSERT INTO stale_media_ids (content_id, provider, provider_id, first_seen_at, last_seen_at)
 			SELECT $2, provider, provider_id, first_seen_at, last_seen_at
 			FROM stale_media_ids
@@ -816,10 +852,10 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			SET provider_id = COALESCE(NULLIF(stale_media_ids.provider_id, ''), EXCLUDED.provider_id),
 			    first_seen_at = LEAST(stale_media_ids.first_seen_at, EXCLUDED.first_seen_at),
 			    last_seen_at = GREATEST(stale_media_ids.last_seen_at, EXCLUDED.last_seen_at)`},
-		{"delete source stale media ids", `DELETE FROM stale_media_ids WHERE content_id = $1`},
-		{"move watch provider history exports", `UPDATE watch_provider_history_exports SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-		{"move watch provider scrobble sessions", `UPDATE watch_provider_scrobble_sessions SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-		{"merge watch provider favorites by provider key", `
+	{"delete source stale media ids", `DELETE FROM stale_media_ids WHERE content_id = $1`},
+	{"move watch provider history exports", `UPDATE watch_provider_history_exports SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"move watch provider scrobble sessions", `UPDATE watch_provider_scrobble_sessions SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"merge watch provider favorites by provider key", `
 			UPDATE watch_provider_favorite_items dest
 			SET remote_present = dest.remote_present OR src.remote_present,
 			    local_present = dest.local_present OR src.local_present,
@@ -834,7 +870,7 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			  AND src.connection_id = dest.connection_id
 			  AND src.provider_item_key <> ''
 			  AND src.provider_item_key = dest.provider_item_key`},
-		{"merge watch provider favorites by connection", `
+	{"merge watch provider favorites by connection", `
 			UPDATE watch_provider_favorite_items dest
 			SET provider_item_key = CASE
 			        WHEN dest.provider_item_key = '' THEN src.provider_item_key
@@ -854,17 +890,25 @@ func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID,
 			WHERE src.media_item_id = $1
 			  AND dest.media_item_id = $2
 			  AND src.connection_id = dest.connection_id`},
-		{"delete duplicate watch provider favorites", `
+	{"delete duplicate watch provider favorites", `
 			DELETE FROM watch_provider_favorite_items src
 			USING watch_provider_favorite_items dest
 			WHERE src.media_item_id = $1
 			  AND dest.media_item_id = $2
 			  AND src.connection_id = dest.connection_id
 			  AND (src.provider_item_key = dest.provider_item_key OR dest.media_item_id = $2)`},
-		{"move remaining watch provider favorites", `UPDATE watch_provider_favorite_items SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"move remaining watch provider favorites", `UPDATE watch_provider_favorite_items SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+}
+
+func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID, canonicalID string) error {
+	if sourceID == "" || canonicalID == "" || sourceID == canonicalID {
+		return nil
 	}
-	for _, step := range steps {
-		if _, err := tx.Exec(ctx, step.sql, sourceID, canonicalID); err != nil {
+	if err := ensureSeriesCanMove(ctx, tx, sourceID, canonicalID); err != nil {
+		return err
+	}
+	for _, step := range mediaItemMergeSteps {
+		if _, err := tx.Exec(ctx, step.sql, mergeStepArgs(step.sql, sourceID, canonicalID)...); err != nil {
 			return fmt.Errorf("%s: %w", step.name, err)
 		}
 	}

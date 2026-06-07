@@ -79,6 +79,7 @@ export function WatchPage({
   autoSkipIntro,
   autoSkipRecap,
   autoPlayNextPreview,
+  canEditMarkers,
   seriesContext,
   onNavigateEpisode,
   onEnded,
@@ -471,6 +472,19 @@ export function WatchPage({
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
       autoPlayNextPreview={autoPlayNextPreview}
+      canEditMarkers={canEditMarkers}
+      onMarkersEdited={(fileId, markers) =>
+        setPlaybackVersions((current) =>
+          patchVersionMarkers(
+            current,
+            fileId,
+            markers.intro,
+            markers.credits,
+            markers.recap,
+            markers.preview,
+          ),
+        )
+      }
       duration={selectedDuration}
       qualityPreference={qualityPreference}
       seriesContext={seriesContext}

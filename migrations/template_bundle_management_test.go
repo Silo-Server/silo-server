@@ -13,16 +13,17 @@ func normalizeSQL(s string) string {
 }
 
 func TestTemplateBundleManagementMigrationContract(t *testing.T) {
-	upBytes, err := FS.ReadFile("133_library_collection_template_bundle_management.up.sql")
+	migrationBytes, err := FS.ReadFile("sql/133_library_collection_template_bundle_management.sql")
 	if err != nil {
-		t.Fatalf("read up migration: %v", err)
+		t.Fatalf("read migration: %v", err)
 	}
-	downBytes, err := FS.ReadFile("133_library_collection_template_bundle_management.down.sql")
-	if err != nil {
-		t.Fatalf("read down migration: %v", err)
+	migration := string(migrationBytes)
+	parts := strings.Split(migration, "-- +goose Down")
+	if len(parts) != 2 {
+		t.Fatalf("expected one goose down section")
 	}
-	up := normalizeSQL(string(upBytes))
-	down := normalizeSQL(string(downBytes))
+	up := normalizeSQL(parts[0])
+	down := normalizeSQL(parts[1])
 
 	for _, want := range []string{
 		"'template_bundle'",

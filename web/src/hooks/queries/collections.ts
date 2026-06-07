@@ -118,6 +118,50 @@ export function useDeleteCollection() {
   });
 }
 
+// useAddItemToCollection adds a single media item to either a personal user
+// collection (PUT /collections/{id}/items/{itemId}) or an admin library
+// collection (PUT /admin/collections/{id}/items/{itemId}). Source determines
+// the route; manual collections are the only ones that meaningfully accept
+// hand-curated items — synced collections will overwrite on the next sync.
+export function useAddItemToCollection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      collectionId,
+      mediaItemId,
+      source,
+      position,
+    }: {
+      collectionId: string;
+      mediaItemId: string;
+      source: "user" | "library";
+      position?: number;
+    }) => {
+      const path =
+        source === "user"
+          ? `/collections/${collectionId}/items/${mediaItemId}`
+          : `/admin/collections/${collectionId}/items/${mediaItemId}`;
+      return api<void>(path, {
+        method: "PUT",
+        body: JSON.stringify({ position: position ?? 0 }),
+      });
+    },
+    onSuccess: (_data, vars) => {
+      toast.success("Added to collection");
+      if (vars.source === "user") {
+        return invalidateUserCollectionQueries(queryClient, vars.collectionId);
+      }
+      // Library collection: invalidate its items query.
+      queryClient.invalidateQueries({
+        queryKey: ["libraryCollections", "items", vars.collectionId],
+      });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to add to collection");
+    },
+  });
+}
+
 export function useRemoveCollectionItem(collectionId: string) {
   const queryClient = useQueryClient();
   return useMutation({

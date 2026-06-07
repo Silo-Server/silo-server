@@ -157,3 +157,59 @@ func TestStubDetailListFields_FreshChapterMapPerCall(t *testing.T) {
 		t.Errorf("mutating dto a's chapter map leaked into dto b: b.Chapters[0][Name] = %v", got)
 	}
 }
+
+// TestStubDetailListFields_MediaSourceStubLooksPlayable locks in that the
+// MediaSources stub advertises playability. Some clients (SenPlayer) decide
+// whether to render a Resume row entry from the listing's MediaSources; an
+// all-false playability stub made them drop every entry (the Continue
+// Watching row showed empty while item-page resume worked fine).
+func TestStubDetailListFields_MediaSourceStubLooksPlayable(t *testing.T) {
+	dto := baseItemDTO{Name: "Pilot", RunTimeTicks: 34800000000}
+	stubDetailListFields(&dto, map[string]bool{"mediasources": true})
+
+	if len(dto.MediaSources) != 1 {
+		t.Fatalf("MediaSources = %v, want single-element slice", dto.MediaSources)
+	}
+	src := dto.MediaSources[0]
+	if !src.SupportsDirectPlay || !src.SupportsDirectStream || !src.SupportsTranscoding || !src.SupportsProbing {
+		t.Errorf("stub source must advertise playability; got %+v", src)
+	}
+	if src.ID != "0" {
+		t.Errorf("stub source ID = %q, want \"0\" (never a registered media source owner)", src.ID)
+	}
+	if src.Name != "Pilot" || src.RunTimeTicks != 34800000000 {
+		t.Errorf("stub source should mirror item Name/RunTimeTicks; got Name=%q ticks=%d", src.Name, src.RunTimeTicks)
+	}
+	if len(src.MediaStreams) != 1 {
+		t.Errorf("stub source should nest a stream stub; got %v", src.MediaStreams)
+	}
+	// Null arrays (vs empty) break strict client deserializers — real servers
+	// always serialize these as []/{}.
+	if src.Formats == nil || src.RequiredHTTPHeaders == nil || src.MediaAttachments == nil {
+		t.Errorf("stub source must not serialize null collections; got Formats=%v RequiredHTTPHeaders=%v MediaAttachments=%v",
+			src.Formats, src.RequiredHTTPHeaders, src.MediaAttachments)
+	}
+}
+
+// TestStubDetailListFields_FreshMediaSourcePerCall guards against reference
+// sharing across responses: the stub is built by copying the package-level
+// stubDetailMediaSource value, which only stays safe while that var's
+// reference-typed fields (slices/maps) remain nil. Mirrors the existing
+// chapter-map guard.
+func TestStubDetailListFields_FreshMediaSourcePerCall(t *testing.T) {
+	a := baseItemDTO{}
+	b := baseItemDTO{}
+	fields := map[string]bool{"mediasources": true}
+
+	stubDetailListFields(&a, fields)
+	stubDetailListFields(&b, fields)
+
+	a.MediaSources[0].RequiredHTTPHeaders["X-Mutated"] = "by-a"
+	a.MediaSources[0].MediaStreams[0].Index = 99
+	if len(b.MediaSources[0].RequiredHTTPHeaders) != 0 {
+		t.Error("mutating dto a's RequiredHTTPHeaders leaked into dto b")
+	}
+	if b.MediaSources[0].MediaStreams[0].Index == 99 {
+		t.Error("mutating dto a's nested stream leaked into dto b")
+	}
+}

@@ -51,6 +51,7 @@ import {
   PinOff,
   LayoutGrid,
   Puzzle,
+  BookHeadphones,
   Send,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
@@ -63,6 +64,9 @@ function getLibraryIcon(type: string) {
       return <Film className="h-[18px] w-[18px]" />;
     case "series":
       return <Tv className="h-[18px] w-[18px]" />;
+    case "audiobook":
+    case "audiobooks":
+      return <BookHeadphones className="h-[18px] w-[18px]" />;
     default:
       return <Library className="h-[18px] w-[18px]" />;
   }

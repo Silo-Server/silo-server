@@ -144,6 +144,7 @@ type Request struct {
 	Targets              []Target   `json:"targets,omitempty"`
 	ExternalID           string     `json:"external_id,omitempty"`
 	ExternalStatus       string     `json:"external_status,omitempty"`
+	LibraryContentID     string     `json:"library_content_id,omitempty"`
 	LastError            string     `json:"last_error,omitempty"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
@@ -169,18 +170,19 @@ type RequestState struct {
 }
 
 type MediaResult struct {
-	MediaType    MediaType    `json:"media_type"`
-	TMDBID       int          `json:"tmdb_id"`
-	Title        string       `json:"title"`
-	Year         int          `json:"year,omitempty"`
-	Overview     string       `json:"overview,omitempty"`
-	PosterPath   string       `json:"poster_path,omitempty"`
-	BackdropPath string       `json:"backdrop_path,omitempty"`
-	ReleaseDate  string       `json:"release_date,omitempty"`
-	Popularity   float64      `json:"popularity,omitempty"`
-	VoteAverage  float64      `json:"vote_average,omitempty"`
-	Availability Availability `json:"availability"`
-	Request      RequestState `json:"request"`
+	MediaType        MediaType    `json:"media_type"`
+	TMDBID           int          `json:"tmdb_id"`
+	Title            string       `json:"title"`
+	Year             int          `json:"year,omitempty"`
+	Overview         string       `json:"overview,omitempty"`
+	PosterPath       string       `json:"poster_path,omitempty"`
+	BackdropPath     string       `json:"backdrop_path,omitempty"`
+	ReleaseDate      string       `json:"release_date,omitempty"`
+	Popularity       float64      `json:"popularity,omitempty"`
+	VoteAverage      float64      `json:"vote_average,omitempty"`
+	Availability     Availability `json:"availability"`
+	LibraryContentID string       `json:"library_content_id,omitempty"`
+	Request          RequestState `json:"request"`
 }
 
 type MediaPage struct {
@@ -228,6 +230,7 @@ type MediaDetail struct {
 	Creators            []string          `json:"creators,omitempty"`
 	Recommendations     []MediaResult     `json:"recommendations,omitempty"`
 	Availability        Availability      `json:"availability"`
+	LibraryContentID    string            `json:"library_content_id,omitempty"`
 	Request             RequestState      `json:"request"`
 }
 

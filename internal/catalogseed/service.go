@@ -634,7 +634,7 @@ func (s *Service) exportFolders(ctx context.Context, libraryIDs []int) ([]Librar
 
 func (s *Service) schemaVersion(ctx context.Context) (int, error) {
 	var version int
-	if err := s.pool.QueryRow(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_versions").Scan(&version); err != nil {
+	if err := s.pool.QueryRow(ctx, "SELECT COALESCE(MAX(version_id), 0) FROM public.goose_db_version").Scan(&version); err != nil {
 		return 0, fmt.Errorf("loading schema version: %w", err)
 	}
 	return version, nil

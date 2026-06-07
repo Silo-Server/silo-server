@@ -472,6 +472,126 @@ func TestBuild_GroupAllCombinesHDRAndDolbyVisionOnSameFile(t *testing.T) {
 	}
 }
 
+func TestBuild_AuthorClauseUsesPersonKindAuthor(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "author", Op: "is", Value: "Brandon Sanderson"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Brandon Sanderson" {
+		t.Fatalf("expected author arg, got %v", args)
+	}
+	// PersonKindAuthor == 7. We compare against the integer constant so an
+	// accidental kind drift breaks the test rather than silently hitting
+	// the wrong table partition.
+	if !strings.Contains(clause, "ip.kind = 7") {
+		t.Fatalf("expected ip.kind = 7 (PersonKindAuthor) in clause, got %q", clause)
+	}
+}
+
+func TestBuild_NarratorClauseUsesPersonKindNarrator(t *testing.T) {
+	clause, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "narrator", Op: "is", Value: "Michael Kramer"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !strings.Contains(clause, "ip.kind = 8") {
+		t.Fatalf("expected ip.kind = 8 (PersonKindNarrator) in clause, got %q", clause)
+	}
+}
+
+func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is", Value: "Mistborn"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Mistborn" {
+		t.Fatalf("expected series arg, got %v", args)
+	}
+	if !strings.Contains(clause, "FROM audiobook_series s") {
+		t.Fatalf("expected audiobook_series join in series clause, got %q", clause)
+	}
+	// Both sides trimmed + case-folded so user-typed input matches stored
+	// values written by the scanner regardless of incidental whitespace.
+	if !strings.Contains(clause, "LOWER(BTRIM(s.series_name))") || !strings.Contains(clause, "LOWER(BTRIM($1))") {
+		t.Fatalf("expected case+whitespace-insensitive series match, got %q", clause)
+	}
+}
+
+func TestBuildSortPlan_AuthorJoinsLateralOnPersonKindAuthor(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "author", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(author) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 {
+		t.Fatalf("expected exactly one join, got %d: %v", len(plan.Joins), plan.Joins)
+	}
+	if !strings.Contains(plan.Joins[0], "LEFT JOIN LATERAL") || !strings.Contains(plan.Joins[0], "ip.kind = 7") {
+		t.Fatalf("expected LATERAL on item_people with kind=7, got %q", plan.Joins[0])
+	}
+	if !strings.Contains(plan.OrderBy, "sort_author.name") {
+		t.Fatalf("expected ORDER BY on sort_author.name, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_NarratorJoinsLateralOnPersonKindNarrator(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "narrator", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(narrator) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "ip.kind = 8") {
+		t.Fatalf("expected LATERAL on item_people with kind=8, got %v", plan.Joins)
+	}
+	if !strings.Contains(plan.OrderBy, "sort_narrator.name") {
+		t.Fatalf("expected ORDER BY on sort_narrator.name, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_SeriesOrdersByNameThenIndex(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "series", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(series) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "audiobook_series sort_series") {
+		t.Fatalf("expected LEFT JOIN audiobook_series, got %v", plan.Joins)
+	}
+	// Series name primary, series_index secondary; both nulls last so
+	// books without a series_index still appear under their series.
+	if !strings.Contains(plan.OrderBy, "sort_series.series_name ASC NULLS LAST") ||
+		!strings.Contains(plan.OrderBy, "sort_series.series_index ASC NULLS LAST") {
+		t.Fatalf("expected name+index ordering with NULLS LAST, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuild_SeriesClauseNegationWrapsInNOT(t *testing.T) {
+	clause, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
+		Match: "all",
+		Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is_not", Value: "Mistborn"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clause), "WHERE")), "NOT (") &&
+		!strings.Contains(clause, "NOT (") {
+		t.Fatalf("expected is_not to wrap the EXISTS in NOT(...), got %q", clause)
+	}
+}
+
 func TestBuild_PersonClauseMatchesByResolvedPersonID(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").Build(QueryDefinition{
 		Match: "all",

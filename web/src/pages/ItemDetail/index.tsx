@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Navigate, useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import type { ItemDetail } from "@/api/types";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -9,6 +9,7 @@ import MovieContent from "@/pages/ItemDetail/MovieContent";
 import SeriesContent from "@/pages/ItemDetail/SeriesContent";
 import SeasonContent from "@/pages/ItemDetail/SeasonContent";
 import EpisodeContent from "@/pages/ItemDetail/EpisodeContent";
+import AudiobookContent from "@/pages/ItemDetail/AudiobookContent";
 import {
   CastSkeleton,
   CrewSkeleton,
@@ -98,6 +99,12 @@ export default function ItemDetail() {
       return <SeasonContent item={item as ItemDetail & { type: "season" }} />;
     case "episode":
       return <EpisodeContent item={item as ItemDetail & { type: "episode" }} />;
+    case "audiobook":
+      return (
+        <AudiobookContent item={item as ItemDetail & { type: "audiobook" }} libraryId={libraryId} />
+      );
+    case "podcast":
+      return <Navigate to={`/podcasts/show/${item.content_id}`} replace />;
     default:
       return (
         <div className="page-shell text-muted-foreground py-8">

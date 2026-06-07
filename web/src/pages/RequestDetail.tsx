@@ -1,5 +1,5 @@
-import { useParams } from "react-router";
-import { Check, Clock, Loader2, Plus, Star } from "lucide-react";
+import { Link, useParams } from "react-router";
+import { Check, Clock, Library, Loader2, Plus, Star } from "lucide-react";
 import CastCarousel from "@/components/CastCarousel";
 import MediaCarousel from "@/components/MediaCarousel";
 import PageBack from "@/components/PageBack";
@@ -227,11 +227,25 @@ function RequestActions({
           )}
         </Button>
       ) : availableInLibrary ? (
-        <StatusBlock
-          tone="emerald"
-          icon={<Check className="h-4 w-4 stroke-[2.5]" />}
-          label="Already in your library"
-        />
+        <>
+          <StatusBlock
+            tone="emerald"
+            icon={<Check className="h-4 w-4 stroke-[2.5]" />}
+            label="Already in your library"
+          />
+          {item.library_content_id ? (
+            <Button
+              asChild
+              variant="outline"
+              className="border-border/60 h-11 rounded-full px-5 text-sm font-semibold"
+            >
+              <Link to={`/item/${encodeURIComponent(item.library_content_id)}`}>
+                <Library className="h-4 w-4" />
+                Open in library
+              </Link>
+            </Button>
+          ) : null}
+        </>
       ) : statusLabel ? (
         <StatusBlock
           tone={statusToneForStatus(item.request.status!)}

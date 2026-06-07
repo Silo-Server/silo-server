@@ -113,20 +113,34 @@ func NewAdminHandler(
 
 // createUserRequest represents the JSON body for POST /admin/users.
 type createUserRequest struct {
-	Username                 string   `json:"username"`
-	Email                    string   `json:"email"`
-	Password                 string   `json:"password"`
-	Role                     string   `json:"role"`
-	Permissions              []string `json:"permissions"`
-	CreateDefaultProfile     bool     `json:"create_default_profile"`
-	DefaultProfileName       string   `json:"default_profile_name,omitempty"`
-	LibraryIDs               []int    `json:"library_ids"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality"`
-	MaxStreams               *int     `json:"max_streams,omitempty"`
-	MaxTranscodes            *int     `json:"max_transcodes,omitempty"`
-	MaxProfiles              *int     `json:"max_profiles,omitempty"`
-	DownloadAllowed          *bool    `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool    `json:"download_transcode_allowed,omitempty"`
+	Username                 string                 `json:"username"`
+	Email                    string                 `json:"email"`
+	Password                 string                 `json:"password"`
+	Role                     string                 `json:"role"`
+	Permissions              createStringSliceField `json:"permissions"`
+	CreateDefaultProfile     bool                   `json:"create_default_profile"`
+	DefaultProfileName       string                 `json:"default_profile_name,omitempty"`
+	LibraryIDs               []int                  `json:"library_ids"`
+	MaxPlaybackQuality       string                 `json:"max_playback_quality"`
+	MaxStreams               *int                   `json:"max_streams,omitempty"`
+	MaxTranscodes            *int                   `json:"max_transcodes,omitempty"`
+	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
+	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
+	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
+}
+
+type createStringSliceField struct {
+	Set   bool
+	Value []string
+}
+
+func (f *createStringSliceField) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		f.Value = []string{}
+		return nil
+	}
+	return json.Unmarshal(data, &f.Value)
 }
 
 type updateLibraryIDsField struct {
@@ -391,7 +405,11 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
-	permissions, err := auth.NormalizePermissions(req.Permissions)
+	permissions := auth.DefaultUserPermissions()
+	if req.Permissions.Set {
+		permissions = req.Permissions.Value
+	}
+	permissions, err := auth.NormalizePermissions(permissions)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

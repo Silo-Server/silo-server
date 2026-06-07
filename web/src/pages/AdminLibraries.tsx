@@ -1,12 +1,10 @@
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
   AdminJob,
-  CreateLibraryRequest,
   Library,
-  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibrarySkippedRoot,
@@ -24,8 +22,6 @@ import {
   useDeleteLibraryRootOverride,
   useStaleMediaIDs,
   useCheckLibraryMount,
-  useCreateLibrary,
-  useUpdateLibrary,
   useDeleteLibrary,
   useScanLibrary,
   useScanAllLibraries,
@@ -33,9 +29,6 @@ import {
   useRefreshLibraryMetadata,
   useCancelAdminJob,
   useConfirmEmptyRootCleanup,
-  useLibraryProviders,
-  useLibraryMetadataMatchQueues,
-  useSetLibraryProviders,
   useUploadLibraryPoster,
   useDeleteLibraryPoster,
   useUnmatchedLibraryItems,
@@ -44,12 +37,11 @@ import {
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
-import { useAdminPlugins } from "@/hooks/queries/admin/plugins";
+import { LibraryForm } from "@/components/admin/libraries/LibraryForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -74,7 +66,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { LANGUAGES } from "@/player/utils/languageNames";
 import { Link } from "react-router";
 import {
   Plus,
@@ -84,8 +75,6 @@ import {
   ScanLine,
   DatabaseBackup,
   CheckCircle2,
-  ArrowUp,
-  ArrowDown,
   GripVertical,
   Wrench,
   HardDrive,
@@ -103,8 +92,6 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import FolderBrowser from "@/components/FolderBrowser";
-import PathAutocompleteInput from "@/components/PathAutocompleteInput";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getLibraryRefreshLibraryID } from "@/lib/adminJobs";
@@ -144,7 +131,6 @@ export default function AdminLibraries() {
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
-  const { data: metadataMatchQueues = [] } = useLibraryMetadataMatchQueues();
   const { data: skippedRoots = [] } = useSkippedLibraryRoots();
   const { data: staleIDs = [] } = useStaleMediaIDs();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -237,15 +223,6 @@ export default function AdminLibraries() {
     }
     return scansByLibraryID;
   }, [activeScans]);
-  const metadataMatchQueueByLibraryId = useMemo(() => {
-    const queuesByLibraryID = new Map<number, LibraryMetadataMatchQueueStatus>();
-    for (const queue of metadataMatchQueues) {
-      if (queue.total_count > 0) {
-        queuesByLibraryID.set(queue.library_id, queue);
-      }
-    }
-    return queuesByLibraryID;
-  }, [metadataMatchQueues]);
   const activeScanGroups = useMemo(() => {
     return Array.from(activeScansByLibraryId.entries())
       .map(([libraryID, scans]) => {
@@ -403,6 +380,13 @@ export default function AdminLibraries() {
                   setDialogOpen(false);
                   setEditingLib(null);
                 }}
+                extraContent={
+                  editingLib ? (
+                    <div>
+                      <LibraryPosterSection library={editingLib} />
+                    </div>
+                  ) : null
+                }
               />
             </DialogContent>
           </Dialog>
@@ -438,8 +422,6 @@ export default function AdminLibraries() {
                   const isScanning = scanMutation.isPending && scanMutation.variables === lib.id;
                   const activeRefreshJob = activeRefreshJobsByLibraryId.get(lib.id);
                   const activeLibraryScans = activeScansByLibraryId.get(lib.id) ?? [];
-                  const metadataMatchQueue = metadataMatchQueueByLibraryId.get(lib.id);
-                  const hasMetadataMatchQueue = (metadataMatchQueue?.total_count ?? 0) > 0;
                   const runningLibraryScans = activeLibraryScans.filter(
                     (scan) => scan.status === "running",
                   ).length;
@@ -490,11 +472,6 @@ export default function AdminLibraries() {
                             ) : null}
                             {queuedLibraryScans > 0 ? (
                               <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
-                            ) : null}
-                            {hasMetadataMatchQueue ? (
-                              <Badge variant="secondary">
-                                {metadataMatchQueue?.total_count.toLocaleString()} matching
-                              </Badge>
                             ) : null}
                             {lib.scan_warning_code === "empty_root" ? (
                               <Badge variant="destructive">Empty root guarded</Badge>
@@ -1619,6 +1596,7 @@ function RootOverrideDialog({
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
 
 function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoot[] }) {
+  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const { sortField, sortDir, toggle } = useSort<SkippedSortField>("last_seen", "desc");
@@ -1657,157 +1635,143 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
   const pag = usePagination(sorted);
 
   return (
-    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
-      <div className="flex items-start gap-3 px-5 pt-5 pb-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-          <AlertTriangle className="h-4 w-4 text-amber-500" />
-        </div>
-        <div className="space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">Troubleshooting</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Roots where the inferred canonical folder lacks embedded provider IDs.
-          </p>
-        </div>
-        <Badge variant="secondary" className="ml-auto text-[11px] tabular-nums">
-          {skippedRoots.length}
-        </Badge>
+    <CollapsibleDiagnosticsSection
+      title="Troubleshooting"
+      description="Roots where the inferred canonical folder lacks embedded provider IDs."
+      count={skippedRoots.length}
+      icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <div className="relative mb-2">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Input
+          placeholder="Filter by path, library, or reason..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            pag.setPage(0);
+          }}
+          className="h-8 pl-8 text-xs"
+        />
       </div>
-
-      <div className="px-3 pb-3">
-        <div className="relative mb-2">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
-          <Input
-            placeholder="Filter by path, library, or reason..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              pag.setPage(0);
-            }}
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
-        <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <SortableHead
-                  field="root_path"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Item
-                </SortableHead>
-                <SortableHead
-                  field="library"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Library
-                </SortableHead>
-                <SortableHead
-                  field="reason"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Reason
-                </SortableHead>
-                <TableHead className="text-right">Files</TableHead>
-                <SortableHead
-                  field="first_seen"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  First seen
-                </SortableHead>
-                <SortableHead
-                  field="last_seen"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Last seen
-                </SortableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pag.rows.map((root) => {
-                const rowKey = `${root.library_id}:${root.root_path}`;
-                const isExpanded = expandedKey === rowKey;
-                return (
-                  <Fragment key={rowKey}>
-                    <TableRow
-                      className="cursor-pointer"
-                      onClick={() => setExpandedKey(isExpanded ? null : rowKey)}
-                    >
-                      <TableCell className="max-w-[20rem]">
-                        <div className="flex items-center gap-2">
-                          <ChevronRight
-                            className={cn(
-                              "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
-                              isExpanded && "rotate-90",
-                            )}
-                          />
-                          <span className="truncate text-sm font-medium">
-                            {root.root_path.split("/").filter(Boolean).pop()}
-                          </span>
+      <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <SortableHead
+                field="root_path"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Item
+              </SortableHead>
+              <SortableHead
+                field="library"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Library
+              </SortableHead>
+              <SortableHead
+                field="reason"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Reason
+              </SortableHead>
+              <TableHead className="text-right">Files</TableHead>
+              <SortableHead
+                field="first_seen"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                First seen
+              </SortableHead>
+              <SortableHead
+                field="last_seen"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Last seen
+              </SortableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pag.rows.map((root) => {
+              const rowKey = `${root.library_id}:${root.root_path}`;
+              const isExpanded = expandedKey === rowKey;
+              return (
+                <Fragment key={rowKey}>
+                  <TableRow
+                    className="cursor-pointer"
+                    onClick={() => setExpandedKey(isExpanded ? null : rowKey)}
+                  >
+                    <TableCell className="max-w-[20rem]">
+                      <div className="flex items-center gap-2">
+                        <ChevronRight
+                          className={cn(
+                            "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
+                            isExpanded && "rotate-90",
+                          )}
+                        />
+                        <span className="truncate text-sm font-medium">
+                          {root.root_path.split("/").filter(Boolean).pop()}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm">{root.library_name}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className="border-warning/30 bg-warning/5 text-warning"
+                      >
+                        {root.reason}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                      {root.file_count}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs tabular-nums">
+                      {new Date(root.first_seen_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs tabular-nums">
+                      {new Date(root.last_seen_at).toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                  {isExpanded && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
+                        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+                          <span className="text-muted-foreground font-medium">Root path</span>
+                          <code className="font-mono break-all select-all">{root.root_path}</code>
+                          {root.sample_file_path && (
+                            <>
+                              <span className="text-muted-foreground font-medium">Sample file</span>
+                              <code className="font-mono break-all select-all">
+                                {root.sample_file_path}
+                              </code>
+                            </>
+                          )}
+                          <span className="text-muted-foreground font-medium">Files affected</span>
+                          <span>{root.file_count}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{root.library_name}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className="border-warning/30 bg-warning/5 text-warning"
-                        >
-                          {root.reason}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
-                        {root.file_count}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs tabular-nums">
-                        {new Date(root.first_seen_at).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs tabular-nums">
-                        {new Date(root.last_seen_at).toLocaleString()}
-                      </TableCell>
                     </TableRow>
-                    {isExpanded && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
-                          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                            <span className="text-muted-foreground font-medium">Root path</span>
-                            <code className="font-mono break-all select-all">{root.root_path}</code>
-                            {root.sample_file_path && (
-                              <>
-                                <span className="text-muted-foreground font-medium">
-                                  Sample file
-                                </span>
-                                <code className="font-mono break-all select-all">
-                                  {root.sample_file_path}
-                                </code>
-                              </>
-                            )}
-                            <span className="text-muted-foreground font-medium">
-                              Files affected
-                            </span>
-                            <span>{root.file_count}</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-        <PaginationBar {...pag} />
+                  )}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
       </div>
-    </section>
+      <PaginationBar {...pag} />
+    </CollapsibleDiagnosticsSection>
   );
 }
 
@@ -2116,533 +2080,6 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
         />
       )}
     </CollapsibleDiagnosticsSection>
-  );
-}
-
-type LevelChainItem = {
-  plugin_installation_id: number;
-  capability_id: string;
-  provider_slug: string;
-  enabled: boolean;
-};
-
-function contentLevelsForType(libraryType: string): string[] {
-  switch (libraryType) {
-    case "series":
-      return ["series", "season", "episode"];
-    case "movies":
-      return ["movie"];
-    case "mixed":
-      return ["movie", "series", "season", "episode"];
-    default:
-      return [];
-  }
-}
-
-function buildDefaultLevelChains(
-  metadataProviders: Array<{
-    plugin_installation_id: number;
-    capability_id: string;
-    slug: string;
-    defaultPriority: Record<string, number>;
-  }>,
-  libraryType: string,
-): Record<string, LevelChainItem[]> {
-  const defaultChain: Record<string, LevelChainItem[]> = {};
-  for (const level of contentLevelsForType(libraryType)) {
-    const sorted = [...metadataProviders].sort((a, b) => {
-      const pa = a.defaultPriority[level] ?? 0;
-      const pb = b.defaultPriority[level] ?? 0;
-      if ((pa === 0) !== (pb === 0)) return pa === 0 ? 1 : -1;
-      return pa - pb;
-    });
-    defaultChain[level] = sorted.map((provider) => ({
-      plugin_installation_id: provider.plugin_installation_id,
-      capability_id: provider.capability_id,
-      provider_slug: provider.slug,
-      enabled: (provider.defaultPriority[level] ?? 0) > 0,
-    }));
-  }
-  return defaultChain;
-}
-
-function buildLevelChainsFromServer(
-  currentChain: {
-    levels?: Record<
-      string,
-      Array<{
-        plugin_installation_id: number;
-        capability_id: string;
-        provider_slug: string;
-        enabled: boolean;
-      }>
-    >;
-  } | null,
-  metadataProviders: Array<{
-    plugin_installation_id: number;
-    capability_id: string;
-    slug: string;
-    defaultPriority: Record<string, number>;
-  }>,
-  libraryType: string,
-): Record<string, LevelChainItem[]> {
-  const mapped: Record<string, LevelChainItem[]> = {};
-  if (currentChain?.levels) {
-    for (const [level, entries] of Object.entries(currentChain.levels)) {
-      mapped[level] = entries.map((entry) => ({
-        plugin_installation_id: entry.plugin_installation_id,
-        capability_id: entry.capability_id,
-        provider_slug: entry.provider_slug,
-        enabled: entry.enabled,
-      }));
-    }
-  }
-
-  const defaults = buildDefaultLevelChains(metadataProviders, libraryType);
-  for (const level of contentLevelsForType(libraryType)) {
-    if (!mapped[level] || mapped[level].length === 0) {
-      mapped[level] = defaults[level] ?? [];
-    }
-  }
-  return mapped;
-}
-
-function contentLevelLabel(level: string): string {
-  return level.charAt(0).toUpperCase() + level.slice(1);
-}
-
-function ProviderLevelSection({
-  level,
-  items,
-  onReorder,
-  onToggleEnabled,
-}: {
-  level: string;
-  items: LevelChainItem[];
-  onReorder: (items: LevelChainItem[]) => void;
-  onToggleEnabled: (index: number) => void;
-}) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  const moveItem = (index: number, direction: -1 | 1) => {
-    const newItems = [...items];
-    const target = index + direction;
-    if (target < 0 || target >= newItems.length) return;
-    [newItems[index], newItems[target]] = [newItems[target]!, newItems[index]!];
-    onReorder(newItems);
-  };
-
-  return (
-    <div className="mb-3">
-      <button
-        type="button"
-        onClick={() => setCollapsed(!collapsed)}
-        className="text-primary hover:text-primary/80 mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wider uppercase"
-      >
-        {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        {contentLevelLabel(level)}
-      </button>
-      {!collapsed && (
-        <div className="flex flex-col gap-1">
-          {items.map((item, i) => (
-            <div
-              key={`${item.plugin_installation_id}:${item.capability_id}`}
-              className={cn(
-                "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
-                item.enabled
-                  ? "border-border bg-muted text-foreground"
-                  : "border-border/50 bg-muted/30 text-muted-foreground",
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={item.enabled}
-                onChange={() => onToggleEnabled(i)}
-                className="h-3.5 w-3.5"
-                style={{ accentColor: "var(--primary)" }}
-              />
-              <span className="flex-1 font-mono text-xs">{item.provider_slug}</span>
-              <div className="flex gap-0.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5"
-                  disabled={i === 0}
-                  onClick={() => moveItem(i, -1)}
-                >
-                  <ArrowUp className="h-2.5 w-2.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5"
-                  disabled={i === items.length - 1}
-                  onClick={() => moveItem(i, 1)}
-                >
-                  <ArrowDown className="h-2.5 w-2.5" />
-                </Button>
-              </div>
-              <span className="text-muted-foreground/70 font-mono text-[10px]">{i + 1}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LibraryForm({
-  library,
-  chapterThumbnailsSupported,
-  onClose,
-}: {
-  library: Library | null;
-  chapterThumbnailsSupported: boolean;
-  onClose: () => void;
-}) {
-  const [name, setName] = useState(library?.name ?? "");
-  const [paths, setPaths] = useState<string[]>(library?.paths?.length ? library.paths : [""]);
-  const [type, setType] = useState(library?.type ?? "movies");
-  const [enabled, setEnabled] = useState(library?.enabled ?? true);
-  const [metadataLanguage, setMetadataLanguage] = useState(library?.metadata_language ?? "en");
-  const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
-    library?.chapter_thumbnails_enabled ?? false,
-  );
-  const [introDetectionEnabled, setIntroDetectionEnabled] = useState(
-    library?.intro_detection_enabled ?? false,
-  );
-  const [levelChains, setLevelChains] = useState<Record<string, LevelChainItem[]>>({});
-  const [chainDirty, setChainDirty] = useState(false);
-  const [browserOpen, setBrowserOpen] = useState(false);
-
-  const createMutation = useCreateLibrary();
-  const updateMutation = useUpdateLibrary();
-  const setChainMutation = useSetLibraryProviders();
-  const { installations } = useAdminPlugins();
-  const { data: currentChain } = useLibraryProviders(library?.id ?? null);
-
-  // Derive available metadata providers from plugin installations with metadata_provider.v1 capabilities,
-  // sorted by their declared default_priority for the current library type.
-  const metadataProviders = useMemo(() => {
-    const result: Array<{
-      plugin_installation_id: number;
-      capability_id: string;
-      slug: string;
-      defaultPriority: Record<string, number>;
-    }> = [];
-    for (const inst of installations) {
-      if (!inst.enabled) continue;
-      for (const cap of inst.capabilities ?? []) {
-        if (cap.type === "metadata_provider.v1") {
-          const dp =
-            (cap.metadata?.default_priority as Record<string, number>) ??
-            ((cap.metadata?.metadata as Record<string, unknown>)?.default_priority as Record<
-              string,
-              number
-            >) ??
-            {};
-          result.push({
-            plugin_installation_id: inst.id,
-            capability_id: cap.id,
-            slug: cap.display_name || cap.id,
-            defaultPriority: dp,
-          });
-        }
-      }
-    }
-    return result;
-  }, [installations]);
-
-  const isPending =
-    createMutation.isPending || updateMutation.isPending || setChainMutation.isPending;
-
-  const defaultLevelChains = useMemo(
-    () => buildDefaultLevelChains(metadataProviders, type),
-    [metadataProviders, type],
-  );
-  const resolvedLevelChains = useMemo(() => {
-    if (!library) {
-      return defaultLevelChains;
-    }
-    if (currentChain === undefined) {
-      return levelChains;
-    }
-    return buildLevelChainsFromServer(currentChain, metadataProviders, type);
-  }, [currentChain, defaultLevelChains, levelChains, library, metadataProviders, type]);
-  const activeLevelChains = chainDirty ? levelChains : resolvedLevelChains;
-
-  function updatePath(index: number, value: string) {
-    const next = [...paths];
-    next[index] = value;
-    setPaths(next);
-  }
-
-  function addPath() {
-    setPaths([...paths, ""]);
-  }
-
-  function removePath(index: number) {
-    setPaths(paths.filter((_, i) => i !== index));
-  }
-
-  function handleBrowseSelect(selectedPaths: string[]) {
-    const merged = [...paths.filter((path) => path.trim())];
-    for (const selectedPath of selectedPaths) {
-      if (!merged.includes(selectedPath)) {
-        merged.push(selectedPath);
-      }
-    }
-    setPaths(merged.length > 0 ? merged : [""]);
-    setBrowserOpen(false);
-  }
-
-  function handleTypeChange(newType: string) {
-    setType(newType);
-    if (!library) {
-      setLevelChains(buildDefaultLevelChains(metadataProviders, newType));
-      setChainDirty(true);
-    }
-  }
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    const filteredPaths = paths.filter((p) => p.trim());
-    if (filteredPaths.length === 0) return;
-
-    const body: CreateLibraryRequest = {
-      name,
-      paths: filteredPaths,
-      type,
-      enabled,
-      metadata_language: metadataLanguage,
-      chapter_thumbnails_enabled: chapterThumbnailsEnabled,
-      intro_detection_enabled: introDetectionEnabled,
-    };
-
-    if (library) {
-      updateMutation.mutate(
-        { id: library.id, body },
-        {
-          onSuccess: () => {
-            if (chainDirty) {
-              setChainMutation.mutate(
-                {
-                  id: library.id,
-                  body: {
-                    levels: Object.fromEntries(
-                      Object.entries(activeLevelChains).map(([level, items]) => [
-                        level,
-                        items.map((item, i) => ({
-                          plugin_installation_id: item.plugin_installation_id,
-                          capability_id: item.capability_id,
-                          priority: i,
-                          enabled: item.enabled,
-                        })),
-                      ]),
-                    ),
-                  },
-                },
-                { onSuccess: onClose },
-              );
-            } else {
-              onClose();
-            }
-          },
-        },
-      );
-    } else {
-      createMutation.mutate(body, {
-        onSuccess: (created) => {
-          if (chainDirty) {
-            setChainMutation.mutate(
-              {
-                id: created.id,
-                body: {
-                  levels: Object.fromEntries(
-                    Object.entries(activeLevelChains).map(([level, items]) => [
-                      level,
-                      items.map((item, i) => ({
-                        plugin_installation_id: item.plugin_installation_id,
-                        capability_id: item.capability_id,
-                        priority: i,
-                        enabled: item.enabled,
-                      })),
-                    ]),
-                  ),
-                },
-              },
-              { onSuccess: onClose },
-            );
-          } else {
-            onClose();
-          }
-        },
-      });
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="grid grid-cols-[1fr_auto] items-end gap-3">
-        <div className="space-y-1.5">
-          <Label>Name</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} required />
-        </div>
-        <div className="flex items-center gap-2 pb-0.5">
-          <Switch id="enabled-switch" checked={enabled} onCheckedChange={setEnabled} />
-          <Label htmlFor="enabled-switch" className="text-muted-foreground text-xs">
-            Enabled
-          </Label>
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <Label>Paths</Label>
-        {paths.map((p, i) => (
-          <div key={i} className="flex gap-1">
-            <PathAutocompleteInput
-              value={p}
-              onValueChange={(value) => updatePath(i, value)}
-              placeholder="/mnt/media/movies"
-              required
-            />
-            {paths.length > 1 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 shrink-0"
-                onClick={() => removePath(i)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </div>
-        ))}
-        <div className="flex gap-1">
-          <Button type="button" variant="outline" size="sm" onClick={addPath}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Add Path
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setBrowserOpen(true)}>
-            <FolderOpen className="mr-1 h-3.5 w-3.5" /> Browse
-          </Button>
-        </div>
-        <FolderBrowser
-          open={browserOpen}
-          onOpenChange={setBrowserOpen}
-          onSelect={handleBrowseSelect}
-          existingPaths={paths.filter((path) => path.trim())}
-        />
-      </div>
-      <div className="grid grid-cols-2 items-end gap-3">
-        <div className="space-y-1.5">
-          <Label>Type</Label>
-          <Select value={type} onValueChange={handleTypeChange}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="movies">Movies</SelectItem>
-              <SelectItem value="series">Series</SelectItem>
-              <SelectItem value="mixed">Mixed</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Metadata Language</Label>
-          <Select value={metadataLanguage} onValueChange={setMetadataLanguage}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LANGUAGES.map((lang) => (
-                <SelectItem key={lang.code} value={lang.code}>
-                  {lang.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="chapter-thumbnails-switch">Generate chapter thumbnails</Label>
-            <p className="text-xs text-white/60">
-              Stores chapter preview images in the configured public asset S3 bucket. Chapter
-              markers and chapter menus still work without thumbnails.
-            </p>
-            {!chapterThumbnailsSupported ? (
-              <p className="text-xs text-amber-300">
-                Public asset S3 storage is required before this can be enabled.
-              </p>
-            ) : null}
-          </div>
-          <Switch
-            id="chapter-thumbnails-switch"
-            checked={chapterThumbnailsEnabled}
-            disabled={!chapterThumbnailsSupported}
-            onCheckedChange={setChapterThumbnailsEnabled}
-          />
-        </div>
-      </div>
-      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="intro-detection-switch">Detect intro markers</Label>
-            <p className="text-xs text-white/60">
-              Runs background audio analysis for episodes in this library. Embedded intro chapters
-              are used when available.
-            </p>
-          </div>
-          <Switch
-            id="intro-detection-switch"
-            checked={introDetectionEnabled}
-            onCheckedChange={setIntroDetectionEnabled}
-          />
-        </div>
-      </div>
-      {library && (
-        <div>
-          <LibraryPosterSection library={library} />
-        </div>
-      )}
-
-      {/* Per-level Metadata Provider Sections */}
-      {contentLevelsForType(type).length > 0 && (
-        <div className="mt-4 border-t border-white/10 pt-4">
-          <h3 className="mb-3 text-sm font-semibold text-white">Metadata Providers</h3>
-          {contentLevelsForType(type).map((level) => {
-            const items = activeLevelChains[level] ?? [];
-            return (
-              <ProviderLevelSection
-                key={level}
-                level={level}
-                items={items}
-                onReorder={(newItems) => {
-                  setLevelChains({ ...activeLevelChains, [level]: newItems });
-                  setChainDirty(true);
-                }}
-                onToggleEnabled={(index) => {
-                  setLevelChains((prev) => {
-                    const source = prev[level] ?? activeLevelChains[level] ?? [];
-                    const updated = [...source];
-                    updated[index] = { ...updated[index]!, enabled: !updated[index]!.enabled };
-                    return { ...prev, [level]: updated };
-                  });
-                  setChainDirty(true);
-                }}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Saving..." : "Save"}
-      </Button>
-    </form>
   );
 }
 
