@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
@@ -23,13 +23,14 @@ import type {
   RequestApprovalMode,
   RequestIntegration,
   RequestIntegrationOptions,
+  RequestIntegrationValidationError,
   RequestLimitMode,
   RequestSettings,
   RequestTarget,
   RequestUserLimit,
 } from "@/api/types";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
-import { buildSchemaValues, validateSchemaValues } from "@/components/admin/plugins/schemaForm";
+import { buildSchemaValues, parseFieldTypes } from "@/components/admin/plugins/schemaForm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
@@ -661,9 +663,12 @@ function integrationToForm(integration?: RequestIntegration): IntegrationFormSta
 type ConnectionOptionsStatus = "idle" | "loading" | "error";
 
 // useConnectionOptions debounces a ListConfigOptions probe keyed on the connection
-// draft (base URL + key ref + installation + plugin_config). It backs the dynamic
-// SELECT options (root folders, quality profiles, tags) the descriptor declares.
-// The probe is silent (no toasts); callers surface failures inline via `status`.
+// IDENTITY (base URL + key ref + installation) — NOT the full plugin_config, so
+// editing a quality profile / switch doesn't re-probe the arr API. It backs the
+// dynamic SELECT options (root folders, quality profiles, tags) the descriptor
+// declares. The probe is silent (no toasts); callers surface failures inline via
+// `status`. A generation counter enforces latest-wins so a slow older probe can't
+// overwrite a newer result, and options are cleared whenever a probe can't run.
 function useConnectionOptions(
   connectionID: string,
   draft: {
@@ -677,50 +682,67 @@ function useConnectionOptions(
   const load = useLoadRequestIntegrationOptions();
   const [options, setOptions] = useState<RequestIntegrationOptions>({});
   const [status, setStatus] = useState<ConnectionOptionsStatus>("idle");
+  // Latest-wins guard: each probe captures the generation it started with and
+  // only commits its result if no newer probe has begun since.
+  const genRef = useRef(0);
+
   const canLoad =
     draft.base_url.trim().length > 0 &&
     Boolean(draft.installation_id) &&
     Boolean(draft.api_key_ref.trim() || draft.has_api_key);
+
+  // Options depend ONLY on the connection identity. plugin_config is still sent
+  // in the request body so the plugin can resolve options, but it is not part of
+  // the signature — see #2.
   const sig = JSON.stringify({
     u: draft.base_url,
     k: draft.api_key_ref,
     i: draft.installation_id,
-    c: draft.plugin_config,
-    can: canLoad,
   });
+  const debouncedSig = useDebounce(sig, 400);
+
+  // Snapshot the latest connection inputs so the debounced effect sends the
+  // current plugin_config without re-firing when only plugin_config changes.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
   useEffect(() => {
     if (!canLoad) {
+      // Bump the generation so any in-flight probe is invalidated, and clear any
+      // stale options from a previous/invalid connection so they never linger.
+      genRef.current += 1;
+      setOptions({});
       setStatus("idle");
       return;
     }
-    const timer = setTimeout(() => {
-      setStatus("loading");
-      load
-        .mutateAsync({
-          id: connectionID || "new",
-          body: {
-            // `kind` is vestigial in the request body now; the backend resolves the
-            // plugin via installation_id + plugin_config. Kept to satisfy the type.
-            kind: "radarr",
-            base_url: draft.base_url,
-            api_key_ref: draft.api_key_ref.trim() || undefined,
-            capability_id: REQUEST_ROUTER_CAPABILITY,
-            installation_id: draft.installation_id,
-            plugin_config: draft.plugin_config,
-          },
-        })
-        .then((loaded) => {
+    const current = draftRef.current;
+    const gen = ++genRef.current;
+    setStatus("loading");
+    load
+      .mutateAsync({
+        id: connectionID || "new",
+        body: {
+          base_url: current.base_url,
+          api_key_ref: current.api_key_ref.trim() || undefined,
+          capability_id: REQUEST_ROUTER_CAPABILITY,
+          installation_id: current.installation_id,
+          plugin_config: current.plugin_config,
+        },
+      })
+      .then((loaded) => {
+        if (gen === genRef.current) {
           setOptions(loaded);
           setStatus("idle");
-        })
-        .catch(() => {
+        }
+      })
+      .catch(() => {
+        if (gen === genRef.current) {
           setOptions({});
           setStatus("error");
-        });
-    }, 400);
-    return () => clearTimeout(timer);
+        }
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
+  }, [debouncedSig, canLoad]);
   return { options, status };
 }
 
@@ -845,6 +867,26 @@ function IntegrationEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  // SchemaForm owns config validation and reports it up; the editor consumes the
+  // result instead of re-running validateSchemaValues itself.
+  const [schemaValid, setSchemaValid] = useState(true);
+
+  // Any edit invalidates a prior failed save's server-side errors, so clear them
+  // wholesale on edit. A corrected field's stale "does not exist" then disappears.
+  function clearSaveErrors() {
+    setFieldErrors((current) => (Object.keys(current).length === 0 ? current : {}));
+    setFormError((current) => (current === null ? current : null));
+  }
+
+  function patchForm(patch: Partial<IntegrationFormState>) {
+    clearSaveErrors();
+    onChange(patch);
+  }
+
+  function patchConfig(config: Record<string, unknown>) {
+    clearSaveErrors();
+    onConfigChange(config);
+  }
 
   // Default-select the only installed request-router plugin once installations
   // have loaded, when this connection has no installation set yet. Depend on a
@@ -862,7 +904,8 @@ function IntegrationEditor({
   const selectedInstallationID = Number(form.installation_id);
   const hasInstallation = Number.isInteger(selectedInstallationID) && selectedInstallationID > 0;
   const selected = installations.find((entry) => entry.installationID === selectedInstallationID);
-  const descriptor = selected?.capability.config_schema?.[0]?.admin_form;
+  const selectedConfigSchema = selected?.capability.config_schema?.[0];
+  const descriptor = selectedConfigSchema?.admin_form;
   const title = selected?.capability.display_name || selected?.pluginID || "Connection";
 
   const { options, status: optionsStatus } = useConnectionOptions(form.id, {
@@ -873,21 +916,49 @@ function IntegrationEditor({
     plugin_config: pluginConfig,
   });
 
+  // Once dynamic options arrive, default each empty single-SELECT field to its
+  // first option (restores the old root_folder/quality_profile pre-selection
+  // generically). MULTI_SELECT (tags) is left empty; values the admin already
+  // chose are never clobbered. Read config/onChange from refs so the effect keys
+  // only on options + descriptor and doesn't re-fire on unrelated edits.
+  const configRef = useRef(pluginConfig);
+  configRef.current = pluginConfig;
+  const onConfigChangeRef = useRef(onConfigChange);
+  onConfigChangeRef.current = onConfigChange;
+  useEffect(() => {
+    if (!descriptor) return;
+    const current = configRef.current;
+    const patch: Record<string, unknown> = {};
+    for (const field of descriptor.fields) {
+      if (field.control !== "SELECT" || !field.dynamic_options) continue;
+      const first = options[field.key]?.[0];
+      if (!first) continue;
+      const value = current[field.key];
+      const empty = value === undefined || value === null || value === "";
+      if (empty) patch[field.key] = first.value;
+    }
+    if (Object.keys(patch).length > 0) {
+      onConfigChangeRef.current({ ...current, ...patch });
+    }
+  }, [options, descriptor]);
+
   const saving = createIntegration.isPending || updateIntegration.isPending;
   // New instances must carry an API key (there's no saved key to fall back on);
   // edits may leave it blank to keep the stored key (has_api_key).
   const hasApiKey = form.api_key_ref.trim().length > 0 || form.has_api_key;
-  const schemaErrors = descriptor
-    ? validateSchemaValues(descriptor, pluginConfig)
-    : ({} as Record<string, string>);
+  // schemaValid is reported by SchemaForm via onValidityChange. With no descriptor
+  // (no plugin form) there's nothing to validate, so the chrome checks govern.
   const canSave =
     form.name.trim().length > 0 &&
     form.base_url.trim().length > 0 &&
     hasApiKey &&
     hasInstallation &&
-    Object.keys(schemaErrors).length === 0;
+    (!descriptor || schemaValid);
 
   function handleSave() {
+    // Coercion is driven by the plugin's declared json_schema types so e.g. a
+    // numeric string isn't sent where a string is declared (and vice versa).
+    const fieldTypes = parseFieldTypes(selectedConfigSchema?.json_schema);
     // plugin_config is the sole source of truth for fulfillment; the host owns
     // only the generic connection chrome (name, base_url, api_key, installation).
     const payload = {
@@ -899,7 +970,9 @@ function IntegrationEditor({
       capability_id: REQUEST_ROUTER_CAPABILITY,
       installation_id: hasInstallation ? selectedInstallationID : undefined,
       supported_media_types: [],
-      plugin_config: descriptor ? buildSchemaValues(descriptor, pluginConfig) : pluginConfig,
+      plugin_config: descriptor
+        ? buildSchemaValues(descriptor, pluginConfig, fieldTypes)
+        : pluginConfig,
     } as RequestIntegration;
 
     setFieldErrors({});
@@ -908,7 +981,7 @@ function IntegrationEditor({
     mut.mutate(payload, {
       onError: (err) => {
         const body = (err as { body?: unknown })?.body as
-          | { field_errors?: Record<string, string>; form_error?: string }
+          | RequestIntegrationValidationError
           | undefined;
         if (body?.field_errors) setFieldErrors(body.field_errors);
         if (body?.form_error) setFormError(body.form_error);
@@ -925,7 +998,7 @@ function IntegrationEditor({
           {form.has_api_key ? <Badge variant="secondary">Key saved</Badge> : null}
           {isNew ? <Badge variant="outline">New</Badge> : null}
         </div>
-        <Switch checked={form.enabled} onCheckedChange={(enabled) => onChange({ enabled })} />
+        <Switch checked={form.enabled} onCheckedChange={(enabled) => patchForm({ enabled })} />
       </div>
 
       {formError ? (
@@ -938,14 +1011,14 @@ function IntegrationEditor({
         <Field label="Name">
           <Input
             value={form.name}
-            onChange={(event) => onChange({ name: event.target.value })}
+            onChange={(event) => patchForm({ name: event.target.value })}
             placeholder="Connection name"
           />
         </Field>
         <Field label="API key or setting key">
           <Input
             value={form.api_key_ref}
-            onChange={(event) => onChange({ api_key_ref: event.target.value })}
+            onChange={(event) => patchForm({ api_key_ref: event.target.value })}
             placeholder={form.has_api_key ? "Leave blank to keep saved key" : "API key"}
           />
         </Field>
@@ -954,7 +1027,7 @@ function IntegrationEditor({
       <Field label="Base URL">
         <Input
           value={form.base_url}
-          onChange={(event) => onChange({ base_url: event.target.value })}
+          onChange={(event) => patchForm({ base_url: event.target.value })}
           placeholder="http://localhost:7878"
         />
       </Field>
@@ -970,7 +1043,7 @@ function IntegrationEditor({
         ) : (
           <Select
             value={form.installation_id}
-            onValueChange={(installation_id) => onChange({ installation_id })}
+            onValueChange={(installation_id) => patchForm({ installation_id })}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select plugin" />
@@ -994,9 +1067,10 @@ function IntegrationEditor({
           <SchemaForm
             descriptor={descriptor}
             values={pluginConfig}
-            onChange={onConfigChange}
+            onChange={patchConfig}
             dynamicOptions={options}
             errors={fieldErrors}
+            onValidityChange={setSchemaValid}
             idPrefix={`conn-${form.id || form.installation_id || "new"}`}
           />
           {optionsStatus === "loading" ? (

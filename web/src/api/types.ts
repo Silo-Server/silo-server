@@ -1,4 +1,5 @@
 import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySortOptions";
+import type { SchemaOption } from "@/components/admin/plugins/schemaForm";
 
 // Auth
 export interface LoginRequest {
@@ -1733,7 +1734,7 @@ export interface RequestIntegration {
   updated_at?: string;
 }
 
-export type RequestIntegrationOptions = Record<string, { value: string; label: string }[]>;
+export type RequestIntegrationOptions = Record<string, SchemaOption[]>;
 
 export interface RequestIntegrationValidationError {
   error: "validation_failed";
@@ -1742,7 +1743,9 @@ export interface RequestIntegrationValidationError {
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
-  kind: "radarr" | "sonarr";
+  // Vestigial: the backend resolves the plugin via installation_id +
+  // plugin_config and ignores this. Optional and no longer sent by the client.
+  kind?: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
   // For unsaved connections the host cannot backfill from a stored row, so the
