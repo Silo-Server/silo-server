@@ -5,7 +5,6 @@ import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
   AdminJob,
   Library,
-  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibrarySkippedRoot,
@@ -30,7 +29,6 @@ import {
   useRefreshLibraryMetadata,
   useCancelAdminJob,
   useConfirmEmptyRootCleanup,
-  useLibraryMetadataMatchQueues,
   useUploadLibraryPoster,
   useDeleteLibraryPoster,
   useUnmatchedLibraryItems,
@@ -133,7 +131,6 @@ export default function AdminLibraries() {
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
-  const { data: metadataMatchQueues = [] } = useLibraryMetadataMatchQueues();
   const { data: skippedRoots = [] } = useSkippedLibraryRoots();
   const { data: staleIDs = [] } = useStaleMediaIDs();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -226,15 +223,6 @@ export default function AdminLibraries() {
     }
     return scansByLibraryID;
   }, [activeScans]);
-  const metadataMatchQueueByLibraryId = useMemo(() => {
-    const queuesByLibraryID = new Map<number, LibraryMetadataMatchQueueStatus>();
-    for (const queue of metadataMatchQueues) {
-      if (queue.total_count > 0) {
-        queuesByLibraryID.set(queue.library_id, queue);
-      }
-    }
-    return queuesByLibraryID;
-  }, [metadataMatchQueues]);
   const activeScanGroups = useMemo(() => {
     return Array.from(activeScansByLibraryId.entries())
       .map(([libraryID, scans]) => {
@@ -434,8 +422,6 @@ export default function AdminLibraries() {
                   const isScanning = scanMutation.isPending && scanMutation.variables === lib.id;
                   const activeRefreshJob = activeRefreshJobsByLibraryId.get(lib.id);
                   const activeLibraryScans = activeScansByLibraryId.get(lib.id) ?? [];
-                  const metadataMatchQueue = metadataMatchQueueByLibraryId.get(lib.id);
-                  const hasMetadataMatchQueue = (metadataMatchQueue?.total_count ?? 0) > 0;
                   const runningLibraryScans = activeLibraryScans.filter(
                     (scan) => scan.status === "running",
                   ).length;
@@ -486,11 +472,6 @@ export default function AdminLibraries() {
                             ) : null}
                             {queuedLibraryScans > 0 ? (
                               <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
-                            ) : null}
-                            {hasMetadataMatchQueue ? (
-                              <Badge variant="secondary">
-                                {metadataMatchQueue?.total_count.toLocaleString()} matching
-                              </Badge>
                             ) : null}
                             {lib.scan_warning_code === "empty_root" ? (
                               <Badge variant="destructive">Empty root guarded</Badge>
