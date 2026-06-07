@@ -57,7 +57,7 @@ A small stateless client constructed per call from `(baseURL, apiKey)` (carried 
 
 - `CreateRequest(ctx, CreateRequestBody) (*MediaRequest, error)` → `POST /api/v1/request`.
 - `GetRequest(ctx, id) (*MediaRequest, error)` → `GET /api/v1/request/{id}`.
-- `FindExistingRequest(ctx, tmdbID int, is4k bool) (*MediaRequest, error)` → `GET /api/v1/media` (filtered/scanned for the entry whose `tmdbId` matches), returning the matching request with the same `is4k` flag. Used **only** on the `409` duplicate path to recover the existing request id. Returns a not-found sentinel if no match.
+- `FindExistingRequest(ctx, tmdbID int, is4k bool) (*MediaRequest, error)` → `GET /api/v1/request?take=100` (the request list returns `MediaRequest` objects that carry the request `id`, per-request `is4k`, and nested `media.tmdbId`), scanned for the entry matching `(tmdbId, is4k)`. This is preferred over `GET /api/v1/media` because the media list does not directly carry the request id that 409 recovery needs. Used **only** on the `409` duplicate path to recover the existing request id. Bounded scan; returns a not-found sentinel if no match in the page.
 - `Me(ctx) error` → `GET /api/v1/auth/me` (connection test; 200 = ok).
 
 Non-2xx responses are wrapped as a typed `*APIError{StatusCode int, Message string}` (Message parsed from Seerr's `{ "message": ... }` error body when present). `409 Conflict` (duplicate request) is surfaced distinctly (e.g. `errors.Is(err, ErrDuplicate)` or a `StatusCode==409` check) so the router can recover the existing request id (see Fulfill step 4).
