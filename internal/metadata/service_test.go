@@ -986,6 +986,98 @@ func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 	}
 }
 
+func TestRefreshSeriesEpisodeMetadataStateUsesActionableDebt(t *testing.T) {
+	now := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+
+	t.Run("provider numbered episode clears stale debt", func(t *testing.T) {
+		h := newTestHarness()
+		ctx := context.Background()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		h.itemRepo.items["series-provider"] = &models.MediaItem{
+			ContentID:                 "series-provider",
+			Type:                      "series",
+			EpisodeMetadataIncomplete: true,
+		}
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID:      "episode-provider",
+			SeriesID:       "series-provider",
+			SeasonID:       "season-provider",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "Episode 1",
+			TvdbID:         "9607609",
+			MetadataSource: "provider",
+		}); err != nil {
+			t.Fatalf("seed provider episode: %v", err)
+		}
+		debts.debts[fakeRefreshDebtKey(RefreshTargetEpisode, "episode-provider")] = &models.MetadataRefreshDebt{
+			TargetType: RefreshTargetEpisode,
+			ContentID:  "episode-provider",
+			ReasonMask: RefreshDebtReasonEpisodeIncomplete,
+		}
+
+		h.service.refreshSeriesEpisodeMetadataState(ctx, "series-provider", now)
+
+		item, err := h.itemRepo.GetByID(ctx, "series-provider")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if item.EpisodeMetadataIncomplete {
+			t.Fatal("expected provider numbered episode to clear series incomplete flag")
+		}
+		if item.EpisodeMetadataLastCheckedAt == nil || !item.EpisodeMetadataLastCheckedAt.Equal(now) {
+			t.Fatalf("last checked at = %v, want %v", item.EpisodeMetadataLastCheckedAt, now)
+		}
+		if _, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-provider"); !errors.Is(err, ErrRefreshDebtNotFound) {
+			t.Fatalf("provider episode debt after refresh = %v, want ErrRefreshDebtNotFound", err)
+		}
+	})
+
+	t.Run("scanner fallback episode creates debt", func(t *testing.T) {
+		h := newTestHarness()
+		ctx := context.Background()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		h.itemRepo.items["series-fallback"] = &models.MediaItem{
+			ContentID: "series-fallback",
+			Type:      "series",
+		}
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID:      "episode-fallback",
+			SeriesID:       "series-fallback",
+			SeasonID:       "season-fallback",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "Episode 1",
+			MetadataSource: "scanner_fallback",
+		}); err != nil {
+			t.Fatalf("seed fallback episode: %v", err)
+		}
+
+		h.service.refreshSeriesEpisodeMetadataState(ctx, "series-fallback", now)
+
+		item, err := h.itemRepo.GetByID(ctx, "series-fallback")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if !item.EpisodeMetadataIncomplete {
+			t.Fatal("expected fallback episode to keep series incomplete flag")
+		}
+		debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-fallback")
+		if err != nil {
+			t.Fatalf("GetTarget fallback debt: %v", err)
+		}
+		if !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) {
+			t.Fatalf("fallback debt reason mask = %d, want episode incomplete", debt.ReasonMask)
+		}
+	})
+}
+
 func TestRequestStaleMetadataRefreshStartsOnDemandRefreshOnce(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
