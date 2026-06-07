@@ -41,6 +41,9 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	var succeeded int
 	var failures []error
 	for _, root := range folder.Paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			slog.Warn("audiobook scan: read root failed", "root", root, "error", err)
@@ -53,8 +56,14 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 				continue
 			}
 			subPath := filepath.Join(root, entry.Name())
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			attempted++
 			if err := s.reconcileAudiobookFolder(ctx, folder, subPath); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
 				slog.Warn("audiobook scan: folder failed",
 					"folder_id", folder.ID,
 					"path", subPath,
@@ -202,9 +211,10 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 }
 
 // upsertAudiobookPeople upserts author and narrator rows into item_people,
-// using the PersonRepository to find-or-create each person by name.
-// Existing credits are not deleted first — we use ON CONFLICT DO NOTHING
-// (via ReplacePeople-style logic) so manual edits survive re-scans.
+// using the PersonRepository to find-or-create each person by name. When the
+// parsed credits differ, ReplacePeople makes scanner-derived credits authoritative.
+// Skips the DELETE+INSERT entirely when the existing credit set already
+// matches the desired set (case-insensitive on name, exact on kind).
 func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, book *parsedAudiobook) error {
 	if s.personRepo == nil {
 		return fmt.Errorf("personRepo not configured on Scanner")

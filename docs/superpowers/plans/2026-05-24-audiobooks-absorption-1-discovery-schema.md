@@ -336,11 +336,11 @@ main `auth_sessions`.
   ```bash
   sudo docker exec silo-prod-postgres-1 psql -U silo -d silo -c "
   INSERT INTO abs_sessions (user_id, token_hash, device_id, device_name, client_name, client_version)
-  VALUES (1, 'test-token-hash-001', 'test-device-001', 'Test Device', 'AbsTestClient', '1.0.0');
+  VALUES ((SELECT id FROM users ORDER BY id LIMIT 1), 'test-token-hash-001', 'test-device-001', 'Test Device', 'AbsTestClient', '1.0.0');
   DELETE FROM abs_sessions WHERE token_hash = 'test-token-hash-001';
   "
   ```
-  Expected: `INSERT 0 1` then `DELETE 1`. (User id 1 must exist — silo's first user.)
+  Expected: `INSERT 0 1` then `DELETE 1`. (At least one user must exist.)
 
 ### Step 2.6: Commit
 
@@ -462,7 +462,7 @@ EOF
 
 ---
 
-## Task 4: Migration 159 — `media_folders.type` audiobook value (no-op)
+## Task 4: Migration 159 — `media_libraries.kind` audiobook value (no-op)
 
 Adds a discriminator column so the scanner can branch on
 `audiobooks`/`podcasts` libraries without filename heuristics.

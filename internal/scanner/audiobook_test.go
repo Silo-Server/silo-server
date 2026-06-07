@@ -149,6 +149,18 @@ func TestScanAudiobookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	}
 }
 
+func TestScanAudiobookFolderReturnsCanceledContext(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &Scanner{}
+	err := s.ScanAudiobookFolder(ctx, &models.MediaFolder{ID: 42, Paths: []string{root}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScanAudiobookFolder error = %v, want context.Canceled", err)
+	}
+}
+
 func TestResolveAudiobookMediaItemReusesRootScopedContentID(t *testing.T) {
 	finder := &fakeRootContentFinder{contentID: "book-root-id"}
 	writer := &fakeFilesystemItemWriter{}

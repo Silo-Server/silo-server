@@ -29,6 +29,9 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 	var succeeded int
 	var failures []error
 	for _, root := range folder.Paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			slog.Warn("podcast scan: read root failed", "root", root, "error", err)
@@ -41,8 +44,14 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				continue
 			}
 			subPath := filepath.Join(root, entry.Name())
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			attempted++
 			if err := s.reconcilePodcastShow(ctx, folder, subPath); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
 				slog.Warn("podcast scan: show failed",
 					"folder_id", folder.ID,
 					"path", subPath,
