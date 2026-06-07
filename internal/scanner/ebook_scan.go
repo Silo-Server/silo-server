@@ -120,7 +120,9 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		if err != nil {
 			return fmt.Errorf("find active ebook file: %w", err)
 		}
-		if existing != nil && existing.ContentID != "" && ebookFileUnchanged(existing, info.Size(), info.ModTime()) {
+		if shouldSkip, err := s.ebookFileShouldSkip(ctx, existing, info.Size(), info.ModTime()); err != nil {
+			return err
+		} else if shouldSkip {
 			slog.Debug("ebook scan: unchanged file skipped",
 				"folder_id", folder.ID,
 				"content_id", existing.ContentID,
@@ -166,6 +168,20 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		"file", path,
 	)
 	return nil
+}
+
+func (s *Scanner) ebookFileShouldSkip(ctx context.Context, existing *models.MediaFile, size int64, modTime time.Time) (bool, error) {
+	if existing == nil || existing.ContentID == "" || !ebookFileUnchanged(existing, size, modTime) {
+		return false, nil
+	}
+	if s == nil || s.ebookDetailsRepo == nil {
+		return false, nil
+	}
+	hasDetails, err := s.ebookDetailsRepo.Exists(ctx, existing.ContentID)
+	if err != nil {
+		return false, fmt.Errorf("check ebook details before unchanged skip: %w", err)
+	}
+	return hasDetails, nil
 }
 
 func ebookFileUnchanged(existing *models.MediaFile, size int64, modTime time.Time) bool {

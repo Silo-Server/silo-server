@@ -2,8 +2,10 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -15,6 +17,28 @@ type EbookDetailsRepository struct {
 
 func NewEbookDetailsRepository(pool *pgxpool.Pool) *EbookDetailsRepository {
 	return &EbookDetailsRepository{pool: pool}
+}
+
+func (r *EbookDetailsRepository) Exists(ctx context.Context, contentID string) (bool, error) {
+	if contentID == "" {
+		return false, fmt.Errorf("ebook details content_id is required")
+	}
+	if r == nil || r.pool == nil {
+		return false, fmt.Errorf("ebook details repository not configured")
+	}
+	var found int
+	err := r.pool.QueryRow(ctx, `
+		SELECT 1
+		FROM ebook_details
+		WHERE content_id = $1
+	`, contentID).Scan(&found)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check ebook details exists: %w", err)
+	}
+	return true, nil
 }
 
 func (r *EbookDetailsRepository) Upsert(ctx context.Context, details models.EbookDetails) error {
