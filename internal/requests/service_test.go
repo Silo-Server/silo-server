@@ -886,7 +886,6 @@ func TestDeleteIntegrationRejectsLiveTargets(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{{
 		ID:      "radarr-hd",
-		Kind:    "radarr",
 		Enabled: true,
 	}}
 	store.targets = map[string][]Target{
@@ -942,36 +941,6 @@ func TestCreateIntegrationRejectedByPluginValidate(t *testing.T) {
 	}
 	if len(store.integrations) != 0 {
 		t.Fatalf("integrations = %d, want 0 (rejected before persist)", len(store.integrations))
-	}
-}
-
-func TestSaveDerivesLegacyColumnsFromPluginConfig(t *testing.T) {
-	store := newFakeStore()
-	service := newTestService(store)
-	service.SetRouterProvider(&fakeRouterProvider{})
-
-	install := 1
-	saved, err := service.CreateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
-		Name:           "radarr",
-		CapabilityID:   "request_router.v1",
-		BaseURL:        "http://radarr.local",
-		InstallationID: &install,
-		PluginConfig: map[string]any{
-			"service_kind": "sonarr",
-			"is_default":   true,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateIntegration returned error: %v", err)
-	}
-	if saved.Kind != "sonarr" || !saved.IsDefault {
-		t.Fatalf("derived columns = kind=%q is_default=%v, want sonarr/true", saved.Kind, saved.IsDefault)
-	}
-	if len(store.integrations) != 1 {
-		t.Fatalf("integrations = %d, want 1", len(store.integrations))
-	}
-	if store.integrations[0].Kind != "sonarr" || !store.integrations[0].IsDefault {
-		t.Fatalf("persisted row = kind=%q is_default=%v, want sonarr/true", store.integrations[0].Kind, store.integrations[0].IsDefault)
 	}
 }
 
@@ -1376,17 +1345,6 @@ func (f *fakeStore) UpdateIntegration(_ context.Context, in Integration) (*Integ
 func (f *fakeStore) SaveIntegrationWithDefaults(_ context.Context, in Integration, isCreate bool) (*Integration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for i := range f.integrations {
-		if f.integrations[i].Kind != in.Kind || f.integrations[i].ID == in.ID {
-			continue
-		}
-		if in.IsDefault {
-			f.integrations[i].IsDefault = false
-		}
-		if in.IsDefault4K {
-			f.integrations[i].IsDefault4K = false
-		}
-	}
 	if isCreate {
 		f.integrations = append(f.integrations, in)
 		cp := in
@@ -1886,17 +1844,12 @@ func routerInstOn(id string, installID int) Integration {
 	}
 }
 
-// autoApproveRouterInst is a router connection that also satisfies the legacy
-// auto-approval gate (integrationConfigured: enabled radarr default with creds /
-// root folder / quality profile).
+// autoApproveRouterInst is a router connection that satisfies the auto-approval
+// gate (integrationConfigured: an enabled request_router connection bound to an
+// installation with a base URL and api key).
 func autoApproveRouterInst(id, apiKeyRef string) Integration {
 	in := routerInst(id)
-	qp := 1
-	in.Kind = "radarr"
-	in.IsDefault = true
 	in.APIKeyRef = apiKeyRef
-	in.RootFolder = "/movies"
-	in.QualityProfileID = &qp
 	return in
 }
 

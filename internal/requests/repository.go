@@ -452,14 +452,12 @@ func (r *Repository) SetOutcome(ctx context.Context, id string, outcome Outcome,
 	return req, nil
 }
 
-const integrationColumns = `id, kind, name, enabled, base_url, api_key_ref,
-	root_folder, quality_profile_id, tags, is_4k, is_default, is_default_4k,
-	anime_enabled, anime_quality_profile_id, anime_root_folder, anime_tags,
-	options, last_check_at, last_check_status, last_check_error, updated_at,
+const integrationColumns = `id, name, enabled, base_url, api_key_ref,
+	last_check_at, last_check_status, last_check_error, updated_at,
 	capability_id, installation_id, supported_media_types, plugin_config`
 
 func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+integrationColumns+` FROM request_integrations ORDER BY kind, name`)
+	rows, err := r.pool.Query(ctx, `SELECT `+integrationColumns+` FROM request_integrations ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list request integrations: %w", err)
 	}
@@ -504,13 +502,6 @@ func (r *Repository) UpdateIntegration(ctx context.Context, i Integration) (*Int
 // tx) so the same SQL is reused by the plain create path and the transactional
 // SaveIntegrationWithDefaults path.
 func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor, i Integration) (*Integration, error) {
-	if i.Options == nil {
-		i.Options = map[string]any{}
-	}
-	options, err := json.Marshal(i.Options)
-	if err != nil {
-		return nil, fmt.Errorf("marshal options: %w", err)
-	}
 	if i.PluginConfig == nil {
 		i.PluginConfig = map[string]any{}
 	}
@@ -528,19 +519,13 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 	}
 	row := exec.QueryRow(ctx, `
 		INSERT INTO request_integrations (
-			id, kind, name, enabled, base_url, api_key_ref, root_folder,
-			quality_profile_id, tags, is_4k, is_default, is_default_4k,
-			anime_enabled, anime_quality_profile_id, anime_root_folder, anime_tags,
-			options, capability_id, installation_id, supported_media_types,
+			id, name, enabled, base_url, api_key_ref,
+			capability_id, installation_id, supported_media_types,
 			plugin_config, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-			$18,$19,$20,$21, now())
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
 		RETURNING `+integrationColumns,
-		i.ID, i.Kind, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
-		strings.TrimSpace(i.APIKeyRef), strings.TrimSpace(i.RootFolder), i.QualityProfileID,
-		int32Slice(i.Tags), i.Is4K, i.IsDefault, i.IsDefault4K, i.AnimeEnabled,
-		i.AnimeQualityProfileID, strings.TrimSpace(i.AnimeRootFolder), int32Slice(i.AnimeTags),
-		options, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
+		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
+		strings.TrimSpace(i.APIKeyRef), capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
 	out, err := scanIntegration(row)
 	if err != nil {
 		return nil, fmt.Errorf("create request integration: %w", err)
@@ -551,13 +536,6 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 // updateIntegration runs the integration UPDATE against any executor (pool or
 // tx) so the plain update path and SaveIntegrationWithDefaults share the SQL.
 func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor, i Integration) (*Integration, error) {
-	if i.Options == nil {
-		i.Options = map[string]any{}
-	}
-	options, err := json.Marshal(i.Options)
-	if err != nil {
-		return nil, fmt.Errorf("marshal options: %w", err)
-	}
 	if i.PluginConfig == nil {
 		i.PluginConfig = map[string]any{}
 	}
@@ -577,18 +555,12 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 		UPDATE request_integrations SET
 			name=$2, enabled=$3, base_url=$4,
 			api_key_ref = CASE WHEN $5 = '' THEN api_key_ref ELSE $5 END,
-			root_folder=$6, quality_profile_id=$7, tags=$8, is_4k=$9,
-			is_default=$10, is_default_4k=$11, anime_enabled=$12,
-			anime_quality_profile_id=$13, anime_root_folder=$14, anime_tags=$15,
-			options=$16, capability_id=$17, installation_id=$18,
-			supported_media_types=$19, plugin_config=$20, updated_at=now()
+			capability_id=$6, installation_id=$7,
+			supported_media_types=$8, plugin_config=$9, updated_at=now()
 		WHERE id=$1
 		RETURNING `+integrationColumns,
 		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
-		strings.TrimSpace(i.APIKeyRef), strings.TrimSpace(i.RootFolder), i.QualityProfileID,
-		int32Slice(i.Tags), i.Is4K, i.IsDefault, i.IsDefault4K, i.AnimeEnabled,
-		i.AnimeQualityProfileID, strings.TrimSpace(i.AnimeRootFolder), int32Slice(i.AnimeTags),
-		options, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
+		strings.TrimSpace(i.APIKeyRef), capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
 	out, err := scanIntegration(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -599,26 +571,16 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 	return &out, nil
 }
 
-// SaveIntegrationWithDefaults clears the conflicting kind default(s) and
-// creates/updates the instance in a single transaction so a save failure can
-// never leave the kind with zero defaults.
+// SaveIntegrationWithDefaults creates/updates the instance in a single
+// transaction. The host no longer enforces a single HD/4K default per kind;
+// the request_router plugin's RouteTargets picks the first is_default
+// connection from plugin_config, so the save path is a plain insert-or-update.
 func (r *Repository) SaveIntegrationWithDefaults(ctx context.Context, in Integration, isCreate bool) (*Integration, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin save integration: %w", err)
 	}
 	defer tx.Rollback(ctx)
-
-	if in.IsDefault {
-		if err := r.ClearDefault(ctx, tx, in.Kind, false, in.ID); err != nil {
-			return nil, err
-		}
-	}
-	if in.IsDefault4K {
-		if err := r.ClearDefault(ctx, tx, in.Kind, true, in.ID); err != nil {
-			return nil, err
-		}
-	}
 
 	var out *Integration
 	if isCreate {
@@ -670,21 +632,6 @@ func (r *Repository) DeleteIntegration(ctx context.Context, id string) error {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit delete integration: %w", err)
-	}
-	return nil
-}
-
-// ClearDefault unsets the HD (or 4K) default flag for every instance of a kind
-// except excludeID, so saving an instance that is itself the new default does
-// not clear its own freshly-written flag.
-func (r *Repository) ClearDefault(ctx context.Context, exec requestExecutor, kind string, fourK bool, excludeID string) error {
-	col := "is_default"
-	if fourK {
-		col = "is_default_4k"
-	}
-	_, err := exec.Exec(ctx, `UPDATE request_integrations SET `+col+` = false WHERE kind = $1 AND id <> $2`, kind, excludeID)
-	if err != nil {
-		return fmt.Errorf("clear default: %w", err)
 	}
 	return nil
 }
@@ -799,40 +746,19 @@ type integrationScanner interface {
 
 func scanIntegration(row integrationScanner) (Integration, error) {
 	var i Integration
-	var quality, animeQuality, installationID sql.NullInt64
-	var tags, animeTags []int32
-	var optionsRaw, pluginConfigRaw []byte
+	var installationID sql.NullInt64
+	var pluginConfigRaw []byte
 	var lastCheckAt sql.NullTime
 	if err := row.Scan(
-		&i.ID, &i.Kind, &i.Name, &i.Enabled, &i.BaseURL, &i.APIKeyRef,
-		&i.RootFolder, &quality, &tags, &i.Is4K, &i.IsDefault, &i.IsDefault4K,
-		&i.AnimeEnabled, &animeQuality, &i.AnimeRootFolder, &animeTags,
-		&optionsRaw, &lastCheckAt, &i.LastCheckStatus, &i.LastCheckError, &i.UpdatedAt,
+		&i.ID, &i.Name, &i.Enabled, &i.BaseURL, &i.APIKeyRef,
+		&lastCheckAt, &i.LastCheckStatus, &i.LastCheckError, &i.UpdatedAt,
 		&i.CapabilityID, &installationID, &i.SupportedMediaTypes, &pluginConfigRaw,
 	); err != nil {
 		return Integration{}, err
 	}
-	if quality.Valid {
-		v := int(quality.Int64)
-		i.QualityProfileID = &v
-	}
-	if animeQuality.Valid {
-		v := int(animeQuality.Int64)
-		i.AnimeQualityProfileID = &v
-	}
 	if installationID.Valid {
 		v := int(installationID.Int64)
 		i.InstallationID = &v
-	}
-	i.Tags = intsFromInt32(tags)
-	i.AnimeTags = intsFromInt32(animeTags)
-	if len(optionsRaw) > 0 {
-		if err := json.Unmarshal(optionsRaw, &i.Options); err != nil {
-			return Integration{}, fmt.Errorf("unmarshal request integration options for %s: %w", i.ID, err)
-		}
-	}
-	if i.Options == nil {
-		i.Options = map[string]any{}
 	}
 	if len(pluginConfigRaw) > 0 {
 		if err := json.Unmarshal(pluginConfigRaw, &i.PluginConfig); err != nil {
@@ -846,20 +772,4 @@ func scanIntegration(row integrationScanner) (Integration, error) {
 		i.LastCheckAt = &lastCheckAt.Time
 	}
 	return i, nil
-}
-
-func int32Slice(values []int) []int32 {
-	out := make([]int32, 0, len(values))
-	for _, value := range values {
-		out = append(out, int32(value))
-	}
-	return out
-}
-
-func intsFromInt32(values []int32) []int {
-	out := make([]int, 0, len(values))
-	for _, value := range values {
-		out = append(out, int(value))
-	}
-	return out
 }

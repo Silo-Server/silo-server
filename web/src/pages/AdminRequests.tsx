@@ -888,10 +888,8 @@ function IntegrationEditor({
     Object.keys(schemaErrors).length === 0;
 
   function handleSave() {
-    // plugin_config is the source of truth for fulfillment; the server derives
-    // kind / is_default* from it via deriveLegacyColumns. The legacy top-level arr
-    // fields are still required by the TS type, so send zero-values the server
-    // overwrites — they carry no meaning from the client now.
+    // plugin_config is the sole source of truth for fulfillment; the host owns
+    // only the generic connection chrome (name, base_url, api_key, installation).
     const payload = {
       id: form.id,
       name: form.name.trim(),
@@ -902,17 +900,6 @@ function IntegrationEditor({
       installation_id: hasInstallation ? selectedInstallationID : undefined,
       supported_media_types: [],
       plugin_config: descriptor ? buildSchemaValues(descriptor, pluginConfig) : pluginConfig,
-      kind: "",
-      is_4k: false,
-      is_default: false,
-      is_default_4k: false,
-      root_folder: "",
-      quality_profile_id: undefined,
-      tags: [],
-      anime_enabled: false,
-      anime_quality_profile_id: undefined,
-      anime_root_folder: undefined,
-      anime_tags: [],
     } as RequestIntegration;
 
     setFieldErrors({});

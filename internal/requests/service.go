@@ -796,7 +796,6 @@ func (s *Service) CreateIntegration(ctx context.Context, viewer Viewer, in Integ
 		return nil, err
 	}
 	in.ID = id
-	deriveLegacyColumns(&in)
 	if err := validateInstance(&in); err != nil {
 		return nil, err
 	}
@@ -813,7 +812,6 @@ func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if strings.TrimSpace(in.ID) == "" {
 		return nil, fmt.Errorf("%w: integration id required", ErrInvalidInput)
 	}
-	deriveLegacyColumns(&in)
 	if err := validateInstance(&in); err != nil {
 		return nil, err
 	}
@@ -821,27 +819,6 @@ func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integ
 		return nil, err
 	}
 	return s.store.SaveIntegrationWithDefaults(ctx, in, false)
-}
-
-// deriveLegacyColumns mirrors the generic plugin_config blob into the legacy
-// top-level columns (kind, is_default*, is_4k) so clients need only send
-// plugin_config. The columns still drive ClearDefault and target labeling.
-func deriveLegacyColumns(in *Integration) {
-	if in.PluginConfig == nil {
-		return
-	}
-	if k, ok := in.PluginConfig["service_kind"].(string); ok && k != "" {
-		in.Kind = k
-	}
-	if v, ok := in.PluginConfig["is_default"].(bool); ok {
-		in.IsDefault = v
-	}
-	if v, ok := in.PluginConfig["is_default_4k"].(bool); ok {
-		in.IsDefault4K = v
-	}
-	if v, ok := in.PluginConfig["is_4k"].(bool); ok {
-		in.Is4K = v
-	}
 }
 
 // validateViaPlugin asks the bound request_router plugin to validate the

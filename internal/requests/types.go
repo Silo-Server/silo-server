@@ -254,31 +254,19 @@ type ListFilter struct {
 }
 
 type Integration struct {
-	ID                    string         `json:"id"`
-	Name                  string         `json:"name"`
-	Kind                  string         `json:"kind"`
-	Enabled               bool           `json:"enabled"`
-	Is4K                  bool           `json:"is_4k"`
-	IsDefault             bool           `json:"is_default"`
-	IsDefault4K           bool           `json:"is_default_4k"`
-	AnimeEnabled          bool           `json:"anime_enabled"`
-	AnimeQualityProfileID *int           `json:"anime_quality_profile_id,omitempty"`
-	AnimeRootFolder       string         `json:"anime_root_folder,omitempty"`
-	AnimeTags             []int          `json:"anime_tags"`
-	BaseURL               string         `json:"base_url"`
-	APIKeyRef             string         `json:"api_key_ref,omitempty"`
-	RootFolder            string         `json:"root_folder"`
-	QualityProfileID      *int           `json:"quality_profile_id,omitempty"`
-	Tags                  []int          `json:"tags"`
-	Options               map[string]any `json:"options"`
-	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckStatus       string         `json:"last_check_status,omitempty"`
-	LastCheckError        string         `json:"last_check_error,omitempty"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-	CapabilityID          string         `json:"capability_id"`
-	InstallationID        *int           `json:"installation_id,omitempty"`
-	SupportedMediaTypes   []string       `json:"supported_media_types"`
-	PluginConfig          map[string]any `json:"plugin_config"`
+	ID                  string         `json:"id"`
+	Name                string         `json:"name"`
+	Enabled             bool           `json:"enabled"`
+	BaseURL             string         `json:"base_url"`
+	APIKeyRef           string         `json:"api_key_ref,omitempty"`
+	LastCheckAt         *time.Time     `json:"last_check_at,omitempty"`
+	LastCheckStatus     string         `json:"last_check_status,omitempty"`
+	LastCheckError      string         `json:"last_check_error,omitempty"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	CapabilityID        string         `json:"capability_id"`
+	InstallationID      *int           `json:"installation_id,omitempty"`
+	SupportedMediaTypes []string       `json:"supported_media_types"`
+	PluginConfig        map[string]any `json:"plugin_config"`
 }
 
 type FulfillmentResult struct {
