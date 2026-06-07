@@ -91,6 +91,51 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(catalogKeys.itemDetail("item-1"))?.isInvalidated).toBe(true);
   });
 
+  it("does not invalidate catalog list queries for a different library scope", async () => {
+    const queryClient = new QueryClient();
+    const moviesKey = catalogKeys.list({
+      source: "section",
+      scope: "library",
+      section_id: "all",
+      library_id: 1,
+      limit: 60,
+      offset: 0,
+    });
+    const internationalKey = catalogKeys.list({
+      source: "section",
+      scope: "library",
+      section_id: "all",
+      library_id: 3,
+      limit: 60,
+      offset: 0,
+    });
+
+    queryClient.setQueryData(moviesKey, { items: [] });
+    queryClient.setQueryData(internationalKey, { items: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
+
+    expect(queryClient.getQueryState(moviesKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(internationalKey)?.isInvalidated).toBe(true);
+  });
+
+  it("does not invalidate library section queries for a different library scope", async () => {
+    const queryClient = new QueryClient();
+    const moviesLayoutKey = sectionKeys.libraryLayout(1);
+    const moviesSectionKey = sectionKeys.libraryItems(1, "recently-added");
+    const internationalLayoutKey = sectionKeys.libraryLayout(3);
+
+    queryClient.setQueryData(moviesLayoutKey, { sections: [] });
+    queryClient.setQueryData(moviesSectionKey, { section: { id: "recently-added", items: [] } });
+    queryClient.setQueryData(internationalLayoutKey, { sections: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
+
+    expect(queryClient.getQueryState(moviesLayoutKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(moviesSectionKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(internationalLayoutKey)?.isInvalidated).toBe(true);
+  });
+
   it("sets all cached detail keys for the mutated item", () => {
     const queryClient = new QueryClient();
 

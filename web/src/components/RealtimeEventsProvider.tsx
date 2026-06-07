@@ -18,9 +18,10 @@ import {
   type RealtimeConnectionState,
   type RealtimeEventsContextValue,
 } from "@/components/realtimeEventsContext";
+import { invalidateCatalogState } from "@/components/realtimeCatalogInvalidation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePageActivity } from "@/hooks/usePageActivity";
-import { adminKeys, catalogKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
+import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
   invalidateMediaSurfaceQueries,
   updateCatalogItemDetail,
@@ -46,7 +47,12 @@ interface UserStatePayload {
   in_watchlist?: boolean;
 }
 
-const CATALOG_ITEM_CHANGED_EVENTS = new Set(["metadata.updated", "catalog.item.changed"]);
+const CATALOG_ITEM_CHANGED_EVENTS = new Set([
+  "catalog.item.changed",
+  "library.item_added",
+  "metadata.updated",
+]);
+const SCOPED_CATALOG_LIBRARY_EVENTS = new Set(["catalog.library.changed", "library.changed"]);
 const DASHBOARD_QUERY_KEYS = [
   adminKeys.stats(),
   adminKeys.sessions(),
@@ -178,25 +184,12 @@ function invalidateDashboardQueries(queryClient: QueryClient, allowRefetch: bool
   }
 }
 
-function invalidateCatalogState(
-  queryClient: QueryClient,
-  options: { itemId?: string; allowDashboardRefetch: boolean },
-) {
-  const { itemId, allowDashboardRefetch } = options;
-  void invalidateMediaSurfaceQueries(queryClient, itemId ? { itemId } : {}).then(() => {
-    bumpHomeRefreshSignal(queryClient);
-  });
-  void queryClient.refetchQueries({ queryKey: catalogKeys.all, type: "active" });
-  void queryClient.invalidateQueries({
-    queryKey: adminKeys.libraries(),
-    refetchType: allowDashboardRefetch ? "active" : "none",
-  });
-  void queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
-  void queryClient.invalidateQueries({
-    queryKey: adminKeys.stats(),
-    refetchType: allowDashboardRefetch ? "active" : "none",
-  });
-  void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
+function catalogEventLibraryID(data: unknown) {
+  if (!data || typeof data !== "object" || !("library_id" in data)) {
+    return undefined;
+  }
+  const value = (data as { library_id?: unknown }).library_id;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function handleJobSideEffects(
@@ -473,18 +466,29 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   function handleEvent(message: EventsEventMessage) {
     switch (message.channel) {
       case "catalog":
-        if (CATALOG_ITEM_CHANGED_EVENTS.has(message.event)) {
-          invalidateCatalogState(queryClient, {
-            itemId:
-              typeof message.data === "object" && message.data && "content_id" in message.data
-                ? (message.data as { content_id?: string }).content_id
-                : undefined,
-            allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-          });
-        } else {
-          invalidateCatalogState(queryClient, {
-            allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-          });
+        {
+          const eventLibraryID = catalogEventLibraryID(message.data);
+          if (CATALOG_ITEM_CHANGED_EVENTS.has(message.event)) {
+            invalidateCatalogState(queryClient, {
+              itemId:
+                typeof message.data === "object" && message.data && "content_id" in message.data
+                  ? (message.data as { content_id?: string }).content_id
+                  : undefined,
+              libraryId: eventLibraryID,
+              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+              includeLibraryLists: false,
+            });
+          } else if (SCOPED_CATALOG_LIBRARY_EVENTS.has(message.event) && eventLibraryID) {
+            invalidateCatalogState(queryClient, {
+              libraryId: eventLibraryID,
+              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+            });
+          } else {
+            invalidateCatalogState(queryClient, {
+              libraryId: eventLibraryID,
+              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+            });
+          }
         }
         break;
       case "jobs":
