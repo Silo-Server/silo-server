@@ -658,9 +658,12 @@ function integrationToForm(integration?: RequestIntegration): IntegrationFormSta
   };
 }
 
+type ConnectionOptionsStatus = "idle" | "loading" | "error";
+
 // useConnectionOptions debounces a ListConfigOptions probe keyed on the connection
 // draft (base URL + key ref + installation + plugin_config). It backs the dynamic
 // SELECT options (root folders, quality profiles, tags) the descriptor declares.
+// The probe is silent (no toasts); callers surface failures inline via `status`.
 function useConnectionOptions(
   connectionID: string,
   draft: {
@@ -673,6 +676,7 @@ function useConnectionOptions(
 ) {
   const load = useLoadRequestIntegrationOptions();
   const [options, setOptions] = useState<RequestIntegrationOptions>({});
+  const [status, setStatus] = useState<ConnectionOptionsStatus>("idle");
   const canLoad =
     draft.base_url.trim().length > 0 &&
     Boolean(draft.installation_id) &&
@@ -685,8 +689,12 @@ function useConnectionOptions(
     can: canLoad,
   });
   useEffect(() => {
-    if (!canLoad) return;
+    if (!canLoad) {
+      setStatus("idle");
+      return;
+    }
     const timer = setTimeout(() => {
+      setStatus("loading");
       load
         .mutateAsync({
           id: connectionID || "new",
@@ -701,13 +709,19 @@ function useConnectionOptions(
             plugin_config: draft.plugin_config,
           },
         })
-        .then(setOptions)
-        .catch(() => setOptions({}));
+        .then((loaded) => {
+          setOptions(loaded);
+          setStatus("idle");
+        })
+        .catch(() => {
+          setOptions({});
+          setStatus("error");
+        });
     }, 400);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
-  return options;
+  return { options, status };
 }
 
 function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegration[] }) {
@@ -851,7 +865,7 @@ function IntegrationEditor({
   const descriptor = selected?.capability.config_schema?.[0]?.admin_form;
   const title = selected?.capability.display_name || selected?.pluginID || "Connection";
 
-  const options = useConnectionOptions(form.id, {
+  const { options, status: optionsStatus } = useConnectionOptions(form.id, {
     base_url: form.base_url,
     api_key_ref: form.api_key_ref,
     has_api_key: form.has_api_key,
@@ -989,14 +1003,23 @@ function IntegrationEditor({
       </Field>
 
       {descriptor ? (
-        <SchemaForm
-          descriptor={descriptor}
-          values={pluginConfig}
-          onChange={onConfigChange}
-          dynamicOptions={options}
-          errors={fieldErrors}
-          idPrefix={`conn-${form.id || form.installation_id || "new"}`}
-        />
+        <div className="space-y-2">
+          <SchemaForm
+            descriptor={descriptor}
+            values={pluginConfig}
+            onChange={onConfigChange}
+            dynamicOptions={options}
+            errors={fieldErrors}
+            idPrefix={`conn-${form.id || form.installation_id || "new"}`}
+          />
+          {optionsStatus === "loading" ? (
+            <p className="text-muted-foreground text-xs">Loading options…</p>
+          ) : optionsStatus === "error" && form.base_url.trim().length > 0 ? (
+            <p className="text-destructive text-xs">
+              Couldn&apos;t load options for this connection — check the base URL and API key.
+            </p>
+          ) : null}
+        </div>
       ) : hasInstallation ? (
         <p className="text-muted-foreground text-sm">
           This plugin does not expose a connection configuration form.

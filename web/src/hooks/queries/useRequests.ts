@@ -392,12 +392,7 @@ export function useLoadRequestIntegrationOptions() {
           body: JSON.stringify(body),
         },
       ),
-    onSuccess: () => {
-      toast.success("Connection successful");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to load integration settings");
-    },
+    // Silent background probe: callers surface load failures inline (no toast).
   });
 }
 
