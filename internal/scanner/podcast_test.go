@@ -86,6 +86,18 @@ func TestScanPodcastFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	}
 }
 
+func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &Scanner{}
+	err := s.ScanPodcastFolder(ctx, &models.MediaFolder{ID: 43, Paths: []string{root}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScanPodcastFolder error = %v, want context.Canceled", err)
+	}
+}
+
 func TestResolvePodcastMediaItemReusesRootScopedContentID(t *testing.T) {
 	finder := &fakeRootContentFinder{contentID: "podcast-root-id"}
 	writer := &fakeFilesystemItemWriter{}
