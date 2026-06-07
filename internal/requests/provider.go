@@ -98,7 +98,7 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 		Year:               int32(year),
 		ExternalIds:        ids,
 		IsAnime:            req.IsAnime,
-		RequesterUserId:    int32(req.RequestedByUserID),
+		RequesterUserId:    int64(req.RequestedByUserID),
 		RequesterProfileId: req.RequestedByProfileID,
 	}
 }
