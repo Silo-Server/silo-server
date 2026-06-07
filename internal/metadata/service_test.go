@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -85,7 +86,7 @@ func (r *fakeItemRepo) Delete(_ context.Context, contentID string) ([]string, er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.items[contentID]; !ok {
-		return nil, fmt.Errorf("item not found: %s", contentID)
+		return nil, catalog.ErrItemNotFound
 	}
 	delete(r.items, contentID)
 	return nil, nil
