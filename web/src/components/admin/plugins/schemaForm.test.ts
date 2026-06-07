@@ -47,3 +47,29 @@ describe("buildSchemaValues", () => {
     expect(out.season_folder).toBe(true);
   });
 });
+
+describe("buildSchemaValues hidden fields", () => {
+  it("drops a field hidden by show_when even if its draft value is set", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "is_4k", label: "4K", control: "SWITCH", required: false, secret: false, multiline: false },
+        { key: "is_default_4k", label: "Default 4K", control: "SWITCH", required: false, secret: false, multiline: false,
+          show_when: [{ field: "is_4k", equals: ["true"] }] },
+      ],
+    };
+    const out = buildSchemaValues(d, { is_4k: false, is_default_4k: true });
+    expect(out.is_default_4k).toBeUndefined(); // hidden -> not persisted
+    expect(out.is_4k).toBe(false);
+  });
+  it("keeps a field when its show_when is satisfied", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "is_4k", label: "4K", control: "SWITCH", required: false, secret: false, multiline: false },
+        { key: "is_default_4k", label: "Default 4K", control: "SWITCH", required: false, secret: false, multiline: false,
+          show_when: [{ field: "is_4k", equals: ["true"] }] },
+      ],
+    };
+    const out = buildSchemaValues(d, { is_4k: true, is_default_4k: true });
+    expect(out.is_default_4k).toBe(true);
+  });
+});

@@ -95,6 +95,7 @@ export function buildSchemaValues(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const field of descriptor.fields) {
+    if (!evaluateShowWhen(field.show_when, draft)) continue; // don't persist hidden fields' stale values
     const coerced = coerceFieldValue(field, draft[field.key]);
     if (coerced === undefined) continue;
     out[field.key] = coerced;
