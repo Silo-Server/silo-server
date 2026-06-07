@@ -39,6 +39,35 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 const minHNSWEfSearch = 200
 
+const tasteSeedCandidateQuery = `
+			WITH watched_counts AS (
+				SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
+				       COUNT(DISTINCT wp.user_id::text || ':' || COALESCE(wp.profile_id, '')) AS watch_count
+				FROM   user_watch_progress wp
+				LEFT JOIN episodes e ON e.content_id = wp.media_item_id
+				WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
+				  AND  wp.updated_at > NOW() - INTERVAL '180 days'
+				GROUP  BY 1
+			)
+			SELECT mi.content_id
+			FROM   media_items mi
+			LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
+			WHERE  mi.status = 'matched'
+			  AND  mi.type IN ('movie', 'series')
+			  AND  mi.poster_path IS NOT NULL
+			  AND  mi.poster_path <> ''
+			ORDER  BY COALESCE(wc.watch_count, 0) DESC,
+			          CASE
+			            WHEN mi.rating_imdb IS NOT NULL THEN 2
+			            WHEN mi.rating_tmdb IS NOT NULL AND mi.rating_tmdb < 9.5 THEN 1
+			            ELSE 0
+			          END DESC,
+			          mi.rating_imdb DESC NULLS LAST,
+			          CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END DESC NULLS LAST,
+			          mi.year DESC NULLS LAST,
+			          mi.content_id ASC
+			LIMIT  $1 OFFSET $2`
+
 // Repo provides database operations for the recommendation system.
 type Repo struct {
 	pool *pgxpool.Pool
@@ -1298,34 +1327,12 @@ func (r *Repo) GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]S
 
 // GetTasteSeedCandidates returns movie/series content IDs ordered for the
 // taste-seeding picker: server engagement first (most-watched in the last
-// 180 days), then TMDB rating, then recency. This blend ensures fresh servers
-// (no watch history) still surface meaningful posters via TMDB ratings while
-// established servers prioritize what users actually watch. Episodes are
-// resolved to their parent series. Items without a poster are excluded.
+// 180 days), then rating reliability and rating score, then recency. This keeps
+// fresh servers from front-loading single-vote TMDB 10.0 obscurities while
+// established servers prioritize what users actually watch. Episodes are resolved
+// to their parent series. Items without a poster are excluded.
 func (r *Repo) GetTasteSeedCandidates(ctx context.Context, limit, offset int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_counts AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       COUNT(DISTINCT wp.user_id::text || ':' || COALESCE(wp.profile_id, '')) AS watch_count
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  wp.updated_at > NOW() - INTERVAL '180 days'
-			GROUP  BY 1
-		)
-		SELECT mi.content_id
-		FROM   media_items mi
-		LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
-		WHERE  mi.status = 'matched'
-		  AND  mi.type IN ('movie', 'series')
-		  AND  mi.poster_path IS NOT NULL
-		  AND  mi.poster_path <> ''
-		ORDER  BY COALESCE(wc.watch_count, 0) DESC,
-		          mi.rating_tmdb DESC NULLS LAST,
-		          mi.year DESC NULLS LAST,
-		          mi.content_id ASC
-		LIMIT  $1 OFFSET $2`,
-		limit, offset)
+	rows, err := r.pool.Query(ctx, tasteSeedCandidateQuery, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get taste seed candidates: %w", err)
 	}
