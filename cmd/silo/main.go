@@ -250,6 +250,8 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 
 func main() {
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
+	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
+	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -269,12 +271,48 @@ func main() {
 	defer pool.Close()
 	slog.Info("connected to PostgreSQL")
 
+	if *migrateStatus {
+		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		statuses, statusErr := database.MigrationStatuses(migCtx, pool, migrations.FS, "sql")
+		migCancel()
+		if statusErr != nil {
+			log.Fatalf("failed to read migration status: %v", statusErr)
+		}
+
+		fmt.Printf("%-8s %8s %-25s %s\n", "STATE", "VERSION", "APPLIED_AT", "MIGRATION")
+		for _, status := range statuses {
+			appliedAt := "-"
+			if !status.AppliedAt.IsZero() {
+				appliedAt = status.AppliedAt.UTC().Format(time.RFC3339)
+			}
+			source := status.Source
+			if source != "" {
+				source = filepath.Base(source)
+			} else {
+				source = "-"
+			}
+			fmt.Printf("%-8s %8d %-25s %s\n", status.State, status.Version, appliedAt, source)
+		}
+		return
+	}
+
+	if *migrateOnly {
+		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
+		migCancel()
+		if migErr != nil {
+			log.Fatalf("failed to run migrations: %v", migErr)
+		}
+		slog.Info("database migrations applied")
+		return
+	}
+
 	// Run migrations only for integrated/api modes. Proxy and transcode nodes
 	// should never alter the schema — they may scale independently and would
 	// race or apply migrations before the primary node is deliberately upgraded.
 	if bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == "" {
 		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
-		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "."); migErr != nil {
+		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql"); migErr != nil {
 			migCancel()
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
