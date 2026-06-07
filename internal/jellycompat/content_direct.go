@@ -46,6 +46,14 @@ type itemAccessSource interface {
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 }
 
+// folderListSource is the subset of *catalog.FolderRepository that
+// directContentService relies on. Defined as an interface so tests can
+// substitute a stub without standing up a Postgres pool.
+type folderListSource interface {
+	GetEnabled(ctx context.Context) ([]*models.MediaFolder, error)
+	ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error)
+}
+
 // seasonListSource is the subset of *catalog.SeasonRepository that
 // directContentService relies on.
 type seasonListSource interface {
@@ -70,7 +78,7 @@ type directContentService struct {
 	seasonRepo      seasonListSource
 	episodeRepo     episodeListSource
 	detailSvc       *catalog.DetailService
-	folderRepo      *catalog.FolderRepository
+	folderRepo      folderListSource
 	storeProvider   userstore.UserStoreProvider
 	accessFilter    AccessFilterResolver
 	posterPresigner LibraryPosterPresigner
@@ -83,7 +91,7 @@ func newDirectContentService(
 	seasonRepo *catalog.SeasonRepository,
 	episodeRepo *catalog.EpisodeRepository,
 	detailSvc *catalog.DetailService,
-	folderRepo *catalog.FolderRepository,
+	folderRepo folderListSource,
 	storeProvider userstore.UserStoreProvider,
 	accessFilter AccessFilterResolver,
 ) *directContentService {
