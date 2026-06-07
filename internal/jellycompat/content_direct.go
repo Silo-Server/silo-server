@@ -61,6 +61,7 @@ type seasonListSource interface {
 type episodeListSource interface {
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeriesGroupedBySeason(ctx context.Context, seriesID string) (map[int][]*models.Episode, error)
+	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
 }
 
 // directContentService implements ContentService by calling catalog repos directly.
@@ -265,6 +266,18 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	if len(collected) > requestedLimit {
 		collected = collected[:requestedLimit]
 	}
+
+	// The handler's resolveUserStateForContentIDs overlay only covers items
+	// with their own progress rows, which a series never has — aggregate
+	// series watch state here so library views carry Played/UnplayedItemCount.
+	// The is_played path already did this via enrichListItemsUserData.
+	// That same absence is what keeps this safe from the handler overlay:
+	// userDataDTO only overrides item-level UserData when a direct progress
+	// row exists, and one never does for a series id.
+	if isPlayedFilter == "" {
+		s.enrichSeriesUserData(ctx, session, collected)
+	}
+
 	if totalKnown {
 		hasMore = totalFromCatalog > requestedOffset+requestedLimit
 	}
@@ -345,6 +358,17 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 					DurationSeconds: progress.DurationSeconds,
 					Played:          progress.Completed,
 					IsInProgress:    progress.PositionSeconds > 0 && !progress.Completed,
+				}
+			}
+
+			// A series never has a progress row of its own, so roll watch
+			// state up from its episodes (mirrors applySeasonUserData) to
+			// give clients Played/UnplayedItemCount at the series level.
+			if result.UserData == nil && strings.EqualFold(result.Type, "series") && s.episodeRepo != nil {
+				if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
+					episodes := episodesBySeries[contentID]
+					progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, modelEpisodeContentIDs(episodes))
+					result.UserData = seriesUserDataFromEpisodes(episodes, progressMap)
 				}
 			}
 		}
@@ -545,6 +569,128 @@ func (s *directContentService) enrichListItemsUserData(ctx context.Context, sess
 			items[i].UserData = seasonUserDataFromProgress(progress)
 		}
 	}
+
+	s.enrichSeriesListUserData(ctx, session, store, items)
+}
+
+// enrichSeriesUserData is enrichSeriesListUserData with store acquisition,
+// for callers that haven't already resolved the user store.
+func (s *directContentService) enrichSeriesUserData(ctx context.Context, session *Session, items []upstreamListItem) {
+	if s.storeProvider == nil || len(items) == 0 {
+		return
+	}
+	store, err := s.userStore(ctx, session)
+	if err != nil {
+		return
+	}
+	s.enrichSeriesListUserData(ctx, session, store, items)
+}
+
+// enrichSeriesListUserData fills aggregated user data for series rows in a
+// list response. A series never has a progress row of its own, so Played and
+// UnplayedItemCount are rolled up from episode progress, mirroring
+// applySeasonUserData semantics.
+func (s *directContentService) enrichSeriesListUserData(ctx context.Context, session *Session, store userstore.UserStore, items []upstreamListItem) {
+	if s.episodeRepo == nil {
+		return
+	}
+	seriesIDs := make([]string, 0, len(items))
+	for i := range items {
+		if items[i].UserData == nil && items[i].ContentID != "" && strings.EqualFold(items[i].Type, "series") {
+			seriesIDs = append(seriesIDs, items[i].ContentID)
+		}
+	}
+	if len(seriesIDs) == 0 {
+		return
+	}
+	// Cap the rollup so a max-limit browse (compatBrowseMaxLimit) of a
+	// series-only library can't materialize hundreds of thousands of episode
+	// rows in one request. Series past the cap keep a nil UserData — the same
+	// shape they had before series aggregation existed. Real clients page at
+	// 20-100 items, well under the cap.
+	const maxSeriesUserDataRollups = 250
+	if len(seriesIDs) > maxSeriesUserDataRollups {
+		seriesIDs = seriesIDs[:maxSeriesUserDataRollups]
+	}
+	episodesBySeries, err := s.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
+	if err != nil {
+		return
+	}
+	episodeIDs := make([]string, 0, 256)
+	for _, episodes := range episodesBySeries {
+		episodeIDs = append(episodeIDs, modelEpisodeContentIDs(episodes)...)
+	}
+	progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, episodeIDs)
+	for i := range items {
+		if items[i].UserData != nil || !strings.EqualFold(items[i].Type, "series") {
+			continue
+		}
+		if episodes, ok := episodesBySeries[items[i].ContentID]; ok {
+			items[i].UserData = seriesUserDataFromEpisodes(episodes, progressMap)
+		}
+	}
+}
+
+// seriesUserDataFromEpisodes computes WatchedCount/UnplayedCount/
+// InProgressCount/Played for a whole series from a pre-fetched progressMap.
+// Pure function — no I/O. Counting semantics match the native API's series
+// rollup (all episodes including specials; in-progress = started but not
+// completed).
+func seriesUserDataFromEpisodes(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) *catalog.SeasonUserData {
+	watched := 0
+	unplayed := 0
+	inProgress := 0
+	for _, ep := range episodes {
+		if ep == nil {
+			continue
+		}
+		progress, ok := progressMap[ep.ContentID]
+		if ok && progress.Completed {
+			watched++
+			continue
+		}
+		if ok && progress.PositionSeconds > 0 {
+			inProgress++
+		}
+		unplayed++
+	}
+	return &catalog.SeasonUserData{
+		WatchedCount:    watched,
+		UnplayedCount:   unplayed,
+		InProgressCount: inProgress,
+		Played:          unplayed == 0 && len(episodes) > 0,
+	}
+}
+
+// modelEpisodeContentIDs returns the non-empty content ids of the given episodes.
+func modelEpisodeContentIDs(episodes []*models.Episode) []string {
+	ids := make([]string, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep != nil && ep.ContentID != "" {
+			ids = append(ids, ep.ContentID)
+		}
+	}
+	return ids
+}
+
+// chunkedProgressByMediaItems batches ListProgressByMediaItems calls when a
+// series list expands to thousands of episode ids: per-user stores may be
+// SQLite-backed (999 bind-variable default), and chunking also keeps
+// Postgres IN-lists at a sane size. Returns an empty map (never nil); chunks
+// that error are skipped.
+func chunkedProgressByMediaItems(ctx context.Context, store userstore.UserStore, profileID string, mediaItemIDs []string) map[string]userstore.WatchProgress {
+	const chunkSize = 500
+	result := make(map[string]userstore.WatchProgress, len(mediaItemIDs))
+	for start := 0; start < len(mediaItemIDs); start += chunkSize {
+		chunk, err := store.ListProgressByMediaItems(ctx, profileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
+		if err != nil {
+			continue
+		}
+		for id, progress := range chunk {
+			result[id] = progress
+		}
+	}
+	return result
 }
 
 // enrichSeasonUserData adds aggregated user data for a season. Used by
