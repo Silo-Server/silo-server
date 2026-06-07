@@ -13,13 +13,14 @@ import (
 )
 
 type fakeStore struct {
-	settings      Settings
-	sources       []Source
-	connection    Connection
-	advanced      map[string]string // source ID -> marker
-	recorded      map[string]string // source ID -> error message
-	createdEvents []EventCreate
-	events        []EventFinish
+	settings       Settings
+	sources        []Source
+	connection     Connection
+	advanced       map[string]string // source ID -> marker
+	recorded       map[string]string // source ID -> error message
+	createdEvents  []EventCreate
+	events         []EventFinish
+	createEventErr error
 }
 
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
@@ -52,6 +53,9 @@ func (f *fakeStore) RecordError(_ context.Context, sourceID, msg string) error {
 	return nil
 }
 func (f *fakeStore) CreateEvent(_ context.Context, event EventCreate) (int64, error) {
+	if f.createEventErr != nil {
+		return 0, f.createEventErr
+	}
 	f.createdEvents = append(f.createdEvents, event)
 	return int64(len(f.createdEvents)), nil
 }
@@ -68,9 +72,11 @@ type fakeProvider struct {
 	err        error
 	errByCap   map[string]error
 	lastConfig map[string]string
+	calls      int
 }
 
 func (f *fakeProvider) PollChanges(_ context.Context, _ string, capabilityID, _ string, _ ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
+	f.calls++
 	f.lastConfig = sourceConfig
 	if f.err != nil {
 		return nil, "", f.err
@@ -103,6 +109,38 @@ func TestPollOncePassesSourceConfigToProvider(t *testing.T) {
 	}
 	if got := prov.lastConfig["exclusions"]; got != ".downloads\n.recyclebin" {
 		t.Fatalf("source config = %#v", prov.lastConfig)
+	}
+}
+
+func TestPollOnceSkipsSourceWhenPollAlreadyRunning(t *testing.T) {
+	store := &fakeStore{
+		settings:       Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		createEventErr: ErrPollAlreadyRunning,
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"cephfs": {"/mnt/media/Movie/movie.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", prov.calls)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("enqueued scans = %+v, want none", q.enqueued)
+	}
+	if len(store.events) != 0 {
+		t.Fatalf("finished events = %+v, want none", store.events)
+	}
+	if len(store.recorded) != 0 {
+		t.Fatalf("recorded source errors = %+v, want none", store.recorded)
+	}
+	if len(store.advanced) != 0 {
+		t.Fatalf("advanced markers = %+v, want none", store.advanced)
 	}
 }
 

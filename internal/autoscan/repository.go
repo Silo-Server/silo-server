@@ -499,14 +499,66 @@ func (r *Repository) CreateEvent(ctx context.Context, in EventCreate) (int64, er
 	if started.IsZero() {
 		started = time.Now()
 	}
-	row := r.pool.QueryRow(ctx, `
+	sourceID := strings.TrimSpace(in.SourceID)
+	if sourceID == "" {
+		row := r.pool.QueryRow(ctx, `
 			INSERT INTO autoscan_events (
 				source_id, plugin_id, capability_id, started_at, completed_at,
 				duration_ms, status, error_message, marker_before
 			)
 		VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7)
 		RETURNING id`,
-		nullable(in.SourceID),
+			nil,
+			in.PluginID,
+			in.CapabilityID,
+			started,
+			string(EventStatusRunning),
+			"",
+			nullable(in.MarkerBefore),
+		)
+		var id int64
+		if err := row.Scan(&id); err != nil {
+			return 0, fmt.Errorf("create autoscan event: %w", err)
+		}
+		return id, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin autoscan event: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(900173, hashtext($1))`, sourceID); err != nil {
+		return 0, fmt.Errorf("lock autoscan event: %w", err)
+	}
+
+	var runningID int64
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM autoscan_events
+		WHERE source_id = $1
+		  AND status = $2
+		ORDER BY started_at ASC, id ASC
+		LIMIT 1`,
+		sourceID,
+		string(EventStatusRunning),
+	).Scan(&runningID)
+	if err == nil {
+		return 0, fmt.Errorf("%w: source %s event %d", ErrPollAlreadyRunning, sourceID, runningID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("check running autoscan event: %w", err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO autoscan_events (
+			source_id, plugin_id, capability_id, started_at, completed_at,
+			duration_ms, status, error_message, marker_before
+		)
+		VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7)
+		RETURNING id`,
+		sourceID,
 		in.PluginID,
 		in.CapabilityID,
 		started,
@@ -517,6 +569,9 @@ func (r *Repository) CreateEvent(ctx context.Context, in EventCreate) (int64, er
 	var id int64
 	if err := row.Scan(&id); err != nil {
 		return 0, fmt.Errorf("create autoscan event: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit autoscan event: %w", err)
 	}
 	return id, nil
 }

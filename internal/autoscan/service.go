@@ -150,7 +150,10 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if src.Marker != nil {
 			marker = *src.Marker
 		}
-		eventID := s.createEvent(ctx, src, marker, time.Now())
+		eventID, started := s.createEvent(ctx, src, marker, time.Now())
+		if !started {
+			continue
+		}
 		// A connection is OPTIONAL. Server-based providers (Sonarr/Radarr) bind a
 		// connection and the resolved {base_url, api_key} is handed to the plugin.
 		// Other providers (e.g. a filesystem/CephFS watcher) need none and get an
@@ -275,9 +278,9 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) int64 {
+func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) (int64, bool) {
 	if s == nil || s.store == nil {
-		return 0
+		return 0, true
 	}
 	id, err := s.store.CreateEvent(ctx, EventCreate{
 		SourceID:     src.ID,
@@ -287,10 +290,14 @@ func (s *Service) createEvent(ctx context.Context, src Source, marker string, st
 		MarkerBefore: marker,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPollAlreadyRunning) {
+			slog.DebugContext(ctx, "autoscan: source poll already running", "source_id", src.ID)
+			return 0, false
+		}
 		slog.WarnContext(ctx, "autoscan: create event failed", "source_id", src.ID, "err", err)
-		return 0
+		return 0, true
 	}
-	return id
+	return id, true
 }
 
 func (s *Service) finishEvent(ctx context.Context, eventID int64, finish EventFinish) {
