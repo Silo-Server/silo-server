@@ -201,8 +201,12 @@ func TestResolveEbookMediaItemReusesRootScopedContentID(t *testing.T) {
 	if finder.calls != 1 {
 		t.Fatalf("root finder calls = %d, want 1", finder.calls)
 	}
-	if len(writer.upserts) != 0 {
-		t.Fatalf("unexpected item upsert for existing root: %d", len(writer.upserts))
+	if len(writer.upserts) != 1 {
+		t.Fatalf("item upserts = %d, want metadata refresh", len(writer.upserts))
+	}
+	item := writer.upserts[0]
+	if item.ContentID != "ebook-root-id" || item.Type != "ebook" || item.Title != "Same Title" {
+		t.Fatalf("refreshed item = %+v", item)
 	}
 }
 

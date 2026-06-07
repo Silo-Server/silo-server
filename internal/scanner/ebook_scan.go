@@ -147,6 +147,9 @@ func resolveEbookMediaItem(
 		return "", fmt.Errorf("find ebook by root path: %w", err)
 	}
 	if existingID != "" {
+		if err := upsertEbookMediaItemWithID(ctx, itemWriter, existingID, book); err != nil {
+			return "", err
+		}
 		return existingID, nil
 	}
 	return createEbookMediaItem(ctx, itemWriter, book)
@@ -160,9 +163,19 @@ func createEbookMediaItem(ctx context.Context, itemWriter filesystemMediaItemWri
 	if err != nil {
 		return "", fmt.Errorf("generate content_id: %w", err)
 	}
+	if err := upsertEbookMediaItemWithID(ctx, itemWriter, id, book); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func upsertEbookMediaItemWithID(ctx context.Context, itemWriter filesystemMediaItemWriter, contentID string, book *parsedEbook) error {
+	if itemWriter == nil {
+		return fmt.Errorf("media item writer not configured")
+	}
 	title := ebookTitleOrDefault(book)
 	item := &models.MediaItem{
-		ContentID: id,
+		ContentID: contentID,
 		Type:      "ebook",
 		Title:     title,
 		SortTitle: titleutil.DeriveDefaultSortTitle(title),
@@ -172,9 +185,9 @@ func createEbookMediaItem(ctx context.Context, itemWriter filesystemMediaItemWri
 		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
 	}
 	if err := itemWriter.Upsert(ctx, item); err != nil {
-		return "", err
+		return err
 	}
-	return id, nil
+	return nil
 }
 
 func applyEbookToMediaItem(item *models.MediaItem, book *parsedEbook) {
@@ -292,6 +305,8 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 	if s.personRepo == nil {
 		return fmt.Errorf("personRepo not configured on Scanner")
 	}
+	// Ebook scanner credits are currently author-only. ReplacePeople clears
+	// scanner-owned stale authors when a file is retagged or loses authors.
 	if book == nil || len(book.Authors) == 0 {
 		return s.itemRepo.ReplacePeople(ctx, contentID, nil)
 	}
@@ -320,7 +335,10 @@ func (s *Scanner) upsertEbookISBN(ctx context.Context, contentID string, book *p
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
 		VALUES ($1, 'isbn', $2, 'ebook')
-		ON CONFLICT DO NOTHING
+		ON CONFLICT (content_id, provider) DO UPDATE SET
+		    provider_id = EXCLUDED.provider_id,
+		    item_type = EXCLUDED.item_type,
+		    updated_at = NOW()
 	`, contentID, book.ISBN); err != nil {
 		return fmt.Errorf("upsert ebook ISBN provider id: %w", err)
 	}
