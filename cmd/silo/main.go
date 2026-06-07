@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -1896,47 +1895,17 @@ func main() {
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
 
-			// Access filter resolver for profile-scoped library access.
-			compatDeps.AccessFilterFn = func(ctx context.Context, userID int, profileID string) catalog.AccessFilter {
-				if userStoreProvider == nil {
-					return catalog.AccessFilter{}
-				}
-				store, err := userStoreProvider.ForUser(ctx, userID)
-				if err != nil {
-					return catalog.AccessFilter{}
-				}
-				profile, err := store.GetProfile(ctx, profileID)
-				if err != nil || profile == nil {
-					return catalog.AccessFilter{}
-				}
-				filter := catalog.AccessFilter{
-					MaxContentRating: profile.MaxContentRating,
-				}
-				if profile.LibraryRestrictionsEnabled && len(profile.AllowedLibraryIDs) > 0 {
-					filter.AllowedLibraryIDs = profile.AllowedLibraryIDs
-				}
-				// Apply user-disabled library IDs.
-				if raw, err := store.GetSetting(ctx, "disabled_library_ids"); err == nil && raw != "" {
-					var disabled []int
-					if json.Unmarshal([]byte(raw), &disabled) == nil && len(disabled) > 0 {
-						if filter.AllowedLibraryIDs != nil {
-							filtered := make([]int, 0, len(filter.AllowedLibraryIDs))
-							disSet := make(map[int]struct{}, len(disabled))
-							for _, id := range disabled {
-								disSet[id] = struct{}{}
-							}
-							for _, id := range filter.AllowedLibraryIDs {
-								if _, ok := disSet[id]; !ok {
-									filtered = append(filtered, id)
-								}
-							}
-							filter.AllowedLibraryIDs = filtered
-						} else {
-							filter.DisabledLibraryIDs = disabled
-						}
-					}
-				}
-				return filter
+			// Access filter resolver for viewer-scoped library access.
+			// Backed by the shared access.Resolver so account-level library
+			// restrictions (users.library_ids), profile restrictions,
+			// user-disabled libraries, and rating/quality ceilings apply to
+			// the compat API exactly as they do to the native API.
+			if userStoreProvider != nil {
+				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(access.NewResolver(
+					userRepo,
+					userStoreProvider,
+					nil, // profile tokens unused: compat login already verifies PINs
+				))
 			}
 		}
 

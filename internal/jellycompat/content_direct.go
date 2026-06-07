@@ -46,6 +46,14 @@ type itemAccessSource interface {
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 }
 
+// folderListSource is the subset of *catalog.FolderRepository that
+// directContentService relies on. Defined as an interface so tests can
+// substitute a stub without standing up a Postgres pool.
+type folderListSource interface {
+	GetEnabled(ctx context.Context) ([]*models.MediaFolder, error)
+	ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error)
+}
+
 // seasonListSource is the subset of *catalog.SeasonRepository that
 // directContentService relies on.
 type seasonListSource interface {
@@ -71,7 +79,7 @@ type directContentService struct {
 	seasonRepo      seasonListSource
 	episodeRepo     episodeListSource
 	detailSvc       *catalog.DetailService
-	folderRepo      *catalog.FolderRepository
+	folderRepo      folderListSource
 	storeProvider   userstore.UserStoreProvider
 	accessFilter    AccessFilterResolver
 	posterPresigner LibraryPosterPresigner
@@ -84,7 +92,7 @@ func newDirectContentService(
 	seasonRepo *catalog.SeasonRepository,
 	episodeRepo *catalog.EpisodeRepository,
 	detailSvc *catalog.DetailService,
-	folderRepo *catalog.FolderRepository,
+	folderRepo folderListSource,
 	storeProvider userstore.UserStoreProvider,
 	accessFilter AccessFilterResolver,
 ) *directContentService {
@@ -136,7 +144,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 
 	var folders []*models.MediaFolder
 	var err error
-	if len(filter.AllowedLibraryIDs) > 0 {
+	if filter.AllowedLibraryIDs != nil {
+		// A non-nil allowlist means the viewer is restricted; an empty
+		// allowlist grants access to no libraries at all.
+		if len(filter.AllowedLibraryIDs) == 0 {
+			return []upstreamUserLibrary{}, nil
+		}
 		folders, err = s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
 	} else {
 		folders, err = s.folderRepo.GetEnabled(ctx)
@@ -145,8 +158,16 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 		return nil, fmt.Errorf("list libraries: %w", err)
 	}
 
+	disabled := make(map[int]struct{}, len(filter.DisabledLibraryIDs))
+	for _, id := range filter.DisabledLibraryIDs {
+		disabled[id] = struct{}{}
+	}
+
 	libraries := make([]upstreamUserLibrary, 0, len(folders))
 	for _, f := range folders {
+		if _, ok := disabled[f.ID]; ok {
+			continue
+		}
 		lib := upstreamUserLibrary{
 			ID:         f.ID,
 			Name:       f.Name,
