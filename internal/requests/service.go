@@ -828,6 +828,26 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 	if s.router == nil || in.InstallationID == nil {
 		return nil
 	}
+	// On UPDATE the client omits api_key_ref ("leave blank to keep saved key"),
+	// so resolveAPIKey would otherwise validate against an empty credential. Mirror
+	// LoadIntegrationOptions's backfill: load the stored row by id and reuse the
+	// saved api key ref (and BaseURL/PluginConfig if also blank). Nil-safe — a
+	// brand-new id has no stored row, so just proceed with what the body carries.
+	if strings.TrimSpace(in.APIKeyRef) == "" && strings.TrimSpace(in.ID) != "" {
+		stored, err := s.store.GetIntegration(ctx, in.ID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if stored != nil {
+			in.APIKeyRef = stored.APIKeyRef
+			if strings.TrimSpace(in.BaseURL) == "" {
+				in.BaseURL = stored.BaseURL
+			}
+			if in.PluginConfig == nil {
+				in.PluginConfig = stored.PluginConfig
+			}
+		}
+	}
 	apiKey, err := s.resolveAPIKey(ctx, in)
 	if err != nil {
 		return err
@@ -864,15 +884,9 @@ func validateInstance(in *Integration) error {
 	if in.InstallationID == nil {
 		return fmt.Errorf("%w: installation_id is required", ErrInvalidInput)
 	}
-	is4k, _ := in.PluginConfig["is_4k"].(bool)
-	isDefault, _ := in.PluginConfig["is_default"].(bool)
-	isDefault4k, _ := in.PluginConfig["is_default_4k"].(bool)
-	if isDefault && is4k {
-		return fmt.Errorf("%w: the HD default cannot be a 4K server", ErrInvalidInput)
-	}
-	if isDefault4k && !is4k {
-		return fmt.Errorf("%w: the 4K default must be a 4K server", ErrInvalidInput)
-	}
+	// The is_default/is_4k/is_default_4k cross-field consistency check is owned by
+	// the request_router plugin's Validate RPC, which surfaces it as an inline
+	// field error (better UX than a generic host 400). See validateViaPlugin.
 	return nil
 }
 

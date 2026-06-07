@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -138,5 +140,72 @@ func TestAdminFormToJSONSchemaFields(t *testing.T) {
 	if len(section.ShowWhen) != 1 || section.ShowWhen[0].Field != "service_type" ||
 		len(section.ShowWhen[0].Equals) != 1 {
 		t.Errorf("section show_when not serialized correctly: %+v", section.ShowWhen)
+	}
+}
+
+// adminFormDTOMappingRenames records intentional proto-field -> DTO-field name
+// renames. The DTO field names currently mirror the proto field names 1:1, so
+// this is empty; add an entry only when a DTO field is deliberately named
+// differently from its proto source (the test then accepts the renamed target).
+var adminFormDTOMappingRenames = map[string]string{}
+
+// protoInternalFields are the protobuf-runtime bookkeeping fields every
+// generated message struct carries. They are never serialized to the client
+// DTO, so the completeness guard skips them.
+var protoInternalFields = map[string]bool{
+	"state":         true,
+	"sizeCache":     true,
+	"unknownFields": true,
+}
+
+// TestAdminFormDTOCompleteness is a guard against the C1-class bug: the
+// hand-written adminFormToJSON allowlist (pluginAdminFormFieldJSON /
+// pluginAdminFormSectionJSON / pluginAdminFormJSON) silently dropping a NEW
+// proto field added to AdminFormField / AdminFormDescriptor / AdminFormSection
+// later. It reflects over each proto message's exported fields and asserts the
+// corresponding JSON DTO struct has a field mapping to it (by identical Go name,
+// or via an explicit rename in adminFormDTOMappingRenames). When the next proto
+// field lands, this FAILS naming the un-mapped field, forcing the serializer +
+// DTO to be updated in lockstep. (We deliberately do not switch the serializer
+// to protojson — the short-form control-string MULTI_SELECT mapping makes that
+// risky; this guard is the proportionate fix.)
+func TestAdminFormDTOCompleteness(t *testing.T) {
+	cases := []struct {
+		name  string
+		proto reflect.Type
+		dto   reflect.Type
+	}{
+		{"AdminFormField", reflect.TypeOf(pluginv1.AdminFormField{}), reflect.TypeOf(pluginAdminFormFieldJSON{})},
+		{"AdminFormDescriptor", reflect.TypeOf(pluginv1.AdminFormDescriptor{}), reflect.TypeOf(pluginAdminFormJSON{})},
+		{"AdminFormSection", reflect.TypeOf(pluginv1.AdminFormSection{}), reflect.TypeOf(pluginAdminFormSectionJSON{})},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dtoFields := map[string]bool{}
+			for i := 0; i < tc.dto.NumField(); i++ {
+				dtoFields[tc.dto.Field(i).Name] = true
+			}
+
+			for i := 0; i < tc.proto.NumField(); i++ {
+				pf := tc.proto.Field(i)
+				if !pf.IsExported() {
+					continue // unexported protobuf-internal state
+				}
+				if protoInternalFields[pf.Name] || strings.HasPrefix(pf.Name, "XXX_") {
+					continue
+				}
+				want := pf.Name
+				if mapped, ok := adminFormDTOMappingRenames[pf.Name]; ok {
+					want = mapped
+				}
+				if !dtoFields[want] {
+					t.Errorf("proto field %s.%s has no corresponding field %q in the JSON DTO %s; "+
+						"adminFormToJSON would silently drop it. Add the field to the DTO + serializer "+
+						"(or record an intentional rename in adminFormDTOMappingRenames).",
+						tc.name, pf.Name, want, tc.dto.Name())
+				}
+			}
+		})
 	}
 }

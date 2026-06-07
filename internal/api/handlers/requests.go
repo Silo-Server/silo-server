@@ -435,15 +435,6 @@ func (h *RequestsHandler) HandleCreateIntegration(w http.ResponseWriter, r *http
 	}
 	created, err := h.service.CreateIntegration(r.Context(), viewer, integration)
 	if err != nil {
-		var verr *mediarequests.ValidationError
-		if errors.As(err, &verr) {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"error":        "validation_failed",
-				"field_errors": verr.FieldErrors,
-				"form_error":   verr.FormError,
-			})
-			return
-		}
 		writeRequestServiceError(w, err)
 		return
 	}
@@ -463,15 +454,6 @@ func (h *RequestsHandler) HandleUpdateIntegration(w http.ResponseWriter, r *http
 	integration.ID = chi.URLParam(r, "id")
 	updated, err := h.service.UpdateIntegration(r.Context(), viewer, integration)
 	if err != nil {
-		var verr *mediarequests.ValidationError
-		if errors.As(err, &verr) {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"error":        "validation_failed",
-				"field_errors": verr.FieldErrors,
-				"form_error":   verr.FormError,
-			})
-			return
-		}
 		writeRequestServiceError(w, err)
 		return
 	}
@@ -648,6 +630,18 @@ func toIntegrationResponses(integrations []mediarequests.Integration) []requestI
 }
 
 func writeRequestServiceError(w http.ResponseWriter, err error) {
+	// Plugin/instance validation failures carry inline field/form errors; surface
+	// them as a structured 400 so any handler routing through here renders them
+	// inline. Checked first because *ValidationError does not wrap a sentinel.
+	var verr *mediarequests.ValidationError
+	if errors.As(err, &verr) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":        "validation_failed",
+			"field_errors": verr.FieldErrors,
+			"form_error":   verr.FormError,
+		})
+		return
+	}
 	var quota mediarequests.QuotaError
 	switch {
 	case errors.As(err, &quota):
