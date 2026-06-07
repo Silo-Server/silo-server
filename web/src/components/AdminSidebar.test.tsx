@@ -75,6 +75,13 @@ describe("AdminSidebar", () => {
     expect(markup).toContain(">Recommendations<");
   });
 
+  it("includes a Marker History link in the users navigation", () => {
+    const markup = renderSidebar();
+
+    expect(markup).toContain('href="/admin/marker-history"');
+    expect(markup).toContain(">Marker History<");
+  });
+
   it("renders the build identifier in the footer", () => {
     const markup = renderSidebar();
 
@@ -82,7 +89,7 @@ describe("AdminSidebar", () => {
     expect(markup).toContain(">b4c5aae1+dirty<");
   });
 
-  it("renders unavailable when build metadata is missing", () => {
+  it("renders dev build when build metadata is missing", () => {
     mockUseBuildInfo.mockReturnValueOnce({
       data: {
         ...defaultBuildInfo,
@@ -98,7 +105,7 @@ describe("AdminSidebar", () => {
 
     const markup = renderSidebar();
 
-    expect(markup).toContain(">unavailable<");
+    expect(markup).toContain(">dev build<");
   });
 
   it("renders load failed when the build info query errors", () => {

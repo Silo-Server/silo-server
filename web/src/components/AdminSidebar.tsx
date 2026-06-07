@@ -150,6 +150,11 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
           href: "/admin/history",
         },
         {
+          label: "Marker History",
+          icon: <Captions className="h-[18px] w-[18px]" />,
+          href: "/admin/marker-history",
+        },
+        {
           label: "History Import",
           icon: <Download className="h-[18px] w-[18px]" />,
           href: "/admin/history-import",

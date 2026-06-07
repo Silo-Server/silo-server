@@ -30,7 +30,10 @@ import { selectDefaultPlaybackVariantVersion } from "./components/versionRanking
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { resolveLeafPrimaryAction } from "./itemDetailLayout";
 import { getWatchedActionLabel } from "./watchedState";
-import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import {
+  canCurateMetadata as canCurateMetadataForUser,
+  canEditMarkers as canEditMarkersForUser,
+} from "@/lib/permissions";
 
 function formatDuration(minutes: number): string {
   if (minutes <= 0) return "";
@@ -45,6 +48,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const canCurateMetadata = canCurateMetadataForUser(user);
+  const canEditMarkers = canEditMarkersForUser(user);
   const { profile: currentProfile } = useCurrentProfile();
 
   const isFavorite = item.user_state?.is_favorite ?? false;
@@ -255,6 +259,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             isRefreshing={refreshMetadataMutation.isPending}
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
+            canEditMarkers={canEditMarkers}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
             versions={item.versions}

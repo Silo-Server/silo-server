@@ -6,6 +6,7 @@ import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
+import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
@@ -16,6 +17,7 @@ import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitlePositionStyle } from "../hooks/useSubtitlePositionStyle";
 import { useNextEpisode } from "../hooks/useNextEpisode";
+import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { COMPATIBILITY_QUALITY_ID, useTranscodeQuality } from "../hooks/useTranscodeQuality";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
@@ -44,6 +46,8 @@ import type {
   PlayerSubtitleInfo,
   PlayerSubtitleTrackSignature,
   PlayerTimeRange,
+  MarkerDraft,
+  MarkerRegionView,
   SeriesContext,
   SubtitleMode,
 } from "../types";
@@ -84,6 +88,9 @@ interface VideoPlayerProps {
   autoSkipRecap?: boolean;
   preview?: PlayerTimeRange | null;
   autoPlayNextPreview?: boolean;
+  canEditMarkers?: boolean;
+  /** Notified after a successful in-player marker edit so the host can patch local state. */
+  onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
   duration?: number;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
@@ -171,6 +178,8 @@ export function VideoPlayer({
   autoSkipRecap = false,
   preview = null,
   autoPlayNextPreview = false,
+  canEditMarkers = true,
+  onMarkersEdited,
   duration: propDuration,
   seriesContext,
   onNavigateEpisode,
@@ -1527,6 +1536,34 @@ export function VideoPlayer({
     };
   }, [playing, resetControlsTimer]);
 
+  // -- Marker editing --
+  const currentMarkers = useMemo<MarkerDraft>(
+    () => ({ intro, recap, credits, preview }),
+    [intro, recap, credits, preview],
+  );
+  const markerEditor = useMarkerEditor({
+    fileId: activeFileId,
+    duration,
+    canEdit: canEditMarkers,
+    markers: currentMarkers,
+    onSaved: (saved) => {
+      if (activeFileId != null) onMarkersEdited?.(activeFileId, saved);
+    },
+  });
+  // While editing, the seek bar reflects the live draft; otherwise the saved
+  // props. All four kinds are shown so recap/preview are visible too.
+  const markerRegions = useMemo<MarkerRegionView[]>(() => {
+    const source = markerEditor.editing ? markerEditor.draft : currentMarkers;
+    const out: MarkerRegionView[] = [];
+    for (const kind of MARKER_KINDS) {
+      const range = source[kind];
+      if (range && range.end > range.start) {
+        out.push({ kind, start: range.start, end: range.end });
+      }
+    }
+    return out;
+  }, [markerEditor.editing, markerEditor.draft, currentMarkers]);
+
   // -- Playback info overlay --
   const [showPlaybackInfo, setShowPlaybackInfo] = useState(false);
 
@@ -2251,6 +2288,11 @@ export function VideoPlayer({
       {!isDetached && showIntroSkip && <IntroSkipButton onSkip={skipIntro} />}
       {!isDetached && showRecapSkip && <IntroSkipButton onSkip={skipRecap} label="Skip Recap" />}
 
+      {/* Marker editor */}
+      {!isDetached && markerEditor.editing && (
+        <MarkerEditPanel editor={markerEditor} currentTime={currentTime} />
+      )}
+
       {/* Next episode overlay */}
       {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (
         <NextEpisodeOverlay
@@ -2274,14 +2316,19 @@ export function VideoPlayer({
       {/* Controls */}
       {!isDetached && isPlayerReady && (
         <PlayerControls
-          visible={controlsVisible}
+          visible={controlsVisible || markerEditor.editing}
           playing={playing}
           currentTime={currentTime}
           duration={duration}
           buffered={buffered}
           chapters={chapters}
-          introRegion={intro}
-          creditsRegion={credits}
+          regions={markerRegions}
+          editing={markerEditor.editing}
+          activeEditKind={markerEditor.activeKind}
+          onRegionEdgeChange={markerEditor.setEdge}
+          markerEditAvailable={markerEditor.canEdit}
+          markerEditActive={markerEditor.editing}
+          onToggleMarkerEdit={markerEditor.editing ? markerEditor.cancel : markerEditor.begin}
           volume={volume}
           muted={muted}
           isFullscreen={isFullscreen}

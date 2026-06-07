@@ -984,6 +984,7 @@ type segmentState struct {
 	provider   *string
 	confidence *float64
 	algorithm  *string
+	detectedAt *time.Time
 }
 
 // applySegmentPatch merges the patched start/end into the segment state, then
@@ -993,10 +994,14 @@ type segmentState struct {
 func applySegmentPatch(
 	state *segmentState,
 	legacySharedSource *string,
-	update MarkerUpdate,
+	source string,
+	provider *string,
+	confidence *float64,
+	algorithm string,
 	patchStart, patchEnd *float64,
 	duration float64,
 	segmentName string,
+	mutationAt time.Time,
 ) (bool, error) {
 	if patchStart == nil && patchEnd == nil {
 		return false, nil
@@ -1024,23 +1029,62 @@ func applySegmentPatch(
 	if effectiveSource == nil && state.start != nil && state.end != nil {
 		effectiveSource = legacySharedSource
 	}
-	if !markers.CanWriteMarker(effectiveSource, state.confidence, update.MarkersSource, update.MarkersConfidence) {
+	if !markers.CanWriteMarker(effectiveSource, state.confidence, source, confidence) {
 		return false, nil
 	}
 
-	src := update.MarkersSource
-	algo := markerAlgorithm(update)
+	src := source
+	algo := algorithm
+	nextState := segmentState{
+		start:      nextStart,
+		end:        nextEnd,
+		source:     &src,
+		provider:   provider,
+		confidence: confidence,
+		algorithm:  &algo,
+		detectedAt: &mutationAt,
+	}
+	if segmentEqual(*state, nextState) {
+		return false, nil
+	}
 	state.start = nextStart
 	state.end = nextEnd
 	state.source = &src
-	state.provider = update.MarkersProvider
-	state.confidence = update.MarkersConfidence
+	state.provider = provider
+	state.confidence = confidence
 	state.algorithm = &algo
+	state.detectedAt = &mutationAt
 	return true, nil
 }
 
-// segmentEqual reports whether two segment states are byte-equivalent. Used to
-// detect no-op writes so the transaction can short-circuit without a SQL UPDATE.
+// resolveSegmentProvenance returns the source/provider/confidence/algorithm to
+// write for a segment: the per-segment override when present, otherwise the
+// update's shared Markers* values. The algorithm always falls back to
+// external:<source> so writes carry an algorithm tag.
+func resolveSegmentProvenance(update MarkerUpdate, override *SegmentProvenance) (source string, provider *string, confidence *float64, algorithm string) {
+	source = update.MarkersSource
+	provider = update.MarkersProvider
+	confidence = update.MarkersConfidence
+	algorithm = update.MarkersAlgorithm
+	if override != nil {
+		if override.Source != "" {
+			source = override.Source
+		}
+		provider = override.Provider
+		confidence = override.Confidence
+		if override.Algorithm != "" {
+			algorithm = override.Algorithm
+		}
+	}
+	if algorithm == "" {
+		algorithm = "external:" + source
+	}
+	return source, provider, confidence, algorithm
+}
+
+// segmentEqual reports whether two segment states are semantically equivalent.
+// detected_at is intentionally ignored so writing the same marker value does
+// not refresh provenance timestamps or create audit noise.
 func segmentEqual(a, b segmentState) bool {
 	return ptrFloatEqual(a.start, b.start) &&
 		ptrFloatEqual(a.end, b.end) &&
@@ -1055,22 +1099,243 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 	if update.MarkersSource == "" {
 		return false, fmt.Errorf("marker source is required")
 	}
+	return r.UpsertAndClearMarkers(ctx, fileID, update, nil)
+}
+
+// ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
+// a file, including their provenance columns. Used by the admin manual-marker
+// API to remove a marker so detection/online fetch can repopulate it. Returns
+// whether a row was updated.
+func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
+	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
+}
+
+// UpsertAndClearMarkers applies manual marker sets and clears in one row-locking
+// transaction so mixed PUT bodies cannot partially persist.
+func (r *FileRepository) UpsertAndClearMarkers(ctx context.Context, fileID int, update MarkerUpdate, clearSegments []string) (bool, error) {
+	return r.upsertAndClearMarkers(ctx, fileID, &update, clearSegments)
+}
+
+func (r *FileRepository) ListMarkerEditAudit(ctx context.Context, fileIDs []int, limit int) ([]MarkerEditAuditRow, error) {
+	if len(fileIDs) == 0 {
+		return []MarkerEditAuditRow{}, nil
+	}
+	return r.listMarkerEditAudit(ctx, "WHERE a.media_file_id = ANY ($1)", []any{fileIDs}, limit)
+}
+
+func (r *FileRepository) ListAllMarkerEditAudit(ctx context.Context, limit int) ([]MarkerEditAuditRow, error) {
+	return r.listMarkerEditAudit(ctx, "", nil, limit)
+}
+
+func (r *FileRepository) listMarkerEditAudit(ctx context.Context, whereClause string, args []any, limit int) ([]MarkerEditAuditRow, error) {
+	limit = normalizeMarkerAuditLimit(limit)
+	args = append(args, limit)
+	limitPlaceholder := len(args)
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+		SELECT a.id,
+		       a.media_file_id,
+		       NULLIF(CASE WHEN mf.episode_id <> '' THEN mf.episode_id ELSE mf.content_id END, '') AS item_id,
+		       NULLIF(COALESCE(CASE WHEN mf.episode_id <> '' THEN 'episode' ELSE mi.type END, mf.base_type), '') AS item_type,
+		       NULLIF(COALESCE(e.title, mi.title, mf.base_title), '') AS media_title,
+		       NULLIF(mf.file_path, '') AS file_path,
+		       a.segment_kind,
+		       a.action,
+		       a.before_marker,
+		       a.after_marker,
+		       a.user_id,
+		       u.username,
+		       a.impersonator_user_id,
+		       iu.username,
+		       a.api_key_id,
+		       a.request_id,
+		       a.client_ip::text,
+		       a.user_agent,
+		       a.created_at
+		FROM marker_edit_audit a
+		LEFT JOIN media_files mf ON mf.id = a.media_file_id
+		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
+		LEFT JOIN episodes e ON e.content_id = mf.episode_id
+		LEFT JOIN users u ON u.id = a.user_id
+		LEFT JOIN users iu ON iu.id = a.impersonator_user_id
+		%s
+		ORDER BY a.created_at DESC, a.id DESC
+		LIMIT $%d`, whereClause, limitPlaceholder), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list marker edit audit: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]MarkerEditAuditRow, 0, limit)
+	for rows.Next() {
+		var row MarkerEditAuditRow
+		var beforeJSON []byte
+		var afterJSON []byte
+		if err := rows.Scan(
+			&row.ID,
+			&row.MediaFileID,
+			&row.ItemID,
+			&row.ItemType,
+			&row.MediaTitle,
+			&row.FilePath,
+			&row.SegmentKind,
+			&row.Action,
+			&beforeJSON,
+			&afterJSON,
+			&row.UserID,
+			&row.Username,
+			&row.ImpersonatorUserID,
+			&row.ImpersonatorUsername,
+			&row.APIKeyID,
+			&row.RequestID,
+			&row.ClientIP,
+			&row.UserAgent,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan marker edit audit row: %w", err)
+		}
+		before, err := unmarshalMarkerAuditSegment(beforeJSON)
+		if err != nil {
+			return nil, err
+		}
+		after, err := unmarshalMarkerAuditSegment(afterJSON)
+		if err != nil {
+			return nil, err
+		}
+		row.Before = before
+		row.After = after
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate marker edit audit rows: %w", err)
+	}
+	return out, nil
+}
+
+func normalizeMarkerAuditLimit(limit int) int {
+	if limit <= 0 {
+		return 25
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+type markerSegmentFlags struct {
+	intro   bool
+	credits bool
+	recap   bool
+	preview bool
+}
+
+func (f markerSegmentFlags) any() bool {
+	return f.intro || f.credits || f.recap || f.preview
+}
+
+type markerMutationState struct {
+	duration           float64
+	existingSource     *string
+	existingConfidence *float64
+	intro              segmentState
+	credits            segmentState
+	recap              segmentState
+	preview            segmentState
+}
+
+func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, update *MarkerUpdate, clearSegments []string) (bool, error) {
+	hasUpdate := update != nil && update.HasAnySegment()
+	if hasUpdate && update.MarkersSource == "" {
+		return false, fmt.Errorf("marker source is required")
+	}
+	clearFlags, err := markerClearFlags(clearSegments)
+	if err != nil {
+		return false, err
+	}
+	if !hasUpdate && !clearFlags.any() {
+		return false, nil
+	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("begin marker upsert transaction: %w", err)
+		return false, fmt.Errorf("begin marker mutation transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	var (
-		duration           float64
-		existingSource     *string
-		existingConfidence *float64
-		intro              segmentState
-		credits            segmentState
-		recap              segmentState
-		preview            segmentState
-	)
+	state, err := loadMarkerMutationState(ctx, tx, fileID)
+	if err != nil {
+		return false, err
+	}
+	before := state
+	mutationAt := time.Now().UTC()
+	changed := markerSegmentFlags{}
+
+	if hasUpdate {
+		applied, err := applyMarkerUpdateToMutationState(update, &state, mutationAt)
+		if err != nil {
+			return false, err
+		}
+		changed.intro = changed.intro || applied.intro
+		changed.credits = changed.credits || applied.credits
+		changed.recap = changed.recap || applied.recap
+		changed.preview = changed.preview || applied.preview
+	}
+	if clearFlags.intro {
+		changed.intro = clearSegmentState(&state.intro) || changed.intro
+	}
+	if clearFlags.credits {
+		changed.credits = clearSegmentState(&state.credits) || changed.credits
+	}
+	if clearFlags.recap {
+		changed.recap = clearSegmentState(&state.recap) || changed.recap
+	}
+	if clearFlags.preview {
+		changed.preview = clearSegmentState(&state.preview) || changed.preview
+	}
+	if !changed.any() {
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit marker no-op transaction: %w", err)
+		}
+		return false, nil
+	}
+
+	wrote, err := writeMarkerMutationState(ctx, tx, fileID, state)
+	if err != nil {
+		return false, err
+	}
+	if wrote {
+		if audit, ok := MarkerAuditContextFromContext(ctx); ok {
+			if err := insertMarkerEditAuditRows(ctx, tx, fileID, before, state, changed, audit, mutationAt); err != nil {
+				return false, err
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit marker mutation transaction: %w", err)
+	}
+	return wrote, nil
+}
+
+func markerClearFlags(segments []string) (markerSegmentFlags, error) {
+	var flags markerSegmentFlags
+	for _, seg := range segments {
+		switch seg {
+		case "intro":
+			flags.intro = true
+		case "credits":
+			flags.credits = true
+		case "recap":
+			flags.recap = true
+		case "preview":
+			flags.preview = true
+		default:
+			return markerSegmentFlags{}, fmt.Errorf("invalid marker segment %q", seg)
+		}
+	}
+	return flags, nil
+}
+
+func loadMarkerMutationState(ctx context.Context, tx pgx.Tx, fileID int) (markerMutationState, error) {
+	var state markerMutationState
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(duration, 0),
 		        markers_source,
@@ -1081,120 +1346,132 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 		        intro_markers_provider,
 		        intro_markers_confidence,
 		        intro_markers_algorithm,
+		        intro_markers_detected_at,
 		        credits_start,
 		        credits_end,
 		        credits_markers_source,
 		        credits_markers_provider,
 		        credits_markers_confidence,
 		        credits_markers_algorithm,
+		        credits_markers_detected_at,
 		        recap_start,
 		        recap_end,
 		        recap_markers_source,
 		        recap_markers_provider,
 		        recap_markers_confidence,
 		        recap_markers_algorithm,
+		        recap_markers_detected_at,
 		        preview_start,
 		        preview_end,
 		        preview_markers_source,
 		        preview_markers_provider,
 		        preview_markers_confidence,
-		        preview_markers_algorithm
+		        preview_markers_algorithm,
+		        preview_markers_detected_at
 		 FROM media_files WHERE id = $1 FOR UPDATE`,
 		fileID,
 	).Scan(
-		&duration,
-		&existingSource,
-		&existingConfidence,
-		&intro.start, &intro.end, &intro.source, &intro.provider, &intro.confidence, &intro.algorithm,
-		&credits.start, &credits.end, &credits.source, &credits.provider, &credits.confidence, &credits.algorithm,
-		&recap.start, &recap.end, &recap.source, &recap.provider, &recap.confidence, &recap.algorithm,
-		&preview.start, &preview.end, &preview.source, &preview.provider, &preview.confidence, &preview.algorithm,
+		&state.duration,
+		&state.existingSource,
+		&state.existingConfidence,
+		&state.intro.start, &state.intro.end, &state.intro.source, &state.intro.provider, &state.intro.confidence, &state.intro.algorithm, &state.intro.detectedAt,
+		&state.credits.start, &state.credits.end, &state.credits.source, &state.credits.provider, &state.credits.confidence, &state.credits.algorithm, &state.credits.detectedAt,
+		&state.recap.start, &state.recap.end, &state.recap.source, &state.recap.provider, &state.recap.confidence, &state.recap.algorithm, &state.recap.detectedAt,
+		&state.preview.start, &state.preview.end, &state.preview.source, &state.preview.provider, &state.preview.confidence, &state.preview.algorithm, &state.preview.detectedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, ErrFileNotFound
+			return markerMutationState{}, ErrFileNotFound
 		}
-		return false, fmt.Errorf("load existing marker source: %w", err)
+		return markerMutationState{}, fmt.Errorf("load existing marker source: %w", err)
 	}
+	return state, nil
+}
 
-	originalIntro, originalCredits, originalRecap, originalPreview := intro, credits, recap, preview
-
-	introApplied, err := applySegmentPatch(&intro, existingSource, update, update.IntroStart, update.IntroEnd, duration, "intro")
+func applyMarkerUpdateToMutationState(update *MarkerUpdate, state *markerMutationState, mutationAt time.Time) (markerSegmentFlags, error) {
+	var applied markerSegmentFlags
+	introSrc, introProv, introConf, introAlgo := resolveSegmentProvenance(*update, update.IntroProvenance)
+	var err error
+	applied.intro, err = applySegmentPatch(&state.intro, state.existingSource, introSrc, introProv, introConf, introAlgo, update.IntroStart, update.IntroEnd, state.duration, "intro", mutationAt)
 	if err != nil {
-		return false, err
+		return markerSegmentFlags{}, err
 	}
-	creditsApplied, err := applySegmentPatch(&credits, existingSource, update, update.CreditsStart, update.CreditsEnd, duration, "credits")
+	creditsSrc, creditsProv, creditsConf, creditsAlgo := resolveSegmentProvenance(*update, update.CreditsProvenance)
+	applied.credits, err = applySegmentPatch(&state.credits, state.existingSource, creditsSrc, creditsProv, creditsConf, creditsAlgo, update.CreditsStart, update.CreditsEnd, state.duration, "credits", mutationAt)
 	if err != nil {
-		return false, err
+		return markerSegmentFlags{}, err
 	}
-	recapApplied, err := applySegmentPatch(&recap, existingSource, update, update.RecapStart, update.RecapEnd, duration, "recap")
+	recapSrc, recapProv, recapConf, recapAlgo := resolveSegmentProvenance(*update, update.RecapProvenance)
+	applied.recap, err = applySegmentPatch(&state.recap, state.existingSource, recapSrc, recapProv, recapConf, recapAlgo, update.RecapStart, update.RecapEnd, state.duration, "recap", mutationAt)
 	if err != nil {
-		return false, err
+		return markerSegmentFlags{}, err
 	}
-	previewApplied, err := applySegmentPatch(&preview, existingSource, update, update.PreviewStart, update.PreviewEnd, duration, "preview")
+	previewSrc, previewProv, previewConf, previewAlgo := resolveSegmentProvenance(*update, update.PreviewProvenance)
+	applied.preview, err = applySegmentPatch(&state.preview, state.existingSource, previewSrc, previewProv, previewConf, previewAlgo, update.PreviewStart, update.PreviewEnd, state.duration, "preview", mutationAt)
 	if err != nil {
-		return false, err
+		return markerSegmentFlags{}, err
 	}
+	return applied, nil
+}
 
-	anyApplied := introApplied || creditsApplied || recapApplied || previewApplied
-	nextSource, nextConfidence := nextSharedMarkerAttribution(existingSource, existingConfidence, update, anyApplied)
-
-	if segmentEqual(intro, originalIntro) &&
-		segmentEqual(credits, originalCredits) &&
-		segmentEqual(recap, originalRecap) &&
-		segmentEqual(preview, originalPreview) &&
-		ptrStringEqual(existingSource, nextSource) &&
-		ptrFloatEqual(existingConfidence, nextConfidence) {
-		if err := tx.Commit(ctx); err != nil {
-			return false, fmt.Errorf("commit marker no-op transaction: %w", err)
-		}
-		return false, nil
-	}
-
+func writeMarkerMutationState(
+	ctx context.Context,
+	tx pgx.Tx,
+	fileID int,
+	state markerMutationState,
+) (bool, error) {
+	nextSource, nextConfidence := recomputeSharedMarkerAttribution(
+		state.existingSource,
+		state.existingConfidence,
+		state.intro,
+		state.credits,
+		state.recap,
+		state.preview,
+	)
 	tag, err := tx.Exec(ctx, `
 		UPDATE media_files
-		SET intro_start = $2,
-			intro_end = $3,
-			credits_start = $4,
-			credits_end = $5,
-			recap_start = $6,
-			recap_end = $7,
-			preview_start = $8,
-			preview_end = $9,
-			markers_source = $10,
-			markers_confidence = $11,
-			intro_markers_source = $12,
-			intro_markers_provider = $13,
-			intro_markers_confidence = $14,
-			intro_markers_algorithm = $15,
-			intro_markers_detected_at = CASE WHEN $16 THEN NOW() ELSE intro_markers_detected_at END,
-			credits_markers_source = $17,
-			credits_markers_provider = $18,
-			credits_markers_confidence = $19,
-			credits_markers_algorithm = $20,
-			credits_markers_detected_at = CASE WHEN $21 THEN NOW() ELSE credits_markers_detected_at END,
-			recap_markers_source = $22,
-			recap_markers_provider = $23,
-			recap_markers_confidence = $24,
-			recap_markers_algorithm = $25,
-			recap_markers_detected_at = CASE WHEN $26 THEN NOW() ELSE recap_markers_detected_at END,
-			preview_markers_source = $27,
-			preview_markers_provider = $28,
-			preview_markers_confidence = $29,
-			preview_markers_algorithm = $30,
-			preview_markers_detected_at = CASE WHEN $31 THEN NOW() ELSE preview_markers_detected_at END,
+		SET intro_start = $2::double precision,
+			intro_end = $3::double precision,
+			credits_start = $4::double precision,
+			credits_end = $5::double precision,
+			recap_start = $6::double precision,
+			recap_end = $7::double precision,
+			preview_start = $8::double precision,
+			preview_end = $9::double precision,
+			markers_source = $10::text,
+			markers_confidence = $11::double precision,
+			intro_markers_source = $12::text,
+			intro_markers_provider = $13::text,
+			intro_markers_confidence = $14::double precision,
+			intro_markers_algorithm = $15::text,
+			intro_markers_detected_at = $16::timestamptz,
+			credits_markers_source = $17::text,
+			credits_markers_provider = $18::text,
+			credits_markers_confidence = $19::double precision,
+			credits_markers_algorithm = $20::text,
+			credits_markers_detected_at = $21::timestamptz,
+			recap_markers_source = $22::text,
+			recap_markers_provider = $23::text,
+			recap_markers_confidence = $24::double precision,
+			recap_markers_algorithm = $25::text,
+			recap_markers_detected_at = $26::timestamptz,
+			preview_markers_source = $27::text,
+			preview_markers_provider = $28::text,
+			preview_markers_confidence = $29::double precision,
+			preview_markers_algorithm = $30::text,
+			preview_markers_detected_at = $31::timestamptz,
 			updated_at = NOW()
 		WHERE id = $1
 	`,
 		fileID,
-		intro.start, intro.end,
-		credits.start, credits.end,
-		recap.start, recap.end,
-		preview.start, preview.end,
+		state.intro.start, state.intro.end,
+		state.credits.start, state.credits.end,
+		state.recap.start, state.recap.end,
+		state.preview.start, state.preview.end,
 		nextSource, nextConfidence,
-		intro.source, intro.provider, intro.confidence, intro.algorithm, introApplied,
-		credits.source, credits.provider, credits.confidence, credits.algorithm, creditsApplied,
-		recap.source, recap.provider, recap.confidence, recap.algorithm, recapApplied,
-		preview.source, preview.provider, preview.confidence, preview.algorithm, previewApplied,
+		state.intro.source, state.intro.provider, state.intro.confidence, state.intro.algorithm, state.intro.detectedAt,
+		state.credits.source, state.credits.provider, state.credits.confidence, state.credits.algorithm, state.credits.detectedAt,
+		state.recap.source, state.recap.provider, state.recap.confidence, state.recap.algorithm, state.recap.detectedAt,
+		state.preview.source, state.preview.provider, state.preview.confidence, state.preview.algorithm, state.preview.detectedAt,
 	)
 	if err != nil {
 		return false, fmt.Errorf("updating media markers: %w", err)
@@ -1202,11 +1479,225 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 	if tag.RowsAffected() == 0 {
 		return false, ErrFileNotFound
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit marker upsert transaction: %w", err)
-	}
 	return true, nil
+}
+
+func clearSegmentState(state *segmentState) bool {
+	if segmentEqual(*state, segmentState{}) {
+		return false
+	}
+	state.start = nil
+	state.end = nil
+	state.source = nil
+	state.provider = nil
+	state.confidence = nil
+	state.algorithm = nil
+	state.detectedAt = nil
+	return true
+}
+
+func insertMarkerEditAuditRows(
+	ctx context.Context,
+	tx pgx.Tx,
+	fileID int,
+	before markerMutationState,
+	after markerMutationState,
+	changed markerSegmentFlags,
+	audit MarkerAuditContext,
+	mutationAt time.Time,
+) error {
+	type changedSegment struct {
+		kind   string
+		before segmentState
+		after  segmentState
+	}
+	segments := make([]changedSegment, 0, 4)
+	if changed.intro {
+		segments = append(segments, changedSegment{"intro", before.intro, after.intro})
+	}
+	if changed.credits {
+		segments = append(segments, changedSegment{"credits", before.credits, after.credits})
+	}
+	if changed.recap {
+		segments = append(segments, changedSegment{"recap", before.recap, after.recap})
+	}
+	if changed.preview {
+		segments = append(segments, changedSegment{"preview", before.preview, after.preview})
+	}
+
+	for _, segment := range segments {
+		beforeJSON, err := marshalMarkerAuditSegment(markerAuditSegmentForState(segment.before))
+		if err != nil {
+			return err
+		}
+		afterJSON, err := marshalMarkerAuditSegment(markerAuditSegmentForState(segment.after))
+		if err != nil {
+			return err
+		}
+		action := "set"
+		if len(afterJSON) == 0 {
+			action = "clear"
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO marker_edit_audit (
+				media_file_id,
+				segment_kind,
+				action,
+				before_marker,
+				after_marker,
+				user_id,
+				impersonator_user_id,
+				api_key_id,
+				request_id,
+				client_ip,
+				user_agent,
+				created_at
+			)
+			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10::inet, $11, $12)`,
+			fileID,
+			segment.kind,
+			action,
+			nullableJSON(beforeJSON),
+			nullableJSON(afterJSON),
+			audit.UserID,
+			audit.ImpersonatorUserID,
+			audit.APIKeyID,
+			nullableString(audit.RequestID),
+			nullableString(audit.ClientIP),
+			nullableString(audit.UserAgent),
+			mutationAt,
+		)
+		if err != nil {
+			return fmt.Errorf("insert marker edit audit row: %w", err)
+		}
+	}
+	return nil
+}
+
+func markerAuditSegmentForState(state segmentState) *MarkerAuditSegment {
+	if state.start == nil || state.end == nil {
+		return nil
+	}
+	return &MarkerAuditSegment{
+		Start:      cloneFloat(state.start),
+		End:        cloneFloat(state.end),
+		Source:     cloneString(state.source),
+		Provider:   cloneString(state.provider),
+		Confidence: cloneFloat(state.confidence),
+		Algorithm:  cloneString(state.algorithm),
+		DetectedAt: cloneTime(state.detectedAt),
+	}
+}
+
+func marshalMarkerAuditSegment(segment *MarkerAuditSegment) ([]byte, error) {
+	if segment == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(segment)
+	if err != nil {
+		return nil, fmt.Errorf("marshal marker audit segment: %w", err)
+	}
+	return data, nil
+}
+
+func nullableJSON(data []byte) any {
+	if len(data) == 0 {
+		return nil
+	}
+	return data
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func recomputeSharedMarkerAttribution(
+	legacySource *string,
+	legacyConfidence *float64,
+	states ...segmentState,
+) (*string, *float64) {
+	var (
+		bestSource     *string
+		bestConfidence *float64
+		bestPriority   int
+		found          bool
+	)
+	for _, state := range states {
+		if state.start == nil || state.end == nil {
+			continue
+		}
+		source := state.source
+		confidence := state.confidence
+		if source == nil {
+			source = legacySource
+			if confidence == nil {
+				confidence = legacyConfidence
+			}
+		}
+		if source == nil || *source == "" {
+			continue
+		}
+		priority := models.MarkerSourcePriority(*source)
+		if !found || priority > bestPriority || (priority == bestPriority && confidenceGreater(confidence, bestConfidence)) {
+			sourceCopy := *source
+			bestSource = &sourceCopy
+			bestConfidence = cloneFloat(confidence)
+			bestPriority = priority
+			found = true
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+	return bestSource, bestConfidence
+}
+
+func confidenceGreater(a, b *float64) bool {
+	if a == nil {
+		return false
+	}
+	if b == nil {
+		return true
+	}
+	return *a > *b
+}
+
+func cloneFloat(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneString(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func cloneTime(v *time.Time) *time.Time {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func unmarshalMarkerAuditSegment(data []byte) (*MarkerAuditSegment, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var segment MarkerAuditSegment
+	if err := json.Unmarshal(data, &segment); err != nil {
+		return nil, fmt.Errorf("unmarshal marker audit segment: %w", err)
+	}
+	return &segment, nil
 }
 
 func ptrFloatEqual(a, b *float64) bool {
@@ -1214,31 +1705,6 @@ func ptrFloatEqual(a, b *float64) bool {
 		return a == b
 	}
 	return *a == *b
-}
-
-func nextSharedMarkerAttribution(
-	existingSource *string,
-	existingConfidence *float64,
-	update MarkerUpdate,
-	markerApplied bool,
-) (*string, *float64) {
-	if !markerApplied {
-		return existingSource, existingConfidence
-	}
-	if existingSource == nil || models.MarkerSourcePriority(update.MarkersSource) > models.MarkerSourcePriority(*existingSource) {
-		return &update.MarkersSource, update.MarkersConfidence
-	}
-	if models.MarkerSourcePriority(update.MarkersSource) == models.MarkerSourcePriority(*existingSource) && update.MarkersConfidence != nil {
-		return existingSource, update.MarkersConfidence
-	}
-	return existingSource, existingConfidence
-}
-
-func markerAlgorithm(update MarkerUpdate) string {
-	if update.MarkersAlgorithm != "" {
-		return update.MarkersAlgorithm
-	}
-	return "external:" + update.MarkersSource
 }
 
 func ptrStringEqual(a, b *string) bool {

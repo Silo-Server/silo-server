@@ -24,6 +24,7 @@ import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
+import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { PlayerConfigProvider, WatchPage } from "@/player";
 import type {
@@ -48,6 +49,7 @@ import {
   type WatchPlaybackStartInput,
   type WatchRouteRequest,
 } from "@/pages/watchRouteHelpers";
+import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 
 const AUTO_SKIP_INTRO_KEY = "playback.auto_skip_intro";
 
@@ -395,7 +397,9 @@ export function WatchPlaybackHost() {
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
+  const canEditMarkers = canEditMarkersForUser(user);
   const { data: effectivePlaybackSettings = {} } = useEffectiveSettings(currentProfile?.id, [
     AUTO_SKIP_INTRO_KEY,
   ]);
@@ -858,6 +862,7 @@ export function WatchPlaybackHost() {
       <WatchPage
         {...watchPageProps}
         autoSkipIntro={autoSkipIntro}
+        canEditMarkers={canEditMarkers}
         playbackRequestKey={requestKeyValue}
         onNavigateEpisode={handleNavigateEpisode}
         onEnded={handleEnded}

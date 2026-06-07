@@ -9,6 +9,7 @@ import (
 
 func TestNormalizePermissions_DeduplicatesAndSorts(t *testing.T) {
 	got, err := NormalizePermissions([]string{
+		"marker_edit",
 		" metadata_curation ",
 		"metadata_curation",
 		"",
@@ -16,7 +17,7 @@ func TestNormalizePermissions_DeduplicatesAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizePermissions returned error: %v", err)
 	}
-	want := []string{"metadata_curation"}
+	want := []string{"marker_edit", "metadata_curation"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("permissions = %#v, want %#v", got, want)
 	}
@@ -28,10 +29,13 @@ func TestNormalizePermissions_RejectsUnknownPermission(t *testing.T) {
 	}
 }
 
-func TestHasEffectivePermission_AdminImpliesMetadataCuration(t *testing.T) {
+func TestHasEffectivePermission_AdminImpliesAssignablePermissions(t *testing.T) {
 	user := &models.User{Role: "admin", Enabled: true}
 	if !HasEffectivePermission(user, PermissionMetadataCuration) {
 		t.Fatal("admin should have metadata curation")
+	}
+	if !HasEffectivePermission(user, PermissionMarkerEdit) {
+		t.Fatal("admin should have marker edit")
 	}
 }
 
@@ -43,5 +47,13 @@ func TestHasEffectivePermission_UserRequiresAssignedPermission(t *testing.T) {
 	user.Permissions = []string{"metadata_curation"}
 	if !HasEffectivePermission(user, PermissionMetadataCuration) {
 		t.Fatal("assigned user should have metadata curation")
+	}
+}
+
+func TestDefaultUserPermissionsIncludesMarkerEditOnly(t *testing.T) {
+	got := DefaultUserPermissions()
+	want := []string{"marker_edit"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("default permissions = %#v, want %#v", got, want)
 	}
 }

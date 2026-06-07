@@ -40,17 +40,18 @@ const (
 // ---------------------------------------------------------------------------
 
 const (
-	EventScanComplete            = "scan_complete"
-	EventMetadataUpdated         = "metadata_updated"
-	EventAdminStatsInvalidated   = "admin_stats_invalidated"
-	EventPlaybackSessionsChanged = "playback_sessions_changed"
-	EventUserDisabled            = "user_disabled"
-	EventUserDeleted             = "user_deleted"
-	EventSettingsChanged         = "settings_changed"
-	EventNodePoolChanged         = "node_pool_changed"
-	EventOperationalLogAppended  = "operational_log_appended"
-	EventAuditLogAppended        = "audit_log_appended"
-	EventEventsNotification      = "events_notification"
+	EventScanComplete                = "scan_complete"
+	EventMetadataUpdated             = "metadata_updated"
+	EventAdminStatsInvalidated       = "admin_stats_invalidated"
+	EventPlaybackSessionsChanged     = "playback_sessions_changed"
+	EventUserDisabled                = "user_disabled"
+	EventUserDeleted                 = "user_deleted"
+	EventSettingsChanged             = "settings_changed"
+	EventMarkerProviderConfigChanged = "marker_provider_config_changed"
+	EventNodePoolChanged             = "node_pool_changed"
+	EventOperationalLogAppended      = "operational_log_appended"
+	EventAuditLogAppended            = "audit_log_appended"
+	EventEventsNotification          = "events_notification"
 )
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -16,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,11 +23,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
@@ -52,7 +52,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/markers"
-	"github.com/Silo-Server/silo-server/internal/markers/introdb"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -497,36 +496,34 @@ func main() {
 	}
 	if deps.DB != nil {
 		markerRegistry := markers.NewRegistry(slog.Default())
-		introdbAPIKey, err := settingsRepo.Get(appCtx, "introdb.api_key")
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("load introdb.api_key from settings failed; provider will run with no key",
+		markerProviderConfig := markers.NewProviderConfigStore(deps.DB)
+		if err := markerProviderConfig.Reload(appCtx); err != nil {
+			slog.Warn("load marker provider config failed; falling back to registration-order fetch",
 				"error", err)
-			introdbAPIKey = ""
-		}
-		introdbClient := introdb.NewClient(introdbAPIKey)
-		if err := markerRegistry.Register(introdb.NewProvider(introdbClient)); err != nil {
-			log.Fatalf("register introdb marker provider: %v", err)
-		}
-		deps.OnServerSettingUpdated = func(_ context.Context, key, value string) {
-			if key == "introdb.api_key" {
-				introdbClient.SetAPIKey(value)
+		} else {
+			markerRegistry.UseConfigStore(markerProviderConfig)
+			if deps.EventBus != nil {
+				if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+					if event.Type != cache.EventMarkerProviderConfigChanged {
+						return
+					}
+					if err := markerProviderConfig.Reload(appCtx); err != nil {
+						slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
+					}
+				}); err != nil {
+					slog.Warn("subscribe marker provider config reload failed", "error", err)
+				}
 			}
 		}
-		if eventBus != nil {
-			_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
-				if event.Type != cache.EventSettingsChanged || event.Payload != "introdb.api_key" {
-					return
-				}
-				value, loadErr := settingsRepo.Get(context.Background(), "introdb.api_key")
-				if loadErr != nil {
-					slog.Warn("introdb api key reload failed", "error", loadErr)
-					return
-				}
-				introdbClient.SetAPIKey(value)
-			})
-		}
+		deps.MarkerProviderConfig = markerProviderConfig
 		deps.MarkerRegistry = markerRegistry
-		deps.MarkerResolver = markers.NewDBExternalIDResolver(deps.DB)
+		markerResolver := markers.NewDBExternalIDResolver(deps.DB)
+		deps.MarkerResolver = markerResolver
+		markerContributionStore := markers.NewContributionStore(deps.DB)
+		deps.MarkerContributionStore = markerContributionStore
+		deps.MarkerContributionService = markers.NewContributionService(
+			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore, slog.Default(),
+		)
 	}
 	var watchProviderService *watchsync.Service
 	if deps.DB != nil {
@@ -738,6 +735,22 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
+			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
+			pluginService.AddLifecycleHook(func(ctx context.Context) {
+				if err := reloadMarkerPluginProviders(
+					ctx,
+					deps.MarkerRegistry,
+					deps.MarkerProviderConfig,
+					installationStore,
+					runtimeConfigStore,
+					settingsRepo,
+					markerPluginResolver,
+				); err != nil {
+					slog.Warn("reload marker plugin providers failed", "error", err)
+				}
+			})
+		}
 		if err := pluginService.PreloadEnabled(appCtx); err != nil {
 			log.Fatalf("preload enabled plugins: %v", err)
 		}
@@ -1355,6 +1368,11 @@ func main() {
 		}
 		if deps.IntroAnalyzer != nil {
 			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
+		}
+		if deps.MarkerContributionService != nil && deps.MarkerProviderConfig != nil && deps.MarkerContributionStore != nil && deps.FileRepo != nil {
+			taskMgr.Register(tasks.NewContributeMarkersTask(
+				deps.MarkerContributionService, deps.MarkerProviderConfig, deps.MarkerContributionStore, deps.FileRepo,
+			))
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
@@ -2001,6 +2019,198 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 		deps.S3UserDB = s3UserDB
 		slog.Info("S3 user-db client configured", "bucket", s3UserDB.Bucket())
 	}
+}
+
+type markerPluginCapabilityStore interface {
+	ListEnabled(ctx context.Context) ([]*plugins.Installation, error)
+	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
+}
+
+type markerPluginRuntimeConfigStore interface {
+	ListGlobalConfigs(ctx context.Context, installationID int) ([]*plugins.RuntimeConfig, error)
+	PutGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) error
+}
+
+type markerLegacySettingsStore interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
+func reloadMarkerPluginProviders(
+	ctx context.Context,
+	registry *markers.Registry,
+	configStore *markers.ProviderConfigStore,
+	store markerPluginCapabilityStore,
+	runtimeConfigs markerPluginRuntimeConfigStore,
+	legacySettings markerLegacySettingsStore,
+	resolver *markers.PluginResolverAdapter,
+) error {
+	if registry == nil {
+		return nil
+	}
+	var providers []markers.Provider
+	if store == nil || resolver == nil {
+		return registry.SetProviders(providers)
+	}
+
+	installations, err := store.ListEnabled(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled plugin installations: %w", err)
+	}
+	sort.Slice(installations, func(i, j int) bool {
+		if installations[i] == nil {
+			return false
+		}
+		if installations[j] == nil {
+			return true
+		}
+		return installations[i].ID < installations[j].ID
+	})
+
+	nextPriority := 1000
+	for _, installation := range installations {
+		if installation == nil {
+			continue
+		}
+		capabilities, err := store.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			return fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
+		}
+		sort.Slice(capabilities, func(i, j int) bool {
+			if capabilities[i] == nil {
+				return false
+			}
+			if capabilities[j] == nil {
+				return true
+			}
+			return capabilities[i].ID < capabilities[j].ID
+		})
+		for _, capability := range capabilities {
+			if capability == nil || capability.Type != sdkcapability.MarkerProvider {
+				continue
+			}
+			descriptor, err := plugins.DecodeCapability(capability)
+			if err != nil {
+				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
+			}
+			metadataMap := markerCapabilityMetadata(descriptor)
+			provider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
+				InstallationID:      installation.ID,
+				CapabilityID:        capability.ID,
+				DisplayName:         firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
+				PluginID:            installation.PluginID,
+				RequiredExternalIDs: markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
+			}, resolver)
+			if err != nil {
+				return err
+			}
+			providers = append(providers, provider)
+
+			priority := nextPriority
+			nextPriority++
+			if configuredPriority, ok := markers.PluginDefaultFetchPriorityFromMetadata(metadataMap); ok {
+				priority = configuredPriority
+			}
+			if configStore != nil {
+				defaultConfig := markers.ProviderConfig{
+					Provider:                provider.ID(),
+					FetchEnabled:            true,
+					FetchPriority:           priority,
+					ContributeEnabled:       false,
+					ContributeAutoLocal:     false,
+					ContributeMinConfidence: 0.95,
+				}
+				if legacy, ok := legacyIntroDBProviderConfig(configStore, installation, capability, provider.ID()); ok {
+					defaultConfig = legacy
+				}
+				if err := configStore.Ensure(ctx, defaultConfig); err != nil {
+					return err
+				}
+			}
+			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
+				return err
+			}
+		}
+	}
+	return registry.SetProviders(providers)
+}
+
+func legacyIntroDBProviderConfig(
+	configStore *markers.ProviderConfigStore,
+	installation *plugins.Installation,
+	capability *plugins.Capability,
+	providerID string,
+) (markers.ProviderConfig, bool) {
+	if configStore == nil ||
+		installation == nil ||
+		capability == nil ||
+		installation.PluginID != "silo.theintrodb" ||
+		capability.ID != "introdb" {
+		return markers.ProviderConfig{}, false
+	}
+	if _, exists := configStore.Get(providerID); exists {
+		return markers.ProviderConfig{}, false
+	}
+	legacy, ok := configStore.Get("introdb")
+	if !ok {
+		return markers.ProviderConfig{}, false
+	}
+	legacy.Provider = providerID
+	return legacy, true
+}
+
+func copyLegacyIntroDBPluginConfig(
+	ctx context.Context,
+	runtimeConfigs markerPluginRuntimeConfigStore,
+	legacySettings markerLegacySettingsStore,
+	installation *plugins.Installation,
+	capability *plugins.Capability,
+) error {
+	if runtimeConfigs == nil ||
+		legacySettings == nil ||
+		installation == nil ||
+		capability == nil ||
+		installation.PluginID != "silo.theintrodb" ||
+		capability.ID != "introdb" {
+		return nil
+	}
+	configs, err := runtimeConfigs.ListGlobalConfigs(ctx, installation.ID)
+	if err != nil {
+		return fmt.Errorf("list TheIntroDB plugin config: %w", err)
+	}
+	for _, config := range configs {
+		if config != nil && config.Key == "account" {
+			return nil
+		}
+	}
+	apiKey, err := legacySettings.Get(ctx, "introdb.api_key")
+	if err != nil {
+		return fmt.Errorf("load legacy introdb.api_key: %w", err)
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return nil
+	}
+	if err := runtimeConfigs.PutGlobalConfig(ctx, installation.ID, "account", map[string]any{
+		"api_key": strings.TrimSpace(apiKey),
+	}); err != nil {
+		return fmt.Errorf("copy legacy introdb.api_key to plugin config: %w", err)
+	}
+	return nil
+}
+
+func markerCapabilityMetadata(descriptor *pluginv1.CapabilityDescriptor) map[string]any {
+	if descriptor == nil || descriptor.GetMetadata() == nil {
+		return nil
+	}
+	return descriptor.GetMetadata().AsMap()
+}
+
+func firstNonEmptyMarkerText(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // mapFolderTypeToMediaType maps silo's MediaFolder.Type values

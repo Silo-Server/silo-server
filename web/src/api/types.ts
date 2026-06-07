@@ -810,6 +810,65 @@ export interface TimeRange {
   end: number;
 }
 
+/** The four editable marker kinds. "credits" is exposed as Jellyfin's "Outro". */
+export type MarkerKind = "intro" | "credits" | "recap" | "preview";
+
+/** A marker segment with provenance, as returned by the markers API. */
+export interface MarkerSegment {
+  start: number | null;
+  end: number | null;
+  source: string | null;
+  provider: string | null;
+  confidence: number | null;
+  algorithm: string | null;
+  detected_at: string | null;
+}
+
+/** Response shape from GET/PUT /markers/{items,files}/{id}. */
+export interface FileMarkersResponse {
+  file_id: number;
+  intro: MarkerSegment;
+  credits: MarkerSegment;
+  recap: MarkerSegment;
+  preview: MarkerSegment;
+}
+
+export interface MarkerEditAuditEntry {
+  id: number;
+  media_file_id: number;
+  item_id?: string;
+  item_type?: string;
+  media_title?: string;
+  file_path?: string;
+  segment: MarkerKind;
+  action: "set" | "clear";
+  before: MarkerSegment | null;
+  after: MarkerSegment | null;
+  user_id?: number;
+  username?: string;
+  impersonator_user_id?: number;
+  impersonator_username?: string;
+  api_key_id?: number;
+  request_id?: string;
+  client_ip?: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface MarkerEditAuditResponse {
+  history: MarkerEditAuditEntry[];
+}
+
+/** A single segment in a set-markers request: object to set, null to clear. */
+export type MarkerSegmentInput = { start?: number | null; end?: number | null };
+
+/**
+ * Request body for PUT /markers/{items,files}/{id}. Only present keys are
+ * acted on: an object sets the segment, null clears it, an absent key is
+ * left unchanged.
+ */
+export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | null>>;
+
 export interface ItemDetail {
   content_id: string;
   type: "movie" | "series" | "season" | "episode";
@@ -3355,6 +3414,51 @@ export interface SubtitleProviderTestRequest {
 
 export interface SubtitleProviderTestResponse {
   success: boolean;
+  error?: string;
+}
+
+// --- Marker Providers ---
+
+export interface MarkerProviderConfig {
+  provider: string;
+  display_name?: string;
+  source_type?: string;
+  plugin_id?: string;
+  plugin_installation_id?: number;
+  capability_id?: string;
+  is_submitter: boolean;
+  fetch_enabled: boolean;
+  fetch_priority: number;
+  contribute_enabled: boolean;
+  contribute_auto_local: boolean;
+  contribute_min_confidence: number;
+}
+
+export interface MarkerProviderUpdateRequest {
+  fetch_enabled?: boolean;
+  fetch_priority?: number;
+  contribute_enabled?: boolean;
+  contribute_auto_local?: boolean;
+  contribute_min_confidence?: number;
+}
+
+export interface MarkerProviderListResponse {
+  providers: MarkerProviderConfig[];
+}
+
+export interface MarkerUserStats {
+  total: number;
+  accepted: number;
+  pending: number;
+  rejected: number;
+  acceptance_rate: number;
+  current_streak: number;
+  best_streak: number;
+}
+
+export interface MarkerProviderValidationResponse {
+  valid: boolean;
+  stats?: MarkerUserStats;
   error?: string;
 }
 

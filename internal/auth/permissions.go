@@ -10,9 +10,13 @@ import (
 
 type Permission string
 
-const PermissionMetadataCuration Permission = "metadata_curation"
+const (
+	PermissionMarkerEdit       Permission = "marker_edit"
+	PermissionMetadataCuration Permission = "metadata_curation"
+)
 
 var assignablePermissions = map[Permission]struct{}{
+	PermissionMarkerEdit:       {},
 	PermissionMetadataCuration: {},
 }
 
@@ -54,6 +58,10 @@ func NormalizePermissions(values []string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func DefaultUserPermissions() []string {
+	return []string{string(PermissionMarkerEdit)}
 }
 
 func HasAssignedPermission(user *models.User, permission Permission) bool {

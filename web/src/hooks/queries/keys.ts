@@ -50,6 +50,7 @@ export const itemKeys = {
     ["items", "detail", id, libraryId ?? "default"] as const,
   watchDetail: (id: string, fileId?: number, libraryId?: number) =>
     ["items", "watchDetail", id, fileId ?? "default", libraryId ?? "default"] as const,
+  markers: (id: string) => ["items", "markers", id] as const,
   browse: (params: BrowseParams) => ["items", "browse", params] as const,
   infiniteBrowse: (params: InfiniteBrowseParams) => ["items", "infiniteBrowse", params] as const,
   filters: () => ["items", "filters"] as const,
@@ -386,6 +387,14 @@ export const adminKeys = {
   task: (key: string) => ["admin", "tasks", key] as const,
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
+  markerProviders: () => ["admin", "markerProviders"] as const,
+  markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
+  markerProviderValidation: (provider: string) =>
+    ["admin", "markerProviders", provider, "validation"] as const,
+  markerHistoryRoot: () => ["admin", "markerHistory"] as const,
+  markerHistory: (limit: number) => ["admin", "markerHistory", "all", limit] as const,
+  markerItemHistory: (itemId: string) => ["admin", "markerHistory", "items", itemId] as const,
+  markerFileHistory: (fileId: number) => ["admin", "markerHistory", "files", fileId] as const,
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
