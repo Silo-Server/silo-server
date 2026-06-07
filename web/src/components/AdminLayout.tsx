@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet, useLocation } from "react-router";
+import { AdminRestartRequiredBanner } from "@/components/AdminRestartRequiredBanner";
 import AdminSidebar from "@/components/AdminSidebar";
 import ServerActivity from "@/components/ServerActivity";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -74,6 +75,7 @@ export default function AdminLayout() {
         }`}
       >
         <div className="admin-shell">
+          <AdminRestartRequiredBanner />
           <Outlet />
         </div>
       </main>

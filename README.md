@@ -1,6 +1,6 @@
 # Silo
 
-A self-hosted media streaming server with a React frontend and Go backend. Supports direct play, remuxing, and hardware-accelerated transcoding. Compatible with Jellyfin/Emby clients (VidHub, Findroid) via a built-in compatibility layer.
+A self-hosted media streaming server with a React frontend and Go backend. Supports direct play, remuxing, and hardware-accelerated transcoding. Includes optional Jellyfin/Emby-compatible app support for clients such as VidHub and Findroid.
 
 Join the community on [Discord](https://discord.gg/4RxuUQAEnW).
 
@@ -30,7 +30,7 @@ The easiest way to run Silo is with Docker Compose. The default stack assumes yo
    docker compose up -d
    ```
 
-   This starts PostgreSQL, Redis, and the integrated Silo server. The app is available at `http://localhost:8090` and the Jellyfin-compatible endpoint at `http://localhost:8096`.
+   This starts PostgreSQL, Redis, and the integrated Silo server. The app is available at `http://localhost:8090`. Jellyfin-compatible app support is disabled until an administrator enables it in onboarding or admin settings.
 
    If you already have PostgreSQL and Redis available, omit those bundled service examples from compose and point Silo at your existing `DATABASE_URL` and `REDIS_URL` instead.
 

@@ -29,6 +29,7 @@ const SERVER_KEYS = [
   "playback.transcode_dir",
   "playback.hw_accel",
   "playback.transcode_enabled",
+  "jellyfin_compat.enabled",
   "jellyfin_compat.public_url",
   "jellyfin_compat.server_name",
 ];
@@ -323,9 +324,19 @@ export function ServerStorageStep() {
       </Section>
 
       <Section
-        label="Jellyfin compatibility"
+        label="Jellyfin-compatible app support"
         description="For VidHub, Findroid, Infuse, and other Jellyfin clients."
       >
+        <div className="mb-4 flex items-center gap-2 pb-1">
+          <Switch
+            id="setup-jellyfin-enabled"
+            checked={form.getValue("jellyfin_compat.enabled") === "true"}
+            onCheckedChange={(v) => form.setValue("jellyfin_compat.enabled", v ? "true" : "false")}
+          />
+          <Label htmlFor="setup-jellyfin-enabled" className="text-xs">
+            Enable Jellyfin-compatible API
+          </Label>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="setup-jellyfin-url" className="text-xs">

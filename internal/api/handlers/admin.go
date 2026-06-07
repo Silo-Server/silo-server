@@ -85,6 +85,7 @@ type AdminHandler struct {
 	accountProvisioner           *auth.AccountProvisioner
 	DetailSvc                    *catalog.DetailService
 	StatsSource                  AdminStatsSource
+	Config                       *config.Config
 	EventBus                     cache.EventBus
 	SettingsRepo                 ServerSettingsStore
 	JobRepo                      AdminJobCreator

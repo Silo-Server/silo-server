@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[97543],{42512:function(a,e,d){d.r(e),e.default='<div id="lyricPage" data-role="page" class="page lyricPage" data-backbutton="true"> <div> <div class="lyricsContainer padded-bottom-page"> </div> </div> </div> '}}]);

@@ -22,6 +22,7 @@ import {
   type ChunkedUploadProgress,
   uploadFileInChunks,
 } from "@/lib/chunkedUpload";
+import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
@@ -349,7 +350,10 @@ export function useSavePluginTaskBinding() {
           body: JSON.stringify(body),
         },
       ),
-    onSuccess: () => {
+    onSuccess: (response) => {
+      if (response.restart_required) {
+        markAdminRestartRequired();
+      }
       toast.success("Task binding saved");
       invalidatePluginQueries(queryClient);
     },

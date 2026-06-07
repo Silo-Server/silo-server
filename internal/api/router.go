@@ -779,6 +779,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
+		adminHandler.Config = deps.Config
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 		}
@@ -2081,6 +2082,11 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
 							r.Post("/server/restart", serverControlHandler.HandleRestart)
+							r.Get("/jellyfin-compat/status", adminHandler.HandleGetJellyfinCompatStatus)
+							r.Patch("/jellyfin-compat/settings", adminHandler.HandleUpdateJellyfinCompatSettings)
+							r.Post("/jellyfin-compat/web/install", adminHandler.HandleInstallJellyfinCompatWeb)
+							r.Post("/jellyfin-compat/web/update", adminHandler.HandleUpdateJellyfinCompatWeb)
+							r.Post("/jellyfin-compat/web/remove", adminHandler.HandleRemoveJellyfinCompatWeb)
 							r.Get("/settings/sensitive-status", adminHandler.HandleGetSensitiveStatus)
 							r.Post("/settings/check/{kind}", adminHandler.HandleCheckSettingsConnection)
 							if sectionSettingsHandler != nil {

@@ -20,6 +20,7 @@ coverage.html
 # Temp
 /tmp/
 *.tmp
+.local/
 
 # Worktrees
 .worktrees/

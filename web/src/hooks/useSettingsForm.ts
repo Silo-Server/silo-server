@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
 import {
   useAdminServerSettings,
   useUpdateServerSetting,
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
+import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 
 interface UseSettingsFormOptions {
   /** Setting keys this section manages */
@@ -46,6 +47,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, []);
 
   const dirtyCount = dirty.size;
+  const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
   const buildConnectionCheckRequest = useCallback(
     (selectedKeys: string[] = keys): AdminSettingsConnectionCheckRequest => ({
@@ -68,6 +70,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     // until the server actually restarts.
     if (results.some((r) => r?.restart_required)) {
       setRestartRequired(true);
+      markAdminRestartRequired();
     }
   }, [dirty, localValues, updateSetting]);
 
@@ -89,6 +92,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     getValue,
     setValue,
     dirtyCount,
+    dirtyKeys,
     save,
     discard,
     isSaving: updateSetting.isPending,

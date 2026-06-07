@@ -14,6 +14,7 @@ import {
   useUpdateServerSetting,
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
+import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 import {
   useRecommendationsStatus,
   useTriggerEmbeddings,
@@ -344,6 +345,7 @@ export default function AdminRecommendations() {
         return next;
       });
       setRestartRequired(true);
+      markAdminRestartRequired();
     } catch {
       // useUpdateServerSetting already reports failures.
     }
@@ -352,8 +354,15 @@ export default function AdminRecommendations() {
   function handleToggle(key: string, checked: boolean) {
     setConnectionResult(null);
     setLocalValues((prev) => ({ ...prev, [key]: checked ? "true" : "false" }));
-    updateSetting.mutate({ key, value: checked ? "true" : "false" });
-    setRestartRequired(true);
+    updateSetting.mutate(
+      { key, value: checked ? "true" : "false" },
+      {
+        onSuccess: () => {
+          setRestartRequired(true);
+          markAdminRestartRequired();
+        },
+      },
+    );
   }
 
   async function applyEmbeddingPreset(preset: RecommendationProviderPreset) {
@@ -375,6 +384,7 @@ export default function AdminRecommendations() {
       });
 
       setRestartRequired(true);
+      markAdminRestartRequired();
       setConnectionResult(null);
     } catch {
       // useUpdateServerSetting already reports failures.
