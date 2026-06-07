@@ -33,6 +33,20 @@ const REGION_COLORS_EDIT: Record<MarkerKind, string> = {
   preview: "bg-emerald-300/70",
 };
 
+const REGION_DOT_COLORS: Record<MarkerKind, string> = {
+  intro: "bg-sky-300",
+  recap: "bg-violet-300",
+  credits: "bg-amber-300",
+  preview: "bg-emerald-300",
+};
+
+const MARKER_LABELS: Record<MarkerKind, string> = {
+  intro: "Intro",
+  recap: "Recap",
+  credits: "Credits / Outro",
+  preview: "Preview",
+};
+
 function findChapterAtTime(chapters: PlayerChapter[], time: number): PlayerChapter | null {
   for (const chapter of chapters) {
     if (time >= chapter.start_seconds && time < chapter.end_seconds) {
@@ -40,6 +54,19 @@ function findChapterAtTime(chapters: PlayerChapter[], time: number): PlayerChapt
     }
   }
   return chapters.length > 0 ? (chapters[chapters.length - 1] ?? null) : null;
+}
+
+function findRegionAtTime(regions: MarkerRegionView[], time: number): MarkerRegionView | null {
+  let match: MarkerRegionView | null = null;
+  for (const region of regions) {
+    if (time < region.start || time > region.end) {
+      continue;
+    }
+    if (!match || region.end - region.start < match.end - match.start) {
+      match = region;
+    }
+  }
+  return match;
 }
 
 function formatTime(seconds: number): string {
@@ -98,6 +125,10 @@ export function SeekBar({
   const hoverChapter = useMemo(
     () => (hoverTime === null ? null : findChapterAtTime(chapters, hoverTime)),
     [chapters, hoverTime],
+  );
+  const hoverRegion = useMemo(
+    () => (hoverTime === null ? null : findRegionAtTime(regions, hoverTime)),
+    [regions, hoverTime],
   );
 
   const handleMouseDown = useCallback(
@@ -249,7 +280,7 @@ export function SeekBar({
           <div
             className={[
               "overflow-hidden rounded-lg border border-white/[0.08] bg-neutral-900/95 text-white shadow-2xl backdrop-blur-md",
-              hoverChapter ? "w-40" : "",
+              hoverChapter || hoverRegion ? "w-44" : "",
             ].join(" ")}
           >
             {/* Thumbnail or chapter placeholder */}
@@ -277,6 +308,21 @@ export function SeekBar({
                 </div>
               ))}
             <div className="px-2.5 py-1.5">
+              {hoverRegion && (
+                <div className="mb-1 flex items-center gap-1.5 text-[11px] leading-tight font-semibold text-white">
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "h-1.5 w-1.5 rounded-full",
+                      REGION_DOT_COLORS[hoverRegion.kind],
+                    ].join(" ")}
+                  />
+                  <span className="truncate">{MARKER_LABELS[hoverRegion.kind]}</span>
+                  <span className="text-white/45 tabular-nums">
+                    {formatTime(hoverRegion.start)}-{formatTime(hoverRegion.end)}
+                  </span>
+                </div>
+              )}
               <div className="text-xs font-semibold text-white tabular-nums">
                 {formatTime(hoverTime)}
               </div>
@@ -368,14 +414,16 @@ export function SeekBar({
           {duration > 0 &&
             regions.map((region) => {
               const isActive = editing && region.kind === activeEditKind;
+              const isHovered = hoverRegion?.kind === region.kind && !dragging && edgeDrag === null;
               return (
                 <div
+                  aria-hidden="true"
                   key={region.kind}
                   className={[
-                    "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height] duration-150 ease-out",
-                    editing ? (isActive ? "h-2.5" : "h-2") : "h-full",
+                    "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height,box-shadow] duration-150 ease-out",
+                    editing ? (isActive ? "h-2.5" : "h-2") : isHovered ? "h-2" : "h-full",
                     editing ? REGION_COLORS_EDIT[region.kind] : REGION_COLORS[region.kind],
-                    isActive ? "z-[1] ring-1 ring-white/80" : "",
+                    isActive || isHovered ? "z-[2] ring-1 ring-white/80" : "z-[1]",
                   ].join(" ")}
                   style={{
                     left: `${(region.start / duration) * 100}%`,
@@ -391,7 +439,7 @@ export function SeekBar({
           />
           {/* Thumb */}
           <div
-            className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_4px_14px_rgb(0_0_0/0.45)] ring-1 ring-black/10 transition-all duration-200 group-hover/seek:opacity-100"
+            className="absolute top-1/2 z-[3] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_4px_14px_rgb(0_0_0/0.45)] ring-1 ring-black/10 transition-all duration-200 group-hover/seek:opacity-100"
             style={{ left: `${playedPercent}%` }}
           />
           {/* Editable marker handles for the active region */}
