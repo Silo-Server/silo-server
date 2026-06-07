@@ -1748,28 +1748,12 @@ export interface RequestIntegration {
   updated_at?: string;
 }
 
-export interface RequestIntegrationRootFolder {
-  path: string;
-  free_space?: number;
-  total_space?: number;
-  accessible: boolean;
-}
+export type RequestIntegrationOptions = Record<string, { value: string; label: string }[]>;
 
-export interface RequestIntegrationQualityProfile {
-  id: number;
-  name: string;
-}
-
-export interface RequestIntegrationTag {
-  id: number;
-  label: string;
-}
-
-export interface RequestIntegrationOptions {
-  kind: string;
-  root_folders: RequestIntegrationRootFolder[];
-  quality_profiles: RequestIntegrationQualityProfile[];
-  tags: RequestIntegrationTag[];
+export interface RequestIntegrationValidationError {
+  error: "validation_failed";
+  field_errors?: Record<string, string>;
+  form_error?: string;
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
