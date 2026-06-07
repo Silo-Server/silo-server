@@ -482,6 +482,53 @@ func (s *Service) ScanSourceClient(
 	return client.ScanSource(capabilityID)
 }
 
+func (s *Service) ScanSourceClientByPluginID(
+	ctx context.Context,
+	pluginID string,
+	capabilityID string,
+) (*pluginhost.ScanSourceClient, error) {
+	if s == nil || s.installations == nil {
+		return nil, fmt.Errorf("scan source plugin resolver is not configured")
+	}
+	installations, err := s.installations.ListByPluginID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if len(installations) == 0 {
+		return nil, fmt.Errorf("scan source plugin %q is not installed", pluginID)
+	}
+	if len(installations) > 1 {
+		return nil, fmt.Errorf("scan source plugin %q is ambiguous across %d installations", pluginID, len(installations))
+	}
+
+	var matches []*Installation
+	for _, installation := range installations {
+		if installation == nil {
+			continue
+		}
+		capabilities, err := s.installations.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, capability := range capabilities {
+			if capability == nil {
+				continue
+			}
+			if capability.Type == "scan_source.v1" && capability.ID == capabilityID {
+				matches = append(matches, installation)
+				break
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("scan source capability %q is not installed for plugin %q", capabilityID, pluginID)
+	}
+	if !matches[0].Enabled {
+		return nil, fmt.Errorf("scan source plugin %q is disabled", pluginID)
+	}
+	return s.ScanSourceClient(ctx, matches[0].ID, capabilityID)
+}
+
 func (s *Service) EventConsumerClient(
 	ctx context.Context,
 	installationID int,

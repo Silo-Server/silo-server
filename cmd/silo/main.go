@@ -1499,6 +1499,9 @@ func main() {
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
 			autoscanRepo := autoscan.NewRepository(deps.DB)
+			if err := autoscanRepo.MarkInterruptedEvents(appCtx); err != nil {
+				slog.Warn("autoscan: failed to mark interrupted polls", "err", err)
+			}
 			autoscanSvc := api.BuildAutoscanService(
 				autoscanRepo,
 				pluginService,

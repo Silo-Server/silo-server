@@ -1808,7 +1808,7 @@ export interface AutoscanPathRewrite {
 
 export interface AutoscanSource {
   id: string;
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   connection_id: string | null;
   enabled: boolean;
@@ -1834,9 +1834,8 @@ export interface AutoscanSourcesResponse {
 }
 
 export interface AutoscanAvailableSource {
-  installation_id: number;
-  capability_id: string;
   plugin_id: string;
+  capability_id: string;
   display_name: string;
 }
 
@@ -1845,7 +1844,7 @@ export interface AutoscanAvailableSourcesResponse {
 }
 
 export interface AutoscanSourceCreateInput {
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   connection_id?: string | null;
   enabled: boolean;
@@ -1887,7 +1886,7 @@ export interface AutoscanRewriteSuggestions {
 
 export interface AutoscanStatusSource {
   id: string;
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   connection_id: string | null;
   enabled: boolean;
@@ -1896,16 +1895,27 @@ export interface AutoscanStatusSource {
   last_error: string | null;
 }
 
+export interface AutoscanRunningPoll {
+  id: number;
+  source_id: string | null;
+  plugin_id: string;
+  capability_id: string;
+  started_at: string;
+  elapsed_ms: number;
+  marker_before?: string;
+}
+
 export interface AutoscanStatus {
   enabled: boolean;
   sources: AutoscanStatusSource[];
+  running_polls: AutoscanRunningPoll[];
   active_scans: number;
   accepted_scans: number;
   running_scans: number;
   latest_event_at?: string;
 }
 
-export type AutoscanEventStatus = "success" | "error" | "unresolved";
+export type AutoscanEventStatus = "running" | "success" | "error" | "unresolved";
 
 export interface AutoscanEventScanRun {
   id: string;
@@ -1923,7 +1933,7 @@ export interface AutoscanEventScanRun {
 export interface AutoscanEvent {
   id: number;
   source_id: string | null;
-  installation_id: number;
+  plugin_id: string;
   capability_id: string;
   started_at: string;
   completed_at: string;
@@ -1961,7 +1971,7 @@ export interface AutoscanScan {
   completed_at?: string;
   autoscan_event_id?: number;
   source_id?: string;
-  installation_id?: number;
+  plugin_id?: string;
   capability_id?: string;
   event_status?: AutoscanEventStatus;
   event_completed_at?: string;

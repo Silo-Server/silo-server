@@ -175,14 +175,14 @@ func (r *Repository) GetConnection(ctx context.Context, id string) (Connection, 
 
 // --- Sources ---
 
-const sourceColumns = `id, installation_id, capability_id, connection_id, enabled,
+const sourceColumns = `id, plugin_id, capability_id, connection_id, enabled,
 	poll_interval_seconds, path_rewrites, source_config, label, marker, last_run_at, last_error`
 
 func scanSource(row interface{ Scan(...any) error }) (Source, error) {
 	var s Source
 	var pathRewrites []byte
 	var sourceConfig []byte
-	if err := row.Scan(&s.ID, &s.InstallationID, &s.CapabilityID, &s.ConnectionID,
+	if err := row.Scan(&s.ID, &s.PluginID, &s.CapabilityID, &s.ConnectionID,
 		&s.Enabled, &s.PollIntervalSeconds, &pathRewrites, &sourceConfig, &s.Label, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
 		return Source{}, err
 	}
@@ -283,11 +283,11 @@ func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error)
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO autoscan_sources (
-			installation_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, source_config, label
+			plugin_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, source_config, label
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+sourceColumns,
-		s.InstallationID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
+		s.PluginID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
 	out, err := scanSource(row)
 	if err != nil {
 		if connID, ok := connectionFKViolation(err, s.ConnectionID); ok {
@@ -299,7 +299,7 @@ func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error)
 }
 
 // UpdateSource updates a source's binding/scheduling fields by id. Identity
-// (installation_id, capability_id) and bookkeeping fields (marker/last_run_at/
+// (plugin_id, capability_id) and bookkeeping fields (marker/last_run_at/
 // last_error) are left untouched. An unknown id maps to ErrNotFound; a
 // non-existent connection trips the FK constraint and also maps to ErrNotFound.
 func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error) {
@@ -353,7 +353,7 @@ func connectionFKViolation(err error, connectionID *string) (string, bool) {
 
 func (r *Repository) ListSources(ctx context.Context) ([]Source, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+sourceColumns+`
-		FROM autoscan_sources ORDER BY installation_id, capability_id`)
+		FROM autoscan_sources ORDER BY plugin_id, capability_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list autoscan sources: %w", err)
 	}
@@ -364,7 +364,7 @@ func (r *Repository) ListSources(ctx context.Context) ([]Source, error) {
 func (r *Repository) ListEnabledSources(ctx context.Context) ([]Source, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+sourceColumns+`
 		FROM autoscan_sources WHERE enabled = true
-		ORDER BY installation_id, capability_id`)
+		ORDER BY plugin_id, capability_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled autoscan sources: %w", err)
 	}
@@ -462,7 +462,7 @@ func (r *Repository) RecordError(ctx context.Context, sourceID, msg string) erro
 	return nil
 }
 
-const eventColumns = `id, source_id, installation_id, capability_id, started_at, completed_at,
+const eventColumns = `id, source_id, plugin_id, capability_id, started_at, completed_at,
 	duration_ms, status, changes_returned, changes_resolved, targets_claimed, scans_created,
 	scans_reused, scans_suppressed, error_message, marker_before, marker_after`
 
@@ -472,7 +472,7 @@ func scanEvent(row interface{ Scan(...any) error }) (Event, error) {
 	if err := row.Scan(
 		&e.ID,
 		&e.SourceID,
-		&e.InstallationID,
+		&e.PluginID,
 		&e.CapabilityID,
 		&e.StartedAt,
 		&e.CompletedAt,
@@ -499,24 +499,79 @@ func (r *Repository) CreateEvent(ctx context.Context, in EventCreate) (int64, er
 	if started.IsZero() {
 		started = time.Now()
 	}
-	row := r.pool.QueryRow(ctx, `
+	sourceID := strings.TrimSpace(in.SourceID)
+	if sourceID == "" {
+		row := r.pool.QueryRow(ctx, `
+			INSERT INTO autoscan_events (
+				source_id, plugin_id, capability_id, started_at, completed_at,
+				duration_ms, status, error_message, marker_before
+			)
+		VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7)
+		RETURNING id`,
+			nil,
+			in.PluginID,
+			in.CapabilityID,
+			started,
+			string(EventStatusRunning),
+			"",
+			nullable(in.MarkerBefore),
+		)
+		var id int64
+		if err := row.Scan(&id); err != nil {
+			return 0, fmt.Errorf("create autoscan event: %w", err)
+		}
+		return id, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin autoscan event: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(900173, hashtext($1))`, sourceID); err != nil {
+		return 0, fmt.Errorf("lock autoscan event: %w", err)
+	}
+
+	var runningID int64
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM autoscan_events
+		WHERE source_id = $1
+		  AND status = $2
+		ORDER BY started_at ASC, id ASC
+		LIMIT 1`,
+		sourceID,
+		string(EventStatusRunning),
+	).Scan(&runningID)
+	if err == nil {
+		return 0, fmt.Errorf("%w: source %s event %d", ErrPollAlreadyRunning, sourceID, runningID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("check running autoscan event: %w", err)
+	}
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO autoscan_events (
-			source_id, installation_id, capability_id, started_at, completed_at,
+			source_id, plugin_id, capability_id, started_at, completed_at,
 			duration_ms, status, error_message, marker_before
 		)
 		VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7)
 		RETURNING id`,
-		nullable(in.SourceID),
-		in.InstallationID,
+		sourceID,
+		in.PluginID,
 		in.CapabilityID,
 		started,
-		string(EventStatusError),
-		"poll started but did not finish",
+		string(EventStatusRunning),
+		"",
 		nullable(in.MarkerBefore),
 	)
 	var id int64
 	if err := row.Scan(&id); err != nil {
 		return 0, fmt.Errorf("create autoscan event: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit autoscan event: %w", err)
 	}
 	return id, nil
 }
@@ -561,6 +616,25 @@ func (r *Repository) FinishEvent(ctx context.Context, in EventFinish) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("%w: autoscan event %d", ErrNotFound, in.ID)
+	}
+	return nil
+}
+
+func (r *Repository) MarkInterruptedEvents(ctx context.Context) error {
+	msg := "poll started but did not finish"
+	_, err := r.pool.Exec(ctx, `
+		UPDATE autoscan_events
+		SET completed_at = now(),
+			duration_ms = GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint,
+			status = $1,
+			error_message = $2
+		WHERE status = $3`,
+		string(EventStatusError),
+		msg,
+		string(EventStatusRunning),
+	)
+	if err != nil {
+		return fmt.Errorf("mark interrupted autoscan events: %w", err)
 	}
 	return nil
 }
@@ -758,6 +832,30 @@ func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]
 	return events, runRows.Err()
 }
 
+func (r *Repository) ListRunningEvents(ctx context.Context) ([]Event, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+eventColumns+`
+		FROM autoscan_events
+		WHERE status = $1
+		ORDER BY started_at ASC, id ASC`,
+		string(EventStatusRunning),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list running autoscan events: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]Event, 0)
+	for rows.Next() {
+		event, scanErr := scanEvent(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
 func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilter) ([]ScanWithEvent, error) {
 	limit := clampAutoscanLimit(filter.Limit)
 	offset := filter.Offset
@@ -780,15 +878,15 @@ func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilte
 			sr.trigger,
 			sr.status,
 			COALESCE(sr.error_message, ''),
-			sr.requested_at,
-			sr.started_at,
-			sr.completed_at,
-			sr.autoscan_event_id,
-			e.source_id,
-			e.installation_id,
-			COALESCE(e.capability_id, ''),
-			COALESCE(e.status, ''),
-			e.completed_at
+				sr.requested_at,
+				sr.started_at,
+				sr.completed_at,
+				sr.autoscan_event_id,
+				e.source_id,
+				COALESCE(e.plugin_id, ''),
+				COALESCE(e.capability_id, ''),
+				COALESCE(e.status, ''),
+				e.completed_at
 		FROM scan_runs sr
 		LEFT JOIN autoscan_events e ON e.id = sr.autoscan_event_id
 		WHERE `+strings.Join(clauses, " AND ")+`
@@ -818,7 +916,7 @@ func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilte
 			&scan.CompletedAt,
 			&scan.AutoscanEventID,
 			&scan.SourceID,
-			&scan.InstallationID,
+			&scan.PluginID,
 			&scan.CapabilityID,
 			&eventStatus,
 			&scan.EventCompletedAt,
@@ -853,7 +951,7 @@ func (r *Repository) GetQueueSummary(ctx context.Context) (QueueSummary, error) 
 
 func (r *Repository) LatestEventAt(ctx context.Context) (*time.Time, error) {
 	var latest *time.Time
-	err := r.pool.QueryRow(ctx, `SELECT max(completed_at) FROM autoscan_events`).Scan(&latest)
+	err := r.pool.QueryRow(ctx, `SELECT max(completed_at) FROM autoscan_events WHERE status <> $1`, string(EventStatusRunning)).Scan(&latest)
 	if err != nil {
 		return nil, fmt.Errorf("get latest autoscan event time: %w", err)
 	}

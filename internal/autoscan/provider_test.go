@@ -17,10 +17,17 @@ func (c *capturingClient) PollChanges(_ context.Context, req *pluginv1.PollChang
 	return &pluginv1.PollChangesResponse{SourcePaths: []string{"/mnt/media/x"}, NextMarker: "m2"}, nil
 }
 
-// capturingResolver yields a fixed PollChangesClient.
-type capturingResolver struct{ client PollChangesClient }
+// capturingResolver yields a fixed PollChangesClient and records the requested
+// stable scan-source identity.
+type capturingResolver struct {
+	client       PollChangesClient
+	lastPluginID string
+	lastCapID    string
+}
 
-func (r capturingResolver) ScanSourceClient(context.Context, int, string) (PollChangesClient, error) {
+func (r *capturingResolver) ScanSourceClient(_ context.Context, pluginID, capabilityID string) (PollChangesClient, error) {
+	r.lastPluginID = pluginID
+	r.lastCapID = capabilityID
 	return r.client, nil
 }
 
@@ -28,11 +35,12 @@ func (r capturingResolver) ScanSourceClient(context.Context, int, string) (PollC
 // delivered to the plugin on the PollChangesRequest.
 func TestPluginProviderPopulatesConnection(t *testing.T) {
 	client := &capturingClient{}
-	prov := NewPluginProvider(capturingResolver{client})
+	resolver := &capturingResolver{client: client}
+	prov := NewPluginProvider(resolver)
 
 	conn := ResolvedConnection{BaseURL: "https://arr.example", APIKey: "secret-key"}
 	sourceConfig := map[string]string{"exclusions": ".downloads"}
-	changes, next, err := prov.PollChanges(context.Background(), 1, "cap", "m1", conn, sourceConfig)
+	changes, next, err := prov.PollChanges(context.Background(), "silo.autoscan.arr", "cap", "m1", conn, sourceConfig)
 	if err != nil {
 		t.Fatalf("PollChanges: %v", err)
 	}
@@ -44,6 +52,9 @@ func TestPluginProviderPopulatesConnection(t *testing.T) {
 	}
 	if client.last.GetCapabilityId() != "cap" || client.last.GetMarker() != "m1" {
 		t.Fatalf("unexpected request fields: cap=%q marker=%q", client.last.GetCapabilityId(), client.last.GetMarker())
+	}
+	if resolver.lastPluginID != "silo.autoscan.arr" || resolver.lastCapID != "cap" {
+		t.Fatalf("resolver identity = %q/%q", resolver.lastPluginID, resolver.lastCapID)
 	}
 	rc := client.last.GetConnection()
 	if rc == nil {
@@ -59,9 +70,9 @@ func TestPluginProviderPopulatesConnection(t *testing.T) {
 
 func TestPluginProviderPrefersStructuredChanges(t *testing.T) {
 	client := &capturingStructuredClient{}
-	prov := NewPluginProvider(capturingResolver{client: client})
+	prov := NewPluginProvider(&capturingResolver{client: client})
 
-	changes, next, err := prov.PollChanges(context.Background(), 1, "cap", "m1", ResolvedConnection{}, nil)
+	changes, next, err := prov.PollChanges(context.Background(), "silo.autoscan.arr", "cap", "m1", ResolvedConnection{}, nil)
 	if err != nil {
 		t.Fatalf("PollChanges: %v", err)
 	}

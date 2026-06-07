@@ -36,6 +36,7 @@ type autoscanStore interface {
 	CountAutoscanScans(ctx context.Context, filter autoscan.ScanListFilter) (int, error)
 	ListEvents(ctx context.Context, filter autoscan.EventListFilter) ([]autoscan.EventWithRuns, error)
 	CountEvents(ctx context.Context, filter autoscan.EventListFilter) (int, error)
+	ListRunningEvents(ctx context.Context) ([]autoscan.Event, error)
 	GetQueueSummary(ctx context.Context) (autoscan.QueueSummary, error)
 	LatestEventAt(ctx context.Context) (*time.Time, error)
 }
@@ -309,7 +310,7 @@ func (h *AutoscanHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.
 // credentials: the connection link is by id only.
 type autoscanSourceResponse struct {
 	ID                  string                 `json:"id"`
-	InstallationID      int                    `json:"installation_id"`
+	PluginID            string                 `json:"plugin_id"`
 	CapabilityID        string                 `json:"capability_id"`
 	ConnectionID        *string                `json:"connection_id"`
 	Enabled             bool                   `json:"enabled"`
@@ -331,7 +332,7 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 	config := normalizeSourceConfig(s.SourceConfig)
 	return autoscanSourceResponse{
 		ID:                  s.ID,
-		InstallationID:      s.InstallationID,
+		PluginID:            s.PluginID,
 		CapabilityID:        s.CapabilityID,
 		ConnectionID:        s.ConnectionID,
 		Enabled:             s.Enabled,
@@ -364,10 +365,9 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 // --- Available scan-source plugins (Add-source picker) ---
 
 type autoscanScanSourcePluginResponse struct {
-	InstallationID int    `json:"installation_id"`
-	CapabilityID   string `json:"capability_id"`
-	PluginID       string `json:"plugin_id"`
-	DisplayName    string `json:"display_name"`
+	PluginID     string `json:"plugin_id"`
+	CapabilityID string `json:"capability_id"`
+	DisplayName  string `json:"display_name"`
 }
 
 // HandleListAvailableScanSources returns every installed scan_source capability
@@ -381,10 +381,9 @@ func (h *AutoscanHandler) HandleListAvailableScanSources(w http.ResponseWriter, 
 	out := make([]autoscanScanSourcePluginResponse, 0, len(available))
 	for _, a := range available {
 		out = append(out, autoscanScanSourcePluginResponse{
-			InstallationID: a.InstallationID,
-			CapabilityID:   a.CapabilityID,
-			PluginID:       a.PluginID,
-			DisplayName:    a.DisplayName,
+			PluginID:     a.PluginID,
+			CapabilityID: a.CapabilityID,
+			DisplayName:  a.DisplayName,
 		})
 	}
 	writeJSON(w, http.StatusOK, struct {
@@ -394,12 +393,12 @@ func (h *AutoscanHandler) HandleListAvailableScanSources(w http.ResponseWriter, 
 
 // --- Create source ---
 
-// autoscanCreateSourceInput is the create payload: it names the installed
-// scan_source capability to bind (installation_id + capability_id) plus the
-// initial binding/scheduling fields. Unlike the update payload, identity is
-// supplied here rather than read from an existing row.
+// autoscanCreateSourceInput is the create payload: it names the scan_source
+// capability to bind (plugin_id + capability_id) plus the initial
+// binding/scheduling fields. Unlike the update payload, identity is supplied
+// here rather than read from an existing row.
 type autoscanCreateSourceInput struct {
-	InstallationID      int                    `json:"installation_id"`
+	PluginID            string                 `json:"plugin_id"`
 	CapabilityID        string                 `json:"capability_id"`
 	ConnectionID        *string                `json:"connection_id"`
 	Enabled             bool                   `json:"enabled"`
@@ -420,6 +419,11 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	capID := strings.TrimSpace(in.CapabilityID)
+	pluginID := strings.TrimSpace(in.PluginID)
+	if pluginID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "plugin_id is required")
+		return
+	}
 	if capID == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "capability_id is required")
 		return
@@ -432,7 +436,7 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	// Validate the (installation_id, capability_id) is a currently-installed
+	// Validate the (plugin_id, capability_id) is a currently-installed
 	// scan_source capability — a source may only be created against an installed
 	// plugin capability.
 	available, err := h.svc.ListAvailableScanSources(r.Context())
@@ -440,13 +444,13 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		writeAutoscanError(w, err)
 		return
 	}
-	if !scanSourceInstalled(available, in.InstallationID, capID) {
-		writeError(w, http.StatusBadRequest, "bad_request", "installation_id + capability_id is not a currently-installed scan_source capability")
+	if !scanSourceInstalled(available, pluginID, capID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "plugin_id + capability_id is not a currently-installed scan_source capability")
 		return
 	}
 	connArg := normalizeConnectionID(in.ConnectionID)
 	created, err := h.repo.CreateSource(r.Context(), autoscan.Source{
-		InstallationID:      in.InstallationID,
+		PluginID:            pluginID,
 		CapabilityID:        capID,
 		ConnectionID:        connArg,
 		Enabled:             in.Enabled,
@@ -462,18 +466,18 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusCreated, sourceResponse(created))
 }
 
-// scanSourceInstalled reports whether (installationID, capabilityID) is in the
+// scanSourceInstalled reports whether (pluginID, capabilityID) is in the
 // set of currently-installed scan_source capabilities.
-func scanSourceInstalled(available []autoscan.AvailableScanSource, installationID int, capabilityID string) bool {
+func scanSourceInstalled(available []autoscan.AvailableScanSource, pluginID, capabilityID string) bool {
 	for _, a := range available {
-		if a.InstallationID == installationID && a.CapabilityID == capabilityID {
+		if a.PluginID == pluginID && a.CapabilityID == capabilityID {
 			return true
 		}
 	}
 	return false
 }
 
-// autoscanSourceInput is the source write payload. The (installation_id,
+// autoscanSourceInput is the source write payload. The (plugin_id,
 // capability_id) identity is read from the existing source row, so only the
 // schedulable/binding fields are accepted.
 //
@@ -548,7 +552,7 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 	// connection_id is a full-state field: nil means unbind, a UUID string
 	// means bind. A whitespace-only string is normalised to nil (unbound).
 	connArg := normalizeConnectionID(in.ConnectionID)
-	// Update by id; identity (installation_id, capability_id) is immutable and
+	// Update by id; identity (plugin_id, capability_id) is immutable and
 	// preserved by the repo. A missing source maps to 404.
 	updated, err := h.repo.UpdateSource(r.Context(), autoscan.Source{
 		ID:                  id,
@@ -581,9 +585,8 @@ func normalizeConnectionID(in *string) *string {
 }
 
 // HandleDeleteSource removes a source row. This is the operator's escape hatch
-// for an orphaned source (one whose scan_source plugin was uninstalled): the
-// poll loop skips such rows quietly, and this endpoint clears them. An unknown
-// id maps to 404 via autoscan.ErrNotFound.
+// for an orphaned source (one whose scan_source plugin was uninstalled or no
+// longer resolves cleanly). An unknown id maps to 404 via autoscan.ErrNotFound.
 func (h *AutoscanHandler) HandleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if err := h.repo.DeleteSource(r.Context(), id); err != nil {
@@ -710,7 +713,7 @@ type autoscanEventScanRunResponse struct {
 type autoscanEventResponse struct {
 	ID              int64                          `json:"id"`
 	SourceID        *string                        `json:"source_id"`
-	InstallationID  int                            `json:"installation_id"`
+	PluginID        string                         `json:"plugin_id"`
 	CapabilityID    string                         `json:"capability_id"`
 	StartedAt       time.Time                      `json:"started_at"`
 	CompletedAt     time.Time                      `json:"completed_at"`
@@ -753,7 +756,7 @@ func eventResponse(event autoscan.EventWithRuns) autoscanEventResponse {
 	return autoscanEventResponse{
 		ID:              e.ID,
 		SourceID:        e.SourceID,
-		InstallationID:  e.InstallationID,
+		PluginID:        e.PluginID,
 		CapabilityID:    e.CapabilityID,
 		StartedAt:       e.StartedAt,
 		CompletedAt:     e.CompletedAt,
@@ -794,9 +797,9 @@ func (h *AutoscanHandler) HandleListEvents(w http.ResponseWriter, r *http.Reques
 		filter.Offset = offset
 	}
 	switch filter.Status {
-	case "", autoscan.EventStatusSuccess, autoscan.EventStatusError, autoscan.EventStatusUnresolved:
+	case "", autoscan.EventStatusRunning, autoscan.EventStatusSuccess, autoscan.EventStatusError, autoscan.EventStatusUnresolved:
 	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "status must be success, error, or unresolved")
+		writeError(w, http.StatusBadRequest, "bad_request", "status must be running, success, error, or unresolved")
 		return
 	}
 
@@ -835,7 +838,7 @@ type autoscanScanResponse struct {
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
 	AutoscanEventID  *int64     `json:"autoscan_event_id,omitempty"`
 	SourceID         *string    `json:"source_id,omitempty"`
-	InstallationID   *int       `json:"installation_id,omitempty"`
+	PluginID         string     `json:"plugin_id,omitempty"`
 	CapabilityID     string     `json:"capability_id,omitempty"`
 	EventStatus      string     `json:"event_status,omitempty"`
 	EventCompletedAt *time.Time `json:"event_completed_at,omitempty"`
@@ -862,7 +865,7 @@ func autoscanScanRunResponse(scan autoscan.ScanWithEvent) autoscanScanResponse {
 		CompletedAt:      scan.CompletedAt,
 		AutoscanEventID:  scan.AutoscanEventID,
 		SourceID:         scan.SourceID,
-		InstallationID:   scan.InstallationID,
+		PluginID:         scan.PluginID,
 		CapabilityID:     scan.CapabilityID,
 		EventStatus:      string(scan.EventStatus),
 		EventCompletedAt: scan.EventCompletedAt,
@@ -923,24 +926,35 @@ func (h *AutoscanHandler) HandleListScans(w http.ResponseWriter, r *http.Request
 // --- Status ---
 
 type autoscanStatusSource struct {
-	ID             string                 `json:"id"`
-	InstallationID int                    `json:"installation_id"`
-	CapabilityID   string                 `json:"capability_id"`
-	ConnectionID   *string                `json:"connection_id"`
-	Enabled        bool                   `json:"enabled"`
-	Label          string                 `json:"label"`
-	PathRewrites   []autoscan.PathRewrite `json:"path_rewrites"`
-	LastRunAt      *time.Time             `json:"last_run_at,omitempty"`
-	LastError      *string                `json:"last_error,omitempty"`
+	ID           string                 `json:"id"`
+	PluginID     string                 `json:"plugin_id"`
+	CapabilityID string                 `json:"capability_id"`
+	ConnectionID *string                `json:"connection_id"`
+	Enabled      bool                   `json:"enabled"`
+	Label        string                 `json:"label"`
+	PathRewrites []autoscan.PathRewrite `json:"path_rewrites"`
+	LastRunAt    *time.Time             `json:"last_run_at,omitempty"`
+	LastError    *string                `json:"last_error,omitempty"`
+}
+
+type autoscanRunningPollResponse struct {
+	ID           int64     `json:"id"`
+	SourceID     *string   `json:"source_id"`
+	PluginID     string    `json:"plugin_id"`
+	CapabilityID string    `json:"capability_id"`
+	StartedAt    time.Time `json:"started_at"`
+	ElapsedMS    int64     `json:"elapsed_ms"`
+	MarkerBefore *string   `json:"marker_before,omitempty"`
 }
 
 type autoscanStatusResponse struct {
-	Enabled       bool                   `json:"enabled"`
-	Sources       []autoscanStatusSource `json:"sources"`
-	ActiveScans   int                    `json:"active_scans"`
-	AcceptedScans int                    `json:"accepted_scans"`
-	RunningScans  int                    `json:"running_scans"`
-	LatestEventAt *time.Time             `json:"latest_event_at,omitempty"`
+	Enabled       bool                          `json:"enabled"`
+	Sources       []autoscanStatusSource        `json:"sources"`
+	RunningPolls  []autoscanRunningPollResponse `json:"running_polls"`
+	ActiveScans   int                           `json:"active_scans"`
+	AcceptedScans int                           `json:"accepted_scans"`
+	RunningScans  int                           `json:"running_scans"`
+	LatestEventAt *time.Time                    `json:"latest_event_at,omitempty"`
 }
 
 func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
@@ -960,6 +974,11 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		writeAutoscanError(w, err)
 		return
 	}
+	runningEvents, err := h.repo.ListRunningEvents(ctx)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
 	latestEventAt, err := h.repo.LatestEventAt(ctx)
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -972,20 +991,38 @@ func (h *AutoscanHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 			rewrites = []autoscan.PathRewrite{}
 		}
 		trimmed = append(trimmed, autoscanStatusSource{
-			ID:             src.ID,
-			InstallationID: src.InstallationID,
-			CapabilityID:   src.CapabilityID,
-			ConnectionID:   src.ConnectionID,
-			Enabled:        src.Enabled,
-			Label:          src.Label,
-			PathRewrites:   rewrites,
-			LastRunAt:      src.LastRunAt,
-			LastError:      src.LastError,
+			ID:           src.ID,
+			PluginID:     src.PluginID,
+			CapabilityID: src.CapabilityID,
+			ConnectionID: src.ConnectionID,
+			Enabled:      src.Enabled,
+			Label:        src.Label,
+			PathRewrites: rewrites,
+			LastRunAt:    src.LastRunAt,
+			LastError:    src.LastError,
+		})
+	}
+	now := time.Now()
+	runningPolls := make([]autoscanRunningPollResponse, 0, len(runningEvents))
+	for _, event := range runningEvents {
+		elapsed := now.Sub(event.StartedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		runningPolls = append(runningPolls, autoscanRunningPollResponse{
+			ID:           event.ID,
+			SourceID:     event.SourceID,
+			PluginID:     event.PluginID,
+			CapabilityID: event.CapabilityID,
+			StartedAt:    event.StartedAt,
+			ElapsedMS:    elapsed.Milliseconds(),
+			MarkerBefore: event.MarkerBefore,
 		})
 	}
 	writeJSON(w, http.StatusOK, autoscanStatusResponse{
 		Enabled:       s.Enabled,
 		Sources:       trimmed,
+		RunningPolls:  runningPolls,
 		ActiveScans:   queue.Active,
 		AcceptedScans: queue.Accepted,
 		RunningScans:  queue.Running,
