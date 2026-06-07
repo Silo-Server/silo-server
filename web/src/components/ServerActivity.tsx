@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
@@ -64,18 +64,31 @@ function useServerActivityData() {
 // ── Main component ───────────────────────────────────────────
 
 function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
-  const [connectionProblemState, setConnectionProblemState] =
-    useState<RealtimeConnectionState | null>(null);
+  const isNonLive = connectionState !== "live";
+  const previousIsNonLiveRef = useRef(isNonLive);
+  const [connectionProblemState, setConnectionProblemState] = useState(false);
 
   useEffect(() => {
+    const wasNonLive = previousIsNonLiveRef.current;
+    previousIsNonLiveRef.current = isNonLive;
+
+    if (!isNonLive) {
+      setConnectionProblemState(false);
+      return;
+    }
+
+    if (wasNonLive) {
+      return;
+    }
+
     const timeoutID = window.setTimeout(
-      () => setConnectionProblemState(connectionState === "live" ? null : connectionState),
-      connectionState === "live" ? 0 : CONNECTION_PROBLEM_INDICATOR_DELAY_MS,
+      () => setConnectionProblemState(true),
+      CONNECTION_PROBLEM_INDICATOR_DELAY_MS,
     );
     return () => window.clearTimeout(timeoutID);
-  }, [connectionState]);
+  }, [isNonLive]);
 
-  return connectionState !== "live" && connectionProblemState === connectionState;
+  return isNonLive && connectionProblemState;
 }
 
 export default function ServerActivity({ hideWhenEmpty = false }: ServerActivityProps) {
