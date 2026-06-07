@@ -55,7 +55,10 @@ const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const DASHBOARD_AUTO_REFRESH_MS = 60_000;
 const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
 
-function formatFileCount(count: number) {
+function formatFileCount(count: number | null | undefined) {
+  if (count == null) {
+    return "—";
+  }
   return count === 1 ? "1 file" : `${count.toLocaleString()} files`;
 }
 
@@ -332,13 +335,13 @@ function StatsRow({
     {
       label: "Total Movies",
       value: stats.total_movies.toLocaleString(),
-      sub: formatFileCount(stats.total_movie_files ?? 0),
+      sub: formatFileCount(stats.total_movie_files),
       icon: <Film className="h-4 w-4" />,
     },
     {
       label: "Total Shows",
       value: stats.total_shows.toLocaleString(),
-      sub: formatFileCount(stats.total_show_files ?? 0),
+      sub: formatFileCount(stats.total_show_files),
       icon: <Tv className="h-4 w-4" />,
     },
     {
@@ -707,7 +710,7 @@ function LibrariesCard({
             return (
               <div
                 key={lib.id}
-                className="bg-surface border-border hover:bg-surface-hover flex cursor-pointer items-center gap-3 rounded-md border p-3 transition-colors duration-150"
+                className="bg-surface border-border hover:bg-surface-hover flex items-center gap-3 rounded-md border p-3 transition-colors duration-150"
               >
                 {lib.poster_url ? (
                   <img
