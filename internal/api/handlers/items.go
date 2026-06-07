@@ -150,7 +150,7 @@ func (h *ItemsHandler) maybeRequestStaleEpisodeMetadataRefresh(ctx context.Conte
 	if h == nil || h.metadataRefreshRequester == nil || episode == nil {
 		return
 	}
-	if metadata.EpisodeHasIncompleteMetadata(episode, time.Now()) {
+	if metadata.EpisodeHasActionableMetadataDebt(episode, time.Now()) {
 		h.requestStaleMetadataRefresh(ctx, "episode", episode.ContentID)
 	}
 }
@@ -161,7 +161,7 @@ func (h *ItemsHandler) maybeRequestStaleSeasonMetadataRefresh(ctx context.Contex
 	}
 	now := time.Now()
 	for _, episode := range episodes {
-		if metadata.EpisodeHasIncompleteMetadata(episode, now) {
+		if metadata.EpisodeHasActionableMetadataDebt(episode, now) {
 			h.requestStaleMetadataRefresh(ctx, "season", seasonID)
 			return
 		}
