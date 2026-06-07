@@ -35,6 +35,7 @@ func TestParsedEbookSanitizeBoundsFields(t *testing.T) {
 		Title:     "  Title  ",
 		Authors:   []string{" Alice ", "", "Alice", "Bob"},
 		Genres:    []string{" Fiction ", "fiction", ""},
+		ASIN:      " b0-0 ab ",
 		PageCount: -5,
 	}
 	book.sanitize()
@@ -49,6 +50,9 @@ func TestParsedEbookSanitizeBoundsFields(t *testing.T) {
 	}
 	if len(book.Genres) != 1 || book.Genres[0] != "Fiction" {
 		t.Fatalf("genres = %#v, want Fiction", book.Genres)
+	}
+	if book.ASIN != "B00AB" {
+		t.Fatalf("asin = %q, want B00AB", book.ASIN)
 	}
 	if book.PageCount != 0 {
 		t.Fatalf("page count = %d, want 0", book.PageCount)

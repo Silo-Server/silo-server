@@ -55,7 +55,7 @@ func (b *parsedEbook) sanitize() {
 	b.Publisher = strings.TrimSpace(b.Publisher)
 	b.Language = strings.TrimSpace(b.Language)
 	b.ISBN = normalizeEbookExternalID(b.ISBN)
-	b.ASIN = strings.TrimSpace(b.ASIN)
+	b.ASIN = normalizeEbookExternalID(b.ASIN)
 	b.Series = strings.TrimSpace(b.Series)
 	b.SeriesIndex = strings.TrimSpace(b.SeriesIndex)
 	b.Authors = uniqueTrimmedStrings(b.Authors)
