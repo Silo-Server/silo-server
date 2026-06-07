@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   useScanLibrary: vi.fn(),
   useScanAllLibraries: vi.fn(),
   useRefreshLibraryMetadata: vi.fn(),
+  useLibraryMetadataMatchQueues: vi.fn(),
   useLibraryMetadataMatchQueueDetail: vi.fn(),
   useRetryLibraryMetadataMatchQueue: vi.fn(),
   useCancelLibraryMetadataMatchQueue: vi.fn(),
@@ -48,6 +49,8 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useScanLibrary: (...args: unknown[]) => mocks.useScanLibrary(...args),
   useScanAllLibraries: (...args: unknown[]) => mocks.useScanAllLibraries(...args),
   useRefreshLibraryMetadata: (...args: unknown[]) => mocks.useRefreshLibraryMetadata(...args),
+  useLibraryMetadataMatchQueues: (...args: unknown[]) =>
+    mocks.useLibraryMetadataMatchQueues(...args),
   useLibraryMetadataMatchQueueDetail: (...args: unknown[]) =>
     mocks.useLibraryMetadataMatchQueueDetail(...args),
   useRetryLibraryMetadataMatchQueue: (...args: unknown[]) =>
@@ -139,6 +142,10 @@ describe("AdminLibraries", () => {
     mocks.useScanLibrary.mockReturnValue(queryState);
     mocks.useScanAllLibraries.mockReturnValue(queryState);
     mocks.useRefreshLibraryMetadata.mockReturnValue(queryState);
+    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
+      data: [],
+      isLoading: false,
+    });
     mocks.useLibraryMetadataMatchQueueDetail.mockReturnValue({
       data: null,
       isLoading: false,
@@ -214,6 +221,19 @@ describe("AdminLibraries", () => {
   });
 
   it("does not show metadata matcher queue counts in the library status", () => {
+    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
+      data: [
+        {
+          library_id: 1,
+          movie_count: 1,
+          series_count: 2,
+          raw_file_count: 0,
+          total_count: 3,
+        },
+      ],
+      isLoading: false,
+    });
+
     const markup = renderPage();
 
     expect(markup).toContain("Enabled");
