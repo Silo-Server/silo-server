@@ -337,6 +337,33 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Items that could not be matched to any metadata provider.");
   });
 
+  it("renders the Troubleshooting section collapsed by default when skipped roots exist", () => {
+    mocks.useSkippedLibraryRoots.mockReturnValue({
+      data: [
+        {
+          library_id: 1,
+          library_name: "Movies",
+          root_path: "/media/movies/Unknown Movie",
+          reason: "missing_provider_ids",
+          file_count: 2,
+          sample_file_path: "/media/movies/Unknown Movie/movie.mkv",
+          first_seen_at: "2026-03-23T20:00:00Z",
+          last_seen_at: "2026-03-23T21:00:00Z",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain("Troubleshooting");
+    expect(markup).toContain(
+      "Roots where the inferred canonical folder lacks embedded provider IDs.",
+    );
+    expect(markup).not.toContain("Filter by path, library, or reason");
+    expect(markup).not.toContain("Unknown Movie");
+  });
+
   it("hides unmatched items section when no unmatched items exist", () => {
     const markup = renderPage();
 
