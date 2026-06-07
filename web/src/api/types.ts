@@ -1732,6 +1732,13 @@ export interface RequestIntegration {
   anime_root_folder?: string;
   anime_tags: number[];
   options: Record<string, unknown>;
+  // Two-tier plugin-driven connection model. Generic fields above are owned by
+  // the host; the arr-specific config now lives in plugin_config. Optional for
+  // backward-compatible reads of legacy rows that predate the refactor.
+  capability_id?: string;
+  installation_id?: number;
+  supported_media_types?: string[];
+  plugin_config?: Record<string, unknown>;
   last_check_at?: string | null;
   last_check_status?: string;
   last_check_error?: string;
@@ -1766,6 +1773,12 @@ export interface LoadRequestIntegrationOptionsRequest {
   kind: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
+  // For unsaved connections the host cannot backfill from a stored row, so the
+  // body must carry enough to resolve the plugin (installation + capability +
+  // arr-specific config) when testing the connection.
+  capability_id?: string;
+  installation_id?: number;
+  plugin_config?: Record<string, unknown>;
 }
 
 export interface RequestIntegrationsResponse {

@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
@@ -20,6 +20,8 @@ import type {
   MediaRequest,
   MediaRequestOutcome,
   MediaRequestStatus,
+  PluginCapability,
+  PluginInstallation,
   RequestApprovalMode,
   RequestIntegration,
   RequestIntegrationOptions,
@@ -58,6 +60,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminMediaRequests,
@@ -581,9 +584,49 @@ type IntegrationFormState = {
   series_type: string;
   season_folder: boolean;
   has_api_key: boolean;
+  // Selected installed plugin (which request-router plugin fulfills this connection).
+  // Empty string means "none selected"; the backend requires a non-empty value.
+  installation_id: string;
 };
 
 const INTEGRATION_KINDS: Array<"radarr" | "sonarr"> = ["radarr", "sonarr"];
+
+// All request integrations are fulfilled by a plugin exposing this capability.
+const REQUEST_ROUTER_CAPABILITY = "request_router.v1";
+
+type RequestRouterInstallation = {
+  installationID: number;
+  pluginID: string;
+  capability: PluginCapability;
+};
+
+// requestRouterInstallations flattens installed plugins to one entry per
+// request_router.v1 capability so the form can offer an installation selector.
+function requestRouterInstallations(
+  installations: PluginInstallation[],
+): RequestRouterInstallation[] {
+  const out: RequestRouterInstallation[] = [];
+  for (const installation of installations) {
+    for (const capability of installation.capabilities ?? []) {
+      if (
+        capability.type === REQUEST_ROUTER_CAPABILITY ||
+        capability.id === REQUEST_ROUTER_CAPABILITY
+      ) {
+        out.push({
+          installationID: installation.id,
+          pluginID: installation.plugin_id,
+          capability,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function installationOptionLabel(entry: RequestRouterInstallation): string {
+  const name = entry.capability.display_name || entry.pluginID;
+  return `${name} (${entry.capability.id})`;
+}
 
 const MINIMUM_AVAILABILITY_OPTIONS = [
   { value: "announced", label: "Announced" },
@@ -625,6 +668,16 @@ function nextCardKey(): string {
 }
 
 function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegration[] }) {
+  const installationsQuery = useAdminPluginInstallations();
+  const routerInstallations = useMemo(
+    () => requestRouterInstallations(installationsQuery.data ?? []),
+    [installationsQuery.data],
+  );
+  // When exactly one request-router plugin is installed, default new/unseeded
+  // connections to it so the admin doesn't have to pick.
+  const defaultInstallationID =
+    routerInstallations.length === 1 ? String(routerInstallations[0]?.installationID ?? "") : "";
+
   const [cards, setCards] = useState<IntegrationCard[]>(() =>
     integrations.map((integration) => ({
       key: integration.id || nextCardKey(),
@@ -644,7 +697,11 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
   function addCard(kind: "radarr" | "sonarr") {
     setCards((current) => [
       ...current,
-      { key: nextCardKey(), form: integrationToForm(kind), source: null },
+      {
+        key: nextCardKey(),
+        form: { ...integrationToForm(kind), installation_id: defaultInstallationID },
+        source: null,
+      },
     ]);
   }
 
@@ -678,6 +735,8 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
                     key={card.key}
                     form={card.form}
                     source={card.source}
+                    installations={routerInstallations}
+                    installationsLoading={installationsQuery.isLoading}
                     onChange={(patch) => updateCard(card.key, patch)}
                     onRemove={() => removeCard(card.key)}
                   />
@@ -694,11 +753,15 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
 function IntegrationEditor({
   form,
   source,
+  installations,
+  installationsLoading,
   onChange,
   onRemove,
 }: {
   form: IntegrationFormState;
   source: RequestIntegration | null;
+  installations: RequestRouterInstallation[];
+  installationsLoading: boolean;
   onChange: (patch: Partial<IntegrationFormState>) => void;
   onRemove: () => void;
 }) {
@@ -720,17 +783,38 @@ function IntegrationEditor({
   const tags = options?.tags ?? [];
   const selectedTags = parseTags(form.tags);
   const selectedAnimeTags = parseTags(form.anime_tags);
+
+  // Default-select the only installed request-router plugin once installations
+  // have loaded, when this connection has no installation set yet.
+  useEffect(() => {
+    const only = installations.length === 1 ? installations[0] : undefined;
+    if (form.installation_id || !only) return;
+    onChange({ installation_id: String(only.installationID) });
+    // onChange identity is stable per card; intentionally depend on the data only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.installation_id, installations]);
+
+  const selectedInstallationID = Number(form.installation_id);
+  const hasInstallation = Number.isInteger(selectedInstallationID) && selectedInstallationID > 0;
   const canLoadOptions =
-    form.base_url.trim().length > 0 && Boolean(form.api_key_ref.trim() || form.has_api_key);
+    hasInstallation &&
+    form.base_url.trim().length > 0 &&
+    Boolean(form.api_key_ref.trim() || form.has_api_key);
 
   async function handleLoadOptions() {
     try {
+      // Unsaved connections have no stored row for the host to backfill from, so
+      // send the plugin wiring + config inline. Saved rows resolve by id.
+      const payload = formToIntegration(form);
       const loaded = await loadOptions.mutateAsync({
         id: form.id || "new",
         body: {
           kind: form.kind,
           base_url: form.base_url,
           api_key_ref: form.api_key_ref.trim() || undefined,
+          capability_id: REQUEST_ROUTER_CAPABILITY,
+          installation_id: hasInstallation ? selectedInstallationID : undefined,
+          plugin_config: payload.plugin_config,
         },
       });
       setOptions(loaded);
@@ -754,7 +838,8 @@ function IntegrationEditor({
   // New instances must carry an API key (there's no saved key to fall back on);
   // edits may leave it blank to keep the stored key (has_api_key).
   const hasApiKey = form.api_key_ref.trim().length > 0 || form.has_api_key;
-  const canSave = form.name.trim().length > 0 && form.base_url.trim().length > 0 && hasApiKey;
+  const canSave =
+    form.name.trim().length > 0 && form.base_url.trim().length > 0 && hasApiKey && hasInstallation;
 
   function handleSave() {
     const payload = formToIntegration(form);
@@ -832,6 +917,36 @@ function IntegrationEditor({
           onCheckedChange={(is_default_4k) => onChange({ is_default_4k })}
         />
       </div>
+
+      <Field label="Plugin">
+        {installationsLoading ? (
+          <Skeleton className="h-9 w-full rounded-md" />
+        ) : installations.length === 0 ? (
+          <p className="text-destructive text-xs">
+            No installed plugin exposes the {REQUEST_ROUTER_CAPABILITY} capability. Install a
+            request-router plugin before adding instances.
+          </p>
+        ) : (
+          <Select
+            value={form.installation_id}
+            onValueChange={(installation_id) => onChange({ installation_id })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select plugin" />
+            </SelectTrigger>
+            <SelectContent>
+              {installations.map((entry) => (
+                <SelectItem key={entry.installationID} value={String(entry.installationID)}>
+                  {installationOptionLabel(entry)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {!installationsLoading && installations.length > 0 && !hasInstallation ? (
+          <p className="text-destructive text-xs">Select a plugin to fulfill this connection.</p>
+        ) : null}
+      </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Base URL">
@@ -1151,39 +1266,97 @@ function integrationToForm(
   kind: "radarr" | "sonarr",
   integration?: RequestIntegration,
 ): IntegrationFormState {
+  // Two-tier model: arr-specific config lives in plugin_config. Fall back to the
+  // legacy top-level fields when plugin_config is empty so existing/migrated rows
+  // still populate the form. options carries the misc toggles (search_on_add etc.).
+  const pluginConfig = integration?.plugin_config ?? {};
   const options = integration?.options ?? {};
+  const config = Object.keys(pluginConfig).length > 0 ? pluginConfig : options;
+
+  const rootFolder = stringConfig(pluginConfig, "root_folder", integration?.root_folder ?? "");
+  const qualityProfileID = numberConfig(
+    pluginConfig,
+    "quality_profile_id",
+    integration?.quality_profile_id ?? undefined,
+  );
+  const tags = numberArrayConfig(pluginConfig, "tags", integration?.tags ?? []);
+  const animeRootFolder = stringConfig(
+    pluginConfig,
+    "anime_root_folder",
+    integration?.anime_root_folder ?? "",
+  );
+  const animeQualityProfileID = numberConfig(
+    pluginConfig,
+    "anime_quality_profile_id",
+    integration?.anime_quality_profile_id ?? undefined,
+  );
+  const animeTags = numberArrayConfig(pluginConfig, "anime_tags", integration?.anime_tags ?? []);
+
   return {
     id: integration?.id ?? "",
     name: integration?.name ?? "",
     kind,
     enabled: integration?.enabled ?? true,
-    is_4k: integration?.is_4k ?? false,
-    is_default: integration?.is_default ?? false,
-    is_default_4k: integration?.is_default_4k ?? false,
+    is_4k: boolConfig(pluginConfig, "is_4k", integration?.is_4k ?? false),
+    is_default: boolConfig(pluginConfig, "is_default", integration?.is_default ?? false),
+    is_default_4k: boolConfig(pluginConfig, "is_default_4k", integration?.is_default_4k ?? false),
     base_url: integration?.base_url ?? "",
     api_key_ref: "",
-    root_folder: integration?.root_folder ?? "",
-    quality_profile_id: integration?.quality_profile_id
-      ? String(integration.quality_profile_id)
-      : "",
-    tags: integration?.tags?.join(", ") ?? "",
-    anime_enabled: integration?.anime_enabled ?? false,
-    anime_quality_profile_id: integration?.anime_quality_profile_id
-      ? String(integration.anime_quality_profile_id)
-      : "",
-    anime_root_folder: integration?.anime_root_folder ?? "",
-    anime_tags: integration?.anime_tags?.join(", ") ?? "",
-    search_on_add: boolOption(options, "search_on_add", true),
-    minimum_availability: stringOption(options, "minimum_availability", "released"),
-    series_type: stringOption(options, "series_type", "standard"),
-    season_folder: boolOption(options, "season_folder", true),
+    root_folder: rootFolder,
+    quality_profile_id: qualityProfileID ? String(qualityProfileID) : "",
+    tags: tags.join(", "),
+    anime_enabled: boolConfig(pluginConfig, "anime_enabled", integration?.anime_enabled ?? false),
+    anime_quality_profile_id: animeQualityProfileID ? String(animeQualityProfileID) : "",
+    anime_root_folder: animeRootFolder,
+    anime_tags: animeTags.join(", "),
+    search_on_add: boolOption(config, "search_on_add", true),
+    minimum_availability: stringOption(config, "minimum_availability", "released"),
+    series_type: stringOption(config, "series_type", "standard"),
+    season_folder: boolOption(config, "season_folder", true),
     has_api_key: integration?.has_api_key ?? false,
+    installation_id: integration?.installation_id ? String(integration.installation_id) : "",
   };
 }
 
 function formToIntegration(form: IntegrationFormState): RequestIntegration {
   const qualityProfileID = Number(form.quality_profile_id);
   const animeQualityProfileID = Number(form.anime_quality_profile_id);
+  const resolvedQualityProfileID =
+    Number.isFinite(qualityProfileID) && qualityProfileID > 0 ? qualityProfileID : undefined;
+  const resolvedAnimeQualityProfileID =
+    Number.isFinite(animeQualityProfileID) && animeQualityProfileID > 0
+      ? animeQualityProfileID
+      : undefined;
+  const tags = parseTags(form.tags);
+  const animeTags = parseTags(form.anime_tags);
+  const rootFolder = form.root_folder.trim();
+  const animeRootFolder = form.anime_root_folder.trim();
+
+  // Two-tier shape: all arr-specific config goes into plugin_config (the source of
+  // truth the backend reads). Generic fields (name/enabled/base_url/api_key_ref)
+  // stay top-level alongside the plugin wiring (capability/installation).
+  const pluginConfig: Record<string, unknown> = {
+    service_kind: form.kind,
+    root_folder: rootFolder,
+    quality_profile_id: resolvedQualityProfileID,
+    tags,
+    is_default: form.is_default,
+    is_default_4k: form.is_default_4k,
+    is_4k: form.is_4k,
+    anime_enabled: form.anime_enabled,
+    anime_root_folder: animeRootFolder || undefined,
+    anime_quality_profile_id: resolvedAnimeQualityProfileID,
+    anime_tags: animeTags,
+    search_on_add: form.search_on_add,
+  };
+  if (form.kind === "sonarr") {
+    pluginConfig.series_type = form.series_type.trim() || "standard";
+    pluginConfig.season_folder = form.season_folder;
+  } else {
+    pluginConfig.minimum_availability = form.minimum_availability.trim() || "released";
+  }
+
+  // options mirrors the misc toggles for backward-compatible reads of older rows.
   const options: Record<string, unknown> = {
     search_on_add: form.search_on_add,
   };
@@ -1193,6 +1366,8 @@ function formToIntegration(form: IntegrationFormState): RequestIntegration {
   } else {
     options.minimum_availability = form.minimum_availability.trim() || "released";
   }
+
+  const installationID = Number(form.installation_id);
 
   return {
     id: form.id,
@@ -1204,18 +1379,19 @@ function formToIntegration(form: IntegrationFormState): RequestIntegration {
     is_default_4k: form.is_default_4k,
     base_url: form.base_url.trim(),
     api_key_ref: form.api_key_ref.trim() || undefined,
-    root_folder: form.root_folder.trim(),
-    quality_profile_id:
-      Number.isFinite(qualityProfileID) && qualityProfileID > 0 ? qualityProfileID : undefined,
-    tags: parseTags(form.tags),
+    root_folder: rootFolder,
+    quality_profile_id: resolvedQualityProfileID,
+    tags,
     anime_enabled: form.anime_enabled,
-    anime_quality_profile_id:
-      Number.isFinite(animeQualityProfileID) && animeQualityProfileID > 0
-        ? animeQualityProfileID
-        : undefined,
-    anime_root_folder: form.anime_root_folder.trim() || undefined,
-    anime_tags: parseTags(form.anime_tags),
+    anime_quality_profile_id: resolvedAnimeQualityProfileID,
+    anime_root_folder: animeRootFolder || undefined,
+    anime_tags: animeTags,
     options,
+    capability_id: REQUEST_ROUTER_CAPABILITY,
+    installation_id:
+      Number.isInteger(installationID) && installationID > 0 ? installationID : undefined,
+    supported_media_types: form.kind === "sonarr" ? ["series"] : ["movie"],
+    plugin_config: pluginConfig,
   };
 }
 
@@ -1506,6 +1682,41 @@ function boolOption(options: Record<string, unknown>, key: string, fallback: boo
 
 function stringOption(options: Record<string, unknown>, key: string, fallback: string): string {
   return typeof options[key] === "string" ? String(options[key]) : fallback;
+}
+
+function boolConfig(config: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  return typeof config[key] === "boolean" ? Boolean(config[key]) : fallback;
+}
+
+function stringConfig(config: Record<string, unknown>, key: string, fallback: string): string {
+  return typeof config[key] === "string" && config[key] ? String(config[key]) : fallback;
+}
+
+function numberConfig(
+  config: Record<string, unknown>,
+  key: string,
+  fallback: number | undefined,
+): number | undefined {
+  const value = config[key];
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  return fallback;
+}
+
+function numberArrayConfig(
+  config: Record<string, unknown>,
+  key: string,
+  fallback: number[],
+): number[] {
+  const value = config[key];
+  if (Array.isArray(value)) {
+    const parsed = value
+      .map((entry) => Number(entry))
+      .filter((entry) => Number.isInteger(entry) && entry > 0);
+    return parsed;
+  }
+  return fallback;
 }
 
 function parseTags(value: string): number[] {
