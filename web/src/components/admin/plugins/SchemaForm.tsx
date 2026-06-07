@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   PluginAdminForm,
@@ -17,7 +17,12 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
-import { evaluateShowWhen, validateSchemaValues, type SchemaOption } from "./schemaForm";
+import {
+  effectiveValue,
+  evaluateShowWhen,
+  validateSchemaValues,
+  type SchemaOption,
+} from "./schemaForm";
 
 type Props = {
   descriptor: PluginAdminForm;
@@ -26,6 +31,7 @@ type Props = {
   errors?: Record<string, string>;
   dynamicOptions?: Record<string, SchemaOption[]>;
   idPrefix?: string;
+  onValidityChange?: (valid: boolean) => void;
 };
 
 function optionsFor(
@@ -89,6 +95,7 @@ export function SchemaForm({
   errors,
   dynamicOptions,
   idPrefix = "schema",
+  onValidityChange,
 }: Props) {
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
@@ -98,9 +105,19 @@ export function SchemaForm({
     return map;
   }, [descriptor.fields]);
 
+  const clientErrors = useMemo(
+    () => validateSchemaValues(descriptor, values),
+    [descriptor, values],
+  );
+
   const mergedErrors = useMemo(() => {
-    return { ...validateSchemaValues(descriptor, values), ...(errors ?? {}) };
-  }, [descriptor, values, errors]);
+    return { ...clientErrors, ...(errors ?? {}) };
+  }, [clientErrors, errors]);
+
+  const valid = Object.keys(clientErrors).length === 0;
+  useEffect(() => {
+    onValidityChange?.(valid);
+  }, [valid, onValidityChange]);
 
   function setField(key: string, value: unknown) {
     onChange({ ...values, [key]: value });
@@ -114,7 +131,7 @@ export function SchemaForm({
         <div className="flex items-center gap-3 rounded-md border px-3 py-2">
           <Switch
             id={id}
-            checked={Boolean(values[field.key])}
+            checked={Boolean(effectiveValue(field, values))}
             onCheckedChange={(checked) => setField(field.key, checked)}
           />
           <span className="text-muted-foreground text-sm">{field.placeholder || ""}</span>
@@ -126,7 +143,7 @@ export function SchemaForm({
       const options = optionsFor(field, dynamicOptions);
       return (
         <Select
-          value={String(values[field.key] ?? "")}
+          value={String(effectiveValue(field, values) ?? "")}
           onValueChange={(nextValue) => setField(field.key, nextValue)}
         >
           <SelectTrigger id={id}>
@@ -145,9 +162,8 @@ export function SchemaForm({
 
     if (field.control === "MULTI_SELECT") {
       const options = optionsFor(field, dynamicOptions);
-      const selected = Array.isArray(values[field.key])
-        ? (values[field.key] as unknown[]).map((v) => String(v))
-        : [];
+      const current = effectiveValue(field, values);
+      const selected = Array.isArray(current) ? current.map((v) => String(v)) : [];
       return (
         <div className="flex flex-wrap gap-2">
           {options.map((option) => {
@@ -179,7 +195,7 @@ export function SchemaForm({
           id={id}
           className="border-border bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
           rows={field.rows && field.rows > 0 ? field.rows : 4}
-          value={String(values[field.key] ?? "")}
+          value={String(effectiveValue(field, values) ?? "")}
           placeholder={field.placeholder}
           onChange={(event) => setField(field.key, event.target.value)}
         />
@@ -196,7 +212,7 @@ export function SchemaForm({
               ? "number"
               : "text"
         }
-        value={String(values[field.key] ?? "")}
+        value={String(effectiveValue(field, values) ?? "")}
         placeholder={field.placeholder}
         onChange={(event) => setField(field.key, event.target.value)}
       />

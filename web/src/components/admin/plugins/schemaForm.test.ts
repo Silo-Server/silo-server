@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PluginAdminForm } from "@/api/types";
-import { evaluateShowWhen, validateSchemaValues, buildSchemaValues } from "./schemaForm";
+import {
+  evaluateShowWhen,
+  validateSchemaValues,
+  buildSchemaValues,
+  parseFieldTypes,
+} from "./schemaForm";
 
 const descriptor: PluginAdminForm = {
   fields: [
@@ -45,6 +50,108 @@ describe("buildSchemaValues", () => {
     expect(out.quality_profile_id).toBe(3);
     expect(out.tags).toEqual([1, 2]);
     expect(out.season_folder).toBe(true);
+  });
+});
+
+describe("validateSchemaValues regex guard (#5)", () => {
+  it("does not throw on a malformed pattern; treats it as no constraint", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "name", label: "Name", control: "TEXT", required: false, secret: false, multiline: false,
+          validation: { pattern: "[" } },
+      ],
+    };
+    expect(() => validateSchemaValues(d, { name: "anything" })).not.toThrow();
+    expect(validateSchemaValues(d, { name: "anything" })).toEqual({});
+  });
+  it("still flags a valid pattern mismatch", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "name", label: "Name", control: "TEXT", required: false, secret: false, multiline: false,
+          validation: { pattern: "^[a-z]+$" } },
+      ],
+    };
+    expect(validateSchemaValues(d, { name: "ABC" }).name).toMatch(/invalid/i);
+    expect(validateSchemaValues(d, { name: "abc" })).toEqual({});
+  });
+});
+
+describe("parseFieldTypes (#15)", () => {
+  it("reads declared property types including array item types", () => {
+    const json = JSON.stringify({
+      type: "object",
+      properties: {
+        quality_profile_id: { type: "integer" },
+        root_folder: { type: "string" },
+        tags: { type: "array", items: { type: "integer" } },
+        labels: { type: "array", items: { type: "string" } },
+        enabled: { type: "boolean" },
+      },
+    });
+    expect(parseFieldTypes(json)).toEqual({
+      quality_profile_id: "integer",
+      root_folder: "string",
+      tags: "array:int",
+      labels: "array",
+      enabled: "boolean",
+    });
+  });
+  it("returns {} for invalid or empty json_schema", () => {
+    expect(parseFieldTypes("")).toEqual({});
+    expect(parseFieldTypes("not json")).toEqual({});
+    expect(parseFieldTypes(undefined)).toEqual({});
+    expect(parseFieldTypes("[]")).toEqual({});
+  });
+});
+
+describe("buildSchemaValues type-driven coercion (#15)", () => {
+  it("coerces by declared type, preserving string ids and numeric array items", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "quality_profile_id", label: "QP", control: "SELECT", required: false, secret: false, multiline: false, dynamic_options: true },
+        { key: "root_folder", label: "Root", control: "SELECT", required: false, secret: false, multiline: false, dynamic_options: true },
+        { key: "tags", label: "Tags", control: "MULTI_SELECT", required: false, secret: false, multiline: false, dynamic_options: true },
+      ],
+    };
+    const out = buildSchemaValues(
+      d,
+      { quality_profile_id: "3", root_folder: "007", tags: ["1", "2"] },
+      { quality_profile_id: "integer", root_folder: "string", tags: "array:int" },
+    );
+    expect(out.quality_profile_id).toBe(3);
+    expect(out.root_folder).toBe("007"); // string preserved, NOT 7
+    expect(out.tags).toEqual([1, 2]);
+  });
+});
+
+describe("buildSchemaValues default_value (#6)", () => {
+  it("persists an untouched declared default", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "season_folder", label: "Season folder", control: "SWITCH", required: false, secret: false, multiline: false, default_value: true },
+      ],
+    };
+    const out = buildSchemaValues(d, {});
+    expect(out.season_folder).toBe(true);
+  });
+  it("required field satisfied by its default value", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "season_folder", label: "Season folder", control: "SWITCH", required: true, secret: false, multiline: false, default_value: true },
+      ],
+    };
+    expect(validateSchemaValues(d, {})).toEqual({});
+  });
+  it("does not persist a default for a hidden field", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "is_4k", label: "4K", control: "SWITCH", required: false, secret: false, multiline: false },
+        { key: "season_folder", label: "Season folder", control: "SWITCH", required: false, secret: false, multiline: false, default_value: true,
+          show_when: [{ field: "is_4k", equals: ["true"] }] },
+      ],
+    };
+    const out = buildSchemaValues(d, { is_4k: false });
+    expect(out.season_folder).toBeUndefined();
   });
 });
 

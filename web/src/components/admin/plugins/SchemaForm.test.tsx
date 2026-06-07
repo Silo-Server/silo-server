@@ -42,4 +42,30 @@ describe("SchemaForm", () => {
     fireEvent.click(screen.getByRole("switch"));
     expect(onChange).toHaveBeenCalled();
   });
+  it("renders a declared default_value when the field is absent from values (#6)", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "season_folder", label: "Season folder", control: "SWITCH", required: false, secret: false, multiline: false, default_value: true },
+      ],
+    };
+    const onChange = vi.fn();
+    render(<SchemaForm descriptor={d} values={{}} onChange={onChange} />);
+    expect((screen.getByRole("switch") as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
+  });
+  it("reports validity through onValidityChange (#14)", () => {
+    const onValidityChange = vi.fn();
+    const d: PluginAdminForm = {
+      fields: [
+        { key: "name", label: "Name", control: "TEXT", required: true, secret: false, multiline: false },
+      ],
+    };
+    const { rerender } = render(
+      <SchemaForm descriptor={d} values={{}} onChange={vi.fn()} onValidityChange={onValidityChange} />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    rerender(
+      <SchemaForm descriptor={d} values={{ name: "ok" }} onChange={vi.fn()} onValidityChange={onValidityChange} />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+  });
 });
