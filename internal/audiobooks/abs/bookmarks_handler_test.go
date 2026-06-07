@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -157,10 +158,14 @@ func (p *recordingPublisher) snapshot() []publishedEvent {
 // handler tests can drive both the 200 and 404 branches.
 type stubMediaStore struct {
 	noopMediaStore
-	known map[string]*models.MediaItem // itemID → row (nil means "exists but no row needed")
+	known     map[string]*models.MediaItem // itemID → row (nil means "exists but no row needed")
+	lookupErr error
 }
 
 func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalog.AccessFilter) (*models.MediaItem, error) {
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
 	if it, ok := s.known[id]; ok {
 		if it == nil {
 			return &models.MediaItem{ContentID: id}, nil
@@ -408,6 +413,19 @@ func TestMissingItem_404(t *testing.T) {
 	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/unknown/bookmark", "unknown", "", []byte(`{"title":"x","time":1}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestItemLookup_ErrorFromMediaStore_500(t *testing.T) {
+	hb := newBookmarksHarness(t, "book-1")
+	hb.H.deps.MediaStore = &stubMediaStore{
+		known:     map[string]*models.MediaItem{"book-1": nil},
+		lookupErr: errors.New("media lookup failed"),
+	}
+
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/book-1/bookmark", "book-1", "", []byte(`{"title":"x","time":1}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

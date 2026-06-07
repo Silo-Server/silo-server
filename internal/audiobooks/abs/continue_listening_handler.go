@@ -32,7 +32,12 @@ func (h *Handler) setHideFromContinue(w http.ResponseWriter, r *http.Request, hi
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
-	if err != nil || item == nil {
+	if err != nil {
+		slog.Error("abs continue item lookup failed", "err", err, "user", a.UserID, "item", itemID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}

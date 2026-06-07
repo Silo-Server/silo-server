@@ -151,14 +151,18 @@ func (h *Handler) handleDeleteItemProgress(w http.ResponseWriter, r *http.Reques
 // returns the empty progress shape so the client can store offline state
 // without raising an error.
 func (h *Handler) handleSetEpisodeProgress(w http.ResponseWriter, r *http.Request) {
+	if a, ok := absAuthFrom(r); !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"libraryItemId":    chi.URLParam(r, "libraryItemId"),
-		"episodeId":        chi.URLParam(r, "episodeId"),
-		"currentTime":      0.0,
-		"duration":         0.0,
-		"isFinished":       false,
-		"progress":         0.0,
-		"lastUpdate":       0,
+		"libraryItemId": chi.URLParam(r, "libraryItemId"),
+		"episodeId":     chi.URLParam(r, "episodeId"),
+		"currentTime":   0.0,
+		"duration":      0.0,
+		"isFinished":    false,
+		"progress":      0.0,
+		"lastUpdate":    0,
 	})
 }
 
@@ -182,8 +186,8 @@ func (h *Handler) handleEbookFile(w http.ResponseWriter, _ *http.Request) {
 // optimistic update succeeds.
 func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"libraryItemId": chi.URLParam(r, "id"),
-		"fileId":        chi.URLParam(r, "fileid"),
+		"libraryItemId":   chi.URLParam(r, "id"),
+		"fileId":          chi.URLParam(r, "fileid"),
 		"isSupplementary": false,
 	})
 }

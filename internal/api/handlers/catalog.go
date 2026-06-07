@@ -221,6 +221,9 @@ func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *h
 			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
 			return
 		}
+		if n > 100 {
+			n = 100
+		}
 		limit = n
 	}
 

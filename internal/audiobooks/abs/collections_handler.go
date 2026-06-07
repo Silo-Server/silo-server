@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
@@ -39,7 +40,12 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if body.Name == nil || *body.Name == "" {
+	if body.Name == nil {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(*body.Name)
+	if name == "" {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
 	}
@@ -48,7 +54,7 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 		ID:        ulid.Make().String(),
 		UserID:    a.UserID,
 		ProfileID: a.ProfileID,
-		Name:      *body.Name,
+		Name:      name,
 	}
 	if body.Description != nil {
 		c.Description = *body.Description
@@ -267,7 +273,12 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if body.Name != nil {
-		c.Name = *body.Name
+		name := strings.TrimSpace(*body.Name)
+		if name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		c.Name = name
 	}
 	if body.Description != nil {
 		c.Description = *body.Description

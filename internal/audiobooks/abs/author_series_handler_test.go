@@ -44,7 +44,9 @@ func TestAuthor_Detail_ReturnsBooks(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
 	if got["name"] != "Brandon Sanderson" {
 		t.Errorf("name = %v", got["name"])
 	}
@@ -78,7 +80,9 @@ func TestSeries_Detail_ReturnsBooks(t *testing.T) {
 		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
 	}
 	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
 	if got["name"] != "Mistborn" {
 		t.Errorf("name = %v", got["name"])
 	}

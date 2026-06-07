@@ -25,7 +25,7 @@ import (
 // and profile_id; we mirror that so List can filter correctly).
 type memCollectionStore struct {
 	mu    sync.Mutex
-	rows  map[string]Collection      // id -> row
+	rows  map[string]Collection       // id -> row
 	items map[string][]CollectionItem // collection_id -> items
 }
 
@@ -281,8 +281,16 @@ func TestCollection_List_DoesNotLeakOtherUsers(t *testing.T) {
 	// User 2 lists.
 	rec := dispatchABSWithParams(http.MethodGet, "/api/collections", nil, nil, "2", "", hb.H.handleListCollections)
 	var env map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	list, _ := env["collections"].([]any)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	list, ok := env["collections"].([]any)
+	if !ok {
+		t.Fatalf("response missing 'collections' key; body=%s", rec.Body.String())
+	}
 	if len(list) != 0 {
 		t.Errorf("user 2 sees %d collections, want 0", len(list))
 	}
@@ -295,8 +303,16 @@ func TestCollection_List_ProfileIsolation(t *testing.T) {
 	_ = dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(`{"name":"A"}`), "1", pA, hb.H.handleCreateCollection)
 	rec := dispatchABSWithParams(http.MethodGet, "/api/collections", nil, nil, "1", pB, hb.H.handleListCollections)
 	var env map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	list, _ := env["collections"].([]any)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	list, ok := env["collections"].([]any)
+	if !ok {
+		t.Fatalf("response missing 'collections' key; body=%s", rec.Body.String())
+	}
 	if len(list) != 0 {
 		t.Errorf("profile B sees %d collections, want 0", len(list))
 	}

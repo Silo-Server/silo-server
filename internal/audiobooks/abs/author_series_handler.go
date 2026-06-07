@@ -18,7 +18,8 @@ func (h *Handler) handleAuthorDetail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		slog.Warn("abs author access resolution failed", "err", err, "id", id)
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	author, err := h.deps.MediaStore.GetAuthorByID(r.Context(), id, access)
@@ -47,7 +48,8 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		slog.Warn("abs series access resolution failed", "err", err, "id", id)
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	series, err := h.deps.MediaStore.GetSeriesByName(r.Context(), id, access)
