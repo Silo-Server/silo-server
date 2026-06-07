@@ -32,11 +32,11 @@ type tasteSeedSubmitResponse struct {
 
 // HandleTasteSeedItems handles GET /recommendations/taste-seed/items.
 //
-// Returns a paginated, hydrated list of "popular on this server" posters used
-// for the new-user taste-seeding picker. Blends server-watched popularity with
-// TMDB rating so fresh servers (no watch history yet) still surface meaningful
-// content. The user_state field carries the existing is_favorite flag, so the
-// UI can pre-select items the profile already favorited.
+// Returns a paginated, hydrated list of posters used for the new-user
+// taste-seeding picker. Blends server-watched popularity with rating reliability
+// and recency so fresh servers (no watch history yet) still surface recognizable
+// content. The user_state field carries the existing is_favorite flag, so the UI
+// can pre-select items the profile already favorited.
 func (h *RecommendationsHandler) HandleTasteSeedItems(w http.ResponseWriter, r *http.Request) {
 	if h.recsRepo == nil || h.Fetcher == nil {
 		writeJSON(w, http.StatusOK, tasteSeedItemsResponse{Items: []sectionItemResponse{}})
