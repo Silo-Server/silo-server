@@ -841,6 +841,47 @@ func TestReconcileRequestsMarksDownloadingFromProvider(t *testing.T) {
 	}
 }
 
+func TestReconcileRequestsResolvesGlobalInputsOncePerCycle(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")} // APIKeyRef "key-router-1"
+
+	// Three approved candidates that all share the same router connection. Each
+	// one drives submitApprovedRequest, which resolves the router connection (and
+	// thus the connection's api key). Without per-cycle caching this would fetch
+	// integrations/settings and decrypt the key once per request.
+	for _, id := range []string{"req-1", "req-2", "req-3"} {
+		req := &Request{ID: id, MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive}
+		store.candidates = append(store.candidates, req)
+		store.requests[id] = req
+	}
+
+	secrets := newCountingSecrets(map[string]string{"key-router-1": "radarr-key"})
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+	service.SetSecretResolver(secrets)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Checked != 3 || result.Submitted != 3 {
+		t.Fatalf("result = %+v, want 3 checked / 3 submitted", result)
+	}
+
+	// The connection's api key is decrypted ONCE for the whole cycle, not once per
+	// request (which would be 3).
+	if got := secrets.count("key-router-1"); got != 1 {
+		t.Fatalf("secret Get(\"key-router-1\") calls = %d, want 1 per cycle", got)
+	}
+	// Integrations and settings are likewise fetched once per cycle.
+	if store.listIntegrationsCalls != 1 {
+		t.Fatalf("ListIntegrations calls = %d, want 1 per cycle", store.listIntegrationsCalls)
+	}
+	if store.getSettingsCalls != 1 {
+		t.Fatalf("GetSettings calls = %d, want 1 per cycle", store.getSettingsCalls)
+	}
+}
+
 func TestDeleteIntegrationRejectsLiveTargets(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{{
@@ -1046,6 +1087,9 @@ type fakeStore struct {
 	requests      map[string]*Request
 	targets       map[string][]Target
 	targetSeq     int64
+
+	listIntegrationsCalls int
+	getSettingsCalls      int
 }
 
 func newFakeStore() *fakeStore {
@@ -1066,6 +1110,7 @@ func newFakeStore() *fakeStore {
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getSettingsCalls++
 	return f.settings, nil
 }
 
@@ -1228,6 +1273,7 @@ func (f *fakeStore) SetOutcome(_ context.Context, id string, outcome Outcome, _ 
 func (f *fakeStore) ListIntegrations(context.Context) ([]Integration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listIntegrationsCalls++
 	return f.integrations, nil
 }
 
@@ -1819,7 +1865,7 @@ func TestSubmitApprovedFansOutDualQuality(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	if len(router.gotQualities) != 2 {
@@ -1838,7 +1884,7 @@ func TestSubmitApprovedNoRouterFails(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -1854,7 +1900,7 @@ func TestSubmitApprovedNoConnectionsFails(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -1871,7 +1917,7 @@ func TestSubmitApprovedZeroTargetsUsesProviderMessage(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -1896,7 +1942,7 @@ func TestSubmitApprovedIsIdempotentPerQuality(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	// HD ceiling only -> only 1080p is allowed, and it already has a healthy target,
@@ -1919,7 +1965,7 @@ func TestSubmitApprovedRecordsDroppedQualityAsFailed(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
@@ -1947,7 +1993,7 @@ func TestSubmitApprovedRecordsDroppedQualityAsFailed(t *testing.T) {
 	cur := *store.requests["r1"]
 	cur.Status = StatusApproved
 	cur.Outcome = OutcomeActive
-	if _, err := svc.submitApprovedRequest(context.Background(), cur, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), cur, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("retry submit: %v", err)
 	}
 	if len(retryRouter.gotQualities) != 1 || retryRouter.gotQualities[0] != Quality2160p {
@@ -1969,7 +2015,7 @@ func TestSubmitApprovedContainsToSingleInstallation(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	if router.gotInstallationID != 1 {
@@ -1993,7 +2039,7 @@ func TestSubmitApprovedDedupesDuplicateQualityTargets(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit returned error: %v", err)
 	}
@@ -2018,7 +2064,7 @@ func TestSubmitApprovedSkipsMismatchedMediaType(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -2049,7 +2095,7 @@ func TestSubmitApprovedSkipsBadConnectionUsesSibling(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit must not abort on a single bad connection: %v", err)
 	}
@@ -2075,7 +2121,7 @@ func TestSubmitApprovedSkipsConnectionWithEmptyKey(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -2100,7 +2146,7 @@ func TestSubmitApprovedSkipsUnknownQuality(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	targets, _ := store.ListTargets(context.Background(), "r1")
@@ -2125,7 +2171,7 @@ func TestSubmitApprovedCoercesUnknownStatusToQueued(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	targets, _ := store.ListTargets(context.Background(), "r1")
@@ -2153,7 +2199,7 @@ func TestSubmitApprovedSkipsTargetForHealthyQuality(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
 		t.Fatalf("submit must not error on a duplicate of a healthy quality: %v", err)
 	}
 	targets, _ := store.ListTargets(context.Background(), "r1")
@@ -2183,7 +2229,7 @@ func TestSubmitApprovedUnboundInstallationFailsWithGuidance(t *testing.T) {
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -2210,6 +2256,31 @@ type fakeSecrets map[string]string
 
 func (f fakeSecrets) Get(_ context.Context, key string) (string, error) {
 	return f[key], nil
+}
+
+// countingSecrets wraps a value map and counts Get calls per key, so tests can
+// assert that per-cycle memoization decrypts each ref only once.
+type countingSecrets struct {
+	mu     sync.Mutex
+	values map[string]string
+	calls  map[string]int
+}
+
+func newCountingSecrets(values map[string]string) *countingSecrets {
+	return &countingSecrets{values: values, calls: map[string]int{}}
+}
+
+func (c *countingSecrets) Get(_ context.Context, key string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls[key]++
+	return c.values[key], nil
+}
+
+func (c *countingSecrets) count(key string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls[key]
 }
 
 type fakeSecretError struct {
