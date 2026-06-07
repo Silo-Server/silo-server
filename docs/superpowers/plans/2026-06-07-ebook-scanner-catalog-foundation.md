@@ -4,7 +4,7 @@
 
 **Goal:** Add first-party ebook library scanning and catalog visibility for local EPUB/PDF/MOBI/AZW/AZW3/FB2 files.
 
-**Architecture:** Ebooks become normal `media_items` with `type = 'ebook'`, one `media_files` row per ebook file, author credits in `item_people`, ISBN/ASIN in `media_item_provider_ids`, and ebook-only fields in a new `ebook_details` table. The scanner mirrors audiobook folder handling where useful, but identity is file-scoped and never title/year-scoped.
+**Architecture:** Ebooks become normal `media_items` with `type = 'ebook'`, one `media_files` row per ebook file, author credits in `item_people`, ISBN in `media_item_provider_ids`, and ebook-only fields in a new `ebook_details` table. The scanner mirrors audiobook folder handling where useful, but identity is file-scoped and never title/year-scoped.
 
 **Tech Stack:** Go, pgx/PostgreSQL migrations, existing Silo scanner/catalog repositories, React/TypeScript API type updates.
 
@@ -78,7 +78,6 @@ CREATE TABLE IF NOT EXISTS public.ebook_details (
     content_id text PRIMARY KEY REFERENCES public.media_items(content_id) ON DELETE CASCADE,
     format text NOT NULL DEFAULT '',
     isbn text NOT NULL DEFAULT '',
-    asin text NOT NULL DEFAULT '',
     publisher text NOT NULL DEFAULT '',
     page_count integer NOT NULL DEFAULT 0,
     series_name text NOT NULL DEFAULT '',
@@ -121,7 +120,6 @@ type EbookDetails struct {
 	ContentID    string
 	Format       string
 	ISBN         string
-	ASIN         string
 	Publisher    string
 	PageCount    int
 	SeriesName   string
@@ -192,19 +190,18 @@ func (r *EbookDetailsRepository) Upsert(ctx context.Context, details models.Eboo
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO ebook_details
-		    (content_id, format, isbn, asin, publisher, page_count, series_name, series_index, metadata_json)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		    (content_id, format, isbn, publisher, page_count, series_name, series_index, metadata_json)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (content_id) DO UPDATE SET
 		    format = EXCLUDED.format,
 		    isbn = EXCLUDED.isbn,
-		    asin = EXCLUDED.asin,
 		    publisher = EXCLUDED.publisher,
 		    page_count = EXCLUDED.page_count,
 		    series_name = EXCLUDED.series_name,
 		    series_index = EXCLUDED.series_index,
 		    metadata_json = EXCLUDED.metadata_json,
 		    updated_at = now()
-	`, details.ContentID, details.Format, details.ISBN, details.ASIN, details.Publisher,
+	`, details.ContentID, details.Format, details.ISBN, details.Publisher,
 		details.PageCount, details.SeriesName, details.SeriesIndex, details.MetadataJSON)
 	if err != nil {
 		return fmt.Errorf("upsert ebook details: %w", err)
@@ -322,7 +319,6 @@ type parsedEbook struct {
 	Year        int
 	Language    string
 	ISBN        string
-	ASIN        string
 	Series      string
 	SeriesIndex string
 	Genres      []string
@@ -346,7 +342,6 @@ func (b *parsedEbook) sanitize() {
 	b.Publisher = strings.TrimSpace(b.Publisher)
 	b.Language = strings.TrimSpace(b.Language)
 	b.ISBN = normalizeEbookExternalID(b.ISBN)
-	b.ASIN = strings.TrimSpace(b.ASIN)
 	b.Series = strings.TrimSpace(b.Series)
 	b.SeriesIndex = strings.TrimSpace(b.SeriesIndex)
 	b.Authors = uniqueTrimmedStrings(b.Authors)

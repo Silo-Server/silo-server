@@ -29,19 +29,18 @@ func (r *EbookDetailsRepository) Upsert(ctx context.Context, details models.Eboo
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO ebook_details
-		    (content_id, format, isbn, asin, publisher, page_count, series_name, series_index, metadata_json)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		    (content_id, format, isbn, publisher, page_count, series_name, series_index, metadata_json)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (content_id) DO UPDATE SET
 		    format = EXCLUDED.format,
 		    isbn = EXCLUDED.isbn,
-		    asin = EXCLUDED.asin,
 		    publisher = EXCLUDED.publisher,
 		    page_count = EXCLUDED.page_count,
 		    series_name = EXCLUDED.series_name,
 		    series_index = EXCLUDED.series_index,
 		    metadata_json = EXCLUDED.metadata_json,
 		    updated_at = now()
-	`, details.ContentID, details.Format, details.ISBN, details.ASIN, details.Publisher,
+	`, details.ContentID, details.Format, details.ISBN, details.Publisher,
 		details.PageCount, details.SeriesName, details.SeriesIndex, details.MetadataJSON)
 	if err != nil {
 		return fmt.Errorf("upsert ebook details: %w", err)

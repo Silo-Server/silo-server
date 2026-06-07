@@ -31,7 +31,6 @@ type parsedEbook struct {
 	Year        int
 	Language    string
 	ISBN        string
-	ASIN        string
 	Series      string
 	SeriesIndex string
 	Genres      []string
@@ -55,7 +54,6 @@ func (b *parsedEbook) sanitize() {
 	b.Publisher = strings.TrimSpace(b.Publisher)
 	b.Language = strings.TrimSpace(b.Language)
 	b.ISBN = normalizeEbookExternalID(b.ISBN)
-	b.ASIN = normalizeEbookExternalID(b.ASIN)
 	b.Series = strings.TrimSpace(b.Series)
 	b.SeriesIndex = strings.TrimSpace(b.SeriesIndex)
 	b.Authors = uniqueTrimmedStrings(b.Authors)

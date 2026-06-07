@@ -14,7 +14,7 @@ In scope:
 - Route `ebook` and `ebooks` media folders through a dedicated ebook scanner.
 - Support `.epub`, `.pdf`, `.mobi`, `.azw`, `.azw3`, and `.fb2`.
 - Extract local embedded metadata where available: title, authors, publisher,
-  year/release date, language, genres, ISBN, ASIN, description, series, series
+  year/release date, language, genres, ISBN, description, series, series
   position, page count, and cover image.
 - Use sidecar covers when there is no embedded cover: `cover.jpg`,
   `cover.png`, or `folder.jpg`.
@@ -22,7 +22,7 @@ In scope:
   `media_items`, `media_files`, `media_item_libraries`, `item_people`, and
   `media_item_provider_ids`.
 - Add an ebook-specific details table for metadata that does not fit cleanly
-  into `media_items` or `media_files`, such as format, page count, ISBN/ASIN,
+  into `media_items` or `media_files`, such as format, page count, ISBN,
   publisher, series name, and series index.
 - Make ebooks visible through existing catalog browse/search surfaces.
 
@@ -32,7 +32,7 @@ Out of scope:
 - OPDS, Kobo, Kindle, send-to-device, or sync integrations.
 - Reading progress, annotations, bookmarks, highlights, or reading stats.
 - Ebook request workflows.
-- External metadata enrichment. The scanner stores ISBN/ASIN/provider hints so
+- External metadata enrichment. The scanner stores ISBN/provider hints so
   a later MR can add metadata provider integration.
 
 ## Architecture
@@ -55,7 +55,6 @@ New database shape:
   - `content_id text primary key references media_items(content_id) on delete cascade`
   - `format text not null default ''`
   - `isbn text not null default ''`
-  - `asin text not null default ''`
   - `publisher text not null default ''`
   - `page_count integer not null default 0`
   - `series_name text not null default ''`
@@ -70,8 +69,7 @@ Shared tables:
 - `media_files`: one row per ebook file with `base_type = 'ebook'`,
   file size/mtime/hash, root paths, container/format, and identity confidence.
 - `item_people`: authors use `models.PersonKindAuthor`.
-- `media_item_provider_ids`: ISBN and ASIN are stored as durable provider IDs
-  when present.
+- `media_item_provider_ids`: ISBN is stored as a durable provider ID when present.
 - `media_item_libraries`: library membership.
 
 Catalog updates add `ebook` to type parsing and API response unions. Ebook
@@ -91,8 +89,8 @@ Identity order:
    moved within the same root in a way the existing file repository can prove.
 3. Otherwise create a new `media_items` row.
 
-ISBN and ASIN are persisted for later matching, but they do not collapse local
-items in this first MR.
+ISBN is persisted for later matching, but it does not collapse local items in
+this first MR.
 
 ## Data Flow
 
@@ -107,7 +105,7 @@ items in this first MR.
    - write one `media_files` row
    - write `ebook_details`
    - replace author links
-   - persist ISBN/ASIN provider IDs when present
+   - persist ISBN provider IDs when present
    - cache embedded cover art, or sidecar cover art when embedded cover is absent
    - ensure `media_item_libraries` membership exists
 4. Missing files are marked by setting `media_files.missing_since` through the
@@ -132,7 +130,7 @@ items in this first MR.
 Parser tests:
 
 - Supported extension routing for EPUB, PDF, MOBI, AZW, AZW3, and FB2.
-- Metadata extraction for title, author, year/release date, language, ISBN/ASIN,
+- Metadata extraction for title, author, year/release date, language, ISBN,
   series, page count, description, and cover where practical fixtures exist.
 - Panic recovery and unsupported/corrupt file handling.
 
@@ -141,7 +139,7 @@ Scanner tests:
 - Unsupported extensions are ignored.
 - Unchanged files are skipped.
 - Same-title ebooks in different paths create separate items.
-- ISBN/ASIN are stored as provider IDs but do not force merging.
+- ISBN is stored as a provider ID but does not force merging.
 - Author links are written with `PersonKindAuthor`.
 - Embedded cover wins over sidecar; sidecar is used when embedded cover is
   absent.

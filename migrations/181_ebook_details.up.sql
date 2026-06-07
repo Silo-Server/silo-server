@@ -2,7 +2,6 @@ CREATE TABLE IF NOT EXISTS public.ebook_details (
     content_id text PRIMARY KEY REFERENCES public.media_items(content_id) ON DELETE CASCADE,
     format text NOT NULL DEFAULT '',
     isbn text NOT NULL DEFAULT '',
-    asin text NOT NULL DEFAULT '',
     publisher text NOT NULL DEFAULT '',
     page_count integer NOT NULL DEFAULT 0,
     series_name text NOT NULL DEFAULT '',

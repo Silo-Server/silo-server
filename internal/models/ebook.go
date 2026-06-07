@@ -6,7 +6,6 @@ type EbookDetails struct {
 	ContentID    string
 	Format       string
 	ISBN         string
-	ASIN         string
 	Publisher    string
 	PageCount    int
 	SeriesName   string
