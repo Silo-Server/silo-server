@@ -12,7 +12,7 @@
 
 ## File Structure
 
-- Create `migrations/180_ebook_details.up.sql` and `migrations/180_ebook_details.down.sql`
+- Create `migrations/181_ebook_details.up.sql` and `migrations/181_ebook_details.down.sql`
   - Defines the `ebook_details` table and useful indexes.
 - Create `internal/models/ebook.go`
   - `EbookDetails` model used by scanner/catalog tests and repository code.
@@ -36,8 +36,8 @@
 ## Task 1: Migration And Details Repository
 
 **Files:**
-- Create: `migrations/180_ebook_details.up.sql`
-- Create: `migrations/180_ebook_details.down.sql`
+- Create: `migrations/181_ebook_details.up.sql`
+- Create: `migrations/181_ebook_details.down.sql`
 - Create: `internal/models/ebook.go`
 - Create: `internal/catalog/ebook_details_repo.go`
 - Test: `migrations/ebook_details_test.go`
@@ -58,7 +58,7 @@ import (
 
 func TestEbookDetailsMigrationFilesExist(t *testing.T) {
 	for _, suffix := range []string{"up.sql", "down.sql"} {
-		path := filepath.Join("..", "migrations", "180_ebook_details."+suffix)
+		path := filepath.Join("..", "migrations", "181_ebook_details."+suffix)
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected migration file %s: %v", path, err)
 		}
@@ -71,7 +71,7 @@ Expected: FAIL until the migration files exist.
 
 - [ ] **Step 2: Add migration files**
 
-Create `migrations/180_ebook_details.up.sql`:
+Create `migrations/181_ebook_details.up.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.ebook_details (
@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_ebook_details_format
     WHERE format <> '';
 ```
 
-Create `migrations/180_ebook_details.down.sql`:
+Create `migrations/181_ebook_details.down.sql`:
 
 ```sql
 DROP INDEX IF EXISTS public.idx_ebook_details_format;
@@ -219,7 +219,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/180_ebook_details.* internal/models/ebook.go internal/catalog/ebook_details_repo.go internal/catalog/ebook_details_repo_test.go migrations/ebook_details_test.go
+git add migrations/181_ebook_details.* internal/models/ebook.go internal/catalog/ebook_details_repo.go internal/catalog/ebook_details_repo_test.go migrations/ebook_details_test.go
 git commit -m "feat(ebooks): add ebook details schema"
 ```
 
