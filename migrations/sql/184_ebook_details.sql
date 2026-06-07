@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS public.ebook_details (
     content_id text PRIMARY KEY REFERENCES public.media_items(content_id) ON DELETE CASCADE,
     format text NOT NULL DEFAULT '',
@@ -18,3 +20,11 @@ CREATE INDEX IF NOT EXISTS idx_ebook_details_series_name
 CREATE INDEX IF NOT EXISTS idx_ebook_details_format
     ON public.ebook_details (format)
     WHERE format <> '';
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.idx_ebook_details_format;
+DROP INDEX IF EXISTS public.idx_ebook_details_series_name;
+DROP TABLE IF EXISTS public.ebook_details;
+-- +goose StatementEnd
