@@ -1520,21 +1520,6 @@ func normalizeUserLimit(limit UserLimit) (UserLimit, error) {
 	return limit, nil
 }
 
-func normalizeIntegrationConnection(integration Integration) (Integration, error) {
-	integration.Kind = strings.ToLower(strings.TrimSpace(integration.Kind))
-	switch integration.Kind {
-	case "radarr", "sonarr":
-	default:
-		return Integration{}, fmt.Errorf("%w: invalid integration kind", ErrInvalidInput)
-	}
-	integration.BaseURL = strings.TrimRight(strings.TrimSpace(integration.BaseURL), "/")
-	integration.APIKeyRef = strings.TrimSpace(integration.APIKeyRef)
-	if integration.Options == nil {
-		integration.Options = map[string]any{}
-	}
-	return integration, nil
-}
-
 func normalizeMediaType(mediaType MediaType) (MediaType, error) {
 	switch MediaType(strings.ToLower(strings.TrimSpace(string(mediaType)))) {
 	case MediaTypeMovie:
