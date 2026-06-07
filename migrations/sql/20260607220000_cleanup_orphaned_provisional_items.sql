@@ -19,6 +19,30 @@ WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
     WHERE lci.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
+    SELECT 1 FROM public.abs_bookmarks ab
+    WHERE ab.library_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.abs_collection_items aci
+    WHERE aci.library_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.abs_playback_sessions aps
+    WHERE aps.content_id = mi.content_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.abs_playlist_items api
+    WHERE api.library_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.abs_playlists ap
+    WHERE ap.cover_item = mi.content_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.abs_rss_feeds arf
+    WHERE arf.library_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
     SELECT 1 FROM public.downloads d
     WHERE d.content_id = mi.content_id
   )
@@ -33,6 +57,10 @@ WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
   AND NOT EXISTS (
     SELECT 1 FROM public.plex_sync_item_state psis
     WHERE psis.media_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.podcast_feeds pf
+    WHERE pf.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
     SELECT 1 FROM public.user_favorites uf
