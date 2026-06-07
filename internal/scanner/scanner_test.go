@@ -200,3 +200,23 @@ func TestIsPodcastLibraryType(t *testing.T) {
 		}
 	}
 }
+
+func TestWalkModeForEbookLibraryTypes(t *testing.T) {
+	for _, libraryType := range []string{"ebook", "ebooks"} {
+		if got := walkModeFor(libraryType); got != walkModeEbook {
+			t.Fatalf("walkModeFor(%q) = %v, want %v", libraryType, got, walkModeEbook)
+		}
+	}
+}
+
+func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
+	if !walkModeEbook.acceptsExt(".epub") {
+		t.Fatal("walkModeEbook should accept .epub")
+	}
+	if walkModeEbook.acceptsExt(".mp4") {
+		t.Fatal("walkModeEbook should reject video extensions")
+	}
+	if walkModeEbook.acceptsExt(".mp3") {
+		t.Fatal("walkModeEbook should reject audio extensions")
+	}
+}

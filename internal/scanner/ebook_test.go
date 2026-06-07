@@ -2,10 +2,14 @@ package scanner
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestSupportsEbookFile(t *testing.T) {
@@ -139,6 +143,41 @@ func TestParseEbookFileReturnsCorruptInputErrors(t *testing.T) {
 			t.Fatal("parseEbookFile corrupt fb2 returned nil error")
 		}
 	})
+}
+
+func TestScanEbookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.epub"), []byte("not a zip"), 0o644); err != nil {
+		t.Fatalf("write corrupt epub: %v", err)
+	}
+
+	s := &Scanner{}
+	err := s.ScanEbookFolder(context.Background(), &models.MediaFolder{ID: 44, Paths: []string{root}})
+	if err == nil {
+		t.Fatal("ScanEbookFolder returned nil, want aggregate failure")
+	}
+	if !strings.Contains(err.Error(), "folder_id=44") {
+		t.Fatalf("error = %q, want folder id", err)
+	}
+}
+
+func TestScanFolderRoutesEbookLibrariesToEbookScanner(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.epub"), []byte("not a zip"), 0o644); err != nil {
+		t.Fatalf("write corrupt epub: %v", err)
+	}
+
+	s := &Scanner{}
+	result, err := s.ScanFolder(context.Background(), &models.MediaFolder{ID: 45, Type: "ebooks", Paths: []string{root}})
+	if err == nil {
+		t.Fatal("ScanFolder returned nil error, want ebook scan failure")
+	}
+	if result != nil {
+		t.Fatalf("ScanFolder result = %#v, want nil on error", result)
+	}
+	if !strings.Contains(err.Error(), "folder_id=45") {
+		t.Fatalf("error = %q, want ebook scanner aggregate error", err)
+	}
 }
 
 func TestParseEbookFB2ReadsDescriptionMetadata(t *testing.T) {

@@ -214,9 +214,9 @@ func (s *Scanner) SetMetadataQueueProducer(producer MetadataQueueProducer) {
 // probes them for technical data, and upserts them into the database.
 // Files previously in the DB that no longer exist on disk are marked as missing.
 //
-// Audiobook libraries are handled by ScanAudiobookFolder and podcast
-// libraries by ScanPodcastFolder; both bypass the per-file movie/TV
-// pipeline entirely.
+// Audiobook libraries are handled by ScanAudiobookFolder, podcast libraries by
+// ScanPodcastFolder, and ebook libraries by ScanEbookFolder; all bypass the
+// per-file movie/TV pipeline entirely.
 func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*ScanResult, error) {
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
@@ -230,6 +230,13 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 
 	if isPodcastLibraryType(folder.Type) {
 		if err := s.ScanPodcastFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+
+	if isEbookLibraryType(folder.Type) {
+		if err := s.ScanEbookFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -271,6 +278,14 @@ func isPodcastLibraryType(libraryType string) bool {
 		return false
 	}
 }
+func isEbookLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "ebook", "ebooks":
+		return true
+	default:
+		return false
+	}
+}
 
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
@@ -282,6 +297,7 @@ const (
 	walkModeMovie                     // movie library: video extensions + sample/extra skipping
 	walkModeAudiobook                 // audiobook library: audio extensions, no skipping
 	walkModePodcast                   // podcast library: audio extensions, no skipping
+	walkModeEbook                     // ebook library: ebook extensions, no skipping
 )
 
 // walkModeFor derives a walkMode from a media_folders.type string.
@@ -295,6 +311,8 @@ func walkModeFor(folderType string) walkMode {
 		return walkModeAudiobook
 	case isPodcastLibraryType(folderType):
 		return walkModePodcast
+	case isEbookLibraryType(folderType):
+		return walkModeEbook
 	default:
 		return walkModeVideo
 	}
@@ -306,6 +324,8 @@ func (m walkMode) acceptsExt(ext string) bool {
 	switch m {
 	case walkModeAudiobook, walkModePodcast:
 		return audioExtensions[ext]
+	case walkModeEbook:
+		return ebookExtensions[ext]
 	default:
 		return videoExtensions[ext]
 	}
