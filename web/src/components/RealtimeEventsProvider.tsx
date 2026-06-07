@@ -18,6 +18,7 @@ import {
   type RealtimeConnectionState,
   type RealtimeEventsContextValue,
 } from "@/components/realtimeEventsContext";
+import { invalidateCatalogState } from "@/components/realtimeCatalogInvalidation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
@@ -176,33 +177,6 @@ function invalidateDashboardQueries(queryClient: QueryClient, allowRefetch: bool
       refetchType: allowRefetch ? "active" : "none",
     });
   }
-}
-
-function invalidateCatalogState(
-  queryClient: QueryClient,
-  options: {
-    itemId?: string;
-    libraryId?: number;
-    allowDashboardRefetch: boolean;
-    includeLibraryLists?: boolean;
-  },
-) {
-  const { itemId, libraryId, allowDashboardRefetch, includeLibraryLists = true } = options;
-  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId }).then(() => {
-    bumpHomeRefreshSignal(queryClient);
-  });
-  if (includeLibraryLists) {
-    void queryClient.invalidateQueries({
-      queryKey: adminKeys.libraries(),
-      refetchType: allowDashboardRefetch ? "active" : "none",
-    });
-    void queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
-    void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
-  }
-  void queryClient.invalidateQueries({
-    queryKey: adminKeys.stats(),
-    refetchType: allowDashboardRefetch ? "active" : "none",
-  });
 }
 
 function catalogEventLibraryID(data: unknown) {
@@ -503,7 +477,6 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             invalidateCatalogState(queryClient, {
               libraryId: eventLibraryID,
               allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-              includeLibraryLists: false,
             });
           } else {
             invalidateCatalogState(queryClient, {
