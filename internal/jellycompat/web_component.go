@@ -31,6 +31,10 @@ const (
 	webSourceFile   = "SILO-JELLYFIN-WEB-SOURCE.txt"
 	webInstallLock  = ".installing"
 	webLastError    = ".last-error"
+	webTempMarker   = ".silo-jellyfin-web-temp"
+
+	webMalformedLockGrace = 2 * time.Minute
+	webOperationStaleAge  = 90 * time.Minute
 )
 
 var (
@@ -99,6 +103,8 @@ type WebComponentOperationStatus struct {
 	StartedAt   string                     `json:"started_at"`
 	CompletedAt string                     `json:"completed_at,omitempty"`
 	Error       string                     `json:"error,omitempty"`
+	lockMTime   time.Time                  `json:"-"`
+	malformed   bool                       `json:"-"`
 }
 
 type WebComponentStatus struct {
@@ -145,10 +151,15 @@ func DefaultWebInstallRoot(cfg *config.Config) string {
 }
 
 func DefaultWebInstallPath(cfg *config.Config) string {
-	if cfg != nil && strings.TrimSpace(cfg.JellyfinCompat.WebDir) != "" {
-		return strings.TrimSpace(cfg.JellyfinCompat.WebDir)
+	return ManagedWebInstallPath(DefaultWebInstallRoot(cfg))
+}
+
+func ManagedWebInstallPath(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = config.DefaultJellyfinWebInstallDir
 	}
-	return filepath.Join(DefaultWebInstallRoot(cfg), "current")
+	return filepath.Join(root, "current")
 }
 
 func DefaultWebVersion(cfg *config.Config) string {
@@ -244,7 +255,7 @@ func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebCom
 
 func StartWebComponentRemove(root string) (WebComponentStatus, error) {
 	root, err := normalizeWebInstallRoot(root)
-	status := webComponentStatus(root, filepath.Join(root, "current"), "", "")
+	status := webComponentStatus(root, ManagedWebInstallPath(root), "", "")
 	if err != nil {
 		status.LastError = err.Error()
 		return status, err
@@ -308,54 +319,58 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 	}
 
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 
 	tmpRoot, err := os.MkdirTemp(root, ".install-*")
 	if err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	defer os.RemoveAll(tmpRoot)
+	if err := os.WriteFile(filepath.Join(tmpRoot, webTempMarker), []byte("silo jellyfin web install workspace\n"), 0o644); err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
 
 	srcDir := filepath.Join(tmpRoot, "src")
 	tag := "v" + version
 	if err := run(ctx, "", []string{"git", "clone", "--depth", "1", "--branch", tag, sourceURL, srcDir}, ""); err != nil {
 		err = fmt.Errorf("clone jellyfin-web %s: %w", tag, err)
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	commitSHA, err := commandOutput(ctx, srcDir, "git", "rev-parse", "HEAD")
 	if err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := run(ctx, srcDir, []string{"npm", "ci"}, ""); err != nil {
 		err = fmt.Errorf("install jellyfin-web dependencies: %w", err)
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := run(ctx, srcDir, []string{"npm", "run", "build:production"}, ""); err != nil {
 		err = fmt.Errorf("build jellyfin-web production bundle: %w", err)
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 
 	releaseDir := filepath.Join(root, version)
 	stagedDir := filepath.Join(tmpRoot, version)
 	if err := copyDir(filepath.Join(srcDir, "dist"), stagedDir); err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := copyFile(filepath.Join(srcDir, "LICENSE"), filepath.Join(stagedDir, "LICENSE")); err != nil {
 		err = fmt.Errorf("copy jellyfin-web license: %w", err)
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	checksum, err := directoryChecksum(stagedDir)
 	if err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	metadata := WebComponentMetadata{
 		Component:    "jellyfin-web",
@@ -371,31 +386,35 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 	}
 	if err := writeWebMetadata(stagedDir, metadata); err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := writeWebSourceFile(stagedDir, metadata); err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
-	if !filePresent(filepath.Join(stagedDir, "LICENSE")) || !filePresent(filepath.Join(stagedDir, webMetadataFile)) || !filePresent(filepath.Join(stagedDir, webSourceFile)) {
-		err := errors.New("jellyfin-web install is missing required license or provenance files")
+	if _, err := validateWebComponentDirectory(stagedDir); err != nil {
+		err = fmt.Errorf("validate staged jellyfin-web assets: %w", err)
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
+	if err := ensureCanReplaceWebRelease(releaseDir); err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := os.RemoveAll(releaseDir); err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := os.Rename(stagedDir, releaseDir); err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	if err := activateWebComponent(root, version); err != nil {
 		writeWebInstallError(root, err)
-		return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), err
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	clearWebInstallError(root)
-	return webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL), nil
+	return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), nil
 }
 
 func RemoveWebComponent(root string) error {
@@ -423,10 +442,23 @@ func removeWebComponentLocked(root string) error {
 		return err
 	}
 
+	removeCurrent := currentLinkTargetsManagedWebRelease(root)
 	for _, entry := range entries {
 		name := entry.Name()
 		path := filepath.Join(root, name)
-		if name == "current" || name == ".current-next" {
+		if name == ".current-next" {
+			if entry.Type()&os.ModeSymlink != 0 {
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					writeWebInstallError(root, err)
+					return err
+				}
+			}
+			continue
+		}
+		if name == "current" {
+			if !removeCurrent {
+				continue
+			}
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				writeWebInstallError(root, err)
 				return err
@@ -434,13 +466,16 @@ func removeWebComponentLocked(root string) error {
 			continue
 		}
 		if entry.IsDir() && strings.HasPrefix(name, ".install-") {
+			if !filePresent(filepath.Join(path, webTempMarker)) {
+				continue
+			}
 			if err := os.RemoveAll(path); err != nil {
 				writeWebInstallError(root, err)
 				return err
 			}
 			continue
 		}
-		if entry.IsDir() && filePresent(filepath.Join(path, webMetadataFile)) && filePresent(filepath.Join(path, webSourceFile)) {
+		if entry.IsDir() && webComponentDirectoryReady(path) {
 			if err := os.RemoveAll(path); err != nil {
 				writeWebInstallError(root, err)
 				return err
@@ -453,7 +488,7 @@ func removeWebComponentLocked(root string) error {
 
 func normalizeWebInstallOptions(opts WebComponentInstallOptions) (WebComponentInstallOptions, WebComponentStatus, error) {
 	root, err := normalizeWebInstallRoot(opts.InstallRoot)
-	status := webComponentStatus(root, filepath.Join(root, "current"), opts.Version, opts.SourceURL)
+	status := webComponentStatus(root, ManagedWebInstallPath(root), opts.Version, opts.SourceURL)
 	if err != nil {
 		status.LastError = err.Error()
 		return opts, status, err
@@ -462,7 +497,7 @@ func normalizeWebInstallOptions(opts WebComponentInstallOptions) (WebComponentIn
 	version, err := normalizeRequiredWebVersion(opts.Version)
 	if err != nil {
 		status.InstallRoot = root
-		status.InstallPath = filepath.Join(root, "current")
+		status.InstallPath = ManagedWebInstallPath(root)
 		status.LastError = err.Error()
 		return opts, status, err
 	}
@@ -470,7 +505,7 @@ func normalizeWebInstallOptions(opts WebComponentInstallOptions) (WebComponentIn
 	sourceURL, err := normalizeWebSourceURL(opts.SourceURL)
 	if err != nil {
 		status.InstallRoot = root
-		status.InstallPath = filepath.Join(root, "current")
+		status.InstallPath = ManagedWebInstallPath(root)
 		status.LastError = err.Error()
 		return opts, status, err
 	}
@@ -481,7 +516,7 @@ func normalizeWebInstallOptions(opts WebComponentInstallOptions) (WebComponentIn
 	opts.InstallRoot = root
 	opts.Version = version
 	opts.SourceURL = sourceURL
-	status = webComponentStatus(root, filepath.Join(root, "current"), version, sourceURL)
+	status = webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL)
 	return opts, status, nil
 }
 
@@ -502,6 +537,120 @@ func normalizeWebInstallRoot(root string) (string, error) {
 		return cleaned, errors.New("jellyfin web install directory cannot be the filesystem root")
 	}
 	return cleaned, nil
+}
+
+func normalizeManagedWebInstallPath(root, webDir string) (string, error) {
+	expected := ManagedWebInstallPath(root)
+	expectedAbs, err := cleanAbsolutePath(expected)
+	if err != nil {
+		return expected, err
+	}
+	webDir = strings.TrimSpace(webDir)
+	if webDir == "" {
+		return expectedAbs, nil
+	}
+	actualAbs, err := cleanAbsolutePath(webDir)
+	if err != nil {
+		return expectedAbs, err
+	}
+	if actualAbs != expectedAbs {
+		return expectedAbs, fmt.Errorf("jellyfin web_dir must use managed install path %s", expectedAbs)
+	}
+	return expectedAbs, nil
+}
+
+func cleanAbsolutePath(path string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if cleaned == "" || cleaned == "." {
+		cleaned = config.DefaultJellyfinWebDir
+	}
+	if filepath.IsAbs(cleaned) {
+		return cleaned, nil
+	}
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return cleaned, err
+	}
+	return abs, nil
+}
+
+func ensureCanReplaceWebRelease(path string) error {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect existing Jellyfin Web release: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("refusing to replace non-directory Jellyfin Web release path %s", path)
+	}
+	if !webComponentDirectoryReady(path) {
+		return fmt.Errorf("refusing to replace %s because it is not a managed Jellyfin Web release", path)
+	}
+	return nil
+}
+
+func validateWebComponentDirectory(path string) (WebComponentMetadata, error) {
+	if !filePresent(filepath.Join(path, "index.html")) {
+		return WebComponentMetadata{}, errors.New("index.html is missing")
+	}
+	if !filePresent(filepath.Join(path, "LICENSE")) {
+		return WebComponentMetadata{}, errors.New("LICENSE is missing")
+	}
+	if !filePresent(filepath.Join(path, webSourceFile)) {
+		return WebComponentMetadata{}, fmt.Errorf("%s is missing", webSourceFile)
+	}
+	metadata, err := readWebMetadata(path)
+	if err != nil {
+		return WebComponentMetadata{}, fmt.Errorf("%s is missing or invalid: %w", webMetadataFile, err)
+	}
+	if metadata.Component != "jellyfin-web" {
+		return WebComponentMetadata{}, fmt.Errorf("unexpected component %q", metadata.Component)
+	}
+	if normalizeWebVersion(metadata.Version) == "" {
+		return WebComponentMetadata{}, fmt.Errorf("invalid Jellyfin Web metadata version %q", metadata.Version)
+	}
+	if strings.TrimSpace(metadata.License) == "" {
+		return WebComponentMetadata{}, errors.New("Jellyfin Web metadata license is missing")
+	}
+	if _, err := normalizeWebSourceURL(metadata.SourceURL); err != nil {
+		return WebComponentMetadata{}, err
+	}
+	return metadata, nil
+}
+
+func webComponentDirectoryReady(path string) bool {
+	_, err := validateWebComponentDirectory(path)
+	return err == nil
+}
+
+func currentLinkTargetsManagedWebRelease(root string) bool {
+	current := filepath.Join(root, "current")
+	info, err := os.Lstat(current)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	target, err := os.Readlink(current)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, target)
+	}
+	rootAbs, err := cleanAbsolutePath(root)
+	if err != nil {
+		return false
+	}
+	targetAbs, err := cleanAbsolutePath(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return false
+	}
+	return webComponentDirectoryReady(targetAbs)
 }
 
 func normalizeRequiredWebVersion(version string) (string, error) {
@@ -586,35 +735,24 @@ func beginWebOperation(root string, kind WebComponentOperationKind) (*WebCompone
 		return copyWebOperation(existing), ErrWebComponentOperationActive
 	}
 
-	file, err := os.OpenFile(filepath.Join(root, webInstallLock), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
+	if err := writeWebOperationState(root, op); err != nil {
 		if os.IsExist(err) {
 			existing := readWebOperationState(root)
 			if isRecoverableWebOperation(existing) {
 				if recoverErr := recoverStaleWebOperation(root, existing); recoverErr != nil {
 					return copyWebOperation(existing), recoverErr
 				}
-				file, err = os.OpenFile(filepath.Join(root, webInstallLock), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-				if err == nil {
-					goto writeOperation
-				}
-				if !os.IsExist(err) {
-					return nil, err
+				if err := writeWebOperationState(root, op); err != nil {
+					if !os.IsExist(err) {
+						return nil, err
+					}
+				} else {
+					webOperations[root] = op
+					return copyWebOperation(op), nil
 				}
 			}
 			return copyWebOperation(existing), ErrWebComponentOperationActive
 		}
-		return nil, err
-	}
-
-writeOperation:
-	if err := json.NewEncoder(file).Encode(op); err != nil {
-		_ = file.Close()
-		_ = os.Remove(filepath.Join(root, webInstallLock))
-		return nil, err
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(filepath.Join(root, webInstallLock))
 		return nil, err
 	}
 
@@ -626,18 +764,38 @@ func isRecoverableWebOperation(op *WebComponentOperationStatus) bool {
 	if op == nil {
 		return true
 	}
+	if op.malformed && webOperationLockAge(op) < webMalformedLockGrace {
+		return false
+	}
 	if op.State != "" && op.State != WebComponentOperationRunning {
 		return true
 	}
 	if op.PID <= 0 {
-		return true
+		return webOperationLockAge(op) >= webMalformedLockGrace
 	}
 	if op.Process != "" {
 		if token := processToken(op.PID); token != "" {
 			return op.Process != token
 		}
 	}
+	if webOperationLockAge(op) >= webOperationStaleAge {
+		return true
+	}
 	return !processIsRunning(op.PID)
+}
+
+func webOperationLockAge(op *WebComponentOperationStatus) time.Duration {
+	if op == nil {
+		return webOperationStaleAge
+	}
+	startedAt, err := time.Parse(time.RFC3339, op.StartedAt)
+	if err == nil {
+		return time.Since(startedAt)
+	}
+	if !op.lockMTime.IsZero() {
+		return time.Since(op.lockMTime)
+	}
+	return webOperationStaleAge
 }
 
 func recoverStaleWebOperation(root string, op *WebComponentOperationStatus) error {
@@ -647,7 +805,13 @@ func recoverStaleWebOperation(root string, op *WebComponentOperationStatus) erro
 	}
 	err := fmt.Errorf("recovered %s lock after process restart", operationLabel)
 	writeWebInstallError(root, err)
-	clearWebInstallState(root)
+	id := ""
+	if op != nil {
+		id = op.ID
+	}
+	if !clearWebInstallStateForOperation(root, id) {
+		return ErrWebComponentOperationActive
+	}
 	return nil
 }
 
@@ -707,11 +871,12 @@ func finishWebOperation(root, id string, err error) {
 	}
 	webOperationsMu.Unlock()
 
-	clearWebInstallState(root)
-	if err != nil {
-		writeWebInstallError(root, err)
-	} else {
-		clearWebInstallError(root)
+	if clearWebInstallStateForOperation(root, id) {
+		if err != nil {
+			writeWebInstallError(root, err)
+		} else {
+			clearWebInstallError(root)
+		}
 	}
 }
 
@@ -724,8 +889,9 @@ func currentWebOperation(root string) *WebComponentOperationStatus {
 	}
 	op = readWebOperationState(root)
 	if op != nil && isRecoverableWebOperation(op) {
-		_ = recoverStaleWebOperation(root, op)
-		return nil
+		if err := recoverStaleWebOperation(root, op); err == nil {
+			return nil
+		}
 	}
 	return op
 }
@@ -739,7 +905,9 @@ func copyWebOperation(op *WebComponentOperationStatus) *WebComponentOperationSta
 }
 
 func readWebOperationState(root string) *WebComponentOperationStatus {
-	data, err := os.ReadFile(filepath.Join(root, webInstallLock))
+	path := filepath.Join(root, webInstallLock)
+	info, statErr := os.Stat(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -747,6 +915,9 @@ func readWebOperationState(root string) *WebComponentOperationStatus {
 	if err := json.Unmarshal(data, &op); err == nil && op.Kind != "" {
 		if op.State == "" {
 			op.State = WebComponentOperationRunning
+		}
+		if statErr == nil {
+			op.lockMTime = info.ModTime()
 		}
 		return &op
 	}
@@ -760,11 +931,29 @@ func readWebOperationState(root string) *WebComponentOperationStatus {
 		kind = WebComponentOperationRemove
 	}
 	return &WebComponentOperationStatus{
-		ID:    "legacy",
-		Kind:  kind,
-		State: WebComponentOperationRunning,
-		Error: "",
+		ID:        "legacy",
+		Kind:      kind,
+		State:     WebComponentOperationRunning,
+		StartedAt: lockStartedAt(info, statErr),
+		Error:     "",
+		lockMTime: lockModifiedAt(info, statErr),
+		malformed: true,
 	}
+}
+
+func lockStartedAt(info os.FileInfo, err error) string {
+	modified := lockModifiedAt(info, err)
+	if modified.IsZero() {
+		return ""
+	}
+	return modified.UTC().Format(time.RFC3339)
+}
+
+func lockModifiedAt(info os.FileInfo, err error) time.Time {
+	if err != nil || info == nil {
+		return time.Time{}
+	}
+	return info.ModTime()
 }
 
 func webComponentStatus(root, webDir, pinnedVersion, sourceURL string) WebComponentStatus {
@@ -781,8 +970,13 @@ func webComponentStatus(root, webDir, pinnedVersion, sourceURL string) WebCompon
 
 	webDir = strings.TrimSpace(webDir)
 	if webDir == "" {
-		webDir = filepath.Join(normalizedRoot, "current")
+		webDir = ManagedWebInstallPath(normalizedRoot)
 	}
+	managedWebDir, err := normalizeManagedWebInstallPath(normalizedRoot, webDir)
+	if err != nil {
+		statusError = appendStatusError(statusError, err.Error())
+	}
+	webDir = managedWebDir
 
 	rawPinnedVersion := strings.TrimSpace(pinnedVersion)
 	pinnedVersion = normalizeWebVersion(rawPinnedVersion)
@@ -836,11 +1030,14 @@ func webComponentStatus(root, webDir, pinnedVersion, sourceURL string) WebCompon
 		}
 		return status
 	}
-	if !operationRunning {
-		status.WebState = WebComponentInstalled
-	}
-	metadata, err := readWebMetadata(webDir)
+	status.LicensePresent = filePresent(filepath.Join(webDir, "LICENSE"))
+	status.ProvenancePresent = filePresent(filepath.Join(webDir, webMetadataFile)) &&
+		filePresent(filepath.Join(webDir, webSourceFile))
+	metadata, err := validateWebComponentDirectory(webDir)
 	if err == nil {
+		if !operationRunning {
+			status.WebState = WebComponentInstalled
+		}
 		status.InstalledVersion = metadata.Version
 		status.Tag = metadata.Tag
 		status.CommitSHA = metadata.CommitSHA
@@ -850,10 +1047,12 @@ func webComponentStatus(root, webDir, pinnedVersion, sourceURL string) WebCompon
 		if !operationRunning && normalizeWebVersion(metadata.Version) != pinnedVersion {
 			status.WebState = WebComponentUpdateAvailable
 		}
+		return status
 	}
-	status.LicensePresent = filePresent(filepath.Join(webDir, "LICENSE"))
-	status.ProvenancePresent = filePresent(filepath.Join(webDir, webMetadataFile)) &&
-		filePresent(filepath.Join(webDir, webSourceFile))
+	status.LastError = appendStatusError(status.LastError, fmt.Sprintf("Jellyfin Web assets are not served because required provenance is missing or invalid: %v", err))
+	if !operationRunning {
+		status.WebState = WebComponentFailed
+	}
 	return status
 }
 
@@ -1053,19 +1252,54 @@ func activateWebComponent(root, version string) error {
 	return nil
 }
 
-func markWebInstallState(root, value string) error {
+func writeWebOperationState(root string, op *WebComponentOperationStatus) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, webInstallLock), []byte(value), 0o644)
+	data, err := json.Marshal(op)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	tmp, err := os.CreateTemp(root, ".install-lock-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Link(tmpName, filepath.Join(root, webInstallLock)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func clearWebInstallState(root string) {
 	_ = os.Remove(filepath.Join(root, webInstallLock))
 }
 
-func isWebInstalling(root string) bool {
-	return filePresent(filepath.Join(root, webInstallLock))
+func clearWebInstallStateForOperation(root, id string) bool {
+	current := readWebOperationState(root)
+	if current == nil {
+		clearWebInstallState(root)
+		return true
+	}
+	if id != "" && current.ID != id {
+		return false
+	}
+	if id == "" && !isRecoverableWebOperation(current) {
+		return false
+	}
+	clearWebInstallState(root)
+	return true
 }
 
 func writeWebInstallError(root string, err error) {

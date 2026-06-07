@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
@@ -85,15 +86,7 @@ func TestWebComponentStatusInstalledWithProvenance(t *testing.T) {
 func TestWebComponentStatusUpdateAvailable(t *testing.T) {
 	root := t.TempDir()
 	release := filepath.Join(root, "10.11.6")
-	if err := os.MkdirAll(release, 0o755); err != nil {
-		t.Fatalf("mkdir release: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
-		t.Fatalf("write index: %v", err)
-	}
-	if err := writeWebMetadata(release, WebComponentMetadata{Version: "10.11.6"}); err != nil {
-		t.Fatalf("write metadata: %v", err)
-	}
+	writeValidWebRelease(t, release, "10.11.6")
 	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
 		t.Fatalf("symlink current: %v", err)
 	}
@@ -183,6 +176,9 @@ func TestRemoveWebComponentOnlyRemovesGeneratedAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
 		t.Fatalf("write index: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(release, "LICENSE"), []byte("GPL-2.0"), 0o644); err != nil {
+		t.Fatalf("write license: %v", err)
+	}
 	metadata := WebComponentMetadata{
 		Component: "jellyfin-web",
 		SourceURL: DefaultWebSourceURL,
@@ -223,6 +219,10 @@ func TestWebComponentStatusRecoversLegacyStaleOperationLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, webInstallLock), []byte("installing"), 0o644); err != nil {
 		t.Fatalf("write legacy lock: %v", err)
 	}
+	old := time.Now().Add(-(webMalformedLockGrace + time.Second))
+	if err := os.Chtimes(filepath.Join(root, webInstallLock), old, old); err != nil {
+		t.Fatalf("age legacy lock: %v", err)
+	}
 
 	status := webComponentStatus(root, filepath.Join(root, "current"), "10.11.6", DefaultWebSourceURL)
 
@@ -237,6 +237,22 @@ func TestWebComponentStatusRecoversLegacyStaleOperationLock(t *testing.T) {
 	}
 	if !strings.Contains(status.LastError, "recovered stale Jellyfin Web") {
 		t.Fatalf("LastError = %q, want recovered stale lock message", status.LastError)
+	}
+}
+
+func TestBeginWebOperationRejectsFreshMalformedLock(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, webInstallLock), []byte("installing"), 0o644); err != nil {
+		t.Fatalf("write malformed lock: %v", err)
+	}
+	defer clearWebInstallState(root)
+
+	_, err := beginWebOperation(root, WebComponentOperationInstall)
+	if !errors.Is(err, ErrWebComponentOperationActive) {
+		t.Fatalf("beginWebOperation error = %v, want ErrWebComponentOperationActive", err)
 	}
 }
 
@@ -328,15 +344,39 @@ func TestBeginWebOperationRejectsLiveProcessLock(t *testing.T) {
 	}
 }
 
+func TestFinishWebOperationDoesNotClearDifferentLock(t *testing.T) {
+	root := t.TempDir()
+	first, err := beginWebOperation(root, WebComponentOperationInstall)
+	if err != nil {
+		t.Fatalf("begin first operation: %v", err)
+	}
+	second := WebComponentOperationStatus{
+		ID:        "remove-new",
+		Kind:      WebComponentOperationRemove,
+		State:     WebComponentOperationRunning,
+		PID:       os.Getpid(),
+		Process:   currentProcessToken(),
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := writeWebOperationLock(root, second); err != nil {
+		t.Fatalf("replace lock: %v", err)
+	}
+
+	finishWebOperation(root, first.ID, nil)
+
+	current := readWebOperationState(root)
+	if current == nil || current.ID != second.ID {
+		t.Fatalf("current lock = %+v, want second operation lock", current)
+	}
+	clearWebInstallState(root)
+}
+
 func TestResolveCompatWebFSDoesNotFallbackToVendoredDirectory(t *testing.T) {
 	cfg := &config.Config{}
 
 	webFS, _, err := resolveCompatWebFS(context.Background(), Dependencies{Config: cfg})
-	if err != nil {
-		t.Fatalf("resolveCompatWebFS returned error: %v", err)
-	}
 	if webFS != nil {
-		t.Fatal("resolveCompatWebFS returned a web filesystem without configured assets")
+		t.Fatalf("resolveCompatWebFS returned a web filesystem without configured assets (err=%v)", err)
 	}
 }
 
@@ -346,4 +386,32 @@ func writeWebOperationLock(root string, op WebComponentOperationStatus) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(root, webInstallLock), data, 0o644)
+}
+
+func writeValidWebRelease(t *testing.T, release, version string) {
+	t.Helper()
+	if err := os.MkdirAll(release, 0o755); err != nil {
+		t.Fatalf("mkdir release: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(release, "LICENSE"), []byte("GPL-2.0"), 0o644); err != nil {
+		t.Fatalf("write license: %v", err)
+	}
+	metadata := WebComponentMetadata{
+		Component: "jellyfin-web",
+		SourceURL: DefaultWebSourceURL,
+		Version:   version,
+		Tag:       "v" + version,
+		CommitSHA: "abc123",
+		Checksum:  "sha256:test",
+		License:   "GPL-2.0",
+	}
+	if err := writeWebMetadata(release, metadata); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if err := writeWebSourceFile(release, metadata); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
 }

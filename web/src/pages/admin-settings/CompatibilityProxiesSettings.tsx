@@ -26,7 +26,6 @@ const JELLYFIN_KEYS = [
   "jellyfin_compat.server_id",
   "jellyfin_compat.emulated_server_version",
   "jellyfin_compat.web_version",
-  "jellyfin_compat.web_dir",
   "jellyfin_compat.web_install_dir",
   "jellyfin_compat.session_ttl",
   "jellyfin_compat.playback_session_ttl",
@@ -95,11 +94,7 @@ export default function CompatibilityProxiesSettings() {
     );
 
   const hasDirtyWebConfig = form.dirtyKeys.some((key) =>
-    [
-      "jellyfin_compat.web_version",
-      "jellyfin_compat.web_dir",
-      "jellyfin_compat.web_install_dir",
-    ].includes(key),
+    ["jellyfin_compat.web_version", "jellyfin_compat.web_install_dir"].includes(key),
   );
   const operationRunning =
     status?.operation?.state === "running" ||
@@ -267,11 +262,6 @@ export default function CompatibilityProxiesSettings() {
             label="Web Install Directory"
             value={form.getValue("jellyfin_compat.web_install_dir")}
             onChange={(v) => form.setValue("jellyfin_compat.web_install_dir", v)}
-          />
-          <SettingField
-            label="Active Web Directory"
-            value={form.getValue("jellyfin_compat.web_dir")}
-            onChange={(v) => form.setValue("jellyfin_compat.web_dir", v)}
           />
         </FieldGroup>
 

@@ -14,10 +14,10 @@ func newCompatWebFSFromDirectory(root string) (fs.FS, error) {
 		return nil, nil
 	}
 
-	webFS := os.DirFS(root)
-	if _, err := fs.Stat(webFS, "index.html"); err != nil {
+	if _, err := validateWebComponentDirectory(root); err != nil {
 		return nil, err
 	}
+	webFS := os.DirFS(root)
 	return webFS, nil
 }
 
@@ -142,15 +142,23 @@ func resolveCompatWebFS(ctx context.Context, deps Dependencies) (fs.FS, string, 
 }
 
 func compatWebDir(ctx context.Context, deps Dependencies) string {
+	root := ""
 	if deps.SettingsRepo != nil {
-		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.web_dir"); strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.web_install_dir"); strings.TrimSpace(value) != "" {
+			root = strings.TrimSpace(value)
 		}
 	}
-	if deps.Config == nil {
+	if root == "" {
+		if deps.Config == nil {
+			return ""
+		}
+		root = DefaultWebInstallRoot(deps.Config)
+	}
+	root, err := normalizeWebInstallRoot(root)
+	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(deps.Config.JellyfinCompat.WebDir)
+	return ManagedWebInstallPath(root)
 }
 
 func compatWebVersion(ctx context.Context, deps Dependencies) string {

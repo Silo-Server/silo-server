@@ -48,10 +48,10 @@ func TestRouterCompressesJSONResponses(t *testing.T) {
 }
 
 func TestRouterServesCompatWebAssetsCreatedAfterStartup(t *testing.T) {
-	webDir := t.TempDir()
+	root := t.TempDir()
 	cfg, err := config.LoadFromDB(map[string]string{
-		"jellyfin_compat.web_dir":     webDir,
-		"jellyfin_compat.web_version": "10.11.6",
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_version":     "10.11.6",
 	})
 	if err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
@@ -65,8 +65,13 @@ func TestRouterServesCompatWebAssetsCreatedAfterStartup(t *testing.T) {
 		t.Fatalf("missing status = %d, want %d", missingRec.Code, http.StatusNotFound)
 	}
 
-	if err := os.WriteFile(filepath.Join(webDir, "index.html"), []byte("<!doctype html>ready"), 0o644); err != nil {
-		t.Fatalf("write index: %v", err)
+	release := filepath.Join(root, "10.11.6")
+	writeValidWebRelease(t, release, "10.11.6")
+	if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>ready"), 0o644); err != nil {
+		t.Fatalf("write ready index: %v", err)
+	}
+	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
+		t.Fatalf("symlink current: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/web/", nil)
@@ -77,5 +82,32 @@ func TestRouterServesCompatWebAssetsCreatedAfterStartup(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "ready") {
 		t.Fatalf("unexpected response body %q", rec.Body.String())
+	}
+}
+
+func TestRouterRejectsArbitraryCompatWebDirectory(t *testing.T) {
+	root := t.TempDir()
+	arbitrary := t.TempDir()
+	if err := os.WriteFile(filepath.Join(arbitrary, "index.html"), []byte("<!doctype html>secret"), 0o644); err != nil {
+		t.Fatalf("write arbitrary index: %v", err)
+	}
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_dir":         arbitrary,
+		"jellyfin_compat.web_version":     "10.11.6",
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	router := NewRouter(Dependencies{Config: cfg})
+
+	req := httptest.NewRequest(http.MethodGet, "/web/", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if strings.Contains(rec.Body.String(), "secret") {
+		t.Fatalf("arbitrary web_dir content was served: %q", rec.Body.String())
 	}
 }

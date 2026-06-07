@@ -61,8 +61,26 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 	setOptionalString(updates, "jellyfin_compat.server_name", req.ServerName)
 	setOptionalString(updates, "jellyfin_compat.emulated_server_version", req.EmulatedServerVersion)
 	setOptionalString(updates, "jellyfin_compat.web_version", req.WebVersion)
-	setOptionalString(updates, "jellyfin_compat.web_dir", req.WebDir)
 	setOptionalString(updates, "jellyfin_compat.web_install_dir", req.WebInstallDir)
+	if req.WebDir != nil {
+		root := strings.TrimSpace(updates["jellyfin_compat.web_install_dir"])
+		if root == "" {
+			settings, ok := h.jellyfinCompatSettings(w, r)
+			if !ok {
+				return
+			}
+			root = strings.TrimSpace(settings["jellyfin_compat.web_install_dir"])
+		}
+		if root == "" {
+			root = config.DefaultJellyfinWebInstallDir
+		}
+		managedPath := jellycompat.ManagedWebInstallPath(root)
+		if raw := strings.TrimSpace(*req.WebDir); raw != "" && filepath.Clean(raw) != filepath.Clean(managedPath) {
+			writeError(w, http.StatusBadRequest, "bad_request", "Jellyfin Web active directory is managed by Silo and cannot point at an arbitrary path")
+			return
+		}
+		updates["jellyfin_compat.web_dir"] = managedPath
+	}
 	if len(updates) == 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "At least one setting is required")
 		return
@@ -146,7 +164,7 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 		}
 		updates := map[string]string{
 			"jellyfin_compat.web_install_dir": status.InstallRoot,
-			"jellyfin_compat.web_dir":         filepath.Join(status.InstallRoot, "current"),
+			"jellyfin_compat.web_dir":         jellycompat.ManagedWebInstallPath(status.InstallRoot),
 			"jellyfin_compat.web_version":     status.PinnedVersion,
 		}
 		if status.SourceURL != "" {
