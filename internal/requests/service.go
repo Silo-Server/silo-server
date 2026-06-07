@@ -1106,18 +1106,38 @@ func (s *Service) detectRequestAnime(ctx context.Context, mediaType MediaType, t
 	return detectAnime(detail.KeywordIDs)
 }
 
+// integrationConfigured reports whether a fulfillment backend exists for the
+// media type, gating auto-approval (pending vs approved). It uses the same
+// router-connection selection as resolveRouterConnections — an enabled
+// request_router.v1 connection with an installation — and additionally honors a
+// connection's declared media-type support so a movie request only auto-approves
+// when a router connection supporting "movie" exists.
 func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType) (bool, error) {
 	instances, err := s.store.ListIntegrations(ctx)
 	if err != nil {
 		return false, err
 	}
-	kind := integrationKindForMediaType(mediaType)
 	for _, in := range instances {
-		if in.Kind == kind && in.Enabled && (in.IsDefault || in.IsDefault4K) && integrationIsConfigured(in) {
+		if in.Enabled && in.CapabilityID == "request_router.v1" && in.InstallationID != nil &&
+			integrationSupportsMediaType(in, mediaType) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// integrationSupportsMediaType reports whether a router connection serves the
+// given media type. An empty SupportedMediaTypes is treated as "supports all".
+func integrationSupportsMediaType(in Integration, mediaType MediaType) bool {
+	if len(in.SupportedMediaTypes) == 0 {
+		return true
+	}
+	for _, mt := range in.SupportedMediaTypes {
+		if mt == string(mediaType) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor Viewer) (*Request, error) {
@@ -1390,14 +1410,6 @@ func (s *Service) resolveAPIKey(ctx context.Context, integration Integration) (s
 		return value, nil
 	}
 	return resolved, nil
-}
-
-func integrationIsConfigured(integration Integration) bool {
-	return integration.Enabled &&
-		strings.TrimSpace(integration.BaseURL) != "" &&
-		strings.TrimSpace(integration.APIKeyRef) != "" &&
-		strings.TrimSpace(integration.RootFolder) != "" &&
-		integration.QualityProfileID != nil
 }
 
 func (s *Service) now() time.Time {

@@ -161,9 +161,11 @@ func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
 	store.settings.GlobalAutoApprovalEnabled = true
-	store.integrations = []Integration{autoApproveRouterInst("router-1", "request.radarr.api_key")}
+	// A plugin-driven router connection that sets only the generic
+	// Enabled/CapabilityID/InstallationID fields (no legacy Kind/IsDefault columns)
+	// must still satisfy the auto-approve gate.
+	store.integrations = []Integration{routerInst("router-1")}
 	service := newTestService(store)
-	service.SetSecretResolver(fakeSecrets{"request.radarr.api_key": "radarr-key"})
 	service.SetRouterProvider(&fakeRouterProvider{})
 
 	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
@@ -174,10 +176,35 @@ func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest returned error: %v", err)
 	}
-	// A configured HD default auto-approves and immediately submits through the
-	// router, so the request lands in the fulfillment pipeline (one queued target).
+	// The configured router connection auto-approves and immediately submits, so the
+	// request lands in the fulfillment pipeline (one queued target).
 	if req.Status != StatusQueued {
 		t.Fatalf("status = %q, want queued (auto-approved and submitted)", req.Status)
+	}
+}
+
+func TestCreateRequestAutoApprovalRespectsSupportedMediaTypes(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	store.settings.GlobalAutoApprovalEnabled = true
+	// A router connection that only serves series must NOT auto-approve a movie
+	// request; the gate falls back to manual approval (pending).
+	seriesOnly := routerInst("router-series")
+	seriesOnly.SupportedMediaTypes = []string{string(MediaTypeSeries)}
+	store.integrations = []Integration{seriesOnly}
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.Status != StatusPending {
+		t.Fatalf("status = %q, want pending (no router connection supports movie)", req.Status)
 	}
 }
 
