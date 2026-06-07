@@ -591,6 +591,10 @@ type requestIntegrationResponse struct {
 	ID                    string         `json:"id"`
 	Name                  string         `json:"name"`
 	Kind                  string         `json:"kind"`
+	CapabilityID          string         `json:"capability_id"`
+	InstallationID        *int           `json:"installation_id,omitempty"`
+	SupportedMediaTypes   []string       `json:"supported_media_types"`
+	PluginConfig          map[string]any `json:"plugin_config"`
 	Enabled               bool           `json:"enabled"`
 	Is4K                  bool           `json:"is_4k"`
 	IsDefault             bool           `json:"is_default"`
@@ -626,6 +630,10 @@ func requestIntegrationResponseFrom(integration mediarequests.Integration) reque
 		ID:                    integration.ID,
 		Name:                  integration.Name,
 		Kind:                  integration.Kind,
+		CapabilityID:          integration.CapabilityID,
+		InstallationID:        integration.InstallationID,
+		SupportedMediaTypes:   integration.SupportedMediaTypes,
+		PluginConfig:          integration.PluginConfig,
 		Enabled:               integration.Enabled,
 		Is4K:                  integration.Is4K,
 		IsDefault:             integration.IsDefault,
