@@ -312,6 +312,7 @@ export function useAutoscanScans(params?: {
 // --- Trigger ---
 
 export function useTriggerAutoscan() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
       api<{ status: string }>("/admin/autoscan/trigger", {
@@ -319,6 +320,8 @@ export function useTriggerAutoscan() {
       }),
     onSuccess: () => {
       toast.success("Autoscan triggered");
+      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanStatus() });
+      queryClient.invalidateQueries({ queryKey: ["admin", "autoscan", "events"] });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to trigger autoscan");

@@ -15,6 +15,7 @@ import type {
   AutoscanEvent,
   AutoscanEventScanRun,
   AutoscanEventStatus,
+  AutoscanRunningPoll,
   AutoscanScan,
   AutoscanScanStatus,
   Library,
@@ -95,6 +96,18 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+function pollEventDuration(event: AutoscanEvent): string {
+  if (event.status !== "running") {
+    return formatDuration(event.duration_ms);
+  }
+  const elapsed = Math.max(0, Date.now() - new Date(event.started_at).getTime());
+  return formatDuration(elapsed);
+}
+
+function pollEventTimestamp(event: AutoscanEvent): string {
+  return formatTimestamp(event.status === "running" ? event.started_at : event.completed_at);
+}
+
 function eventStatusTone(status: AutoscanEventStatus): {
   label: string;
   icon: typeof CheckCircle2;
@@ -106,6 +119,12 @@ function eventStatusTone(status: AutoscanEventStatus): {
         label: "Success",
         icon: CheckCircle2,
         className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
+      };
+    case "running":
+      return {
+        label: "Running",
+        icon: RefreshCw,
+        className: "border-primary/30 bg-primary/10 text-primary",
       };
     case "unresolved":
       return {
@@ -144,9 +163,15 @@ function scanStatusLabel(status: AutoscanScanStatus | ScanRun["status"]) {
 // arr-plugin sources fan out one-per-connection under a single generic
 // capability, so resolve every Activity row through the shared label chain:
 // operator label -> connection name -> manifest display_name -> capability_id.
-function pollSourceName(event: AutoscanEvent, lookups: SourceLabelLookups): string {
+type PollSourceRef = {
+  source_id?: string | null;
+  plugin_id?: string | null;
+  capability_id?: string;
+};
+
+function pollSourceName(event: PollSourceRef, lookups: SourceLabelLookups): string {
   return (
-    resolveEventSourceName(event, lookups) || `${event.capability_id} #${event.installation_id}`
+    resolveEventSourceName(event, lookups) || event.plugin_id || event.capability_id || "Autoscan"
   );
 }
 
@@ -163,7 +188,7 @@ function PollStatusBadge({ status }: { status: AutoscanEventStatus }) {
   const Icon = tone.icon;
   return (
     <Badge variant="outline" className={tone.className}>
-      <Icon className="h-3.5 w-3.5" />
+      <Icon className={cn("h-3.5 w-3.5", status === "running" && "animate-spin")} />
       {tone.label}
     </Badge>
   );
@@ -415,6 +440,55 @@ function AutoscanQueue({
   );
 }
 
+function RunningPolls({
+  polls,
+  lookups,
+}: {
+  polls: AutoscanRunningPoll[];
+  lookups: SourceLabelLookups;
+}) {
+  if (polls.length === 0) return null;
+
+  return (
+    <section className="space-y-3" role="status" aria-live="polite">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <RefreshCw className="text-primary h-4 w-4 animate-spin" />
+            Polling now
+          </div>
+          <p className="text-muted-foreground mt-1 text-xs">
+            Scan-source plugin calls currently in progress.
+          </p>
+        </div>
+        <Badge variant="secondary" className="tabular-nums">
+          {polls.length} active
+        </Badge>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        {polls.map((poll) => (
+          <div key={poll.id} className="border-border rounded-lg border p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-medium">{pollSourceName(poll, lookups)}</div>
+                <div className="text-muted-foreground mt-1 text-xs [overflow-wrap:anywhere]">
+                  {poll.plugin_id} · {poll.capability_id}
+                </div>
+              </div>
+              <PollStatusBadge status="running" />
+            </div>
+            <div className="text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
+              <span>Started {formatTimestamp(poll.started_at)}</span>
+              <span>{formatDuration(poll.elapsed_ms)} elapsed</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ScanHistoryCard({
   scan,
   librariesByID,
@@ -536,8 +610,8 @@ function PollEventCard({ event, lookups }: { event: AutoscanEvent; lookups: Sour
           <PollMetricStrip event={event} />
         </div>
         <div className="text-muted-foreground text-right text-xs tabular-nums">
-          <div>{formatTimestamp(event.completed_at)}</div>
-          <div>{formatDuration(event.duration_ms)}</div>
+          <div>{pollEventTimestamp(event)}</div>
+          <div>{pollEventDuration(event)}</div>
         </div>
       </div>
       {event.error_message ? (
@@ -579,7 +653,7 @@ function PollEventTable({
             <TableHead>Counts</TableHead>
             <TableHead>Scans</TableHead>
             <TableHead>Duration</TableHead>
-            <TableHead>Completed</TableHead>
+            <TableHead>Time</TableHead>
           </>
         }
       >
@@ -608,10 +682,10 @@ function PollEventTable({
               </details>
             </TableCell>
             <TableCell className="whitespace-nowrap tabular-nums">
-              {formatDuration(event.duration_ms)}
+              {pollEventDuration(event)}
             </TableCell>
             <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
-              {formatTimestamp(event.completed_at)}
+              {pollEventTimestamp(event)}
             </TableCell>
           </TableRow>
         ))}
@@ -740,10 +814,11 @@ export default function ActivityPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="border-border grid gap-4 rounded-lg border p-4 sm:grid-cols-4">
+      <div className="border-border grid gap-4 rounded-lg border p-4 sm:grid-cols-5">
         <StatTile label="Active" value={queue?.active_scans ?? 0} icon={ScanLine} />
         <StatTile label="Queued" value={queue?.accepted_scans ?? 0} />
-        <StatTile label="Running" value={queue?.running_scans ?? 0} />
+        <StatTile label="Running scans" value={queue?.running_scans ?? 0} />
+        <StatTile label="Polling" value={queue?.running_polls?.length ?? 0} icon={RefreshCw} />
         <div className="flex items-start justify-between gap-3 sm:block">
           <StatTile label="Latest poll" value={formatTime(queue?.latest_event_at)} icon={Clock} />
           <Button
@@ -758,6 +833,8 @@ export default function ActivityPanel() {
           </Button>
         </div>
       </div>
+
+      <RunningPolls polls={queue?.running_polls ?? []} lookups={labelLookups} />
 
       <AutoscanQueue
         scans={autoscanQueue}
@@ -860,6 +937,7 @@ export default function ActivityPanel() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="running">Running</SelectItem>
                   <SelectItem value="success">Success</SelectItem>
                   <SelectItem value="unresolved">Unresolved</SelectItem>
                   <SelectItem value="error">Error</SelectItem>
