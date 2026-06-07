@@ -9,8 +9,7 @@ import (
 
 const defaultOrphanedProvisionalCleanupBatchSize = 1000
 
-const orphanedProvisionalMediaItemPredicate = `
-WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
+const orphanedProvisionalMediaItemConditions = `mi.status IN ('pending', 'unmatched', 'ambiguous')
   AND NOT EXISTS (
 	SELECT 1 FROM public.media_item_libraries mil
 	WHERE mil.content_id = mi.content_id
@@ -18,6 +17,14 @@ WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
   AND NOT EXISTS (
 	SELECT 1 FROM public.media_files mf
 	WHERE mf.content_id = mi.content_id
+  )
+  AND NOT EXISTS (
+	SELECT 1 FROM public.episodes e
+	WHERE e.series_id = mi.content_id
+  )
+  AND NOT EXISTS (
+	SELECT 1 FROM public.seasons s
+	WHERE s.series_id = mi.content_id
   )
   AND NOT EXISTS (
 	SELECT 1 FROM public.library_collection_items lci
@@ -72,12 +79,24 @@ WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
 	WHERE uhid.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
+	SELECT 1 FROM public.user_audio_preferences uap
+	WHERE uap.series_id = mi.content_id
+  )
+  AND NOT EXISTS (
 	SELECT 1 FROM public.user_personal_collection_items upci
 	WHERE upci.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
 	SELECT 1 FROM public.user_ratings ur
 	WHERE ur.media_item_id = mi.content_id
+  )
+  AND NOT EXISTS (
+	SELECT 1 FROM public.user_series_playback_preferences uspp
+	WHERE uspp.series_id = mi.content_id
+  )
+  AND NOT EXISTS (
+	SELECT 1 FROM public.user_subtitle_preferences usp
+	WHERE usp.series_id = mi.content_id
   )
   AND NOT EXISTS (
 	SELECT 1 FROM public.user_watch_history uwh
@@ -115,6 +134,9 @@ WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
 	SELECT 1 FROM public.webhook_sync_item_state wsis
 	WHERE wsis.media_item_id = mi.content_id
   )`
+
+const orphanedProvisionalMediaItemPredicate = `
+WHERE ` + orphanedProvisionalMediaItemConditions
 
 type OrphanedProvisionalCleanupStats struct {
 	Candidates int

@@ -712,12 +712,23 @@ func (r *FolderRepository) deleteFolderMembershipBatch(ctx context.Context, fold
 	return contentIDs, nil
 }
 
+const collectOrphanedProvisionalIDsByContentIDSQL = `
+	SELECT mi.content_id
+	FROM public.media_items mi
+	WHERE mi.content_id = ANY($1)
+	  AND ` + orphanedProvisionalMediaItemConditions
+
+const deleteOrphanedProvisionalIDsByContentIDSQL = `
+	DELETE FROM public.media_items mi
+	WHERE mi.content_id = ANY($1)
+	  AND ` + orphanedProvisionalMediaItemConditions
+
 func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, contentIDs []string) (int, []string, error) {
 	if len(contentIDs) == 0 {
 		return 0, nil, nil
 	}
 
-	orphanIDs, err := r.collectOrphanedIDsByContentID(ctx, contentIDs)
+	orphanIDs, err := r.collectOrphanedProvisionalIDsByContentID(ctx, contentIDs)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -732,13 +743,7 @@ func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, c
 
 	var deleted int64
 	if err := retryOnDeadlock(ctx, func() error {
-		tag, err := r.pool.Exec(ctx, `
-			DELETE FROM media_items
-			WHERE content_id = ANY($1)
-			  AND NOT EXISTS (
-				SELECT 1 FROM media_item_libraries mil
-				WHERE mil.content_id = media_items.content_id
-			  )`, orphanIDs)
+		tag, err := r.pool.Exec(ctx, deleteOrphanedProvisionalIDsByContentIDSQL, orphanIDs)
 		if err != nil {
 			return err
 		}
@@ -750,14 +755,8 @@ func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, c
 	return int(deleted), imageDirs, nil
 }
 
-func (r *FolderRepository) collectOrphanedIDsByContentID(ctx context.Context, contentIDs []string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT cid
-		FROM unnest($1::text[]) AS cid
-		WHERE NOT EXISTS (
-			SELECT 1 FROM media_item_libraries mil
-			WHERE mil.content_id = cid
-		)`, contentIDs)
+func (r *FolderRepository) collectOrphanedProvisionalIDsByContentID(ctx context.Context, contentIDs []string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, collectOrphanedProvisionalIDsByContentIDSQL, contentIDs)
 	if err != nil {
 		return nil, err
 	}

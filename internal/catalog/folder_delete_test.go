@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,5 +135,17 @@ func TestDeleteInBatchesReturnsError(t *testing.T) {
 	})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel, got %v", err)
+	}
+}
+
+func TestLateOrphanCleanupUsesProvisionalSafetyPredicate(t *testing.T) {
+	conditions := normalizePredicateSQL(orphanedProvisionalMediaItemConditions)
+	for name, query := range map[string]string{
+		"collect": collectOrphanedProvisionalIDsByContentIDSQL,
+		"delete":  deleteOrphanedProvisionalIDsByContentIDSQL,
+	} {
+		if !strings.Contains(normalizePredicateSQL(query), conditions) {
+			t.Fatalf("%s late orphan query does not use provisional safety predicate", name)
+		}
 	}
 }

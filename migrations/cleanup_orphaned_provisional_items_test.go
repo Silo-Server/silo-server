@@ -15,8 +15,13 @@ func TestCleanupOrphanedProvisionalItemsPreservesDurableReferences(t *testing.T)
 		"public.abs_bookmarks ab WHERE ab.library_item_id = mi.content_id",
 		"public.abs_playback_sessions aps WHERE aps.content_id = mi.content_id",
 		"public.abs_rss_feeds arf WHERE arf.library_item_id = mi.content_id",
+		"public.episodes e WHERE e.series_id = mi.content_id",
 		"public.podcast_feeds pf WHERE pf.media_item_id = mi.content_id",
+		"public.seasons s WHERE s.series_id = mi.content_id",
+		"public.user_audio_preferences uap WHERE uap.series_id = mi.content_id",
 		"public.user_personal_collection_items upci WHERE upci.media_item_id = mi.content_id",
+		"public.user_series_playback_preferences uspp WHERE uspp.series_id = mi.content_id",
+		"public.user_subtitle_preferences usp WHERE usp.series_id = mi.content_id",
 	} {
 		if !strings.Contains(migration, normalizeSQL(want)) {
 			t.Fatalf("cleanup migration missing durable reference guard %q", want)
