@@ -13,33 +13,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 type Repository struct {
-	pool   *pgxpool.Pool
-	cipher *secret.Cipher
+	pool *pgxpool.Pool
 }
 
-func NewRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *Repository {
-	return &Repository{pool: pool, cipher: cipher}
-}
-
-// apiKeyAAD binds a request_integrations api_key_ref ciphertext to its row.
-func apiKeyAAD(id string) string {
-	return secret.RowAAD("request_integrations", "api_key_ref", id)
-}
-
-// encryptAPIKey encrypts a non-empty, trimmed API key bound to the integration
-// id. An empty key returns "" so the update path's keep-existing CASE sentinel
-// still fires (and an absent key stays absent).
-func (r *Repository) encryptAPIKey(id, apiKey string) (string, error) {
-	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
-		return "", nil
-	}
-	return r.cipher.Encrypt(apiKey, apiKeyAAD(id))
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
 }
 
 func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
@@ -474,7 +455,8 @@ func (r *Repository) SetOutcome(ctx context.Context, id string, outcome Outcome,
 const integrationColumns = `id, kind, name, enabled, base_url, api_key_ref,
 	root_folder, quality_profile_id, tags, is_4k, is_default, is_default_4k,
 	anime_enabled, anime_quality_profile_id, anime_root_folder, anime_tags,
-	options, last_check_at, last_check_status, last_check_error, updated_at`
+	options, last_check_at, last_check_status, last_check_error, updated_at,
+	capability_id, installation_id, supported_media_types, plugin_config`
 
 func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+integrationColumns+` FROM request_integrations ORDER BY kind, name`)
@@ -485,7 +467,7 @@ func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error
 
 	var out []Integration
 	for rows.Next() {
-		integration, err := r.scanIntegration(rows)
+		integration, err := scanIntegration(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -500,7 +482,7 @@ func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error
 func (r *Repository) GetIntegration(ctx context.Context, id string) (*Integration, error) {
 	row := r.pool.QueryRow(ctx, `SELECT `+integrationColumns+
 		` FROM request_integrations WHERE id = $1`, id)
-	i, err := r.scanIntegration(row)
+	i, err := scanIntegration(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -529,24 +511,37 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 	if err != nil {
 		return nil, fmt.Errorf("marshal options: %w", err)
 	}
-	apiKeyRef, err := r.encryptAPIKey(i.ID, i.APIKeyRef)
+	if i.PluginConfig == nil {
+		i.PluginConfig = map[string]any{}
+	}
+	pluginConfig, err := json.Marshal(i.PluginConfig)
 	if err != nil {
-		return nil, fmt.Errorf("encrypt api key: %w", err)
+		return nil, fmt.Errorf("marshal plugin config: %w", err)
+	}
+	capabilityID := strings.TrimSpace(i.CapabilityID)
+	if capabilityID == "" {
+		capabilityID = "request_router.v1"
+	}
+	supportedMediaTypes := i.SupportedMediaTypes
+	if supportedMediaTypes == nil {
+		supportedMediaTypes = []string{}
 	}
 	row := exec.QueryRow(ctx, `
 		INSERT INTO request_integrations (
 			id, kind, name, enabled, base_url, api_key_ref, root_folder,
 			quality_profile_id, tags, is_4k, is_default, is_default_4k,
 			anime_enabled, anime_quality_profile_id, anime_root_folder, anime_tags,
-			options, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
+			options, capability_id, installation_id, supported_media_types,
+			plugin_config, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+			$18,$19,$20,$21, now())
 		RETURNING `+integrationColumns,
 		i.ID, i.Kind, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
-		apiKeyRef, strings.TrimSpace(i.RootFolder), i.QualityProfileID,
+		strings.TrimSpace(i.APIKeyRef), strings.TrimSpace(i.RootFolder), i.QualityProfileID,
 		int32Slice(i.Tags), i.Is4K, i.IsDefault, i.IsDefault4K, i.AnimeEnabled,
 		i.AnimeQualityProfileID, strings.TrimSpace(i.AnimeRootFolder), int32Slice(i.AnimeTags),
-		options)
-	out, err := r.scanIntegration(row)
+		options, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
+	out, err := scanIntegration(row)
 	if err != nil {
 		return nil, fmt.Errorf("create request integration: %w", err)
 	}
@@ -563,11 +558,20 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 	if err != nil {
 		return nil, fmt.Errorf("marshal options: %w", err)
 	}
-	// Encrypt the incoming key; an empty result preserves the keep-existing CASE
-	// (a blank edit leaves the stored key untouched).
-	apiKeyRef, err := r.encryptAPIKey(i.ID, i.APIKeyRef)
+	if i.PluginConfig == nil {
+		i.PluginConfig = map[string]any{}
+	}
+	pluginConfig, err := json.Marshal(i.PluginConfig)
 	if err != nil {
-		return nil, fmt.Errorf("encrypt api key: %w", err)
+		return nil, fmt.Errorf("marshal plugin config: %w", err)
+	}
+	capabilityID := strings.TrimSpace(i.CapabilityID)
+	if capabilityID == "" {
+		capabilityID = "request_router.v1"
+	}
+	supportedMediaTypes := i.SupportedMediaTypes
+	if supportedMediaTypes == nil {
+		supportedMediaTypes = []string{}
 	}
 	row := exec.QueryRow(ctx, `
 		UPDATE request_integrations SET
@@ -576,15 +580,16 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 			root_folder=$6, quality_profile_id=$7, tags=$8, is_4k=$9,
 			is_default=$10, is_default_4k=$11, anime_enabled=$12,
 			anime_quality_profile_id=$13, anime_root_folder=$14, anime_tags=$15,
-			options=$16, updated_at=now()
+			options=$16, capability_id=$17, installation_id=$18,
+			supported_media_types=$19, plugin_config=$20, updated_at=now()
 		WHERE id=$1
 		RETURNING `+integrationColumns,
 		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
-		apiKeyRef, strings.TrimSpace(i.RootFolder), i.QualityProfileID,
+		strings.TrimSpace(i.APIKeyRef), strings.TrimSpace(i.RootFolder), i.QualityProfileID,
 		int32Slice(i.Tags), i.Is4K, i.IsDefault, i.IsDefault4K, i.AnimeEnabled,
 		i.AnimeQualityProfileID, strings.TrimSpace(i.AnimeRootFolder), int32Slice(i.AnimeTags),
-		options)
-	out, err := r.scanIntegration(row)
+		options, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
+	out, err := scanIntegration(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -792,28 +797,21 @@ type integrationScanner interface {
 	Scan(dest ...any) error
 }
 
-func (r *Repository) scanIntegration(row integrationScanner) (Integration, error) {
+func scanIntegration(row integrationScanner) (Integration, error) {
 	var i Integration
-	var quality, animeQuality sql.NullInt64
+	var quality, animeQuality, installationID sql.NullInt64
 	var tags, animeTags []int32
-	var optionsRaw []byte
+	var optionsRaw, pluginConfigRaw []byte
 	var lastCheckAt sql.NullTime
 	if err := row.Scan(
 		&i.ID, &i.Kind, &i.Name, &i.Enabled, &i.BaseURL, &i.APIKeyRef,
 		&i.RootFolder, &quality, &tags, &i.Is4K, &i.IsDefault, &i.IsDefault4K,
 		&i.AnimeEnabled, &animeQuality, &i.AnimeRootFolder, &animeTags,
 		&optionsRaw, &lastCheckAt, &i.LastCheckStatus, &i.LastCheckError, &i.UpdatedAt,
+		&i.CapabilityID, &installationID, &i.SupportedMediaTypes, &pluginConfigRaw,
 	); err != nil {
 		return Integration{}, err
 	}
-	// Decrypt the stored api key (read-path contract: legacy plaintext passes
-	// through, enc:v1: values decrypt, corrupt ciphertext errors). Callers
-	// receive the literal key — there is no longer a ref/literal ambiguity.
-	apiKey, err := r.cipher.DecryptIfEncrypted(i.APIKeyRef, apiKeyAAD(i.ID))
-	if err != nil {
-		return Integration{}, fmt.Errorf("decrypt request integration %s api key: %w", i.ID, err)
-	}
-	i.APIKeyRef = apiKey
 	if quality.Valid {
 		v := int(quality.Int64)
 		i.QualityProfileID = &v
@@ -821,6 +819,10 @@ func (r *Repository) scanIntegration(row integrationScanner) (Integration, error
 	if animeQuality.Valid {
 		v := int(animeQuality.Int64)
 		i.AnimeQualityProfileID = &v
+	}
+	if installationID.Valid {
+		v := int(installationID.Int64)
+		i.InstallationID = &v
 	}
 	i.Tags = intsFromInt32(tags)
 	i.AnimeTags = intsFromInt32(animeTags)
@@ -831,6 +833,14 @@ func (r *Repository) scanIntegration(row integrationScanner) (Integration, error
 	}
 	if i.Options == nil {
 		i.Options = map[string]any{}
+	}
+	if len(pluginConfigRaw) > 0 {
+		if err := json.Unmarshal(pluginConfigRaw, &i.PluginConfig); err != nil {
+			return Integration{}, fmt.Errorf("unmarshal request integration plugin config for %s: %w", i.ID, err)
+		}
+	}
+	if i.PluginConfig == nil {
+		i.PluginConfig = map[string]any{}
 	}
 	if lastCheckAt.Valid {
 		i.LastCheckAt = &lastCheckAt.Time

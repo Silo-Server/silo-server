@@ -275,6 +275,10 @@ type Integration struct {
 	LastCheckStatus       string         `json:"last_check_status,omitempty"`
 	LastCheckError        string         `json:"last_check_error,omitempty"`
 	UpdatedAt             time.Time      `json:"updated_at"`
+	CapabilityID          string         `json:"capability_id"`
+	InstallationID        *int           `json:"installation_id,omitempty"`
+	SupportedMediaTypes   []string       `json:"supported_media_types"`
+	PluginConfig          map[string]any `json:"plugin_config"`
 }
 
 type IntegrationRootFolder struct {
