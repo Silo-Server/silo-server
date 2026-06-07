@@ -1745,6 +1745,19 @@ func (r *FileRepository) GetByPath(ctx context.Context, path string) (*models.Me
 	return scanMediaFile(r.pool.QueryRow(ctx, query, path))
 }
 
+// FindActiveByPath retrieves a present media file by folder and exact file path.
+func (r *FileRepository) FindActiveByPath(ctx context.Context, folderID int, filePath string) (*models.MediaFile, error) {
+	query := `SELECT ` + fileColumns + ` FROM media_files
+		WHERE media_folder_id = $1
+		  AND file_path = $2
+		  AND missing_since IS NULL`
+	file, err := scanMediaFile(r.pool.QueryRow(ctx, query, folderID, filePath))
+	if errors.Is(err, ErrFileNotFound) {
+		return nil, nil
+	}
+	return file, err
+}
+
 // GetByHash retrieves a media file by its file hash.
 func (r *FileRepository) GetByHash(ctx context.Context, hash string) (*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files WHERE file_hash = $1 LIMIT 1`
@@ -2517,6 +2530,22 @@ func (r *FileRepository) GetByFolder(ctx context.Context, folderID int) ([]*mode
 	rows, err := r.pool.Query(ctx, query, folderID)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by folder: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMediaFiles(rows)
+}
+
+// ListActiveByFolderAndType returns present media files for a folder and base type.
+func (r *FileRepository) ListActiveByFolderAndType(ctx context.Context, folderID int, baseType string) ([]*models.MediaFile, error) {
+	query := `SELECT ` + fileColumns + ` FROM media_files
+		WHERE media_folder_id = $1
+		  AND base_type = $2
+		  AND missing_since IS NULL
+		ORDER BY file_path ASC`
+	rows, err := r.pool.Query(ctx, query, folderID, baseType)
+	if err != nil {
+		return nil, fmt.Errorf("querying active files by folder and type: %w", err)
 	}
 	defer rows.Close()
 

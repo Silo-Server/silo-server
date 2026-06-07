@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -177,6 +178,74 @@ func TestScanFolderRoutesEbookLibrariesToEbookScanner(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "folder_id=45") {
 		t.Fatalf("error = %q, want ebook scanner aggregate error", err)
+	}
+}
+
+func TestEbookFileUnchanged(t *testing.T) {
+	modTime := time.Date(2026, 6, 7, 12, 30, 45, 123456789, time.UTC)
+	normalized := normalizeFileModifiedAt(modTime)
+
+	existing := &models.MediaFile{
+		FileSize:       123,
+		FileModifiedAt: &normalized,
+	}
+
+	if !ebookFileUnchanged(existing, 123, modTime) {
+		t.Fatal("ebookFileUnchanged returned false, want true")
+	}
+}
+
+func TestEbookFileUnchangedReturnsFalseForChangedSize(t *testing.T) {
+	modTime := normalizeFileModifiedAt(time.Date(2026, 6, 7, 12, 30, 45, 0, time.UTC))
+	existing := &models.MediaFile{
+		FileSize:       123,
+		FileModifiedAt: &modTime,
+	}
+
+	if ebookFileUnchanged(existing, 456, modTime) {
+		t.Fatal("ebookFileUnchanged returned true for changed size")
+	}
+}
+
+func TestEbookFileUnchangedReturnsFalseForNilOrMissingMTime(t *testing.T) {
+	modTime := time.Date(2026, 6, 7, 12, 30, 45, 0, time.UTC)
+
+	if ebookFileUnchanged(nil, 123, modTime) {
+		t.Fatal("ebookFileUnchanged returned true for nil existing")
+	}
+	if ebookFileUnchanged(&models.MediaFile{FileSize: 123}, 123, modTime) {
+		t.Fatal("ebookFileUnchanged returned true without existing mtime")
+	}
+}
+
+func TestSelectEbookCoverPrefersEmbeddedOverSidecar(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cover.jpg"), []byte("sidecar"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	data, contentType, source := selectEbookCover(&parsedEbook{
+		Cover: &parsedEbookCover{
+			ContentType: "image/png",
+			Bytes:       []byte("embedded"),
+		},
+	}, dir)
+
+	if string(data) != "embedded" || contentType != "image/png" || source != "embedded" {
+		t.Fatalf("cover = %q/%q/%q, want embedded png", string(data), contentType, source)
+	}
+}
+
+func TestSelectEbookCoverUsesSidecar(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Folder.PNG"), []byte("sidecar"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	data, contentType, source := selectEbookCover(&parsedEbook{}, dir)
+
+	if string(data) != "sidecar" || contentType != "image/png" || source != "sidecar" {
+		t.Fatalf("cover = %q/%q/%q, want sidecar png", string(data), contentType, source)
 	}
 }
 

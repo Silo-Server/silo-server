@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -21,9 +24,26 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 		return fmt.Errorf("ScanEbookFolder: nil scanner or folder")
 	}
 
+	var existingFiles []*models.MediaFile
+	if s.fileRepo != nil {
+		files, err := s.fileRepo.ListActiveByFolderAndType(ctx, folder.ID, "ebook")
+		if err != nil {
+			slog.Warn("ebook scan: existing-file listing failed; missing cleanup skipped",
+				"folder_id", folder.ID,
+				"error", err,
+			)
+		} else {
+			existingFiles = files
+		}
+	}
+
 	candidates, hadWalkErrors, walkErr := collectLogicalFilePathsWithWalkStatus(ctx, folder.Paths, "ebook")
 	if walkErr != nil {
 		return fmt.Errorf("walking ebook roots: %w", walkErr)
+	}
+	seenPaths := make(map[string]bool, len(candidates))
+	for _, path := range candidates {
+		seenPaths[path] = true
 	}
 
 	var attempted int
@@ -53,6 +73,20 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 		slog.Warn("ebook scan: missing-file cleanup skipped because walk had errors",
 			"folder_id", folder.ID,
 		)
+	} else if len(existingFiles) > 0 {
+		now := time.Now().UTC()
+		for _, existing := range existingFiles {
+			if existing == nil || seenPaths[existing.FilePath] {
+				continue
+			}
+			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+				slog.Warn("ebook scan: failed to mark file missing",
+					"folder_id", folder.ID,
+					"path", existing.FilePath,
+					"error", err,
+				)
+			}
+		}
 	}
 	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
 		return fmt.Errorf("ebook scan failed for every attempted folder_id=%d candidates=%d: %w", folder.ID, len(candidates), errors.Join(failures...))
@@ -79,6 +113,21 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	}
 	if !info.Mode().IsRegular() {
 		return nil
+	}
+
+	if s.fileRepo != nil {
+		existing, err := s.fileRepo.FindActiveByPath(ctx, folder.ID, path)
+		if err != nil {
+			return fmt.Errorf("find active ebook file: %w", err)
+		}
+		if existing != nil && existing.ContentID != "" && ebookFileUnchanged(existing, info.Size(), info.ModTime()) {
+			slog.Debug("ebook scan: unchanged file skipped",
+				"folder_id", folder.ID,
+				"content_id", existing.ContentID,
+				"file", path,
+			)
+			return nil
+		}
 	}
 
 	book, err := parseEbookFile(path)
@@ -108,6 +157,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	if err := s.libraryRepo.Upsert(ctx, contentID, folder.ID, time.Now()); err != nil {
 		return fmt.Errorf("upsert ebook library membership: %w", err)
 	}
+	s.cacheSelectedEbookCover(ctx, contentID, &book, filepath.Dir(path))
 
 	slog.Info("ebook scan: indexed",
 		"folder_id", folder.ID,
@@ -116,6 +166,102 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		"file", path,
 	)
 	return nil
+}
+
+func ebookFileUnchanged(existing *models.MediaFile, size int64, modTime time.Time) bool {
+	if existing == nil || existing.FileModifiedAt == nil {
+		return false
+	}
+	if existing.FileSize != size {
+		return false
+	}
+	return sameFileModifiedAt(existing.FileModifiedAt, normalizeFileModifiedAt(modTime))
+}
+
+func selectEbookCover(book *parsedEbook, dir string) ([]byte, string, string) {
+	if book != nil && book.Cover != nil && len(book.Cover.Bytes) > 0 {
+		return book.Cover.Bytes, book.Cover.ContentType, "embedded"
+	}
+	for _, name := range []string{"cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png"} {
+		path := findEbookSidecarCover(dir, name)
+		if path == "" {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		return data, ebookCoverContentType(path), "sidecar"
+	}
+	return nil, "", ""
+}
+
+func findEbookSidecarCover(dir, name string) string {
+	if dir == "" || name == "" {
+		return ""
+	}
+	path := filepath.Join(dir, name)
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		return path
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	want := strings.ToLower(name)
+	for _, entry := range entries {
+		if entry.IsDir() || strings.ToLower(entry.Name()) != want {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() {
+			return path
+		}
+	}
+	return ""
+}
+
+func ebookCoverContentType(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	default:
+		return ""
+	}
+}
+
+func (s *Scanner) cacheSelectedEbookCover(ctx context.Context, contentID string, book *parsedEbook, dir string) {
+	if s == nil || s.imageCacher == nil || s.itemRepo == nil || contentID == "" {
+		return
+	}
+	data, contentType, source := selectEbookCover(book, dir)
+	if len(data) == 0 {
+		return
+	}
+	basePath, ext, thumbhash, err := s.imageCacher.CacheAudiobookCover(ctx, data, contentID)
+	if err != nil {
+		slog.Warn("ebook cover: imagecache upload failed",
+			"content_id", contentID,
+			"source", source,
+			"content_type", contentType,
+			"error", err,
+		)
+		return
+	}
+	posterPath := fmt.Sprintf("%s/original%s", basePath, ext)
+	if err := s.itemRepo.UpdateMetadata(ctx, contentID, &catalog.MetadataUpdate{
+		PosterPath:      &posterPath,
+		PosterThumbhash: &thumbhash,
+	}); err != nil {
+		slog.Warn("ebook cover: media item poster update failed",
+			"content_id", contentID,
+			"source", source,
+			"poster_path", posterPath,
+			"error", err,
+		)
+	}
 }
 
 func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePath string, book *parsedEbook) (string, error) {
