@@ -1964,7 +1964,7 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	reasonMask := int64(0)
 	now := time.Now().UTC()
 	for _, episode := range episodes {
-		if EpisodeHasIncompleteMetadata(episode, now) {
+		if EpisodeHasActionableMetadataDebt(episode, now) {
 			reasonMask = RefreshDebtReasonEpisodeIncomplete
 			break
 		}
@@ -1999,7 +1999,7 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 	}
 	reasonMask := int64(0)
 	now := time.Now().UTC()
-	if EpisodeHasIncompleteMetadata(episode, now) {
+	if EpisodeHasActionableMetadataDebt(episode, now) {
 		reasonMask = RefreshDebtReasonEpisodeIncomplete
 	}
 	if reasonMask == 0 {
@@ -3515,7 +3515,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 
 	incomplete := false
 	for _, episode := range episodes {
-		if EpisodeHasIncompleteMetadata(episode, now) {
+		if EpisodeHasActionableMetadataDebt(episode, now) {
 			incomplete = true
 		}
 		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
@@ -3534,7 +3534,7 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	if s == nil || s.refreshDebtRepo == nil || episode == nil || strings.TrimSpace(episode.ContentID) == "" {
 		return nil
 	}
-	if !EpisodeHasIncompleteMetadata(episode, now) {
+	if !EpisodeHasActionableMetadataDebt(episode, now) {
 		return s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetEpisode, episode.ContentID)
 	}
 	reasonMask := RefreshDebtReasonEpisodeIncomplete
