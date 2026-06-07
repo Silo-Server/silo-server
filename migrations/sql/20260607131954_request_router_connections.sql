@@ -1,5 +1,9 @@
 -- +goose Up
 -- +goose StatementBegin
+-- NOTE: existing rows get installation_id = NULL because the plugin install id is
+-- not known at migration time. Such connections are treated as "not bound to a
+-- plugin installation" and are skipped during fulfillment until an admin re-saves
+-- the connection to bind it to an installed request_router plugin.
 ALTER TABLE public.request_integrations
     ADD COLUMN IF NOT EXISTS capability_id text NOT NULL DEFAULT 'request_router.v1',
     ADD COLUMN IF NOT EXISTS installation_id integer,

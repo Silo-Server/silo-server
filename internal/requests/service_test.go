@@ -208,7 +208,7 @@ func TestCreateRequestAutoApprovalRespectsSupportedMediaTypes(t *testing.T) {
 	}
 }
 
-func TestCreateRequestAutoApprovalSecretFailureSurfacesError(t *testing.T) {
+func TestCreateRequestAutoApprovalSecretFailureMarksFailed(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
 	store.settings.GlobalAutoApprovalEnabled = true
@@ -217,16 +217,19 @@ func TestCreateRequestAutoApprovalSecretFailureSurfacesError(t *testing.T) {
 	service.SetSecretResolver(fakeSecretError{err: errors.New("secret lookup unavailable")})
 	service.SetRouterProvider(&fakeRouterProvider{})
 
-	// Resolving connection credentials is now a hard prerequisite for dispatch, so
-	// a secret-resolution failure surfaces as an error rather than a per-target
-	// failure (the request stays approved for the reconciler to retry).
-	_, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+	// A connection whose credentials can't be resolved is skipped (never sent
+	// unauthenticated). With no usable connection left, submission fails the
+	// request rather than aborting the whole CreateRequest call.
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
 		MediaType: MediaTypeMovie,
 		TMDBID:    550,
 		Title:     "Fight Club",
 	})
-	if err == nil || !strings.Contains(err.Error(), "secret lookup unavailable") {
-		t.Fatalf("err = %v, want secret lookup failure", err)
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.Outcome != OutcomeFailed || req.LastError != "no fulfillment backend configured" {
+		t.Fatalf("request = %+v, want failed with no-backend message", req)
 	}
 }
 
@@ -2001,6 +2004,206 @@ func TestSubmitApprovedDedupesDuplicateQualityTargets(t *testing.T) {
 	if len(targets) != 1 {
 		t.Fatalf("targets = %d, want 1 (duplicate quality deduped)", len(targets))
 	}
+}
+
+func TestSubmitApprovedSkipsMismatchedMediaType(t *testing.T) {
+	store := newFakeStore()
+	// Only a series-serving router connection exists; a movie request must not use it.
+	seriesOnly := routerInst("router-series")
+	seriesOnly.SupportedMediaTypes = []string{string(MediaTypeSeries)}
+	store.integrations = []Integration{seriesOnly}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got.Outcome != OutcomeFailed || got.LastError != "no fulfillment backend configured" {
+		t.Fatalf("request = %+v, want failed with no-backend message", got)
+	}
+	if router.fulfillCalls != 0 {
+		t.Fatalf("fulfill calls = %d, want 0 (series connection filtered out for a movie)", router.fulfillCalls)
+	}
+}
+
+func TestSubmitApprovedSkipsBadConnectionUsesSibling(t *testing.T) {
+	store := newFakeStore()
+	// Two connections on the same installation: one's key fails to resolve, the
+	// other resolves cleanly. The healthy sibling must still fulfill the request.
+	bad := routerInstOn("router-bad", 1)
+	bad.APIKeyRef = "broken-ref"
+	good := routerInstOn("router-good", 1)
+	good.APIKeyRef = "good-ref"
+	store.integrations = []Integration{bad, good}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetSecretResolver(selectiveSecrets{
+		fail:   map[string]bool{"broken-ref": true},
+		values: map[string]string{"good-ref": "good-key"},
+	})
+	svc.SetRouterProvider(router)
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	if err != nil {
+		t.Fatalf("submit must not abort on a single bad connection: %v", err)
+	}
+	if got.Outcome == OutcomeFailed {
+		t.Fatalf("outcome = failed, want submitted via the healthy sibling")
+	}
+	if router.fulfillCalls != 1 {
+		t.Fatalf("fulfill calls = %d, want 1", router.fulfillCalls)
+	}
+	if len(router.gotConns) != 1 || router.gotConns[0].ID != "router-good" || router.gotConns[0].APIKey != "good-key" {
+		t.Fatalf("router connections = %+v, want only the healthy router-good with resolved key", router.gotConns)
+	}
+}
+
+func TestSubmitApprovedSkipsConnectionWithEmptyKey(t *testing.T) {
+	store := newFakeStore()
+	noKey := routerInstOn("router-nokey", 1)
+	noKey.APIKeyRef = "" // resolves empty -> must be skipped (never send unauthenticated)
+	store.integrations = []Integration{noKey}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got.Outcome != OutcomeFailed {
+		t.Fatalf("outcome = %q, want failed (no usable connection)", got.Outcome)
+	}
+	if router.fulfillCalls != 0 {
+		t.Fatalf("fulfill calls = %d, want 0 (empty-key connection skipped)", router.fulfillCalls)
+	}
+}
+
+func TestSubmitApprovedSkipsUnknownQuality(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	// Plugin returns a bogus quality alongside a valid one.
+	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
+		{Quality: Quality("720p"), ConnectionID: "router-1", ExternalID: "ext-bad", Status: StatusQueued},
+		{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-hd", Status: StatusQueued},
+	}}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 1 {
+		t.Fatalf("targets = %d, want 1 (720p skipped, 1080p persisted)", len(targets))
+	}
+	for _, tg := range targets {
+		if tg.Quality == Quality("720p") {
+			t.Fatalf("a 720p target was persisted: %+v", tg)
+		}
+	}
+}
+
+func TestSubmitApprovedCoercesUnknownStatusToQueued(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
+		{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-hd", Status: Status("bogus")},
+	}}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 1 || targets[0].Status != StatusQueued {
+		t.Fatalf("targets = %+v, want one StatusQueued target (unknown status coerced)", targets)
+	}
+}
+
+func TestSubmitApprovedSkipsTargetForHealthyQuality(t *testing.T) {
+	store := newFakeStore()
+	store.settings.ForceDualQuality = true // want 1080p + 2160p
+	store.integrations = []Integration{routerInst("router-1")}
+	// Seed a healthy 1080p target; the plugin (misbehaving) returns one anyway.
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusQueued, ExternalID: "ext-existing",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
+		{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "ext-dupe", Status: StatusQueued},
+		{Quality: Quality2160p, ConnectionID: "router-1", ExternalID: "ext-uhd", Status: StatusQueued},
+	}}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+		t.Fatalf("submit must not error on a duplicate of a healthy quality: %v", err)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 2 {
+		t.Fatalf("targets = %d, want 2 (existing 1080p kept + new 2160p; dup 1080p skipped)", len(targets))
+	}
+	count1080 := 0
+	for _, tg := range targets {
+		if tg.Quality == Quality1080p {
+			count1080++
+		}
+	}
+	if count1080 != 1 {
+		t.Fatalf("1080p targets = %d, want 1 (no duplicate persisted)", count1080)
+	}
+}
+
+func TestSubmitApprovedUnboundInstallationFailsWithGuidance(t *testing.T) {
+	store := newFakeStore()
+	// A router connection that exists but is not bound to a plugin installation
+	// (the migration leaves installation_id NULL for pre-existing rows).
+	unbound := routerInst("router-unbound")
+	unbound.InstallationID = nil
+	store.integrations = []Integration{unbound}
+	svc := newTestService(store)
+	svc.SetRouterProvider(&fakeRouterProvider{})
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got.Outcome != OutcomeFailed ||
+		got.LastError != "request backend connection is not bound to a plugin installation; re-save it in admin" {
+		t.Fatalf("request = %+v, want failed with unbound-installation guidance", got)
+	}
+}
+
+// selectiveSecrets resolves some refs and fails others, for skip-bad-connection tests.
+type selectiveSecrets struct {
+	fail   map[string]bool
+	values map[string]string
+}
+
+func (s selectiveSecrets) Get(_ context.Context, key string) (string, error) {
+	if s.fail[key] {
+		return "", errors.New("secret unavailable: " + key)
+	}
+	return s.values[key], nil
 }
 
 type fakeSecrets map[string]string

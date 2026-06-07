@@ -97,15 +97,20 @@ func (s *Service) allowedQualities(ctx context.Context, req Request, settings Se
 	return out
 }
 
-// resolveRouterConnections turns enabled request_router integrations into
-// ResolvedRouterConnections (api key resolved to plaintext, plugin_config attached),
-// and returns the installation+capability to dispatch to.
+// resolveRouterConnections turns enabled request_router integrations that serve
+// the given media type into ResolvedRouterConnections (api key resolved to
+// plaintext, plugin_config attached), and returns the installation+capability to
+// dispatch to.
 //
-// Multi-installation routing isn't supported yet: this picks the first eligible
-// connection's installation and includes ONLY connections belonging to it.
-// Connections from any other installation are ignored so a second installation's
-// resolved plaintext credentials are never handed to the first plugin.
-func (s *Service) resolveRouterConnections(ctx context.Context, integrations []Integration) ([]ResolvedRouterConnection, int, string, error) {
+// It filters by media type to match the integrationConfigured auto-approve gate
+// (so a series-only connection is never used for a movie request). Multi-
+// installation routing isn't supported yet: it picks the first eligible
+// connection's installation and includes ONLY connections belonging to it, so a
+// second installation's resolved plaintext credentials are never handed to the
+// first plugin. A connection whose api key cannot be resolved (or resolves empty)
+// is skipped rather than aborting the whole request — a sibling healthy
+// connection can still fulfill it, and an unauthenticated request is never sent.
+func (s *Service) resolveRouterConnections(ctx context.Context, integrations []Integration, mediaType MediaType) ([]ResolvedRouterConnection, int, string, error) {
 	var conns []ResolvedRouterConnection
 	installationID, capabilityID := 0, ""
 	chosen := false
@@ -113,15 +118,23 @@ func (s *Service) resolveRouterConnections(ctx context.Context, integrations []I
 		if !in.Enabled || in.CapabilityID != "request_router.v1" || in.InstallationID == nil {
 			continue
 		}
+		if !integrationSupportsMediaType(in, mediaType) {
+			continue // align with integrationConfigured, which filters by media type
+		}
 		if !chosen {
 			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
 		}
 		if *in.InstallationID != installationID {
-			continue // single-router assumption: ignore other installations
+			continue // single-installation containment
 		}
 		apiKey, err := s.resolveAPIKey(ctx, in)
 		if err != nil {
-			return nil, 0, "", err
+			slog.WarnContext(ctx, "requests: skipping router connection with unresolvable api key", "connection_id", in.ID, "error", err)
+			continue
+		}
+		if strings.TrimSpace(apiKey) == "" {
+			slog.WarnContext(ctx, "requests: skipping router connection with empty api key", "connection_id", in.ID)
+			continue
 		}
 		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
 	}
@@ -1160,12 +1173,22 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	if err != nil {
 		return nil, err
 	}
-	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, integrations)
+	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, integrations, req.MediaType)
 	if err != nil {
 		return nil, err
 	}
 	if len(conns) == 0 {
-		return s.markSubmissionFailed(ctx, req.ID, actor, fmt.Errorf("no fulfillment backend configured"))
+		// Distinguish "no backend at all" from the migration breakage where an
+		// existing connection row exists but its installation_id is NULL (the row
+		// predates the plugin install and was never re-bound).
+		msg := "no fulfillment backend configured"
+		for _, in := range integrations {
+			if in.Enabled && in.CapabilityID == "request_router.v1" && in.InstallationID == nil {
+				msg = "request backend connection is not bound to a plugin installation; re-save it in admin"
+				break
+			}
+		}
+		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
 	}
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
@@ -1213,12 +1236,21 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	}
 	connKind := connectionKindByID(conns)
 	latest := &req
-	// A misbehaving plugin may return two targets for the same quality; persist
-	// each quality once so we never violate UNIQUE(request_id, quality).
+	// The plugin is an out-of-process trust boundary: validate every returned
+	// target against the DB CHECK constraints (quality, status) and skip any
+	// quality that is duplicated in the batch or already has a healthy target, so
+	// a misbehaving plugin can't violate UNIQUE(request_id, quality) and wedge the
+	// request.
+	validQuality := map[Quality]bool{Quality1080p: true, Quality2160p: true}
+	validStatus := map[Status]bool{StatusQueued: true, StatusDownloading: true, StatusCompleted: true, StatusFailed: true}
 	returned := map[Quality]bool{}
 	for _, rt := range targets {
-		if returned[rt.Quality] {
+		if !validQuality[rt.Quality] {
+			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "request_id", req.ID, "quality", string(rt.Quality))
 			continue
+		}
+		if returned[rt.Quality] || healthy[rt.Quality] {
+			continue // dup-in-batch, or a healthy target already exists for this quality
 		}
 		returned[rt.Quality] = true
 		created, err := s.store.CreateTarget(ctx, Target{
@@ -1229,8 +1261,8 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			return nil, err
 		}
 		status := rt.Status
-		if status == "" {
-			status = StatusQueued
+		if status == "" || !validStatus[status] {
+			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
 		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, rt.Message, actor)
 		if err != nil {
@@ -1351,7 +1383,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 	if err != nil {
 		return reconcileUnchanged, err
 	}
-	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, integrations)
+	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, integrations, req.MediaType)
 	if err != nil {
 		return reconcileUnchanged, err
 	}
