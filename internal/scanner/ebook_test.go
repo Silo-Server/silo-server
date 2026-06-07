@@ -77,6 +77,70 @@ func TestParseEbookEPUBReadsOPFMetadata(t *testing.T) {
 	}
 }
 
+func TestParseEbookEPUBReadsCalibreSeriesMetadata(t *testing.T) {
+	path := writeTinyEPUB(t, map[string]string{
+		"dc:title":            "Series Book",
+		"meta:calibre:series": "Series S",
+		"meta:calibre:index":  "3.5",
+	})
+	book, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if book.Series != "Series S" || book.SeriesIndex != "3.5" {
+		t.Fatalf("series metadata = %q/%q, want Series S/3.5", book.Series, book.SeriesIndex)
+	}
+}
+
+func TestParseEbookFormatOnlyFallbacks(t *testing.T) {
+	for _, ext := range []string{".pdf", ".mobi", ".azw", ".azw3"} {
+		path := filepath.Join(t.TempDir(), "book"+ext)
+		if err := os.WriteFile(path, []byte("placeholder"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", ext, err)
+		}
+		book, err := parseEbookFile(path)
+		if err != nil {
+			t.Fatalf("parseEbookFile(%s): %v", ext, err)
+		}
+		if book.Format != ext[1:] {
+			t.Fatalf("format for %s = %q, want %q", ext, book.Format, ext[1:])
+		}
+	}
+}
+
+func TestParseEbookFileRejectsUnsupportedExtension(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.txt")
+	if err := os.WriteFile(path, []byte("not an ebook"), 0o644); err != nil {
+		t.Fatalf("write txt: %v", err)
+	}
+	_, err := parseEbookFile(path)
+	if err == nil {
+		t.Fatal("parseEbookFile returned nil error, want unsupported format error")
+	}
+}
+
+func TestParseEbookFileReturnsCorruptInputErrors(t *testing.T) {
+	t.Run("epub", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "book.epub")
+		if err := os.WriteFile(path, []byte("not a zip"), 0o644); err != nil {
+			t.Fatalf("write epub: %v", err)
+		}
+		if _, err := parseEbookFile(path); err == nil {
+			t.Fatal("parseEbookFile corrupt epub returned nil error")
+		}
+	})
+
+	t.Run("fb2", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "book.fb2")
+		if err := os.WriteFile(path, []byte("<FictionBook>"), 0o644); err != nil {
+			t.Fatalf("write fb2: %v", err)
+		}
+		if _, err := parseEbookFile(path); err == nil {
+			t.Fatal("parseEbookFile corrupt fb2 returned nil error")
+		}
+	})
+}
+
 func TestParseEbookFB2ReadsDescriptionMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.fb2")
 	xml := `<?xml version="1.0" encoding="utf-8"?>
@@ -99,6 +163,28 @@ func TestParseEbookFB2ReadsDescriptionMetadata(t *testing.T) {
 func writeTinyEPUB(t *testing.T, metadata map[string]string) string {
 	t.Helper()
 
+	metadataXML := ""
+	for tag, value := range metadata {
+		switch tag {
+		case "meta:calibre:series":
+			metadataXML += fmt.Sprintf(`<meta name="calibre:series" content="%s"/>`+"\n", value)
+		case "meta:calibre:index":
+			metadataXML += fmt.Sprintf(`<meta name="calibre:series_index" content="%s"/>`+"\n", value)
+		default:
+			metadataXML += fmt.Sprintf("<%s>%s</%s>\n", tag, value, tag)
+		}
+	}
+	return writeTinyEPUBWithOPF(t, fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/">
+	<metadata>
+		%s
+	</metadata>
+</package>`, metadataXML))
+}
+
+func writeTinyEPUBWithOPF(t *testing.T, opf string) string {
+	t.Helper()
+
 	path := filepath.Join(t.TempDir(), "book.epub")
 	file, err := os.Create(path)
 	if err != nil {
@@ -116,16 +202,7 @@ func writeTinyEPUB(t *testing.T, metadata map[string]string) string {
 	</rootfiles>
 </container>`)
 
-	metadataXML := ""
-	for tag, value := range metadata {
-		metadataXML += fmt.Sprintf("<%s>%s</%s>\n", tag, value, tag)
-	}
-	writeZipFile(t, archive, "OEBPS/content.opf", fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/">
-	<metadata>
-		%s
-	</metadata>
-</package>`, metadataXML))
+	writeZipFile(t, archive, "OEBPS/content.opf", opf)
 
 	return path
 }
