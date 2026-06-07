@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Audiobookshelf-style RSS podcast feeds. Each row exposes one
 -- audiobook (library_item_id) as a public RSS XML feed reachable at
 -- /feed/{slug}.xml — slug is the unguessable capability token.
@@ -23,3 +25,11 @@ CREATE INDEX IF NOT EXISTS abs_rss_feeds_user_profile_idx
         user_id,
         COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid)
     );
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.abs_rss_feeds_user_profile_idx;
+DROP INDEX IF EXISTS public.abs_rss_feeds_slug_uniq;
+DROP TABLE IF EXISTS public.abs_rss_feeds;
+-- +goose StatementEnd

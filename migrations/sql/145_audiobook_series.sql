@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Audiobook series membership. The scanner extracts series_name/sequence
 -- from tag fields (series / mvnm / series-part / mvin), but until this
 -- migration there was nowhere to persist them. Detail page surfaces this
@@ -25,3 +27,9 @@ FROM media_items mi
 WHERE mi.type = 'audiobook'
   AND mi.title ~ '^.+[^\s-]\s+\d+(?:\.\d+)?\s*-\s*.+$'
 ON CONFLICT (content_id) DO NOTHING;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP TABLE IF EXISTS audiobook_series;
+-- +goose StatementEnd

@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Podcast-specific episode metadata. RSS episodes are identified by an
 -- opaque GUID from the feed (not a sequential episode number), and they
 -- carry a remote audio URL rather than a local file path.
@@ -17,3 +19,13 @@ ALTER TABLE public.episodes
 CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_podcast_guid
     ON public.episodes (series_id, podcast_guid)
     WHERE podcast_guid IS NOT NULL;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.idx_episodes_podcast_guid;
+
+ALTER TABLE public.episodes
+    DROP COLUMN IF EXISTS podcast_guid,
+    DROP COLUMN IF EXISTS podcast_audio_url;
+-- +goose StatementEnd

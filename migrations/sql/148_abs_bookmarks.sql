@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- ABS bookmark rows. One row per (user, profile, item, time). Backs the
 -- POST/PATCH/DELETE /me/item/{itemId}/bookmark endpoints in
 -- internal/audiobooks/abs/bookmarks_handler.go.
@@ -28,3 +30,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS abs_bookmarks_user_profile_item_time_uniq
 
 CREATE INDEX IF NOT EXISTS abs_bookmarks_user_item_idx
     ON public.abs_bookmarks (user_id, library_item_id);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.abs_bookmarks_user_item_idx;
+DROP INDEX IF EXISTS public.abs_bookmarks_user_profile_item_time_uniq;
+DROP TABLE IF EXISTS public.abs_bookmarks;
+-- +goose StatementEnd

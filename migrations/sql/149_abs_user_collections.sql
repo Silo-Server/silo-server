@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Manual user collections (named groupings of audiobooks).
 -- Profile-scoped: NULL profile_id encodes the primary profile, and the
 -- COALESCE-to-sentinel-UUID trick in the lookup index collapses NULL
@@ -24,3 +26,10 @@ CREATE INDEX IF NOT EXISTS abs_user_collections_user_profile_idx
         user_id,
         COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid)
     );
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.abs_user_collections_user_profile_idx;
+DROP TABLE IF EXISTS public.abs_user_collections;
+-- +goose StatementEnd

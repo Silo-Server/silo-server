@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Items inside a playlist. library_item_id is NOT FK'd (decoupled to
 -- allow future episode support); episode_id defaults to '' (empty) so
 -- the unique constraint works without COALESCE.
@@ -15,3 +17,10 @@ CREATE TABLE IF NOT EXISTS public.abs_playlist_items (
 
 CREATE INDEX IF NOT EXISTS abs_playlist_items_playlist_position_idx
     ON public.abs_playlist_items (playlist_id, position);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.abs_playlist_items_playlist_position_idx;
+DROP TABLE IF EXISTS public.abs_playlist_items;
+-- +goose StatementEnd

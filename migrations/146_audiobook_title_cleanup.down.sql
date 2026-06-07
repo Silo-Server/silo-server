@@ -1,5 +1,0 @@
--- No-op rollback.
---
--- The up migration intentionally preserves scanner-supplied original_title.
--- Restoring title from original_title on rollback can overwrite newer title
--- edits for every audiobook, so the safe rollback is to leave data as-is.
