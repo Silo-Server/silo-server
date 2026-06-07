@@ -322,6 +322,12 @@ func (c *RequestRouterClient) TestConnection(ctx context.Context, req *pluginv1.
 	return c.client.TestConnection(callCtx, req)
 }
 
+func (c *RequestRouterClient) Validate(ctx context.Context, req *pluginv1.ValidateRequest) (*pluginv1.ValidateResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.Validate(callCtx, req)
+}
+
 func (c *EventConsumerClient) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequest) (*pluginv1.HandleEventResponse, error) {
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()

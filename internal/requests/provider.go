@@ -17,6 +17,7 @@ type RequestRouterProvider interface {
 	CheckStatus(ctx context.Context, installationID int, capabilityID string, req Request, targets []RouterTargetRef, conns []ResolvedRouterConnection) ([]RouterTargetStatus, error)
 	ListConfigOptions(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (map[string][]RouterOption, error)
 	TestConnection(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (bool, string, error)
+	Validate(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (fieldErrors map[string]string, formError string, err error)
 }
 
 // ResolvedRouterConnection is a connection with plaintext credentials + parsed config.
@@ -67,6 +68,7 @@ type RouterClient interface {
 	CheckStatus(ctx context.Context, req *pluginv1.CheckStatusRequest) (*pluginv1.CheckStatusResponse, error)
 	ListConfigOptions(ctx context.Context, req *pluginv1.ListConfigOptionsRequest) (*pluginv1.ListConfigOptionsResponse, error)
 	TestConnection(ctx context.Context, req *pluginv1.TestConnectionRequest) (*pluginv1.TestConnectionResponse, error)
+	Validate(ctx context.Context, req *pluginv1.ValidateRequest) (*pluginv1.ValidateResponse, error)
 }
 
 type pluginRouterProvider struct{ resolver RouterClientResolver }
@@ -222,4 +224,20 @@ func (p *pluginRouterProvider) TestConnection(ctx context.Context, installationI
 		return false, "", err
 	}
 	return resp.GetOk(), resp.GetMessage(), nil
+}
+
+func (p *pluginRouterProvider) Validate(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (map[string]string, string, error) {
+	client, err := p.resolver.RequestRouterClient(ctx, installationID, capabilityID)
+	if err != nil {
+		return nil, "", err
+	}
+	pc, err := routerProtoConn(conn)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Validate(ctx, &pluginv1.ValidateRequest{CapabilityId: capabilityID, Connection: pc})
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.GetFieldErrors(), resp.GetFormError(), nil
 }

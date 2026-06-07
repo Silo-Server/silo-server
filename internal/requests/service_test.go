@@ -1794,6 +1794,10 @@ func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, 
 	return true, "", nil
 }
 
+func (f *fakeRouterProvider) Validate(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (map[string]string, string, error) {
+	return nil, "", nil
+}
+
 // routerInst builds an enabled request_router integration connection for tests.
 func routerInst(id string) Integration {
 	return routerInstOn(id, 1)

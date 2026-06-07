@@ -12,6 +12,7 @@ type fakeRouterClient struct {
 	lastCheckReq   *pluginv1.CheckStatusRequest
 	statuses       []*pluginv1.TargetStatus
 	optionsByField map[string]*pluginv1.ConfigOptionList
+	validateResp   *pluginv1.ValidateResponse
 }
 
 func (f *fakeRouterClient) Fulfill(_ context.Context, req *pluginv1.FulfillRequest) (*pluginv1.FulfillResponse, error) {
@@ -29,6 +30,9 @@ func (f *fakeRouterClient) ListConfigOptions(context.Context, *pluginv1.ListConf
 }
 func (f *fakeRouterClient) TestConnection(context.Context, *pluginv1.TestConnectionRequest) (*pluginv1.TestConnectionResponse, error) {
 	return &pluginv1.TestConnectionResponse{Ok: true}, nil
+}
+func (f *fakeRouterClient) Validate(context.Context, *pluginv1.ValidateRequest) (*pluginv1.ValidateResponse, error) {
+	return f.validateResp, nil
 }
 
 type fakeRouterResolver struct{ c RouterClient }
@@ -114,5 +118,17 @@ func TestPluginRouterProviderListConfigOptionsTranslates(t *testing.T) {
 	qp := out["quality_profile_id"]
 	if len(qp) != 1 || qp[0].Value != "1" || qp[0].Label != "HD-1080p" {
 		t.Fatalf("quality_profile_id mismapped: %+v", qp)
+	}
+}
+
+func TestPluginRouterProviderValidateTranslates(t *testing.T) {
+	fc := &fakeRouterClient{validateResp: &pluginv1.ValidateResponse{
+		FieldErrors: map[string]string{"is_default": "cannot be 4K"}, FormError: "",
+	}}
+	p := NewPluginRouterProvider(fakeRouterResolver{c: fc})
+	fe, form, err := p.Validate(context.Background(), 1, "arr",
+		ResolvedRouterConnection{ID: "c1", Config: map[string]any{"service_kind": "radarr"}})
+	if err != nil || form != "" || fe["is_default"] != "cannot be 4K" {
+		t.Fatalf("unexpected: fe=%v form=%q err=%v", fe, form, err)
 	}
 }
