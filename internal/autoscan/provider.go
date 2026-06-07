@@ -9,7 +9,7 @@ import (
 // ScanSourceProvider yields changed paths for one source. The engine calls
 // PollChanges; production wraps the plugins.Service scan_source resolver.
 type ScanSourceProvider interface {
-	PollChanges(ctx context.Context, installationID int, capabilityID, marker string, conn ResolvedConnection, sourceConfig map[string]string) (changes []Change, nextMarker string, err error)
+	PollChanges(ctx context.Context, pluginID, capabilityID, marker string, conn ResolvedConnection, sourceConfig map[string]string) (changes []Change, nextMarker string, err error)
 }
 
 // PollChangesClient is the slice of *pluginhost.ScanSourceClient used here. It
@@ -20,10 +20,10 @@ type PollChangesClient interface {
 	PollChanges(ctx context.Context, req *pluginv1.PollChangesRequest) (*pluginv1.PollChangesResponse, error)
 }
 
-// ScanSourceResolver yields a per-(installation, capability) scan-source client.
+// ScanSourceResolver yields a per-(plugin, capability) scan-source client.
 // Exported for the same cross-package adapter reason as PollChangesClient.
 type ScanSourceResolver interface {
-	ScanSourceClient(ctx context.Context, installationID int, capabilityID string) (PollChangesClient, error)
+	ScanSourceClient(ctx context.Context, pluginID, capabilityID string) (PollChangesClient, error)
 }
 
 type pluginProvider struct{ resolver ScanSourceResolver }
@@ -34,8 +34,8 @@ func NewPluginProvider(resolver ScanSourceResolver) ScanSourceProvider {
 	return &pluginProvider{resolver: resolver}
 }
 
-func (p *pluginProvider) PollChanges(ctx context.Context, installationID int, capabilityID, marker string, conn ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
-	client, err := p.resolver.ScanSourceClient(ctx, installationID, capabilityID)
+func (p *pluginProvider) PollChanges(ctx context.Context, pluginID, capabilityID, marker string, conn ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
+	client, err := p.resolver.ScanSourceClient(ctx, pluginID, capabilityID)
 	if err != nil {
 		return nil, "", err
 	}

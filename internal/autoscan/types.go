@@ -45,11 +45,11 @@ type Change struct {
 	Scope      ChangeScope
 }
 
-// Source ties a scan_source plugin capability instance to a connection plus the
+// Source ties a scan_source plugin capability to a connection plus the
 // host-owned scheduling/bookkeeping state.
 type Source struct {
 	ID                  string
-	InstallationID      int
+	PluginID            string
 	CapabilityID        string
 	ConnectionID        *string // nil until an operator binds a connection
 	Enabled             bool
@@ -65,6 +65,7 @@ type Source struct {
 type EventStatus string
 
 const (
+	EventStatusRunning    EventStatus = "running"
 	EventStatusSuccess    EventStatus = "success"
 	EventStatusError      EventStatus = "error"
 	EventStatusUnresolved EventStatus = "unresolved"
@@ -73,7 +74,7 @@ const (
 type Event struct {
 	ID              int64
 	SourceID        *string
-	InstallationID  int
+	PluginID        string
 	CapabilityID    string
 	StartedAt       time.Time
 	CompletedAt     time.Time
@@ -91,11 +92,11 @@ type Event struct {
 }
 
 type EventCreate struct {
-	SourceID       string
-	InstallationID int
-	CapabilityID   string
-	StartedAt      time.Time
-	MarkerBefore   string
+	SourceID     string
+	PluginID     string
+	CapabilityID string
+	StartedAt    time.Time
+	MarkerBefore string
 }
 
 type EventFinish struct {
@@ -154,7 +155,7 @@ type ScanWithEvent struct {
 	ScanRunSummary
 	AutoscanEventID  *int64
 	SourceID         *string
-	InstallationID   *int
+	PluginID         string
 	CapabilityID     string
 	EventStatus      EventStatus
 	EventCompletedAt *time.Time

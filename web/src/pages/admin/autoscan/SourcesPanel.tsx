@@ -93,10 +93,10 @@ function resolveSourceName(
     operatorLabel: source.label,
     connectionName: connectionOptions.find((c) => c.id === (source.connection_id ?? ""))?.name,
     displayName: pluginDisplayNames.get(
-      pluginDisplayNameKey(source.installation_id, source.capability_id),
+      pluginDisplayNameKey(source.plugin_id, source.capability_id),
     ),
     capabilityId: source.capability_id,
-    installationId: source.installation_id,
+    pluginId: source.plugin_id,
   }).name;
 }
 
@@ -152,7 +152,7 @@ const CEPHFS_LEGACY_MOVIE_NESTED_KEY = "movie_nested_paths";
 const CEPHFS_LEGACY_TV_NESTED_KEY = "tv_nested_paths";
 
 function isCephFSSource(source: AutoscanSource): boolean {
-  return source.capability_id === CEPHFS_CAPABILITY_ID;
+  return source.plugin_id === CEPHFS_PLUGIN_ID || source.capability_id === CEPHFS_CAPABILITY_ID;
 }
 
 function isCephFSPlugin(plugin: { plugin_id: string; capability_id: string } | undefined): boolean {
@@ -837,10 +837,10 @@ function SourceRow({
       (c) => c.id === (edit.connectionId || source.connection_id || ""),
     )?.name,
     displayName: pluginDisplayNames.get(
-      pluginDisplayNameKey(source.installation_id, source.capability_id),
+      pluginDisplayNameKey(source.plugin_id, source.capability_id),
     ),
     capabilityId: source.capability_id,
-    installationId: source.installation_id,
+    pluginId: source.plugin_id,
   });
   const sourceIdentity = (
     <div className="min-w-0 space-y-1">
@@ -1061,7 +1061,7 @@ function SourceRow({
 // ---------------------------------------------------------------------------
 
 interface AddSourceForm {
-  /** "installation_id:capability_id" composite key of the chosen plugin. */
+  /** "plugin_id:capability_id" composite key of the chosen plugin. */
   pluginKey: string;
   connectionId: string; // "" / "__none__" means no connection
   intervalStr: string;
@@ -1075,8 +1075,8 @@ const BLANK_ADD_SOURCE: AddSourceForm = {
   sourceConfig: {},
 };
 
-function pluginKey(installationId: number, capabilityId: string): string {
-  return `${installationId}:${capabilityId}`;
+function pluginKey(pluginId: string, capabilityId: string): string {
+  return `${pluginId}:${capabilityId}`;
 }
 
 function AddSourceDialog({
@@ -1094,7 +1094,7 @@ function AddSourceDialog({
 
   const plugins = available.data ?? [];
   const selectedPlugin = plugins.find(
-    (p) => pluginKey(p.installation_id, p.capability_id) === form.pluginKey,
+    (p) => pluginKey(p.plugin_id, p.capability_id) === form.pluginKey,
   );
   const selectedIsCephFS = isCephFSPlugin(selectedPlugin);
 
@@ -1111,7 +1111,7 @@ function AddSourceDialog({
     const pollInterval = raw === "" ? null : Number(raw);
     createSource.mutate(
       {
-        installation_id: selectedPlugin.installation_id,
+        plugin_id: selectedPlugin.plugin_id,
         capability_id: selectedPlugin.capability_id,
         connection_id: connectionId,
         enabled: false,
@@ -1157,9 +1157,7 @@ function AddSourceDialog({
               <Select
                 value={form.pluginKey}
                 onValueChange={(v) => {
-                  const plugin = plugins.find(
-                    (p) => pluginKey(p.installation_id, p.capability_id) === v,
-                  );
+                  const plugin = plugins.find((p) => pluginKey(p.plugin_id, p.capability_id) === v);
                   setForm((f) => ({
                     ...f,
                     pluginKey: v,
@@ -1176,8 +1174,8 @@ function AddSourceDialog({
                 <SelectContent>
                   {plugins.map((p) => (
                     <SelectItem
-                      key={pluginKey(p.installation_id, p.capability_id)}
-                      value={pluginKey(p.installation_id, p.capability_id)}
+                      key={pluginKey(p.plugin_id, p.capability_id)}
+                      value={pluginKey(p.plugin_id, p.capability_id)}
                     >
                       {p.display_name}
                     </SelectItem>
