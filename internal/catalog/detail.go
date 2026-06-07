@@ -154,6 +154,51 @@ type ItemDetail struct {
 	EffectiveVersionHDR        *bool   `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo *string `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey *string `json:"effective_version_edition_key,omitempty"`
+
+	// Audiobook-specific detail. Present only when Type == "audiobook".
+	Audiobook *AudiobookDetailExtension `json:"audiobook,omitempty"`
+}
+
+type AudiobookDetailExtension struct {
+	Authors              []AudiobookPerson       `json:"authors"`
+	Narrators            []AudiobookPerson       `json:"narrators"`
+	Publisher            string                  `json:"publisher,omitempty"`
+	TotalDurationSeconds int                     `json:"total_duration_seconds"`
+	Series               *AudiobookSeriesGroup   `json:"series,omitempty"`
+	OtherNarrations      []AudiobookNarration    `json:"other_narrations"`
+	Related              AudiobookRelatedContent `json:"related"`
+}
+
+type AudiobookPerson struct {
+	PersonID       string `json:"person_id,omitempty"`
+	Name           string `json:"name"`
+	PhotoURL       string `json:"photo_url,omitempty"`
+	PhotoThumbhash string `json:"photo_thumbhash,omitempty"`
+}
+
+type AudiobookRelatedContent struct {
+	AlsoByAuthor []AudiobookRelatedItem `json:"also_by_author"`
+	Similar      []AudiobookRelatedItem `json:"similar"`
+}
+
+type AudiobookRelatedItem struct {
+	ContentID   string `json:"content_id"`
+	Title       string `json:"title"`
+	Year        int    `json:"year,omitempty"`
+	PosterURL   string `json:"poster_url,omitempty"`
+	SeriesIndex *int   `json:"series_index,omitempty"`
+}
+
+type AudiobookSeriesGroup struct {
+	Name    string                 `json:"name,omitempty"`
+	Entries []AudiobookRelatedItem `json:"entries"`
+}
+
+type AudiobookNarration struct {
+	ContentID string   `json:"content_id"`
+	Title     string   `json:"title"`
+	Year      int      `json:"year,omitempty"`
+	Narrators []string `json:"narrators"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -224,6 +269,7 @@ type FileVersion struct {
 	PresentationKind         string                 `json:"presentation_kind,omitempty"`
 	PresentationGroupKey     string                 `json:"presentation_group_key,omitempty"`
 	PresentationPartIndex    int                    `json:"presentation_part_index,omitempty"`
+	PresentationPartTotal    int                    `json:"presentation_part_total,omitempty"`
 	MultiEpisodeStart        int                    `json:"multi_episode_start,omitempty"`
 	MultiEpisodeEnd          int                    `json:"multi_episode_end,omitempty"`
 	EffectiveAudioTrackIndex *int                   `json:"effective_audio_track_index,omitempty"`
@@ -833,6 +879,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 
 		files = FilterMediaFilesByAccess(files, filter)
+		if item.Type == "audiobook" {
+			sortAudiobookMediaFiles(files)
+		}
 		files = s.preparePlaybackFiles(ctx, files)
 		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
 			ctx,
@@ -841,6 +890,10 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			item.ContentID,
 		)
 		detail.OverlaySummary = overlays.BuildSummary(files)
+	}
+
+	if item.Type == "audiobook" {
+		detail.Audiobook = s.buildAudiobookExtension(ctx, item, detail.Versions, crewCredits, filter)
 	}
 
 	// Series folder paths from confirmed claims when available, otherwise from
@@ -950,6 +1003,351 @@ func splitCastCrew(credits []PersonCredit) ([]CastCredit, []CrewCredit) {
 		crew = []CrewCredit{}
 	}
 	return cast, crew
+}
+
+func (s *DetailService) buildAudiobookExtension(
+	ctx context.Context,
+	item *models.MediaItem,
+	versions []FileVersion,
+	crew []CrewCredit,
+	filter AccessFilter,
+) *AudiobookDetailExtension {
+	if item == nil {
+		return nil
+	}
+	totalDuration := 0
+	for _, version := range versions {
+		if version.Duration > 0 {
+			totalDuration += version.Duration
+		}
+	}
+
+	return &AudiobookDetailExtension{
+		Authors:              audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
+		Narrators:            audiobookPeopleFromCrew(crew, models.PersonKindNarrator.String()),
+		Publisher:            firstNonEmptyString(item.Studios),
+		TotalDurationSeconds: totalDuration,
+		Series:               s.fetchAudiobookSeries(ctx, item.ContentID, filter),
+		OtherNarrations:      s.fetchAudiobookOtherNarrations(ctx, item.ContentID, filter),
+		Related: AudiobookRelatedContent{
+			AlsoByAuthor: s.fetchAudiobookAlsoByAuthor(ctx, item.ContentID, filter),
+			Similar:      s.fetchAudiobookSimilarByGenres(ctx, item.ContentID, filter),
+		},
+	}
+}
+
+func audiobookPeopleFromCrew(crew []CrewCredit, job string) []AudiobookPerson {
+	out := make([]AudiobookPerson, 0)
+	for _, credit := range crew {
+		if credit.Job != job || strings.TrimSpace(credit.Name) == "" {
+			continue
+		}
+		out = append(out, AudiobookPerson{
+			PersonID:       credit.PersonID,
+			Name:           credit.Name,
+			PhotoURL:       credit.PhotoURL,
+			PhotoThumbhash: credit.PhotoThumbhash,
+		})
+	}
+	return out
+}
+
+func firstNonEmptyString(values []string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func appendAudiobookItemAccessConditions(
+	alias string,
+	filter AccessFilter,
+	conditions *[]string,
+	args *[]any,
+	argIdx *int,
+) bool {
+	if filter.AllowedLibraryIDs != nil {
+		if len(filter.AllowedLibraryIDs) == 0 {
+			return false
+		}
+		*conditions = append(*conditions, fmt.Sprintf(`
+			EXISTS (
+				SELECT 1 FROM media_item_libraries mil_allowed
+				WHERE mil_allowed.content_id = %s.content_id
+				  AND mil_allowed.media_folder_id = ANY($%d)
+			)`, alias, *argIdx))
+		*args = append(*args, filter.AllowedLibraryIDs)
+		*argIdx = *argIdx + 1
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		if filter.AllowedLibraryIDs == nil {
+			*conditions = append(*conditions, fmt.Sprintf(`
+				EXISTS (
+					SELECT 1 FROM media_item_libraries mil_visible
+					WHERE mil_visible.content_id = %s.content_id
+				)`, alias))
+		}
+		*conditions = append(*conditions, fmt.Sprintf(`
+			NOT EXISTS (
+				SELECT 1 FROM media_item_libraries mil_disabled
+				WHERE mil_disabled.content_id = %s.content_id
+				  AND mil_disabled.media_folder_id = ANY($%d)
+			)`, alias, *argIdx))
+		*args = append(*args, filter.DisabledLibraryIDs)
+		*argIdx = *argIdx + 1
+	}
+	ApplySectionAccessFilter(alias, AccessFilter{MaxContentRating: filter.MaxContentRating}, conditions, args, argIdx)
+	return true
+}
+
+func (s *DetailService) fetchAudiobookAlsoByAuthor(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
+	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
+		return []AudiobookRelatedItem{}
+	}
+	args := []any{contentID, models.PersonKindAuthor}
+	argIdx := 3
+	conditions := []string{
+		"ip1.content_id = $1",
+		"ip1.kind = $2",
+		"m2.type = 'audiobook'",
+	}
+	if !appendAudiobookItemAccessConditions("m2", filter, &conditions, &args, &argIdx) {
+		return []AudiobookRelatedItem{}
+	}
+	query := fmt.Sprintf(`
+		SELECT m2.content_id, m2.title, COALESCE(m2.year, 0), COALESCE(m2.poster_path, '')
+		FROM item_people ip1
+		JOIN item_people ip2
+		  ON ip2.person_id = ip1.person_id
+		 AND ip2.kind = ip1.kind
+		 AND ip2.content_id <> ip1.content_id
+		JOIN media_items m2 ON m2.content_id = ip2.content_id
+		WHERE %s
+		ORDER BY m2.year DESC NULLS LAST, LOWER(m2.sort_title)
+		LIMIT 12
+	`, strings.Join(conditions, " AND "))
+	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
+	if err != nil {
+		return []AudiobookRelatedItem{}
+	}
+	defer rows.Close()
+
+	out := make([]AudiobookRelatedItem, 0, 12)
+	seen := make(map[string]struct{})
+	for rows.Next() {
+		var item AudiobookRelatedItem
+		var posterPath string
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
+			return []AudiobookRelatedItem{}
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		item.PosterURL = s.PresignURL(ctx, posterPath, "featured")
+		out = append(out, item)
+	}
+	return out
+}
+
+func (s *DetailService) fetchAudiobookSimilarByGenres(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
+	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
+		return []AudiobookRelatedItem{}
+	}
+	args := []any{contentID, models.PersonKindAuthor}
+	argIdx := 3
+	conditions := []string{
+		"m.type = 'audiobook'",
+		"m.content_id <> $1",
+		"m.genres && (SELECT array_agg(g) FROM this_genres)",
+		`NOT EXISTS (
+			SELECT 1 FROM item_people ip
+			WHERE ip.content_id = m.content_id
+			  AND ip.kind = $2
+			  AND ip.person_id IN (SELECT person_id FROM this_author)
+		)`,
+	}
+	if !appendAudiobookItemAccessConditions("m", filter, &conditions, &args, &argIdx) {
+		return []AudiobookRelatedItem{}
+	}
+	query := fmt.Sprintf(`
+		WITH this_genres AS (
+			SELECT unnest(genres) AS g FROM media_items WHERE content_id = $1
+		),
+		this_author AS (
+			SELECT person_id FROM item_people WHERE content_id = $1 AND kind = $2
+		)
+		SELECT m.content_id, m.title, COALESCE(m.year, 0), COALESCE(m.poster_path, '')
+		FROM media_items m
+		WHERE %s
+		ORDER BY
+			(
+				SELECT COUNT(*)
+				FROM unnest(m.genres) AS genre(value)
+				WHERE genre.value IN (SELECT g FROM this_genres)
+			) DESC,
+			COALESCE(m.year, 0) DESC,
+			LOWER(m.sort_title)
+		LIMIT 12
+	`, strings.Join(conditions, " AND "))
+	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
+	if err != nil {
+		return []AudiobookRelatedItem{}
+	}
+	defer rows.Close()
+
+	out := make([]AudiobookRelatedItem, 0, 12)
+	for rows.Next() {
+		var item AudiobookRelatedItem
+		var posterPath string
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
+			return []AudiobookRelatedItem{}
+		}
+		item.PosterURL = s.PresignURL(ctx, posterPath, "featured")
+		out = append(out, item)
+	}
+	return out
+}
+
+func (s *DetailService) fetchAudiobookSeries(ctx context.Context, contentID string, filter AccessFilter) *AudiobookSeriesGroup {
+	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
+		return nil
+	}
+	args := []any{contentID}
+	argIdx := 2
+	conditions := []string{
+		"root.content_id = $1",
+		"m.type = 'audiobook'",
+	}
+	if !appendAudiobookItemAccessConditions("m", filter, &conditions, &args, &argIdx) {
+		return nil
+	}
+	query := fmt.Sprintf(`
+		SELECT
+			m.content_id,
+			m.title,
+			COALESCE(m.year, 0),
+			COALESCE(m.poster_path, ''),
+			s.series_name,
+			s.series_index
+		FROM audiobook_series root
+		JOIN audiobook_series s ON LOWER(s.series_name) = LOWER(root.series_name)
+		JOIN media_items m ON m.content_id = s.content_id
+		WHERE %s
+		ORDER BY s.series_index NULLS LAST, LOWER(m.sort_title)
+		LIMIT 30
+	`, strings.Join(conditions, " AND "))
+	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var seriesName string
+	entries := make([]AudiobookRelatedItem, 0, 16)
+	for rows.Next() {
+		var (
+			item   AudiobookRelatedItem
+			poster string
+			name   string
+			index  *float64
+		)
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &poster, &name, &index); err != nil {
+			return nil
+		}
+		if seriesName == "" {
+			seriesName = name
+		}
+		if index != nil {
+			n := int(*index)
+			if float64(n) == *index {
+				item.SeriesIndex = &n
+			}
+		}
+		item.PosterURL = s.PresignURL(ctx, poster, "featured")
+		entries = append(entries, item)
+	}
+	if len(entries) < 2 {
+		return nil
+	}
+	return &AudiobookSeriesGroup{Name: seriesName, Entries: entries}
+}
+
+func (s *DetailService) fetchAudiobookOtherNarrations(ctx context.Context, contentID string, filter AccessFilter) []AudiobookNarration {
+	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
+		return []AudiobookNarration{}
+	}
+	const stripRE = `\s*\(?\s*[-:,]?\s*(UK Version:?|US Version:?)?\s*[Rr]ead [Bb]y [^()]+\)?\s*$`
+	args := []any{stripRE, contentID, models.PersonKindAuthor, models.PersonKindNarrator}
+	argIdx := 5
+	conditions := []string{
+		"m.type = 'audiobook'",
+		"m.content_id <> $2",
+		"trim(regexp_replace(m.title, $1, '', 'g')) = (SELECT norm_title FROM this_book)",
+		`EXISTS (
+			SELECT 1 FROM item_people ip
+			WHERE ip.content_id = m.content_id
+			  AND ip.kind = $3
+			  AND ip.person_id IN (SELECT person_id FROM this_author)
+		)`,
+	}
+	if !appendAudiobookItemAccessConditions("m", filter, &conditions, &args, &argIdx) {
+		return []AudiobookNarration{}
+	}
+	query := fmt.Sprintf(`
+		WITH this_book AS (
+			SELECT trim(regexp_replace(title, $1, '', 'g')) AS norm_title
+			FROM media_items WHERE content_id = $2
+		),
+		this_author AS (
+			SELECT person_id FROM item_people WHERE content_id = $2 AND kind = $3
+		)
+		SELECT
+			m.content_id,
+			m.title,
+			COALESCE(m.year, 0),
+			COALESCE(string_agg(DISTINCT NULLIF(BTRIM(p.name), ''), '|||'), '') AS narrators
+		FROM media_items m
+		LEFT JOIN item_people ipn ON ipn.content_id = m.content_id AND ipn.kind = $4
+		LEFT JOIN people p ON p.id = ipn.person_id
+		WHERE %s
+		GROUP BY m.content_id, m.title, m.year
+		ORDER BY m.year DESC NULLS LAST, m.title
+		LIMIT 8
+	`, strings.Join(conditions, " AND "))
+	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
+	if err != nil {
+		return []AudiobookNarration{}
+	}
+	defer rows.Close()
+
+	out := make([]AudiobookNarration, 0, 4)
+	for rows.Next() {
+		var item AudiobookNarration
+		var narrators string
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &narrators); err != nil {
+			return []AudiobookNarration{}
+		}
+		item.Narrators = splitDelimitedNames(narrators)
+		out = append(out, item)
+	}
+	return out
+}
+
+func splitDelimitedNames(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+	parts := strings.Split(raw, "|||")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func seriesFolderPathsFromFiles(files []*models.MediaFile) []string {
@@ -1567,6 +1965,30 @@ func markerFromRange(start, end *float64) *Marker {
 	return &Marker{Start: *start, End: *end}
 }
 
+func sortAudiobookMediaFiles(files []*models.MediaFile) {
+	sort.SliceStable(files, func(i, j int) bool {
+		a, b := files[i], files[j]
+		if a == nil || b == nil {
+			return a != nil
+		}
+		if a.PresentationPartIndex > 0 || b.PresentationPartIndex > 0 {
+			if a.PresentationPartIndex != b.PresentationPartIndex {
+				if a.PresentationPartIndex == 0 {
+					return false
+				}
+				if b.PresentationPartIndex == 0 {
+					return true
+				}
+				return a.PresentationPartIndex < b.PresentationPartIndex
+			}
+		}
+		if a.FilePath != b.FilePath {
+			return strings.Compare(a.FilePath, b.FilePath) < 0
+		}
+		return a.ID < b.ID
+	})
+}
+
 func (s *DetailService) buildPlaybackInfo(
 	ctx context.Context,
 	files []*models.MediaFile,
@@ -1622,6 +2044,7 @@ func (s *DetailService) buildPlaybackInfo(
 			PresentationKind:         f.PresentationKind,
 			PresentationGroupKey:     f.PresentationGroupKey,
 			PresentationPartIndex:    f.PresentationPartIndex,
+			PresentationPartTotal:    f.PresentationPartTotal,
 			MultiEpisodeStart:        f.MultiEpisodeStart,
 			MultiEpisodeEnd:          f.MultiEpisodeEnd,
 			EffectiveAudioTrackIndex: intPtr(effectiveAudioSelection.Index),

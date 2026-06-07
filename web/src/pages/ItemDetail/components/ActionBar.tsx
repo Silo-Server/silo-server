@@ -6,6 +6,7 @@ import {
   Check,
   Captions,
   Download,
+  FolderPlus,
   Loader2,
   MoreVertical,
   Play,
@@ -15,6 +16,7 @@ import {
   RotateCcw,
   Tags,
 } from "lucide-react";
+import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -154,6 +156,7 @@ export default function ActionBar({
   const playbackController = useWatchPlaybackController();
   const [playChoiceOpen, setPlayChoiceOpen] = useState(false);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
+  const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [markerEditorOpen, setMarkerEditorOpen] = useState(false);
   const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
@@ -371,6 +374,12 @@ export default function ActionBar({
                 {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
               </DropdownMenuItem>
             )}
+            {contentId && (
+              <DropdownMenuItem onSelect={() => setAddToCollectionOpen(true)}>
+                <FolderPlus className="size-4" />
+                Add to Collection
+              </DropdownMenuItem>
+            )}
             {onDownload && (
               <DropdownMenuItem onSelect={onDownload}>
                 <Download className="size-4" />
@@ -474,6 +483,13 @@ export default function ActionBar({
           onConfirm={handleRefreshConfirm}
           isPending={isRefreshing}
         />
+        {contentId && (
+          <AddToCollectionDialog
+            open={addToCollectionOpen}
+            onOpenChange={setAddToCollectionOpen}
+            mediaItemId={contentId}
+          />
+        )}
       </div>
 
       {/* ── Stream info controls (second row) ──────────────── */}

@@ -1,4 +1,4 @@
-import { useQuery, useQueries } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { ProgressListResponse, ProgressEntry, ItemDetail } from "@/api/types";
 import { catalogKeys, progressKeys } from "./keys";
@@ -64,4 +64,40 @@ export function useContinueWatching(
     items,
     isLoading: enabled && progressLoading,
   };
+}
+
+interface ReportMediaProgressVars {
+  contentId: string;
+  positionSeconds: number;
+  durationSeconds: number;
+  forceOverwrite?: boolean;
+}
+
+export function useReportMediaProgress() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      contentId,
+      positionSeconds,
+      durationSeconds,
+      forceOverwrite = true,
+    }: ReportMediaProgressVars) =>
+      api("/sync/progress", {
+        method: "POST",
+        body: JSON.stringify({
+          items: [
+            {
+              media_item_id: contentId,
+              position: positionSeconds,
+              duration: durationSeconds,
+              force_overwrite: forceOverwrite,
+            },
+          ],
+        }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: progressKeys.all });
+      queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+    },
+  });
 }

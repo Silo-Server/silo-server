@@ -33,6 +33,7 @@ type ProbeData struct {
 	AudioTracks    []AudioTrackInfo
 	SubtitleTracks []SubtitleTrackInfo
 	Chapters       []ChapterInfo
+	FormatTags     map[string]string // format-level tags from ffprobe (title, artist, album, date, etc.)
 }
 
 // VideoTrackInfo describes a probed video track.

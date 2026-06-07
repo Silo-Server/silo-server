@@ -52,6 +52,9 @@ var queryFieldDefs = map[string]queryFieldDef{
 	"director":          {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
 	"writer":            {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
 	"producer":          {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
+	"author":            {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
+	"narrator":          {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
+	"series":            {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
 	"watched":           {executable: true, personalized: true, validOps: map[string]bool{"is": true}},
 	"favorited":         {executable: true, personalized: true, validOps: map[string]bool{"is": true}},
 	"in_watchlist":      {executable: true, personalized: true, validOps: map[string]bool{"is": true}},
@@ -85,6 +88,11 @@ var querySortDefs = map[string]querySortDef{
 	"progress":           {defaultOrder: "desc", nullsLast: true, personalized: true},
 	"date_viewed":        {defaultOrder: "desc", nullsLast: true, personalized: true},
 	"plays":              {defaultOrder: "desc", nullsLast: true, personalized: true},
+	// Audiobook-native sorts. nullsLast so items without an author /
+	// narrator / series association still appear (sorted to the end).
+	"author":   {defaultOrder: "asc", nullsLast: true},
+	"narrator": {defaultOrder: "asc", nullsLast: true},
+	"series":   {defaultOrder: "asc", nullsLast: true},
 }
 
 type QueryDefinition struct {
@@ -177,8 +185,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 	if normalized.MediaScope != "" &&
 		normalized.MediaScope != "movie" &&
 		normalized.MediaScope != "series" &&
-		normalized.MediaScope != "episode" {
-		return fmt.Errorf("media_scope must be 'movie', 'series', or 'episode'")
+		normalized.MediaScope != "episode" &&
+		normalized.MediaScope != "audiobook" {
+		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', or 'audiobook'")
 	}
 
 	if normalized.Match != "all" && normalized.Match != "any" {

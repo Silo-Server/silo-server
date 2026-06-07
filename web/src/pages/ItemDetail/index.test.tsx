@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("react-router", () => ({
   useParams: () => ({ id: "movie-123" }),
+  useSearchParams: () => [new URLSearchParams()],
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -53,6 +54,6 @@ describe("ItemDetail", () => {
     const markup = renderToStaticMarkup(<ItemDetail />);
 
     expect(markup).toContain("Catalog Detail");
-    expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("movie-123");
+    expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("movie-123", undefined);
   });
 });

@@ -214,6 +214,36 @@ func (s *stubFacetFetcher) SubtitleLanguages(ctx context.Context, filters Browse
 	return nil, nil
 }
 
+func (s *stubFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	s.hit()
+	return nil, nil
+}
+
+func (s *stubFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	s.hit()
+	return nil, nil
+}
+
+func (s *stubFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
 // countingExecutor is a previewExecutor stub that records the number of
 // PreviewPage calls and the AccessFilter passed in (so tests can confirm
 // NamePrefix made it through). It returns an empty result set so the resolver
@@ -273,7 +303,7 @@ func TestPreviewQuerySource_NamePrefix_DoesNotFetchAllRows(t *testing.T) {
 }
 
 // TestListFiltersWithOptions_RunsFacetQueriesConcurrently asserts that the
-// resolver runs the 9 facet lookups in parallel rather than serializing them.
+// resolver runs the facet lookups in parallel rather than serializing them.
 // We expect at least 6 concurrent in-flight callers (the configured cap).
 func TestListFiltersWithOptions_RunsFacetQueriesConcurrently(t *testing.T) {
 	const expectedConcurrent = 6

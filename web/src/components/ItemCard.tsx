@@ -154,7 +154,9 @@ export default function ItemCard({
           className="block overflow-hidden rounded-xl"
         >
           <div
-            className="media-card-image relative aspect-[2/3]"
+            className={`media-card-image relative ${
+              item.type === "audiobook" ? "aspect-square" : "aspect-[2/3]"
+            }`}
             style={
               thumbhashUrl
                 ? {
