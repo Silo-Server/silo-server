@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"path/filepath"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -18,52 +16,9 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 		return fmt.Errorf("ScanEbookFolder: nil scanner or folder")
 	}
 
-	var candidates []string
-	hadWalkErrors := false
-	for _, root := range folder.Paths {
-		if ctx != nil {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-		}
-
-		root := filepath.Clean(root)
-		if root == "" || root == "." {
-			continue
-		}
-
-		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-			if ctx != nil {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-			}
-			if walkErr != nil {
-				hadWalkErrors = true
-				slog.Warn("ebook scan: walk error", "path", path, "error", walkErr)
-				return nil
-			}
-			if d == nil {
-				return nil
-			}
-			if d.IsDir() {
-				if path != root && isIgnoredDirectoryPath(path) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if SupportsEbookFile(path) {
-				candidates = append(candidates, path)
-			}
-			return nil
-		})
-		if walkErr != nil {
-			if ctx != nil && errors.Is(walkErr, ctx.Err()) {
-				return walkErr
-			}
-			hadWalkErrors = true
-			slog.Warn("ebook scan: walk root failed", "root", root, "error", walkErr)
-		}
+	candidates, hadWalkErrors, walkErr := collectLogicalFilePathsWithWalkStatus(ctx, folder.Paths, "ebook")
+	if walkErr != nil {
+		return fmt.Errorf("walking ebook roots: %w", walkErr)
 	}
 
 	var attempted int
@@ -95,7 +50,7 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 		)
 	}
 	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
-		return fmt.Errorf("ebook scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
+		return fmt.Errorf("ebook scan failed for every attempted folder_id=%d candidates=%d: %w", folder.ID, len(candidates), errors.Join(failures...))
 	}
 	return nil
 }
