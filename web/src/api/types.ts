@@ -528,6 +528,46 @@ export interface CrewMember {
   photo_thumbhash?: string;
 }
 
+export interface AudiobookPerson {
+  person_id?: string;
+  name: string;
+  photo_url?: string;
+  photo_thumbhash?: string;
+}
+
+export interface AudiobookRelatedItem {
+  content_id: string;
+  title: string;
+  year?: number;
+  poster_url?: string;
+  series_index?: number;
+}
+
+export interface AudiobookSeriesGroup {
+  name?: string;
+  entries: AudiobookRelatedItem[];
+}
+
+export interface AudiobookNarration {
+  content_id: string;
+  title: string;
+  year?: number;
+  narrators: string[];
+}
+
+export interface AudiobookDetailExtension {
+  authors: AudiobookPerson[];
+  narrators: AudiobookPerson[];
+  publisher?: string;
+  total_duration_seconds: number;
+  series?: AudiobookSeriesGroup;
+  other_narrations: AudiobookNarration[];
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -701,6 +741,7 @@ export interface FileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
   multi_episode_start?: number;
   multi_episode_end?: number;
   effective_audio_track_index?: number;
@@ -949,6 +990,7 @@ export interface ItemDetail {
   effective_version_hdr?: boolean;
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
+  audiobook?: AudiobookDetailExtension;
 }
 
 export interface WatchDetail {

@@ -26,7 +26,7 @@ export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
         {items.map((item) => (
           <ViewTransitionLink
             key={item.content_id}
-            to={`/audiobooks/book/${item.content_id}`}
+            to={`/item/${item.content_id}`}
             className={`block w-[140px] shrink-0 sm:w-[160px] lg:w-[185px] ${
               item.highlight ? "ring-primary rounded-lg ring-2 ring-offset-2" : ""
             }`}

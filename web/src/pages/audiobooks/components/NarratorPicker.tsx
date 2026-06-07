@@ -24,7 +24,7 @@ export function NarratorPicker({ currentNarrator, currentContentId, others }: Na
   }, [open]);
 
   const options: AudiobookNarration[] = [
-    { content_id: currentContentId, title: "", narrator: currentNarrator },
+    { content_id: currentContentId, title: "", narrators: [currentNarrator] },
     ...others,
   ];
 
@@ -58,13 +58,15 @@ export function NarratorPicker({ currentNarrator, currentContentId, others }: Na
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  if (!isCurrent) navigate(`/audiobooks/book/${it.content_id}`);
+                  if (!isCurrent) navigate(`/item/${it.content_id}`);
                 }}
                 className={`hover:bg-muted/60 flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${
                   isCurrent ? "bg-muted/40 font-medium" : ""
                 }`}
               >
-                <span className="truncate">{it.narrator || "Unknown narrator"}</span>
+                <span className="truncate">
+                  {it.narrators.length > 0 ? it.narrators.join(", ") : "Unknown narrator"}
+                </span>
                 {it.year ? (
                   <span className="text-muted-foreground shrink-0 text-xs">{it.year}</span>
                 ) : null}

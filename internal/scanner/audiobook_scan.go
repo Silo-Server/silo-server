@@ -652,7 +652,8 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 	folderPath string,
 	book *parsedAudiobook,
 ) error {
-	for _, af := range book.Files {
+	partTotal := len(book.Files)
+	for idx, af := range book.Files {
 		chapters := make([]models.MediaChapter, len(af.Chapters))
 		for i, ch := range af.Chapters {
 			chapters[i] = models.MediaChapter{
@@ -683,6 +684,12 @@ func (s *Scanner) upsertAudiobookMediaFiles(
 			CodecAudio:         af.CodecAudio,
 			Container:          af.Container,
 			AudioChannels:      af.AudioChannels,
+		}
+		if partTotal > 1 {
+			mf.PresentationKind = "multipart"
+			mf.PresentationGroupKey = contentID
+			mf.PresentationPartIndex = idx + 1
+			mf.PresentationPartTotal = partTotal
 		}
 
 		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {

@@ -134,6 +134,14 @@ describe("parseLibraryPageState", () => {
     ]);
   });
 
+  it("preserves audiobook scope for mixed library filters", () => {
+    const state = parseLibraryPageState(params("tab=library&type=audiobook&sort=author"), "mixed");
+
+    expect(state.activeTab).toBe("library");
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
+    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
+  });
+
   it("accepts grouped query params and canonical sorts", () => {
     const state = parseLibraryPageState(
       params(
@@ -182,6 +190,7 @@ describe("parseLibraryPageState", () => {
       params("tab=library&sort=rating_imdb&order=desc"),
       "audiobooks",
     );
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
     expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
   });
 
@@ -190,6 +199,7 @@ describe("parseLibraryPageState", () => {
       params("tab=library&sort=runtime&order=desc"),
       "audiobooks",
     );
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
     expect(state.queryDefinition.sort).toEqual({ field: "runtime", order: "desc" });
   });
 
@@ -322,6 +332,31 @@ describe("updateLibraryPageSearchParams", () => {
       foo: "bar",
       tab: "library",
       type: "episode",
+    });
+  });
+
+  it("does not write a redundant type param for audiobook libraries", () => {
+    const next = updateLibraryPageSearchParams(
+      params("foo=bar"),
+      {
+        activeTab: "library",
+        browseType: "series",
+        queryDefinition: {
+          library_ids: [],
+          media_scope: "audiobook",
+          match: "all",
+          groups: [],
+          sort: { field: "author", order: "asc" },
+        },
+      },
+      "audiobooks",
+    );
+
+    expect(asObject(next)).toEqual({
+      foo: "bar",
+      tab: "library",
+      sort: "author",
+      order: "asc",
     });
   });
 });

@@ -213,6 +213,68 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 	})
 }
 
+func TestDefaultLibrarySectionsForTypeAudiobooks(t *testing.T) {
+	libraryID := 10
+	got := DefaultLibrarySectionsForType(&libraryID, "audiobooks")
+
+	if len(got) != 5 {
+		t.Fatalf("expected 5 audiobook default sections, got %d", len(got))
+	}
+
+	tests := []struct {
+		index       int
+		id          string
+		sectionType SectionType
+		title       string
+		position    int
+	}{
+		{index: 0, id: "default-continue-listening", sectionType: SectionContinueWatching, title: "Continue Listening", position: 0},
+		{index: 1, id: "default-recently-added-audiobooks", sectionType: SectionRecentlyAdded, title: "Recently Added Audiobooks", position: 1},
+		{index: 2, id: "default-recently-released-audiobooks", sectionType: SectionRecentlyReleased, title: "Recently Released Audiobooks", position: 2},
+		{index: 3, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 3},
+		{index: 4, id: "default-random-audiobooks", sectionType: SectionRandom, title: "Random Picks", position: 4},
+	}
+
+	for _, tt := range tests {
+		section := got[tt.index]
+		if section.ID != tt.id {
+			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
+		}
+		if section.SectionType != tt.sectionType {
+			t.Fatalf("section %d type = %q, want %q", tt.index, section.SectionType, tt.sectionType)
+		}
+		if section.Title != tt.title {
+			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
+		}
+		if section.Position != tt.position {
+			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
+		}
+		if section.Featured {
+			t.Fatalf("section %d featured = true, want false", tt.index)
+		}
+	}
+
+	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
+		MediaScope: "audiobook",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	})
+	assertQueryDefinition(t, got[2].Config, catalog.QueryDefinition{
+		MediaScope: "audiobook",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	})
+	assertEmptyJSON(t, got[3].Config)
+	assertQueryDefinition(t, got[4].Config, catalog.QueryDefinition{
+		MediaScope: "audiobook",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	})
+}
+
 func TestDefaultLibrarySectionsForTypeMixed(t *testing.T) {
 	libraryID := 99
 	got := DefaultLibrarySectionsForType(&libraryID, "mixed")

@@ -225,11 +225,17 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		if err := s.ScanAudiobookFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
 		return &ScanResult{}, nil
 	}
 
 	if isPodcastLibraryType(folder.Type) {
 		if err := s.ScanPodcastFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -1352,6 +1358,31 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 	`, folderID); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderID int) error {
+	if err := s.syncPresentLibraryState(ctx, folderID); err != nil {
+		return err
+	}
+
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id)
+		SELECT DISTINCT mf.media_folder_id, mf.canonical_root_path, mf.content_id
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.media_folder_id = $1
+		  AND mf.missing_since IS NULL
+		  AND mf.content_id IS NOT NULL
+		  AND COALESCE(mf.canonical_root_path, '') <> ''
+		  AND mi.type IN ('audiobook', 'podcast')
+		ON CONFLICT (media_folder_id, canonical_root_path)
+		DO UPDATE SET content_id = EXCLUDED.content_id,
+			last_seen_at = NOW()
+	`, folderID); err != nil {
+		return fmt.Errorf("restoring folder-scoped audio roots: %w", err)
 	}
 
 	return nil

@@ -3,8 +3,8 @@ import { renderHook, act } from "@testing-library/react";
 import { useAudiobookPlayback } from "./useAudiobookPlayback";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 
-vi.mock("@/hooks/audiobooks/useReportAudiobookProgress", () => ({
-  useReportAudiobookProgress: () => ({ mutate: vi.fn() }),
+vi.mock("@/hooks/queries/progress", () => ({
+  useReportMediaProgress: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("@/hooks/queries/downloads", () => ({
   buildDirectDownloadUrl: (id: number) => `/stream/${id}`,
@@ -19,6 +19,21 @@ const files: AudiobookFile[] = [
       { index: 0, title: "One", source: "embedded", start_seconds: 0, end_seconds: 300 },
       { index: 1, title: "Two", source: "embedded", start_seconds: 300, end_seconds: 600 },
     ],
+  },
+];
+
+const multiFile: AudiobookFile[] = [
+  {
+    id: 1,
+    path: "a.mp3",
+    duration_seconds: 300,
+    chapters: [{ index: 0, title: "One", source: "embedded", start_seconds: 0, end_seconds: 300 }],
+  },
+  {
+    id: 2,
+    path: "b.mp3",
+    duration_seconds: 300,
+    chapters: [{ index: 0, title: "Two", source: "embedded", start_seconds: 0, end_seconds: 300 }],
   },
 ];
 
@@ -50,6 +65,15 @@ describe("useAudiobookPlayback", () => {
       useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds: 0 }),
     );
     expect(result.current.streamUrl).toBe("/stream/1");
+  });
+
+  it("computes streamUrl from the part containing the initial absolute position", () => {
+    const { result } = renderHook(() =>
+      useAudiobookPlayback({ contentId: "c", files: multiFile, initialPositionSeconds: 450 }),
+    );
+    expect(result.current.streamUrl).toBe("/stream/2");
+    expect(result.current.currentTime).toBe(450);
+    expect(result.current.duration).toBe(600);
   });
 
   it("togglePlay invokes audio.play when paused, audio.pause otherwise", () => {

@@ -185,8 +185,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 	if normalized.MediaScope != "" &&
 		normalized.MediaScope != "movie" &&
 		normalized.MediaScope != "series" &&
-		normalized.MediaScope != "episode" {
-		return fmt.Errorf("media_scope must be 'movie', 'series', or 'episode'")
+		normalized.MediaScope != "episode" &&
+		normalized.MediaScope != "audiobook" {
+		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', or 'audiobook'")
 	}
 
 	if normalized.Match != "all" && normalized.Match != "any" {

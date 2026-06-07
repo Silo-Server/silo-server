@@ -48,6 +48,10 @@ function getLibrarySortRelevanceScope(
   return "all";
 }
 
+function isAudiobookLibraryType(libraryType: string): boolean {
+  return libraryType === "audiobook" || libraryType === "audiobooks";
+}
+
 export default function LibraryBrowse({
   libraryId,
   libraryType,
@@ -67,9 +71,11 @@ export default function LibraryBrowse({
     media_scope:
       libraryType === "mixed"
         ? queryDefinition.media_scope
-        : libraryType === "movie"
-          ? libraryType
-          : undefined,
+        : isAudiobookLibraryType(libraryType)
+          ? "audiobook"
+          : libraryType === "movie"
+            ? libraryType
+            : undefined,
     sort: normalizeQuerySortForScope(queryDefinition.sort, {
       includePersonalized: true,
       relevanceScope: sortRelevanceScope,
@@ -157,6 +163,7 @@ export default function LibraryBrowse({
         totalItems={totalItems}
         pages={pages}
         pageSize={limit}
+        libraryId={libraryId}
         loading={isLoading}
         onVisibleRangeChange={handleVisibleRangeChange}
         sortField={scopedQueryDefinition.sort.field}

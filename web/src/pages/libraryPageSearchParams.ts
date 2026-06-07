@@ -82,6 +82,10 @@ function getLibrarySortRelevanceScope(
   return "all";
 }
 
+function isAudiobookLibraryType(libraryType: string): boolean {
+  return libraryType === "audiobook" || libraryType === "audiobooks";
+}
+
 function readString(value: string | null): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
@@ -268,9 +272,14 @@ export function parseLibraryPageState(
   const mediaScopeParam = readString(searchParams.get("type"));
   const mediaScope =
     libraryType === "mixed" &&
-    (mediaScopeParam === "movie" || mediaScopeParam === "series" || mediaScopeParam === "episode")
+    (mediaScopeParam === "movie" ||
+      mediaScopeParam === "series" ||
+      mediaScopeParam === "episode" ||
+      mediaScopeParam === "audiobook")
       ? mediaScopeParam
-      : undefined;
+      : isAudiobookLibraryType(libraryType)
+        ? "audiobook"
+        : undefined;
   const sortRelevanceScope =
     libraryType === "series" && browseType === "episode"
       ? "all"

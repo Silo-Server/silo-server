@@ -1089,8 +1089,9 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 	if def.MediaScope != "" &&
 		def.MediaScope != "movie" &&
 		def.MediaScope != "series" &&
-		def.MediaScope != "episode" {
-		return fmt.Errorf("%w: media_scope must be 'movie', 'series', or 'episode'", ErrInvalidCatalogRequest)
+		def.MediaScope != "episode" &&
+		def.MediaScope != "audiobook" {
+		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', or 'audiobook'", ErrInvalidCatalogRequest)
 	}
 	if def.Match != "" && def.Match != "all" && def.Match != "any" {
 		return fmt.Errorf("%w: match must be 'all' or 'any'", ErrInvalidCatalogRequest)

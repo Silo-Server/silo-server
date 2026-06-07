@@ -198,13 +198,12 @@ type authConfigRaw struct {
 	RefreshTokenExpiry string `yaml:"refresh_token_expiry"`
 }
 
-// AudiobookshelfCompatConfig holds the dedicated ABS-compat listener
-// settings. The listener binds its own port (default :13378, ABS's
+// AudiobookshelfCompatConfig holds the dedicated ABS-compat listener setting.
+// The listener binds its own port (:13378, ABS's
 // conventional port) and serves the full ABS protocol — login, libraries,
 // items, sessions — without colliding with silo's SPA on the main listener.
 type AudiobookshelfCompatConfig struct {
-	Listen    string `yaml:"listen"`
-	PublicURL string `yaml:"public_url"`
+	Listen string `yaml:"-"`
 }
 
 // JellyfinCompatConfig holds compatibility proxy settings.

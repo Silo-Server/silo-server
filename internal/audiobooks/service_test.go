@@ -12,13 +12,13 @@ type fakeSettingsReader struct {
 }
 
 func (f *fakeSettingsReader) GetString(_ context.Context, key string) (string, error) {
-	if key != "audiobooks.enabled" {
+	if key != "audiobookshelf_compat.enabled" {
 		return "", errors.New("unexpected key: " + key)
 	}
 	return f.value, f.err
 }
 
-func TestServiceEnabledReadsFlag(t *testing.T) {
+func TestServiceABSCompatEnabledReadsFlag(t *testing.T) {
 	cases := []struct {
 		name   string
 		stored string
@@ -33,44 +33,44 @@ func TestServiceEnabledReadsFlag(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			svc := New(&fakeSettingsReader{value: tc.stored})
-			got, err := svc.Enabled(context.Background())
+			got, err := svc.ABSCompatEnabled(context.Background())
 			if err != nil {
-				t.Fatalf("Enabled returned error: %v", err)
+				t.Fatalf("ABSCompatEnabled returned error: %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("Enabled = %v, want %v", got, tc.want)
+				t.Fatalf("ABSCompatEnabled = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestServiceEnabledPropagatesError(t *testing.T) {
+func TestServiceABSCompatEnabledPropagatesError(t *testing.T) {
 	wantErr := errors.New("db down")
 	svc := New(&fakeSettingsReader{err: wantErr})
-	_, err := svc.Enabled(context.Background())
+	_, err := svc.ABSCompatEnabled(context.Background())
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("Enabled error = %v, want %v wrapped", err, wantErr)
+		t.Fatalf("ABSCompatEnabled error = %v, want %v wrapped", err, wantErr)
 	}
 }
 
-func TestServiceEnabledNilReceiverReturnsFalse(t *testing.T) {
+func TestServiceABSCompatEnabledNilReceiverReturnsFalse(t *testing.T) {
 	var svc *Service
-	got, err := svc.Enabled(context.Background())
+	got, err := svc.ABSCompatEnabled(context.Background())
 	if err != nil {
-		t.Fatalf("Enabled returned error: %v", err)
+		t.Fatalf("ABSCompatEnabled returned error: %v", err)
 	}
 	if got {
-		t.Fatal("Enabled = true, want false")
+		t.Fatal("ABSCompatEnabled = true, want false")
 	}
 }
 
-func TestServiceEnabledNilSettingsReturnsFalse(t *testing.T) {
+func TestServiceABSCompatEnabledNilSettingsReturnsFalse(t *testing.T) {
 	svc := New(nil)
-	got, err := svc.Enabled(context.Background())
+	got, err := svc.ABSCompatEnabled(context.Background())
 	if err != nil {
-		t.Fatalf("Enabled returned error: %v", err)
+		t.Fatalf("ABSCompatEnabled returned error: %v", err)
 	}
 	if got {
-		t.Fatal("Enabled = true, want false")
+		t.Fatal("ABSCompatEnabled = true, want false")
 	}
 }

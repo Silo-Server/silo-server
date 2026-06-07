@@ -1,22 +1,16 @@
-import { useState } from "react";
-import { useParams } from "react-router";
-import { useAudiobook } from "@/hooks/audiobooks/useAudiobook";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useMemo, useState } from "react";
+import type { ItemDetail, LeafItemUserData } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { FolderPlus, Play } from "lucide-react";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
-import AudiobookPlayer from "./player/AudiobookPlayer";
-import { ChaptersSection } from "./components/ChaptersSection";
-import { NarratorCard } from "./components/NarratorCard";
-import { NarratorPicker } from "./components/NarratorPicker";
-import { RelatedRail } from "./components/RelatedRail";
+import AudiobookPlayer from "@/pages/audiobooks/player/AudiobookPlayer";
+import { ChaptersSection } from "@/pages/audiobooks/components/ChaptersSection";
+import { NarratorCard } from "@/pages/audiobooks/components/NarratorCard";
+import { NarratorPicker } from "@/pages/audiobooks/components/NarratorPicker";
+import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function formatSeconds(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -33,7 +27,7 @@ function formatSeconds(totalSeconds: number): string {
 }
 
 function totalDuration(files: AudiobookFile[]): number {
-  return files.reduce((acc, f) => acc + (f.duration_seconds ?? 0), 0);
+  return files.reduce((acc, file) => acc + (file.duration_seconds ?? 0), 0);
 }
 
 function findChapterAt(
@@ -41,15 +35,14 @@ function findChapterAt(
   seconds: number,
 ): { label: string; index: number } | null {
   for (let i = chapters.length - 1; i >= 0; i--) {
-    const ch = chapters[i];
-    if (ch && seconds >= ch.absoluteStart) {
-      return { label: ch.label, index: i + 1 };
+    const chapter = chapters[i];
+    if (chapter && seconds >= chapter.absoluteStart) {
+      return { label: chapter.label, index: i + 1 };
     }
   }
   return chapters[0] ? { label: chapters[0].label, index: 1 } : null;
 }
 
-/** Gather all chapters across files, adjusting start/end by each file's cumulative offset. */
 function buildChapterList(files: AudiobookFile[]): Array<{
   chapter: AudiobookChapter;
   absoluteStart: number;
@@ -64,83 +57,93 @@ function buildChapterList(files: AudiobookFile[]): Array<{
   }> = [];
   let offset = 0;
   for (const file of files) {
-    if (file.chapters && file.chapters.length > 0) {
-      for (const ch of file.chapters) {
-        result.push({
-          chapter: ch,
-          absoluteStart: offset + ch.start_seconds,
-          fileId: file.id,
-          label: ch.title || `Chapter ${ch.index + 1}`,
-        });
-      }
+    for (const chapter of file.chapters ?? []) {
+      result.push({
+        chapter,
+        absoluteStart: offset + chapter.start_seconds,
+        fileId: file.id,
+        label: chapter.title || `Chapter ${chapter.index + 1}`,
+      });
     }
     offset += file.duration_seconds ?? 0;
   }
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Loading skeleton
-// ---------------------------------------------------------------------------
-
-function AudiobookDetailSkeleton() {
-  return (
-    <div className="page-shell py-8">
-      <div className="flex flex-col gap-8 sm:flex-row">
-        <Skeleton className="aspect-square w-full rounded-xl sm:w-[200px] sm:shrink-0 md:w-[260px]" />
-        <div className="flex flex-1 flex-col gap-3">
-          <Skeleton className="h-8 w-3/4" />
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-4 w-1/4" />
-          <Skeleton className="mt-4 h-24 w-full" />
-          <Skeleton className="mt-6 h-10 w-32" />
-        </div>
-      </div>
-    </div>
-  );
+function leafUserData(userData: ItemDetail["user_data"]): LeafItemUserData | undefined {
+  return userData && "position_seconds" in userData ? userData : undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
+function namesFromPeople(people: Array<{ name?: string }> | undefined): string {
+  return (people ?? [])
+    .map((person) => person.name?.trim())
+    .filter(Boolean)
+    .join(", ");
+}
 
-export default function AudiobookDetail() {
-  const { contentId } = useParams<{ contentId: string }>();
-  const { data, isLoading, error } = useAudiobook(contentId);
+function namesFromCrew(item: ItemDetail, job: string): string {
+  return (item.crew ?? [])
+    .filter((credit) => credit.job.toLowerCase() === job)
+    .map((credit) => credit.name?.trim())
+    .filter(Boolean)
+    .join(", ");
+}
 
+function genreHref(genre: string, libraryId?: number): string {
+  const params = new URLSearchParams();
+  if (libraryId) {
+    params.set("tab", "library");
+    params.set("genre", genre);
+    return `/library/${libraryId}?${params.toString()}`;
+  }
+  params.set("source", "query");
+  params.set("type", "audiobook");
+  params.set("genre", genre);
+  return `/catalog?${params.toString()}`;
+}
+
+export default function AudiobookContent({
+  item,
+  libraryId,
+}: {
+  item: ItemDetail & { type: "audiobook" };
+  libraryId?: number;
+}) {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [startSeconds, setStartSeconds] = useState(0);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
-  // Bumped on every openPlayer() call so the AudiobookPlayer key changes
-  // even when startSeconds was already at the requested value. Without
-  // this, clicking "Play from Start" while the player is already open at
-  // position 0 is a no-op (state doesn't change → no remount → audio
-  // keeps playing from its current position).
   const [playToken, setPlayToken] = useState(0);
 
-  if (isLoading && !data) {
-    return <AudiobookDetailSkeleton />;
-  }
+  const files = useMemo<AudiobookFile[]>(
+    () =>
+      (item.versions ?? []).map((version) => ({
+        id: version.file_id,
+        path: version.file_path ?? version.file_name ?? "",
+        duration_seconds: version.duration ?? 0,
+        chapters: version.chapters ?? [],
+      })),
+    [item.versions],
+  );
 
-  if (error || !data) {
-    return (
-      <div className="page-shell py-8">
-        <div className="text-destructive py-16 text-center text-sm">
-          {error instanceof Error ? error.message : "Failed to load audiobook."}
-        </div>
-      </div>
-    );
-  }
-
-  const { audiobook, author, narrator, files, progress } = data;
-
-  const hasProgress = Boolean(progress && progress.position_seconds > 0 && !progress.completed);
+  const author =
+    namesFromPeople(item.audiobook?.authors) || namesFromCrew(item, "author") || undefined;
+  const narrator =
+    namesFromPeople(item.audiobook?.narrators) || namesFromCrew(item, "narrator") || undefined;
+  const progress = leafUserData(item.user_data);
   const resumeSeconds = progress?.position_seconds ?? 0;
-  const durationTotal = totalDuration(files);
+  const durationTotal =
+    item.audiobook?.total_duration_seconds || progress?.duration_seconds || totalDuration(files);
+  const hasProgress = Boolean(
+    progress &&
+    resumeSeconds > 0 &&
+    durationTotal > 0 &&
+    (progress.is_in_progress ?? !progress.played),
+  );
+  const chapters = useMemo(() => buildChapterList(files), [files]);
 
   function openPlayer(atSeconds: number) {
     setStartSeconds(atSeconds);
-    setPlayToken((t) => t + 1);
+    setPlayToken((token) => token + 1);
     setPlayerOpen(true);
   }
 
@@ -153,21 +156,18 @@ export default function AudiobookDetail() {
       <AddToCollectionDialog
         open={addToCollectionOpen}
         onOpenChange={setAddToCollectionOpen}
-        mediaItemId={contentId ?? ""}
-        itemTitle={data.audiobook.title}
+        mediaItemId={item.content_id}
+        itemTitle={item.title}
       />
-      {/* The player owns its own positioning (mini bar at the bottom or
-          Now Listening full-screen overlay). Key forces a remount when the
-          user jumps to a different position so initialPositionSeconds
-          takes effect even if the player was already open. */}
+
       {playerOpen && (
         <AudiobookPlayer
-          key={`${contentId}-${startSeconds}-${playToken}`}
-          contentId={contentId ?? ""}
-          title={audiobook.title}
+          key={`${item.content_id}-${startSeconds}-${playToken}`}
+          contentId={item.content_id}
+          title={item.title}
           author={author}
           narrator={narrator}
-          posterUrl={audiobook.poster_url}
+          posterUrl={item.poster_url}
           files={files}
           initialPositionSeconds={startSeconds}
           onClose={() => setPlayerOpen(false)}
@@ -175,10 +175,11 @@ export default function AudiobookDetail() {
       )}
 
       <DetailHero
-        title={audiobook.title}
+        title={item.title}
         context="Audiobook"
-        studioLabel={data.audiobook.publisher || undefined}
-        posterUrl={audiobook.poster_url}
+        studioLabel={item.audiobook?.publisher || item.studios?.[0] || undefined}
+        posterUrl={item.poster_url}
+        posterThumbhash={item.poster_thumbhash}
         posterOrientation="square"
         subtitle={
           (author || narrator) && (
@@ -191,11 +192,11 @@ export default function AudiobookDetail() {
               {narrator && (
                 <span>
                   <span className="font-medium">Narrated by</span>{" "}
-                  {data.other_narrations && data.other_narrations.length > 0 ? (
+                  {(item.audiobook?.other_narrations ?? []).length > 0 ? (
                     <NarratorPicker
                       currentNarrator={narrator}
-                      currentContentId={contentId ?? ""}
-                      others={data.other_narrations}
+                      currentContentId={item.content_id}
+                      others={item.audiobook?.other_narrations ?? []}
                     />
                   ) : (
                     narrator
@@ -207,13 +208,13 @@ export default function AudiobookDetail() {
         }
         metadata={
           <MetadataBadges
-            year={audiobook.year > 0 ? String(audiobook.year) : undefined}
+            year={item.year > 0 ? String(item.year) : undefined}
             duration={durationTotal > 0 ? formatSeconds(durationTotal) : undefined}
           />
         }
-        overview={audiobook.overview}
-        genres={data.audiobook.genres}
-        genreHref={(g) => `/audiobooks?genre=${encodeURIComponent(g)}`}
+        overview={item.overview}
+        genres={item.genres}
+        genreHref={(genre) => genreHref(genre, libraryId)}
         actions={
           files.length > 0 && (
             <div className="flex max-w-md flex-col gap-3">
@@ -236,8 +237,8 @@ export default function AudiobookDetail() {
                   <Play className="h-4 w-4 fill-current" />
                   {hasProgress
                     ? (() => {
-                        const ch = findChapterAt(buildChapterList(files), resumeSeconds);
-                        return ch ? `Resume · ${ch.label}` : "Resume";
+                        const chapter = findChapterAt(chapters, resumeSeconds);
+                        return chapter ? `Resume · ${chapter.label}` : "Resume";
                       })()
                     : "Play"}
                 </Button>
@@ -268,39 +269,42 @@ export default function AudiobookDetail() {
       >
         {narrator && <NarratorCard narrator={narrator} />}
 
-        {data.in_series && data.in_series.entries.length > 0 && (
+        {item.audiobook?.series && item.audiobook.series.entries.length > 0 && (
           <RelatedRail
-            heading={data.in_series.name ? `In ${data.in_series.name}` : "In this series"}
-            items={data.in_series.entries.map((it) => ({
-              content_id: it.content_id,
-              title: it.title,
-              poster_url: it.poster_url,
-              subtitle: typeof it.series_index === "number" ? `Book ${it.series_index}` : undefined,
-              highlight: it.content_id === contentId,
+            heading={
+              item.audiobook.series.name ? `In ${item.audiobook.series.name}` : "In this series"
+            }
+            items={item.audiobook.series.entries.map((entry) => ({
+              content_id: entry.content_id,
+              title: entry.title,
+              poster_url: entry.poster_url,
+              subtitle:
+                typeof entry.series_index === "number" ? `Book ${entry.series_index}` : undefined,
+              highlight: entry.content_id === item.content_id,
             }))}
           />
         )}
 
-        {data.also_by_author && data.also_by_author.length > 0 && (
+        {(item.audiobook?.related.also_by_author ?? []).length > 0 && (
           <RelatedRail
             heading={`Also by ${author ?? "this author"}`}
-            items={data.also_by_author.map((it) => ({
-              content_id: it.content_id,
-              title: it.title,
-              poster_url: it.poster_url,
-              subtitle: it.year ? String(it.year) : undefined,
+            items={(item.audiobook?.related.also_by_author ?? []).map((entry) => ({
+              content_id: entry.content_id,
+              title: entry.title,
+              poster_url: entry.poster_url,
+              subtitle: entry.year ? String(entry.year) : undefined,
             }))}
           />
         )}
 
-        {data.similar_audiobooks && data.similar_audiobooks.length > 0 && (
+        {(item.audiobook?.related.similar ?? []).length > 0 && (
           <RelatedRail
             heading="You might also like"
-            items={data.similar_audiobooks.map((it) => ({
-              content_id: it.content_id,
-              title: it.title,
-              poster_url: it.poster_url,
-              subtitle: it.year ? String(it.year) : undefined,
+            items={(item.audiobook?.related.similar ?? []).map((entry) => ({
+              content_id: entry.content_id,
+              title: entry.title,
+              poster_url: entry.poster_url,
+              subtitle: entry.year ? String(entry.year) : undefined,
             }))}
           />
         )}
@@ -308,7 +312,7 @@ export default function AudiobookDetail() {
         <ChaptersSection
           files={files}
           currentPositionSeconds={playerOpen ? startSeconds : resumeSeconds || null}
-          onSelect={(s) => openPlayer(s)}
+          onSelect={(seconds) => openPlayer(seconds)}
         />
       </div>
     </div>

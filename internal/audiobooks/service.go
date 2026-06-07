@@ -21,10 +21,8 @@ type SettingsReader interface {
 	GetString(ctx context.Context, key string) (string, error)
 }
 
-// Service is the audiobooks feature's top-level orchestrator. Sub-plan 1
-// exposes only Enabled(); subsequent sub-plans hang additional methods
-// off Service as new capabilities (scanner branches, ABS handlers, etc.)
-// come online.
+// Service owns the Audiobookshelf compatibility adapters. Native audiobook
+// libraries are normal catalog media_items and do not depend on this service.
 type Service struct {
 	settings   SettingsReader
 	ABSHandler *abs.Handler
@@ -181,17 +179,16 @@ func buildABSRecommender(deps ABSHandlerDeps) abs.Recommender {
 	return &ABSRecommender{Pool: deps.Pool, Recs: deps.Recs}
 }
 
-// Enabled reports whether the audiobooks feature flag (set by
-// 160_audiobooks_feature_flag and toggled by operators) is currently true.
-// Any value other than the literal string "true" reads as false; this matches how silo
-// treats other boolean server_settings rows.
-func (s *Service) Enabled(ctx context.Context) (bool, error) {
+// ABSCompatEnabled reports whether the Audiobookshelf compatibility listener
+// should be started. Native audiobook libraries intentionally do not read this
+// setting.
+func (s *Service) ABSCompatEnabled(ctx context.Context) (bool, error) {
 	if s == nil || s.settings == nil {
 		return false, nil
 	}
-	value, err := s.settings.GetString(ctx, "audiobooks.enabled")
+	value, err := s.settings.GetString(ctx, "audiobookshelf_compat.enabled")
 	if err != nil {
-		return false, fmt.Errorf("read audiobooks.enabled: %w", err)
+		return false, fmt.Errorf("read audiobookshelf_compat.enabled: %w", err)
 	}
 	return value == "true", nil
 }

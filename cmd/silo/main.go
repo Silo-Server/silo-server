@@ -527,12 +527,11 @@ func main() {
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
 	}
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
-	audiobooksEnabled, err := audiobooksService.Enabled(appCtx)
+	absCompatEnabled, err := audiobooksService.ABSCompatEnabled(appCtx)
 	if err != nil {
-		slog.Warn("audiobooks feature disabled; failed to read setting", "err", err)
-		audiobooksEnabled = false
+		slog.Warn("Audiobookshelf compatibility disabled; failed to read setting", "err", err)
+		absCompatEnabled = false
 	}
-	deps.AudiobooksEnabled = audiobooksEnabled
 	adminJobCancelRegistry := adminjob.NewCancelRegistry()
 	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
@@ -1519,7 +1518,7 @@ func main() {
 		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
-		if audiobooksEnabled && audiobookEnricher != nil {
+		if audiobookEnricher != nil {
 			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
@@ -1542,7 +1541,7 @@ func main() {
 	// available. Routes are mounted at the root level by NewRouter (not under
 	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
 	// /abs/socket.io/* without path prefix hacks.
-	if audiobooksEnabled && deps.DB != nil {
+	if absCompatEnabled && deps.DB != nil {
 		absUserRepo := auth.NewUserRepository(deps.DB)
 		absSessionRepo := auth.NewSessionRepository(deps.DB)
 		absJWTService := auth.NewJWTService(
