@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Ordered audiobook playlists. Profile-scoped (NULL profile_id =
 -- primary profile, collapsed to a single bucket per user via the
 -- COALESCE-to-sentinel index trick).
@@ -22,3 +24,10 @@ CREATE INDEX IF NOT EXISTS abs_playlists_user_profile_idx
         user_id,
         COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid)
     );
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.abs_playlists_user_profile_idx;
+DROP TABLE IF EXISTS public.abs_playlists;
+-- +goose StatementEnd

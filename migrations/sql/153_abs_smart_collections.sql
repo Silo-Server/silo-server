@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Smart Collections — rule-based dynamic groupings of audiobooks.
 -- The query_def JSONB column stores the DSL tree (see
 -- internal/audiobooks/smartcoll/query.go). Profile-scoped per the
@@ -23,3 +25,10 @@ CREATE INDEX IF NOT EXISTS abs_smart_collections_user_profile_idx
         user_id,
         COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid)
     );
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.abs_smart_collections_user_profile_idx;
+DROP TABLE IF EXISTS public.abs_smart_collections;
+-- +goose StatementEnd

@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Truncate audiobook_series so the table can be repopulated cleanly by
 -- the next library scan. The data shipped by migration 145's regex
 -- backfill (and subsequently overwritten by the scanner) was 87%
@@ -19,3 +21,14 @@
 -- next library scan completing; acceptable because 87% of the prior
 -- entries were fake anyway.
 TRUNCATE TABLE audiobook_series;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+-- TRUNCATE cannot be undone — the table contents were discarded
+-- intentionally because they were 87% noise from a parser bug. Down
+-- migration is a no-op; the next library scan after rolling back the
+-- parser fix would repopulate the table with the same polluted data,
+-- which is not a desirable rollback target.
+SELECT 1 WHERE FALSE; -- no-op
+-- +goose StatementEnd

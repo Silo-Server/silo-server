@@ -6,16 +6,16 @@ import (
 )
 
 func TestUnifyUserCollectionsPreservesExistingCollectionTypes(t *testing.T) {
-	upBytes, err := FS.ReadFile("156_unify_user_collections.up.sql")
+	migrationBytes, err := FS.ReadFile("sql/156_unify_user_collections.sql")
 	if err != nil {
-		t.Fatalf("read up migration: %v", err)
+		t.Fatalf("read migration: %v", err)
 	}
-	downBytes, err := FS.ReadFile("156_unify_user_collections.down.sql")
-	if err != nil {
-		t.Fatalf("read down migration: %v", err)
+	parts := strings.SplitN(string(migrationBytes), "-- +goose Down", 2)
+	if len(parts) != 2 {
+		t.Fatal("migration missing goose Down section")
 	}
-	up := normalizeSQL(string(upBytes))
-	down := normalizeSQL(string(downBytes))
+	up := normalizeSQL(parts[0])
+	down := normalizeSQL(parts[1])
 
 	for _, collectionType := range []string{"'manual'", "'smart'", "'mdblist'", "'tmdb'", "'trakt'", "'synced'", "'playlist'"} {
 		if !strings.Contains(up, collectionType) {

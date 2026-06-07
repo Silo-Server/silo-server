@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Clean narrator/edition suffixes out of audiobook titles. The narrator
 -- is already captured separately in item_people (kind=8) from the file's
 -- narrator tag, so leaving it in the title field is duplicate data that
@@ -42,3 +44,13 @@ FROM cleaned c
 WHERE mi.content_id = c.content_id
   AND c.clean_title <> ''
   AND c.clean_title <> c.raw_title;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+-- No-op rollback.
+--
+-- The up migration intentionally preserves scanner-supplied original_title.
+-- Restoring title from original_title on rollback can overwrite newer title
+-- edits for every audiobook, so the safe rollback is to leave data as-is.
+-- +goose StatementEnd
