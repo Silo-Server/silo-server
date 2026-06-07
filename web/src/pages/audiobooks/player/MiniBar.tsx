@@ -38,8 +38,6 @@ export function MiniBar({
         duration={playback.duration}
         buffered={playback.buffered}
         chapters={playback.chapters}
-        introRegion={null}
-        creditsRegion={null}
         onSeek={playback.seekTo}
       />
 
