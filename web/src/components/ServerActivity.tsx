@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
@@ -6,8 +6,13 @@ import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useTasks } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useRealtimeEvents } from "@/components/realtimeEventsContext";
+import {
+  useRealtimeEvents,
+  type RealtimeConnectionState,
+} from "@/components/realtimeEventsContext";
 import type { TaskInfo, ScanRun } from "@/api/types";
+
+const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 
 interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
@@ -58,6 +63,34 @@ function useServerActivityData() {
 
 // ── Main component ───────────────────────────────────────────
 
+function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
+  const isNonLive = connectionState !== "live";
+  const previousIsNonLiveRef = useRef(false);
+  const [connectionProblemState, setConnectionProblemState] = useState(false);
+
+  useEffect(() => {
+    const wasNonLive = previousIsNonLiveRef.current;
+    previousIsNonLiveRef.current = isNonLive;
+
+    if (!isNonLive) {
+      setConnectionProblemState(false);
+      return;
+    }
+
+    if (wasNonLive) {
+      return;
+    }
+
+    const timeoutID = window.setTimeout(
+      () => setConnectionProblemState(true),
+      CONNECTION_PROBLEM_INDICATOR_DELAY_MS,
+    );
+    return () => window.clearTimeout(timeoutID);
+  }, [isNonLive]);
+
+  return isNonLive && connectionProblemState;
+}
+
 export default function ServerActivity({ hideWhenEmpty = false }: ServerActivityProps) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
@@ -72,6 +105,7 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
     connectionState,
     scansLoaded,
   } = useServerActivityData();
+  const showConnectionProblem = useDelayedConnectionProblem(connectionState);
 
   // Keep mounted while popover is open so Radix can animate closed
   if (hideWhenEmpty && totalActive === 0 && !open) return null;
@@ -96,7 +130,7 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
               {totalActive}
             </span>
           )}
-          {connectionState !== "live" && (
+          {showConnectionProblem && (
             <span
               className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-background"
               aria-hidden="true"
