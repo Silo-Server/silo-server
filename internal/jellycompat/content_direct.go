@@ -135,7 +135,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 
 	var folders []*models.MediaFolder
 	var err error
-	if len(filter.AllowedLibraryIDs) > 0 {
+	if filter.AllowedLibraryIDs != nil {
+		// A non-nil allowlist means the viewer is restricted; an empty
+		// allowlist grants access to no libraries at all.
+		if len(filter.AllowedLibraryIDs) == 0 {
+			return []upstreamUserLibrary{}, nil
+		}
 		folders, err = s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
 	} else {
 		folders, err = s.folderRepo.GetEnabled(ctx)
@@ -144,8 +149,16 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 		return nil, fmt.Errorf("list libraries: %w", err)
 	}
 
+	disabled := make(map[int]struct{}, len(filter.DisabledLibraryIDs))
+	for _, id := range filter.DisabledLibraryIDs {
+		disabled[id] = struct{}{}
+	}
+
 	libraries := make([]upstreamUserLibrary, 0, len(folders))
 	for _, f := range folders {
+		if _, ok := disabled[f.ID]; ok {
+			continue
+		}
 		lib := upstreamUserLibrary{
 			ID:         f.ID,
 			Name:       f.Name,
