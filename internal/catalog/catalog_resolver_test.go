@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -224,6 +225,11 @@ func (s *stubFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFi
 	return nil, nil
 }
 
+func (s *stubFacetFetcher) EbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	s.hit()
+	return nil, nil
+}
+
 func (s *stubFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
 	s.hit()
 	return nil, false, nil
@@ -242,6 +248,96 @@ func (s *stubFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.P
 func (s *stubFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
 	s.hit()
 	return nil, false, nil
+}
+
+func (s *stubFacetFetcher) SearchEbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.hit()
+	return nil, false, nil
+}
+
+type recordingFacetFetcher struct {
+	peopleKinds     []models.PersonKind
+	audiobookSeries int
+	ebookSeries     int
+	searchAudiobook int
+	searchEbook     int
+	lastMediaScope  string
+}
+
+func (r *recordingFacetFetcher) DistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	return nil, nil
+}
+
+func (r *recordingFacetFetcher) DistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	return nil, nil
+}
+
+func (r *recordingFacetFetcher) Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	return nil, nil
+}
+
+func (r *recordingFacetFetcher) JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	return nil, nil
+}
+
+func (r *recordingFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	return nil, nil
+}
+
+func (r *recordingFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	r.peopleKinds = append(r.peopleKinds, kind)
+	if kind == models.PersonKindAuthor {
+		return []string{"Octavia Butler"}, nil
+	}
+	if kind == models.PersonKindNarrator {
+		return []string{"Should Not Load"}, nil
+	}
+	return nil, nil
+}
+
+func (r *recordingFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	r.audiobookSeries++
+	return []string{"Audio Series"}, nil
+}
+
+func (r *recordingFacetFetcher) EbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	r.lastMediaScope = mediaScope
+	r.ebookSeries++
+	return []string{"Ebook Series"}, nil
+}
+
+func (r *recordingFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	r.lastMediaScope = mediaScope
+	return nil, false, nil
+}
+
+func (r *recordingFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	r.lastMediaScope = mediaScope
+	return nil, false, nil
+}
+
+func (r *recordingFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	r.lastMediaScope = mediaScope
+	return nil, false, nil
+}
+
+func (r *recordingFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	r.lastMediaScope = mediaScope
+	r.searchAudiobook++
+	return []string{"Audio Search"}, false, nil
+}
+
+func (r *recordingFacetFetcher) SearchEbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	r.lastMediaScope = mediaScope
+	r.searchEbook++
+	return []string{"Ebook Search"}, true, nil
 }
 
 // countingExecutor is a previewExecutor stub that records the number of
@@ -326,4 +422,73 @@ func TestListFiltersWithOptions_RunsFacetQueriesConcurrently(t *testing.T) {
 	}
 
 	barrier.assertConcurrent(t)
+}
+
+func TestListFiltersWithOptions_EbookScopeUsesAuthorsAndEbookSeriesWithoutNarrators(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	resolver := &CatalogResolver{
+		browseRepo: &BrowseRepository{},
+		facets:     facets,
+	}
+
+	result, err := resolver.ListFiltersWithOptions(
+		context.Background(),
+		CatalogRequest{
+			Source: CatalogSourceQuery,
+			Query: QueryDefinition{
+				MediaScope: "ebook",
+				Match:      "all",
+				Sort:       QuerySort{Field: "title", Order: "asc"},
+			},
+		},
+		AccessFilter{},
+		CatalogFilterOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ListFiltersWithOptions returned error: %v", err)
+	}
+	if facets.lastMediaScope != "ebook" {
+		t.Fatalf("expected facet media scope ebook, got %q", facets.lastMediaScope)
+	}
+	if !slices.Contains(facets.peopleKinds, models.PersonKindAuthor) {
+		t.Fatalf("expected author facet to be loaded, got kinds %v", facets.peopleKinds)
+	}
+	if slices.Contains(facets.peopleKinds, models.PersonKindNarrator) {
+		t.Fatalf("expected narrator facet not to be loaded for ebook scope, got kinds %v", facets.peopleKinds)
+	}
+	if facets.ebookSeries != 1 || facets.audiobookSeries != 0 {
+		t.Fatalf("expected ebook series only, got ebook=%d audiobook=%d", facets.ebookSeries, facets.audiobookSeries)
+	}
+	if len(result.Authors) != 1 || result.Authors[0] != "Octavia Butler" {
+		t.Fatalf("expected ebook authors in result, got %v", result.Authors)
+	}
+	if len(result.Narrators) != 0 {
+		t.Fatalf("expected no ebook narrators in result, got %v", result.Narrators)
+	}
+	if len(result.Series) != 1 || result.Series[0] != "Ebook Series" {
+		t.Fatalf("expected ebook series in result, got %v", result.Series)
+	}
+}
+
+func TestDispatchFacetSearch_EbookSeriesUsesEbookDetails(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	matches, hasMore, err := dispatchFacetSearch(
+		context.Background(),
+		facets,
+		"series",
+		BrowseFilters{},
+		"media_items mi",
+		"ebook",
+		"Dune",
+		10,
+	)
+	if err != nil {
+		t.Fatalf("dispatchFacetSearch returned error: %v", err)
+	}
+	if facets.searchEbook != 1 || facets.searchAudiobook != 0 {
+		t.Fatalf("expected ebook series search only, got ebook=%d audiobook=%d", facets.searchEbook, facets.searchAudiobook)
+	}
+	if !hasMore || len(matches) != 1 || matches[0] != "Ebook Search" {
+		t.Fatalf("expected ebook series search result with hasMore, got matches=%v hasMore=%v", matches, hasMore)
+	}
 }

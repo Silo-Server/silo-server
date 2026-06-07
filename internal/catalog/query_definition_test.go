@@ -60,6 +60,22 @@ func TestValidate_EpisodeMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidate_AudioAndEbookMediaScopes(t *testing.T) {
+	for _, scope := range []string{"audiobook", "ebook"} {
+		t.Run(scope, func(t *testing.T) {
+			qd := QueryDefinition{
+				MediaScope: scope,
+				Match:      "all",
+				Groups:     []QueryGroup{},
+				Sort:       QuerySort{Field: "title", Order: "asc"},
+			}
+			if err := qd.Validate(); err != nil {
+				t.Fatalf("expected %s media scope to be valid, got %v", scope, err)
+			}
+		})
+	}
+}
+
 func TestValidateWithSortScope_RejectsPersonalizedSortWithoutProfileScope(t *testing.T) {
 	qd := QueryDefinition{
 		Match:  "all",

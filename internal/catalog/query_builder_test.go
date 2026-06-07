@@ -531,6 +531,33 @@ func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
 	}
 }
 
+func TestBuild_SeriesClauseUsesEbookDetailsForEbookScope(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").
+		WithMediaScope("ebook").
+		Build(QueryDefinition{
+			MediaScope: "ebook",
+			Match:      "all",
+			Groups: []QueryGroup{
+				{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is", Value: "Patternist"}}},
+			},
+		})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Patternist" {
+		t.Fatalf("expected series arg, got %v", args)
+	}
+	if !strings.Contains(clause, "FROM ebook_details ed") {
+		t.Fatalf("expected ebook_details in ebook series clause, got %q", clause)
+	}
+	if strings.Contains(clause, "audiobook_series") {
+		t.Fatalf("expected ebook series clause not to use audiobook_series, got %q", clause)
+	}
+	if !strings.Contains(clause, "LOWER(BTRIM(ed.series_name))") || !strings.Contains(clause, "LOWER(BTRIM($1))") {
+		t.Fatalf("expected case+whitespace-insensitive ebook series match, got %q", clause)
+	}
+}
+
 func TestBuildSortPlan_AuthorJoinsLateralOnPersonKindAuthor(t *testing.T) {
 	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "author", Order: "asc"})
 	if err != nil {
@@ -573,6 +600,25 @@ func TestBuildSortPlan_SeriesOrdersByNameThenIndex(t *testing.T) {
 	if !strings.Contains(plan.OrderBy, "sort_series.series_name ASC NULLS LAST") ||
 		!strings.Contains(plan.OrderBy, "sort_series.series_index ASC NULLS LAST") {
 		t.Fatalf("expected name+index ordering with NULLS LAST, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_SeriesUsesEbookDetailsForEbookScope(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").
+		WithMediaScope("ebook").
+		BuildSortPlan(QuerySort{Field: "series", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(series) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "ebook_details sort_series") {
+		t.Fatalf("expected LEFT JOIN ebook_details, got %v", plan.Joins)
+	}
+	if strings.Contains(plan.Joins[0], "audiobook_series") {
+		t.Fatalf("expected ebook series sort not to use audiobook_series, got %v", plan.Joins)
+	}
+	if !strings.Contains(plan.OrderBy, "sort_series.series_name ASC NULLS LAST") ||
+		!strings.Contains(plan.OrderBy, "sort_series.series_index ASC NULLS LAST") {
+		t.Fatalf("expected ebook name+index ordering with NULLS LAST, got %q", plan.OrderBy)
 	}
 }
 

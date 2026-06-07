@@ -39,10 +39,9 @@ type CatalogFiltersResult struct {
 	Resolutions       []string
 	AudioLanguages    []string
 	SubtitleLanguages []string
-	// Authors, Narrators and Series are audiobook-native facets. Populated
-	// whenever the scope contains audiobook items; empty for video-only
-	// scopes. They share the item_people / audiobook_series tables so
-	// callers don't need to switch on media type.
+	// Authors, Narrators and Series are book-native facets. Audiobook scope
+	// uses item_people + audiobook_series; ebook scope uses authors from
+	// item_people and series_name from ebook_details.
 	Authors   []string
 	Narrators []string
 	Series    []string
@@ -67,6 +66,9 @@ type facetFetcher interface {
 	// AudiobookSeries returns distinct series_name values from
 	// audiobook_series joined onto the scoped result set.
 	AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
+	// EbookSeries returns distinct series_name values from ebook_details
+	// joined onto the scoped result set.
+	EbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	// SearchDistinctArrayColumn prefix-searches an array-column facet
 	// (genres, studios, networks, countries). Returns up to limit
 	// alphabetical matches and hasMore=true when more would be available.
@@ -78,6 +80,8 @@ type facetFetcher interface {
 	SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
 	// SearchAudiobookSeries is the typeahead equivalent of AudiobookSeries.
 	SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
+	// SearchEbookSeries is the typeahead equivalent of EbookSeries.
+	SearchEbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error)
 }
 
 // pgxFacetFetcher is the production facetFetcher. It dispatches each method to
@@ -114,6 +118,10 @@ func (f *pgxFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFil
 	return listDistinctAudiobookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
 }
 
+func (f *pgxFacetFetcher) EbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return listDistinctEbookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+}
+
 func (f *pgxFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
 	return searchDistinctArrayColumnWithSource(ctx, f.pool, column, filters, baseRelation, mediaScope, prefix, limit)
 }
@@ -128,6 +136,10 @@ func (f *pgxFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.Pe
 
 func (f *pgxFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
 	return searchDistinctAudiobookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope, prefix, limit)
+}
+
+func (f *pgxFacetFetcher) SearchEbookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return searchDistinctEbookSeriesWithSource(ctx, f.pool, filters, baseRelation, mediaScope, prefix, limit)
 }
 
 // previewExecutor is the seam consumed by previewQuerySource so tests can
@@ -710,7 +722,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 		return r.listFiltersForSource(ctx, filters, options, episodeCatalogBaseRelation, req.Query.MediaScope)
 	}
 
-	return r.listFiltersForSource(ctx, filters, options, "media_items mi", "")
+	return r.listFiltersForSource(ctx, filters, options, "media_items mi", req.Query.MediaScope)
 }
 
 // CatalogFacetSearchResult is the typed return for SearchFacet. Matches
@@ -802,6 +814,8 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	if isEpisodeCatalogScope(req.Query.MediaScope) {
 		baseRelation = episodeCatalogBaseRelation
 		mediaScope = req.Query.MediaScope
+	} else {
+		mediaScope = req.Query.MediaScope
 	}
 
 	facets := r.facets
@@ -839,6 +853,9 @@ func dispatchFacetSearch(ctx context.Context, facets facetFetcher, facet string,
 	case "narrator":
 		return facets.SearchPeopleByKind(ctx, models.PersonKindNarrator, filters, baseRelation, mediaScope, prefix, limit)
 	case "series":
+		if mediaScope == "ebook" {
+			return facets.SearchEbookSeries(ctx, filters, baseRelation, mediaScope, prefix, limit)
+		}
 		return facets.SearchAudiobookSeries(ctx, filters, baseRelation, mediaScope, prefix, limit)
 	default:
 		return nil, false, fmt.Errorf("%w: unknown facet %q", ErrInvalidCatalogRequest, facet)
@@ -950,30 +967,43 @@ func (r *CatalogResolver) listFiltersForSource(
 		contentRatings = out
 		return nil
 	}))
-	eg.Go(withLimit(func() error {
-		out, err := facets.PeopleByKind(gctx, models.PersonKindAuthor, filters, baseRelation, mediaScope)
-		if err != nil {
-			return fmt.Errorf("listing catalog authors: %w", err)
-		}
-		authors = out
-		return nil
-	}))
-	eg.Go(withLimit(func() error {
-		out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
-		if err != nil {
-			return fmt.Errorf("listing catalog narrators: %w", err)
-		}
-		narrators = out
-		return nil
-	}))
-	eg.Go(withLimit(func() error {
-		out, err := facets.AudiobookSeries(gctx, filters, baseRelation, mediaScope)
-		if err != nil {
-			return fmt.Errorf("listing catalog audiobook series: %w", err)
-		}
-		series = out
-		return nil
-	}))
+	if mediaScope == "audiobook" || mediaScope == "ebook" || mediaScope == "" {
+		eg.Go(withLimit(func() error {
+			out, err := facets.PeopleByKind(gctx, models.PersonKindAuthor, filters, baseRelation, mediaScope)
+			if err != nil {
+				return fmt.Errorf("listing catalog authors: %w", err)
+			}
+			authors = out
+			return nil
+		}))
+	}
+	if mediaScope == "audiobook" || mediaScope == "" {
+		eg.Go(withLimit(func() error {
+			out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
+			if err != nil {
+				return fmt.Errorf("listing catalog narrators: %w", err)
+			}
+			narrators = out
+			return nil
+		}))
+		eg.Go(withLimit(func() error {
+			out, err := facets.AudiobookSeries(gctx, filters, baseRelation, mediaScope)
+			if err != nil {
+				return fmt.Errorf("listing catalog audiobook series: %w", err)
+			}
+			series = out
+			return nil
+		}))
+	} else if mediaScope == "ebook" {
+		eg.Go(withLimit(func() error {
+			out, err := facets.EbookSeries(gctx, filters, baseRelation, mediaScope)
+			if err != nil {
+				return fmt.Errorf("listing catalog ebook series: %w", err)
+			}
+			series = out
+			return nil
+		}))
+	}
 
 	if options.IncludeTechnical {
 		eg.Go(withLimit(func() error {
@@ -1086,11 +1116,8 @@ func validateCatalogExactCollectionRequest(req CatalogRequest) error {
 }
 
 func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
-	if def.MediaScope != "" &&
-		def.MediaScope != "movie" &&
-		def.MediaScope != "series" &&
-		def.MediaScope != "episode" {
-		return fmt.Errorf("%w: media_scope must be 'movie', 'series', or 'episode'", ErrInvalidCatalogRequest)
+	if def.MediaScope != "" && !isCatalogMediaScope(def.MediaScope) {
+		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', or 'ebook'", ErrInvalidCatalogRequest)
 	}
 	if def.Match != "" && def.Match != "all" && def.Match != "any" {
 		return fmt.Errorf("%w: match must be 'all' or 'any'", ErrInvalidCatalogRequest)

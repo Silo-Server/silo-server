@@ -794,6 +794,34 @@ func listDistinctAudiobookSeriesWithSource(
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
+// listDistinctEbookSeriesWithSource returns distinct series_name values from
+// ebook_details joined onto the scoped result set.
+func listDistinctEbookSeriesWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+) ([]string, error) {
+	fromClause, whereClause, args, earlyEmpty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if earlyEmpty {
+		return []string{}, nil
+	}
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT BTRIM(ed.series_name) AS name
+			FROM %s
+			JOIN ebook_details ed ON ed.content_id = mi.content_id
+			%s
+			  AND ed.series_name IS NOT NULL
+			  AND BTRIM(ed.series_name) <> ''
+		) names
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, fromClause, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	return queryDistinctStrings(ctx, pool, query, args)
+}
+
 // searchDistinctArrayColumnWithSource prefix-searches the distinct values
 // of an array column (genres, studios, networks, countries) within the
 // scoped result set. Returns up to limit matches in alphabetical order
@@ -951,6 +979,43 @@ func searchDistinctAudiobookSeriesWithSource(
 			  AND s.series_name IS NOT NULL
 			  AND BTRIM(s.series_name) <> ''
 			  AND LOWER(BTRIM(s.series_name)) LIKE LOWER($%d)
+		) names
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, fromClause, browseFilterPrefix(whereClause), prefixIdx, limit+1)
+	return queryFacetSearchResults(ctx, pool, query, args, limit)
+}
+
+// searchDistinctEbookSeriesWithSource is the typeahead equivalent of
+// listDistinctEbookSeriesWithSource.
+func searchDistinctEbookSeriesWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+	prefix string,
+	limit int,
+) ([]string, bool, error) {
+	prefix = strings.TrimSpace(prefix)
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if empty {
+		return []string{}, false, nil
+	}
+	args = append(args, prefix+"%")
+	prefixIdx := len(args)
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT BTRIM(ed.series_name) AS name
+			FROM %s
+			JOIN ebook_details ed ON ed.content_id = mi.content_id
+			%s
+			  AND ed.series_name IS NOT NULL
+			  AND BTRIM(ed.series_name) <> ''
+			  AND LOWER(BTRIM(ed.series_name)) LIKE LOWER($%d)
 		) names
 		ORDER BY LOWER(name) ASC
 		LIMIT %d

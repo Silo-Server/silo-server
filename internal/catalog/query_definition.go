@@ -182,11 +182,8 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 		}
 	}
 
-	if normalized.MediaScope != "" &&
-		normalized.MediaScope != "movie" &&
-		normalized.MediaScope != "series" &&
-		normalized.MediaScope != "episode" {
-		return fmt.Errorf("media_scope must be 'movie', 'series', or 'episode'")
+	if normalized.MediaScope != "" && !isCatalogMediaScope(normalized.MediaScope) {
+		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', 'audiobook', or 'ebook'")
 	}
 
 	if normalized.Match != "all" && normalized.Match != "any" {
@@ -229,6 +226,15 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 	}
 
 	return nil
+}
+
+func isCatalogMediaScope(scope string) bool {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "movie", "series", "episode", "audiobook", "ebook":
+		return true
+	default:
+		return false
+	}
 }
 
 func NormalizeQuerySort(sortConfig QuerySort) QuerySort {
