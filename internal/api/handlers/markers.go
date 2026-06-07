@@ -13,8 +13,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -44,6 +48,15 @@ type MarkerContributionLister interface {
 	ListByFile(ctx context.Context, fileID int) ([]markers.ContributionRow, error)
 }
 
+type MarkerAuditLister interface {
+	ListMarkerEditAudit(ctx context.Context, fileIDs []int, limit int) ([]scanner.MarkerEditAuditRow, error)
+	ListAllMarkerEditAudit(ctx context.Context, limit int) ([]scanner.MarkerEditAuditRow, error)
+}
+
+type MarkerPermissionUserLoader interface {
+	GetByID(ctx context.Context, id int) (*models.User, error)
+}
+
 // MarkersHandler serves the manual-marker + contribution API. The marker
 // read/write/clear routes are mounted for any authenticated viewer (users fix
 // and create markers from the player); the contribution + history routes stay
@@ -54,7 +67,9 @@ type MarkersHandler struct {
 	Writer        ManualMarkerWriter
 	Contributor   MarkerContributor
 	Contributions MarkerContributionLister
+	AuditHistory  MarkerAuditLister
 	Notifier      PlaybackMarkerUpdateNotifier
+	Users         MarkerPermissionUserLoader
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -131,6 +146,28 @@ type contributionRowResponse struct {
 	Error            *string    `json:"error,omitempty"`
 	SubmittedAt      *time.Time `json:"submitted_at,omitempty"`
 	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
+}
+
+type markerEditAuditResponse struct {
+	ID                   int64          `json:"id"`
+	MediaFileID          int            `json:"media_file_id"`
+	ItemID               *string        `json:"item_id,omitempty"`
+	ItemType             *string        `json:"item_type,omitempty"`
+	MediaTitle           *string        `json:"media_title,omitempty"`
+	FilePath             *string        `json:"file_path,omitempty"`
+	Segment              string         `json:"segment"`
+	Action               string         `json:"action"`
+	Before               *segmentMarker `json:"before"`
+	After                *segmentMarker `json:"after"`
+	UserID               *int           `json:"user_id,omitempty"`
+	Username             *string        `json:"username,omitempty"`
+	ImpersonatorUserID   *int           `json:"impersonator_user_id,omitempty"`
+	ImpersonatorUsername *string        `json:"impersonator_username,omitempty"`
+	APIKeyID             *int64         `json:"api_key_id,omitempty"`
+	RequestID            *string        `json:"request_id,omitempty"`
+	ClientIP             *string        `json:"client_ip,omitempty"`
+	UserAgent            *string        `json:"user_agent,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
 }
 
 func fileMarkers(file *models.MediaFile) fileMarkersResponse {
@@ -245,6 +282,46 @@ func (h *MarkersHandler) loadItemPrimaryFile(w http.ResponseWriter, r *http.Requ
 	return nil, false
 }
 
+func (h *MarkersHandler) requireMarkerEdit(w http.ResponseWriter, r *http.Request) bool {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return false
+	}
+	if claims.Role == "admin" {
+		return true
+	}
+	if h == nil || h.Users == nil {
+		writeError(w, http.StatusForbidden, "forbidden", "Marker editing permission required")
+		return false
+	}
+	user, err := h.Users.GetByID(r.Context(), claims.UserID)
+	if err != nil || user == nil || !auth.HasEffectivePermission(user, auth.PermissionMarkerEdit) {
+		writeError(w, http.StatusForbidden, "forbidden", "Marker editing permission required")
+		return false
+	}
+	return true
+}
+
+func (h *MarkersHandler) auditContext(r *http.Request) context.Context {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil {
+		return r.Context()
+	}
+	audit := scanner.MarkerAuditContext{
+		UserID:             &claims.UserID,
+		ImpersonatorUserID: claims.ImpersonatorUserID,
+		RequestID:          chimw.GetReqID(r.Context()),
+		ClientIP:           clientip.FromContext(r.Context()),
+		UserAgent:          r.UserAgent(),
+	}
+	if claims.APIKeyID > 0 {
+		apiKeyID := claims.APIKeyID
+		audit.APIKeyID = &apiKeyID
+	}
+	return scanner.WithMarkerAuditContext(r.Context(), audit)
+}
+
 // HandleGetFileMarkers returns the current markers + provenance for a file.
 func (h *MarkersHandler) HandleGetFileMarkers(w http.ResponseWriter, r *http.Request) {
 	file, ok := h.loadFile(w, r)
@@ -270,6 +347,9 @@ func (h *MarkersHandler) HandleSetFileMarkers(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	if !h.requireMarkerEdit(w, r) {
+		return
+	}
 	h.setMarkersForFile(w, r, file)
 }
 
@@ -277,6 +357,9 @@ func (h *MarkersHandler) HandleSetFileMarkers(w http.ResponseWriter, r *http.Req
 func (h *MarkersHandler) HandleSetItemMarkers(w http.ResponseWriter, r *http.Request) {
 	file, ok := h.loadItemPrimaryFile(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireMarkerEdit(w, r) {
 		return
 	}
 	h.setMarkersForFile(w, r, file)
@@ -326,7 +409,7 @@ func (h *MarkersHandler) setMarkersForFile(w http.ResponseWriter, r *http.Reques
 		setSegs = append(setSegs, seg)
 	}
 
-	if _, err := h.Writer.UpsertAndClearMarkers(r.Context(), file.ID, update, clears); err != nil {
+	if _, err := h.Writer.UpsertAndClearMarkers(h.auditContext(r), file.ID, update, clears); err != nil {
 		h.logger.Error("markers: save failed", "file_id", file.ID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save markers")
 		return
@@ -352,12 +435,15 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker writing is not configured")
 		return
 	}
+	if !h.requireMarkerEdit(w, r) {
+		return
+	}
 	segment := chi.URLParam(r, "segment")
 	if !isMarkerSegment(segment) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Unknown marker segment")
 		return
 	}
-	if _, err := h.Writer.ClearMarkers(r.Context(), file.ID, []string{segment}); err != nil {
+	if _, err := h.Writer.ClearMarkers(h.auditContext(r), file.ID, []string{segment}); err != nil {
 		h.logger.Error("markers: clear segment failed", "file_id", file.ID, "segment", segment, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear marker")
 		return
@@ -424,6 +510,105 @@ func (h *MarkersHandler) HandleListFileContributions(w http.ResponseWriter, r *h
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contributions": contributionRowResponses(rows)})
+}
+
+// HandleListFileMarkerHistory returns recent semantic marker edit audit rows for one file.
+func (h *MarkersHandler) HandleListFileMarkerHistory(w http.ResponseWriter, r *http.Request) {
+	file, ok := h.loadFile(w, r)
+	if !ok {
+		return
+	}
+	h.listMarkerHistory(w, r, []int{file.ID})
+}
+
+// HandleListItemMarkerHistory returns recent marker edit audit rows for every file version on an item.
+func (h *MarkersHandler) HandleListItemMarkerHistory(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.Files == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker history is not configured")
+		return
+	}
+	itemID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if itemID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "A valid item id is required")
+		return
+	}
+
+	files, err := h.Files.GetByEpisodeID(r.Context(), itemID)
+	if err != nil {
+		h.logger.Error("markers: episode history file lookup failed", "item_id", itemID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item files")
+		return
+	}
+	if len(files) == 0 {
+		files, err = h.Files.GetByContentID(r.Context(), itemID)
+		if err != nil {
+			h.logger.Error("markers: content history file lookup failed", "item_id", itemID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item files")
+			return
+		}
+	}
+
+	fileIDs := make([]int, 0, len(files))
+	for _, file := range files {
+		if file != nil {
+			fileIDs = append(fileIDs, file.ID)
+		}
+	}
+	if len(fileIDs) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "Media file not found for item")
+		return
+	}
+	h.listMarkerHistory(w, r, fileIDs)
+}
+
+// HandleListMarkerHistory returns recent semantic marker edit audit rows across all files.
+func (h *MarkersHandler) HandleListMarkerHistory(w http.ResponseWriter, r *http.Request) {
+	if h.AuditHistory == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"history": []markerEditAuditResponse{}})
+		return
+	}
+	limit, ok := markerHistoryLimit(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.AuditHistory.ListAllMarkerEditAudit(r.Context(), limit)
+	if err != nil {
+		h.logger.Error("markers: list all history failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load marker history")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"history": markerEditAuditResponses(rows)})
+}
+
+func (h *MarkersHandler) listMarkerHistory(w http.ResponseWriter, r *http.Request, fileIDs []int) {
+	if h.AuditHistory == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"history": []markerEditAuditResponse{}})
+		return
+	}
+	limit, ok := markerHistoryLimit(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.AuditHistory.ListMarkerEditAudit(r.Context(), fileIDs, limit)
+	if err != nil {
+		h.logger.Error("markers: list history failed", "file_ids", fileIDs, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load marker history")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"history": markerEditAuditResponses(rows)})
+}
+
+func markerHistoryLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	limit := 25
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "A valid limit is required")
+			return 0, false
+		}
+		limit = parsed
+	}
+	return limit, true
 }
 
 func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*models.MediaFile, error) {
@@ -558,6 +743,49 @@ func contributionRowResponses(rows []markers.ContributionRow) []contributionRowR
 		resp = append(resp, item)
 	}
 	return resp
+}
+
+func markerEditAuditResponses(rows []scanner.MarkerEditAuditRow) []markerEditAuditResponse {
+	resp := make([]markerEditAuditResponse, 0, len(rows))
+	for _, row := range rows {
+		resp = append(resp, markerEditAuditResponse{
+			ID:                   row.ID,
+			MediaFileID:          row.MediaFileID,
+			ItemID:               row.ItemID,
+			ItemType:             row.ItemType,
+			MediaTitle:           row.MediaTitle,
+			FilePath:             row.FilePath,
+			Segment:              row.SegmentKind,
+			Action:               row.Action,
+			Before:               markerAuditSegmentResponse(row.Before),
+			After:                markerAuditSegmentResponse(row.After),
+			UserID:               row.UserID,
+			Username:             row.Username,
+			ImpersonatorUserID:   row.ImpersonatorUserID,
+			ImpersonatorUsername: row.ImpersonatorUsername,
+			APIKeyID:             row.APIKeyID,
+			RequestID:            row.RequestID,
+			ClientIP:             row.ClientIP,
+			UserAgent:            row.UserAgent,
+			CreatedAt:            row.CreatedAt,
+		})
+	}
+	return resp
+}
+
+func markerAuditSegmentResponse(segment *scanner.MarkerAuditSegment) *segmentMarker {
+	if segment == nil {
+		return nil
+	}
+	return &segmentMarker{
+		Start:      segment.Start,
+		End:        segment.End,
+		Source:     segment.Source,
+		Provider:   segment.Provider,
+		Confidence: segment.Confidence,
+		Algorithm:  segment.Algorithm,
+		DetectedAt: segment.DetectedAt,
+	}
 }
 
 // normalizeManualSegment applies the start/end defaults and validation, mirroring

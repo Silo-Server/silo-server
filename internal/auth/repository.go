@@ -135,7 +135,11 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
 	}
 
-	permissions, err := NormalizePermissions(input.Permissions)
+	permissions := append([]string(nil), input.Permissions...)
+	if input.Permissions == nil && input.Role != "admin" {
+		permissions = DefaultUserPermissions()
+	}
+	permissions, err = NormalizePermissions(permissions)
 	if err != nil {
 		return nil, err
 	}

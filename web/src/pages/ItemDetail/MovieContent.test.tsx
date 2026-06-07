@@ -92,6 +92,10 @@ vi.mock("@/components/MatchItemDialog", () => ({
   default: () => <div />,
 }));
 
+vi.mock("./components/SubtitleSearchDialog", () => ({
+  default: () => <div />,
+}));
+
 vi.mock("@/components/RecommendationGrid", () => ({
   default: () => <div />,
 }));
@@ -226,6 +230,23 @@ describe("MovieContent", () => {
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       playLabel: "Play",
       restartHref: undefined,
+    });
+  });
+
+  it("allows marker editing without metadata curation permission", () => {
+    mocks.useAuth.mockReturnValue({
+      user: { role: "user", permissions: ["marker_edit"], download_allowed: true },
+    });
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      canCurateMetadata: false,
+      canEditMarkers: true,
     });
   });
 });

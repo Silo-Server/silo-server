@@ -27,6 +27,7 @@ const ADMIN_TITLES: Record<string, string> = {
   devices: "Admin Devices",
   history: "Admin Playback History",
   "history-import": "Admin History Import",
+  "marker-history": "Admin Marker History",
   libraries: "Admin Libraries",
   logs: "Admin Logs",
   maintenance: "Admin Maintenance",

@@ -11,7 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -40,17 +43,27 @@ func (f fakeMarkerFiles) GetByEpisodeID(context.Context, string) ([]*models.Medi
 type fakeMarkerWriter struct {
 	upserts []scanner.MarkerUpdate
 	clears  [][]string
+	audits  []scanner.MarkerAuditContext
 }
 
-func (f *fakeMarkerWriter) UpsertMarkers(_ context.Context, _ int, u scanner.MarkerUpdate) (bool, error) {
+func (f *fakeMarkerWriter) captureAudit(ctx context.Context) {
+	if audit, ok := scanner.MarkerAuditContextFromContext(ctx); ok {
+		f.audits = append(f.audits, audit)
+	}
+}
+
+func (f *fakeMarkerWriter) UpsertMarkers(ctx context.Context, _ int, u scanner.MarkerUpdate) (bool, error) {
+	f.captureAudit(ctx)
 	f.upserts = append(f.upserts, u)
 	return true, nil
 }
-func (f *fakeMarkerWriter) ClearMarkers(_ context.Context, _ int, segs []string) (bool, error) {
+func (f *fakeMarkerWriter) ClearMarkers(ctx context.Context, _ int, segs []string) (bool, error) {
+	f.captureAudit(ctx)
 	f.clears = append(f.clears, segs)
 	return true, nil
 }
-func (f *fakeMarkerWriter) UpsertAndClearMarkers(_ context.Context, _ int, u scanner.MarkerUpdate, segs []string) (bool, error) {
+func (f *fakeMarkerWriter) UpsertAndClearMarkers(ctx context.Context, _ int, u scanner.MarkerUpdate, segs []string) (bool, error) {
+	f.captureAudit(ctx)
 	if u.HasAnySegment() {
 		f.upserts = append(f.upserts, u)
 	}
@@ -64,14 +77,23 @@ func markerPutRequest(body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPut, "/markers/files/5", strings.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("fileId", "5")
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 }
 
 func markerItemPutRequest(body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPut, "/markers/items/episode-1", strings.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "episode-1")
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
+}
+
+func withMarkerAdminClaims(req *http.Request) *http.Request {
+	return req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
+		UserID:    1,
+		Role:      "admin",
+		TokenType: auth.TokenTypeAccess,
+		SessionID: "session-1",
+	}))
 }
 
 func newMarkersHandler(writer ManualMarkerWriter) *MarkersHandler {
@@ -136,6 +158,12 @@ func (f fakeMarkerEpisodeLookup) GetByID(_ context.Context, contentID string) (*
 	return f[contentID], nil
 }
 
+type fakeMarkerUsers map[int]*models.User
+
+func (f fakeMarkerUsers) GetByID(_ context.Context, id int) (*models.User, error) {
+	return f[id], nil
+}
+
 func TestGetItemMarkersUsesFirstAuthorizedFile(t *testing.T) {
 	denied := &models.MediaFile{ID: 8, EpisodeID: "episode-denied", Duration: 1800}
 	allowed := &models.MediaFile{ID: 9, EpisodeID: "episode-allowed", Duration: 1800}
@@ -175,6 +203,101 @@ func TestGetItemMarkersUsesFirstAuthorizedFile(t *testing.T) {
 	}
 	if body.FileID != allowed.ID {
 		t.Fatalf("file_id = %d, want first authorized file %d", body.FileID, allowed.ID)
+	}
+}
+
+func TestGetFileMarkersDoesNotRequireMarkerEditPermission(t *testing.T) {
+	h := newMarkersHandler(nil)
+	h.Users = fakeMarkerUsers{
+		7: &models.User{ID: 7, Role: "user", Enabled: true, Permissions: nil},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/markers/files/5", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("fileId", "5")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
+
+	rec := httptest.NewRecorder()
+	h.HandleGetFileMarkers(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetFileMarkersRejectsUserWithoutMarkerEditPermission(t *testing.T) {
+	writer := &fakeMarkerWriter{}
+	h := newMarkersHandler(writer)
+	h.Users = fakeMarkerUsers{
+		7: &models.User{ID: 7, Role: "user", Enabled: true, Permissions: nil},
+	}
+	req := markerPutRequest(`{"intro":{"start":0,"end":60}}`)
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
+
+	rec := httptest.NewRecorder()
+	h.HandleSetFileMarkers(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(writer.upserts) != 0 {
+		t.Fatalf("permission failure wrote markers: %+v", writer.upserts)
+	}
+}
+
+func TestSetFileMarkersAllowsUserWithMarkerEditPermission(t *testing.T) {
+	writer := &fakeMarkerWriter{}
+	h := newMarkersHandler(writer)
+	h.Users = fakeMarkerUsers{
+		7: &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{"marker_edit"}},
+	}
+	req := markerPutRequest(`{"intro":{"start":0,"end":60}}`)
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
+
+	rec := httptest.NewRecorder()
+	h.HandleSetFileMarkers(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(writer.upserts) != 1 {
+		t.Fatalf("expected marker write, got %d", len(writer.upserts))
+	}
+}
+
+func TestSetFileMarkersPassesAuditContextToWriter(t *testing.T) {
+	writer := &fakeMarkerWriter{}
+	h := newMarkersHandler(writer)
+	apiKeyID := int64(99)
+	req := markerPutRequest(`{"intro":{"start":0,"end":60}}`)
+	req.Header.Set("User-Agent", "marker-test-agent")
+	ctx := clientip.SetContext(req.Context(), "203.0.113.10")
+	ctx = apimw.SetClaims(ctx, &auth.Claims{
+		UserID:    7,
+		Role:      "admin",
+		TokenType: auth.TokenTypeAPIKey,
+		APIKeyID:  apiKeyID,
+	})
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	h.HandleSetFileMarkers(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(writer.audits) != 1 {
+		t.Fatalf("audit contexts = %d, want 1", len(writer.audits))
+	}
+	audit := writer.audits[0]
+	if audit.UserID == nil || *audit.UserID != 7 {
+		t.Fatalf("audit user id = %v, want 7", audit.UserID)
+	}
+	if audit.APIKeyID == nil || *audit.APIKeyID != apiKeyID {
+		t.Fatalf("audit api key id = %v, want %d", audit.APIKeyID, apiKeyID)
+	}
+	if audit.ClientIP != "203.0.113.10" || audit.UserAgent != "marker-test-agent" {
+		t.Fatalf("audit request metadata = ip %q ua %q", audit.ClientIP, audit.UserAgent)
 	}
 }
 
@@ -219,7 +342,7 @@ func TestClearFileSegmentRejectsUnknown(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("fileId", "5")
 	rctx.URLParams.Add("segment", "bogus")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 
 	rec := httptest.NewRecorder()
 	h.HandleClearFileSegment(rec, req)

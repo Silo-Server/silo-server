@@ -833,6 +833,32 @@ export interface FileMarkersResponse {
   preview: MarkerSegment;
 }
 
+export interface MarkerEditAuditEntry {
+  id: number;
+  media_file_id: number;
+  item_id?: string;
+  item_type?: string;
+  media_title?: string;
+  file_path?: string;
+  segment: MarkerKind;
+  action: "set" | "clear";
+  before: MarkerSegment | null;
+  after: MarkerSegment | null;
+  user_id?: number;
+  username?: string;
+  impersonator_user_id?: number;
+  impersonator_username?: string;
+  api_key_id?: number;
+  request_id?: string;
+  client_ip?: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface MarkerEditAuditResponse {
+  history: MarkerEditAuditEntry[];
+}
+
 /** A single segment in a set-markers request: object to set, null to clear. */
 export type MarkerSegmentInput = { start?: number | null; end?: number | null };
 

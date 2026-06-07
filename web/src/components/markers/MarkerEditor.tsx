@@ -10,9 +10,16 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { FileMarkersResponse, MarkerKind, SetMarkersRequest } from "@/api/types";
+import type {
+  FileMarkersResponse,
+  MarkerEditAuditEntry,
+  MarkerKind,
+  MarkerSegment,
+  SetMarkersRequest,
+} from "@/api/types";
 import { MARKER_KINDS, MARKER_LABELS, formatClock, parseClock } from "@/lib/markers";
-import { useItemMarkers, useSetItemMarkers } from "@/hooks/queries/markers";
+import { useItemMarkerHistory, useItemMarkers, useSetItemMarkers } from "@/hooks/queries/markers";
+import { useAuth } from "@/hooks/useAuth";
 
 interface MarkerEditorProps {
   itemId: string;
@@ -37,11 +44,14 @@ function fieldsFromResponse(data: FileMarkersResponse): FieldState {
  * authenticated markers API.
  */
 export function MarkerEditor({ itemId, open, onOpenChange }: MarkerEditorProps) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { data, isLoading, isError } = useItemMarkers(itemId, { enabled: open });
+  const history = useItemMarkerHistory(itemId, { enabled: open && isAdmin, limit: 25 });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Edit markers</DialogTitle>
           <DialogDescription>
@@ -63,6 +73,9 @@ export function MarkerEditor({ itemId, open, onOpenChange }: MarkerEditorProps) 
             key={data.file_id}
             itemId={itemId}
             data={data}
+            history={isAdmin ? (history.data ?? []) : []}
+            historyLoading={isAdmin && history.isLoading}
+            showHistory={isAdmin}
             onClose={() => onOpenChange(false)}
           />
         )}
@@ -74,10 +87,16 @@ export function MarkerEditor({ itemId, open, onOpenChange }: MarkerEditorProps) 
 function MarkerEditorForm({
   itemId,
   data,
+  history,
+  historyLoading,
+  showHistory,
   onClose,
 }: {
   itemId: string;
   data: FileMarkersResponse;
+  history: MarkerEditAuditEntry[];
+  historyLoading: boolean;
+  showHistory: boolean;
   onClose: () => void;
 }) {
   const setMarkers = useSetItemMarkers(itemId);
@@ -165,6 +184,8 @@ function MarkerEditorForm({
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
+      {showHistory && <MarkerHistory rows={history} isLoading={historyLoading} />}
+
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
           Cancel
@@ -176,4 +197,58 @@ function MarkerEditorForm({
       </DialogFooter>
     </>
   );
+}
+
+function MarkerHistory({ rows, isLoading }: { rows: MarkerEditAuditEntry[]; isLoading: boolean }) {
+  return (
+    <div className="border-border mt-2 border-t pt-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-medium">Recent changes</h3>
+        {isLoading && <Loader2 className="text-muted-foreground size-4 animate-spin" />}
+      </div>
+      {rows.length === 0 && !isLoading ? (
+        <p className="text-muted-foreground text-sm">No marker edits recorded.</p>
+      ) : (
+        <div className="max-h-48 overflow-y-auto">
+          {rows.map((row) => (
+            <div
+              key={row.id}
+              className="border-border grid gap-1 border-b py-2 last:border-b-0 sm:grid-cols-[8rem_1fr]"
+            >
+              <div className="text-muted-foreground text-xs">
+                <div>{formatHistoryDate(row.created_at)}</div>
+                <div>{row.username ?? "Unknown user"}</div>
+              </div>
+              <div className="text-sm">
+                <div className="font-medium">
+                  {row.action === "clear" ? "Cleared" : "Set"} {MARKER_LABELS[row.segment]}
+                </div>
+                <div className="text-muted-foreground font-mono text-xs">
+                  {formatHistoryRange(row.before)}
+                  {" -> "}
+                  {formatHistoryRange(row.after)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatHistoryRange(marker: MarkerSegment | null): string {
+  if (!marker || marker.start == null || marker.end == null) return "none";
+  return `${formatClock(marker.start)}-${formatClock(marker.end)}`;
+}
+
+function formatHistoryDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

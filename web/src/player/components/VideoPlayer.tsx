@@ -88,6 +88,7 @@ interface VideoPlayerProps {
   autoSkipRecap?: boolean;
   preview?: PlayerTimeRange | null;
   autoPlayNextPreview?: boolean;
+  canEditMarkers?: boolean;
   /** Notified after a successful in-player marker edit so the host can patch local state. */
   onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
   duration?: number;
@@ -177,6 +178,7 @@ export function VideoPlayer({
   autoSkipRecap = false,
   preview = null,
   autoPlayNextPreview = false,
+  canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
   seriesContext,
@@ -1542,6 +1544,7 @@ export function VideoPlayer({
   const markerEditor = useMarkerEditor({
     fileId: activeFileId,
     duration,
+    canEdit: canEditMarkers,
     markers: currentMarkers,
     onSaved: (saved) => {
       if (activeFileId != null) onMarkersEdited?.(activeFileId, saved);

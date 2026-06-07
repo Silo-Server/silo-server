@@ -790,6 +790,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
 		markersHandler.BaseContext = deps.AppContext
+		markersHandler.AuditHistory = deps.FileRepo
+		markersHandler.Users = userRepo
 		if itemRepo != nil {
 			markersHandler.Authorizer = &handlers.MediaFileAuthorizer{
 				FileResolver:  deps.FileRepo,
@@ -1897,10 +1899,13 @@ func NewRouter(deps Dependencies) chi.Router {
 							}
 							if markersHandler != nil {
 								// Marker read/write/clear live on the authenticated
-								// /markers routes (any viewer can edit). Contribution
-								// to external providers stays an admin operation.
+								// /markers routes; writes require marker_edit.
+								// Contribution and audit history stay admin operations.
 								r.Post("/files/{fileId}/contribute", markersHandler.HandleContributeFile)
 								r.Get("/files/{fileId}/contributions", markersHandler.HandleListFileContributions)
+								r.Get("/markers/history", markersHandler.HandleListMarkerHistory)
+								r.Get("/markers/files/{fileId}/history", markersHandler.HandleListFileMarkerHistory)
+								r.Get("/markers/items/{id}/history", markersHandler.HandleListItemMarkerHistory)
 							}
 							if adminMarkerProvidersHandler != nil {
 								r.Get("/markers/providers", adminMarkerProvidersHandler.HandleListProviders)

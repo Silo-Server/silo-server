@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import type {
+  MarkerEditAuditResponse,
   MarkerProviderConfig,
   MarkerProviderListResponse,
   MarkerProviderUpdateRequest,
@@ -17,6 +18,17 @@ export function useMarkerProviders() {
     queryFn: () =>
       api<MarkerProviderListResponse>("/admin/markers/providers").then(
         (data) => data ?? { providers: [] },
+      ),
+    staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+export function useAllMarkerEditHistory(limit = 50) {
+  return useQuery({
+    queryKey: adminKeys.markerHistory(limit),
+    queryFn: () =>
+      api<MarkerEditAuditResponse>(`/admin/markers/history?limit=${limit}`).then(
+        (data) => data.history ?? [],
       ),
     staleTime: ADMIN_STALE_TIME,
   });

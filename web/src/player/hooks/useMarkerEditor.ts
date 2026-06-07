@@ -71,6 +71,7 @@ export interface MarkerEditor {
 interface UseMarkerEditorParams {
   fileId: number | null | undefined;
   duration: number;
+  canEdit?: boolean;
   /** The current saved markers (from props); snapshotted into the draft on begin. */
   markers: MarkerDraft;
   /** Notifies the host of the saved draft so it can patch local state immediately. */
@@ -89,6 +90,7 @@ interface UseMarkerEditorParams {
 export function useMarkerEditor({
   fileId,
   duration,
+  canEdit: canEditParam = true,
   markers,
   onSaved,
 }: UseMarkerEditorParams): MarkerEditor {
@@ -101,7 +103,7 @@ export function useMarkerEditor({
   const originalRef = useRef<MarkerDraft>(EMPTY_DRAFT);
   const savedBaselineRef = useRef<MarkerDraft | null>(null);
 
-  const canEdit = fileId != null && duration > 0;
+  const canEdit = canEditParam && fileId != null && duration > 0;
 
   useEffect(() => {
     const saved = savedBaselineRef.current;
@@ -179,7 +181,7 @@ export function useMarkerEditor({
   const dirty = MARKER_KINDS.some((kind) => !rangesEqual(draft[kind], originalRef.current[kind]));
 
   const save = useCallback(async () => {
-    if (fileId == null) return;
+    if (fileId == null || !canEdit) return;
     const original = originalRef.current;
     const body: Record<string, { start: number; end: number } | null> = {};
     for (const kind of MARKER_KINDS) {
@@ -213,7 +215,7 @@ export function useMarkerEditor({
     } catch (e) {
       console.error("Marker save callback failed:", e);
     }
-  }, [config, draft, fileId, onSaved]);
+  }, [canEdit, config, draft, fileId, onSaved]);
 
   return {
     editing,

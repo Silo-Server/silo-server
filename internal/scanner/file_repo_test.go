@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -116,6 +117,88 @@ func TestRecomputeSharedMarkerAttributionUsesLegacyAttributionForUnattributedSeg
 	}
 	if nextConfidence == nil || *nextConfidence != existingConfidence {
 		t.Fatalf("next confidence = %v, want %v", nextConfidence, existingConfidence)
+	}
+}
+
+func TestApplySegmentPatchSkipsSemanticNoop(t *testing.T) {
+	manual := models.MarkerSourceManual
+	confidence := 1.0
+	algorithm := "manual:v1"
+	detectedAt := time.Unix(100, 0).UTC()
+	state := segmentState{
+		start:      floatPtr(0),
+		end:        floatPtr(60),
+		source:     &manual,
+		confidence: &confidence,
+		algorithm:  &algorithm,
+		detectedAt: &detectedAt,
+	}
+
+	changed, err := applySegmentPatch(
+		&state,
+		nil,
+		manual,
+		nil,
+		&confidence,
+		algorithm,
+		floatPtr(0),
+		floatPtr(60),
+		1800,
+		"intro",
+		time.Unix(200, 0).UTC(),
+	)
+	if err != nil {
+		t.Fatalf("applySegmentPatch returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("identical marker patch should be a semantic no-op")
+	}
+	if state.detectedAt == nil || !state.detectedAt.Equal(detectedAt) {
+		t.Fatalf("detected_at changed on no-op: %v", state.detectedAt)
+	}
+}
+
+func TestClearSegmentStateSkipsSemanticNoop(t *testing.T) {
+	empty := segmentState{}
+	if clearSegmentState(&empty) {
+		t.Fatal("clearing an empty segment should be a no-op")
+	}
+
+	manual := models.MarkerSourceManual
+	state := segmentState{start: floatPtr(0), end: floatPtr(60), source: &manual}
+	if !clearSegmentState(&state) {
+		t.Fatal("clearing a populated segment should report a change")
+	}
+	if state.start != nil || state.end != nil || state.source != nil {
+		t.Fatalf("segment was not cleared: %+v", state)
+	}
+}
+
+func TestMarkerAuditSegmentForStatePreservesBeforeAfterShape(t *testing.T) {
+	manual := models.MarkerSourceManual
+	algorithm := "manual:v1"
+	confidence := 1.0
+	detectedAt := time.Unix(300, 0).UTC()
+
+	segment := markerAuditSegmentForState(segmentState{
+		start:      floatPtr(5),
+		end:        floatPtr(65),
+		source:     &manual,
+		confidence: &confidence,
+		algorithm:  &algorithm,
+		detectedAt: &detectedAt,
+	})
+	if segment == nil {
+		t.Fatal("expected audit segment")
+	}
+	if segment.Start == nil || *segment.Start != 5 || segment.End == nil || *segment.End != 65 {
+		t.Fatalf("audit segment bounds = %v..%v, want 5..65", segment.Start, segment.End)
+	}
+	if segment.Source == nil || *segment.Source != manual || segment.Algorithm == nil || *segment.Algorithm != algorithm {
+		t.Fatalf("audit provenance = source %v algorithm %v", segment.Source, segment.Algorithm)
+	}
+	if segment.DetectedAt == nil || !segment.DetectedAt.Equal(detectedAt) {
+		t.Fatalf("detected_at = %v, want %v", segment.DetectedAt, detectedAt)
 	}
 }
 

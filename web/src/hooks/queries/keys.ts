@@ -391,6 +391,10 @@ export const adminKeys = {
   markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
   markerProviderValidation: (provider: string) =>
     ["admin", "markerProviders", provider, "validation"] as const,
+  markerHistoryRoot: () => ["admin", "markerHistory"] as const,
+  markerHistory: (limit: number) => ["admin", "markerHistory", "all", limit] as const,
+  markerItemHistory: (itemId: string) => ["admin", "markerHistory", "items", itemId] as const,
+  markerFileHistory: (fileId: number) => ["admin", "markerHistory", "files", fileId] as const,
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,

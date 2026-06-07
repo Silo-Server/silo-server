@@ -285,6 +285,7 @@ export interface WatchPageProps {
   preview?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
   autoPlayNextPreview?: boolean;
+  canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
   onEnded?: (state?: PlaybackExitState) => void | Promise<void>;
