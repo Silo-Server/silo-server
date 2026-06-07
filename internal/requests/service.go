@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,28 +28,8 @@ type TMDBExternalIDClient interface {
 
 const externalIDHydrationConcurrency = 4
 
-type MovieFulfillmentAdapter interface {
-	SubmitMovie(ctx context.Context, req Request, integration Integration) (FulfillmentResult, error)
-}
-
-type SeriesFulfillmentAdapter interface {
-	SubmitSeries(ctx context.Context, req Request, integration Integration) (FulfillmentResult, error)
-}
-
-type MovieStatusAdapter interface {
-	CheckMovieStatus(ctx context.Context, req Request, integration Integration) (FulfillmentStatus, error)
-}
-
-type SeriesStatusAdapter interface {
-	CheckSeriesStatus(ctx context.Context, req Request, integration Integration) (FulfillmentStatus, error)
-}
-
-type MovieIntegrationOptionsAdapter interface {
-	ListMovieIntegrationOptions(ctx context.Context, integration Integration) (*IntegrationOptions, error)
-}
-
-type SeriesIntegrationOptionsAdapter interface {
-	ListSeriesIntegrationOptions(ctx context.Context, integration Integration) (*IntegrationOptions, error)
+type SecretResolver interface {
+	Get(ctx context.Context, key string) (string, error)
 }
 
 type EntitlementResolver interface {
@@ -59,13 +40,13 @@ type EntitlementResolver interface {
 }
 
 type Service struct {
-	store         Store
-	tmdb          TMDBClient
-	presence      PresenceResolver
-	movieAdapter  MovieFulfillmentAdapter
-	seriesAdapter SeriesFulfillmentAdapter
-	entitlements  EntitlementResolver
-	Now           func() time.Time
+	store        Store
+	tmdb         TMDBClient
+	presence     PresenceResolver
+	secrets      SecretResolver
+	router       RequestRouterProvider
+	entitlements EntitlementResolver
+	Now          func() time.Time
 }
 
 type DiscoverySection struct {
@@ -86,10 +67,11 @@ func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *
 	}
 }
 
-func (s *Service) SetFulfillmentAdapters(movie MovieFulfillmentAdapter, series SeriesFulfillmentAdapter) {
-	s.movieAdapter = movie
-	s.seriesAdapter = series
+func (s *Service) SetSecretResolver(resolver SecretResolver) {
+	s.secrets = resolver
 }
+
+func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
 
 func (s *Service) SetEntitlementResolver(r EntitlementResolver) { s.entitlements = r }
 
@@ -102,6 +84,39 @@ func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID st
 		return access.PlaybackQualityStandard // fail safe: HD only
 	}
 	return q
+}
+
+// allowedQualities returns the qualities a request may receive: 1080p always,
+// plus 2160p when force-dual is on or the requester's entitlement ceiling allows 4K.
+func (s *Service) allowedQualities(ctx context.Context, req Request, settings Settings) []Quality {
+	out := []Quality{Quality1080p}
+	ceiling := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
+	if settings.ForceDualQuality || access.CompareQuality(ceiling, access.PlaybackQuality4K) >= 0 {
+		out = append(out, Quality2160p)
+	}
+	return out
+}
+
+// resolveRouterConnections turns enabled request_router integrations into
+// ResolvedRouterConnections (api key resolved to plaintext, plugin_config attached),
+// and returns the installation+capability to dispatch to. Assumes a single router
+// plugin for the first cut; if multiple are installed this uses the last one — TODO
+// group by installation_id.
+func (s *Service) resolveRouterConnections(ctx context.Context, integrations []Integration) ([]ResolvedRouterConnection, int, string, error) {
+	var conns []ResolvedRouterConnection
+	installationID, capabilityID := 0, ""
+	for _, in := range integrations {
+		if !in.Enabled || in.CapabilityID != "request_router.v1" || in.InstallationID == nil {
+			continue
+		}
+		apiKey, err := s.resolveAPIKey(ctx, in)
+		if err != nil {
+			return nil, 0, "", err
+		}
+		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
+		installationID, capabilityID = *in.InstallationID, in.CapabilityID
+	}
+	return conns, installationID, capabilityID, nil
 }
 
 func (s *Service) Search(ctx context.Context, viewer Viewer, query string, mediaType MediaType, page int) (*MediaPage, error) {
@@ -576,69 +591,16 @@ func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request
 	if req.Outcome != OutcomeFailed {
 		return nil, ErrInvalidState
 	}
-	active, err := s.store.SetOutcome(ctx, req.ID, OutcomeActive, viewer, "retry requested")
+	if _, err := s.store.SetOutcome(ctx, req.ID, OutcomeActive, viewer, "retry requested"); err != nil {
+		return nil, err
+	}
+	// submitApprovedRequest only re-submits qualities lacking a healthy target, so
+	// it is idempotent; gate it on the approved status it expects.
+	active, err := s.store.SetStatus(ctx, req.ID, StatusApproved, viewer)
 	if err != nil {
 		return nil, err
 	}
-
-	instances, err := s.store.ListIntegrations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	existing, err := s.store.ListTargets(ctx, active.ID)
-	if err != nil {
-		return nil, err
-	}
-	ceiling := s.requesterCeiling(ctx, active.RequestedByUserID, active.RequestedByProfileID)
-	planned := routeTargets(*active, ceiling, settings, instances)
-	if len(planned) == 0 {
-		return s.markSubmissionFailed(ctx, active.ID, viewer,
-			fmt.Errorf("no %s instance configured for the requested quality",
-				integrationKindForMediaType(active.MediaType)))
-	}
-
-	return s.submitPlannedTargets(ctx, *active, planned, existing, viewer)
-}
-
-// submitPlannedTargets submits each planned target idempotently against the
-// already-recorded targets: a non-failed target for a quality is left alone, a
-// failed one is deleted and re-submitted, and a missing one is submitted fresh.
-// This is shared by Retry and the reconcile-driven submit so a re-run never
-// violates the UNIQUE(request_id, quality) constraint.
-func (s *Service) submitPlannedTargets(ctx context.Context, req Request, planned []plannedTarget, existing []Target, actor Viewer) (*Request, error) {
-	hasOK := make(map[Quality]bool)
-	for _, t := range existing {
-		if t.Status != StatusFailed {
-			hasOK[t.Quality] = true
-		}
-	}
-
-	latest := &req
-	for _, pt := range planned {
-		if hasOK[pt.Quality] {
-			continue // healthy target already exists for this quality
-		}
-		// remove the stale failed target for this quality before re-submitting
-		for _, t := range existing {
-			if t.Quality == pt.Quality && t.Status == StatusFailed {
-				if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
-					return nil, err
-				}
-			}
-		}
-		updated, err := s.submitPlannedTarget(ctx, req, pt, actor)
-		if err != nil {
-			return nil, err
-		}
-		if updated != nil {
-			latest = updated
-		}
-	}
-	return latest, nil
+	return s.submitApprovedRequest(ctx, *active, viewer)
 }
 
 func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileResult, error) {
@@ -797,18 +759,18 @@ func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id strin
 }
 
 func validateInstance(in *Integration) error {
-	in.Kind = strings.TrimSpace(in.Kind)
-	if in.Kind != "radarr" && in.Kind != "sonarr" {
-		return fmt.Errorf("%w: kind must be radarr or sonarr", ErrInvalidInput)
-	}
 	if strings.TrimSpace(in.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidInput)
 	}
-	if in.IsDefault && in.Is4K {
-		return fmt.Errorf("%w: the HD default cannot be a 4K server", ErrInvalidInput)
+	in.CapabilityID = strings.TrimSpace(in.CapabilityID)
+	if in.CapabilityID == "" {
+		in.CapabilityID = "request_router.v1"
 	}
-	if in.IsDefault4K && !in.Is4K {
-		return fmt.Errorf("%w: the 4K default must be a 4K server", ErrInvalidInput)
+	if in.CapabilityID != "request_router.v1" {
+		return fmt.Errorf("%w: unsupported capability %q", ErrInvalidInput, in.CapabilityID)
+	}
+	if in.InstallationID == nil {
+		return fmt.Errorf("%w: installation_id is required", ErrInvalidInput)
 	}
 	return nil
 }
@@ -817,58 +779,63 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	// For a saved instance the request body carries only the path id (no kind and
-	// often no creds), so resolve the saved row by id and backfill what the body
-	// omitted. This makes "Test connection" reuse the correct per-instance key
-	// (each kind can have multiple instances) instead of borrowing a sibling's.
+	// For a saved instance the request body carries only the path id (no creds and
+	// often no plugin wiring), so resolve the saved row by id and backfill what the
+	// body omitted. This makes "Test connection" reuse the correct per-instance key
+	// (each plugin can have multiple connections) instead of borrowing a sibling's.
 	if id := strings.TrimSpace(integration.ID); id != "" && id != "new" {
 		stored, err := s.store.GetIntegration(ctx, id)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
 		if stored != nil {
-			if strings.TrimSpace(integration.Kind) == "" {
-				integration.Kind = stored.Kind
-			}
 			if strings.TrimSpace(integration.BaseURL) == "" {
 				integration.BaseURL = stored.BaseURL
 			}
 			if strings.TrimSpace(integration.APIKeyRef) == "" {
 				integration.APIKeyRef = stored.APIKeyRef
 			}
+			if strings.TrimSpace(integration.CapabilityID) == "" {
+				integration.CapabilityID = stored.CapabilityID
+			}
+			if integration.InstallationID == nil {
+				integration.InstallationID = stored.InstallationID
+			}
+			if integration.PluginConfig == nil {
+				integration.PluginConfig = stored.PluginConfig
+			}
 		}
 	}
 
-	normalized, err := normalizeIntegrationConnection(integration)
+	apiKey, err := s.resolveAPIKey(ctx, integration)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(normalized.BaseURL) == "" {
-		return nil, fmt.Errorf("%w: base_url is required", ErrInvalidInput)
+	if s.router == nil || integration.InstallationID == nil {
+		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
-	if strings.TrimSpace(normalized.APIKeyRef) == "" {
-		return nil, fmt.Errorf("%w: api_key_ref is required", ErrInvalidInput)
+	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
+	opts, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
+	if err != nil {
+		return nil, err
 	}
-	// APIKeyRef is already the literal key: a saved instance was decrypted by
-	// GetIntegration above; a new instance carries the key the admin just typed.
-	resolved := normalized
+	return integrationOptionsFromRouter(opts), nil
+}
 
-	switch resolved.Kind {
-	case "radarr":
-		adapter, ok := s.movieAdapter.(MovieIntegrationOptionsAdapter)
-		if !ok {
-			return nil, fmt.Errorf("request radarr integration options are not configured")
-		}
-		return adapter.ListMovieIntegrationOptions(ctx, resolved)
-	case "sonarr":
-		adapter, ok := s.seriesAdapter.(SeriesIntegrationOptionsAdapter)
-		if !ok {
-			return nil, fmt.Errorf("request sonarr integration options are not configured")
-		}
-		return adapter.ListSeriesIntegrationOptions(ctx, resolved)
-	default:
-		return nil, fmt.Errorf("%w: invalid integration kind", ErrInvalidInput)
+func integrationOptionsFromRouter(opts map[string][]RouterOption) *IntegrationOptions {
+	out := &IntegrationOptions{}
+	for _, o := range opts["root_folder"] {
+		out.RootFolders = append(out.RootFolders, IntegrationRootFolder{Path: o.Value, Accessible: true})
 	}
+	for _, o := range opts["quality_profile_id"] {
+		id, _ := strconv.Atoi(o.Value)
+		out.QualityProfiles = append(out.QualityProfiles, IntegrationQualityProfile{ID: id, Name: o.Label})
+	}
+	for _, o := range opts["tags"] {
+		id, _ := strconv.Atoi(o.Value)
+		out.Tags = append(out.Tags, IntegrationTag{ID: id, Label: o.Label})
+	}
+	return out
 }
 
 func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
@@ -1157,87 +1124,102 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	if req.Outcome != OutcomeActive || req.Status != StatusApproved {
 		return &req, nil
 	}
-	instances, err := s.store.ListIntegrations(ctx)
+	if s.router == nil {
+		return s.markSubmissionFailed(ctx, req.ID, actor, fmt.Errorf("no fulfillment backend configured"))
+	}
+	integrations, err := s.store.ListIntegrations(ctx)
 	if err != nil {
 		return nil, err
+	}
+	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, integrations)
+	if err != nil {
+		return nil, err
+	}
+	if len(conns) == 0 {
+		return s.markSubmissionFailed(ctx, req.ID, actor, fmt.Errorf("no fulfillment backend configured"))
 	}
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ceiling := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
-	planned := routeTargets(req, ceiling, settings, instances)
-	if len(planned) == 0 {
-		return s.markSubmissionFailed(ctx, req.ID, actor,
-			fmt.Errorf("no %s instance configured for the requested quality",
-				integrationKindForMediaType(req.MediaType)))
-	}
-
-	// Reconcile can re-run submit while the request is still 'approved'; skip
-	// qualities that already have a live target and replace failed ones so the
-	// UNIQUE(request_id, quality) constraint is never violated.
 	existing, err := s.store.ListTargets(ctx, req.ID)
 	if err != nil {
 		return nil, err
 	}
-	return s.submitPlannedTargets(ctx, req, planned, existing, actor)
-}
-
-// submitPlannedTarget creates a target row, submits it to the adapter, and
-// records the result (queued or failed) via UpdateTargetStatus (which recomputes
-// the request aggregate). Returns the latest request snapshot.
-func (s *Service) submitPlannedTarget(ctx context.Context, req Request, pt plannedTarget, actor Viewer) (*Request, error) {
-	resolved := resolveInstance(pt)
-	// The repo already decrypted the stored key; a blank one means unconfigured.
-	if strings.TrimSpace(resolved.APIKeyRef) == "" {
-		return s.createFailedTarget(ctx, req, pt, resolved, "missing api key", actor)
+	healthy := map[Quality]bool{}
+	for _, t := range existing {
+		if t.Status != StatusFailed {
+			healthy[t.Quality] = true
+		}
 	}
-
-	target, err := s.store.CreateTarget(ctx, Target{
-		RequestID: req.ID, IntegrationID: resolved.ID, IntegrationKind: resolved.Kind,
-		Quality: pt.Quality, IsAnime: pt.IsAnime, Status: StatusQueued,
-	})
+	var want []Quality
+	for _, q := range s.allowedQualities(ctx, req, settings) {
+		if !healthy[q] {
+			want = append(want, q)
+		}
+	}
+	if len(want) == 0 {
+		return &req, nil
+	}
+	for _, t := range existing { // drop stale failed targets for the qualities we re-submit
+		if t.Status == StatusFailed {
+			for _, q := range want {
+				if t.Quality == q {
+					if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
+	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
 	if err != nil {
 		return nil, err
 	}
-
-	result, serr := s.submitTarget(ctx, req, resolved)
-	if serr != nil {
-		return s.store.UpdateTargetStatus(ctx, target.ID, StatusFailed, "", "", serr.Error(), actor)
+	if len(targets) == 0 {
+		if msg == "" {
+			msg = "fulfillment backend created no targets"
+		}
+		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
 	}
-	return s.store.UpdateTargetStatus(ctx, target.ID, StatusQueued,
-		result.ExternalID, result.ExternalStatus, "", actor)
+	connKind := connectionKindByID(conns)
+	latest := &req
+	for _, rt := range targets {
+		created, err := s.store.CreateTarget(ctx, Target{
+			RequestID: req.ID, IntegrationID: rt.ConnectionID, IntegrationKind: connKind[rt.ConnectionID],
+			Quality: rt.Quality, IsAnime: req.IsAnime, Status: StatusQueued,
+		})
+		if err != nil {
+			return nil, err
+		}
+		status := rt.Status
+		if status == "" {
+			status = StatusQueued
+		}
+		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, rt.Message, actor)
+		if err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			latest = updated
+		}
+	}
+	return latest, nil
 }
 
-func (s *Service) createFailedTarget(ctx context.Context, req Request, pt plannedTarget, resolved Integration, msg string, actor Viewer) (*Request, error) {
-	target, err := s.store.CreateTarget(ctx, Target{
-		RequestID: req.ID, IntegrationID: resolved.ID, IntegrationKind: resolved.Kind,
-		Quality: pt.Quality, IsAnime: pt.IsAnime, Status: StatusFailed, LastError: msg,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.store.UpdateTargetStatus(ctx, target.ID, StatusFailed, "", "", msg, actor)
-}
-
-// submitTarget calls the correct adapter with a per-target Request copy. The
-// adapters read root folder/quality/tags (and Sonarr series_type) from the
-// resolved Integration.
-func (s *Service) submitTarget(ctx context.Context, req Request, resolved Integration) (FulfillmentResult, error) {
-	switch req.MediaType {
-	case MediaTypeMovie:
-		if s.movieAdapter == nil {
-			return FulfillmentResult{}, fmt.Errorf("no movie adapter configured")
+// connectionKindByID maps each connection id to its plugin-declared service kind
+// (e.g. "radarr"/"sonarr") from PluginConfig["service_kind"], for the
+// integration_kind column on persisted targets. Missing kinds map to "".
+func connectionKindByID(conns []ResolvedRouterConnection) map[string]string {
+	out := make(map[string]string, len(conns))
+	for _, c := range conns {
+		if c.Config != nil {
+			if kind, ok := c.Config["service_kind"].(string); ok {
+				out[c.ID] = kind
+			}
 		}
-		return s.movieAdapter.SubmitMovie(ctx, req, resolved)
-	case MediaTypeSeries:
-		if s.seriesAdapter == nil {
-			return FulfillmentResult{}, fmt.Errorf("no series adapter configured")
-		}
-		return s.seriesAdapter.SubmitSeries(ctx, req, resolved)
-	default:
-		return FulfillmentResult{}, fmt.Errorf("unsupported media type %q", req.MediaType)
 	}
+	return out
 }
 
 func (s *Service) markSubmissionFailed(ctx context.Context, requestID string, actor Viewer, submitErr error) (*Request, error) {
@@ -1304,41 +1286,55 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 	if err != nil {
 		return reconcileUnchanged, err
 	}
-	instances, err := s.store.ListIntegrations(ctx)
+	if s.router == nil {
+		return reconcileUnchanged, nil
+	}
+	integrations, err := s.store.ListIntegrations(ctx)
 	if err != nil {
 		return reconcileUnchanged, err
 	}
-	byID := make(map[string]Integration, len(instances))
-	for _, in := range instances {
-		byID[in.ID] = in
+	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, integrations)
+	if err != nil {
+		return reconcileUnchanged, err
 	}
-	change := reconcileUnchanged
+	if len(conns) == 0 {
+		return reconcileUnchanged, nil
+	}
+
+	var refs []RouterTargetRef
 	for _, t := range targets {
 		if t.Status == StatusCompleted || t.Status == StatusFailed {
 			continue
 		}
-		in, ok := byID[t.IntegrationID]
-		if !ok {
+		refs = append(refs, RouterTargetRef{Quality: t.Quality, ConnectionID: t.IntegrationID, ExternalID: t.ExternalID})
+	}
+	if len(refs) == 0 {
+		return reconcileUnchanged, nil
+	}
+
+	statuses, err := s.router.CheckStatus(ctx, installationID, capabilityID, req, refs, conns)
+	if err != nil {
+		return reconcileUnchanged, err
+	}
+
+	change := reconcileUnchanged
+	for _, st := range statuses {
+		// Match the returned status to the live target by (quality, connection).
+		var target *Target
+		for i := range targets {
+			if targets[i].Quality == st.Quality && targets[i].IntegrationID == st.ConnectionID {
+				target = &targets[i]
+				break
+			}
+		}
+		if target == nil || target.Status == StatusCompleted || target.Status == StatusFailed {
 			continue
 		}
-		// in.APIKeyRef was decrypted by ListIntegrations; skip if unconfigured.
-		if strings.TrimSpace(in.APIKeyRef) == "" {
+		newStatus := st.Status
+		if newStatus == "" || newStatus == target.Status {
 			continue
 		}
-		probe := req
-		probe.ExternalID = t.ExternalID
-		st, err := s.checkFulfillmentStatus(ctx, probe, in)
-		if err != nil {
-			continue
-		}
-		if st.Status == "" && st.Outcome == "" {
-			continue
-		}
-		newStatus := targetStatusFromFulfillment(st)
-		if newStatus == t.Status {
-			continue
-		}
-		if _, err := s.store.UpdateTargetStatus(ctx, t.ID, newStatus, st.ExternalID, st.ExternalStatus, "", Viewer{}); err != nil {
+		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, "", Viewer{}); err != nil {
 			return reconcileUnchanged, err
 		}
 		switch newStatus {
@@ -1355,20 +1351,6 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 		}
 	}
 	return change, nil
-}
-
-func targetStatusFromFulfillment(st FulfillmentStatus) Status {
-	switch st.Status {
-	case StatusCompleted:
-		return StatusCompleted
-	case StatusDownloading:
-		return StatusDownloading
-	default:
-		if st.Outcome == OutcomeFailed {
-			return StatusFailed
-		}
-		return StatusQueued
-	}
 }
 
 // hasLiveTargets reports whether the request has any non-terminal (queued or
@@ -1394,23 +1376,20 @@ func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, erro
 	return matches[req.TMDBID].Available, nil
 }
 
-func (s *Service) checkFulfillmentStatus(ctx context.Context, req Request, resolved Integration) (FulfillmentStatus, error) {
-	switch req.MediaType {
-	case MediaTypeMovie:
-		checker, ok := s.movieAdapter.(MovieStatusAdapter)
-		if !ok {
-			return FulfillmentStatus{}, nil
-		}
-		return checker.CheckMovieStatus(ctx, req, resolved)
-	case MediaTypeSeries:
-		checker, ok := s.seriesAdapter.(SeriesStatusAdapter)
-		if !ok {
-			return FulfillmentStatus{}, nil
-		}
-		return checker.CheckSeriesStatus(ctx, req, resolved)
-	default:
-		return FulfillmentStatus{}, nil
+func (s *Service) resolveAPIKey(ctx context.Context, integration Integration) (string, error) {
+	value := strings.TrimSpace(integration.APIKeyRef)
+	if value == "" || s.secrets == nil {
+		return value, nil
 	}
+	resolved, err := s.secrets.Get(ctx, value)
+	if err != nil {
+		return "", err
+	}
+	resolved = strings.TrimSpace(resolved)
+	if resolved == "" {
+		return value, nil
+	}
+	return resolved, nil
 }
 
 func integrationIsConfigured(integration Integration) bool {
