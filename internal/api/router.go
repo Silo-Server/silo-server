@@ -802,7 +802,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var adminMarkerProvidersHandler *handlers.AdminMarkerProvidersHandler
 	if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 		adminMarkerProvidersHandler = handlers.NewAdminMarkerProvidersHandler(
-			deps.MarkerRegistry, deps.MarkerProviderConfig, slog.Default(),
+			deps.MarkerRegistry, deps.MarkerProviderConfig, deps.EventBus, slog.Default(),
 		)
 	}
 

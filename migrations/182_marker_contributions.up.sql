@@ -1,6 +1,7 @@
 -- Audit log of marker contributions to online providers. The content_hash over
--- the contributed value gives idempotency: the same segment value is never
--- resubmitted to the same provider, but a corrected value (different hash) is.
+-- the contributed value and resolved provider target gives idempotency: the same
+-- segment value is never resubmitted to the same provider+target, but a
+-- corrected value or rematch (different hash) is.
 CREATE TABLE public.marker_contributions (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     media_file_id      integer NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
@@ -10,7 +11,7 @@ CREATE TABLE public.marker_contributions (
     submitted_start_ms bigint,
     submitted_end_ms   bigint,
     video_duration_ms  bigint,
-    content_hash       text    NOT NULL,                -- hash(segment_kind, start_ms, end_ms, duration_ms)
+    content_hash       text    NOT NULL,                -- hash(segment_kind, bounds, duration, resolved target)
     submission_id      text,                            -- id returned by the provider
     status             text    NOT NULL,                -- pending | accepted | rejected | error
     http_status        integer,

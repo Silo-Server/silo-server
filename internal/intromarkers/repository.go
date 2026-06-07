@@ -593,12 +593,6 @@ func shouldApplyIntroPatch(row markerRow, patch IntroMarkerPatch) bool {
 	if row.IntroMarkersConfidence == nil {
 		return true
 	}
-	if patch.Confidence > *row.IntroMarkersConfidence {
-		return true
-	}
-	if patch.Confidence < *row.IntroMarkersConfidence {
-		return false
-	}
 
 	existingAlgorithm := ""
 	if row.IntroMarkersAlgorithm != nil {
@@ -613,6 +607,12 @@ func shouldApplyIntroPatch(row markerRow, patch IntroMarkerPatch) bool {
 		return true
 	}
 	if patchPriority < existingPriority {
+		return false
+	}
+	if patch.Confidence > *row.IntroMarkersConfidence {
+		return true
+	}
+	if patch.Confidence < *row.IntroMarkersConfidence {
 		return false
 	}
 	if existingAlgorithm != patch.Algorithm && patchPriority == 0 {

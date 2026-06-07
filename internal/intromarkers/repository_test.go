@@ -110,7 +110,7 @@ func TestShouldApplyIntroPatchRejectsEqualConfidenceLowerRankAlgorithm(t *testin
 	}
 }
 
-func TestShouldApplyIntroPatchAllowsHigherConfidenceLowerRankAlgorithm(t *testing.T) {
+func TestShouldApplyIntroPatchRejectsHigherConfidenceLowerRankAlgorithm(t *testing.T) {
 	start := 331.5
 	end := 362.5
 	source := models.MarkerSourceScanner
@@ -131,7 +131,33 @@ func TestShouldApplyIntroPatchAllowsHigherConfidenceLowerRankAlgorithm(t *testin
 		Algorithm:  ChromaprintAlgorithm,
 	}
 
+	if shouldApplyIntroPatch(row, patch) {
+		t.Fatal("higher-confidence chromaprint patch should not replace copied marker")
+	}
+}
+
+func TestShouldApplyIntroPatchAllowsHigherRankLowerConfidenceAlgorithm(t *testing.T) {
+	start := 331.5
+	end := 362.5
+	source := models.MarkerSourceScanner
+	confidence := 0.95
+	algorithm := ChromaprintAlgorithm
+	row := markerRow{
+		IntroStart:             &start,
+		IntroEnd:               &end,
+		IntroMarkersSource:     &source,
+		IntroMarkersConfidence: &confidence,
+		IntroMarkersAlgorithm:  &algorithm,
+	}
+	patch := IntroMarkerPatch{
+		Start:      322.014,
+		End:        363.465,
+		Source:     models.MarkerSourceScanner,
+		Confidence: 0.85,
+		Algorithm:  ChapterAlgorithm,
+	}
+
 	if !shouldApplyIntroPatch(row, patch) {
-		t.Fatal("higher-confidence chromaprint patch should be allowed to replace copied marker")
+		t.Fatal("higher-rank chapter patch should replace lower-rank chromaprint marker")
 	}
 }

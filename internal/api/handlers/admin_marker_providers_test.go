@@ -30,7 +30,7 @@ func TestValidateMarkerProviderUsesSnakeCaseStats(t *testing.T) {
 	if err := reg.Register(fakeMarkerStatsSubmitter{}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
-	h := NewAdminMarkerProvidersHandler(reg, nil, nil)
+	h := NewAdminMarkerProvidersHandler(reg, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/markers/providers/introdb/validate", nil)
 	rctx := chi.NewRouteContext()
@@ -64,7 +64,10 @@ func TestMarkerProviderResponseIncludesPluginMetadata(t *testing.T) {
 	if resp.DisplayName != "Plugin Markers" || resp.SourceType != markers.ProviderSourcePlugin {
 		t.Fatalf("plugin metadata fields missing: %+v", resp)
 	}
-	if resp.PluginInstallationID != 4 || resp.CapabilityID != "markers" || !resp.IsSubmitter {
+	if resp.PluginID != "silo.plugin.markers" ||
+		resp.PluginInstallationID != 4 ||
+		resp.CapabilityID != "markers" ||
+		!resp.IsSubmitter {
 		t.Fatalf("plugin identity fields missing: %+v", resp)
 	}
 }

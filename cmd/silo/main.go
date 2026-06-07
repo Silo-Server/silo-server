@@ -502,6 +502,18 @@ func main() {
 				"error", err)
 		} else {
 			markerRegistry.UseConfigStore(markerProviderConfig)
+			if deps.EventBus != nil {
+				if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+					if event.Type != cache.EventMarkerProviderConfigChanged {
+						return
+					}
+					if err := markerProviderConfig.Reload(appCtx); err != nil {
+						slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
+					}
+				}); err != nil {
+					slog.Warn("subscribe marker provider config reload failed", "error", err)
+				}
+			}
 		}
 		deps.MarkerProviderConfig = markerProviderConfig
 		deps.MarkerRegistry = markerRegistry
@@ -2045,6 +2057,12 @@ func reloadMarkerPluginProviders(
 		return fmt.Errorf("list enabled plugin installations: %w", err)
 	}
 	sort.Slice(installations, func(i, j int) bool {
+		if installations[i] == nil {
+			return false
+		}
+		if installations[j] == nil {
+			return true
+		}
 		return installations[i].ID < installations[j].ID
 	})
 
@@ -2058,6 +2076,12 @@ func reloadMarkerPluginProviders(
 			return fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
 		}
 		sort.Slice(capabilities, func(i, j int) bool {
+			if capabilities[i] == nil {
+				return false
+			}
+			if capabilities[j] == nil {
+				return true
+			}
 			return capabilities[i].ID < capabilities[j].ID
 		})
 		for _, capability := range capabilities {

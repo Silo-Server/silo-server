@@ -38,6 +38,9 @@ export function useUpdateMarkerProvider() {
         queryClient.invalidateQueries({
           queryKey: adminKeys.markerProvider(variables.provider),
         }),
+        queryClient.removeQueries({
+          queryKey: adminKeys.markerProviderValidation(variables.provider),
+        }),
       ]);
     },
     onError: (err) => {

@@ -248,12 +248,17 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 
 func TestContentHashStableAndSensitive(t *testing.T) {
 	s, e, d := int64(0), int64(60000), int64(1800000)
-	h1 := ContentHash("intro", &s, &e, &d)
-	if h1 != ContentHash("intro", &s, &e, &d) {
+	target := contributionTargetParts(ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3})
+	h1 := ContentHash("intro", &s, &e, &d, target...)
+	if h1 != ContentHash("intro", &s, &e, &d, target...) {
 		t.Error("hash not stable for identical input")
 	}
 	e2 := int64(61000)
-	if ContentHash("intro", &s, &e2, &d) == h1 {
+	if ContentHash("intro", &s, &e2, &d, target...) == h1 {
 		t.Error("changed end should change hash")
+	}
+	rematched := contributionTargetParts(ExternalIDs{Kind: ItemKindEpisode, TmdbID: "9999", SeasonNumber: 1, EpisodeNumber: 3})
+	if ContentHash("intro", &s, &e, &d, rematched...) == h1 {
+		t.Error("changed resolved target should change hash")
 	}
 }

@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -198,7 +199,7 @@ func (s *ContributionService) contributeSegment(
 	startMs := int64(*seg.start * 1000)
 	endMs := int64(*seg.end * 1000)
 	durMs := int64(file.Duration) * 1000
-	hash := ContentHash(seg.name, &startMs, &endMs, &durMs)
+	hash := ContentHash(seg.name, &startMs, &endMs, &durMs, contributionTargetParts(ids)...)
 
 	already, err := s.store.AlreadySubmitted(ctx, file.ID, providerID, seg.name, hash)
 	if err != nil {
@@ -258,6 +259,24 @@ func (s *ContributionService) contributeSegment(
 		s.logger.Warn("record contribution failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", err)
 	}
 	return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, SubmissionID: result.ID}, true
+}
+
+func contributionTargetParts(ids ExternalIDs) []string {
+	return []string{
+		itemTypeName(ids.Kind),
+		ids.TmdbID,
+		ids.ImdbID,
+		ids.TvdbID,
+		intPart(ids.SeasonNumber),
+		intPart(ids.EpisodeNumber),
+	}
+}
+
+func intPart(v int) string {
+	if v == 0 {
+		return ""
+	}
+	return strconv.Itoa(v)
 }
 
 func missingRequiredExternalIDs(sub Submitter, ids ExternalIDs) []string {

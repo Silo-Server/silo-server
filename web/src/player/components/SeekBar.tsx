@@ -426,10 +426,7 @@ function MarkerHandle({
 }) {
   return (
     <div
-      role="slider"
       aria-label={label}
-      aria-valuenow={Math.round(percent)}
-      tabIndex={-1}
       onPointerDown={onPointerDown}
       onMouseDown={(e) => e.stopPropagation()}
       className="absolute top-1/2 z-[2] flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"

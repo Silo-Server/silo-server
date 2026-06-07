@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/markers"
 )
 
@@ -16,15 +17,16 @@ import (
 type AdminMarkerProvidersHandler struct {
 	Registry *markers.Registry
 	Config   *markers.ProviderConfigStore
+	EventBus cache.EventBus
 	logger   *slog.Logger
 }
 
 // NewAdminMarkerProvidersHandler constructs the handler.
-func NewAdminMarkerProvidersHandler(registry *markers.Registry, config *markers.ProviderConfigStore, logger *slog.Logger) *AdminMarkerProvidersHandler {
+func NewAdminMarkerProvidersHandler(registry *markers.Registry, config *markers.ProviderConfigStore, eventBus cache.EventBus, logger *slog.Logger) *AdminMarkerProvidersHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AdminMarkerProvidersHandler{Registry: registry, Config: config, logger: logger}
+	return &AdminMarkerProvidersHandler{Registry: registry, Config: config, EventBus: eventBus, logger: logger}
 }
 
 type providerConfigResponse struct {
@@ -161,6 +163,12 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		h.logger.Error("admin markers: update provider config failed", "provider", provider, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update provider")
 		return
+	}
+	if h.EventBus != nil {
+		_ = h.EventBus.Publish(r.Context(), cache.ChannelAdmin, cache.Event{
+			Type:    cache.EventMarkerProviderConfigChanged,
+			Payload: provider,
+		})
 	}
 	writeJSON(w, http.StatusOK, toProviderConfigResponse(existing, h.submitterIDs()[provider], h.providerDescriptions()[provider]))
 }

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 
@@ -95,7 +96,18 @@ func (s *Service) OnLifecycleChange(ctx context.Context) {
 	hooks := append([]func(context.Context){}, s.lifecycleHooks...)
 	s.lifecycleMu.RUnlock()
 	for _, hook := range hooks {
-		hook(ctx)
+		func(hook func(context.Context)) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					slog.Error(
+						"plugin lifecycle hook panicked; continuing",
+						"panic", recovered,
+						"stack", string(debug.Stack()),
+					)
+				}
+			}()
+			hook(ctx)
+		}(hook)
 	}
 }
 

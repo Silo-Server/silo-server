@@ -21,6 +21,7 @@ import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
 
 const INTRO_SETTING_KEYS = ["markers.mode", "markers.lazy_playback"];
+const INTEGER_INPUT_PATTERN = /^[+-]?\d+$/;
 
 function formatRate(value: number) {
   return `${Math.round(value * 100)}%`;
@@ -91,8 +92,10 @@ function ProviderSettingsForm({ provider }: { provider: MarkerProviderConfig }) 
   const parsedMinConfidence = Number.parseFloat(minConfidence);
   const confidenceValid =
     Number.isFinite(parsedMinConfidence) && parsedMinConfidence >= 0 && parsedMinConfidence <= 1;
-  const parsedFetchPriority = Number.parseInt(fetchPriority, 10);
-  const priorityValid = Number.isInteger(parsedFetchPriority);
+  const fetchPriorityInput = fetchPriority.trim();
+  const parsedFetchPriority = Number(fetchPriorityInput);
+  const priorityValid =
+    INTEGER_INPUT_PATTERN.test(fetchPriorityInput) && Number.isInteger(parsedFetchPriority);
   const dirty =
     provider.fetch_enabled !== fetchEnabled ||
     provider.fetch_priority !== parsedFetchPriority ||

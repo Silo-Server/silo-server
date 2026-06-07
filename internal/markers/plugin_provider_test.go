@@ -85,6 +85,47 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	}
 }
 
+func TestPluginProviderRejectsOutOfBoundsSegments(t *testing.T) {
+	negativeStart := -1.0
+	start10, end61 := 10.0, 61.0
+	validStart := 50.0
+	duration := time.Minute
+
+	tests := []struct {
+		name    string
+		segment *pluginv1.MarkerSegment
+		wantOK  bool
+		wantEnd time.Duration
+	}{
+		{
+			name:    "negative start",
+			segment: &pluginv1.MarkerSegment{Segment: "intro", StartSeconds: &negativeStart},
+		},
+		{
+			name:    "end past duration",
+			segment: &pluginv1.MarkerSegment{Segment: "intro", StartSeconds: &start10, EndSeconds: &end61},
+		},
+		{
+			name:    "default end uses duration",
+			segment: &pluginv1.MarkerSegment{Segment: "credits", StartSeconds: &validStart},
+			wantOK:  true,
+			wantEnd: duration,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			marker, ok := markerFromPluginSegment(tt.segment, duration)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if tt.wantOK && marker.End != tt.wantEnd {
+				t.Fatalf("end = %s, want %s", marker.End, tt.wantEnd)
+			}
+		})
+	}
+}
+
 func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 	client := &fakePluginMarkerClient{}
 	provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{

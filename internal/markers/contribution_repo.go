@@ -42,12 +42,15 @@ func NewContributionStore(pool *pgxpool.Pool) *ContributionStore {
 	return &ContributionStore{pool: pool}
 }
 
-// ContentHash is a stable hash over the contributed value (segment kind +
-// bounds + duration). Identical values hash identically (never resubmitted); a
-// correction hashes differently (submitted as a new value).
-func ContentHash(segmentKind string, startMs, endMs, durationMs *int64) string {
+// ContentHash is a stable hash over the contributed value and resolved target.
+// Identical submissions hash identically (never resubmitted); a marker
+// correction or rematch to a different provider identity hashes differently.
+func ContentHash(segmentKind string, startMs, endMs, durationMs *int64, targetParts ...string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s|%s|%s|%s", segmentKind, ptrIntStr(startMs), ptrIntStr(endMs), ptrIntStr(durationMs))
+	for _, part := range targetParts {
+		fmt.Fprintf(h, "|%s", part)
+	}
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 

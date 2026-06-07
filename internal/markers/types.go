@@ -249,6 +249,9 @@ func (r *Registry) SetProviders(providers []Provider) error {
 	if r == nil {
 		return nil
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	seen := make(map[string]struct{}, len(providers))
 	next := make([]Provider, 0, len(providers))
 	for _, provider := range providers {
@@ -265,9 +268,7 @@ func (r *Registry) SetProviders(providers []Provider) error {
 		seen[id] = struct{}{}
 		next = append(next, provider)
 	}
-	r.mu.Lock()
 	r.providers = next
-	r.mu.Unlock()
 	return nil
 }
 

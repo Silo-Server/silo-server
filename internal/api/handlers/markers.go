@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -30,6 +31,7 @@ type MarkerFileResolver interface {
 type ManualMarkerWriter interface {
 	UpsertMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate) (bool, error)
 	ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error)
+	UpsertAndClearMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate, clearSegments []string) (bool, error)
 }
 
 // MarkerContributor submits a file's eligible markers to enabled providers.
@@ -209,16 +211,38 @@ func (h *MarkersHandler) loadItemPrimaryFile(w http.ResponseWriter, r *http.Requ
 			return nil, false
 		}
 	}
-	if len(files) == 0 || files[0] == nil {
+	if len(files) == 0 {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found for item")
 		return nil, false
 	}
 	// Re-validate the resolved primary file through the authorizer so item-id
 	// edits are access-checked the same way file-id edits are.
 	if h.Authorizer != nil {
-		return h.authorizeFile(w, r, files[0].ID)
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			authorized, err := h.Authorizer.Authorize(r, file.ID)
+			if err == nil {
+				return authorized, true
+			}
+			if errors.Is(err, catalog.ErrItemNotFound) || errors.Is(err, catalog.ErrEpisodeNotFound) {
+				continue
+			}
+			h.logger.Error("markers: authorize item file failed", "item_id", itemID, "file_id", file.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize media file")
+			return nil, false
+		}
+		writeError(w, http.StatusNotFound, "not_found", "Media file not found for item")
+		return nil, false
 	}
-	return files[0], true
+	for _, file := range files {
+		if file != nil {
+			return file, true
+		}
+	}
+	writeError(w, http.StatusNotFound, "not_found", "Media file not found for item")
+	return nil, false
 }
 
 // HandleGetFileMarkers returns the current markers + provenance for a file.
@@ -302,22 +326,18 @@ func (h *MarkersHandler) setMarkersForFile(w http.ResponseWriter, r *http.Reques
 		setSegs = append(setSegs, seg)
 	}
 
-	if len(setSegs) > 0 {
-		if _, err := h.Writer.UpsertMarkers(r.Context(), file.ID, update); err != nil {
-			h.logger.Error("markers: upsert failed", "file_id", file.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save markers")
-			return
-		}
-	}
-	if len(clears) > 0 {
-		if _, err := h.Writer.ClearMarkers(r.Context(), file.ID, clears); err != nil {
-			h.logger.Error("markers: clear failed", "file_id", file.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear markers")
-			return
-		}
+	if _, err := h.Writer.UpsertAndClearMarkers(r.Context(), file.ID, update, clears); err != nil {
+		h.logger.Error("markers: save failed", "file_id", file.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save markers")
+		return
 	}
 
-	refreshed := h.reloadAndNotify(r.Context(), file.ID)
+	refreshed, err := h.reloadAndNotify(r.Context(), file.ID)
+	if err != nil {
+		h.logger.Error("markers: reload after save failed", "file_id", file.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
+		return
+	}
 	h.maybeContribute(refreshed, setSegs)
 	writeJSON(w, http.StatusOK, fileMarkers(refreshed))
 }
@@ -342,7 +362,12 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear marker")
 		return
 	}
-	refreshed := h.reloadAndNotify(r.Context(), file.ID)
+	refreshed, err := h.reloadAndNotify(r.Context(), file.ID)
+	if err != nil {
+		h.logger.Error("markers: reload after clear failed", "file_id", file.ID, "segment", segment, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Marker cleared but failed to reload")
+		return
+	}
 	writeJSON(w, http.StatusOK, fileMarkers(refreshed))
 }
 
@@ -360,11 +385,9 @@ func (h *MarkersHandler) HandleContributeFile(w http.ResponseWriter, r *http.Req
 		Provider string   `json:"provider"`
 		Segments []string `json:"segments"`
 	}
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-			return
-		}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
 	}
 	var kinds []markers.MarkerKind
 	for _, name := range body.Segments {
@@ -403,15 +426,18 @@ func (h *MarkersHandler) HandleListFileContributions(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, map[string]any{"contributions": contributionRowResponses(rows)})
 }
 
-func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) *models.MediaFile {
+func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*models.MediaFile, error) {
 	refreshed, err := h.Files.GetByID(ctx, fileID)
 	if err != nil || refreshed == nil {
-		return &models.MediaFile{ID: fileID}
+		if err == nil {
+			err = scanner.ErrFileNotFound
+		}
+		return nil, err
 	}
 	if h.Notifier != nil {
 		h.Notifier.MarkersUpdated(ctx, refreshed)
 	}
-	return refreshed
+	return refreshed, nil
 }
 
 // maybeContribute fires a best-effort, detached contribution run for the

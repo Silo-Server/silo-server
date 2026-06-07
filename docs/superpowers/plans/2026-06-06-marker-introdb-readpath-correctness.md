@@ -615,4 +615,3 @@ Expected: clean (all changes committed in Tasks 1–3; this task adds no files).
   command and the expected result. No migration, no frontend, no wiring changes.
 - **Default confidence:** `defaultConfidence = 0.9` preserves today's effective value for
   responses that omit confidence, so existing stored markers keep equivalent provenance.
-```

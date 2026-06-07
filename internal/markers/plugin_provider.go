@@ -257,6 +257,12 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	if segment.EndSeconds != nil {
 		end = secondsDuration(segment.GetEndSeconds())
 	}
+	if start < 0 {
+		return Marker{}, false
+	}
+	if duration > 0 && (start >= duration || end > duration) {
+		return Marker{}, false
+	}
 	if end <= start {
 		return Marker{}, false
 	}

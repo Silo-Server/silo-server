@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerFetch } from "../player-fetch";
 import type { MarkerDraft, MarkerKind, PlayerTimeRange } from "../types";
@@ -25,6 +25,25 @@ const EMPTY_DRAFT: MarkerDraft = { intro: null, recap: null, credits: null, prev
 function rangesEqual(a: PlayerTimeRange | null, b: PlayerTimeRange | null): boolean {
   if (a === null || b === null) return a === b;
   return a.start === b.start && a.end === b.end;
+}
+
+function normalizeDraft(markers: MarkerDraft): MarkerDraft {
+  return {
+    intro: markers.intro ?? null,
+    recap: markers.recap ?? null,
+    credits: markers.credits ?? null,
+    preview: markers.preview ?? null,
+  };
+}
+
+function draftsEqual(a: MarkerDraft, b: MarkerDraft): boolean {
+  return MARKER_KINDS.every((kind) => rangesEqual(a[kind], b[kind]));
+}
+
+function clampRangeToUpper(range: PlayerTimeRange, upper: number): PlayerTimeRange {
+  const start = Math.max(0, Math.min(upper, range.start));
+  const end = Math.max(start, Math.min(upper, range.end));
+  return { start, end };
 }
 
 export interface MarkerEditor {
@@ -80,16 +99,23 @@ export function useMarkerEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const originalRef = useRef<MarkerDraft>(EMPTY_DRAFT);
+  const savedBaselineRef = useRef<MarkerDraft | null>(null);
 
   const canEdit = fileId != null && duration > 0;
 
+  useEffect(() => {
+    const saved = savedBaselineRef.current;
+    if (saved && draftsEqual(normalizeDraft(markers), saved)) {
+      savedBaselineRef.current = null;
+    }
+  }, [markers]);
+
+  useEffect(() => {
+    savedBaselineRef.current = null;
+  }, [fileId]);
+
   const begin = useCallback(() => {
-    const snapshot: MarkerDraft = {
-      intro: markers.intro ?? null,
-      recap: markers.recap ?? null,
-      credits: markers.credits ?? null,
-      preview: markers.preview ?? null,
-    };
+    const snapshot = savedBaselineRef.current ?? normalizeDraft(markers);
     originalRef.current = snapshot;
     setDraft(snapshot);
     setActiveKind(MARKER_KINDS.find((kind) => snapshot[kind] != null) ?? "intro");
@@ -106,7 +132,7 @@ export function useMarkerEditor({
 
   const setEdge = useCallback(
     (kind: MarkerKind, edge: "start" | "end", seconds: number) => {
-      const upper = duration > 0 ? duration : seconds;
+      const upper = Math.max(0, duration > 0 ? duration : seconds);
       const clamped = Math.max(0, Math.min(upper, seconds));
       setDraft((prev) => {
         const existing = prev[kind];
@@ -122,7 +148,7 @@ export function useMarkerEditor({
         } else {
           next = { start: existing.start, end: Math.max(clamped, existing.start + MIN_GAP) };
         }
-        return { ...prev, [kind]: next };
+        return { ...prev, [kind]: clampRangeToUpper(next, upper) };
       });
       setActiveKind(kind);
       setError(null);
@@ -172,12 +198,20 @@ export function useMarkerEditor({
         method: "PUT",
         body: JSON.stringify(body),
       });
-      onSaved?.(draft);
-      setEditing(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save markers");
+      return;
     } finally {
       setSaving(false);
+    }
+    originalRef.current = draft;
+    savedBaselineRef.current = draft;
+    setDraft(draft);
+    setEditing(false);
+    try {
+      onSaved?.(draft);
+    } catch (e) {
+      console.error("Marker save callback failed:", e);
     }
   }, [config, draft, fileId, onSaved]);
 

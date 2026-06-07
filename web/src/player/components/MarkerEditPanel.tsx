@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, GripHorizontal, RotateCcw, Trash2, X } from "lucide-react";
 import type { MarkerEditor } from "../hooks/useMarkerEditor";
 import { MARKER_KINDS, MARKER_LABELS } from "../hooks/useMarkerEditor";
@@ -27,12 +27,20 @@ const DOT_COLORS: Record<MarkerKind, string> = {
 export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
   const { draft, activeKind, saving, error, dirty } = editor;
   const panelRef = useRef<HTMLDivElement>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
 
   // Drag the panel by its header. The anchored position is shifted with a
   // transform and clamped to the player bounds so it can't leave the frame.
   const handleDragStart = (e: React.PointerEvent) => {
     e.preventDefault();
+    dragCleanupRef.current?.();
     const startX = e.clientX;
     const startY = e.clientY;
     const base = offset;
@@ -60,9 +68,11 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
     const onUp = () => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
+      dragCleanupRef.current = null;
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
+    dragCleanupRef.current = onUp;
   };
 
   return (

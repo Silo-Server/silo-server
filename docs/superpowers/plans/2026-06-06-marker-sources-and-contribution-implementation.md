@@ -62,7 +62,7 @@ Whole-project compile: `go build ./...` (same container).
 
 ---
 
-# Phase 1 — TheIntroDB read-path correctness
+## Phase 1 — TheIntroDB read-path correctness
 
 **Goal:** Honor TVDB ids, capture/use real per-segment confidence + submission_count, and pick
 the best candidate among multiple. Contained to `internal/markers/introdb` plus one field on
@@ -480,4 +480,3 @@ contributed. Mirror `internal/taskmanager/tasks/detect_intro_markers.go`.
   before writing.
 - **Out of scope (tracked in the design doc):** all web UI; per-user TheIntroDB accounts; a
   `marker_provider.v1` plugin capability. Clean seams left for each.
-```

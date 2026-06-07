@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -18,11 +19,17 @@ import (
 
 type fakeMarkerFiles struct {
 	file         *models.MediaFile
+	byID         map[int]*models.MediaFile
 	contentFiles []*models.MediaFile
 	episodeFiles []*models.MediaFile
 }
 
-func (f fakeMarkerFiles) GetByID(context.Context, int) (*models.MediaFile, error) { return f.file, nil }
+func (f fakeMarkerFiles) GetByID(_ context.Context, id int) (*models.MediaFile, error) {
+	if f.byID != nil {
+		return f.byID[id], nil
+	}
+	return f.file, nil
+}
 func (f fakeMarkerFiles) GetByContentID(context.Context, string) ([]*models.MediaFile, error) {
 	return f.contentFiles, nil
 }
@@ -41,6 +48,15 @@ func (f *fakeMarkerWriter) UpsertMarkers(_ context.Context, _ int, u scanner.Mar
 }
 func (f *fakeMarkerWriter) ClearMarkers(_ context.Context, _ int, segs []string) (bool, error) {
 	f.clears = append(f.clears, segs)
+	return true, nil
+}
+func (f *fakeMarkerWriter) UpsertAndClearMarkers(_ context.Context, _ int, u scanner.MarkerUpdate, segs []string) (bool, error) {
+	if u.HasAnySegment() {
+		f.upserts = append(f.upserts, u)
+	}
+	if len(segs) > 0 {
+		f.clears = append(f.clears, segs)
+	}
 	return true, nil
 }
 
@@ -87,7 +103,11 @@ func TestSetFileMarkersWritesManual(t *testing.T) {
 
 func TestSetItemMarkersWritesPrimaryEpisodeFile(t *testing.T) {
 	writer := &fakeMarkerWriter{}
-	files := fakeMarkerFiles{episodeFiles: []*models.MediaFile{{ID: 8, Duration: 1800}}}
+	file := &models.MediaFile{ID: 8, Duration: 1800}
+	files := fakeMarkerFiles{
+		byID:         map[int]*models.MediaFile{8: file},
+		episodeFiles: []*models.MediaFile{file},
+	}
 	h := NewMarkersHandler(files, writer, nil, nil, nil, nil)
 
 	rec := httptest.NewRecorder()
@@ -101,6 +121,60 @@ func TestSetItemMarkersWritesPrimaryEpisodeFile(t *testing.T) {
 	}
 	if writer.upserts[0].RecapEnd == nil || *writer.upserts[0].RecapEnd != 45 {
 		t.Errorf("recap end = %v, want 45", writer.upserts[0].RecapEnd)
+	}
+}
+
+type fakeMarkerItemAccess map[string]error
+
+func (f fakeMarkerItemAccess) EnsureAccessible(_ context.Context, contentID string, _ catalog.AccessFilter) error {
+	return f[contentID]
+}
+
+type fakeMarkerEpisodeLookup map[string]*models.Episode
+
+func (f fakeMarkerEpisodeLookup) GetByID(_ context.Context, contentID string) (*models.Episode, error) {
+	return f[contentID], nil
+}
+
+func TestGetItemMarkersUsesFirstAuthorizedFile(t *testing.T) {
+	denied := &models.MediaFile{ID: 8, EpisodeID: "episode-denied", Duration: 1800}
+	allowed := &models.MediaFile{ID: 9, EpisodeID: "episode-allowed", Duration: 1800}
+	files := fakeMarkerFiles{
+		byID: map[int]*models.MediaFile{
+			8: denied,
+			9: allowed,
+		},
+		episodeFiles: []*models.MediaFile{denied, allowed},
+	}
+	h := NewMarkersHandler(files, nil, nil, nil, nil, nil)
+	h.Authorizer = &MediaFileAuthorizer{
+		FileResolver: files,
+		ItemAccess: fakeMarkerItemAccess{
+			"series-denied": catalog.ErrItemNotFound,
+		},
+		EpisodeLookup: fakeMarkerEpisodeLookup{
+			"episode-denied":  {ContentID: "episode-denied", SeriesID: "series-denied"},
+			"episode-allowed": {ContentID: "episode-allowed", SeriesID: "series-allowed"},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/markers/items/episode-1", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "episode-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	h.HandleGetItemMarkers(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body fileMarkersResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.FileID != allowed.ID {
+		t.Fatalf("file_id = %d, want first authorized file %d", body.FileID, allowed.ID)
 	}
 }
 
@@ -159,6 +233,15 @@ type fakeMarkerContributor struct{ outcomes []markers.ContributionOutcome }
 
 func (f fakeMarkerContributor) ContributeFile(context.Context, *models.MediaFile, markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
 	return f.outcomes, nil
+}
+
+type captureMarkerContributor struct {
+	opts markers.ContributeOptions
+}
+
+func (c *captureMarkerContributor) ContributeFile(_ context.Context, _ *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
+	c.opts = opts
+	return nil, nil
 }
 
 // signalContributor reports every ContributeFile call on a channel so a test
@@ -254,6 +337,36 @@ func TestContributeFileUsesSnakeCaseResponse(t *testing.T) {
 	}
 	if body.Outcomes[0]["retry_after_seconds"] != float64(30) {
 		t.Fatalf("retry_after_seconds = %v, want 30", body.Outcomes[0]["retry_after_seconds"])
+	}
+}
+
+func TestContributeFileDecodesUnknownLengthBody(t *testing.T) {
+	contributor := &captureMarkerContributor{}
+	h := NewMarkersHandler(
+		fakeMarkerFiles{file: &models.MediaFile{ID: 5, Duration: 1800}},
+		nil,
+		contributor,
+		nil,
+		nil,
+		nil,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/admin/files/5/contribute", strings.NewReader(`{"provider":"introdb","segments":["credits"]}`))
+	req.ContentLength = -1
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("fileId", "5")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	rec := httptest.NewRecorder()
+	h.HandleContributeFile(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if contributor.opts.Provider != "introdb" {
+		t.Fatalf("provider = %q, want introdb", contributor.opts.Provider)
+	}
+	if len(contributor.opts.Segments) != 1 || contributor.opts.Segments[0] != markers.MarkerKindCredits {
+		t.Fatalf("segments = %+v, want [credits]", contributor.opts.Segments)
 	}
 }
 

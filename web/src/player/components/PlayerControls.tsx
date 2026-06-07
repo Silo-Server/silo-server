@@ -349,6 +349,7 @@ export function PlayerControls({
                 className="player-utility-btn"
                 onClick={onToggleMarkerEdit}
                 aria-label="Edit markers"
+                aria-pressed={markerEditActive}
                 title="Edit markers"
                 data-active={markerEditActive ? "true" : "false"}
               >
