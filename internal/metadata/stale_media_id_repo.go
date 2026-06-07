@@ -61,7 +61,7 @@ func (r *StaleMediaIDRepository) Upsert(ctx context.Context, contentID, provider
 
 // staleMediaIDContentFKConstraint is the Postgres-auto-generated name of the
 // stale_media_ids.content_id → media_items(content_id) foreign key, declared
-// inline in migrations/036_stale_media_ids.up.sql (hence "{table}_{column}_fkey").
+// inline in migrations/sql/036_stale_media_ids.sql (hence "{table}_{column}_fkey").
 const staleMediaIDContentFKConstraint = "stale_media_ids_content_id_fkey"
 
 // resolveStaleUpsertError maps an Upsert error to the value Upsert should

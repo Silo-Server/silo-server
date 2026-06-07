@@ -1,2 +1,0 @@
-ALTER TABLE public.media_items
-ADD COLUMN IF NOT EXISTS keywords TEXT[] NOT NULL DEFAULT '{}'::TEXT[];

@@ -1,2 +1,0 @@
-ALTER TABLE playback_sessions_sync
-    ADD COLUMN IF NOT EXISTS position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0;

@@ -979,7 +979,7 @@ Expected: `healthy`.
 
 ```bash
 docker compose exec -T postgres psql -U silo -d silo -c \
-  "SELECT version, filename FROM schema_versions WHERE version=174;"
+  "SELECT version_id FROM public.goose_db_version WHERE version_id=174 AND is_applied;"
 docker compose exec -T postgres psql -U silo -d silo -c \
   "SELECT column_name FROM information_schema.columns WHERE table_name='autoscan_sources' AND column_name='label';"
 ```
