@@ -222,10 +222,11 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 		return nil, err
 	}
 
-	primaryAvailable, err := s.lookupAvailable(ctx, mediaType, []int{raw.ID})
+	primaryPresence, err := s.lookupAvailable(ctx, mediaType, []int{raw.ID})
 	if err != nil {
 		return nil, err
 	}
+	primaryMatch := primaryPresence[raw.ID]
 	primaryRequests, err := s.store.ListActiveByTMDB(ctx, mediaType, []int{raw.ID})
 	if err != nil {
 		return nil, err
@@ -258,8 +259,9 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 		Networks:            raw.Networks,
 		Director:            raw.Director,
 		Creators:            raw.Creators,
-		Availability:        availabilityValue(primaryAvailable[raw.ID]),
-		Request:             requestStateFor(viewer, policy, primaryAvailable[raw.ID], primaryRequests[raw.ID]),
+		Availability:        availabilityValue(primaryMatch.Available),
+		LibraryContentID:    primaryMatch.ContentID,
+		Request:             requestStateFor(viewer, policy, primaryMatch.Available, primaryRequests[raw.ID]),
 	}
 	if raw.TVDBID > 0 {
 		tvdb := raw.TVDBID
@@ -397,6 +399,9 @@ func (s *Service) ListMine(ctx context.Context, viewer Viewer, filter ListFilter
 	if err := s.attachTargets(ctx, reqs...); err != nil {
 		return nil, err
 	}
+	if err := s.attachLibraryContent(ctx, reqs...); err != nil {
+		return nil, err
+	}
 	return reqs, nil
 }
 
@@ -409,6 +414,9 @@ func (s *Service) ListAdmin(ctx context.Context, viewer Viewer, filter ListFilte
 		return nil, err
 	}
 	if err := s.attachTargets(ctx, reqs...); err != nil {
+		return nil, err
+	}
+	if err := s.attachLibraryContent(ctx, reqs...); err != nil {
 		return nil, err
 	}
 	return reqs, nil
@@ -430,6 +438,49 @@ func (s *Service) attachTargets(ctx context.Context, reqs ...*Request) error {
 	return nil
 }
 
+func (s *Service) attachLibraryContent(ctx context.Context, reqs ...*Request) error {
+	if s == nil || s.presence == nil || len(reqs) == 0 {
+		return nil
+	}
+
+	type requestKey struct {
+		mediaType MediaType
+		tmdbID    int
+	}
+
+	candidatesByType := map[MediaType][]PresenceCandidate{}
+	requestsByKey := map[requestKey][]*Request{}
+	seen := map[requestKey]bool{}
+	for _, req := range reqs {
+		if req == nil || req.TMDBID <= 0 {
+			continue
+		}
+		key := requestKey{mediaType: req.MediaType, tmdbID: req.TMDBID}
+		requestsByKey[key] = append(requestsByKey[key], req)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		candidatesByType[req.MediaType] = append(candidatesByType[req.MediaType], requestPresenceCandidate(*req))
+	}
+
+	for mediaType, candidates := range candidatesByType {
+		matches, err := s.lookupPresence(ctx, mediaType, candidates)
+		if err != nil {
+			return err
+		}
+		for tmdbID, match := range matches {
+			if !match.Available || strings.TrimSpace(match.ContentID) == "" {
+				continue
+			}
+			for _, req := range requestsByKey[requestKey{mediaType: mediaType, tmdbID: tmdbID}] {
+				req.LibraryContentID = match.ContentID
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Request, error) {
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
@@ -442,6 +493,9 @@ func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Re
 		return nil, ErrForbidden
 	}
 	if err := s.attachTargets(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.attachLibraryContent(ctx, req); err != nil {
 		return nil, err
 	}
 	return req, nil
@@ -905,7 +959,7 @@ func (s *Service) enrichPage(ctx context.Context, viewer Viewer, raw *tmdb.Media
 		idsByType[mediaType] = append(idsByType[mediaType], item.ID)
 	}
 
-	available := map[MediaType]map[int]bool{}
+	available := map[MediaType]map[int]PresenceMatch{}
 	active := map[MediaType]map[int]*Request{}
 	for mediaType, ids := range idsByType {
 		presence, err := s.lookupAvailable(ctx, mediaType, ids)
@@ -931,21 +985,22 @@ func (s *Service) enrichPage(ctx context.Context, viewer Viewer, raw *tmdb.Media
 		if err != nil || item.ID <= 0 {
 			continue
 		}
-		isAvailable := available[mediaType][item.ID]
+		match := available[mediaType][item.ID]
 		activeRequest := active[mediaType][item.ID]
 		out.Results = append(out.Results, MediaResult{
-			MediaType:    mediaType,
-			TMDBID:       item.ID,
-			Title:        item.Title,
-			Year:         item.Year,
-			Overview:     item.Overview,
-			PosterPath:   item.PosterPath,
-			BackdropPath: item.BackdropPath,
-			ReleaseDate:  item.ReleaseDate,
-			Popularity:   item.Popularity,
-			VoteAverage:  item.VoteAverage,
-			Availability: availabilityValue(isAvailable),
-			Request:      requestStateFor(viewer, policy, isAvailable, activeRequest),
+			MediaType:        mediaType,
+			TMDBID:           item.ID,
+			Title:            item.Title,
+			Year:             item.Year,
+			Overview:         item.Overview,
+			PosterPath:       item.PosterPath,
+			BackdropPath:     item.BackdropPath,
+			ReleaseDate:      item.ReleaseDate,
+			Popularity:       item.Popularity,
+			VoteAverage:      item.VoteAverage,
+			Availability:     availabilityValue(match.Available),
+			LibraryContentID: match.ContentID,
+			Request:          requestStateFor(viewer, policy, match.Available, activeRequest),
 		})
 	}
 	return out, nil
@@ -956,14 +1011,6 @@ func (s *Service) lookupPresence(ctx context.Context, mediaType MediaType, candi
 		return map[int]PresenceMatch{}, nil
 	}
 	return s.presence.Lookup(ctx, mediaType, candidates)
-}
-
-func availabilityBoolMap(matches map[int]PresenceMatch) map[int]bool {
-	out := map[int]bool{}
-	for id, match := range matches {
-		out[id] = match.Available
-	}
-	return out
 }
 
 func requestPresenceCandidate(req Request) PresenceCandidate {
@@ -1057,9 +1104,9 @@ func tmdbMediaType(mediaType MediaType) string {
 	return "movie"
 }
 
-func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids []int) (map[int]bool, error) {
+func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids []int) (map[int]PresenceMatch, error) {
 	if s.presence == nil {
-		return map[int]bool{}, nil
+		return map[int]PresenceMatch{}, nil
 	}
 	candidates := make([]PresenceCandidate, 0, len(ids))
 	for _, id := range ids {
@@ -1072,7 +1119,7 @@ func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids 
 	if err != nil {
 		return nil, err
 	}
-	return availabilityBoolMap(matches), nil
+	return matches, nil
 }
 
 func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) {

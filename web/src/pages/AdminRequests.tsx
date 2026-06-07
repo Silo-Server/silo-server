@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Library,
   Plug,
   Plus,
   RefreshCw,
@@ -353,6 +354,15 @@ function RequestQueueRow({
                 className="hover:text-foreground hover:underline"
               >
                 {requesterLabel}
+              </Link>
+            ) : null}
+            {request.library_content_id ? (
+              <Link
+                to={`/item/${encodeURIComponent(request.library_content_id)}`}
+                className="hover:text-foreground inline-flex items-center gap-1 hover:underline"
+              >
+                <Library className="h-3 w-3" />
+                Library
               </Link>
             ) : null}
           </div>
