@@ -65,7 +65,7 @@ function useServerActivityData() {
 
 function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
   const isNonLive = connectionState !== "live";
-  const previousIsNonLiveRef = useRef(isNonLive);
+  const previousIsNonLiveRef = useRef(false);
   const [connectionProblemState, setConnectionProblemState] = useState(false);
 
   useEffect(() => {
