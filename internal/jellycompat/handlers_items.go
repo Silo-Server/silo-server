@@ -1183,33 +1183,67 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// The scan stays on list-level data (per-item GetItemDetail fanout over
+	// the FULL next-up list was 5N DB roundtrips for users with long lists);
+	// only the sliced page below is upgraded to detail when the client asked
+	// for detail-level Fields — see upgradeProgressPageToDetail for why the
+	// listing's MediaSources are load-bearing for Infuse/SenPlayer.
+	pageIDs := make([]string, 0, len(results))
 	items := make([]baseItemDTO, 0, len(results))
 	for _, res := range results {
 		target, ok := episodeTargets[res.ContentID]
 		if !ok {
 			continue
 		}
-		// NextUp deliberately serves list-level data even when the client
-		// requests Fields=People|Chapters|MediaStreams|MediaSources, mirroring
-		// the Resume hydrator (handlers_items.go ~L1721). Per-item
-		// GetItemDetail fanout was 5N DB roundtrips for users with long
-		// next-up lists, and the detail data was never load-bearing for the
-		// row UX — clients refetch MediaSources via /Items/{id}/PlaybackInfo
-		// on play.
 		dto := h.mapper.itemFromList(target.Item, favorites[res.ContentID], progress[res.ContentID], query.requestedFields)
 		h.applyCompatEpisodeTarget(&dto, target)
 		stubDetailListFields(&dto, query.requestedFields)
+		pageIDs = append(pageIDs, res.ContentID)
 		items = append(items, dto)
 	}
 
 	total := len(items)
 	items = sliceBaseItems(items, query.startIndex, query.limit)
+	pageIDs = slicePageIDs(pageIDs, query.startIndex, query.limit)
+	if query.needsDetailFields {
+		for i := range items {
+			if i >= maxDetailUpgrades || i >= len(pageIDs) {
+				break
+			}
+			detail, detailErr := h.content.GetItemDetail(r.Context(), session, pageIDs[i], nil)
+			if detailErr != nil {
+				continue
+			}
+			h.rememberDetailImages(*detail)
+			dto := h.mapper.itemFromDetailWithFields(*detail, favorites[pageIDs[i]], progress[pageIDs[i]], query.requestedFields)
+			if target, ok := episodeTargets[pageIDs[i]]; ok {
+				h.applyCompatEpisodeTarget(&dto, target)
+			}
+			items[i] = dto
+		}
+	}
 	applyImageTypeLimit(items, query.imageTypeLimit)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: total,
 		StartIndex:       query.startIndex,
 	})
+}
+
+// slicePageIDs applies sliceBaseItems' bounds to the parallel content-id
+// slice so page positions stay aligned after StartIndex/Limit slicing.
+func slicePageIDs(ids []string, startIndex, limit int) []string {
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	if startIndex >= len(ids) {
+		return []string{}
+	}
+	if limit <= 0 {
+		limit = len(ids)
+	}
+	end := min(startIndex+limit, len(ids))
+	return ids[startIndex:end]
 }
 
 // HandleUpcoming serves GET /Shows/Upcoming.
@@ -1722,9 +1756,19 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 }
 
 type progressHydratedItem struct {
-	itemType string
-	dto      baseItemDTO
+	itemType   string
+	contentID  string
+	isFavorite bool
+	entry      upstreamProgress
+	target     *compatEpisodeTarget
+	dto        baseItemDTO
 }
+
+// maxDetailUpgrades caps how many returned-page items get re-mapped through
+// the per-item detail path when the client requested detail-level Fields.
+// Entries past the cap keep their stubbed list-level DTO. Guardrail against
+// absurd client limits — normal Resume/NextUp requests are 20-40 items.
+const maxDetailUpgrades = 100
 
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
 	if len(typeSet) == 0 && libraryID == nil && !query.enableTotalRecordCount {
@@ -1733,7 +1777,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			batchSize = 48
 		}
 
-		result := make([]baseItemDTO, 0, query.limit)
+		result := make([]progressHydratedItem, 0, query.limit)
 		offset := query.startIndex
 		for {
 			progressEntries, err := h.userData.ListProgress(ctx, session, status, batchSize, offset)
@@ -1752,14 +1796,14 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 				if len(result) >= query.limit {
 					break
 				}
-				result = append(result, item.dto)
+				result = append(result, item)
 			}
 			if len(result) >= query.limit || len(progressEntries) < batchSize {
 				break
 			}
 			offset += len(progressEntries)
 		}
-		return result, 0, nil
+		return h.finishProgressPage(ctx, session, result, query, libraryID), 0, nil
 	}
 
 	batchSize := min(max(query.limit*3, 48), 200)
@@ -1767,7 +1811,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		batchSize = 48
 	}
 
-	items := make([]baseItemDTO, 0, query.limit)
+	items := make([]progressHydratedItem, 0, query.limit)
 	matchedCount := 0
 	offset := 0
 
@@ -1789,7 +1833,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 				continue
 			}
 			if matchedCount >= query.startIndex && len(items) < query.limit {
-				items = append(items, item.dto)
+				items = append(items, item)
 			}
 			matchedCount++
 		}
@@ -1807,7 +1851,49 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 	if query.enableTotalRecordCount {
 		total = matchedCount
 	}
-	return items, total, nil
+	return h.finishProgressPage(ctx, session, items, query, libraryID), total, nil
+}
+
+// finishProgressPage upgrades the returned page to detail-mapped DTOs when
+// the client asked for detail-level Fields, then unwraps to the DTO slice.
+func (h *ItemsHandler) finishProgressPage(ctx context.Context, session *Session, page []progressHydratedItem, query itemsQuery, libraryID *int) []baseItemDTO {
+	h.upgradeProgressPageToDetail(ctx, session, page, query, libraryID)
+	dtos := make([]baseItemDTO, 0, len(page))
+	for _, item := range page {
+		dtos = append(dtos, item.dto)
+	}
+	return dtos
+}
+
+// upgradeProgressPageToDetail re-maps the returned page of progress rows
+// through the detail path when the client requested detail-level Fields
+// (e.g. MediaSources). The scan loop in loadProgressPage stays on list-level
+// data so type filtering over long in-progress lists never fans out — the
+// per-ENTRY fanout was the 38s timeout in error-report-2026-05-08.md §6 —
+// but the returned page is bounded by the request limit, so this costs the
+// same as HandleLatest's existing per-item detail path. The listing's
+// MediaSources ARE load-bearing for some clients: Infuse and SenPlayer build
+// their Continue Watching rows from them and discard entries served only the
+// list-level stub.
+func (h *ItemsHandler) upgradeProgressPageToDetail(ctx context.Context, session *Session, page []progressHydratedItem, query itemsQuery, libraryID *int) {
+	if !query.needsDetailFields {
+		return
+	}
+	for i := range page {
+		if i >= maxDetailUpgrades {
+			break
+		}
+		detail, err := h.content.GetItemDetail(ctx, session, page[i].contentID, libraryID)
+		if err != nil {
+			continue
+		}
+		h.rememberDetailImages(*detail)
+		dto := h.mapper.itemFromDetailWithFields(*detail, page[i].isFavorite, &page[i].entry, query.requestedFields)
+		if page[i].target != nil {
+			h.applyCompatEpisodeTarget(&dto, *page[i].target)
+		}
+		page[i].dto = dto
+	}
 }
 
 func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Session, entries []upstreamProgress, fields map[string]bool, libraryID *int) ([]progressHydratedItem, error) {
@@ -1843,8 +1929,11 @@ func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Sessio
 			dto := h.mapper.itemFromList(item, favorites[entry.MediaItemID], &entry, fields)
 			stubDetailListFields(&dto, fields)
 			result = append(result, progressHydratedItem{
-				itemType: strings.ToLower(item.Type),
-				dto:      dto,
+				itemType:   strings.ToLower(item.Type),
+				contentID:  entry.MediaItemID,
+				isFavorite: favorites[entry.MediaItemID],
+				entry:      entry,
+				dto:        dto,
 			})
 			continue
 		}
@@ -1853,8 +1942,12 @@ func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Sessio
 			h.applyCompatEpisodeTarget(&dto, target)
 			stubDetailListFields(&dto, fields)
 			result = append(result, progressHydratedItem{
-				itemType: "episode",
-				dto:      dto,
+				itemType:   "episode",
+				contentID:  entry.MediaItemID,
+				isFavorite: favorites[entry.MediaItemID],
+				entry:      entry,
+				target:     &target,
+				dto:        dto,
 			})
 		}
 	}
