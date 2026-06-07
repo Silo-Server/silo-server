@@ -2,6 +2,7 @@ package requests
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -74,15 +75,13 @@ func NewPluginRouterProvider(r RouterClientResolver) RequestRouterProvider {
 	return &pluginRouterProvider{resolver: r}
 }
 
-func routerItoa(n int) string { return strconv.Itoa(n) }
-
 func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 	ids := map[string]string{}
 	if req.TMDBID != 0 {
-		ids["tmdb"] = routerItoa(req.TMDBID)
+		ids["tmdb"] = strconv.Itoa(req.TMDBID)
 	}
 	if req.TVDBID != nil {
-		ids["tvdb"] = routerItoa(*req.TVDBID)
+		ids["tvdb"] = strconv.Itoa(*req.TVDBID)
 	}
 	if req.IMDbID != "" {
 		ids["imdb"] = req.IMDbID
@@ -102,17 +101,24 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 	}
 }
 
-func routerProtoConn(c ResolvedRouterConnection) *pluginv1.RouterConnection {
-	cfg, _ := structpb.NewStruct(c.Config)
-	return &pluginv1.RouterConnection{Id: c.ID, BaseUrl: c.BaseURL, ApiKey: c.APIKey, Config: cfg}
+func routerProtoConn(c ResolvedRouterConnection) (*pluginv1.RouterConnection, error) {
+	cfg, err := structpb.NewStruct(c.Config)
+	if err != nil {
+		return nil, fmt.Errorf("router: encode connection %s config: %w", c.ID, err)
+	}
+	return &pluginv1.RouterConnection{Id: c.ID, BaseUrl: c.BaseURL, ApiKey: c.APIKey, Config: cfg}, nil
 }
 
-func routerProtoConns(conns []ResolvedRouterConnection) []*pluginv1.RouterConnection {
+func routerProtoConns(conns []ResolvedRouterConnection) ([]*pluginv1.RouterConnection, error) {
 	out := make([]*pluginv1.RouterConnection, 0, len(conns))
 	for _, c := range conns {
-		out = append(out, routerProtoConn(c))
+		pc, err := routerProtoConn(c)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pc)
 	}
-	return out
+	return out, nil
 }
 
 func (p *pluginRouterProvider) Fulfill(ctx context.Context, installationID int, capabilityID string, req Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
@@ -124,8 +130,12 @@ func (p *pluginRouterProvider) Fulfill(ctx context.Context, installationID int, 
 	for _, q := range qualities {
 		qs = append(qs, string(q))
 	}
+	pconns, err := routerProtoConns(conns)
+	if err != nil {
+		return nil, "", err
+	}
 	resp, err := client.Fulfill(ctx, &pluginv1.FulfillRequest{
-		CapabilityId: capabilityID, Request: routerDescriptor(req), Qualities: qs, Connections: routerProtoConns(conns),
+		CapabilityId: capabilityID, Request: routerDescriptor(req), Qualities: qs, Connections: pconns,
 	})
 	if err != nil {
 		return nil, "", err
@@ -150,8 +160,12 @@ func (p *pluginRouterProvider) CheckStatus(ctx context.Context, installationID i
 	for _, t := range targets {
 		refs = append(refs, &pluginv1.TargetRef{Quality: string(t.Quality), ConnectionId: t.ConnectionID, ExternalId: t.ExternalID})
 	}
+	pconns, err := routerProtoConns(conns)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := client.CheckStatus(ctx, &pluginv1.CheckStatusRequest{
-		CapabilityId: capabilityID, Request: routerDescriptor(req), Targets: refs, Connections: routerProtoConns(conns),
+		CapabilityId: capabilityID, Request: routerDescriptor(req), Targets: refs, Connections: pconns,
 	})
 	if err != nil {
 		return nil, err
@@ -171,8 +185,12 @@ func (p *pluginRouterProvider) ListConfigOptions(ctx context.Context, installati
 	if err != nil {
 		return nil, err
 	}
+	pconn, err := routerProtoConn(conn)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := client.ListConfigOptions(ctx, &pluginv1.ListConfigOptionsRequest{
-		CapabilityId: capabilityID, Connection: routerProtoConn(conn),
+		CapabilityId: capabilityID, Connection: pconn,
 	})
 	if err != nil {
 		return nil, err
@@ -193,8 +211,12 @@ func (p *pluginRouterProvider) TestConnection(ctx context.Context, installationI
 	if err != nil {
 		return false, "", err
 	}
+	pconn, err := routerProtoConn(conn)
+	if err != nil {
+		return false, "", err
+	}
 	resp, err := client.TestConnection(ctx, &pluginv1.TestConnectionRequest{
-		CapabilityId: capabilityID, Connection: routerProtoConn(conn),
+		CapabilityId: capabilityID, Connection: pconn,
 	})
 	if err != nil {
 		return false, "", err

@@ -794,6 +794,15 @@ func validateInstance(in *Integration) error {
 	if in.InstallationID == nil {
 		return fmt.Errorf("%w: installation_id is required", ErrInvalidInput)
 	}
+	is4k, _ := in.PluginConfig["is_4k"].(bool)
+	isDefault, _ := in.PluginConfig["is_default"].(bool)
+	isDefault4k, _ := in.PluginConfig["is_default_4k"].(bool)
+	if isDefault && is4k {
+		return fmt.Errorf("%w: the HD default cannot be a 4K server", ErrInvalidInput)
+	}
+	if isDefault4k && !is4k {
+		return fmt.Errorf("%w: the 4K default must be a 4K server", ErrInvalidInput)
+	}
 	return nil
 }
 
@@ -1141,6 +1150,7 @@ func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType
 	}
 	for _, in := range instances {
 		if in.Enabled && in.CapabilityID == "request_router.v1" && in.InstallationID != nil &&
+			strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.APIKeyRef) != "" &&
 			integrationSupportsMediaType(in, mediaType) {
 			return true, nil
 		}
