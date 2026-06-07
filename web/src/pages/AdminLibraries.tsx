@@ -5,7 +5,6 @@ import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
   AdminJob,
   Library,
-  LibraryMetadataMatchQueueStatus,
   LibraryMountCheckResponse,
   LibraryRoot,
   LibrarySkippedRoot,
@@ -30,7 +29,6 @@ import {
   useRefreshLibraryMetadata,
   useCancelAdminJob,
   useConfirmEmptyRootCleanup,
-  useLibraryMetadataMatchQueues,
   useUploadLibraryPoster,
   useDeleteLibraryPoster,
   useUnmatchedLibraryItems,
@@ -133,7 +131,6 @@ export default function AdminLibraries() {
   const { data: libraries = [], isLoading } = useAdminLibraries();
   const { data: activeScans = [] } = useActiveScans();
   const { data: libraryRefreshJobs = [] } = useLibraryRefreshJobs();
-  const { data: metadataMatchQueues = [] } = useLibraryMetadataMatchQueues();
   const { data: skippedRoots = [] } = useSkippedLibraryRoots();
   const { data: staleIDs = [] } = useStaleMediaIDs();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -226,15 +223,6 @@ export default function AdminLibraries() {
     }
     return scansByLibraryID;
   }, [activeScans]);
-  const metadataMatchQueueByLibraryId = useMemo(() => {
-    const queuesByLibraryID = new Map<number, LibraryMetadataMatchQueueStatus>();
-    for (const queue of metadataMatchQueues) {
-      if (queue.total_count > 0) {
-        queuesByLibraryID.set(queue.library_id, queue);
-      }
-    }
-    return queuesByLibraryID;
-  }, [metadataMatchQueues]);
   const activeScanGroups = useMemo(() => {
     return Array.from(activeScansByLibraryId.entries())
       .map(([libraryID, scans]) => {
@@ -434,8 +422,6 @@ export default function AdminLibraries() {
                   const isScanning = scanMutation.isPending && scanMutation.variables === lib.id;
                   const activeRefreshJob = activeRefreshJobsByLibraryId.get(lib.id);
                   const activeLibraryScans = activeScansByLibraryId.get(lib.id) ?? [];
-                  const metadataMatchQueue = metadataMatchQueueByLibraryId.get(lib.id);
-                  const hasMetadataMatchQueue = (metadataMatchQueue?.total_count ?? 0) > 0;
                   const runningLibraryScans = activeLibraryScans.filter(
                     (scan) => scan.status === "running",
                   ).length;
@@ -486,11 +472,6 @@ export default function AdminLibraries() {
                             ) : null}
                             {queuedLibraryScans > 0 ? (
                               <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
-                            ) : null}
-                            {hasMetadataMatchQueue ? (
-                              <Badge variant="secondary">
-                                {metadataMatchQueue?.total_count.toLocaleString()} matching
-                              </Badge>
                             ) : null}
                             {lib.scan_warning_code === "empty_root" ? (
                               <Badge variant="destructive">Empty root guarded</Badge>
@@ -1615,6 +1596,7 @@ function RootOverrideDialog({
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
 
 function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoot[] }) {
+  const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const { sortField, sortDir, toggle } = useSort<SkippedSortField>("last_seen", "desc");
@@ -1653,157 +1635,143 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
   const pag = usePagination(sorted);
 
   return (
-    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
-      <div className="flex items-start gap-3 px-5 pt-5 pb-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-          <AlertTriangle className="h-4 w-4 text-amber-500" />
-        </div>
-        <div className="space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">Troubleshooting</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Roots where the inferred canonical folder lacks embedded provider IDs.
-          </p>
-        </div>
-        <Badge variant="secondary" className="ml-auto text-[11px] tabular-nums">
-          {skippedRoots.length}
-        </Badge>
+    <CollapsibleDiagnosticsSection
+      title="Troubleshooting"
+      description="Roots where the inferred canonical folder lacks embedded provider IDs."
+      count={skippedRoots.length}
+      icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <div className="relative mb-2">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Input
+          placeholder="Filter by path, library, or reason..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            pag.setPage(0);
+          }}
+          className="h-8 pl-8 text-xs"
+        />
       </div>
-
-      <div className="px-3 pb-3">
-        <div className="relative mb-2">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
-          <Input
-            placeholder="Filter by path, library, or reason..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              pag.setPage(0);
-            }}
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
-        <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <SortableHead
-                  field="root_path"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Item
-                </SortableHead>
-                <SortableHead
-                  field="library"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Library
-                </SortableHead>
-                <SortableHead
-                  field="reason"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Reason
-                </SortableHead>
-                <TableHead className="text-right">Files</TableHead>
-                <SortableHead
-                  field="first_seen"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  First seen
-                </SortableHead>
-                <SortableHead
-                  field="last_seen"
-                  activeField={sortField}
-                  activeDir={sortDir}
-                  onSort={toggle}
-                >
-                  Last seen
-                </SortableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pag.rows.map((root) => {
-                const rowKey = `${root.library_id}:${root.root_path}`;
-                const isExpanded = expandedKey === rowKey;
-                return (
-                  <Fragment key={rowKey}>
-                    <TableRow
-                      className="cursor-pointer"
-                      onClick={() => setExpandedKey(isExpanded ? null : rowKey)}
-                    >
-                      <TableCell className="max-w-[20rem]">
-                        <div className="flex items-center gap-2">
-                          <ChevronRight
-                            className={cn(
-                              "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
-                              isExpanded && "rotate-90",
-                            )}
-                          />
-                          <span className="truncate text-sm font-medium">
-                            {root.root_path.split("/").filter(Boolean).pop()}
-                          </span>
+      <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <SortableHead
+                field="root_path"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Item
+              </SortableHead>
+              <SortableHead
+                field="library"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Library
+              </SortableHead>
+              <SortableHead
+                field="reason"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Reason
+              </SortableHead>
+              <TableHead className="text-right">Files</TableHead>
+              <SortableHead
+                field="first_seen"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                First seen
+              </SortableHead>
+              <SortableHead
+                field="last_seen"
+                activeField={sortField}
+                activeDir={sortDir}
+                onSort={toggle}
+              >
+                Last seen
+              </SortableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pag.rows.map((root) => {
+              const rowKey = `${root.library_id}:${root.root_path}`;
+              const isExpanded = expandedKey === rowKey;
+              return (
+                <Fragment key={rowKey}>
+                  <TableRow
+                    className="cursor-pointer"
+                    onClick={() => setExpandedKey(isExpanded ? null : rowKey)}
+                  >
+                    <TableCell className="max-w-[20rem]">
+                      <div className="flex items-center gap-2">
+                        <ChevronRight
+                          className={cn(
+                            "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
+                            isExpanded && "rotate-90",
+                          )}
+                        />
+                        <span className="truncate text-sm font-medium">
+                          {root.root_path.split("/").filter(Boolean).pop()}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm">{root.library_name}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className="border-warning/30 bg-warning/5 text-warning"
+                      >
+                        {root.reason}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                      {root.file_count}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs tabular-nums">
+                      {new Date(root.first_seen_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs tabular-nums">
+                      {new Date(root.last_seen_at).toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                  {isExpanded && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
+                        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+                          <span className="text-muted-foreground font-medium">Root path</span>
+                          <code className="font-mono break-all select-all">{root.root_path}</code>
+                          {root.sample_file_path && (
+                            <>
+                              <span className="text-muted-foreground font-medium">Sample file</span>
+                              <code className="font-mono break-all select-all">
+                                {root.sample_file_path}
+                              </code>
+                            </>
+                          )}
+                          <span className="text-muted-foreground font-medium">Files affected</span>
+                          <span>{root.file_count}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{root.library_name}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className="border-warning/30 bg-warning/5 text-warning"
-                        >
-                          {root.reason}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
-                        {root.file_count}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs tabular-nums">
-                        {new Date(root.first_seen_at).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs tabular-nums">
-                        {new Date(root.last_seen_at).toLocaleString()}
-                      </TableCell>
                     </TableRow>
-                    {isExpanded && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
-                          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                            <span className="text-muted-foreground font-medium">Root path</span>
-                            <code className="font-mono break-all select-all">{root.root_path}</code>
-                            {root.sample_file_path && (
-                              <>
-                                <span className="text-muted-foreground font-medium">
-                                  Sample file
-                                </span>
-                                <code className="font-mono break-all select-all">
-                                  {root.sample_file_path}
-                                </code>
-                              </>
-                            )}
-                            <span className="text-muted-foreground font-medium">
-                              Files affected
-                            </span>
-                            <span>{root.file_count}</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-        <PaginationBar {...pag} />
+                  )}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
       </div>
-    </section>
+      <PaginationBar {...pag} />
+    </CollapsibleDiagnosticsSection>
   );
 }
 
