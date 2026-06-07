@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -152,6 +153,22 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 		}
 	}
 	return t
+}
+
+var errTranscode4KDisallowed = errors.New("4k video transcode disallowed by server settings")
+
+// allow4KVideoTranscode reads the allow_4k_transcode server setting,
+// defaulting to deny like the native playback handler.
+func (h *PlaybackHandler) allow4KVideoTranscode(ctx context.Context) bool {
+	if h.SettingsRepo == nil {
+		return false
+	}
+	v, _ := h.SettingsRepo.Get(ctx, "allow_4k_transcode")
+	return v == "true"
+}
+
+func is4KResolution(res string) bool {
+	return access.CompareQuality(res, "2160p") >= 0
 }
 
 // NewPlaybackHandler creates a playback handler.
@@ -300,6 +317,9 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	initialSeekSeconds float64,
 	transcodeNodeURL string,
 ) error {
+	if !source.TranscodeAudio && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
+		return errTranscode4KDisallowed
+	}
 	if d := float64(source.Version.Duration); d > 0 && initialSeekSeconds > d {
 		initialSeekSeconds = d
 	}
@@ -416,8 +436,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
 
+	allow4KTranscode := h.allow4KVideoTranscode(r.Context())
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req)
+		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
 		if req.MediaSourceID != "" && source.ID != req.MediaSourceID {
 			continue
 		}
@@ -513,6 +534,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	version catalog.FileVersion,
 	profile DeviceProfile,
 	req playbackInfoRequest,
+	allow4KTranscode bool,
 ) PlaybackMediaSource {
 	sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
 	enableDirectPlay := boolDefault(req.EnableDirectPlay, true)
@@ -531,6 +553,12 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		allowAudioCopy &&
 		audioSupported
 	supportsTranscoding := boolDefault(req.EnableTranscoding, true) && profile.SupportsTranscoding(version)
+	// Don't offer full video encodes of 4K sources when allow_4k_transcode is
+	// off. Audio-only transcodes (transcodeAudio) stream-copy the video and
+	// stay available.
+	if supportsTranscoding && !transcodeAudio && !allow4KTranscode && is4KResolution(version.Resolution) {
+		supportsTranscoding = false
+	}
 
 	audioIndex := defaultAudioStreamIndex(version)
 	subtitleIndex := defaultSubtitleStreamIndex(version)
