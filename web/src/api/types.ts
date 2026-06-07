@@ -1731,7 +1731,10 @@ export interface RequestIntegration {
   anime_quality_profile_id?: number | null;
   anime_root_folder?: string;
   anime_tags: number[];
-  options: Record<string, unknown>;
+  // Legacy misc-toggle blob. The client no longer writes this (plugin_config is
+  // the source of truth); kept optional only for backward-compatible reads of
+  // older rows that predate the two-tier refactor.
+  options?: Record<string, unknown>;
   // Two-tier plugin-driven connection model. Generic fields above are owned by
   // the host; the arr-specific config now lives in plugin_config. Optional for
   // backward-compatible reads of legacy rows that predate the refactor.

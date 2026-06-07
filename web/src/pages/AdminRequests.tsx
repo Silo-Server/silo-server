@@ -785,14 +785,17 @@ function IntegrationEditor({
   const selectedAnimeTags = parseTags(form.anime_tags);
 
   // Default-select the only installed request-router plugin once installations
-  // have loaded, when this connection has no installation set yet.
+  // have loaded, when this connection has no installation set yet. Depend on a
+  // stable scalar (not the array identity) so a refetch returning the same single
+  // plugin does not re-fire and re-select after a deliberate clear.
+  const soleInstallationID =
+    installations.length === 1 ? String(installations[0]?.installationID) : undefined;
   useEffect(() => {
-    const only = installations.length === 1 ? installations[0] : undefined;
-    if (form.installation_id || !only) return;
-    onChange({ installation_id: String(only.installationID) });
+    if (form.installation_id || soleInstallationID === undefined) return;
+    onChange({ installation_id: soleInstallationID });
     // onChange identity is stable per card; intentionally depend on the data only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.installation_id, installations]);
+  }, [form.installation_id, soleInstallationID]);
 
   const selectedInstallationID = Number(form.installation_id);
   const hasInstallation = Number.isInteger(selectedInstallationID) && selectedInstallationID > 0;
@@ -1273,18 +1276,20 @@ function integrationToForm(
   const options = integration?.options ?? {};
   const config = Object.keys(pluginConfig).length > 0 ? pluginConfig : options;
 
-  const rootFolder = stringConfig(pluginConfig, "root_folder", integration?.root_folder ?? "");
+  const rootFolderFallback = integration?.root_folder ?? "";
+  // stringConfig's old truthiness guard preserved: empty stored value falls back.
+  const rootFolder =
+    stringOption(pluginConfig, "root_folder", rootFolderFallback) || rootFolderFallback;
   const qualityProfileID = numberConfig(
     pluginConfig,
     "quality_profile_id",
     integration?.quality_profile_id ?? undefined,
   );
   const tags = numberArrayConfig(pluginConfig, "tags", integration?.tags ?? []);
-  const animeRootFolder = stringConfig(
-    pluginConfig,
-    "anime_root_folder",
-    integration?.anime_root_folder ?? "",
-  );
+  const animeRootFolderFallback = integration?.anime_root_folder ?? "";
+  const animeRootFolder =
+    stringOption(pluginConfig, "anime_root_folder", animeRootFolderFallback) ||
+    animeRootFolderFallback;
   const animeQualityProfileID = numberConfig(
     pluginConfig,
     "anime_quality_profile_id",
@@ -1297,16 +1302,17 @@ function integrationToForm(
     name: integration?.name ?? "",
     kind,
     enabled: integration?.enabled ?? true,
-    is_4k: boolConfig(pluginConfig, "is_4k", integration?.is_4k ?? false),
-    is_default: boolConfig(pluginConfig, "is_default", integration?.is_default ?? false),
-    is_default_4k: boolConfig(pluginConfig, "is_default_4k", integration?.is_default_4k ?? false),
+    is_4k: boolOption(pluginConfig, "is_4k", integration?.is_4k ?? false),
+    is_default: boolOption(pluginConfig, "is_default", integration?.is_default ?? false),
+    is_default_4k: boolOption(pluginConfig, "is_default_4k", integration?.is_default_4k ?? false),
     base_url: integration?.base_url ?? "",
     api_key_ref: "",
     root_folder: rootFolder,
-    quality_profile_id: qualityProfileID ? String(qualityProfileID) : "",
+    quality_profile_id: qualityProfileID === undefined ? "" : String(qualityProfileID),
     tags: tags.join(", "),
-    anime_enabled: boolConfig(pluginConfig, "anime_enabled", integration?.anime_enabled ?? false),
-    anime_quality_profile_id: animeQualityProfileID ? String(animeQualityProfileID) : "",
+    anime_enabled: boolOption(pluginConfig, "anime_enabled", integration?.anime_enabled ?? false),
+    anime_quality_profile_id:
+      animeQualityProfileID === undefined ? "" : String(animeQualityProfileID),
     anime_root_folder: animeRootFolder,
     anime_tags: animeTags.join(", "),
     search_on_add: boolOption(config, "search_on_add", true),
@@ -1356,19 +1362,12 @@ function formToIntegration(form: IntegrationFormState): RequestIntegration {
     pluginConfig.minimum_availability = form.minimum_availability.trim() || "released";
   }
 
-  // options mirrors the misc toggles for backward-compatible reads of older rows.
-  const options: Record<string, unknown> = {
-    search_on_add: form.search_on_add,
-  };
-  if (form.kind === "sonarr") {
-    options.series_type = form.series_type.trim() || "standard";
-    options.season_folder = form.season_folder;
-  } else {
-    options.minimum_availability = form.minimum_availability.trim() || "released";
-  }
-
   const installationID = Number(form.installation_id);
 
+  // The legacy top-level arr fields below (kind/is_default/is_default_4k/is_4k/
+  // root_folder/quality_profile_id/tags/anime_*) are intentionally still sent:
+  // the server's default-clearing and admin grouping read them, pending the staged
+  // column-cleanup migration. plugin_config is the source of truth for fulfillment.
   return {
     id: form.id,
     name: form.name.trim(),
@@ -1386,7 +1385,6 @@ function formToIntegration(form: IntegrationFormState): RequestIntegration {
     anime_quality_profile_id: resolvedAnimeQualityProfileID,
     anime_root_folder: animeRootFolder || undefined,
     anime_tags: animeTags,
-    options,
     capability_id: REQUEST_ROUTER_CAPABILITY,
     installation_id:
       Number.isInteger(installationID) && installationID > 0 ? installationID : undefined,
@@ -1682,14 +1680,6 @@ function boolOption(options: Record<string, unknown>, key: string, fallback: boo
 
 function stringOption(options: Record<string, unknown>, key: string, fallback: string): string {
   return typeof options[key] === "string" ? String(options[key]) : fallback;
-}
-
-function boolConfig(config: Record<string, unknown>, key: string, fallback: boolean): boolean {
-  return typeof config[key] === "boolean" ? Boolean(config[key]) : fallback;
-}
-
-function stringConfig(config: Record<string, unknown>, key: string, fallback: string): string {
-  return typeof config[key] === "string" && config[key] ? String(config[key]) : fallback;
 }
 
 function numberConfig(
