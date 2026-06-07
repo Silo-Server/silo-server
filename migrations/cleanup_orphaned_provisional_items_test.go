@@ -13,15 +13,22 @@ func TestCleanupOrphanedProvisionalItemsPreservesDurableReferences(t *testing.T)
 	migration := normalizeSQL(string(migrationBytes))
 	for _, want := range []string{
 		"public.abs_bookmarks ab WHERE ab.library_item_id = mi.content_id",
-		"public.abs_collection_items aci WHERE aci.library_item_id = mi.content_id",
 		"public.abs_playback_sessions aps WHERE aps.content_id = mi.content_id",
-		"public.abs_playlist_items api WHERE api.library_item_id = mi.content_id",
-		"public.abs_playlists ap WHERE ap.cover_item = mi.content_id",
 		"public.abs_rss_feeds arf WHERE arf.library_item_id = mi.content_id",
 		"public.podcast_feeds pf WHERE pf.media_item_id = mi.content_id",
+		"public.user_personal_collection_items upci WHERE upci.media_item_id = mi.content_id",
 	} {
 		if !strings.Contains(migration, normalizeSQL(want)) {
 			t.Fatalf("cleanup migration missing durable reference guard %q", want)
+		}
+	}
+	for _, droppedTable := range []string{
+		"abs_collection_items",
+		"abs_playlist_items",
+		"abs_playlists",
+	} {
+		if strings.Contains(migration, droppedTable) {
+			t.Fatalf("cleanup migration references dropped table %q", droppedTable)
 		}
 	}
 }

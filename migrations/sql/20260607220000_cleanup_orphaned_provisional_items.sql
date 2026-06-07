@@ -23,20 +23,8 @@ WHERE mi.status IN ('pending', 'unmatched', 'ambiguous')
     WHERE ab.library_item_id = mi.content_id
   )
   AND NOT EXISTS (
-    SELECT 1 FROM public.abs_collection_items aci
-    WHERE aci.library_item_id = mi.content_id
-  )
-  AND NOT EXISTS (
     SELECT 1 FROM public.abs_playback_sessions aps
     WHERE aps.content_id = mi.content_id
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM public.abs_playlist_items api
-    WHERE api.library_item_id = mi.content_id
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM public.abs_playlists ap
-    WHERE ap.cover_item = mi.content_id
   )
   AND NOT EXISTS (
     SELECT 1 FROM public.abs_rss_feeds arf
