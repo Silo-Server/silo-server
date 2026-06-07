@@ -36,10 +36,7 @@ func BuildEmbeddingText(item *models.MediaItem) string {
 	var parts []string
 
 	// Lead with genres + type + overview for semantic dominance.
-	typeName := "movie"
-	if item.Type == "series" {
-		typeName = "TV series"
-	}
+	typeName := mediaTypeLabel(item.Type)
 
 	if len(item.Genres) > 0 && item.Overview != "" {
 		overview := truncateRunes(item.Overview, maxOverviewRunes)
@@ -66,51 +63,74 @@ func BuildEmbeddingText(item *models.MediaItem) string {
 		parts = append(parts, fmt.Sprintf(`"%s"`, item.Tagline))
 	}
 
-	// Top-billed cast with character names (up to 5).
-	var actors []models.ItemPerson
-	for _, p := range item.People {
-		if p.Kind == models.PersonKindActor {
-			actors = append(actors, p)
-		}
-	}
-	sortItemPeople(actors)
-	if len(actors) > 0 {
-		credits := make([]string, 0, 5)
-		for i, p := range actors {
-			if i >= 5 {
-				break
-			}
-			if p.Character != "" {
-				credits = append(credits, fmt.Sprintf("%s as %s", p.Name, p.Character))
-			} else {
-				credits = append(credits, p.Name)
+	if item.Type == "audiobook" {
+		// Audiobooks credit author (kind=7) and narrator (kind=8). Cast/
+		// director/writer don't apply. Keep the SQL canonical_text builder
+		// in recommendations/repo.go in sync with this shape.
+		var authors, narrators []models.ItemPerson
+		for _, p := range item.People {
+			switch p.Kind {
+			case models.PersonKindAuthor:
+				authors = append(authors, p)
+			case models.PersonKindNarrator:
+				narrators = append(narrators, p)
 			}
 		}
-		parts = append(parts, fmt.Sprintf("Cast: %s", strings.Join(credits, ", ")))
-	}
-
-	// Director(s).
-	var directors []models.ItemPerson
-	for _, p := range item.People {
-		if p.Kind == models.PersonKindDirector {
-			directors = append(directors, p)
+		sortItemPeople(authors)
+		sortItemPeople(narrators)
+		if len(authors) > 0 {
+			parts = append(parts, fmt.Sprintf("Written by %s", strings.Join(itemPersonNames(authors), ", ")))
 		}
-	}
-	sortItemPeople(directors)
-	if len(directors) > 0 {
-		parts = append(parts, fmt.Sprintf("Directed by %s", strings.Join(itemPersonNames(directors), ", ")))
-	}
-
-	// Writer(s).
-	var writers []models.ItemPerson
-	for _, p := range item.People {
-		if p.Kind == models.PersonKindWriter {
-			writers = append(writers, p)
+		if len(narrators) > 0 {
+			parts = append(parts, fmt.Sprintf("Narrated by %s", strings.Join(itemPersonNames(narrators), ", ")))
 		}
-	}
-	sortItemPeople(writers)
-	if len(writers) > 0 {
-		parts = append(parts, fmt.Sprintf("Written by %s", strings.Join(itemPersonNames(writers), ", ")))
+	} else {
+		// Top-billed cast with character names (up to 5).
+		var actors []models.ItemPerson
+		for _, p := range item.People {
+			if p.Kind == models.PersonKindActor {
+				actors = append(actors, p)
+			}
+		}
+		sortItemPeople(actors)
+		if len(actors) > 0 {
+			credits := make([]string, 0, 5)
+			for i, p := range actors {
+				if i >= 5 {
+					break
+				}
+				if p.Character != "" {
+					credits = append(credits, fmt.Sprintf("%s as %s", p.Name, p.Character))
+				} else {
+					credits = append(credits, p.Name)
+				}
+			}
+			parts = append(parts, fmt.Sprintf("Cast: %s", strings.Join(credits, ", ")))
+		}
+
+		// Director(s).
+		var directors []models.ItemPerson
+		for _, p := range item.People {
+			if p.Kind == models.PersonKindDirector {
+				directors = append(directors, p)
+			}
+		}
+		sortItemPeople(directors)
+		if len(directors) > 0 {
+			parts = append(parts, fmt.Sprintf("Directed by %s", strings.Join(itemPersonNames(directors), ", ")))
+		}
+
+		// Writer(s).
+		var writers []models.ItemPerson
+		for _, p := range item.People {
+			if p.Kind == models.PersonKindWriter {
+				writers = append(writers, p)
+			}
+		}
+		sortItemPeople(writers)
+		if len(writers) > 0 {
+			parts = append(parts, fmt.Sprintf("Written by %s", strings.Join(itemPersonNames(writers), ", ")))
+		}
 	}
 
 	if len(item.Keywords) > 0 {
@@ -142,6 +162,21 @@ func BuildEmbeddingText(item *models.MediaItem) string {
 	}
 
 	return strings.ToValidUTF8(strings.Join(parts, ". "), "")
+}
+
+// mediaTypeLabel maps a media_items.type to the natural-language label
+// used in the embedding canonical text. The exact strings here are part
+// of the embedding-text contract — change them and every existing
+// embedding goes stale (see canonicalText logic in repo.go).
+func mediaTypeLabel(t string) string {
+	switch t {
+	case "series":
+		return "TV series"
+	case "audiobook":
+		return "audiobook"
+	default:
+		return "movie"
+	}
 }
 
 func sortItemPeople(people []models.ItemPerson) {

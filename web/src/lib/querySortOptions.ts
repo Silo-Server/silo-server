@@ -1,5 +1,5 @@
 export type QuerySortOrder = "asc" | "desc";
-export type QuerySortRelevanceScope = "movie" | "series" | "episode" | "all";
+export type QuerySortRelevanceScope = "movie" | "series" | "episode" | "audiobook" | "all";
 export type QuerySortField =
   | "title"
   | "added_at"
@@ -16,7 +16,10 @@ export type QuerySortField =
   | "bitrate"
   | "progress"
   | "date_viewed"
-  | "plays";
+  | "plays"
+  | "author"
+  | "narrator"
+  | "series";
 
 type ApplicableMediaScope = Exclude<QuerySortRelevanceScope, "all">;
 
@@ -47,7 +50,14 @@ interface QuerySortLike {
   order?: string | null;
 }
 
-const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = ["movie", "series", "episode"];
+// ALL_VIDEO_SCOPES is the universe of video-side scopes — used as the
+// baseline for the "all" relevance scope (mixed libraries / episode
+// browse mode) so that sorts limited to series+episode are still
+// filtered out as not universally applicable. Audiobook is explicit
+// opt-in: a sort field must list "audiobook" in its applicableMediaScopes
+// to be eligible for an audiobook-only library.
+const ALL_VIDEO_SCOPES: ApplicableMediaScope[] = ["movie", "series", "episode"];
+const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = [...ALL_VIDEO_SCOPES, "audiobook"];
 
 export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
   {
@@ -91,7 +101,7 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "Content Rating",
     defaultOrder: "asc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: ALL_VIDEO_SCOPES,
   },
   {
     value: "runtime",
@@ -105,35 +115,35 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "IMDb Rating",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: ALL_VIDEO_SCOPES,
   },
   {
     value: "rating_tmdb",
     label: "TMDB Rating",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: ALL_VIDEO_SCOPES,
   },
   {
     value: "rating_rt_critic",
     label: "RT Critic Rating",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: ALL_VIDEO_SCOPES,
   },
   {
     value: "rating_rt_audience",
     label: "RT Audience Rating",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: ALL_VIDEO_SCOPES,
   },
   {
     value: "resolution",
     label: "Resolution",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: ALL_VIDEO_SCOPES,
   },
   {
     value: "bitrate",
@@ -163,6 +173,31 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     personalized: true,
     applicableMediaScopes: ALL_MEDIA_SCOPES,
   },
+  // Audiobook-native sorts. Author / Narrator use alphabetically-first
+  // person name per item; Series uses audiobook_series.series_name with
+  // series_index breaking ties so books within a series come back in
+  // narrative order.
+  {
+    value: "author",
+    label: "Author",
+    defaultOrder: "asc",
+    personalized: false,
+    applicableMediaScopes: ["audiobook"],
+  },
+  {
+    value: "narrator",
+    label: "Narrator",
+    defaultOrder: "asc",
+    personalized: false,
+    applicableMediaScopes: ["audiobook"],
+  },
+  {
+    value: "series",
+    label: "Series",
+    defaultOrder: "asc",
+    personalized: false,
+    applicableMediaScopes: ["audiobook"],
+  },
 ];
 
 const QUERY_SORT_OPTION_MAP = new Map(QUERY_SORT_OPTIONS.map((option) => [option.value, option]));
@@ -183,8 +218,12 @@ function optionMatchesRelevanceScope(
   if (!relevanceScope) {
     return true;
   }
+  // "all" — applies to mixed libraries and the episode browse mode.
+  // Match the historical baseline (universal across all video scopes)
+  // so series-only sorts still get normalized away. Audiobook scope is
+  // intentionally not part of this baseline; see ALL_VIDEO_SCOPES.
   if (relevanceScope === "all") {
-    return ALL_MEDIA_SCOPES.every((scope) => option.applicableMediaScopes.includes(scope));
+    return ALL_VIDEO_SCOPES.every((scope) => option.applicableMediaScopes.includes(scope));
   }
   return option.applicableMediaScopes.includes(relevanceScope);
 }

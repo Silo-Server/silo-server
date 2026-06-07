@@ -2036,8 +2036,10 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 		levels = []string{"series", "season", "episode"}
 	case "movies", "movie":
 		levels = []string{"movie"}
+	case "audiobooks", "audiobook":
+		levels = []string{"audiobook"}
 	case "mixed":
-		levels = []string{"movie", "series", "season", "episode"}
+		levels = []string{"movie", "series", "season", "episode", "audiobook"}
 	default:
 		return nil
 	}

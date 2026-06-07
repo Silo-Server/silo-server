@@ -528,6 +528,46 @@ export interface CrewMember {
   photo_thumbhash?: string;
 }
 
+export interface AudiobookPerson {
+  person_id?: string;
+  name: string;
+  photo_url?: string;
+  photo_thumbhash?: string;
+}
+
+export interface AudiobookRelatedItem {
+  content_id: string;
+  title: string;
+  year?: number;
+  poster_url?: string;
+  series_index?: number;
+}
+
+export interface AudiobookSeriesGroup {
+  name?: string;
+  entries: AudiobookRelatedItem[];
+}
+
+export interface AudiobookNarration {
+  content_id: string;
+  title: string;
+  year?: number;
+  narrators: string[];
+}
+
+export interface AudiobookDetailExtension {
+  authors: AudiobookPerson[];
+  narrators: AudiobookPerson[];
+  publisher?: string;
+  total_duration_seconds: number;
+  series?: AudiobookSeriesGroup;
+  other_narrations: AudiobookNarration[];
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -608,7 +648,7 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -675,6 +715,11 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   audio_languages?: string[];
   subtitle_languages?: string[];
   original_languages?: string[];
+  // Audiobook-native facets — populated when the scope contains audiobook
+  // items, empty otherwise. The UI gates these on libraryType=audiobook[s].
+  authors?: string[];
+  narrators?: string[];
+  series?: string[];
 }
 
 // Item Detail
@@ -696,6 +741,7 @@ export interface FileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
   multi_episode_start?: number;
   multi_episode_end?: number;
   effective_audio_track_index?: number;
@@ -871,7 +917,7 @@ export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | 
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -944,6 +990,7 @@ export interface ItemDetail {
   effective_version_hdr?: boolean;
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
+  audiobook?: AudiobookDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1114,13 +1161,16 @@ export interface QuerySort {
     | "progress"
     | "date_viewed"
     | "plays"
+    | "author"
+    | "narrator"
+    | "series"
     | "relevance";
   order: "asc" | "desc";
 }
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode";
+  media_scope?: "movie" | "series" | "episode" | "audiobook";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -2886,7 +2936,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -3045,7 +3095,8 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
     media_scope:
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
-      value?.media_scope === "episode"
+      value?.media_scope === "episode" ||
+      value?.media_scope === "audiobook"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
@@ -3105,7 +3156,9 @@ export function queryDefinitionFromSectionConfig(
         ? "series"
         : config.media_scope === "episode" || config.filter_type === "episode"
           ? "episode"
-          : undefined;
+          : config.media_scope === "audiobook" || config.filter_type === "audiobook"
+            ? "audiobook"
+            : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;

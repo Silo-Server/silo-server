@@ -76,6 +76,7 @@ export default function CatalogFilterBar({
             <SelectItem value="movie">Movies</SelectItem>
             <SelectItem value="series">Series</SelectItem>
             <SelectItem value="episode">Episodes</SelectItem>
+            <SelectItem value="audiobook">Audiobooks</SelectItem>
           </SelectContent>
         </Select>
       ) : null}

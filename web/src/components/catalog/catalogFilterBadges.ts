@@ -104,6 +104,30 @@ export function getActiveFilterBadges(state: GuidedFormState): ActiveFilterBadge
     });
   }
 
+  if (state.author) {
+    badges.push({
+      key: "author",
+      label: `Author: ${state.author}`,
+      clearPatch: { author: "" },
+    });
+  }
+
+  if (state.narrator) {
+    badges.push({
+      key: "narrator",
+      label: `Narrator: ${state.narrator}`,
+      clearPatch: { narrator: "" },
+    });
+  }
+
+  if (state.series) {
+    badges.push({
+      key: "series",
+      label: `Series: ${state.series}`,
+      clearPatch: { series: "" },
+    });
+  }
+
   // Studio
   if (state.studio) {
     badges.push({
