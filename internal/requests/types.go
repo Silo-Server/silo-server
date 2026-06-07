@@ -281,30 +281,6 @@ type Integration struct {
 	PluginConfig          map[string]any `json:"plugin_config"`
 }
 
-type IntegrationRootFolder struct {
-	Path       string `json:"path"`
-	FreeSpace  int64  `json:"free_space,omitempty"`
-	TotalSpace int64  `json:"total_space,omitempty"`
-	Accessible bool   `json:"accessible"`
-}
-
-type IntegrationQualityProfile struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-}
-
-type IntegrationTag struct {
-	ID    int    `json:"id"`
-	Label string `json:"label"`
-}
-
-type IntegrationOptions struct {
-	Kind            string                      `json:"kind"`
-	RootFolders     []IntegrationRootFolder     `json:"root_folders"`
-	QualityProfiles []IntegrationQualityProfile `json:"quality_profiles"`
-	Tags            []IntegrationTag            `json:"tags"`
-}
-
 type FulfillmentResult struct {
 	IntegrationKind string
 	ExternalID      string

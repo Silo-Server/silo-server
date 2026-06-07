@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -792,14 +791,18 @@ func (s *Service) CreateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	if err := validateInstance(&in); err != nil {
-		return nil, err
-	}
 	id, err := idgen.NextID()
 	if err != nil {
 		return nil, err
 	}
 	in.ID = id
+	deriveLegacyColumns(&in)
+	if err := validateInstance(&in); err != nil {
+		return nil, err
+	}
+	if err := s.validateViaPlugin(ctx, in); err != nil {
+		return nil, err
+	}
 	return s.store.SaveIntegrationWithDefaults(ctx, in, true)
 }
 
@@ -810,10 +813,57 @@ func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if strings.TrimSpace(in.ID) == "" {
 		return nil, fmt.Errorf("%w: integration id required", ErrInvalidInput)
 	}
+	deriveLegacyColumns(&in)
 	if err := validateInstance(&in); err != nil {
 		return nil, err
 	}
+	if err := s.validateViaPlugin(ctx, in); err != nil {
+		return nil, err
+	}
 	return s.store.SaveIntegrationWithDefaults(ctx, in, false)
+}
+
+// deriveLegacyColumns mirrors the generic plugin_config blob into the legacy
+// top-level columns (kind, is_default*, is_4k) so clients need only send
+// plugin_config. The columns still drive ClearDefault and target labeling.
+func deriveLegacyColumns(in *Integration) {
+	if in.PluginConfig == nil {
+		return
+	}
+	if k, ok := in.PluginConfig["service_kind"].(string); ok && k != "" {
+		in.Kind = k
+	}
+	if v, ok := in.PluginConfig["is_default"].(bool); ok {
+		in.IsDefault = v
+	}
+	if v, ok := in.PluginConfig["is_default_4k"].(bool); ok {
+		in.IsDefault4K = v
+	}
+	if v, ok := in.PluginConfig["is_4k"].(bool); ok {
+		in.Is4K = v
+	}
+}
+
+// validateViaPlugin asks the bound request_router plugin to validate the
+// connection config on save. Field/form errors are surfaced as *ValidationError
+// so the API layer can render them inline.
+func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
+	if s.router == nil || in.InstallationID == nil {
+		return nil
+	}
+	apiKey, err := s.resolveAPIKey(ctx, in)
+	if err != nil {
+		return err
+	}
+	conn := ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig}
+	fe, form, err := s.router.Validate(ctx, *in.InstallationID, in.CapabilityID, conn)
+	if err != nil {
+		return err
+	}
+	if len(fe) > 0 || form != "" {
+		return &ValidationError{FieldErrors: fe, FormError: form}
+	}
+	return nil
 }
 
 func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id string) error {
@@ -849,7 +899,7 @@ func validateInstance(in *Integration) error {
 	return nil
 }
 
-func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, integration Integration) (*IntegrationOptions, error) {
+func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, integration Integration) (map[string][]RouterOption, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
@@ -889,27 +939,7 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
 	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
-	opts, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
-	if err != nil {
-		return nil, err
-	}
-	return integrationOptionsFromRouter(opts), nil
-}
-
-func integrationOptionsFromRouter(opts map[string][]RouterOption) *IntegrationOptions {
-	out := &IntegrationOptions{}
-	for _, o := range opts["root_folder"] {
-		out.RootFolders = append(out.RootFolders, IntegrationRootFolder{Path: o.Value, Accessible: true})
-	}
-	for _, o := range opts["quality_profile_id"] {
-		id, _ := strconv.Atoi(o.Value)
-		out.QualityProfiles = append(out.QualityProfiles, IntegrationQualityProfile{ID: id, Name: o.Label})
-	}
-	for _, o := range opts["tags"] {
-		id, _ := strconv.Atoi(o.Value)
-		out.Tags = append(out.Tags, IntegrationTag{ID: id, Label: o.Label})
-	}
-	return out
+	return s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 }
 
 func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {

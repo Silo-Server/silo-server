@@ -912,6 +912,69 @@ func TestDeleteIntegrationRejectsLiveTargets(t *testing.T) {
 	}
 }
 
+func TestCreateIntegrationRejectedByPluginValidate(t *testing.T) {
+	store := newFakeStore()
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{
+		validateFieldErrors: map[string]string{"root_folder": "root folder does not exist"},
+		validateFormError:   "connection invalid",
+	})
+
+	install := 1
+	_, err := service.CreateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		Name:           "radarr",
+		CapabilityID:   "request_router.v1",
+		BaseURL:        "http://radarr.local",
+		InstallationID: &install,
+	})
+	if err == nil {
+		t.Fatal("expected validation error from plugin Validate")
+	}
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, want *ValidationError", err)
+	}
+	if ve.FieldErrors["root_folder"] != "root folder does not exist" {
+		t.Fatalf("field errors = %+v, want root_folder error", ve.FieldErrors)
+	}
+	if ve.FormError != "connection invalid" {
+		t.Fatalf("form error = %q, want connection invalid", ve.FormError)
+	}
+	if len(store.integrations) != 0 {
+		t.Fatalf("integrations = %d, want 0 (rejected before persist)", len(store.integrations))
+	}
+}
+
+func TestSaveDerivesLegacyColumnsFromPluginConfig(t *testing.T) {
+	store := newFakeStore()
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+
+	install := 1
+	saved, err := service.CreateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		Name:           "radarr",
+		CapabilityID:   "request_router.v1",
+		BaseURL:        "http://radarr.local",
+		InstallationID: &install,
+		PluginConfig: map[string]any{
+			"service_kind": "sonarr",
+			"is_default":   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateIntegration returned error: %v", err)
+	}
+	if saved.Kind != "sonarr" || !saved.IsDefault {
+		t.Fatalf("derived columns = kind=%q is_default=%v, want sonarr/true", saved.Kind, saved.IsDefault)
+	}
+	if len(store.integrations) != 1 {
+		t.Fatalf("integrations = %d, want 1", len(store.integrations))
+	}
+	if store.integrations[0].Kind != "sonarr" || !store.integrations[0].IsDefault {
+		t.Fatalf("persisted row = kind=%q is_default=%v, want sonarr/true", store.integrations[0].Kind, store.integrations[0].IsDefault)
+	}
+}
+
 func TestCancelOwnerCanWithdrawPendingRequest(t *testing.T) {
 	store := newFakeStore()
 	store.requests["req-mine"] = &Request{
@@ -1744,6 +1807,11 @@ type fakeRouterProvider struct {
 
 	// ListConfigOptions behavior.
 	options map[string][]RouterOption
+
+	// Validate behavior (default empty = valid).
+	validateFieldErrors map[string]string
+	validateFormError   string
+	validateErr         error
 }
 
 func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, _ Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
@@ -1795,7 +1863,7 @@ func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, 
 }
 
 func (f *fakeRouterProvider) Validate(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (map[string]string, string, error) {
-	return nil, "", nil
+	return f.validateFieldErrors, f.validateFormError, f.validateErr
 }
 
 // routerInst builds an enabled request_router integration connection for tests.
