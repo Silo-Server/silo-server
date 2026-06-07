@@ -112,6 +112,18 @@ func TestCatalogRuleMatchesItem_InLastDateFields(t *testing.T) {
 	}
 }
 
+func TestFilterCatalogItems_NormalizesMediaScope(t *testing.T) {
+	items := []*models.MediaItem{
+		{ContentID: "book", Type: "ebook"},
+		{ContentID: "movie", Type: "movie"},
+	}
+
+	filtered := filterCatalogItems(items, QueryDefinition{MediaScope: " Ebook "})
+	if len(filtered) != 1 || filtered[0].ContentID != "book" {
+		t.Fatalf("expected normalized ebook scope to keep only ebook item, got %#v", filtered)
+	}
+}
+
 // concurrentCallBarrier records the maximum number of callers observed
 // in-flight at the same time. Each call into the stubbed facet fetcher invokes
 // hit, which:
@@ -257,6 +269,7 @@ func (s *stubFacetFetcher) SearchEbookSeries(ctx context.Context, filters Browse
 
 type recordingFacetFetcher struct {
 	peopleKinds     []models.PersonKind
+	searchKinds     []models.PersonKind
 	audiobookSeries int
 	ebookSeries     int
 	searchAudiobook int
@@ -325,6 +338,10 @@ func (r *recordingFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, 
 
 func (r *recordingFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
 	r.lastMediaScope = mediaScope
+	r.searchKinds = append(r.searchKinds, kind)
+	if kind == models.PersonKindNarrator {
+		return []string{"Audio Narrator"}, true, nil
+	}
 	return nil, false, nil
 }
 
@@ -470,6 +487,40 @@ func TestListFiltersWithOptions_EbookScopeUsesAuthorsAndEbookSeriesWithoutNarrat
 	}
 }
 
+func TestListFiltersWithOptions_NormalizesEbookScopeBeforeFacetDispatch(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	resolver := &CatalogResolver{
+		browseRepo: &BrowseRepository{},
+		facets:     facets,
+	}
+
+	result, err := resolver.ListFiltersWithOptions(
+		context.Background(),
+		CatalogRequest{
+			Source: CatalogSourceQuery,
+			Query: QueryDefinition{
+				MediaScope: " Ebook ",
+				Match:      "all",
+				Sort:       QuerySort{Field: "title", Order: "asc"},
+			},
+		},
+		AccessFilter{},
+		CatalogFilterOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ListFiltersWithOptions returned error: %v", err)
+	}
+	if facets.lastMediaScope != "ebook" {
+		t.Fatalf("expected normalized facet media scope ebook, got %q", facets.lastMediaScope)
+	}
+	if slices.Contains(facets.peopleKinds, models.PersonKindNarrator) {
+		t.Fatalf("expected narrator facet not to be loaded for normalized ebook scope, got kinds %v", facets.peopleKinds)
+	}
+	if len(result.Narrators) != 0 {
+		t.Fatalf("expected no ebook narrators in result, got %v", result.Narrators)
+	}
+}
+
 func TestDispatchFacetSearch_EbookSeriesUsesEbookDetails(t *testing.T) {
 	facets := &recordingFacetFetcher{}
 	matches, hasMore, err := dispatchFacetSearch(
@@ -490,5 +541,51 @@ func TestDispatchFacetSearch_EbookSeriesUsesEbookDetails(t *testing.T) {
 	}
 	if !hasMore || len(matches) != 1 || matches[0] != "Ebook Search" {
 		t.Fatalf("expected ebook series search result with hasMore, got matches=%v hasMore=%v", matches, hasMore)
+	}
+}
+
+func TestDispatchFacetSearch_EbookNarratorReturnsEmptyWithoutLookup(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	matches, hasMore, err := dispatchFacetSearch(
+		context.Background(),
+		facets,
+		"narrator",
+		BrowseFilters{},
+		"media_items mi",
+		"ebook",
+		"read",
+		10,
+	)
+	if err != nil {
+		t.Fatalf("dispatchFacetSearch returned error: %v", err)
+	}
+	if len(facets.searchKinds) != 0 {
+		t.Fatalf("expected no people lookup for ebook narrator search, got kinds %v", facets.searchKinds)
+	}
+	if hasMore || len(matches) != 0 {
+		t.Fatalf("expected empty ebook narrator result, got matches=%v hasMore=%v", matches, hasMore)
+	}
+}
+
+func TestDispatchFacetSearch_AudiobookNarratorUsesNarratorLookup(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	matches, hasMore, err := dispatchFacetSearch(
+		context.Background(),
+		facets,
+		"narrator",
+		BrowseFilters{},
+		"media_items mi",
+		"audiobook",
+		"read",
+		10,
+	)
+	if err != nil {
+		t.Fatalf("dispatchFacetSearch returned error: %v", err)
+	}
+	if !slices.Contains(facets.searchKinds, models.PersonKindNarrator) {
+		t.Fatalf("expected narrator lookup for audiobook scope, got kinds %v", facets.searchKinds)
+	}
+	if !hasMore || len(matches) != 1 || matches[0] != "Audio Narrator" {
+		t.Fatalf("expected audiobook narrator result with hasMore, got matches=%v hasMore=%v", matches, hasMore)
 	}
 }

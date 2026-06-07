@@ -533,7 +533,6 @@ func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
 
 func TestBuild_SeriesClauseUsesEbookDetailsForEbookScope(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").
-		WithMediaScope("ebook").
 		Build(QueryDefinition{
 			MediaScope: "ebook",
 			Match:      "all",

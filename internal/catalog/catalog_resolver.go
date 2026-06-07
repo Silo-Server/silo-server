@@ -201,6 +201,7 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 	if r == nil || r.browseRepo == nil || r.itemRepo == nil {
 		return nil, fmt.Errorf("catalog resolver requires browse and item repositories")
 	}
+	req.Query = req.Query.Normalize()
 	switch req.Source {
 	case CatalogSourceQuery:
 		if err := validateCatalogQueryRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
@@ -668,6 +669,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	if r == nil || r.browseRepo == nil {
 		return nil, fmt.Errorf("catalog resolver requires a browse repository")
 	}
+	req.Query = req.Query.Normalize()
 	var (
 		filters    BrowseFilters
 		earlyEmpty bool
@@ -748,6 +750,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	if r == nil || r.browseRepo == nil {
 		return nil, fmt.Errorf("catalog resolver requires a browse repository")
 	}
+	req.Query = req.Query.Normalize()
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
 		return &CatalogFacetSearchResult{Matches: []string{}}, nil
@@ -851,6 +854,9 @@ func dispatchFacetSearch(ctx context.Context, facets facetFetcher, facet string,
 	case "author":
 		return facets.SearchPeopleByKind(ctx, models.PersonKindAuthor, filters, baseRelation, mediaScope, prefix, limit)
 	case "narrator":
+		if mediaScope == "ebook" {
+			return []string{}, false, nil
+		}
 		return facets.SearchPeopleByKind(ctx, models.PersonKindNarrator, filters, baseRelation, mediaScope, prefix, limit)
 	case "series":
 		if mediaScope == "ebook" {
@@ -1622,44 +1628,46 @@ func (r *CatalogResolver) fetchAllSearchCandidates(ctx context.Context, req Cata
 }
 
 func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter, []string, bool) {
-	allowedLibraryIDs, earlyEmpty := effectiveCatalogLibraryIDs(req.Query.LibraryIDs, access)
+	query := req.Query.Normalize()
+	allowedLibraryIDs, earlyEmpty := effectiveCatalogLibraryIDs(query.LibraryIDs, access)
 	if earlyEmpty {
 		return AccessFilter{}, nil, true
 	}
 
 	searchAccess := AccessFilter{
 		AllowedLibraryIDs:  allowedLibraryIDs,
-		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(req.Query.LibraryIDs, access.DisabledLibraryIDs),
+		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(query.LibraryIDs, access.DisabledLibraryIDs),
 		MaxContentRating:   access.MaxContentRating,
 	}
 
 	var itemTypes []string
-	if req.Query.MediaScope != "" {
-		itemTypes = []string{req.Query.MediaScope}
+	if query.MediaScope != "" {
+		itemTypes = []string{query.MediaScope}
 	}
 
 	return searchAccess, itemTypes, false
 }
 
 func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilters, bool, error) {
-	allowedLibraryIDs, earlyEmpty := effectiveCatalogLibraryIDs(req.Query.LibraryIDs, access)
+	query := req.Query.Normalize()
+	allowedLibraryIDs, earlyEmpty := effectiveCatalogLibraryIDs(query.LibraryIDs, access)
 	if earlyEmpty {
 		return BrowseFilters{}, true, nil
 	}
 
 	filters := BrowseFilters{
-		Type:               req.Query.MediaScope,
+		Type:               query.MediaScope,
 		NamePrefix:         req.NamePrefix,
-		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(req.Query.LibraryIDs, access.DisabledLibraryIDs),
+		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(query.LibraryIDs, access.DisabledLibraryIDs),
 		MaxContentRating:   access.MaxContentRating,
 	}
-	applyCatalogBrowseOverlayRules(&filters, req.Query)
+	applyCatalogBrowseOverlayRules(&filters, query)
 
 	if len(allowedLibraryIDs) == 1 {
 		filters.LibraryID = allowedLibraryIDs[0]
 	} else if len(allowedLibraryIDs) > 1 {
 		filters.LibraryIDs = allowedLibraryIDs
-	} else if access.AllowedLibraryIDs != nil && len(req.Query.LibraryIDs) == 0 {
+	} else if access.AllowedLibraryIDs != nil && len(query.LibraryIDs) == 0 {
 		filters.LibraryIDs = []int{}
 	}
 
@@ -1784,6 +1792,7 @@ func removeCatalogLibraryIDs(ids, remove []int) []int {
 }
 
 func filterCatalogItems(items []*models.MediaItem, def QueryDefinition) []*models.MediaItem {
+	def = def.Normalize()
 	filtered := make([]*models.MediaItem, 0, len(items))
 	for _, item := range items {
 		if item == nil {
