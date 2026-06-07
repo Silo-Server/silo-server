@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Intentionally a no-op migration.
 --
 -- The audiobooks absorption design spec assumed silo needed to add a
@@ -17,3 +19,11 @@
 -- .down.sql is also a no-op.
 
 SELECT 1;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+-- See 159_media_folders_kind_noop.up.sql — intentionally empty.
+
+SELECT 1;
+-- +goose StatementEnd

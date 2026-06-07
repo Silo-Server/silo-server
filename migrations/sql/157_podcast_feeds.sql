@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- RSS-feed metadata for subscribed podcasts. One row per podcast
 -- media_items row; the feed refresher polls feed_url every
 -- refresh_interval_seconds and upserts new episodes into the existing
@@ -21,3 +23,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_podcast_feeds_feed_url
 
 CREATE INDEX IF NOT EXISTS idx_podcast_feeds_due_for_refresh
     ON public.podcast_feeds (last_refreshed_at);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.idx_podcast_feeds_due_for_refresh;
+DROP INDEX IF EXISTS public.idx_podcast_feeds_feed_url;
+DROP TABLE IF EXISTS public.podcast_feeds;
+-- +goose StatementEnd

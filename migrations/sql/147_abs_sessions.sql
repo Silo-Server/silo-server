@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Audiobookshelf-compatible client sessions. Same role as
 -- jellycompat_sessions (compat-layer token store) but with a proper
 -- users FK, device metadata, and soft revocation via revoked_at instead
@@ -24,3 +26,12 @@ CREATE INDEX IF NOT EXISTS idx_abs_sessions_user_device
 
 CREATE INDEX IF NOT EXISTS idx_abs_sessions_last_seen
     ON public.abs_sessions (last_seen_at);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS public.idx_abs_sessions_last_seen;
+DROP INDEX IF EXISTS public.idx_abs_sessions_user_device;
+DROP INDEX IF EXISTS public.idx_abs_sessions_token_hash;
+DROP TABLE IF EXISTS public.abs_sessions;
+-- +goose StatementEnd
