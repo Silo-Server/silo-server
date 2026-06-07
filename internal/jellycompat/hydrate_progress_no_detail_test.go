@@ -25,11 +25,11 @@ func (s *panicOnGetItemDetailContent) GetItemDetail(_ context.Context, _ *Sessio
 // Fields=People|Chapters|MediaStreams|MediaSources, producing the 38s timeout
 // observed in production for users with large in-progress lists.
 //
-// The function now serves list-level data unconditionally and stubs the four
-// detail-only fields with empty (but non-nil) collections via
-// stubDetailListFields. Standard Jellyfin clients refetch MediaSources via
-// /Items/{id}/PlaybackInfo on play, so the detail data was never load-bearing
-// for the Resume row UX.
+// hydrateProgressItems is the SCAN phase and must stay detail-free: it runs
+// over up to 200 entries per loop iteration purely for type filtering. The
+// detail data clients need (real MediaSources — load-bearing for Infuse and
+// SenPlayer Continue Watching rows) is served by upgradeProgressPageToDetail,
+// which runs only on the returned page, bounded by the request limit.
 func TestHydrateProgressItems_DoesNotCallGetItemDetail(t *testing.T) {
 	codec := NewResourceIDCodec()
 
