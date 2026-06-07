@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
+import { useEventChannel } from "@/components/realtimeEventsContext";
 import { fetchAdminStats, useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminLibraries,
+  useCancelLibraryScans,
   useScanAllLibraries,
   useScanLibrary,
 } from "@/hooks/queries/admin/libraries";
+import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +34,7 @@ import {
   Pause,
   Library,
   ScanLine,
+  Square,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
@@ -38,15 +42,34 @@ import type {
   AdminStats,
   Library as LibraryType,
   AdminUser,
+  ScanRun,
   WatchProviderActivity,
 } from "@/api/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
+import { cn } from "@/lib/utils";
+import { compareActiveScans, formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const DASHBOARD_AUTO_REFRESH_MS = 60_000;
 const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
+
+function formatFileCount(count: number | null | undefined) {
+  if (count == null) {
+    return "—";
+  }
+  return count === 1 ? "1 file" : `${count.toLocaleString()} files`;
+}
+
+function formatDashboardLibraryScanProgress(scan: ScanRun, activeScanCount: number) {
+  const status = scan.status === "running" ? "Scanning" : "Queued";
+  const progress = formatActiveScanProgress(scan);
+  const detail =
+    progress || (scan.status === "running" ? formatActiveScanMode(scan) : "Waiting for capacity");
+  const extraScans = activeScanCount > 1 ? ` + ${activeScanCount - 1} more` : "";
+  return `${status}: ${detail}${extraScans}`;
+}
 
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
@@ -222,6 +245,7 @@ export default function AdminDashboard() {
           <Button
             variant="default"
             size="sm"
+            className="cursor-pointer"
             onClick={() => {
               if (libraries.length > 0) {
                 scanAll.mutate();
@@ -311,13 +335,13 @@ function StatsRow({
     {
       label: "Total Movies",
       value: stats.total_movies.toLocaleString(),
-      sub: `of ${stats.total_items.toLocaleString()} items`,
+      sub: formatFileCount(stats.total_movie_files),
       icon: <Film className="h-4 w-4" />,
     },
     {
       label: "Total Shows",
       value: stats.total_shows.toLocaleString(),
-      sub: `${stats.total_files.toLocaleString()} files total`,
+      sub: formatFileCount(stats.total_show_files),
       icon: <Tv className="h-4 w-4" />,
     },
     {
@@ -329,7 +353,7 @@ function StatsRow({
     {
       label: "Storage",
       value: storageDisplay,
-      sub: `${stats.total_files.toLocaleString()} files`,
+      sub: formatFileCount(stats.total_files),
       icon: <HardDrive className="h-4 w-4" />,
     },
   ];
@@ -629,7 +653,26 @@ function LibrariesCard({
   isLoading: boolean;
   error: unknown;
 }) {
+  useEventChannel("scans");
   const scanLibrary = useScanLibrary();
+  const cancelScans = useCancelLibraryScans();
+  const { data: activeScans = [] } = useActiveScans();
+
+  const activeScansByLibraryId = useMemo(() => {
+    const scansByLibraryID = new Map<number, ScanRun[]>();
+    for (const scan of activeScans) {
+      if (scan.status !== "accepted" && scan.status !== "running") {
+        continue;
+      }
+      const scans = scansByLibraryID.get(scan.library_id) ?? [];
+      scans.push(scan);
+      scansByLibraryID.set(scan.library_id, scans);
+    }
+    for (const scans of scansByLibraryID.values()) {
+      scans.sort(compareActiveScans);
+    }
+    return scansByLibraryID;
+  }, [activeScans]);
 
   return (
     <Card>
@@ -652,47 +695,95 @@ function LibrariesCard({
             No libraries configured.
           </div>
         ) : (
-          libraries.map((lib) => (
-            <div
-              key={lib.id}
-              className="bg-surface border-border hover:bg-surface-hover flex cursor-pointer items-center gap-3 rounded-md border p-3 transition-colors duration-150"
-            >
-              {lib.poster_url ? (
-                <img
-                  src={lib.poster_url}
-                  alt={lib.name}
-                  className="border-border h-8 w-14 flex-shrink-0 rounded border object-cover"
-                />
-              ) : (
-                <div className="bg-primary/5 border-primary/10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border">
-                  <Library className="text-primary h-4 w-4" />
+          libraries.map((lib) => {
+            const activeLibraryScans = activeScansByLibraryId.get(lib.id) ?? [];
+            const primaryActiveScan = activeLibraryScans[0];
+            const hasActiveScan = activeLibraryScans.length > 0;
+            const isScanStarting = scanLibrary.isPending && scanLibrary.variables === lib.id;
+            const isCancellingScan = cancelScans.isPending && cancelScans.variables === lib.id;
+            const scanProgressLabel = primaryActiveScan
+              ? formatDashboardLibraryScanProgress(primaryActiveScan, activeLibraryScans.length)
+              : isScanStarting
+                ? "Starting scan..."
+                : "";
+
+            return (
+              <div
+                key={lib.id}
+                className="bg-surface border-border hover:bg-surface-hover flex items-center gap-3 rounded-md border p-3 transition-colors duration-150"
+              >
+                {lib.poster_url ? (
+                  <img
+                    src={lib.poster_url}
+                    alt={lib.name}
+                    className="border-border h-8 w-14 flex-shrink-0 rounded border object-cover"
+                  />
+                ) : (
+                  <div className="bg-primary/5 border-primary/10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border">
+                    <Library className="text-primary h-4 w-4" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold">{lib.name}</div>
+                  <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
+                    <span>
+                      {lib.type} · {lib.paths.length} {lib.paths.length === 1 ? "path" : "paths"}
+                    </span>
+                    {scanProgressLabel ? (
+                      <>
+                        <span className="text-border/70">·</span>
+                        <span className="max-w-[22rem] truncate text-amber-300 tabular-nums">
+                          {scanProgressLabel}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-bold">{lib.name}</div>
-                <div className="text-muted-foreground text-[11px]">
-                  {lib.type} · {lib.paths.length} {lib.paths.length === 1 ? "path" : "paths"}
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <Button
+                    variant={hasActiveScan ? "destructive" : "ghost"}
+                    size="icon"
+                    className="h-7 w-7 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (hasActiveScan) {
+                        cancelScans.mutate(lib.id);
+                        return;
+                      }
+                      scanLibrary.mutate(lib.id);
+                    }}
+                    disabled={hasActiveScan ? isCancellingScan : isScanStarting}
+                    title={hasActiveScan ? "Stop Library Scans" : "Scan Library"}
+                    aria-label={hasActiveScan ? `Stop scans for ${lib.name}` : `Scan ${lib.name}`}
+                  >
+                    {hasActiveScan ? (
+                      <Square className="h-3 w-3 fill-current" />
+                    ) : (
+                      <ScanLine className={cn("h-3 w-3", isScanStarting && "animate-pulse")} />
+                    )}
+                  </Button>
+                  <div
+                    className={cn(
+                      "h-2 w-2 rounded-full",
+                      hasActiveScan || isScanStarting
+                        ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.65)]"
+                        : lib.enabled
+                          ? "bg-green-500"
+                          : "bg-muted-foreground/30",
+                      hasActiveScan && "animate-pulse",
+                    )}
+                    title={
+                      hasActiveScan
+                        ? "Scan in progress"
+                        : lib.enabled
+                          ? "Library enabled"
+                          : "Library disabled"
+                    }
+                  />
                 </div>
               </div>
-              <div className="flex flex-shrink-0 items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    scanLibrary.mutate(lib.id);
-                  }}
-                  title="Scan"
-                >
-                  <ScanLine className="h-3 w-3" />
-                </Button>
-                <div
-                  className={`h-2 w-2 rounded-full ${lib.enabled ? "bg-green-500" : "bg-muted-foreground/30"}`}
-                />
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </CardContent>
     </Card>
