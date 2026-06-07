@@ -155,15 +155,34 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 		file_stats AS (
 			SELECT
 				COUNT(*)::bigint AS total_files,
-				COUNT(*) FILTER (
-					WHERE lower(trim(media_folders.type)) IN ('movie', 'movies')
-				)::bigint AS total_movie_files,
-				COUNT(*) FILTER (
-					WHERE lower(trim(media_folders.type)) IN ('series', 'tv', 'show', 'shows', 'tvshows')
-				)::bigint AS total_show_files,
-				COALESCE(SUM(media_files.file_size), 0)::bigint AS total_storage_bytes
-			FROM media_files
-			JOIN media_folders ON media_folders.id = media_files.media_folder_id
+				COUNT(*) FILTER (WHERE file_kind = 'movie')::bigint AS total_movie_files,
+				COUNT(*) FILTER (WHERE file_kind = 'series')::bigint AS total_show_files,
+				COALESCE(SUM(file_size), 0)::bigint AS total_storage_bytes
+			FROM (
+				SELECT
+					media_files.file_size,
+					CASE
+						WHEN lower(trim(COALESCE(NULLIF(media_items.type, ''), ''))) = 'movie'
+							THEN 'movie'
+						WHEN lower(trim(COALESCE(NULLIF(media_items.type, ''), ''))) = 'series'
+							THEN 'series'
+						WHEN episodes.content_id IS NOT NULL
+							THEN 'series'
+						WHEN lower(trim(COALESCE(NULLIF(media_files.base_type, ''), ''))) IN ('movie', 'movies')
+							THEN 'movie'
+						WHEN lower(trim(COALESCE(NULLIF(media_files.base_type, ''), ''))) IN ('series', 'tv', 'show', 'shows', 'tvshows')
+							THEN 'series'
+						WHEN lower(trim(media_folders.type)) IN ('movie', 'movies')
+							THEN 'movie'
+						WHEN lower(trim(media_folders.type)) IN ('series', 'tv', 'show', 'shows', 'tvshows')
+							THEN 'series'
+						ELSE ''
+					END AS file_kind
+				FROM media_files
+				JOIN media_folders ON media_folders.id = media_files.media_folder_id
+				LEFT JOIN media_items ON media_items.content_id = media_files.content_id
+				LEFT JOIN episodes ON episodes.content_id = media_files.episode_id
+			) classified_files
 		),
 		session_stats AS (
 			SELECT COUNT(*)::bigint AS active_streams

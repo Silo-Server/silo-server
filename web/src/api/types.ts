@@ -1927,9 +1927,9 @@ export interface AdminStats {
   total_files: number;
   total_users: number;
   total_movies: number;
-  total_movie_files: number;
+  total_movie_files?: number;
   total_shows: number;
-  total_show_files: number;
+  total_show_files?: number;
   active_streams: number;
   total_storage_bytes: number;
   watch_provider_activity: WatchProviderActivity;

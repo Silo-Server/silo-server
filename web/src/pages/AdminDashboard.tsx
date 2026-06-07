@@ -332,13 +332,13 @@ function StatsRow({
     {
       label: "Total Movies",
       value: stats.total_movies.toLocaleString(),
-      sub: formatFileCount(stats.total_movie_files),
+      sub: formatFileCount(stats.total_movie_files ?? 0),
       icon: <Film className="h-4 w-4" />,
     },
     {
       label: "Total Shows",
       value: stats.total_shows.toLocaleString(),
-      sub: formatFileCount(stats.total_show_files),
+      sub: formatFileCount(stats.total_show_files ?? 0),
       icon: <Tv className="h-4 w-4" />,
     },
     {
