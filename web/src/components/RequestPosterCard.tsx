@@ -81,7 +81,6 @@ function DiscoverCard({
           title={item.title}
           mediaType={item.media_type}
           dim={!requestable}
-          accent={ribbon?.kind ?? null}
         >
           {ribbon && <StatusRibbon status={ribbon.kind} label={ribbon.label} />}
         </PosterFrame>
@@ -126,7 +125,6 @@ function DiscoverCard({
 
 function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }) {
   const poster = tmdbImageURL(request.poster_path);
-  const isDownloading = request.status === "downloading";
   const isCompleted = request.status === "completed";
   const isFailed =
     request.outcome === "failed" ||
@@ -149,15 +147,9 @@ function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }
         title={request.title}
         mediaType={request.media_type}
         dim={isFailed}
-        accent={kind}
       >
         <StatusRibbon status={kind} label={label} />
 
-        {isDownloading && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-black/40">
-            <div className="downloading-shimmer h-full bg-sky-400" />
-          </div>
-        )}
         {isCompleted && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center bg-gradient-to-t from-emerald-950/90 via-emerald-900/40 to-transparent p-3">
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-emerald-200 ring-1 ring-emerald-400/30">
@@ -182,28 +174,17 @@ function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }
   );
 }
 
-const ACCENT_BAR: Record<RibbonKind, string> = {
-  pending: "bg-amber-300/70",
-  approved: "bg-emerald-300/70",
-  queued: "bg-sky-300/70",
-  downloading: "bg-sky-300/70",
-  completed: "bg-emerald-300/70",
-  blocked: "bg-zinc-400/40",
-};
-
 function PosterFrame({
   poster,
   title,
   mediaType,
   dim,
-  accent,
   children,
 }: {
   poster: string | null;
   title: string;
   mediaType: "movie" | "series";
   dim?: boolean;
-  accent?: RibbonKind | null;
   children?: React.ReactNode;
 }) {
   return (
@@ -223,15 +204,6 @@ function PosterFrame({
       )}
       {/* subtle bottom vignette for legibility behind ribbons / hover overlays */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent opacity-90" />
-      {/* thin status accent bar, hugs bottom edge */}
-      {accent && (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 h-[2px] opacity-90",
-            ACCENT_BAR[accent],
-          )}
-        />
-      )}
       {children}
     </div>
   );
