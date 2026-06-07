@@ -10,6 +10,7 @@ import (
 )
 
 const defaultDRIDir = "/dev/dri"
+const defaultNVIDIAControlDevice = "/dev/nvidiactl"
 
 // HWAccelInfo describes the detected hardware acceleration capability.
 type HWAccelInfo struct {
@@ -54,7 +55,7 @@ func PickRenderDevice(explicit string) string {
 }
 
 // ResolveHWAccel resolves "auto" into a concrete acceleration method by
-// probing the system. Preference order: qsv > vaapi > none.
+// probing the system. Preference order: qsv > nvenc > vaapi > none.
 // Non-"auto" values are returned unchanged.
 func ResolveHWAccel(hwAccel string) string {
 	if hwAccel != "auto" {
@@ -65,22 +66,33 @@ func ResolveHWAccel(hwAccel string) string {
 	}
 
 	devices := listRenderDevices(defaultDRIDir)
-	if len(devices) == 0 {
-		slog.Info("hw_accel=auto: no render devices found, using software encoding")
-		return "none"
-	}
-
-	// Check for Intel GPU — enables QSV (preferred).
-	for _, dev := range devices {
-		if isIntelDevice(dev) {
-			slog.Info("hw_accel=auto: Intel GPU detected, using QSV", "device", dev)
-			return "qsv"
+	if len(devices) > 0 {
+		// Check for Intel GPU — enables QSV (preferred).
+		for _, dev := range devices {
+			if isIntelDevice(dev) {
+				slog.Info("hw_accel=auto: Intel GPU detected, using QSV", "device", dev)
+				return "qsv"
+			}
 		}
+		// If a DRM render device maps to an NVIDIA adapter, prefer NVENC.
+		for _, dev := range devices {
+			if isNVIDIADevice(dev) {
+				slog.Info("hw_accel=auto: NVIDIA GPU detected, using NVENC", "device", dev)
+				return "nvenc"
+			}
+		}
+		// Any accessible render device supports VAAPI.
+		slog.Info("hw_accel=auto: non-Intel GPU detected, using VAAPI", "device", devices[0])
+		return "vaapi"
 	}
 
-	// Any accessible render device supports VAAPI.
-	slog.Info("hw_accel=auto: non-Intel GPU detected, using VAAPI", "device", devices[0])
-	return "vaapi"
+	if hasNVIDIADevice() {
+		slog.Info("hw_accel=auto: NVIDIA device detected, using NVENC")
+		return "nvenc"
+	}
+
+	slog.Info("hw_accel=auto: no compatible GPU devices found, using software encoding")
+	return "none"
 }
 
 // listRenderDevices returns all accessible /dev/dri/renderD* paths, sorted.
@@ -113,6 +125,36 @@ func isIntelDevice(renderDevPath string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(data)) == "0x8086"
+}
+
+// isNVIDIADevice checks whether a render device belongs to an NVIDIA GPU by
+// reading the PCI vendor ID from sysfs. NVIDIA vendor ID is 0x10de.
+func isNVIDIADevice(renderDevPath string) bool {
+	name := filepath.Base(renderDevPath)
+	vendorPath := filepath.Join("/sys/class/drm", name, "device", "vendor")
+	data, err := os.ReadFile(vendorPath)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(data)) == "0x10de"
+}
+
+func hasNVIDIADevice() bool {
+	if file, err := os.Open(defaultNVIDIAControlDevice); err == nil {
+		file.Close()
+		return true
+	}
+	matches, err := filepath.Glob("/dev/nvidia[0-9]*")
+	if err != nil || len(matches) == 0 {
+		return false
+	}
+	for _, dev := range matches {
+		if file, err := os.Open(dev); err == nil {
+			file.Close()
+			return true
+		}
+	}
+	return false
 }
 
 // detectRenderDevice enumerates /dev/dri/renderD* and returns the first

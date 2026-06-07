@@ -1,0 +1,22 @@
+services:
+  silo:
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${NVIDIA_GPU_COUNT:-1}
+              capabilities: [gpu]
+
+  # Optional distributed-mode example. Most single-host installs should
+  # just use the integrated service above.  
+  #  silo-transcode:
+  #  runtime: nvidia
+  #  deploy:
+  #    resources:
+  #      reservations:
+  #        devices:
+  #          - driver: nvidia
+  #            count: ${NVIDIA_GPU_COUNT:-1}
+  #            capabilities: [gpu]

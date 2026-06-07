@@ -39,7 +39,7 @@ type TranscodeOpts struct {
 	SegmentDuration    int    // seconds, default 6
 	StartSegmentNumber int    // -hls_segment_start_number, default 0
 	FFmpegPath         string // optional explicit ffmpeg binary path
-	HWAccel            string // auto, qsv, vaapi, none
+	HWAccel            string // auto, qsv, vaapi, nvenc, none
 	HWDevice           string // e.g., /dev/dri/renderD128 (default if empty)
 	SubtitleTrackIndex int    // -1 = no subtitles
 	SubtitleBurnIn     bool
@@ -294,6 +294,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		} else if opts.HWAccel == "vaapi" {
 			scale := vaapiScaleFilter(opts.TargetResolution)
 			args = append(args, "-vf", scale)
+		} else if opts.HWAccel == "nvenc" {
+			scale := nvencScaleFilter(opts.TargetResolution)
+			args = append(args, "-vf", scale)
 		} else if opts.TargetResolution != "" {
 			scale := resolutionToScale(opts.TargetResolution)
 			if scale != "" {
@@ -422,12 +425,12 @@ func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
 			fmt.Sprintf("expr:gte(t,n_forced*%d)", opts.SegmentDuration))
 	}
 
-	// Hardware encoders (QSV, VAAPI) may not reliably honor
+	// Hardware encoders (QSV, VAAPI, NVENC) may not reliably honor
 	// force_key_frames expressions. Set explicit GOP size so segment
 	// boundaries always start with an IDR frame. We assume 30 fps as a
 	// safe ceiling — the GOP will be at most segmentDuration * 30 frames.
 	// Matches Jellyfin's approach for hardware encoders.
-	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" {
+	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" || opts.HWAccel == "nvenc" {
 		gopSize := fmt.Sprintf("%d", opts.SegmentDuration*30)
 		args = append(args, "-g", gopSize, "-keyint_min", gopSize)
 	}
@@ -465,6 +468,15 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
 		)
+	case "nvenc":
+		args = append(args,
+			"-hwaccel", "cuda",
+			"-hwaccel_output_format", "cuda",
+			"-noautorotate",
+		)
+		if hwDevice := strings.TrimSpace(opts.HWDevice); hwDevice != "" {
+			args = append(args, "-hwaccel_device", hwDevice)
+		}
 	}
 	return args
 }
@@ -529,6 +541,26 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 			args = append(args,
 				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
 				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		}
+	case opts.HWAccel == "nvenc" && codec == "h264":
+		args = append(args, "-c:v", "h264_nvenc", "-rc:v", "vbr")
+		if hasBitrateCap {
+			args = append(args,
+				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		} else {
+			args = append(args, "-cq:v", "23", "-b:v", "0")
+		}
+	case opts.HWAccel == "nvenc" && codec == "hevc":
+		args = append(args, "-c:v", "hevc_nvenc", "-rc:v", "vbr")
+		if hasBitrateCap {
+			args = append(args,
+				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		} else {
+			args = append(args, "-cq:v", "28", "-b:v", "0")
 		}
 	default:
 		// CPU fallback — match Jellyfin's proven browser-compatible settings.
@@ -609,6 +641,10 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 		// VAAPI-only: download, apply CPU filters, convert to nv12, upload back.
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
 		args = append(args, "-vf", vf)
+	case "nvenc":
+		// NVENC/CUDA: download to CPU for subtitle rendering, then upload back.
+		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload_cuda"
+		args = append(args, "-vf", vf)
 	default:
 		// CPU encoding: filters run directly on decoded frames.
 		args = append(args, "-vf", cpuFilters)
@@ -676,6 +712,25 @@ func vaapiScaleFilter(res string) string {
 		return "scale_vaapi=w=-2:h=328:format=nv12"
 	default:
 		return "scale_vaapi=format=nv12"
+	}
+}
+
+func nvencScaleFilter(res string) string {
+	switch res {
+	case "2160p":
+		return "scale_cuda=w=-2:h=2160:format=nv12"
+	case "1080p":
+		return "scale_cuda=w=-2:h=1080:format=nv12"
+	case "720p":
+		return "scale_cuda=w=-2:h=720:format=nv12"
+	case "480p":
+		return "scale_cuda=w=-2:h=480:format=nv12"
+	case "420p":
+		return "scale_cuda=w=-2:h=420:format=nv12"
+	case "328p":
+		return "scale_cuda=w=-2:h=328:format=nv12"
+	default:
+		return "scale_cuda=format=nv12"
 	}
 }
 
