@@ -30,6 +30,7 @@ require (
 	github.com/pgvector/pgvector-go v0.3.0
 	go.n16f.net/thumbhash v1.1.0
 	golang.org/x/image v0.39.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -44,11 +45,10 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.41.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 )
 
 require (
-	github.com/Silo-Server/silo-plugin-sdk v0.4.1-0.20260604220604-0d7865171220
+	github.com/Silo-Server/silo-plugin-sdk v0.5.0
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
