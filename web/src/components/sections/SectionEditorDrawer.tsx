@@ -477,7 +477,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                       setQueryDefinition({
                         ...queryDefinition,
                         media_scope:
-                          value === "all" ? undefined : (value as "movie" | "series" | "episode"),
+                          value === "all" ? undefined : (value as QueryDefinition["media_scope"]),
                       })
                     }
                   >
@@ -489,6 +489,8 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                       <SelectItem value="movie">Movies</SelectItem>
                       <SelectItem value="series">Series</SelectItem>
                       <SelectItem value="episode">Episodes</SelectItem>
+                      <SelectItem value="audiobook">Audiobooks</SelectItem>
+                      <SelectItem value="ebook">Ebooks</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

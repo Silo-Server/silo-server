@@ -1,5 +1,11 @@
 export type QuerySortOrder = "asc" | "desc";
-export type QuerySortRelevanceScope = "movie" | "series" | "episode" | "audiobook" | "all";
+export type QuerySortRelevanceScope =
+  | "movie"
+  | "series"
+  | "episode"
+  | "audiobook"
+  | "ebook"
+  | "all";
 export type QuerySortField =
   | "title"
   | "added_at"
@@ -53,11 +59,12 @@ interface QuerySortLike {
 // ALL_VIDEO_SCOPES is the universe of video-side scopes — used as the
 // baseline for the "all" relevance scope (mixed libraries / episode
 // browse mode) so that sorts limited to series+episode are still
-// filtered out as not universally applicable. Audiobook is explicit
-// opt-in: a sort field must list "audiobook" in its applicableMediaScopes
-// to be eligible for an audiobook-only library.
+// filtered out as not universally applicable. Book scopes are explicit
+// opt-in: a sort field must list "audiobook" or "ebook" in its
+// applicableMediaScopes to be eligible for that library type.
 const ALL_VIDEO_SCOPES: ApplicableMediaScope[] = ["movie", "series", "episode"];
-const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = [...ALL_VIDEO_SCOPES, "audiobook"];
+const ALL_BOOK_SCOPES: ApplicableMediaScope[] = ["audiobook", "ebook"];
+const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = [...ALL_VIDEO_SCOPES, ...ALL_BOOK_SCOPES];
 
 export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
   {
@@ -173,16 +180,15 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     personalized: true,
     applicableMediaScopes: ALL_MEDIA_SCOPES,
   },
-  // Audiobook-native sorts. Author / Narrator use alphabetically-first
-  // person name per item; Series uses audiobook_series.series_name with
-  // series_index breaking ties so books within a series come back in
-  // narrative order.
+  // Book-native sorts. Author applies to ebooks and audiobooks; narrator is
+  // audiobook-only. Series is backed by audiobook_series for audiobooks and
+  // ebook_details for ebooks.
   {
     value: "author",
     label: "Author",
     defaultOrder: "asc",
     personalized: false,
-    applicableMediaScopes: ["audiobook"],
+    applicableMediaScopes: ALL_BOOK_SCOPES,
   },
   {
     value: "narrator",
@@ -196,7 +202,7 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "Series",
     defaultOrder: "asc",
     personalized: false,
-    applicableMediaScopes: ["audiobook"],
+    applicableMediaScopes: ALL_BOOK_SCOPES,
   },
 ];
 

@@ -52,6 +52,16 @@ interface RuleBuilder {
   values?: Map<number, unknown>;
 }
 
+function isCatalogMediaScope(value: string | undefined): value is QueryDefinition["media_scope"] {
+  return (
+    value === "movie" ||
+    value === "series" ||
+    value === "episode" ||
+    value === "audiobook" ||
+    value === "ebook"
+  );
+}
+
 const overlaySources = new Set<CatalogSource>([
   "query",
   "favorites",
@@ -134,7 +144,7 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
 
   baseState.query_definition = normalizeQueryDefinition({
     library_ids: baseState.library_id ? [baseState.library_id] : [],
-    media_scope: type === "movie" || type === "series" ? type : undefined,
+    media_scope: isCatalogMediaScope(type) ? type : undefined,
     match: searchParams.get("match") === "any" ? "any" : "all",
     groups: [...implicitGroups, ...groups],
     sort: sort

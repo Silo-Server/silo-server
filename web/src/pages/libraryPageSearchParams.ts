@@ -59,6 +59,16 @@ function parseSeriesLibraryBrowseType(value: string | undefined): LibraryBrowseT
   return value === "episode" ? "episode" : "series";
 }
 
+function isCatalogMediaScope(value: string | undefined): value is QueryDefinition["media_scope"] {
+  return (
+    value === "movie" ||
+    value === "series" ||
+    value === "episode" ||
+    value === "audiobook" ||
+    value === "ebook"
+  );
+}
+
 function getLibrarySortRelevanceScope(
   libraryType: string,
   mediaScope?: QueryDefinition["media_scope"],
@@ -71,11 +81,15 @@ function getLibrarySortRelevanceScope(
   if (libraryType === "audiobook" || libraryType === "audiobooks") {
     return "audiobook";
   }
+  if (libraryType === "ebook" || libraryType === "ebooks") {
+    return "ebook";
+  }
   if (
     mediaScope === "movie" ||
     mediaScope === "series" ||
     mediaScope === "episode" ||
-    mediaScope === "audiobook"
+    mediaScope === "audiobook" ||
+    mediaScope === "ebook"
   ) {
     return mediaScope;
   }
@@ -267,10 +281,7 @@ export function parseLibraryPageState(
   const implicitGroups = buildLegacyImplicitGroups(searchParams, parsedGroups);
   const mediaScopeParam = readString(searchParams.get("type"));
   const mediaScope =
-    libraryType === "mixed" &&
-    (mediaScopeParam === "movie" || mediaScopeParam === "series" || mediaScopeParam === "episode")
-      ? mediaScopeParam
-      : undefined;
+    libraryType === "mixed" && isCatalogMediaScope(mediaScopeParam) ? mediaScopeParam : undefined;
   const sortRelevanceScope =
     libraryType === "series" && browseType === "episode"
       ? "all"

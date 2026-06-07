@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -295,6 +296,27 @@ describe("guidedStateToQueryDefinition", () => {
     expect(rules).toContainEqual({ field: "series", op: "is", value: "Mistborn" });
   });
 
+  it("omits narrator rules for ebook scope", () => {
+    const state: GuidedFormState = {
+      ...emptyState(),
+      mediaScope: "ebook",
+      author: "Octavia Butler",
+      narrator: "Should Not Persist",
+      series: "Patternist",
+    };
+
+    const rebuilt = guidedStateToQueryDefinition(state, createEmptyQueryDefinition());
+    const rules = rebuilt.groups[0]!.rules;
+    expect(rebuilt.media_scope).toBe("ebook");
+    expect(rules).toContainEqual({ field: "author", op: "is", value: "Octavia Butler" });
+    expect(rules).toContainEqual({ field: "series", op: "is", value: "Patternist" });
+    expect(rules).not.toContainEqual({
+      field: "narrator",
+      op: "is",
+      value: "Should Not Persist",
+    });
+  });
+
   it("round-trips last_air_date sort through parse and serialize", () => {
     const original: QueryDefinition = {
       library_ids: [1],
@@ -365,5 +387,80 @@ describe("CollectionGuidedRulesEditor original language field", () => {
     );
 
     expect(markup).toContain("Media Type");
+  });
+
+  it("renders ebook book facets without narrator or video-only controls", () => {
+    const markup = renderToStaticMarkup(
+      <CollectionGuidedRulesEditor
+        value={{
+          ...createEmptyQueryDefinition(),
+          media_scope: "ebook",
+        }}
+        onChange={() => {}}
+        libraryType="ebooks"
+        filters={{ genres: [], studios: [], networks: [], countries: [], content_ratings: [] }}
+      />,
+    );
+
+    expect(markup).toContain("Author");
+    expect(markup).toContain("Series");
+    expect(markup).not.toContain("Narrator");
+    expect(markup).not.toContain("Minimum IMDb Rating");
+    expect(markup).not.toContain("Video Quality");
+  });
+
+  it("does not render narrator for ebook libraries with stale audiobook scope", () => {
+    const markup = renderToStaticMarkup(
+      <CollectionGuidedRulesEditor
+        value={{
+          ...createEmptyQueryDefinition(),
+          media_scope: "audiobook",
+        }}
+        onChange={() => {}}
+        libraryType="ebooks"
+        filters={{ genres: [], studios: [], networks: [], countries: [], content_ratings: [] }}
+      />,
+    );
+
+    expect(markup).toContain("Author");
+    expect(markup).toContain("Series");
+    expect(markup).not.toContain("Narrator");
+  });
+
+  it("drops hidden stale narrator rules on ebook library edits", () => {
+    let nextValue: QueryDefinition | undefined;
+
+    render(
+      <CollectionGuidedRulesEditor
+        value={{
+          ...createEmptyQueryDefinition(),
+          groups: [
+            {
+              match: "all",
+              rules: [
+                { field: "author", op: "is", value: "Octavia Butler" },
+                { field: "narrator", op: "is", value: "Should Not Persist" },
+              ],
+            },
+          ],
+        }}
+        onChange={(value) => {
+          nextValue = value;
+        }}
+        libraryType="ebooks"
+        filters={{ genres: [], studios: [], networks: [], countries: [], content_ratings: [] }}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. 2000"), { target: { value: "1979" } });
+
+    const rules = nextValue?.groups.flatMap((group) => group.rules) ?? [];
+    expect(rules).toContainEqual({ field: "author", op: "is", value: "Octavia Butler" });
+    expect(rules).toContainEqual({ field: "year", op: "gte", value: 1979 });
+    expect(rules).not.toContainEqual({
+      field: "narrator",
+      op: "is",
+      value: "Should Not Persist",
+    });
   });
 });

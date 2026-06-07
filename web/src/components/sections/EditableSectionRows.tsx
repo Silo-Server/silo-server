@@ -61,9 +61,11 @@ export function SectionSummaryBadges({
       <Badge variant="secondary">{recipeLabel(catalog, section.sectionType)}</Badge>
       {queryDefinition.media_scope === "movie" ? <Badge variant="outline">Movies</Badge> : null}
       {queryDefinition.media_scope === "series" ? <Badge variant="outline">Series</Badge> : null}
-      {queryDefinition.media_scope === "episode" ? (
-        <Badge variant="outline">Episodes</Badge>
+      {queryDefinition.media_scope === "episode" ? <Badge variant="outline">Episodes</Badge> : null}
+      {queryDefinition.media_scope === "audiobook" ? (
+        <Badge variant="outline">Audiobooks</Badge>
       ) : null}
+      {queryDefinition.media_scope === "ebook" ? <Badge variant="outline">Ebooks</Badge> : null}
       {libraries
         ? queryDefinition.library_ids.map((libraryId) => {
             const library = libraries.find((entry) => entry.id === libraryId);

@@ -77,6 +77,7 @@ export default function CatalogFilterBar({
             <SelectItem value="series">Series</SelectItem>
             <SelectItem value="episode">Episodes</SelectItem>
             <SelectItem value="audiobook">Audiobooks</SelectItem>
+            <SelectItem value="ebook">Ebooks</SelectItem>
           </SelectContent>
         </Select>
       ) : null}
@@ -85,8 +86,9 @@ export default function CatalogFilterBar({
       <Select
         value={selectedSort.field}
         onValueChange={(v) => {
-          const sortOption = getQuerySortOptions({ includePersonalized: allowPersonalizedSorts })
-            .find((opt) => opt.value === v);
+          const sortOption = getQuerySortOptions({
+            includePersonalized: allowPersonalizedSorts,
+          }).find((opt) => opt.value === v);
           const patch: Partial<GuidedFormState> = {
             sortField: v,
             sortOrder: getDefaultQuerySortOrder(v),
@@ -97,9 +99,11 @@ export default function CatalogFilterBar({
               sortOption.applicableMediaScopes.includes(
                 state.mediaScope as Exclude<QuerySortRelevanceScope, "all">,
               );
-            if (sortOption.preferredMediaScope && state.mediaScope !== sortOption.preferredMediaScope) {
-              patch.mediaScope = sortOption
-                .preferredMediaScope as GuidedFormState["mediaScope"];
+            if (
+              sortOption.preferredMediaScope &&
+              state.mediaScope !== sortOption.preferredMediaScope
+            ) {
+              patch.mediaScope = sortOption.preferredMediaScope as GuidedFormState["mediaScope"];
             } else if (!currentApplicable) {
               patch.mediaScope = sortOption
                 .applicableMediaScopes[0] as GuidedFormState["mediaScope"];

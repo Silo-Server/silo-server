@@ -608,7 +608,7 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -675,8 +675,8 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   audio_languages?: string[];
   subtitle_languages?: string[];
   original_languages?: string[];
-  // Audiobook-native facets — populated when the scope contains audiobook
-  // items, empty otherwise. The UI gates these on libraryType=audiobook[s].
+  // Book-native facets — authors/series apply to ebook and audiobook scopes;
+  // narrators apply to audiobook scopes only.
   authors?: string[];
   narrators?: string[];
   series?: string[];
@@ -876,7 +876,7 @@ export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | 
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -1128,7 +1128,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode" | "audiobook";
+  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -2894,7 +2894,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -3054,7 +3054,8 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
       value?.media_scope === "episode" ||
-      value?.media_scope === "audiobook"
+      value?.media_scope === "audiobook" ||
+      value?.media_scope === "ebook"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
@@ -3116,7 +3117,9 @@ export function queryDefinitionFromSectionConfig(
           ? "episode"
           : config.media_scope === "audiobook" || config.filter_type === "audiobook"
             ? "audiobook"
-            : undefined;
+            : config.media_scope === "ebook" || config.filter_type === "ebook"
+              ? "ebook"
+              : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;

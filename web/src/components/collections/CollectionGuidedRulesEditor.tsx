@@ -40,7 +40,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook";
+  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook" | "ebook";
   libraryIds: number[];
   genres: string[];
   decade: string;
@@ -298,7 +298,7 @@ export function guidedStateToQueryDefinition(
   if (state.author) {
     rules.push({ field: "author", op: "is", value: state.author });
   }
-  if (state.narrator) {
+  if (state.narrator && state.mediaScope !== "ebook") {
     rules.push({ field: "narrator", op: "is", value: state.narrator });
   }
   if (state.series) {
@@ -416,10 +416,16 @@ export default function CollectionGuidedRulesEditor({
   const metadataFiltersQuery = useCatalogMetadataFilters();
   const filters = providedFilters ?? metadataFiltersQuery.data;
   const filtersLoading = providedFiltersLoading ?? metadataFiltersQuery.isLoading;
-  // Audiobook-only libraries should hide video-only filter sections.
-  // Backend stores type as the plural "audiobooks"; the singular form
-  // shows up in some API surfaces — accept either.
+  // Book-only libraries should hide video-only filter sections. Backend
+  // stores type as plural for dedicated book libraries; singular forms show
+  // up in some API surfaces — accept either.
   const isAudiobookLibrary = libraryType === "audiobook" || libraryType === "audiobooks";
+  const isEbookLibrary = libraryType === "ebook" || libraryType === "ebooks";
+  const isBookLibrary = isAudiobookLibrary || isEbookLibrary;
+  const isBookScope = state.mediaScope === "audiobook" || state.mediaScope === "ebook";
+  const showBookFacets = isBookLibrary || isBookScope;
+  const showNarratorFacet =
+    !isEbookLibrary && (isAudiobookLibrary || state.mediaScope === "audiobook");
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
@@ -428,6 +434,9 @@ export default function CollectionGuidedRulesEditor({
 
   function update(patch: Partial<GuidedFormState>) {
     const next = { ...state, ...patch };
+    if (patch.mediaScope === "ebook" || !showNarratorFacet) {
+      next.narrator = "";
+    }
     next.decade = deriveDecade(next.yearFrom, next.yearTo);
     onChange(guidedStateToQueryDefinition(next, value));
   }
@@ -486,6 +495,8 @@ export default function CollectionGuidedRulesEditor({
                   <SelectItem value="movie">Movies</SelectItem>
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>
+                  <SelectItem value="audiobook">Audiobooks</SelectItem>
+                  <SelectItem value="ebook">Ebooks</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -560,7 +571,7 @@ export default function CollectionGuidedRulesEditor({
         </div>
       </div>
 
-      {isAudiobookLibrary ? null : (
+      {showBookFacets ? null : (
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Minimum IMDb Rating</Label>
@@ -602,7 +613,7 @@ export default function CollectionGuidedRulesEditor({
         />
       </div>
 
-      {isAudiobookLibrary ? null : (
+      {showBookFacets ? null : (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -669,7 +680,7 @@ export default function CollectionGuidedRulesEditor({
         </>
       )}
 
-      {isAudiobookLibrary ? (
+      {showBookFacets ? (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -694,28 +705,30 @@ export default function CollectionGuidedRulesEditor({
                 />
               )}
             </div>
-            <div className="space-y-2">
-              <Label>Narrator</Label>
-              {catalogState ? (
-                <FacetSearchSelect
-                  facet="narrator"
-                  state={catalogState}
-                  value={state.narrator}
-                  onChange={(narrator) => update({ narrator })}
-                  placeholder="Search narrators..."
-                  disabled={readOnly}
-                />
-              ) : (
-                <SearchableSelect
-                  options={filters?.narrators ?? []}
-                  value={state.narrator}
-                  onChange={(narrator) => update({ narrator })}
-                  placeholder="Select narrator..."
-                  disabled={readOnly}
-                  isLoading={filtersLoading}
-                />
-              )}
-            </div>
+            {showNarratorFacet ? (
+              <div className="space-y-2">
+                <Label>Narrator</Label>
+                {catalogState ? (
+                  <FacetSearchSelect
+                    facet="narrator"
+                    state={catalogState}
+                    value={state.narrator}
+                    onChange={(narrator) => update({ narrator })}
+                    placeholder="Search narrators..."
+                    disabled={readOnly}
+                  />
+                ) : (
+                  <SearchableSelect
+                    options={filters?.narrators ?? []}
+                    value={state.narrator}
+                    onChange={(narrator) => update({ narrator })}
+                    placeholder="Select narrator..."
+                    disabled={readOnly}
+                    isLoading={filtersLoading}
+                  />
+                )}
+              </div>
+            ) : null}
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -804,7 +817,7 @@ export default function CollectionGuidedRulesEditor({
         ) : null}
       </div>
 
-      {isAudiobookLibrary ? null : (
+      {showBookFacets ? null : (
         <div className="space-y-2">
           <Label>Video Quality</Label>
           <div className="flex flex-wrap gap-2">

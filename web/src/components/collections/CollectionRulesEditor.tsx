@@ -68,7 +68,7 @@ export default function CollectionRulesEditor({
                   onChange({
                     ...value,
                     media_scope:
-                      next === "all" ? undefined : (next as "movie" | "series" | "episode"),
+                      next === "all" ? undefined : (next as QueryDefinition["media_scope"]),
                     sort: nextSort,
                   });
                 }}
@@ -82,6 +82,8 @@ export default function CollectionRulesEditor({
                   <SelectItem value="movie">Movies</SelectItem>
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>
+                  <SelectItem value="audiobook">Audiobooks</SelectItem>
+                  <SelectItem value="ebook">Ebooks</SelectItem>
                 </SelectContent>
               </Select>
             </div>

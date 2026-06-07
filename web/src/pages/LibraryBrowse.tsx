@@ -37,11 +37,15 @@ function getLibrarySortRelevanceScope(
   if (libraryType === "audiobook" || libraryType === "audiobooks") {
     return "audiobook";
   }
+  if (libraryType === "ebook" || libraryType === "ebooks") {
+    return "ebook";
+  }
   if (
     mediaScope === "movie" ||
     mediaScope === "series" ||
     mediaScope === "episode" ||
-    mediaScope === "audiobook"
+    mediaScope === "audiobook" ||
+    mediaScope === "ebook"
   ) {
     return mediaScope;
   }
@@ -69,7 +73,11 @@ export default function LibraryBrowse({
         ? queryDefinition.media_scope
         : libraryType === "movie"
           ? libraryType
-          : undefined,
+          : libraryType === "audiobook" || libraryType === "audiobooks"
+            ? "audiobook"
+            : libraryType === "ebook" || libraryType === "ebooks"
+              ? "ebook"
+              : undefined,
     sort: normalizeQuerySortForScope(queryDefinition.sort, {
       includePersonalized: true,
       relevanceScope: sortRelevanceScope,
