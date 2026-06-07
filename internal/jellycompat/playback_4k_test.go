@@ -8,10 +8,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-type stubSettingsReader map[string]string
+type stubSettingsReader struct {
+	values map[string]string
+	err    error
+}
 
 func (s stubSettingsReader) Get(_ context.Context, key string) (string, error) {
-	return s[key], nil
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.values[key], nil
 }
 
 func TestAllow4KVideoTranscode(t *testing.T) {
@@ -22,8 +28,9 @@ func TestAllow4KVideoTranscode(t *testing.T) {
 	}{
 		{name: "nil repo defaults to deny", repo: nil, want: false},
 		{name: "unset defaults to deny", repo: stubSettingsReader{}, want: false},
-		{name: "explicit false denies", repo: stubSettingsReader{"allow_4k_transcode": "false"}, want: false},
-		{name: "explicit true allows", repo: stubSettingsReader{"allow_4k_transcode": "true"}, want: true},
+		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}, want: false},
+		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{"allow_4k_transcode": "false"}}, want: false},
+		{name: "explicit true allows", repo: stubSettingsReader{values: map[string]string{"allow_4k_transcode": "true"}}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
