@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -425,6 +426,8 @@ func main() {
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
+	restartReqCh := make(chan struct{}, 1)
+	var restartRequested atomic.Bool
 
 	eventBus := cache.NewEventBus(cfg.Redis.URL)
 	logStreamHub := logstream.NewHub(nodeID, eventBus)
@@ -525,6 +528,13 @@ func main() {
 		OpsLogRepo:                   opsRepo,
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
+		RequestServerRestart: func(context.Context) error {
+			if !restartRequested.CompareAndSwap(false, true) {
+				return handlers.ErrServerRestartAlreadyRequested
+			}
+			restartReqCh <- struct{}{}
+			return nil
+		},
 	}
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
 	absCompatEnabled, err := audiobooksService.ABSCompatEnabled(appCtx)
@@ -2015,6 +2025,9 @@ func main() {
 	case sig := <-sigCh:
 		appCancel()
 		slog.Info("received signal, shutting down", "signal", sig)
+	case <-restartReqCh:
+		appCancel()
+		slog.Info("server restart requested, shutting down")
 	case serverErr := <-errCh:
 		appCancel()
 		slog.Error("server error, shutting down", "error", serverErr)
