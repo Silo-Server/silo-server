@@ -839,6 +839,12 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			return err
 		}
 		if stored != nil {
+			// Don't pair a stored API key with a caller-changed base URL: require the
+			// key to be re-entered when the server URL changes (defense against
+			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
+			if strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.BaseURL) != strings.TrimSpace(stored.BaseURL) {
+				return &ValidationError{FieldErrors: map[string]string{"api_key_ref": "re-enter the API key when changing the base URL"}}
+			}
 			in.APIKeyRef = stored.APIKeyRef
 			if strings.TrimSpace(in.BaseURL) == "" {
 				in.BaseURL = stored.BaseURL

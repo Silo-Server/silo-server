@@ -944,6 +944,74 @@ func TestCreateIntegrationRejectedByPluginValidate(t *testing.T) {
 	}
 }
 
+// TestUpdateIntegrationRefusesStoredKeyReuseOnChangedBaseURL covers the security
+// hardening: when the caller leaves api_key_ref blank ("keep saved key") but
+// changes the base_url, the service must refuse rather than pair the stored,
+// API-unreadable key with the new (potentially attacker-controlled) URL. The
+// plugin Validate is never called and nothing is persisted.
+func TestUpdateIntegrationRefusesStoredKeyReuseOnChangedBaseURL(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")} // BaseURL http://router-1.local, APIKeyRef key-router-1
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	install := 1
+	_, err := service.UpdateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		ID:             "router-1",
+		Name:           "router-1",
+		CapabilityID:   "request_router.v1",
+		BaseURL:        "http://attacker.example", // changed from the stored base URL
+		APIKeyRef:      "",                         // blank -> "keep saved key"
+		InstallationID: &install,
+	})
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, want *ValidationError", err)
+	}
+	if ve.FieldErrors["api_key_ref"] == "" {
+		t.Fatalf("field errors = %+v, want api_key_ref message", ve.FieldErrors)
+	}
+	if router.validateCalls != 0 {
+		t.Fatalf("plugin Validate calls = %d, want 0 (refused before dispatch)", router.validateCalls)
+	}
+	// Stored row must be unchanged (not persisted with the new URL).
+	if got := store.integrations[0].BaseURL; got != "http://router-1.local" {
+		t.Fatalf("stored base_url = %q, want unchanged http://router-1.local", got)
+	}
+}
+
+// TestUpdateIntegrationKeepsKeyWhenBaseURLUnchanged confirms the normal
+// edit-keeping-key flow still works: blank api_key_ref with an unchanged (or
+// blank) base_url backfills the stored key, calls the plugin Validate, and
+// persists.
+func TestUpdateIntegrationKeepsKeyWhenBaseURLUnchanged(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	install := 1
+	updated, err := service.UpdateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		ID:             "router-1",
+		Name:           "router-1-renamed",
+		CapabilityID:   "request_router.v1",
+		BaseURL:        "http://router-1.local", // unchanged
+		APIKeyRef:      "",                       // blank -> keep saved key
+		InstallationID: &install,
+	})
+	if err != nil {
+		t.Fatalf("UpdateIntegration err = %v, want nil", err)
+	}
+	if router.validateCalls != 1 {
+		t.Fatalf("plugin Validate calls = %d, want 1", router.validateCalls)
+	}
+	if updated == nil || updated.Name != "router-1-renamed" {
+		t.Fatalf("updated = %+v, want persisted name router-1-renamed", updated)
+	}
+}
+
 func TestCancelOwnerCanWithdrawPendingRequest(t *testing.T) {
 	store := newFakeStore()
 	store.requests["req-mine"] = &Request{
@@ -1770,6 +1838,7 @@ type fakeRouterProvider struct {
 	validateFieldErrors map[string]string
 	validateFormError   string
 	validateErr         error
+	validateCalls       int
 }
 
 func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, _ Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
@@ -1821,6 +1890,9 @@ func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, 
 }
 
 func (f *fakeRouterProvider) Validate(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (map[string]string, string, error) {
+	f.mu.Lock()
+	f.validateCalls++
+	f.mu.Unlock()
 	return f.validateFieldErrors, f.validateFormError, f.validateErr
 }
 
