@@ -70,7 +70,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.SubtitleRepo != nil {
 		subtitleRepo = deps.SubtitleRepo
 	} else if deps.DB != nil {
-		subtitleRepo = subtitles.NewPgRepository(deps.DB)
+		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.recommender = deps.Recommender
@@ -241,7 +241,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.SessionStore = NewPersistentSessionStore(
 				deps.Config.JellyfinCompat.SessionTTL,
 				deps.Now,
-				NewSessionRepository(deps.DB),
+				NewSessionRepository(deps.DB, deps.SecretCipher),
 			)
 		} else {
 			deps.SessionStore = NewSessionStore(deps.Config.JellyfinCompat.SessionTTL, deps.Now)

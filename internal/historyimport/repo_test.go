@@ -1,11 +1,28 @@
 package historyimport
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
+
+// newTestRepo builds a Repository with a real cipher for scan-method tests.
+func newTestRepo(t *testing.T) *Repository {
+	t.Helper()
+	key := make([]byte, 48)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	c, err := secret.New(key)
+	if err != nil {
+		t.Fatalf("secret.New: %v", err)
+	}
+	return &Repository{cipher: c}
+}
 
 type plexSessionScannerStub struct {
 	authToken *string
@@ -92,7 +109,7 @@ func (s plexSessionScannerStub) Scan(dest ...any) error {
 func TestScanPlexSession_AllowsNullAuthToken(t *testing.T) {
 	t.Parallel()
 
-	session, err := scanPlexSession(plexSessionScannerStub{
+	session, err := newTestRepo(t).scanPlexSession(plexSessionScannerStub{
 		authToken: nil,
 		servers: []PlexServer{{
 			Name:             "Plex Server",

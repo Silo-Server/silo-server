@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
+	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -24,6 +25,7 @@ import (
 type Dependencies struct {
 	Config           *config.Config
 	DB               *pgxpool.Pool
+	SecretCipher     *secret.Cipher // at-rest credential cipher (required when DB is set)
 	ClientIPResolver *clientip.Resolver
 	HTTPClient       *http.Client
 	Now              func() time.Time
@@ -132,7 +134,7 @@ func (s *Server) SessionStore() *SessionStore {
 // Call this once after constructing the server; goroutines stop when ctx is cancelled.
 func (s *Server) StartBackgroundTasks(ctx context.Context) {
 	if s.deps.DB != nil {
-		repo := NewSessionRepository(s.deps.DB)
+		repo := NewSessionRepository(s.deps.DB, s.deps.SecretCipher)
 		StartSessionCleanup(ctx, repo, 1*time.Hour)
 	}
 }

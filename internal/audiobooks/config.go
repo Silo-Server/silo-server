@@ -13,16 +13,20 @@ import (
 )
 
 const (
-	absJWTSecretKey          = "audiobooks.abs.jwt_secret"
-	absDefaultAccessTTL      = 24 * time.Hour
-	absDefaultRefreshTTL     = 30 * 24 * time.Hour
+	absJWTSecretKey      = "audiobooks.abs.jwt_secret"
+	absDefaultAccessTTL  = 24 * time.Hour
+	absDefaultRefreshTTL = 30 * 24 * time.Hour
 )
 
 // ABSConfigProvider implements abs.ConfigProvider using silo's server_settings
 // table. The ABS JWT secret is generated once on first read and persisted for
 // the lifetime of the deployment.
 type ABSConfigProvider struct {
-	Settings *catalog.ServerSettingsRepo
+	// Settings is the encrypting settings decorator in production, so the ABS
+	// JWT secret (a SensitiveSettingKey) rests as ciphertext and is transparently
+	// decrypted here. Typed as the interface so both the raw repo and the
+	// decorator satisfy it.
+	Settings catalog.SettingsStore
 
 	// secretCache holds the generated secret so we only hit the DB once per
 	// process lifetime. Protected by mu.
