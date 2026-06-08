@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   captureReaderSettings: vi.fn(),
   fetchEbookReaderConfig: vi.fn(),
   saveEbookReaderConfig: vi.fn(),
+  fetchEbookReaderAnnotations: vi.fn(),
+  createEbookReaderAnnotation: vi.fn(),
+  deleteEbookReaderAnnotation: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -29,6 +32,9 @@ vi.mock("@/components/PageBack", () => ({
 }));
 
 vi.mock("@/reader/ebookReaderApi", () => ({
+  createEbookReaderAnnotation: mocks.createEbookReaderAnnotation,
+  deleteEbookReaderAnnotation: mocks.deleteEbookReaderAnnotation,
+  fetchEbookReaderAnnotations: mocks.fetchEbookReaderAnnotations,
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
 }));
@@ -50,12 +56,16 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           query: string,
         ) => Promise<Array<{ cfi: string; label?: string; excerpt?: string }>>;
         clearSearch: () => void;
+        clearSelection: () => void;
+        createSelectionAnnotation: () => { cfi: string; selectedText: string } | null;
       },
       {
         file: FileVersion;
         settings?: unknown;
+        annotations?: unknown[];
         onProgressChange?: (progress: number | null) => void;
         onFileLoaded?: (state: { objectUrl: string; filename: string } | null) => void;
+        onSelectionChange?: (selection: { cfi: string; selectedText: string } | null) => void;
         onReady?: (state: {
           toc: Array<{
             id: number;
@@ -67,7 +77,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         }) => void;
       }
     >(function MockFoliateBookReader(
-      { file, settings, onProgressChange, onFileLoaded, onReady },
+      { file, settings, onProgressChange, onFileLoaded, onSelectionChange, onReady },
       ref,
     ) {
       mocks.captureReaderSettings(settings);
@@ -78,10 +88,19 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         goToFraction: mocks.readerGoToFraction,
         search: mocks.readerSearch,
         clearSearch: vi.fn(),
+        clearSelection: () => onSelectionChange?.(null),
+        createSelectionAnnotation: () => ({
+          cfi: "epubcfi(/6/4,/1:0,/1:12)",
+          selectedText: "sample text",
+        }),
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
         onProgressChange?.(0.421);
+        onSelectionChange?.({
+          cfi: "epubcfi(/6/4,/1:0,/1:12)",
+          selectedText: "sample text",
+        });
         onReady?.({
           toc: [
             {
@@ -94,7 +113,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           ],
         });
         return () => onFileLoaded?.(null);
-      }, [onFileLoaded, onProgressChange, onReady]);
+      }, [onFileLoaded, onProgressChange, onReady, onSelectionChange]);
       return <div>reader surface {file.file_name}</div>;
     }),
   };
@@ -217,11 +236,26 @@ describe("EbookReader", () => {
     mocks.captureReaderSettings.mockReset();
     mocks.fetchEbookReaderConfig.mockReset();
     mocks.saveEbookReaderConfig.mockReset();
+    mocks.fetchEbookReaderAnnotations.mockReset();
+    mocks.createEbookReaderAnnotation.mockReset();
+    mocks.deleteEbookReaderAnnotation.mockReset();
     mocks.readerSearch.mockResolvedValue([
       { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
     ]);
     mocks.fetchEbookReaderConfig.mockResolvedValue({});
     mocks.saveEbookReaderConfig.mockResolvedValue({});
+    mocks.fetchEbookReaderAnnotations.mockResolvedValue([]);
+    mocks.createEbookReaderAnnotation.mockResolvedValue({
+      id: "ann-2",
+      content_id: "ebook-1",
+      kind: "highlight",
+      cfi_range: "epubcfi(/6/4,/1:0,/1:12)",
+      selected_text: "sample text",
+      note: "",
+      style: "highlight",
+      color: "#facc15",
+    });
+    mocks.deleteEbookReaderAnnotation.mockResolvedValue(undefined);
     localStorage.clear();
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem(),
@@ -537,5 +571,68 @@ describe("EbookReader", () => {
 
     expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads annotations, creates highlights, and deletes annotations", async () => {
+    mocks.fetchEbookReaderAnnotations.mockResolvedValue([
+      {
+        id: "ann-1",
+        content_id: "ebook-1",
+        kind: "bookmark",
+        location: "epubcfi(/6/8)",
+        selected_text: "",
+        note: "Saved spot",
+        style: "highlight",
+        color: "#facc15",
+      },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const notesTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Annotations and bookmarks"]',
+    );
+    await act(async () => {
+      notesTab?.click();
+    });
+
+    expect(container.textContent).toContain("Saved spot");
+
+    const deleteButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Delete annotation"]',
+    );
+    await act(async () => {
+      deleteButton?.click();
+    });
+
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", "ann-1");
+
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        kind: "highlight",
+        cfi_range: "epubcfi(/6/4,/1:0,/1:12)",
+        selected_text: "sample text",
+      }),
+    );
   });
 });

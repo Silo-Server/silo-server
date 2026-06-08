@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Bookmark,
   BookOpen,
   ChevronLeft,
   ChevronRight,
   Download,
+  Highlighter,
   Library,
   ListTree,
   Loader2,
@@ -12,6 +14,8 @@ import {
   PanelRightOpen,
   Search,
   Settings,
+  StickyNote,
+  Trash2,
   Type,
 } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
@@ -31,13 +35,21 @@ import FoliateBookReader, {
   type FoliateBookReaderHandle,
   type ReaderLoadState,
   type ReaderSearchResult,
+  type ReaderSelection,
   type ReaderSettings,
 } from "@/reader/FoliateBookReader";
-import { fetchEbookReaderConfig, saveEbookReaderConfig } from "@/reader/ebookReaderApi";
+import {
+  createEbookReaderAnnotation,
+  deleteEbookReaderAnnotation,
+  fetchEbookReaderAnnotations,
+  fetchEbookReaderConfig,
+  saveEbookReaderConfig,
+  type EbookReaderAnnotation,
+} from "@/reader/ebookReaderApi";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
-type ReaderPanel = "toc" | "search" | "settings";
+type ReaderPanel = "toc" | "search" | "notes" | "settings";
 
 type TocEntry = TOCItem & {
   depth: number;
@@ -126,6 +138,8 @@ export default function EbookReader() {
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(() =>
     loadStoredReaderSettings(),
   );
+  const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
+  const [selection, setSelection] = useState<ReaderSelection | null>(null);
   const configLoadedRef = useRef(false);
   const saveConfigTimerRef = useRef<number | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -142,6 +156,10 @@ export default function EbookReader() {
   const handleReaderReady = useCallback(({ toc: readyToc }: { toc: TOCItem[] }) => {
     setToc(readyToc);
   }, []);
+  const reloadAnnotations = useCallback(async () => {
+    if (!contentId) return;
+    setAnnotations(await fetchEbookReaderAnnotations(contentId));
+  }, [contentId]);
   const handleFileChange = useCallback(
     (fileID: string) => {
       if (!contentId) return;
@@ -195,6 +213,38 @@ export default function EbookReader() {
     setReaderProgress(next);
     void readerRef.current?.goToFraction(next);
   }, []);
+  const handleCreateHighlight = useCallback(async () => {
+    if (!contentId || !selection) return;
+    const created = await createEbookReaderAnnotation(contentId, {
+      kind: "highlight",
+      cfi_range: selection.cfi,
+      selected_text: selection.selectedText,
+      style: "highlight",
+      color: "#facc15",
+    });
+    setAnnotations((current) => [created, ...current]);
+    readerRef.current?.clearSelection();
+    setSelection(null);
+  }, [contentId, selection]);
+  const handleCreateBookmark = useCallback(async () => {
+    if (!contentId) return;
+    const location = selection?.cfi || `fraction:${(readerProgress ?? 0).toFixed(6)}`;
+    const created = await createEbookReaderAnnotation(contentId, {
+      kind: "bookmark",
+      location,
+      note: item?.title || "Bookmark",
+    });
+    setAnnotations((current) => [created, ...current]);
+    setPanel("notes");
+  }, [contentId, item?.title, readerProgress, selection]);
+  const handleDeleteAnnotation = useCallback(
+    async (annotationID: string) => {
+      if (!contentId) return;
+      await deleteEbookReaderAnnotation(contentId, annotationID);
+      setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationID));
+    },
+    [contentId],
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -237,6 +287,10 @@ export default function EbookReader() {
       }
     };
   }, [contentId]);
+
+  useEffect(() => {
+    void reloadAnnotations();
+  }, [reloadAnnotations]);
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
@@ -300,6 +354,27 @@ export default function EbookReader() {
             </select>
           )}
           <div className="flex shrink-0 items-center gap-1">
+            {selection && (
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Highlight selection"
+                title="Highlight selection"
+                onClick={() => void handleCreateHighlight()}
+              >
+                <Highlighter className="size-4" />
+                Highlight
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Add bookmark"
+              title="Add bookmark"
+              onClick={() => void handleCreateBookmark()}
+            >
+              <Bookmark className="size-4" />
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -373,9 +448,11 @@ export default function EbookReader() {
               file={selectedFile}
               title={item.title}
               settings={readerSettings}
+              annotations={annotations}
               onFileLoaded={handleFileLoaded}
               onProgressChange={handleProgressChange}
               onReady={handleReaderReady}
+              onSelectionChange={setSelection}
             />
           </section>
         ) : (
@@ -398,6 +475,12 @@ export default function EbookReader() {
                   aria: "Table of contents",
                 },
                 { id: "search" as const, label: "Search", icon: Search, aria: "Search book" },
+                {
+                  id: "notes" as const,
+                  label: "Notes",
+                  icon: StickyNote,
+                  aria: "Annotations and bookmarks",
+                },
                 {
                   id: "settings" as const,
                   label: "Settings",
@@ -495,6 +578,54 @@ export default function EbookReader() {
                       </Button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {panel === "notes" && (
+                <div className="space-y-2">
+                  {annotations.length === 0 ? (
+                    <div className="text-muted-foreground px-2 py-8 text-center text-sm">
+                      No annotations yet.
+                    </div>
+                  ) : (
+                    annotations.map((annotation) => (
+                      <div
+                        key={annotation.id}
+                        className="border-border rounded-md border p-2 text-sm"
+                      >
+                        <div className="flex items-start gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              readerRef.current?.goTo(
+                                annotation.cfi_range || annotation.location || "",
+                              )
+                            }
+                            className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left whitespace-normal"
+                          >
+                            <span className="min-w-0">
+                              <span className="text-muted-foreground block text-xs capitalize">
+                                {annotation.kind}
+                              </span>
+                              <span className="block">
+                                {annotation.selected_text || annotation.note || annotation.location}
+                              </span>
+                            </span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Delete annotation"
+                            title="Delete annotation"
+                            onClick={() => void handleDeleteAnnotation(annotation.id)}
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 

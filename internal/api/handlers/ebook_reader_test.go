@@ -43,6 +43,13 @@ func withEbookReaderContentRouteParam(req *http.Request, contentID string) *http
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }
 
+func withEbookReaderAnnotationRouteParams(req *http.Request, contentID, annotationID string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("content_id", contentID)
+	routeCtx.URLParams.Add("annotation_id", annotationID)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
 type fakeEbookProgressStore struct {
 	progress *EbookReaderProgress
 	upserted *EbookReaderProgress
@@ -87,6 +94,43 @@ func (s *fakeEbookReaderConfigStore) Upsert(_ context.Context, config EbookReade
 		return s.saveErr
 	}
 	s.saved = &config
+	return nil
+}
+
+type fakeEbookReaderAnnotationStore struct {
+	items   []EbookReaderAnnotation
+	created *EbookReaderAnnotation
+	updated *EbookReaderAnnotation
+	deleted string
+	err     error
+}
+
+func (s *fakeEbookReaderAnnotationStore) List(context.Context, int, string, string) ([]EbookReaderAnnotation, error) {
+	return s.items, s.err
+}
+
+func (s *fakeEbookReaderAnnotationStore) Create(_ context.Context, annotation EbookReaderAnnotation) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.created = &annotation
+	s.items = append(s.items, annotation)
+	return nil
+}
+
+func (s *fakeEbookReaderAnnotationStore) Update(_ context.Context, annotation EbookReaderAnnotation) (*EbookReaderAnnotation, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.updated = &annotation
+	return &annotation, nil
+}
+
+func (s *fakeEbookReaderAnnotationStore) Delete(_ context.Context, userID int, profileID, contentID, annotationID string) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.deleted = annotationID
 	return nil
 }
 
@@ -456,3 +500,141 @@ func TestEbookReaderConfigRequiresAccessibleContent(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestEbookReaderCreatesAnnotationForAccessibleEbook(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.AnnotationStore = store
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/ebooks/ebook-1/annotations",
+		strings.NewReader(`{"kind":"highlight","cfi_range":"epubcfi(/6/4,/1:0,/1:12)","selected_text":"sample text","note":"note text","style":"highlight","color":"#facc15"}`),
+	)
+	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
+		UserID:    1,
+		Role:      "user",
+		TokenType: auth.TokenTypeAccess,
+	})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-9"))
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleCreateAnnotation(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.created == nil {
+		t.Fatal("expected annotation to be created")
+	}
+	if store.created.UserID != 1 || store.created.ProfileID != "profile-9" || store.created.ContentID != "ebook-1" {
+		t.Fatalf("scope = %+v", store.created)
+	}
+	if store.created.Kind != "highlight" || store.created.CFIRange != "epubcfi(/6/4,/1:0,/1:12)" {
+		t.Fatalf("annotation = %+v", store.created)
+	}
+	if store.created.SelectedText != "sample text" || store.created.Note != "note text" {
+		t.Fatalf("annotation text = %+v", store.created)
+	}
+	if store.created.ID == "" {
+		t.Fatal("expected generated annotation id")
+	}
+}
+
+func TestEbookReaderReturnsAnnotations(t *testing.T) {
+	updatedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.AnnotationStore = &fakeEbookReaderAnnotationStore{
+		items: []EbookReaderAnnotation{
+			{
+				ID:           "ann-1",
+				UserID:       1,
+				ProfileID:    "profile-1",
+				ContentID:    "ebook-1",
+				Kind:         "bookmark",
+				Location:     "epubcfi(/6/8)",
+				SelectedText: "",
+				Note:         "Saved spot",
+				Style:        "highlight",
+				Color:        "#facc15",
+				Metadata:     json.RawMessage(`{}`),
+				CreatedAt:    updatedAt,
+				UpdatedAt:    updatedAt,
+			},
+		},
+	}
+
+	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/annotations")
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleListAnnotations(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`"items":[`, `"id":"ann-1"`, `"kind":"bookmark"`, `"location":"epubcfi(/6/8)"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("response %s missing %s", body, want)
+		}
+	}
+}
+
+func TestEbookReaderUpdatesAnnotation(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.AnnotationStore = store
+
+	req := newEbookReaderAuthRequest(http.MethodPatch, "/ebooks/ebook-1/annotations/ann-1")
+	req.Body = ioNopCloser{strings.NewReader(`{"note":"updated","color":"#bfdbfe"}`)}
+	req = withEbookReaderAnnotationRouteParams(req, "ebook-1", "ann-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleUpdateAnnotation(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.updated == nil || store.updated.ID != "ann-1" || store.updated.Note != "updated" || store.updated.Color != "#bfdbfe" {
+		t.Fatalf("updated = %+v", store.updated)
+	}
+}
+
+func TestEbookReaderDeletesAnnotation(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.AnnotationStore = store
+
+	req := newEbookReaderAuthRequest(http.MethodDelete, "/ebooks/ebook-1/annotations/ann-1")
+	req = withEbookReaderAnnotationRouteParams(req, "ebook-1", "ann-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleDeleteAnnotation(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.deleted != "ann-1" {
+		t.Fatalf("deleted = %q", store.deleted)
+	}
+}
+
+type ioNopCloser struct {
+	*strings.Reader
+}
+
+func (c ioNopCloser) Close() error { return nil }

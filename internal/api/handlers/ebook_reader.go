@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -51,11 +52,37 @@ type EbookReaderConfigStore interface {
 	Upsert(ctx context.Context, config EbookReaderConfig) error
 }
 
+// EbookReaderAnnotation is a persisted reader annotation or bookmark.
+type EbookReaderAnnotation struct {
+	ID           string          `json:"id"`
+	UserID       int             `json:"-"`
+	ProfileID    string          `json:"-"`
+	ContentID    string          `json:"content_id"`
+	Kind         string          `json:"kind"`
+	CFIRange     string          `json:"cfi_range,omitempty"`
+	Location     string          `json:"location,omitempty"`
+	SelectedText string          `json:"selected_text"`
+	Note         string          `json:"note"`
+	Style        string          `json:"style"`
+	Color        string          `json:"color"`
+	Metadata     json.RawMessage `json:"metadata"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+type EbookReaderAnnotationStore interface {
+	List(ctx context.Context, userID int, profileID string, contentID string) ([]EbookReaderAnnotation, error)
+	Create(ctx context.Context, annotation EbookReaderAnnotation) error
+	Update(ctx context.Context, annotation EbookReaderAnnotation) (*EbookReaderAnnotation, error)
+	Delete(ctx context.Context, userID int, profileID string, contentID string, annotationID string) error
+}
+
 // EbookReaderHandler serves ebook files for the in-app reader.
 type EbookReaderHandler struct {
-	FileAuthorizer *MediaFileAuthorizer
-	ProgressStore  EbookReaderProgressStore
-	ConfigStore    EbookReaderConfigStore
+	FileAuthorizer  *MediaFileAuthorizer
+	ProgressStore   EbookReaderProgressStore
+	ConfigStore     EbookReaderConfigStore
+	AnnotationStore EbookReaderAnnotationStore
 }
 
 func NewEbookReaderHandler(authorizer *MediaFileAuthorizer) *EbookReaderHandler {
@@ -107,6 +134,17 @@ type ebookReaderProgressRequest struct {
 
 type ebookReaderConfigRequest struct {
 	Config json.RawMessage `json:"config"`
+}
+
+type ebookReaderAnnotationRequest struct {
+	Kind         string          `json:"kind"`
+	CFIRange     string          `json:"cfi_range"`
+	Location     string          `json:"location"`
+	SelectedText string          `json:"selected_text"`
+	Note         string          `json:"note"`
+	Style        string          `json:"style"`
+	Color        string          `json:"color"`
+	Metadata     json.RawMessage `json:"metadata"`
 }
 
 func (h *EbookReaderHandler) HandleGetProgress(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +324,193 @@ func jsonObject(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &value) == nil && value != nil
 }
 
+func (h *EbookReaderHandler) HandleListAnnotations(w http.ResponseWriter, r *http.Request) {
+	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.AnnotationStore.List(r.Context(), userID, profileID, contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load ebook annotations")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *EbookReaderHandler) HandleCreateAnnotation(w http.ResponseWriter, r *http.Request) {
+	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
+	if !ok {
+		return
+	}
+	var req ebookReaderAnnotationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	annotation, err := buildEbookReaderAnnotation(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	now := time.Now().UTC()
+	annotation.ID = uuid.NewString()
+	annotation.UserID = userID
+	annotation.ProfileID = profileID
+	annotation.ContentID = contentID
+	annotation.CreatedAt = now
+	annotation.UpdatedAt = now
+	if err := h.AnnotationStore.Create(r.Context(), annotation); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create ebook annotation")
+		return
+	}
+	writeJSON(w, http.StatusCreated, annotation)
+}
+
+func (h *EbookReaderHandler) HandleUpdateAnnotation(w http.ResponseWriter, r *http.Request) {
+	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
+	if !ok {
+		return
+	}
+	annotationID := strings.TrimSpace(chi.URLParam(r, "annotation_id"))
+	if annotationID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "annotation_id is required")
+		return
+	}
+	var req ebookReaderAnnotationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	annotation, err := buildEbookReaderAnnotationPatch(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	annotation.ID = annotationID
+	annotation.UserID = userID
+	annotation.ProfileID = profileID
+	annotation.ContentID = contentID
+	annotation.UpdatedAt = time.Now().UTC()
+	updated, err := h.AnnotationStore.Update(r.Context(), annotation)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update ebook annotation")
+		return
+	}
+	if updated == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Ebook annotation not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *EbookReaderHandler) HandleDeleteAnnotation(w http.ResponseWriter, r *http.Request) {
+	userID, profileID, contentID, ok := h.annotationRequestScope(w, r)
+	if !ok {
+		return
+	}
+	annotationID := strings.TrimSpace(chi.URLParam(r, "annotation_id"))
+	if annotationID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "annotation_id is required")
+		return
+	}
+	if err := h.AnnotationStore.Delete(r.Context(), userID, profileID, contentID, annotationID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete ebook annotation")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *EbookReaderHandler) annotationRequestScope(w http.ResponseWriter, r *http.Request) (int, string, string, bool) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return 0, "", "", false
+	}
+	if h == nil || h.AnnotationStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook annotations are not configured")
+		return 0, "", "", false
+	}
+	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
+		return 0, "", "", false
+	}
+	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
+		h.writeReadError(w, err)
+		return 0, "", "", false
+	}
+	return userID, profileID, contentID, true
+}
+
+func buildEbookReaderAnnotation(req ebookReaderAnnotationRequest) (EbookReaderAnnotation, error) {
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if kind == "" {
+		kind = "highlight"
+	}
+	if kind != "highlight" && kind != "note" && kind != "bookmark" {
+		return EbookReaderAnnotation{}, fmt.Errorf("kind must be highlight, note, or bookmark")
+	}
+	cfiRange := strings.TrimSpace(req.CFIRange)
+	location := strings.TrimSpace(req.Location)
+	if kind == "bookmark" {
+		if location == "" {
+			return EbookReaderAnnotation{}, fmt.Errorf("location is required for bookmarks")
+		}
+	} else if cfiRange == "" {
+		return EbookReaderAnnotation{}, fmt.Errorf("cfi_range is required for annotations")
+	}
+	metadata := req.Metadata
+	if len(metadata) == 0 {
+		metadata = json.RawMessage(`{}`)
+	}
+	if !jsonObject(metadata) {
+		return EbookReaderAnnotation{}, fmt.Errorf("metadata must be a JSON object")
+	}
+	style := strings.TrimSpace(req.Style)
+	if style == "" {
+		style = "highlight"
+	}
+	color := strings.TrimSpace(req.Color)
+	if color == "" {
+		color = "#facc15"
+	}
+	return EbookReaderAnnotation{
+		Kind:         kind,
+		CFIRange:     cfiRange,
+		Location:     location,
+		SelectedText: strings.TrimSpace(req.SelectedText),
+		Note:         strings.TrimSpace(req.Note),
+		Style:        style,
+		Color:        color,
+		Metadata:     metadata,
+	}, nil
+}
+
+func buildEbookReaderAnnotationPatch(req ebookReaderAnnotationRequest) (EbookReaderAnnotation, error) {
+	metadata := req.Metadata
+	if len(metadata) == 0 {
+		metadata = json.RawMessage(`{}`)
+	}
+	if !jsonObject(metadata) {
+		return EbookReaderAnnotation{}, fmt.Errorf("metadata must be a JSON object")
+	}
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if kind != "" && kind != "highlight" && kind != "note" && kind != "bookmark" {
+		return EbookReaderAnnotation{}, fmt.Errorf("kind must be highlight, note, or bookmark")
+	}
+	return EbookReaderAnnotation{
+		Kind:         kind,
+		CFIRange:     strings.TrimSpace(req.CFIRange),
+		Location:     strings.TrimSpace(req.Location),
+		SelectedText: strings.TrimSpace(req.SelectedText),
+		Note:         strings.TrimSpace(req.Note),
+		Style:        strings.TrimSpace(req.Style),
+		Color:        strings.TrimSpace(req.Color),
+		Metadata:     metadata,
+	}, nil
+}
+
 func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
@@ -446,6 +671,155 @@ func (s *PGEbookReaderConfigStore) Upsert(ctx context.Context, config EbookReade
 		return fmt.Errorf("upsert ebook reader config: %w", err)
 	}
 	return nil
+}
+
+type PGEbookReaderAnnotationStore struct {
+	pool *pgxpool.Pool
+}
+
+func NewPGEbookReaderAnnotationStore(pool *pgxpool.Pool) *PGEbookReaderAnnotationStore {
+	return &PGEbookReaderAnnotationStore{pool: pool}
+}
+
+func (s *PGEbookReaderAnnotationStore) List(ctx context.Context, userID int, profileID string, contentID string) ([]EbookReaderAnnotation, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("ebook reader annotation store is not configured")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, user_id, profile_id, content_id, kind,
+		       COALESCE(cfi_range, ''), COALESCE(location, ''),
+		       selected_text, note, style, color, metadata, created_at, updated_at
+		FROM ebook_reader_annotations
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3
+		ORDER BY updated_at DESC`,
+		userID, profileID, contentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list ebook reader annotations: %w", err)
+	}
+	defer rows.Close()
+	var items []EbookReaderAnnotation
+	for rows.Next() {
+		annotation, err := scanEbookReaderAnnotation(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, annotation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate ebook reader annotations: %w", err)
+	}
+	return items, nil
+}
+
+func (s *PGEbookReaderAnnotationStore) Create(ctx context.Context, annotation EbookReaderAnnotation) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("ebook reader annotation store is not configured")
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO ebook_reader_annotations
+			(id, user_id, profile_id, content_id, kind, cfi_range, location,
+			 selected_text, note, style, color, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''),
+		        $8, $9, $10, $11, $12::jsonb, $13, $14)`,
+		annotation.ID,
+		annotation.UserID,
+		annotation.ProfileID,
+		annotation.ContentID,
+		annotation.Kind,
+		annotation.CFIRange,
+		annotation.Location,
+		annotation.SelectedText,
+		annotation.Note,
+		annotation.Style,
+		annotation.Color,
+		annotation.Metadata,
+		annotation.CreatedAt,
+		annotation.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create ebook reader annotation: %w", err)
+	}
+	return nil
+}
+
+func (s *PGEbookReaderAnnotationStore) Update(ctx context.Context, annotation EbookReaderAnnotation) (*EbookReaderAnnotation, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("ebook reader annotation store is not configured")
+	}
+	updated, err := scanEbookReaderAnnotation(s.pool.QueryRow(ctx, `
+		UPDATE ebook_reader_annotations
+		SET kind = COALESCE(NULLIF($5, ''), kind),
+		    cfi_range = COALESCE(NULLIF($6, ''), cfi_range),
+		    location = COALESCE(NULLIF($7, ''), location),
+		    selected_text = COALESCE(NULLIF($8, ''), selected_text),
+		    note = COALESCE(NULLIF($9, ''), note),
+		    style = COALESCE(NULLIF($10, ''), style),
+		    color = COALESCE(NULLIF($11, ''), color),
+		    metadata = $12::jsonb,
+		    updated_at = $13
+		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND content_id = $4
+		RETURNING id, user_id, profile_id, content_id, kind,
+		          COALESCE(cfi_range, ''), COALESCE(location, ''),
+		          selected_text, note, style, color, metadata, created_at, updated_at`,
+		annotation.ID,
+		annotation.UserID,
+		annotation.ProfileID,
+		annotation.ContentID,
+		annotation.Kind,
+		annotation.CFIRange,
+		annotation.Location,
+		annotation.SelectedText,
+		annotation.Note,
+		annotation.Style,
+		annotation.Color,
+		annotation.Metadata,
+		annotation.UpdatedAt,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update ebook reader annotation: %w", err)
+	}
+	return &updated, nil
+}
+
+func (s *PGEbookReaderAnnotationStore) Delete(ctx context.Context, userID int, profileID string, contentID string, annotationID string) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("ebook reader annotation store is not configured")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		DELETE FROM ebook_reader_annotations
+		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND content_id = $4`,
+		annotationID, userID, profileID, contentID,
+	); err != nil {
+		return fmt.Errorf("delete ebook reader annotation: %w", err)
+	}
+	return nil
+}
+
+func scanEbookReaderAnnotation(scanner interface{ Scan(dest ...any) error }) (EbookReaderAnnotation, error) {
+	var annotation EbookReaderAnnotation
+	if err := scanner.Scan(
+		&annotation.ID,
+		&annotation.UserID,
+		&annotation.ProfileID,
+		&annotation.ContentID,
+		&annotation.Kind,
+		&annotation.CFIRange,
+		&annotation.Location,
+		&annotation.SelectedText,
+		&annotation.Note,
+		&annotation.Style,
+		&annotation.Color,
+		&annotation.Metadata,
+		&annotation.CreatedAt,
+		&annotation.UpdatedAt,
+	); err != nil {
+		return EbookReaderAnnotation{}, fmt.Errorf("scan ebook reader annotation: %w", err)
+	}
+	return annotation, nil
 }
 
 func (s *PGEbookReaderProgressStore) Get(ctx context.Context, userID int, profileID string, contentID string) (*EbookReaderProgress, error) {

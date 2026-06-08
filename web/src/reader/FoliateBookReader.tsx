@@ -3,6 +3,7 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { api, apiBlob } from "@/api/client";
 import type { FileVersion } from "@/api/types";
+import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
 import { DocumentLoader, type BookDoc, type TOCItem } from "@/reader/readest/libs/document";
 
 type FoliateViewElement = HTMLElement & {
@@ -11,6 +12,12 @@ type FoliateViewElement = HTMLElement & {
   init: (options: { lastLocation: string }) => Promise<void>;
   goToFraction: (fraction: number) => Promise<void>;
   goTo?: (href: string) => void;
+  getCFI?: (index: number, range: Range) => string;
+  addAnnotation?: (
+    annotation: { value: string; color?: string; style?: string; note?: string },
+    remove?: boolean,
+  ) => void;
+  deselect?: () => void;
   next?: () => void;
   prev?: () => void;
   search?: (
@@ -18,6 +25,8 @@ type FoliateViewElement = HTMLElement & {
   ) => AsyncGenerator<FoliateSearchResult>;
   clearSearch?: () => void;
   renderer?: HTMLElement & {
+    primaryIndex?: number;
+    getContents?: () => Array<{ doc: Document; index?: number }>;
     setStyles?: (css: string) => void;
     render?: () => Promise<void>;
   };
@@ -50,6 +59,8 @@ export type FoliateBookReaderHandle = {
   goToFraction: (fraction: number) => Promise<void>;
   search: (query: string) => Promise<ReaderSearchResult[]>;
   clearSearch: () => void;
+  clearSelection: () => void;
+  createSelectionAnnotation: () => ReaderSelection | null;
 };
 
 export type ReaderTheme = "light" | "sepia" | "dark";
@@ -85,6 +96,17 @@ export type ReaderSearchResult = {
   cfi: string;
   label?: string;
   excerpt?: string;
+};
+
+export type ReaderSelection = {
+  cfi: string;
+  rect: {
+    height: number;
+    left: number;
+    top: number;
+    width: number;
+  };
+  selectedText: string;
 };
 
 type FoliateSearchResult = {
@@ -407,15 +429,27 @@ type FoliateBookReaderProps = {
   contentID: string;
   file: FileVersion;
   title: string;
+  annotations?: EbookReaderAnnotation[];
   settings?: Partial<ReaderSettings>;
   onFileLoaded?: (state: ReaderLoadState | null) => void;
   onProgressChange?: (progress: number | null) => void;
   onReady?: (state: ReaderReadyState) => void;
+  onSelectionChange?: (selection: ReaderSelection | null) => void;
 };
 
 const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderProps>(
   function FoliateBookReader(
-    { contentID, file, title, settings, onFileLoaded, onProgressChange, onReady },
+    {
+      contentID,
+      file,
+      title,
+      annotations = [],
+      settings,
+      onFileLoaded,
+      onProgressChange,
+      onReady,
+      onSelectionChange,
+    },
     ref,
   ) {
     const queryClient = useQueryClient();
@@ -425,6 +459,9 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const saveTimerRef = useRef<number | null>(null);
     const pendingProgressRef = useRef<EbookReaderProgressPayload | null>(null);
     const settingsRef = useRef(normalizeReaderSettings(settings));
+    const annotationsRef = useRef<EbookReaderAnnotation[]>(annotations);
+    const drawnCfisRef = useRef<Set<string>>(new Set());
+    const selectionCleanupRef = useRef<(() => void)[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -446,6 +483,82 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       void renderer?.render?.();
     }, []);
 
+    const drawAnnotations = useCallback(() => {
+      const view = viewRef.current;
+      if (!view?.addAnnotation) return;
+      const activeCfis = new Set(
+        annotationsRef.current
+          .filter((annotation) => annotation.kind !== "bookmark" && annotation.cfi_range)
+          .map((annotation) => annotation.cfi_range || ""),
+      );
+      for (const cfi of drawnCfisRef.current) {
+        if (!activeCfis.has(cfi)) {
+          view.addAnnotation({ value: cfi }, true);
+          drawnCfisRef.current.delete(cfi);
+        }
+      }
+      for (const annotation of annotationsRef.current) {
+        if (annotation.kind === "bookmark" || !annotation.cfi_range) continue;
+        if (drawnCfisRef.current.has(annotation.cfi_range)) continue;
+        view.addAnnotation({
+          value: annotation.cfi_range,
+          color: annotation.color || "#facc15",
+          style: annotation.style || "highlight",
+          note: annotation.note || undefined,
+        });
+        drawnCfisRef.current.add(annotation.cfi_range);
+      }
+    }, []);
+
+    const createSelectionAnnotation = useCallback((): ReaderSelection | null => {
+      const view = viewRef.current;
+      const contents = view?.renderer?.getContents?.() ?? [];
+      if (!view?.getCFI) return null;
+      for (const content of contents) {
+        const selection = content.doc.getSelection();
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) continue;
+        const selectedText = selection.toString().trim();
+        if (!selectedText) continue;
+        const range = selection.getRangeAt(0);
+        const cfi = view.getCFI(content.index ?? 0, range);
+        const rangeRect = range.getBoundingClientRect();
+        const frameRect = content.doc.defaultView?.frameElement?.getBoundingClientRect();
+        return {
+          cfi,
+          selectedText,
+          rect: {
+            height: rangeRect.height,
+            left: rangeRect.left + (frameRect?.left ?? 0),
+            top: rangeRect.top + (frameRect?.top ?? 0),
+            width: rangeRect.width,
+          },
+        };
+      }
+      return null;
+    }, []);
+
+    const emitSelectionChange = useCallback(() => {
+      onSelectionChange?.(createSelectionAnnotation());
+    }, [createSelectionAnnotation, onSelectionChange]);
+
+    const attachSelectionListeners = useCallback(() => {
+      for (const cleanup of selectionCleanupRef.current) cleanup();
+      selectionCleanupRef.current = [];
+      const contents = viewRef.current?.renderer?.getContents?.() ?? [];
+      for (const content of contents) {
+        const doc = content.doc;
+        const handler = () => window.setTimeout(emitSelectionChange, 0);
+        doc.addEventListener("selectionchange", handler);
+        doc.addEventListener("pointerup", handler);
+        doc.addEventListener("keyup", handler);
+        selectionCleanupRef.current.push(() => {
+          doc.removeEventListener("selectionchange", handler);
+          doc.removeEventListener("pointerup", handler);
+          doc.removeEventListener("keyup", handler);
+        });
+      }
+    }, [emitSelectionChange]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -466,13 +579,23 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           return results;
         },
         clearSearch: () => viewRef.current?.clearSearch?.(),
+        clearSelection: () => {
+          viewRef.current?.deselect?.();
+          onSelectionChange?.(null);
+        },
+        createSelectionAnnotation,
       }),
-      [],
+      [createSelectionAnnotation, onSelectionChange],
     );
 
     useEffect(() => {
       applyReaderSettings(settings);
     }, [applyReaderSettings, settings]);
+
+    useEffect(() => {
+      annotationsRef.current = annotations;
+      drawAnnotations();
+    }, [annotations, drawAnnotations]);
 
     useEffect(() => {
       let cancelled = false;
@@ -524,6 +647,28 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           const view = document.createElement("foliate-view") as FoliateViewElement;
           viewRef.current = view;
           containerRef.current?.replaceChildren(view);
+          view.addEventListener("draw-annotation", async (event: Event) => {
+            const { Overlayer } = await import("foliate-js/overlayer.js");
+            const detail = (
+              event as CustomEvent<{
+                annotation: { color?: string; style?: string };
+                draw: (fn: unknown, options?: Record<string, unknown>) => void;
+              }>
+            ).detail;
+            const style = detail.annotation.style || "highlight";
+            const color = detail.annotation.color || "#facc15";
+            const draw =
+              style === "underline"
+                ? Overlayer.underline
+                : style === "squiggly"
+                  ? Overlayer.squiggly
+                  : Overlayer.highlight;
+            detail.draw(draw, { color });
+          });
+          view.addEventListener("create-overlay", () => {
+            attachSelectionListeners();
+            drawAnnotations();
+          });
           view.addEventListener("relocate", (event: Event) => {
             if (!initializedRef.current) return;
             const progress = progressFromRelocate(
@@ -538,6 +683,8 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           await view.open(book);
           onReady?.({ toc: book.toc ?? [] });
           applyReaderSettings(settingsRef.current);
+          attachSelectionListeners();
+          drawAnnotations();
           const savedFileProgress = savedProgress?.file_id === file.file_id ? savedProgress : null;
           const restoreTarget = restoreProgressTarget(savedFileProgress);
           if (savedFileProgress && restoreTarget?.type === "location") {
@@ -560,6 +707,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       }
 
       void open();
+      const drawnCfis = drawnCfisRef.current;
       return () => {
         cancelled = true;
         initializedRef.current = false;
@@ -571,13 +719,18 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         viewRef.current?.close?.();
         viewRef.current?.remove();
         viewRef.current = null;
+        for (const cleanup of selectionCleanupRef.current) cleanup();
+        selectionCleanupRef.current = [];
+        drawnCfis.clear();
         if (objectUrl) URL.revokeObjectURL(objectUrl);
         onFileLoaded?.(null);
         onProgressChange?.(null);
       };
     }, [
       applyReaderSettings,
+      attachSelectionListeners,
       contentID,
+      drawAnnotations,
       file,
       onFileLoaded,
       onProgressChange,

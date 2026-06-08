@@ -375,9 +375,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	var ebookReaderHandler *handlers.EbookReaderHandler
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
+	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
+		ebookAnnotationStore = handlers.NewPGEbookReaderAnnotationStore(deps.DB)
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
@@ -442,6 +444,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 			if ebookConfigStore != nil {
 				ebookReaderHandler.ConfigStore = ebookConfigStore
+			}
+			if ebookAnnotationStore != nil {
+				ebookReaderHandler.AnnotationStore = ebookAnnotationStore
 			}
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
@@ -1745,6 +1750,10 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
 						r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
 						r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
+						r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
+						r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
+						r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
+						r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
 					})
 				}
 
