@@ -46,6 +46,10 @@ type LocalWatchEventDispatcher interface {
 	HandleLocalWatchEvent(ctx context.Context, event watchsync.LocalWatchEvent) error
 }
 
+type EbookReaderProgressLister interface {
+	ListByContentIDs(ctx context.Context, userID int, profileID string, contentIDs []string) (map[string]EbookReaderProgress, error)
+}
+
 // ItemsHandler handles browse, search, item detail, and series endpoints.
 type ItemsHandler struct {
 	browseRepo               *catalog.BrowseRepository
@@ -62,6 +66,7 @@ type ItemsHandler struct {
 	profileRefreshRequester  ProfileRefreshRequester
 	metadataRefreshRequester MetadataRefreshRequester
 	localWatchDispatcher     LocalWatchEventDispatcher
+	ebookProgressStore       EbookReaderProgressLister
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
 }
@@ -112,6 +117,10 @@ func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequ
 
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {
 	h.localWatchDispatcher = dispatcher
+}
+
+func (h *ItemsHandler) SetEbookReaderProgressStore(store EbookReaderProgressLister) {
+	h.ebookProgressStore = store
 }
 
 func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Context, detail *catalog.ItemDetail) {
@@ -850,6 +859,7 @@ func (h *ItemsHandler) listSortMetrics(
 	filter catalog.AccessFilter,
 	overlaySummaries map[string]*models.OverlaySummary,
 	store userstore.UserStore,
+	userID int,
 	profileID string,
 ) map[string]*sortMetricsResponse {
 	metrics := make(map[string]*sortMetricsResponse, len(items))
@@ -890,7 +900,7 @@ func (h *ItemsHandler) listSortMetrics(
 			}
 		}
 	case "progress", "date_viewed", "plays":
-		h.listUserSortMetrics(ctx, items, sortField, store, profileID, metrics)
+		h.listUserSortMetrics(ctx, items, sortField, store, userID, profileID, metrics)
 	}
 	return metrics
 }
@@ -900,6 +910,7 @@ func (h *ItemsHandler) listUserSortMetrics(
 	items []*models.MediaItem,
 	sortField string,
 	store userstore.UserStore,
+	userID int,
 	profileID string,
 	metrics map[string]*sortMetricsResponse,
 ) {
@@ -915,6 +926,10 @@ func (h *ItemsHandler) listUserSortMetrics(
 	if err != nil {
 		return
 	}
+	ebookProgressMap, err := h.listEbookReaderProgressByContentIDs(ctx, userID, profileID, contentIDs)
+	if err != nil {
+		return
+	}
 
 	switch sortField {
 	case "progress":
@@ -923,10 +938,16 @@ func (h *ItemsHandler) listUserSortMetrics(
 				continue
 			}
 			progress, ok := progressMap[item.ContentID]
-			if !ok || progress.Completed || progress.PositionSeconds <= 0 || progress.DurationSeconds <= 0 {
+			if ok && !progress.Completed && progress.PositionSeconds > 0 && progress.DurationSeconds > 0 {
+				ratio := progress.PositionSeconds / progress.DurationSeconds
+				metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
 				continue
 			}
-			ratio := progress.PositionSeconds / progress.DurationSeconds
+			ebookProgress, ok := ebookProgressMap[item.ContentID]
+			if !ok || ebookProgress.Progress <= 0 || ebookProgress.Progress >= 0.9 {
+				continue
+			}
+			ratio := ebookProgress.Progress
 			metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
 		}
 	case "date_viewed", "plays":
@@ -955,6 +976,12 @@ func (h *ItemsHandler) listUserSortMetrics(
 				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
 					viewedAt = progress.UpdatedAt
 				}
+				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= 0.9 {
+					ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339)
+					if ebookViewedAt > viewedAt {
+						viewedAt = ebookViewedAt
+					}
+				}
 				if viewedAt == "" {
 					continue
 				}
@@ -962,6 +989,9 @@ func (h *ItemsHandler) listUserSortMetrics(
 			} else {
 				playCount := historyCounts[item.ContentID]
 				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
+					playCount = 1
+				}
+				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= 0.9 && playCount < 1 {
 					playCount = 1
 				}
 				if playCount <= 0 {
@@ -972,6 +1002,18 @@ func (h *ItemsHandler) listUserSortMetrics(
 			metrics[item.ContentID] = resp
 		}
 	}
+}
+
+func (h *ItemsHandler) listEbookReaderProgressByContentIDs(
+	ctx context.Context,
+	userID int,
+	profileID string,
+	contentIDs []string,
+) (map[string]EbookReaderProgress, error) {
+	if h == nil || h.ebookProgressStore == nil || userID <= 0 || profileID == "" || len(contentIDs) == 0 {
+		return nil, nil
+	}
+	return h.ebookProgressStore.ListByContentIDs(ctx, userID, profileID, contentIDs)
 }
 
 func uniqueItemContentIDs(items []*models.MediaItem) []string {

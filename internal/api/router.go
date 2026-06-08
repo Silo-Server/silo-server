@@ -425,12 +425,14 @@ func NewRouter(deps Dependencies) chi.Router {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
 		}
 		if deps.FileRepo != nil {
+			ebookProgressStore := handlers.NewPGEbookReaderProgressStore(deps.DB)
+			itemsHandler.SetEbookReaderProgressStore(ebookProgressStore)
 			ebookReaderHandler = handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{
 				FileResolver:  deps.FileRepo,
 				ItemAccess:    itemRepo,
 				EpisodeLookup: episodeRepo,
 			})
-			ebookReaderHandler.ProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
+			ebookReaderHandler.ProgressStore = ebookProgressStore
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogHandler = handlers.NewCatalogHandler(

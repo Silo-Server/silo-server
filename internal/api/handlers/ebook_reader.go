@@ -315,6 +315,46 @@ func (s *PGEbookReaderProgressStore) Get(ctx context.Context, userID int, profil
 	return &progress, nil
 }
 
+func (s *PGEbookReaderProgressStore) ListByContentIDs(ctx context.Context, userID int, profileID string, contentIDs []string) (map[string]EbookReaderProgress, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("ebook reader progress store is not configured")
+	}
+	if userID <= 0 || profileID == "" || len(contentIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT user_id, profile_id, content_id, file_id, location, progress, updated_at
+		FROM ebook_reader_progress
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = ANY($3::text[])`,
+		userID, profileID, contentIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list ebook reader progress: %w", err)
+	}
+	defer rows.Close()
+
+	progressByContentID := make(map[string]EbookReaderProgress, len(contentIDs))
+	for rows.Next() {
+		var progress EbookReaderProgress
+		if err := rows.Scan(
+			&progress.UserID,
+			&progress.ProfileID,
+			&progress.ContentID,
+			&progress.FileID,
+			&progress.Location,
+			&progress.Progress,
+			&progress.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan ebook reader progress: %w", err)
+		}
+		progressByContentID[progress.ContentID] = progress
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate ebook reader progress: %w", err)
+	}
+	return progressByContentID, nil
+}
+
 func (s *PGEbookReaderProgressStore) Upsert(ctx context.Context, progress EbookReaderProgress) error {
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("ebook reader progress store is not configured")
