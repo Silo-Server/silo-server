@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 
 import type { FileVersion } from "@/api/types";
 import {
+  cacheEbookReaderProgress,
   ebookProgressPath,
+  ebookReaderProgressQueryKey,
   ebookReadPath,
   formatReaderProgress,
   progressFromRelocate,
@@ -33,6 +36,20 @@ describe("FoliateBookReader helpers", () => {
 
   it("builds the protected ebook progress endpoint", () => {
     expect(ebookProgressPath("ebook 1")).toBe("/ebooks/ebook%201/progress");
+  });
+
+  it("caches saved reader progress under the shared detail query key", () => {
+    const client = new QueryClient();
+    const saved = {
+      file_id: 42,
+      location: "epubcfi(/6/4)",
+      progress: 0.42,
+      content_id: "ebook 1",
+    };
+
+    cacheEbookReaderProgress(client, "ebook 1", saved);
+
+    expect(client.getQueryData(ebookReaderProgressQueryKey("ebook 1"))).toEqual(saved);
   });
 
   it("detects reader file formats from container or filename", () => {

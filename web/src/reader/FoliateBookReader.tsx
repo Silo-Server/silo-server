@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { api, apiBlob } from "@/api/client";
 import type { FileVersion } from "@/api/types";
@@ -52,6 +53,18 @@ export function ebookReadPath(contentID: string, fileID: number): string {
 
 export function ebookProgressPath(contentID: string): string {
   return `/ebooks/${encodeURIComponent(contentID)}/progress`;
+}
+
+export function ebookReaderProgressQueryKey(contentID: string | undefined) {
+  return ["ebook-reader-progress", contentID] as const;
+}
+
+export function cacheEbookReaderProgress(
+  queryClient: QueryClient,
+  contentID: string,
+  progress: EbookReaderProgress,
+) {
+  queryClient.setQueryData(ebookReaderProgressQueryKey(contentID), progress);
 }
 
 export function readerFileFormat(file: FileVersion | undefined): string {
@@ -189,6 +202,7 @@ function FoliateBookReader(
   },
   ref,
 ) {
+  const queryClient = useQueryClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<FoliateViewElement | null>(null);
   const initializedRef = useRef(false);
@@ -214,7 +228,9 @@ function FoliateBookReader(
       const pending = pendingProgressRef.current;
       if (!pending) return;
       pendingProgressRef.current = null;
-      void saveEbookReaderProgress(contentID, pending);
+      void saveEbookReaderProgress(contentID, pending).then((saved) => {
+        cacheEbookReaderProgress(queryClient, contentID, saved);
+      });
     };
 
     const scheduleProgressSave = (progress: EbookReaderProgressPayload) => {
@@ -302,7 +318,7 @@ function FoliateBookReader(
       onFileLoaded?.(null);
       onProgressChange?.(null);
     };
-  }, [contentID, file, onFileLoaded, onProgressChange, title]);
+  }, [contentID, file, onFileLoaded, onProgressChange, queryClient, title]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-white text-neutral-950">
