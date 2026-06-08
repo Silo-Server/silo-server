@@ -70,12 +70,21 @@ const itemColumns = `content_id, type, title, sort_title, default_metadata_langu
 	content_rating, runtime, overview, tagline,
 	rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
 	imdb_id, tmdb_id, tvdb_id,
-	poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
-	metadata_s3_path, metadata_etag, season_count,
+	COALESCE(poster_path, ''), COALESCE(poster_thumbhash, ''), COALESCE(backdrop_path, ''), COALESCE(backdrop_thumbhash, ''), COALESCE(logo_path, ''),
+	COALESCE(metadata_s3_path, ''), COALESCE(metadata_etag, ''), season_count,
 	studios, networks, countries, keywords, original_language, release_date::text, first_air_date, last_air_date, air_time, air_timezone,
 	show_status,
 	matched_at, last_refreshed, refresh_failures,
 	episode_metadata_incomplete, episode_metadata_last_checked_at, locked_fields, status, created_at, updated_at`
+
+func qualifiedNullableStringColumn(alias, col string) string {
+	switch col {
+	case "poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path", "metadata_s3_path", "metadata_etag":
+		return fmt.Sprintf("COALESCE(%s.%s, '')", alias, col)
+	default:
+		return alias + "." + col
+	}
+}
 
 func qualifiedItemColumns(alias string) string {
 	cols := []string{
@@ -92,7 +101,7 @@ func qualifiedItemColumns(alias string) string {
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
-		prefixed[i] = alias + "." + col
+		prefixed[i] = qualifiedNullableStringColumn(alias, col)
 	}
 	return strings.Join(prefixed, ", ")
 }
@@ -116,7 +125,7 @@ func qualifiedListItemColumns(alias string) string {
 			prefixed[i] = effectiveLastAirDateExpr(alias)
 			continue
 		}
-		prefixed[i] = alias + "." + col
+		prefixed[i] = qualifiedNullableStringColumn(alias, col)
 	}
 	return strings.Join(prefixed, ", ")
 }
