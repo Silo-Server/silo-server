@@ -72,6 +72,18 @@ func TestValidate_AudiobookMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidate_EbookMediaScope(t *testing.T) {
+	qd := QueryDefinition{
+		MediaScope: "ebook",
+		Match:      "all",
+		Groups:     []QueryGroup{},
+		Sort:       QuerySort{Field: "title", Order: "asc"},
+	}
+	if err := qd.Validate(); err != nil {
+		t.Fatalf("expected ebook media scope to be valid, got %v", err)
+	}
+}
+
 func TestValidateWithSortScope_RejectsPersonalizedSortWithoutProfileScope(t *testing.T) {
 	qd := QueryDefinition{
 		Match:  "all",

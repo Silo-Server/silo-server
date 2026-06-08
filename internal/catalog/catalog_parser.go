@@ -390,7 +390,7 @@ func normalizeCatalogMatch(raw string) string {
 
 func parseCatalogMediaScope(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "movie", "series", "episode", "audiobook":
+	case "movie", "series", "episode", "audiobook", "ebook":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""

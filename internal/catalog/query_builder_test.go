@@ -531,6 +531,26 @@ func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
 	}
 }
 
+func TestBuild_SeriesClauseJoinsEbookSeriesForEbookScope(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").
+		WithMediaScope("ebook").
+		Build(QueryDefinition{
+			Match: "all",
+			Groups: []QueryGroup{
+				{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is", Value: "Wayfarers"}}},
+			},
+		})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Wayfarers" {
+		t.Fatalf("expected series arg, got %v", args)
+	}
+	if !strings.Contains(clause, "FROM ebook_series s") {
+		t.Fatalf("expected ebook_series join in series clause, got %q", clause)
+	}
+}
+
 func TestBuildSortPlan_AuthorJoinsLateralOnPersonKindAuthor(t *testing.T) {
 	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "author", Order: "asc"})
 	if err != nil {
@@ -573,6 +593,18 @@ func TestBuildSortPlan_SeriesOrdersByNameThenIndex(t *testing.T) {
 	if !strings.Contains(plan.OrderBy, "sort_series.series_name ASC NULLS LAST") ||
 		!strings.Contains(plan.OrderBy, "sort_series.series_index ASC NULLS LAST") {
 		t.Fatalf("expected name+index ordering with NULLS LAST, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_SeriesUsesEbookSeriesForEbookScope(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").
+		WithMediaScope("ebook").
+		BuildSortPlan(QuerySort{Field: "series", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(series) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "ebook_series sort_series") {
+		t.Fatalf("expected LEFT JOIN ebook_series, got %v", plan.Joins)
 	}
 }
 
