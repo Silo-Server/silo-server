@@ -60,7 +60,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     label: "Pill",
     description: "Larger pill with more padding. Works well with icons.",
     badgeClass:
-      "rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase leading-none backdrop-blur-sm",
+      "rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase leading-none",
     badgeStyle: (accent) => ({
       background: accent
         ? `color-mix(in srgb, ${accent} 20%, rgba(20,20,30,0.7))`
