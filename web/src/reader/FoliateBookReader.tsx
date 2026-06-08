@@ -83,10 +83,10 @@ export function cacheEbookReaderProgress(
 
 export function readerFileFormat(file: FileVersion | undefined): string {
   if (!file) return "";
-  const container = file.container?.trim().toLowerCase();
-  if (container) return container.replace(/^\./, "");
   const fileName = file.file_name || file.file_path || "";
   if (fileName.toLowerCase().endsWith(".fb2.zip")) return "fbz";
+  const container = file.container?.trim().toLowerCase();
+  if (container) return container.replace(/^\./, "");
   const match = /\.([a-z0-9]+)$/i.exec(fileName);
   return match?.[1]?.toLowerCase() ?? "";
 }
