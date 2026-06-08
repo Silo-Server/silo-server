@@ -456,12 +456,12 @@ export default function EbookReader() {
 
       <main
         className={cn(
-          "grid h-[calc(100vh-6rem)] min-h-0",
+          "grid h-[calc(100vh-6rem)] min-h-0 w-full overflow-hidden",
           panelOpen ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : "grid-cols-1",
         )}
       >
         {isReaderSupportedFile(selectedFile) ? (
-          <section className="min-h-0">
+          <section className="min-h-0 min-w-0">
             <FoliateBookReader
               ref={readerRef}
               contentID={contentId}
@@ -485,7 +485,7 @@ export default function EbookReader() {
           </div>
         )}
         {panelOpen && isReaderSupportedFile(selectedFile) && (
-          <aside className="border-border bg-background min-h-0 border-t lg:border-t-0 lg:border-l">
+          <aside className="border-border bg-background min-h-0 min-w-0 overflow-hidden border-t lg:border-t-0 lg:border-l">
             <div className="border-border/70 flex h-11 items-center border-b px-2">
               {[
                 {

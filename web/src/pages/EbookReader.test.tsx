@@ -545,6 +545,26 @@ describe("EbookReader", () => {
     vi.useRealTimers();
   });
 
+  it("constrains the reader grid so the side panel stays inside the viewport", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const main = container.querySelector("main");
+    const readerPane = main?.querySelector("section");
+    const sidePanel = main?.querySelector("aside");
+
+    expect(main?.className).toContain("overflow-hidden");
+    expect(readerPane?.className).toContain("min-w-0");
+    expect(sidePanel?.className).toContain("min-w-0");
+  });
+
   it("scrubs reader progress and supports keyboard page navigation", async () => {
     await act(async () => {
       root.render(
