@@ -17,7 +17,7 @@ type RequestRouterProvider interface {
 	CheckStatus(ctx context.Context, installationID int, capabilityID string, req Request, targets []RouterTargetRef, conns []ResolvedRouterConnection) ([]RouterTargetStatus, error)
 	ListConfigOptions(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (map[string][]RouterOption, error)
 	TestConnection(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (bool, string, error)
-	Validate(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (fieldErrors map[string]string, formError string, err error)
+	Validate(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection, siblings []ResolvedRouterConnection) (fieldErrors map[string]string, formError string, err error)
 }
 
 // ResolvedRouterConnection is a connection with plaintext credentials + parsed config.
@@ -226,7 +226,7 @@ func (p *pluginRouterProvider) TestConnection(ctx context.Context, installationI
 	return resp.GetOk(), resp.GetMessage(), nil
 }
 
-func (p *pluginRouterProvider) Validate(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection) (map[string]string, string, error) {
+func (p *pluginRouterProvider) Validate(ctx context.Context, installationID int, capabilityID string, conn ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {
 	client, err := p.resolver.RequestRouterClient(ctx, installationID, capabilityID)
 	if err != nil {
 		return nil, "", err
@@ -235,7 +235,11 @@ func (p *pluginRouterProvider) Validate(ctx context.Context, installationID int,
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := client.Validate(ctx, &pluginv1.ValidateRequest{CapabilityId: capabilityID, Connection: pc})
+	sibs, err := routerProtoConns(siblings)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Validate(ctx, &pluginv1.ValidateRequest{CapabilityId: capabilityID, Connection: pc, Siblings: sibs})
 	if err != nil {
 		return nil, "", err
 	}

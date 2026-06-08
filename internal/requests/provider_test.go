@@ -131,7 +131,8 @@ func TestPluginRouterProviderValidateTranslates(t *testing.T) {
 	}}
 	p := NewPluginRouterProvider(fakeRouterResolver{c: fc})
 	fe, form, err := p.Validate(context.Background(), 1, "arr",
-		ResolvedRouterConnection{ID: "c1", Config: map[string]any{"service_kind": "radarr"}})
+		ResolvedRouterConnection{ID: "c1", Config: map[string]any{"service_kind": "radarr"}},
+		nil)
 	if err != nil || form != "" || fe["is_default"] != "cannot be 4K" {
 		t.Fatalf("unexpected: fe=%v form=%q err=%v", fe, form, err)
 	}

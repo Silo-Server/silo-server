@@ -1880,6 +1880,7 @@ type fakeRouterProvider struct {
 	validateErr           error
 	validateCalls         int
 	gotValidateCapability string
+	gotValidateSiblings   []ResolvedRouterConnection
 }
 
 func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, _ Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
@@ -1930,10 +1931,11 @@ func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, 
 	return true, "", nil
 }
 
-func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, _ ResolvedRouterConnection) (map[string]string, string, error) {
+func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, _ ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {
 	f.mu.Lock()
 	f.validateCalls++
 	f.gotValidateCapability = capabilityID
+	f.gotValidateSiblings = siblings
 	f.mu.Unlock()
 	return f.validateFieldErrors, f.validateFormError, f.validateErr
 }
@@ -1965,6 +1967,42 @@ func autoApproveRouterInst(id, apiKeyRef string) Integration {
 	in := routerInst(id)
 	in.APIKeyRef = apiKeyRef
 	return in
+}
+
+func TestUpdateIntegrationPassesSiblingsToValidate(t *testing.T) {
+	store := newFakeStore()
+	inst := 1
+	a := routerInstOn("conn-a", inst)
+	b := routerInstOn("conn-b", inst)
+	b.PluginConfig = map[string]any{"service_kind": "radarr"}
+	store.integrations = []Integration{a, b}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	if _, err := service.UpdateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		ID:             "conn-a",
+		Name:           "conn-a",
+		CapabilityID:   "arr",
+		BaseURL:        "http://conn-a.local",
+		APIKeyRef:      "key-conn-a",
+		InstallationID: &inst,
+	}); err != nil {
+		t.Fatalf("UpdateIntegration: %v", err)
+	}
+	if len(router.gotValidateSiblings) != 1 {
+		t.Fatalf("siblings = %d, want 1 (the other installation-1 connection)", len(router.gotValidateSiblings))
+	}
+	sib := router.gotValidateSiblings[0]
+	if sib.ID != "conn-b" {
+		t.Fatalf("sibling id = %q, want conn-b (self excluded)", sib.ID)
+	}
+	if sib.APIKey != "" || sib.BaseURL != "" {
+		t.Fatalf("sibling must carry no credentials, got APIKey=%q BaseURL=%q", sib.APIKey, sib.BaseURL)
+	}
+	if sib.Config["service_kind"] != "radarr" {
+		t.Fatalf("sibling config not passed: %+v", sib.Config)
+	}
 }
 
 func TestAllowedQualities(t *testing.T) {

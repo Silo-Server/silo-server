@@ -865,7 +865,11 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 		return err
 	}
 	conn := ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig}
-	fe, form, err := s.router.Validate(ctx, *in.InstallationID, in.CapabilityID, conn)
+	siblings, err := s.siblingConnections(ctx, in)
+	if err != nil {
+		return err
+	}
+	fe, form, err := s.router.Validate(ctx, *in.InstallationID, in.CapabilityID, conn, siblings)
 	if err != nil {
 		return err
 	}
@@ -873,6 +877,28 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 		return &ValidationError{FieldErrors: fe, FormError: form}
 	}
 	return nil
+}
+
+// siblingConnections returns the other connections bound to the same plugin
+// installation as `in` (self excluded), carrying only id + config so a plugin
+// can enforce cross-connection rules without the host resolving sibling
+// credentials.
+func (s *Service) siblingConnections(ctx context.Context, in Integration) ([]ResolvedRouterConnection, error) {
+	if in.InstallationID == nil {
+		return nil, nil
+	}
+	all, err := s.store.ListIntegrations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []ResolvedRouterConnection
+	for _, other := range all {
+		if other.ID == in.ID || other.InstallationID == nil || *other.InstallationID != *in.InstallationID {
+			continue
+		}
+		out = append(out, ResolvedRouterConnection{ID: other.ID, Config: other.PluginConfig})
+	}
+	return out, nil
 }
 
 func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id string) error {
