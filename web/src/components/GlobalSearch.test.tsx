@@ -132,6 +132,28 @@ describe("GlobalSearch", () => {
     expect(markup).toContain("Press Enter for all results");
   });
 
+  it("labels ebook preview rows with title case media type", () => {
+    mocks.useQuery.mockReturnValue({
+      data: {
+        total: 1,
+        has_more: false,
+        items: [
+          {
+            ...browseFixture,
+            type: "ebook",
+            title: "A Reader",
+          },
+        ],
+      },
+      isFetching: false,
+      isError: false,
+    });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Reader" });
+
+    expect(markup).toContain("2020 · Ebook");
+  });
+
   it("disables the preview query when the dialog is closed", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },

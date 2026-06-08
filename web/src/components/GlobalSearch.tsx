@@ -29,6 +29,8 @@ function typeLabel(type: BrowseItem["type"]): string {
       return "Season";
     case "episode":
       return "Episode";
+    case "ebook":
+      return "Ebook";
     default:
       return type;
   }
