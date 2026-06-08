@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router";
-import { Info, ChevronLeft, ChevronRight, Play, Pause } from "lucide-react";
+import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -41,6 +41,9 @@ interface HeroBannerProps {
  */
 function buildPlayHref(item: SectionItem, libraryId?: number): string {
   const q = libraryId ? `?libraryId=${libraryId}` : "";
+  if (item.type === "ebook") {
+    return `/reader/ebook/${item.content_id}${q}`;
+  }
   if (item.type === "movie" || item.type === "episode") {
     return `/watch/${item.content_id}${q}`;
   }
@@ -126,6 +129,8 @@ export default function HeroBanner({
 
   const slideCount = slides.length;
   const padded = (n: number) => String(n).padStart(2, "0");
+  const primaryActionLabel = current.type === "ebook" ? "Read" : "Play";
+  const PrimaryActionIcon = current.type === "ebook" ? BookOpen : Play;
 
   return (
     <section
@@ -223,8 +228,8 @@ export default function HeroBanner({
                 to={buildPlayHref(current, libraryId)}
                 className="pill pill-primary transition-colors duration-[--duration-fast]"
               >
-                <Play className="h-4 w-4 fill-current" />
-                Play
+                <PrimaryActionIcon className="h-4 w-4 fill-current" />
+                {primaryActionLabel}
               </Link>
               <Link
                 to={`/item/${current.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`}

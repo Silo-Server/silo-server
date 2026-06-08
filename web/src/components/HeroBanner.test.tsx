@@ -42,4 +42,35 @@ describe("HeroBanner", () => {
     expect(markup).toContain("Featured Movie");
     expect(markup).toContain("More Info");
   });
+
+  it("routes ebook hero actions to the reader", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <HeroBanner
+          libraryId={7}
+          items={[
+            {
+              content_id: "ebook-1",
+              type: "ebook",
+              title: "Featured Ebook",
+              year: 2024,
+              genres: ["Mystery"],
+              status: "matched",
+              rating_imdb: null,
+              overview: "Overview",
+              poster_url: "",
+              poster_thumbhash: "",
+              backdrop_url: "",
+              backdrop_thumbhash: "",
+              logo_url: "",
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('href="/reader/ebook/ebook-1?libraryId=7"');
+    expect(markup).not.toContain('href="/watch/ebook-1');
+    expect(markup).toContain("Read");
+  });
 });
