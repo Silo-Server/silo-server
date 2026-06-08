@@ -193,6 +193,16 @@ describe("FoliateBookReader helpers", () => {
   });
 
   it("uses full available width in scrolled flow", () => {
+    const scrolledStyles = readerStyles(
+      normalizeReaderSettings({
+        flow: "scrolled",
+        maxWidth: 68,
+      }),
+    );
+
+    expect(scrolledStyles).toContain("max-width: none !important");
+    expect(scrolledStyles).not.toContain("max-width: 68ch !important");
+
     expect(
       readerRendererAttributes(
         normalizeReaderSettings({

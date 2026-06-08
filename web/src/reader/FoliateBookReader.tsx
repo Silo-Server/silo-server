@@ -337,6 +337,7 @@ function readerColors(theme: ReaderTheme) {
 
 export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS) {
   const colors = readerColors(settings.theme);
+  const contentMaxWidth = settings.flow === "scrolled" ? "none" : `${settings.maxWidth}ch`;
   return `
     :root {
       --theme-bg-color: ${colors.background};
@@ -352,7 +353,7 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
       font-weight: ${settings.fontWeight} !important;
       hyphens: ${settings.hyphenation ? "auto" : "none"} !important;
       line-height: ${settings.lineHeight} !important;
-      max-width: ${settings.maxWidth}ch !important;
+      max-width: ${contentMaxWidth} !important;
       filter: brightness(${settings.fontBrightness}%) !important;
     }
     body :where(p, span, div, li, blockquote, h1, h2, h3, h4, h5, h6,
