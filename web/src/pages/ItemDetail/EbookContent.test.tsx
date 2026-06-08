@@ -256,6 +256,18 @@ describe("EbookContent", () => {
     expect(markup).not.toContain("Read");
   });
 
+  it("preserves library context on reader links", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem()} libraryId={12} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("/reader/ebook/ebook-1?file_id=1&amp;libraryId=12");
+  });
+
   it("does not show read action when ebook files are not reader-supported", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
 

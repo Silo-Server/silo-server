@@ -105,7 +105,7 @@ export default function ItemDetail() {
         <AudiobookContent item={item as ItemDetail & { type: "audiobook" }} libraryId={libraryId} />
       );
     case "ebook":
-      return <EbookContent item={item as ItemDetail & { type: "ebook" }} />;
+      return <EbookContent item={item as ItemDetail & { type: "ebook" }} libraryId={libraryId} />;
     case "podcast":
       return <Navigate to={`/podcasts/show/${item.content_id}`} replace />;
     default:

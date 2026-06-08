@@ -171,6 +171,20 @@ describe("EbookReader", () => {
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves library context on the back-to-ebook link", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?libraryId=12"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.innerHTML).toContain('href="/item/ebook-1?libraryId=12"');
+  });
+
   it("switches between multiple ebook files from the reader header", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem({

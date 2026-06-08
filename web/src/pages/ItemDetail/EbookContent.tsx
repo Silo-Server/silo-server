@@ -56,7 +56,13 @@ function progressReadVersion(
   return versions.find((version) => version.file_id === fileID && isReaderSupportedFile(version));
 }
 
-export default function EbookContent({ item }: { item: ItemDetail & { type: "ebook" } }) {
+export default function EbookContent({
+  item,
+  libraryId,
+}: {
+  item: ItemDetail & { type: "ebook" };
+  libraryId?: number;
+}) {
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
   const { data: readerProgress } = useEbookReaderProgress(item.content_id);
@@ -71,9 +77,17 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
     preferredReadVersion(item.versions);
   const canRead = Boolean(readVersion);
   const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
-  const readerHref = readVersion
-    ? `/reader/ebook/${encodeURIComponent(item.content_id)}?file_id=${readVersion.file_id}`
-    : `/reader/ebook/${encodeURIComponent(item.content_id)}`;
+  const readerParams = new URLSearchParams();
+  if (readVersion) {
+    readerParams.set("file_id", String(readVersion.file_id));
+  }
+  if (libraryId) {
+    readerParams.set("libraryId", String(libraryId));
+  }
+  const readerQuery = readerParams.toString();
+  const readerHref = `/reader/ebook/${encodeURIComponent(item.content_id)}${
+    readerQuery ? `?${readerQuery}` : ""
+  }`;
 
   return (
     <div>

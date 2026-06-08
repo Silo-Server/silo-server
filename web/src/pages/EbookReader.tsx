@@ -35,6 +35,7 @@ export default function EbookReader() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedFileID = Number(searchParams.get("file_id") || "");
+  const libraryIdParam = searchParams.get("libraryId");
   const { data: item, isLoading, error } = useCatalogItemDetail(contentId || undefined);
   const selectedFile = useMemo(
     () => chooseReaderFile(item?.versions ?? [], Number.isFinite(requestedFileID) ? requestedFileID : null),
@@ -58,12 +59,20 @@ export default function EbookReader() {
   const handleFileChange = useCallback(
     (fileID: string) => {
       if (!contentId) return;
-      navigate(`/reader/ebook/${encodeURIComponent(contentId)}?file_id=${encodeURIComponent(fileID)}`, {
+      const nextParams = new URLSearchParams();
+      nextParams.set("file_id", fileID);
+      if (libraryIdParam) {
+        nextParams.set("libraryId", libraryIdParam);
+      }
+      navigate(`/reader/ebook/${encodeURIComponent(contentId)}?${nextParams.toString()}`, {
         replace: true,
       });
     },
-    [contentId, navigate],
+    [contentId, libraryIdParam, navigate],
   );
+  const backHref = `/item/${encodeURIComponent(item.content_id)}${
+    libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
+  }`;
 
   if (isLoading) {
     return (
@@ -96,7 +105,7 @@ export default function EbookReader() {
       <header className="sticky top-0 z-20 border-b border-border/70 bg-background/95 backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label="Back to ebook">
-            <Link to={`/item/${encodeURIComponent(item.content_id)}`}>
+            <Link to={backHref}>
               <ArrowLeft className="size-5" />
             </Link>
           </Button>
