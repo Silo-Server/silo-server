@@ -230,17 +230,15 @@ func TestWalkModeForEbookLibraryTypes(t *testing.T) {
 }
 
 func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
-	if !walkModeEbook.acceptsExt(".epub") {
-		t.Fatal("walkModeEbook should accept .epub")
+	for _, ext := range []string{".epub", ".pdf", ".mobi", ".azw", ".azw3", ".fb2", ".fbz", ".cbz", ".cbr", ".md"} {
+		if !walkModeEbook.acceptsExt(ext) {
+			t.Fatalf("walkModeEbook should accept %s", ext)
+		}
 	}
-	if !walkModeEbook.acceptsExt(".pdf") {
-		t.Fatal("walkModeEbook should accept .pdf")
-	}
-	if walkModeEbook.acceptsExt(".mp4") {
-		t.Fatal("walkModeEbook should reject video extensions")
-	}
-	if walkModeEbook.acceptsExt(".mp3") {
-		t.Fatal("walkModeEbook should reject audio extensions")
+	for _, ext := range []string{".txt", ".mp4", ".mp3", ".mkv"} {
+		if walkModeEbook.acceptsExt(ext) {
+			t.Fatalf("walkModeEbook should reject %s", ext)
+		}
 	}
 }
 
