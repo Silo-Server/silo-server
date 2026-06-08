@@ -77,6 +77,20 @@ func TestNewEnricherUsesConfiguredBatchSize(t *testing.T) {
 	}
 }
 
+func TestNewEnricherCapsWorkersToConfiguredBatchSize(t *testing.T) {
+	t.Setenv("SILO_AUDIOBOOK_ENRICH_BATCH_SIZE", "50")
+	t.Setenv("SILO_AUDIOBOOK_ENRICH_WORKERS", "100")
+
+	e := NewEnricher(nil, nil, nil, nil, nil, nil)
+
+	if e.batchSize != 50 {
+		t.Fatalf("batchSize = %d, want 50", e.batchSize)
+	}
+	if e.workers != e.batchSize {
+		t.Fatalf("workers = %d, want capped batchSize %d", e.workers, e.batchSize)
+	}
+}
+
 func TestAudiobookEnrichWorkersCapsAtBatchSize(t *testing.T) {
 	t.Setenv("SILO_AUDIOBOOK_ENRICH_WORKERS", "8")
 

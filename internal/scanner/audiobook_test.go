@@ -229,6 +229,18 @@ func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 }
 
+func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
+	s := &Scanner{}
+
+	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks"}, "")
+	if err == nil {
+		t.Fatal("ScanSubtree returned nil, want invalid root error")
+	}
+	if !strings.Contains(err.Error(), "invalid audiobook scan root") {
+		t.Fatalf("error = %q, want invalid audiobook scan root", err)
+	}
+}
+
 func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	root := t.TempDir()
 	bookDir := filepath.Join(root, "bad-book")
@@ -250,6 +262,18 @@ func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "folder_id=42") {
 		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
+	}
+}
+
+func TestScanFileAudiobookLibraryRejectsRelativeScopedRoot(t *testing.T) {
+	s := &Scanner{}
+
+	err := s.ScanFile(context.Background(), "chapter.mp3", &models.MediaFolder{ID: 42, Type: "audiobooks"})
+	if err == nil {
+		t.Fatal("ScanFile returned nil, want invalid root error")
+	}
+	if !strings.Contains(err.Error(), "invalid audiobook scan root") {
+		t.Fatalf("error = %q, want invalid audiobook scan root", err)
 	}
 }
 
