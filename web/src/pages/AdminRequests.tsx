@@ -89,6 +89,7 @@ import {
   REQUEST_OUTCOMES,
   REQUEST_STATUSES,
 } from "@/lib/mediaRequests";
+import { applyExclusivity } from "./requestExclusivity";
 
 type StatusFilter = MediaRequestStatus | "all";
 type OutcomeFilter = MediaRequestOutcome | "all";
@@ -776,9 +777,22 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
   }
 
   function updateCardConfig(key: string, pluginConfig: Record<string, unknown>) {
-    setCards((current) =>
-      current.map((card) => (card.key === key ? { ...card, pluginConfig } : card)),
-    );
+    setCards((current) => {
+      const mapped = current.map((card) => ({
+        key: card.key,
+        installationId: card.form.installation_id,
+        config: card.key === key ? pluginConfig : card.pluginConfig,
+      }));
+      const fieldsFor = (installationId: string) =>
+        routerInstallations.find((entry) => String(entry.installationID) === installationId)
+          ?.capability.config_schema?.[0]?.admin_form?.fields ?? [];
+      const next = applyExclusivity(mapped, key, pluginConfig, fieldsFor);
+      const byKey = new Map(next.map((entry) => [entry.key, entry.config]));
+      return current.map((card) => ({
+        ...card,
+        pluginConfig: byKey.get(card.key) ?? card.pluginConfig,
+      }));
+    });
   }
 
   function addCard() {

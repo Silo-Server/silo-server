@@ -2721,6 +2721,7 @@ export interface PluginAdminFormField {
   dynamic_options?: boolean;
   show_when?: PluginAdminFormCondition[];
   validation?: PluginAdminFormValidation;
+  exclusive_group_field?: string;
 }
 
 export interface PluginCapability {
