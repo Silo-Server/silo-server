@@ -8,6 +8,7 @@ import {
   ebookReaderProgressQueryKey,
   ebookReadPath,
   formatReaderProgress,
+  isReaderSupportedFile,
   restoreProgressTarget,
   progressFromRelocate,
   readerFileFormat,
@@ -62,6 +63,10 @@ describe("FoliateBookReader helpers", () => {
     expect(readerFileFormat(version({ container: "zip", file_name: "comic.cbz" }))).toBe("cbz");
     expect(readerFileFormat(version({ container: "rar", file_name: "comic.cbr" }))).toBe("cbr");
     expect(readerFileFormat(version({ file_path: "/library/book.cbz" }))).toBe("cbz");
+  });
+
+  it("does not support plain text files in the reader", () => {
+    expect(isReaderSupportedFile(version({ file_name: "notes.txt" }))).toBe(false);
   });
 
   it("maps readest formats to MIME types", () => {

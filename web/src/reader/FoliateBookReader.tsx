@@ -61,7 +61,6 @@ const READEST_FORMATS = new Set([
   "cbr",
   "fb2",
   "fbz",
-  "txt",
   "md",
 ]);
 
@@ -124,8 +123,6 @@ export function readerMimeType(format: string): string {
       return "application/x-zip-compressed-fb2";
     case "md":
       return "text/markdown";
-    case "txt":
-      return "text/plain";
     default:
       return "application/octet-stream";
   }

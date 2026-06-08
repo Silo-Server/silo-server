@@ -26,7 +26,6 @@ var ebookExtensions = map[string]bool{
 	".fbz":  true,
 	".cbz":  true,
 	".cbr":  true,
-	".txt":  true,
 	".md":   true,
 }
 
@@ -77,7 +76,7 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 		book, err = parseEbookCBZ(path)
 	case ".pdf":
 		book, err = parseEbookPDF(path)
-	case ".mobi", ".azw", ".azw3", ".cbr", ".txt", ".md":
+	case ".mobi", ".azw", ".azw3", ".cbr", ".md":
 		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))

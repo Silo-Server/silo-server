@@ -86,7 +86,7 @@ func TestSupportsEbookFile(t *testing.T) {
 		{"book.fbz", true},
 		{"book.cbz", true},
 		{"book.cbr", true},
-		{"book.txt", true},
+		{"book.txt", false},
 		{"book.md", true},
 		{"book.mp3", false},
 		{"movie.mkv", false},
@@ -108,7 +108,6 @@ func TestParseEbookFileSupportsReaderFormatsWithoutEmbeddedMetadata(t *testing.T
 		{"book.azw", "azw"},
 		{"book.azw3", "azw3"},
 		{"book.cbr", "cbr"},
-		{"book.txt", "txt"},
 		{"book.md", "md"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
