@@ -76,7 +76,7 @@ require (
 )
 
 require (
-	github.com/Silo-Server/silo-plugin-sdk v0.5.0
+	github.com/Silo-Server/silo-plugin-sdk v0.6.0
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
@@ -111,4 +111,3 @@ require (
 // expose the request_router capability types. Points the host build at the
 // local SDK checkout (branch feat/request-router-capability). MUST be removed
 // and replaced with a published SDK version before any PR/publish.
-replace github.com/Silo-Server/silo-plugin-sdk => /opt/silo-plugin-sdk
