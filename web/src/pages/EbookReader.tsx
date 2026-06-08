@@ -40,6 +40,10 @@ export default function EbookReader() {
     () => chooseReaderFile(item?.versions ?? [], Number.isFinite(requestedFileID) ? requestedFileID : null),
     [item?.versions, requestedFileID],
   );
+  const readerFiles = useMemo(
+    () => (item?.versions ?? []).filter((file) => isReaderSupportedFile(file)),
+    [item?.versions],
+  );
   const format = readerFileFormat(selectedFile);
   const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
@@ -105,14 +109,14 @@ export default function EbookReader() {
               {progressLabel}
             </div>
           )}
-          {item.versions.length > 1 && (
+          {isReaderSupportedFile(selectedFile) && readerFiles.length > 1 && (
             <select
               aria-label="Reader file"
               value={selectedFile.file_id}
               onChange={(event) => handleFileChange(event.target.value)}
               className="border-border bg-background text-foreground hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:block"
             >
-              {item.versions.map((file) => (
+              {readerFiles.map((file) => (
                 <option key={file.file_id} value={file.file_id}>
                   {readerFileLabel(file)}
                 </option>

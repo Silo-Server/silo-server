@@ -205,4 +205,34 @@ describe("EbookReader", () => {
 
     expect(container.textContent).toContain("reader surface Reader.pdf");
   });
+
+  it("only lists reader-supported files in the reader file selector", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [
+          makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
+          makeVersion({ file_id: 9, file_name: "Reader.docx", container: "docx" }),
+          makeVersion({ file_id: 10, file_name: "Reader.pdf", container: "pdf" }),
+        ],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const options = Array.from(container.querySelectorAll<HTMLOptionElement>("option")).map(
+      (option) => option.textContent,
+    );
+
+    expect(options).toEqual(["EPUB · Reader.epub", "PDF · Reader.pdf"]);
+  });
 });
