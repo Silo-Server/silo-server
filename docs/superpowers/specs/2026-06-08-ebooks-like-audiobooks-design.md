@@ -37,7 +37,7 @@ Audiobooks have three cooperating pieces:
    - `silo-plugin-audiobook-metadata` exposes `metadata_provider.v1` with an
      audiobook capability and provider implementations.
 
-## Ebook Equivalent
+## Ebook Equivalent Across PRs
 
 Ebooks should mirror that shape:
 
@@ -53,7 +53,7 @@ Ebooks should mirror that shape:
      - `ebook_series`
      - `media_item_libraries`
      - `media_item_provider_ids` using provider `isbn` when an ISBN is parsed
-2. Core metadata enrichment:
+2. Follow-up core metadata enrichment:
    - Add `internal/ebooks/enrichment.go`, shaped after
      `internal/audiobooks/enrichment.go`.
    - Add `internal/taskmanager/tasks/sync_ebook_metadata.go`, shaped after
