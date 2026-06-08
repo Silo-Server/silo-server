@@ -74,7 +74,8 @@ remaining plaintext in place:
 
 1. sensitive `server_settings` keys,
 2. the per-table credential columns (subtitles, watch-sync, webhook-sync,
-   history-import),
+   history-import, including temporary server-list credentials stored in
+   session JSON),
 3. the two arr `api_key_ref` columns — these are **resolved-then-encrypted**: a
    legacy row that held a `server_settings` reference (e.g.
    `requests.radarr.api_key`) is collapsed to the real credential before being
@@ -118,7 +119,8 @@ data migration of the envelope format.
 
 Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
 `server_settings`, watch-sync tokens, webhook-sync `access_token`,
-history-import admin/session tokens, subtitle provider `api_key`/`password`,
+history-import admin/session tokens and temporary server-list credentials,
+subtitle provider `api_key`/`password`,
 the Jellyfin-compat session's bridged Silo access/refresh tokens
 (`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`), and
 the ABS signing key.

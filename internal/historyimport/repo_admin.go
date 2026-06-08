@@ -21,7 +21,7 @@ var (
 
 // SetSourceAdminToken stores an admin token for the given source.
 func (r *Repository) SetSourceAdminToken(ctx context.Context, sourceID int, token string) error {
-	encryptedToken, err := r.cipher.Encrypt(token, sourceAdminTokenAAD(sourceID))
+	encryptedToken, err := r.encryptSourceAdminToken(sourceID, token)
 	if err != nil {
 		return fmt.Errorf("encrypt admin token for source %d: %w", sourceID, err)
 	}

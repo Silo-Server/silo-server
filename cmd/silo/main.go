@@ -268,6 +268,10 @@ func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *sec
 	if err != nil {
 		slog.Error("secret backfill: credential columns", "error", err)
 	}
+	historyServersN, err := historyimport.NewRepository(pool, cipher).BackfillSessionServerSecrets(ctx)
+	if err != nil {
+		slog.Error("secret backfill: history import session server credentials", "error", err)
+	}
 	// The arr resolver is the encrypting settings decorator: it decrypts a
 	// sensitive target (e.g. requests.radarr.api_key) or passes through a
 	// plaintext custom key, exactly replicating the deleted resolveAPIKey.
@@ -275,9 +279,9 @@ func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *sec
 	if err != nil {
 		slog.Error("secret backfill: arr api keys", "error", err)
 	}
-	if total := settingsN + columnsN + arrN; total > 0 {
+	if total := settingsN + columnsN + historyServersN + arrN; total > 0 {
 		slog.Info("secret backfill: encrypted plaintext credentials at rest",
-			"settings", settingsN, "columns", columnsN, "arr_keys", arrN, "total", total)
+			"settings", settingsN, "columns", columnsN, "history_session_servers", historyServersN, "arr_keys", arrN, "total", total)
 	}
 }
 
