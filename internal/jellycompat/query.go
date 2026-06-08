@@ -32,6 +32,7 @@ type itemsQuery struct {
 	personID               int64
 	isPlayed               *bool // nil = not specified
 	imageTypeLimit         *int  // nil = not specified
+	requireBackdrop        bool  // true when ImageTypes includes Backdrop (filter, not just a hint)
 	mediaTypes             []string
 	mediaTypesSet          map[string]bool
 	mediaTypesExplicit     bool
@@ -108,6 +109,17 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	if itlRaw := q.Get("ImageTypeLimit"); itlRaw != "" {
 		if itl, err := strconv.Atoi(itlRaw); err == nil {
 			result.imageTypeLimit = &itl
+		}
+	}
+
+	// ImageTypes acts as a filter: clients (e.g. Wholphin genre cards) request
+	// ImageTypes=Backdrop and assume every returned item has a backdrop. Only
+	// Backdrop is enforced — the catalog browse path can filter on backdrop_path.
+	for _, raw := range q.Values("ImageTypes") {
+		for part := range strings.SplitSeq(raw, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), "Backdrop") {
+				result.requireBackdrop = true
+			}
 		}
 	}
 
@@ -210,6 +222,9 @@ func buildBrowseParams(query itemsQuery) url.Values {
 		} else {
 			params.Set("is_played", "false")
 		}
+	}
+	if query.requireBackdrop {
+		params.Set("require_backdrop", "true")
 	}
 	return params
 }
