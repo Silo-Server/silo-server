@@ -116,6 +116,44 @@ describe("ContinueWatchingCard", () => {
     expect(markup).toContain('src="/movie-poster.jpg"');
   });
 
+  it("links ebook continue rows to the reader and shows percent read", () => {
+    const queryClient = new QueryClient();
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ContinueWatchingCard
+            sectionItem={{
+              content_id: "ebook 001",
+              type: "ebook",
+              title: "A Reader",
+              year: 2026,
+              genres: [],
+              status: "matched",
+              rating_imdb: null,
+              overview: "Ebook overview",
+              item_source: "continue_watching",
+              position_seconds: 0.42,
+              duration_seconds: 1,
+              progress_updated_at: "2026-06-07T00:00:00Z",
+              poster_url: "/ebook-cover.jpg",
+              poster_thumbhash: "",
+              backdrop_url: "",
+              backdrop_thumbhash: "",
+              logo_url: "",
+            }}
+            libraryId={12}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain('href="/reader/ebook/ebook%20001?libraryId=12"');
+    expect(markup).toContain('href="/item/ebook 001?libraryId=12"');
+    expect(markup).toContain("42% read");
+    expect(markup).not.toContain('href="/watch/ebook');
+    expect(markup).not.toContain("0 min left");
+  });
+
   it("renders separate watch and item links alongside episodic metadata", () => {
     const queryClient = new QueryClient();
     const markup = renderToStaticMarkup(

@@ -1,5 +1,5 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { Play } from "lucide-react";
+import { BookOpen, Play } from "lucide-react";
 import { useCallback } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
@@ -35,7 +35,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const card =
     "sectionItem" in props && props.sectionItem
       ? {
-          watchHref: `/watch/${props.sectionItem.content_id}${libraryQuery}`,
+          watchHref:
+            props.sectionItem.type === "ebook"
+              ? `/reader/ebook/${encodeURIComponent(props.sectionItem.content_id)}${libraryQuery}`
+              : `/watch/${props.sectionItem.content_id}${libraryQuery}`,
           itemHref: `/item/${props.sectionItem.content_id}${libraryQuery}`,
           title: props.sectionItem.title,
           seriesTitle: props.sectionItem.series_title,
@@ -48,7 +51,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           type: props.sectionItem.type,
         }
       : {
-          watchHref: `/watch/${props.detail.content_id}${libraryQuery}`,
+          watchHref:
+            props.detail.type === "ebook"
+              ? `/reader/ebook/${encodeURIComponent(props.detail.content_id)}${libraryQuery}`
+              : `/watch/${props.detail.content_id}${libraryQuery}`,
           itemHref: `/item/${props.detail.content_id}${libraryQuery}`,
           title: props.detail.title,
           seriesTitle: props.detail.series_title,
@@ -105,6 +111,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     ? premiereBadge
       ? null
       : "Next Episode"
+    : card.type === "ebook"
+      ? `${Math.round(Math.min(Math.max(progressPercent, 0), 100))}% read`
     : card.durationSeconds > 0
       ? `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
       : "\u00A0";
@@ -118,6 +126,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         event.ctrlKey ||
         event.shiftKey
       ) {
+        return;
+      }
+
+      if (card.type === "ebook") {
         return;
       }
 
@@ -205,7 +217,11 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             {/* Play overlay */}
             <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-150 group-hover/play:bg-black/30">
               <div className="bg-primary text-primary-foreground flex h-11 w-11 items-center justify-center rounded-full opacity-0 shadow-lg transition-all duration-200 group-hover/play:scale-100 group-hover/play:opacity-100 group-focus-visible/play:opacity-100">
-                <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
+                {card.type === "ebook" ? (
+                  <BookOpen className="h-5 w-5" />
+                ) : (
+                  <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
+                )}
               </div>
             </div>
 
