@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -204,6 +205,9 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	}
 	if err := s.upsertEbookPeople(ctx, contentID, &parsed); err != nil {
 		return fmt.Errorf("upsert ebook people: %w", err)
+	}
+	if err := s.upsertEbookSeries(ctx, contentID, &parsed); err != nil {
+		return fmt.Errorf("upsert ebook series: %w", err)
 	}
 	if err := insertEbookLibraryMembership(ctx, s.fileRepo.Pool(), contentID, folder.ID); err != nil {
 		return fmt.Errorf("upsert ebook library membership: %w", err)
@@ -550,7 +554,57 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 }
 
 func (s *Scanner) upsertEbookSeries(ctx context.Context, contentID string, book *parsedEbook) error {
+	if s.fileRepo == nil {
+		return fmt.Errorf("fileRepo not configured on Scanner")
+	}
+	desiredName, desiredIdx := ebookSeriesDesired(book)
+
+	var currentName *string
+	var currentIdx *float64
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT series_name, series_index FROM ebook_series WHERE content_id = $1
+	`, contentID).Scan(&currentName, &currentIdx)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("query ebook_series: %w", err)
+	}
+
+	if desiredName == "" {
+		if currentName == nil {
+			return nil
+		}
+		if _, delErr := s.fileRepo.Pool().Exec(ctx,
+			`DELETE FROM ebook_series WHERE content_id = $1`, contentID); delErr != nil {
+			return fmt.Errorf("delete ebook_series row: %w", delErr)
+		}
+		return nil
+	}
+
+	if currentName != nil && *currentName == desiredName && floatPtrEqual(currentIdx, desiredIdx) {
+		return nil
+	}
+
+	var idx any
+	if desiredIdx != nil {
+		idx = *desiredIdx
+	}
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO ebook_series (content_id, series_name, series_index, updated_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (content_id) DO UPDATE SET
+			series_name  = EXCLUDED.series_name,
+			series_index = EXCLUDED.series_index,
+			updated_at   = NOW()
+	`, contentID, desiredName, idx); err != nil {
+		return fmt.Errorf("upsert ebook_series row: %w", err)
+	}
 	return nil
+}
+
+func ebookSeriesDesired(book *parsedEbook) (string, *float64) {
+	if book == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(book.Series), parseSeriesIndex(book.SeriesIndex)
 }
 
 func ebookIdentityConfidence(book *parsedEbook) string {
