@@ -2,6 +2,7 @@ package ebooks
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -134,6 +135,84 @@ func TestCacheRemotePosterCachesProviderURL(t *testing.T) {
 	}
 }
 
+func TestCacheRemotePosterSkipsNilCacher(t *testing.T) {
+	e := &Enricher{}
+	result := &metadata.MetadataResult{
+		PosterPath: "https://example.test/book.jpg",
+	}
+
+	e.cacheRemotePoster(context.Background(), "content-1", result)
+
+	if result.PosterPath != "https://example.test/book.jpg" {
+		t.Fatalf("PosterPath = %q, want provider URL preserved", result.PosterPath)
+	}
+}
+
+func TestCacheRemotePosterSkipsTypedNilCacher(t *testing.T) {
+	var cacher *fakeEbookImageCacher
+	e := &Enricher{imageCacher: cacher}
+	result := &metadata.MetadataResult{
+		PosterPath: "https://example.test/book.jpg",
+	}
+
+	e.cacheRemotePoster(context.Background(), "content-1", result)
+
+	if result.PosterPath != "https://example.test/book.jpg" {
+		t.Fatalf("PosterPath = %q, want provider URL preserved", result.PosterPath)
+	}
+}
+
+func TestCacheRemotePosterSkipsAlreadyCachedPath(t *testing.T) {
+	cacher := &fakeEbookImageCacher{}
+	e := &Enricher{imageCacher: cacher}
+	result := &metadata.MetadataResult{
+		PosterPath: "local/ebooks/content-1/poster/original.webp",
+	}
+
+	e.cacheRemotePoster(context.Background(), "content-1", result)
+
+	if cacher.calls != 0 {
+		t.Fatalf("CacheImage calls = %d, want 0", cacher.calls)
+	}
+	if result.PosterPath != "local/ebooks/content-1/poster/original.webp" {
+		t.Fatalf("PosterPath = %q", result.PosterPath)
+	}
+}
+
+func TestCacheRemotePosterPreservesProviderURLOnCacheError(t *testing.T) {
+	cacher := &fakeEbookImageCacher{err: errors.New("cache failed")}
+	e := &Enricher{imageCacher: cacher}
+	result := &metadata.MetadataResult{
+		PosterPath: "https://example.test/book.jpg",
+	}
+
+	e.cacheRemotePoster(context.Background(), "content-1", result)
+
+	if cacher.calls != 1 {
+		t.Fatalf("CacheImage calls = %d, want 1", cacher.calls)
+	}
+	if result.PosterPath != "https://example.test/book.jpg" {
+		t.Fatalf("PosterPath = %q, want provider URL preserved", result.PosterPath)
+	}
+}
+
+func TestCacheRemotePosterPreservesProviderURLOnNilCacheResult(t *testing.T) {
+	cacher := &fakeEbookImageCacher{returnNil: true}
+	e := &Enricher{imageCacher: cacher}
+	result := &metadata.MetadataResult{
+		PosterPath: "https://example.test/book.jpg",
+	}
+
+	e.cacheRemotePoster(context.Background(), "content-1", result)
+
+	if cacher.calls != 1 {
+		t.Fatalf("CacheImage calls = %d, want 1", cacher.calls)
+	}
+	if result.PosterPath != "https://example.test/book.jpg" {
+		t.Fatalf("PosterPath = %q, want provider URL preserved", result.PosterPath)
+	}
+}
+
 func TestMergeEnrichmentProviderIDsKeepsExistingIDs(t *testing.T) {
 	dst := &metadata.MetadataResult{ProviderIDs: map[string]string{"isbn": "9780306406157"}}
 	src := &metadata.MetadataResult{ProviderIDs: map[string]string{"isbn": "new", "openlibrary": "OL1M", "empty": ""}}
@@ -152,13 +231,21 @@ func TestMergeEnrichmentProviderIDsKeepsExistingIDs(t *testing.T) {
 }
 
 type fakeEbookImageCacher struct {
-	calls int
-	req   metadata.CacheImageRequest
+	calls     int
+	req       metadata.CacheImageRequest
+	err       error
+	returnNil bool
 }
 
 func (f *fakeEbookImageCacher) CacheImage(_ context.Context, req metadata.CacheImageRequest) (*metadata.CacheImageResult, error) {
 	f.calls++
 	f.req = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.returnNil {
+		return nil, nil
+	}
 	return &metadata.CacheImageResult{
 		BasePath:  req.ProviderID + "/" + req.ContentType + "/" + req.ContentID + "/poster",
 		Thumbhash: "thumb",
