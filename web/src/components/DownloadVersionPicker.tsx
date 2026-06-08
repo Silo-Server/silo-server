@@ -18,6 +18,7 @@ interface DownloadVersionPickerProps {
   onOpenChange: (open: boolean) => void;
   versions: FileVersion[];
   title?: string;
+  summaryBuilder?: (version: FileVersion) => string;
 }
 
 export default function DownloadVersionPicker({
@@ -25,6 +26,7 @@ export default function DownloadVersionPicker({
   onOpenChange,
   versions,
   title,
+  summaryBuilder,
 }: DownloadVersionPickerProps) {
   const sorted = sortByResolution(versions);
   const [downloading, setDownloading] = useState<number | null>(null);
@@ -66,8 +68,8 @@ export default function DownloadVersionPicker({
 
         <div className="space-y-2">
           {sorted.map((version) => {
-            const quality = buildQualitySummary(version);
-            const size = formatFileSize(version.file_size);
+            const quality = summaryBuilder?.(version) || buildQualitySummary(version);
+            const size = summaryBuilder ? "" : formatFileSize(version.file_size);
 
             return (
               <button

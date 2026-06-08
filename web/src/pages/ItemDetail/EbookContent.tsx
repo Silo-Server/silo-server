@@ -165,6 +165,7 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
         onOpenChange={setDownloadOpen}
         versions={item.versions}
         title={item.title}
+        summaryBuilder={ebookVersionSummary}
       />
     </div>
   );

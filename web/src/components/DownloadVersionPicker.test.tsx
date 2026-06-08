@@ -59,4 +59,25 @@ describe("DownloadVersionPicker", () => {
       screen.queryByText("Choose a version to download. Make sure you have enough disk space."),
     ).toBeNull();
   });
+
+  it("allows ebook download rows to show page counts", () => {
+    render(
+      <DownloadVersionPicker
+        open
+        onOpenChange={() => undefined}
+        title="A Psalm for the Wild-Built"
+        versions={[
+          version({
+            file_id: 1,
+            container: "cbz",
+            file_size: 25 * 1024 ** 2,
+            duration: 48,
+          }),
+        ]}
+        summaryBuilder={(file) => `${file.container.toUpperCase()} · 48 pages`}
+      />,
+    );
+
+    expect(screen.getByText("CBZ · 48 pages")).toBeTruthy();
+  });
 });
