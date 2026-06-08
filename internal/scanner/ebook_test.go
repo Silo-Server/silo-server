@@ -54,15 +54,15 @@ func (f *fakeEbookCoverCacher) CacheEbookCover(_ context.Context, data []byte, c
 }
 
 type fakeEbookMetadataUpdater struct {
-	items     []*models.MediaItem
-	getErr    error
-	contentID string
-	update    *catalog.MetadataUpdate
-	err       error
+	posterPath string
+	getErr     error
+	contentID  string
+	update     *catalog.MetadataUpdate
+	err        error
 }
 
-func (f *fakeEbookMetadataUpdater) GetByIDs(_ context.Context, _ []string) ([]*models.MediaItem, error) {
-	return f.items, f.getErr
+func (f *fakeEbookMetadataUpdater) GetPosterPath(_ context.Context, _ string) (string, error) {
+	return f.posterPath, f.getErr
 }
 
 func (f *fakeEbookMetadataUpdater) UpdateMetadata(_ context.Context, contentID string, update *catalog.MetadataUpdate) error {
@@ -850,7 +850,7 @@ func TestApplyEbookEmbeddedCoverCachesAndUpdatesPoster(t *testing.T) {
 
 func TestApplyEbookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
 	cacher := &fakeEbookCoverCacher{}
-	updater := &fakeEbookMetadataUpdater{items: []*models.MediaItem{{ContentID: "content-1", PosterPath: "provider/poster.webp"}}}
+	updater := &fakeEbookMetadataUpdater{posterPath: "provider/poster.webp"}
 
 	err := applyEbookEmbeddedCover(context.Background(), updater, cacher, "content-1", &parsedEbook{
 		Cover: &parsedEbookCover{Bytes: []byte("cover-bytes")},

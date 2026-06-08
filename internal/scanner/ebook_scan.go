@@ -479,7 +479,7 @@ func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath 
 }
 
 type ebookCoverMetadataStore interface {
-	GetByIDs(ctx context.Context, ids []string) ([]*models.MediaItem, error)
+	GetPosterPath(ctx context.Context, contentID string) (string, error)
 	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error
 }
 
@@ -505,11 +505,11 @@ func cacheEbookCoverBytes(ctx context.Context, store ebookCoverMetadataStore, ca
 	if len(data) == 0 {
 		return nil
 	}
-	items, err := store.GetByIDs(ctx, []string{contentID})
+	existingPosterPath, err := store.GetPosterPath(ctx, contentID)
 	if err != nil {
-		return fmt.Errorf("get ebook media item for cover: %w", err)
+		return fmt.Errorf("get ebook poster path for cover: %w", err)
 	}
-	if len(items) > 0 && items[0] != nil && strings.TrimSpace(items[0].PosterPath) != "" {
+	if strings.TrimSpace(existingPosterPath) != "" {
 		return nil
 	}
 	basePath, ext, thumbhash, err := cacher.CacheEbookCover(ctx, data, contentID)
