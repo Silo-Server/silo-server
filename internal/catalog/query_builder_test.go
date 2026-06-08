@@ -850,3 +850,18 @@ func TestQueryBuilder_LastWatched_RequiresCTE(t *testing.T) {
 		t.Fatalf("after lastWatchedExpr, builder should require CTE")
 	}
 }
+
+func TestUserHistoryCTESQLIncludesCompletedEbookReaderProgress(t *testing.T) {
+	sql := UserHistoryCTESQL(1)
+	expectedFragments := []string{
+		"FROM ebook_reader_progress erp",
+		"erp.progress >= 0.9",
+		"erp.content_id",
+		"erp.updated_at",
+	}
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("expected CTE to contain %q, got:\n%s", fragment, sql)
+		}
+	}
+}

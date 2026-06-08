@@ -159,9 +159,10 @@ func (qb *QueryBuilder) UserHistoryCTEArgs() []any {
 // UserHistoryCTESQL returns the user_last_watched CTE definition. The two
 // placeholder positions (user_id, profile_id) are bound to the args returned
 // by UserHistoryCTEArgs and should be the first two entries in the final
-// statement's arg list. The CTE aggregates user_watch_history watch_at and
-// user_watch_progress.completed=TRUE updated_at into one row per
-// media_item_id, filtering out items the user has hidden via
+// statement's arg list. The CTE aggregates user_watch_history watched_at,
+// user_watch_progress.completed=TRUE updated_at, and completed ebook reader
+// progress updated_at into one row per media_item_id, filtering out videos the
+// user has hidden via
 // user_history_hidden_items. The single GROUP BY replaces the two
 // correlated MAX subqueries the previous lastWatchedExpr emitted (audit
 // 2026-05-01 §3.1 Pattern B).
@@ -187,6 +188,10 @@ func UserHistoryCTESQL(argIdx int) string {
 		SELECT uwp.media_item_id, NULL::timestamptz, uwp.updated_at
 		FROM user_watch_progress uwp
 		WHERE uwp.user_id = $%d AND uwp.profile_id = $%d AND uwp.completed = TRUE
+		UNION ALL
+		SELECT erp.content_id AS media_item_id, NULL::timestamptz, erp.updated_at
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $%d AND erp.profile_id = $%d AND erp.progress >= 0.9
 	) src
 	WHERE NOT EXISTS (
 		SELECT 1 FROM user_history_hidden_items hhi
@@ -195,7 +200,7 @@ func UserHistoryCTESQL(argIdx int) string {
 		  AND COALESCE(src.uwh_at, src.uwp_at) <= hhi.hidden_before
 	)
 	GROUP BY src.media_item_id
-)`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1)
+)`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1)
 }
 
 func (qb *QueryBuilder) BuildSortClause(sortConfig QuerySort) (string, []any, error) {
