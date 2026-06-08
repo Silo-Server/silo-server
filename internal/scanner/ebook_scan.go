@@ -24,6 +24,10 @@ type ebookSQLExecutor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
+type filesystemMediaItemReader interface {
+	GetByIDs(ctx context.Context, ids []string) ([]*models.MediaItem, error)
+}
+
 func ebookScanWorkers() int {
 	if v := os.Getenv("SILO_EBOOK_SCAN_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -257,6 +261,9 @@ func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePa
 		return "", fmt.Errorf("find ebook by root path: %w", err)
 	}
 	if existingID != "" {
+		if err := updateExistingEbookMediaItem(ctx, s.itemRepo, s.itemRepo, existingID, book); err != nil {
+			return "", err
+		}
 		return existingID, nil
 	}
 	if existing := s.findEbookByFilePath(ctx, filePath); existing != nil {
@@ -321,6 +328,28 @@ func createEbookMediaItem(ctx context.Context, itemWriter filesystemMediaItemWri
 		return "", err
 	}
 	return id, nil
+}
+
+func updateExistingEbookMediaItem(ctx context.Context, itemReader filesystemMediaItemReader, itemWriter filesystemMediaItemWriter, contentID string, book *parsedEbook) error {
+	if itemReader == nil {
+		return fmt.Errorf("media item reader not configured")
+	}
+	if itemWriter == nil {
+		return fmt.Errorf("media item writer not configured")
+	}
+	items, err := itemReader.GetByIDs(ctx, []string{contentID})
+	if err != nil {
+		return fmt.Errorf("get ebook media item %s: %w", contentID, err)
+	}
+	if len(items) == 0 || items[0] == nil {
+		return fmt.Errorf("ebook media item %s not found", contentID)
+	}
+	item := items[0]
+	applyEbookToMediaItem(item, book)
+	if item.SortTitle == "" {
+		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
+	}
+	return itemWriter.Upsert(ctx, item)
 }
 
 func applyEbookToMediaItem(item *models.MediaItem, book *parsedEbook) {
@@ -472,6 +501,13 @@ func mergeEbookPeople(existing []models.ItemPerson, authors []ebookResolvedAutho
 	return people
 }
 
+func ebookPeopleForReplace(existing []models.ItemPerson, getErr error, authors []ebookResolvedAuthor) ([]models.ItemPerson, error) {
+	if getErr != nil {
+		return nil, fmt.Errorf("get ebook people: %w", getErr)
+	}
+	return mergeEbookPeople(existing, authors), nil
+}
+
 func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book *parsedEbook) error {
 	if s.personRepo == nil {
 		return fmt.Errorf("personRepo not configured on Scanner")
@@ -491,7 +527,10 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 	}
 
 	existing, err := s.itemRepo.GetPeople(ctx, contentID)
-	if err == nil && ebookPeopleCreditsEqual(existing, desired) {
+	if err != nil {
+		return fmt.Errorf("get ebook people: %w", err)
+	}
+	if ebookPeopleCreditsEqual(existing, desired) {
 		return nil
 	}
 
@@ -503,7 +542,11 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 		}
 		authors = append(authors, ebookResolvedAuthor{ID: personID, Name: c.Name})
 	}
-	return s.itemRepo.ReplacePeople(ctx, contentID, mergeEbookPeople(existing, authors))
+	people, err := ebookPeopleForReplace(existing, nil, authors)
+	if err != nil {
+		return err
+	}
+	return s.itemRepo.ReplacePeople(ctx, contentID, people)
 }
 
 func (s *Scanner) upsertEbookSeries(ctx context.Context, contentID string, book *parsedEbook) error {

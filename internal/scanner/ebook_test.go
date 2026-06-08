@@ -25,6 +25,15 @@ func (r *recordingEbookExecutor) Exec(_ context.Context, query string, args ...a
 	return pgconn.CommandTag{}, nil
 }
 
+type fakeFilesystemItemReader struct {
+	items []*models.MediaItem
+	err   error
+}
+
+func (f *fakeFilesystemItemReader) GetByIDs(_ context.Context, _ []string) ([]*models.MediaItem, error) {
+	return f.items, f.err
+}
+
 func TestSupportsEbookFile(t *testing.T) {
 	cases := []struct {
 		path string
@@ -227,6 +236,38 @@ func TestResolveEbookMediaItemReusesRootScopedContentID(t *testing.T) {
 	}
 }
 
+func TestResolveEbookExistingRootAppliesParsedMetadata(t *testing.T) {
+	reader := &fakeFilesystemItemReader{items: []*models.MediaItem{{
+		ContentID:        "ebook-root-id",
+		Type:             "ebook",
+		Title:            "Old Title",
+		Year:             2020,
+		OriginalLanguage: "",
+	}}}
+	writer := &fakeFilesystemItemWriter{}
+
+	err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
+		Title:     "New Title",
+		Year:      2026,
+		Publisher: "New Press",
+		Genres:    []string{"Fiction"},
+		Language:  "en",
+	})
+	if err != nil {
+		t.Fatalf("updateExistingEbookMediaItem: %v", err)
+	}
+	if len(writer.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
+	}
+	item := writer.upserts[0]
+	if item.ContentID != "ebook-root-id" || item.Type != "ebook" || item.Title != "New Title" || item.Year != 2026 || item.OriginalLanguage != "en" {
+		t.Fatalf("updated item = %+v", item)
+	}
+	if strings.Join(item.Studios, ",") != "New Press" || strings.Join(item.Genres, ",") != "Fiction" {
+		t.Fatalf("updated item studios/genres = %+v/%+v", item.Studios, item.Genres)
+	}
+}
+
 func TestEbookPeopleCreditsEqualAuthorsOnly(t *testing.T) {
 	existing := []models.ItemPerson{
 		{Person: models.Person{Name: "Ada Writer"}, Kind: models.PersonKindAuthor, SortOrder: 0},
@@ -269,6 +310,14 @@ func TestEbookPeopleMergePreservesExistingNonAuthorCredits(t *testing.T) {
 	}
 	if got[2].Person.ID != 40 || got[2].Kind != models.PersonKindAuthor || got[2].SortOrder != 2 {
 		t.Fatalf("new author credit = %+v", got[2])
+	}
+}
+
+func TestEbookPeopleReplacePlanReturnsGetPeopleError(t *testing.T) {
+	wantErr := errors.New("get people failed")
+	_, err := ebookPeopleForReplace(nil, wantErr, []ebookResolvedAuthor{{ID: 40, Name: "New Author"}})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
 
