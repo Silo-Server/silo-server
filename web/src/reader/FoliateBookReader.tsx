@@ -409,11 +409,12 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
 
 export function readerRendererAttributes(settings: ReaderSettings) {
   const scrolled = settings.flow === "scrolled";
+  const maxInlinePx = Math.round(settings.maxWidth * 10);
   return {
     flow: scrolled ? "scrolled" : null,
-    gap: `${settings.margin}px`,
+    gap: "7%",
     margin: `${settings.margin}px`,
-    maxInlineSize: scrolled ? "100%" : `${settings.maxWidth}ch`,
+    maxInlineSize: scrolled ? "9999px" : `${maxInlinePx}px`,
     maxColumnCount: scrolled ? "1" : settings.spread === "none" ? "1" : "2",
     scale: `${settings.zoom}`,
   };

@@ -220,10 +220,10 @@ describe("FoliateBookReader helpers", () => {
       ),
     ).toEqual({
       flow: null,
-      gap: "20px",
+      gap: "7%",
       margin: "20px",
       maxColumnCount: "2",
-      maxInlineSize: "68ch",
+      maxInlineSize: "680px",
       scale: "100",
     });
 
@@ -238,10 +238,10 @@ describe("FoliateBookReader helpers", () => {
       ),
     ).toEqual({
       flow: "scrolled",
-      gap: "20px",
+      gap: "7%",
       margin: "20px",
       maxColumnCount: "1",
-      maxInlineSize: "100%",
+      maxInlineSize: "9999px",
       scale: "100",
     });
   });
