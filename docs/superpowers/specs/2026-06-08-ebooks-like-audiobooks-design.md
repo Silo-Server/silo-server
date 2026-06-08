@@ -88,9 +88,14 @@ The first implementation PR should establish the mirrored foundation:
 - local ebook parser
 - ebook scan routing and persistence
 - `ebook_series` migration
-- ebook metadata enrichment package/task/wiring
 - tests proving ebook authors-only behavior, ISBN provider ID behavior, and
-  `content_level = 'ebook'` enrichment chain resolution
+  scanner-owned ebook series behavior
+
+Deferred follow-up PR scope:
+
+- ebook metadata enrichment package/task/wiring, analogous to
+  `internal/audiobooks.Enricher`
+- plugin chain resolution at `content_level = 'ebook'`
 
 UI/detail page, ebook reader experience, ABS ebook compatibility endpoints, and
 advanced provider-specific plugin improvements can be separate PRs unless they

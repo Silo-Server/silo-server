@@ -301,7 +301,7 @@ git add migrations/sql/20260608000100_ebook_series.sql internal/scanner/ebook_sc
 git commit -m "feat: persist ebook series membership"
 ```
 
-### Task 4: Ebook Metadata Enricher
+### Follow-up PR Task 4: Ebook Metadata Enricher
 
 **Files:**
 - Create: `internal/ebooks/enrichment.go`
@@ -360,7 +360,7 @@ git add internal/ebooks/enrichment.go internal/ebooks/enrichment_test.go
 git commit -m "feat: add ebook metadata enricher"
 ```
 
-### Task 5: Ebook Metadata Task And Main Wiring
+### Follow-up PR Task 5: Ebook Metadata Task And Main Wiring
 
 **Files:**
 - Create: `internal/taskmanager/tasks/sync_ebook_metadata.go`

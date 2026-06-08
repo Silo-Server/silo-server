@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const maxEPUBMetadataEntrySize = 8 * 1024 * 1024
+
 var ebookExtensions = map[string]bool{
 	".epub": true,
 	".pdf":  true,
@@ -280,7 +282,15 @@ func readEPUBZipEntry(reader *zip.Reader, name string) ([]byte, error) {
 			return nil, err
 		}
 		defer entry.Close()
-		return io.ReadAll(entry)
+		limited := io.LimitReader(entry, maxEPUBMetadataEntrySize+1)
+		data, err := io.ReadAll(limited)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxEPUBMetadataEntrySize {
+			return nil, fmt.Errorf("epub entry too large: %s", name)
+		}
+		return data, nil
 	}
 	return nil, fmt.Errorf("epub entry not found: %s", name)
 }
