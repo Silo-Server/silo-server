@@ -175,6 +175,14 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
 			{ID: "default-random-audiobooks", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
 		}
+	case "ebooks", "ebook":
+		return []*PageSection{
+			{ID: "default-continue-reading", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Reading", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-recently-added-ebooks", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Ebooks", ItemLimit: 20, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+			{ID: "default-recently-released-ebooks", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Ebooks", ItemLimit: 20, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-ebooks", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+		}
 	default:
 		return DefaultLibrarySections(libraryID)
 	}
