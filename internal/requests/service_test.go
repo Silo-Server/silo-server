@@ -1866,6 +1866,9 @@ type fakeRouterProvider struct {
 	gotInstallationID int
 	fulfillCalls      int
 
+	gotRequesterEmail    string
+	gotRequesterUsername string
+
 	// CheckStatus behavior.
 	statuses    []RouterTargetStatus
 	statusErr   error
@@ -1883,9 +1886,11 @@ type fakeRouterProvider struct {
 	gotValidateSiblings   []ResolvedRouterConnection
 }
 
-func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, _ Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
+func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, req Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.gotRequesterEmail = req.RequesterEmail
+	f.gotRequesterUsername = req.RequesterUsername
 	f.fulfillCalls++
 	f.gotQualities = append(f.gotQualities, qualities...)
 	f.gotConns = conns
@@ -2518,4 +2523,33 @@ type fakeSecretError struct {
 
 func (f fakeSecretError) Get(context.Context, string) (string, error) {
 	return "", f.err
+}
+
+type fakeRequesterIdentity struct {
+	email, username string
+	err             error
+	gotUserID       int
+}
+
+func (f *fakeRequesterIdentity) ResolveRequester(_ context.Context, userID int) (string, string, error) {
+	f.gotUserID = userID
+	return f.email, f.username, f.err
+}
+
+func TestSubmitApprovedPopulatesRequesterIdentity(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInstOn("router-1", 1)}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	service.SetRequesterIdentityResolver(&fakeRequesterIdentity{email: "u@example.com", username: "bob"})
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := service.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if router.gotRequesterEmail != "u@example.com" || router.gotRequesterUsername != "bob" {
+		t.Fatalf("descriptor identity = %q/%q, want u@example.com/bob", router.gotRequesterEmail, router.gotRequesterUsername)
+	}
 }

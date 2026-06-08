@@ -100,6 +100,8 @@ func routerDescriptor(req Request) *pluginv1.RequestDescriptor {
 		IsAnime:            req.IsAnime,
 		RequesterUserId:    int64(req.RequestedByUserID),
 		RequesterProfileId: req.RequestedByProfileID,
+		RequesterEmail:     req.RequesterEmail,
+		RequesterUsername:  req.RequesterUsername,
 	}
 }
 

@@ -139,6 +139,8 @@ type Request struct {
 	Outcome              Outcome    `json:"outcome"`
 	RequestedByUserID    int        `json:"requested_by_user_id,omitempty"`
 	RequestedByProfileID string     `json:"requested_by_profile_id,omitempty"`
+	RequesterEmail       string     `json:"-"`
+	RequesterUsername    string     `json:"-"`
 	IntegrationKind      string     `json:"integration_kind,omitempty"`
 	IsAnime              bool       `json:"is_anime"`
 	Targets              []Target   `json:"targets,omitempty"`

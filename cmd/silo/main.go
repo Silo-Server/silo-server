@@ -1540,6 +1540,7 @@ func main() {
 			),
 		)
 		requestReconcileSvc.SetSecretResolver(settingsRepo)
+		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		if userStoreProvider != nil {
 			reconcileResolver := access.NewResolver(

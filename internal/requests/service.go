@@ -38,14 +38,21 @@ type EntitlementResolver interface {
 	MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error)
 }
 
+// RequesterIdentityResolver resolves a requesting user id into the identity a
+// per-user request_router plugin needs (e.g. Seerr attribution by email).
+type RequesterIdentityResolver interface {
+	ResolveRequester(ctx context.Context, userID int) (email, username string, err error)
+}
+
 type Service struct {
-	store        Store
-	tmdb         TMDBClient
-	presence     PresenceResolver
-	secrets      SecretResolver
-	router       RequestRouterProvider
-	entitlements EntitlementResolver
-	Now          func() time.Time
+	store             Store
+	tmdb              TMDBClient
+	presence          PresenceResolver
+	secrets           SecretResolver
+	router            RequestRouterProvider
+	entitlements      EntitlementResolver
+	requesterIdentity RequesterIdentityResolver
+	Now               func() time.Time
 }
 
 type DiscoverySection struct {
@@ -73,6 +80,24 @@ func (s *Service) SetSecretResolver(resolver SecretResolver) {
 func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
 
 func (s *Service) SetEntitlementResolver(r EntitlementResolver) { s.entitlements = r }
+
+func (s *Service) SetRequesterIdentityResolver(r RequesterIdentityResolver) {
+	s.requesterIdentity = r
+}
+
+// populateRequesterIdentity fills req.RequesterEmail/Username from the resolver.
+// Nil resolver or any error leaves them empty (the plugin then behaves as admin).
+func (s *Service) populateRequesterIdentity(ctx context.Context, req *Request) {
+	if s.requesterIdentity == nil || req.RequestedByUserID <= 0 {
+		return
+	}
+	email, username, err := s.requesterIdentity.ResolveRequester(ctx, req.RequestedByUserID)
+	if err != nil {
+		slog.WarnContext(ctx, "requests: requester identity resolve failed; attributing to admin", "user_id", req.RequestedByUserID, "error", err)
+		return
+	}
+	req.RequesterEmail, req.RequesterUsername = email, username
+}
 
 func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID string) string {
 	if s.entitlements == nil {
@@ -1346,6 +1371,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			}
 		}
 	}
+	s.populateRequesterIdentity(ctx, &req)
 	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
 	if err != nil {
 		return nil, err
