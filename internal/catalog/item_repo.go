@@ -35,6 +35,26 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 	return &ItemRepository{pool: pool}
 }
 
+// GetPosterPath returns the current poster path for a media item. Missing or
+// NULL poster values are returned as an empty string.
+func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (string, error) {
+	if r == nil || r.pool == nil {
+		return "", ErrItemNotFound
+	}
+	var posterPath string
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(poster_path, '')
+		FROM media_items
+		WHERE content_id = $1
+	`, contentID).Scan(&posterPath); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrItemNotFound
+		}
+		return "", fmt.Errorf("getting media item poster path: %w", err)
+	}
+	return posterPath, nil
+}
+
 // overviewMatchFloor is the minimum ts_rank_cd score an overview-only match
 // must achieve to be returned when no title FTS match exists in the candidate
 // set. The overview tsvector is built without setweight(), so PostgreSQL's

@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const maxAudiobookSidecarCoverSize = 8 * 1024 * 1024
@@ -26,7 +25,7 @@ type audiobookCoverCacher interface {
 }
 
 type audiobookCoverMetadataStore interface {
-	GetByIDs(ctx context.Context, ids []string) ([]*models.MediaItem, error)
+	GetPosterPath(ctx context.Context, contentID string) (string, error)
 	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error
 }
 
@@ -98,11 +97,11 @@ func applyAudiobookSidecarCover(ctx context.Context, store audiobookCoverMetadat
 	if err != nil || len(cover) == 0 {
 		return err
 	}
-	items, err := store.GetByIDs(ctx, []string{contentID})
+	existingPosterPath, err := store.GetPosterPath(ctx, contentID)
 	if err != nil {
-		return fmt.Errorf("get audiobook media item for cover: %w", err)
+		return fmt.Errorf("get audiobook poster path for cover: %w", err)
 	}
-	if len(items) > 0 && items[0] != nil && strings.TrimSpace(items[0].PosterPath) != "" {
+	if strings.TrimSpace(existingPosterPath) != "" {
 		return nil
 	}
 	basePath, ext, thumbhash, err := cacher.CacheAudiobookCover(ctx, cover, contentID)

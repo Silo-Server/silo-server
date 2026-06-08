@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type fakeAudiobookCoverCacher struct {
@@ -28,15 +27,15 @@ func (f *fakeAudiobookCoverCacher) CacheAudiobookCover(_ context.Context, data [
 }
 
 type fakeAudiobookCoverStore struct {
-	items     []*models.MediaItem
-	getErr    error
-	contentID string
-	update    *catalog.MetadataUpdate
-	err       error
+	posterPath string
+	getErr     error
+	contentID  string
+	update     *catalog.MetadataUpdate
+	err        error
 }
 
-func (f *fakeAudiobookCoverStore) GetByIDs(_ context.Context, _ []string) ([]*models.MediaItem, error) {
-	return f.items, f.getErr
+func (f *fakeAudiobookCoverStore) GetPosterPath(_ context.Context, _ string) (string, error) {
+	return f.posterPath, f.getErr
 }
 
 func (f *fakeAudiobookCoverStore) UpdateMetadata(_ context.Context, contentID string, update *catalog.MetadataUpdate) error {
@@ -76,7 +75,7 @@ func TestApplyAudiobookSidecarCoverPreservesExistingPoster(t *testing.T) {
 	}
 	cacher := &fakeAudiobookCoverCacher{}
 	store := &fakeAudiobookCoverStore{
-		items: []*models.MediaItem{{ContentID: "content-1", PosterPath: "provider/poster.webp"}},
+		posterPath: "provider/poster.webp",
 	}
 
 	err := applyAudiobookSidecarCover(context.Background(), store, cacher, "content-1", dir)
