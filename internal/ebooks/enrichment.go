@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -370,7 +371,7 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 	if !strings.HasPrefix(result.PosterPath, "http://") && !strings.HasPrefix(result.PosterPath, "https://") {
 		return
 	}
-	if e.imageCacher == nil {
+	if isNilImageCacher(e.imageCacher) {
 		return
 	}
 
@@ -389,12 +390,32 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 		)
 		return
 	}
+	if cached == nil {
+		slog.Warn("ebook enrichment: poster cache returned no result, keeping provider URL",
+			"content_id", contentID,
+			"url", result.PosterPath,
+		)
+		return
+	}
 
 	if storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext); storedPath != "" {
 		result.PosterPath = storedPath
 	}
 	if cached.Thumbhash != "" {
 		result.PosterThumbhash = cached.Thumbhash
+	}
+}
+
+func isNilImageCacher(cacher metadata.ImageCacher) bool {
+	if cacher == nil {
+		return true
+	}
+	value := reflect.ValueOf(cacher)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
 }
 
