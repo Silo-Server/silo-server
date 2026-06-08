@@ -40,7 +40,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             type: props.sectionItem.type,
             libraryId: props.libraryId,
           }),
-          itemHref: buildItemHref({ contentId: props.sectionItem.content_id, libraryId: props.libraryId }),
+          itemHref: buildItemHref({
+            contentId: props.sectionItem.content_id,
+            libraryId: props.libraryId,
+          }),
           title: props.sectionItem.title,
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
@@ -57,7 +60,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             type: props.detail.type,
             libraryId: props.libraryId,
           }),
-          itemHref: buildItemHref({ contentId: props.detail.content_id, libraryId: props.libraryId }),
+          itemHref: buildItemHref({
+            contentId: props.detail.content_id,
+            libraryId: props.libraryId,
+          }),
           title: props.detail.title,
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
@@ -77,6 +83,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           ? {
               itemId: props.sectionItem.content_id,
               surface: "next_up" as const,
+              mediaType: props.sectionItem.type,
               seriesId: props.sectionItem.series_id,
             }
           : undefined
@@ -84,12 +91,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           ? {
               itemId: props.sectionItem.content_id,
               surface: "continue_watching" as const,
+              mediaType: props.sectionItem.type,
               progressUpdatedAt: props.sectionItem.progress_updated_at,
             }
           : undefined
       : {
           itemId: props.detail.content_id,
           surface: "continue_watching" as const,
+          mediaType: props.detail.type,
           progressUpdatedAt: props.progress.updated_at,
         };
   const progressPercent =
@@ -242,7 +251,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               : props.detail.content_id
           }
           mediaType={
-              "sectionItem" in props && props.sectionItem ? props.sectionItem.type : props.detail.type
+            "sectionItem" in props && props.sectionItem ? props.sectionItem.type : props.detail.type
           }
           libraryId={props.libraryId}
           userState={

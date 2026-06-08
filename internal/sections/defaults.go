@@ -11,12 +11,23 @@ import (
 // DefaultHomeSections returns the canonical default sections for the home scope.
 // These are used for seeding fresh installs and the admin "Restore Defaults" action.
 func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
-	emptyCfg := json.RawMessage(`{}`)
 	result := []*PageSection{
-		{ID: "default-continue-watching", Scope: "home", Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+		{ID: "default-continue-watching", Scope: "home", Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: ContinueTypeConfig(ContinueTypeWatching), Enabled: true},
+	}
+	if hasAudiobookLibrary(libraries) {
+		result = append(result, &PageSection{
+			ID:          "default-continue-listening",
+			Scope:       "home",
+			Position:    1,
+			SectionType: SectionContinueWatching,
+			Title:       "Continue Listening",
+			ItemLimit:   20,
+			Config:      ContinueTypeConfig(ContinueTypeListening),
+			Enabled:     true,
+		})
 	}
 
-	position := 1
+	position := len(result)
 	for _, library := range libraries {
 		if library == nil {
 			continue
@@ -61,6 +72,15 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 	)
 
 	return result
+}
+
+func hasAudiobookLibrary(libraries []*models.MediaFolder) bool {
+	for _, library := range libraries {
+		if library != nil && IsAudiobookLibraryType(library.Type) {
+			return true
+		}
+	}
+	return false
 }
 
 func generatedHomeLibraryRecentID(section *PageSection, libraryID int) string {
@@ -147,11 +167,12 @@ func defaultRecentEpisodesConfig() json.RawMessage {
 // library defaults.
 func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSection {
 	emptyCfg := json.RawMessage(`{}`)
+	continueWatchingCfg := ContinueTypeConfig(ContinueTypeWatching)
 
 	switch libraryType {
 	case "movies", "movie":
 		return []*PageSection{
-			{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: continueWatchingCfg, Enabled: true},
 			{ID: "default-recently-added-movies", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Movies", ItemLimit: 20, Config: defaultMediaScopeConfig("movie"), Enabled: true},
 			{ID: "default-recently-released-movies", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Movies", ItemLimit: 20, Config: defaultMediaScopeConfig("movie"), Enabled: true},
 			{ID: "default-top-rated-movies", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionCustomFilter, Title: "Top Rated Movies", ItemLimit: 20, Config: defaultTopRatedConfig("movie"), Enabled: true},
@@ -160,7 +181,7 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 		}
 	case "series":
 		return []*PageSection{
-			{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: continueWatchingCfg, Enabled: true},
 			{ID: "default-recently-added-tv", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added TV", ItemLimit: 20, Config: defaultMediaScopeConfig("series"), Enabled: true},
 			{ID: "default-recently-released-episodes", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionCustomFilter, Title: "Recently Released Episodes", ItemLimit: 20, Config: defaultRecentEpisodesConfig(), Enabled: true},
 			{ID: "default-top-rated-tv", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionCustomFilter, Title: "Top Rated TV", ItemLimit: 20, Config: defaultTopRatedConfig("series"), Enabled: true},
@@ -169,7 +190,7 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 		}
 	case "audiobooks", "audiobook":
 		return []*PageSection{
-			{ID: "default-continue-listening", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Listening", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-continue-listening", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Listening", ItemLimit: 20, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true},
 			{ID: "default-recently-added-audiobooks", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Audiobooks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
 			{ID: "default-recently-released-audiobooks", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Audiobooks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
 			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
@@ -186,7 +207,7 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 func DefaultLibrarySections(libraryID *int) []*PageSection {
 	emptyCfg := json.RawMessage(`{}`)
 	return []*PageSection{
-		{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+		{ID: "default-continue-watching", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Watching", ItemLimit: 20, Config: ContinueTypeConfig(ContinueTypeWatching), Enabled: true},
 		{ID: "default-recently-added", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: emptyCfg, Enabled: true},
 		{ID: "default-recently-released", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released", ItemLimit: 20, Config: emptyCfg, Enabled: true},
 	}
