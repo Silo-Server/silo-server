@@ -5,6 +5,7 @@ import type { FileVersion } from "@/api/types";
 import { DocumentLoader } from "@/reader/readest/libs/document";
 import {
   cacheEbookReaderProgress,
+  DEFAULT_READER_SETTINGS,
   ebookProgressPath,
   ebookReaderProgressQueryKey,
   ebookReadPath,
@@ -166,6 +167,27 @@ describe("FoliateBookReader helpers", () => {
       theme: "sepia",
       flow: "scrolled",
       spread: "none",
+    });
+  });
+
+  it("defaults to the ebook publisher font instead of an unloaded named font", () => {
+    expect(DEFAULT_READER_SETTINGS.fontFamily).toBe("inherit");
+    expect(normalizeReaderSettings({ fontFamily: "" }).fontFamily).toBe("inherit");
+  });
+
+  it("normalizes persisted reading ruler settings", () => {
+    expect(
+      normalizeReaderSettings({
+        readingRuler: true,
+        readingRulerTop: 250,
+      }),
+    ).toMatchObject({
+      readingRuler: true,
+      readingRulerTop: 100,
+    });
+    expect(normalizeReaderSettings({ readingRulerTop: -10 })).toMatchObject({
+      readingRuler: false,
+      readingRulerTop: 0,
     });
   });
 

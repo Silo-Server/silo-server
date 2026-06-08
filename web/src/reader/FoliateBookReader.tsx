@@ -83,6 +83,8 @@ export type ReaderSettings = {
   fontBrightness: number;
   rtl: boolean;
   writingMode: ReaderWritingMode;
+  readingRuler: boolean;
+  readingRulerTop: number;
 };
 
 export type ReaderReadyState = {
@@ -148,7 +150,7 @@ const READEST_FORMATS = new Set([
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   theme: "light",
-  fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+  fontFamily: "inherit",
   fontSize: 112,
   fontWeight: 400,
   hyphenation: true,
@@ -160,6 +162,8 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   fontBrightness: 100,
   rtl: false,
   writingMode: "auto",
+  readingRuler: false,
+  readingRulerTop: 50,
 };
 
 export function ebookReadPath(contentID: string, fileID: number): string {
@@ -313,6 +317,16 @@ export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): Rea
     writingMode: isReaderWritingMode(settings?.writingMode)
       ? settings.writingMode
       : DEFAULT_READER_SETTINGS.writingMode,
+    readingRuler:
+      typeof settings?.readingRuler === "boolean"
+        ? settings.readingRuler
+        : DEFAULT_READER_SETTINGS.readingRuler,
+    readingRulerTop: clampNumber(
+      settings?.readingRulerTop,
+      DEFAULT_READER_SETTINGS.readingRulerTop,
+      0,
+      100,
+    ),
   };
 }
 

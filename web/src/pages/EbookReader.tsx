@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import {
   ArrowLeft,
   Bookmark,
@@ -15,6 +15,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Ruler,
   Search,
   Settings,
   StickyNote,
@@ -61,6 +62,59 @@ type ReaderPanel = "toc" | "search" | "notes" | "settings";
 type TocEntry = TOCItem & {
   depth: number;
 };
+
+const READER_FONT_OPTIONS = [
+  { label: "Book default", value: "inherit" },
+  {
+    label: "System serif",
+    value: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  },
+  {
+    label: "System sans",
+    value: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
+  {
+    label: "Monospace",
+    value: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+  },
+] as const;
+
+const READER_PROFILES = [
+  {
+    id: "comfortable",
+    label: "Comfortable",
+    description: "Serif, roomier lines",
+    settings: {
+      fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+      fontSize: 112,
+      lineHeight: 1.75,
+      margin: 28,
+    },
+  },
+  {
+    id: "accessible",
+    label: "Accessible",
+    description: "Larger sans text",
+    settings: {
+      fontFamily:
+        'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      fontSize: 126,
+      lineHeight: 1.9,
+      margin: 32,
+    },
+  },
+  {
+    id: "compact",
+    label: "Compact",
+    description: "More words per page",
+    settings: {
+      fontFamily: "inherit",
+      fontSize: 96,
+      lineHeight: 1.5,
+      margin: 16,
+    },
+  },
+] as const;
 
 function chooseReaderFile(
   files: FileVersion[],
@@ -150,6 +204,7 @@ export default function EbookReader() {
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsVoiceURI, setTtsVoiceURI] = useState("");
+  const rulerDragRef = useRef<{ offsetY: number } | null>(null);
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
   const configLoadedRef = useRef(false);
@@ -276,6 +331,17 @@ export default function EbookReader() {
       voiceURI: ttsVoiceURI || undefined,
     });
   }, [tts, ttsRate, ttsVoiceURI]);
+  const handleRulerPointerMove = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (!rulerDragRef.current) return;
+      const rect = event.currentTarget.parentElement?.getBoundingClientRect();
+      if (!rect) return;
+      const offsetY = rulerDragRef.current.offsetY;
+      const next = ((event.clientY - rect.top - offsetY) / rect.height) * 100;
+      updateReaderSettings({ readingRulerTop: Math.min(100, Math.max(0, next)) });
+    },
+    [updateReaderSettings],
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -407,6 +473,15 @@ export default function EbookReader() {
               <Bookmark className="size-4" />
             </Button>
             <Button
+              variant={readerSettings.readingRuler ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label="Toggle reading ruler"
+              title="Reading ruler"
+              onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
+            >
+              <Ruler className="size-4" />
+            </Button>
+            <Button
               variant="ghost"
               size="icon-sm"
               aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
@@ -472,7 +547,7 @@ export default function EbookReader() {
         )}
       >
         {isReaderSupportedFile(selectedFile) ? (
-          <section className="min-h-0 min-w-0">
+          <section className="relative min-h-0 min-w-0 overflow-hidden">
             <FoliateBookReader
               ref={readerRef}
               contentID={contentId}
@@ -485,6 +560,44 @@ export default function EbookReader() {
               onReady={handleReaderReady}
               onSelectionChange={setSelection}
             />
+            {readerSettings.readingRuler && (
+              <div
+                role="separator"
+                aria-label="Reading ruler - drag vertically to reposition"
+                aria-orientation="horizontal"
+                className="pointer-events-auto absolute inset-x-0 z-10 -translate-y-1/2 cursor-ns-resize touch-none select-none border-y border-yellow-400/70 bg-yellow-200/15"
+                style={{
+                  top: `${readerSettings.readingRulerTop}%`,
+                  height: `${Math.min(
+                    96,
+                    Math.max(
+                      28,
+                      Math.round(
+                        16 * (readerSettings.fontSize / 100) * readerSettings.lineHeight,
+                      ) + 6,
+                    ),
+                  )}px`,
+                  boxShadow:
+                    "0 -100vh 0 100vh rgb(0 0 0 / 0.24), 0 100vh 0 100vh rgb(0 0 0 / 0.24)",
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  const bandRect = event.currentTarget.getBoundingClientRect();
+                  rulerDragRef.current = {
+                    offsetY: event.clientY - (bandRect.top + bandRect.height / 2),
+                  };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerMove={handleRulerPointerMove}
+                onPointerUp={(event) => {
+                  rulerDragRef.current = null;
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onPointerCancel={() => {
+                  rulerDragRef.current = null;
+                }}
+              />
+            )}
           </section>
         ) : (
           <div className="flex h-full items-center justify-center px-6">
@@ -745,6 +858,29 @@ export default function EbookReader() {
                       />
                     </label>
                   </div>
+                  <div className="border-border space-y-2 border-t pt-3">
+                    <div className="text-muted-foreground text-xs font-medium">Reading profile</div>
+                    <div className="grid gap-2">
+                      {READER_PROFILES.map((profile) => (
+                        <Button
+                          key={profile.id}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Apply ${profile.id} reading profile`}
+                          onClick={() => updateReaderSettings(profile.settings)}
+                          className="h-auto min-h-11 w-full justify-start px-3 py-2 text-left"
+                        >
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium">{profile.label}</span>
+                            <span className="text-muted-foreground block text-xs">
+                              {profile.description}
+                            </span>
+                          </span>
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Type className="size-4" />
                     Typography
@@ -774,10 +910,11 @@ export default function EbookReader() {
                       onChange={(event) => updateReaderSettings({ fontFamily: event.target.value })}
                       className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                     >
-                      <option value="Inter, ui-sans-serif, system-ui, sans-serif">Inter</option>
-                      <option value="Georgia, serif">Georgia</option>
-                      <option value="Merriweather, Georgia, serif">Merriweather</option>
-                      <option value="ui-serif, Georgia, Cambria, serif">System Serif</option>
+                      {READER_FONT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <ReaderRange
@@ -847,6 +984,28 @@ export default function EbookReader() {
                         onChange={(event) => updateReaderSettings({ rtl: event.target.checked })}
                       />
                     </label>
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                      <span>Reading ruler</span>
+                      <input
+                        aria-label="Reading ruler"
+                        type="checkbox"
+                        checked={readerSettings.readingRuler}
+                        onChange={(event) =>
+                          updateReaderSettings({ readingRuler: event.target.checked })
+                        }
+                      />
+                    </label>
+                    {readerSettings.readingRuler && (
+                      <ReaderRange
+                        label="Ruler position"
+                        value={readerSettings.readingRulerTop}
+                        min={0}
+                        max={100}
+                        step={1}
+                        suffix="%"
+                        onChange={(readingRulerTop) => updateReaderSettings({ readingRulerTop })}
+                      />
+                    )}
                   </div>
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground text-xs font-medium">Writing mode</span>

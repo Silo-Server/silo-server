@@ -594,6 +594,74 @@ describe("EbookReader", () => {
     vi.useRealTimers();
   });
 
+  it("offers reliable font choices and reading profile presets", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    const fontOptions = Array.from(font?.options ?? []).map((option) => option.textContent ?? "");
+    expect(fontOptions).toContain("Book default");
+    expect(fontOptions).toContain("System serif");
+    expect(fontOptions).toContain("System sans");
+    expect(fontOptions).not.toContain("Inter");
+    expect(fontOptions).not.toContain("Merriweather");
+
+    const comfortable = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Apply comfortable reading profile"]',
+    );
+    await act(async () => {
+      comfortable?.click();
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        fontFamily: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
+        fontSize: 112,
+        lineHeight: 1.75,
+      }),
+    );
+  });
+
+  it("toggles the persisted reading ruler overlay", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const ruler = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle reading ruler"]',
+    );
+    await act(async () => {
+      ruler?.click();
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ readingRuler: true }),
+    );
+    expect(
+      container.querySelector('[aria-label="Reading ruler - drag vertically to reposition"]'),
+    ).not.toBeNull();
+  });
+
   it("constrains the reader grid so the side panel stays inside the viewport", async () => {
     await act(async () => {
       root.render(
