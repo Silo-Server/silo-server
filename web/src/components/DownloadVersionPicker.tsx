@@ -94,9 +94,7 @@ export default function DownloadVersionPicker({
         </div>
 
         {sorted.length > 1 && (
-          <p className="text-muted-foreground text-xs">
-            Higher quality files require more storage space.
-          </p>
+          <p className="text-muted-foreground text-xs">Larger files require more storage space.</p>
         )}
       </DialogContent>
     </Dialog>
