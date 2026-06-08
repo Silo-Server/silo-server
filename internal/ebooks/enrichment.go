@@ -258,6 +258,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
+	item.ProviderIDs = filterEbookProviderIDs(item.ProviderIDs)
 	accumulatedIDs := make(map[string]string, len(item.ProviderIDs))
 	for k, v := range item.ProviderIDs {
 		accumulatedIDs[k] = v
@@ -477,6 +478,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 		upd.Year = &result.Year
 	}
 
+	providerIDs = filterEbookProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
 			slog.Warn("ebook enrichment: failed to persist provider IDs",
@@ -579,7 +581,7 @@ func mergeEnrichmentProviderIDs(dst *metadata.MetadataResult, src *metadata.Meta
 	if dst.ProviderIDs == nil {
 		dst.ProviderIDs = make(map[string]string, len(src.ProviderIDs))
 	}
-	for k, v := range src.ProviderIDs {
+	for k, v := range filterEbookProviderIDs(src.ProviderIDs) {
 		if v != "" {
 			if _, exists := dst.ProviderIDs[k]; !exists {
 				dst.ProviderIDs[k] = v
@@ -588,14 +590,42 @@ func mergeEnrichmentProviderIDs(dst *metadata.MetadataResult, src *metadata.Meta
 	}
 }
 
+func filterEbookProviderIDs(providerIDs map[string]string) map[string]string {
+	if len(providerIDs) == 0 {
+		return nil
+	}
+	filtered := make(map[string]string, len(providerIDs))
+	for provider, providerID := range providerIDs {
+		provider = strings.TrimSpace(provider)
+		providerID = strings.TrimSpace(providerID)
+		if provider == "" || providerID == "" {
+			continue
+		}
+		switch strings.ToLower(provider) {
+		case "asin", "audible_asin":
+			continue
+		default:
+			filtered[provider] = providerID
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
 func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string {
 	if len(rows) == 0 {
 		return nil
 	}
 	m := make(map[string]string, len(rows))
 	for _, r := range rows {
-		if r != nil && strings.TrimSpace(r.Provider) != "" && strings.TrimSpace(r.ProviderID) != "" {
-			m[strings.TrimSpace(r.Provider)] = strings.TrimSpace(r.ProviderID)
+		if r != nil {
+			for provider, providerID := range filterEbookProviderIDs(map[string]string{
+				r.Provider: r.ProviderID,
+			}) {
+				m[provider] = providerID
+			}
 		}
 	}
 	return m

@@ -230,6 +230,29 @@ func TestMergeEnrichmentProviderIDsKeepsExistingIDs(t *testing.T) {
 	}
 }
 
+func TestMergeEnrichmentProviderIDsDropsAsinIDs(t *testing.T) {
+	dst := &metadata.MetadataResult{ProviderIDs: map[string]string{"isbn": "9780306406157"}}
+	src := &metadata.MetadataResult{
+		ProviderIDs: map[string]string{
+			"ASIN":         "B00TEST",
+			"audible_asin": "B00AUDIO",
+			"openlibrary":  "OL1M",
+		},
+	}
+
+	mergeEnrichmentProviderIDs(dst, src)
+
+	if _, exists := dst.ProviderIDs["ASIN"]; exists {
+		t.Fatal("ASIN provider ID should not be merged for ebooks")
+	}
+	if _, exists := dst.ProviderIDs["audible_asin"]; exists {
+		t.Fatal("audible_asin provider ID should not be merged for ebooks")
+	}
+	if got := dst.ProviderIDs["openlibrary"]; got != "OL1M" {
+		t.Fatalf("openlibrary = %q, want OL1M", got)
+	}
+}
+
 type fakeEbookImageCacher struct {
 	calls     int
 	req       metadata.CacheImageRequest
