@@ -10,6 +10,7 @@ import SeriesContent from "@/pages/ItemDetail/SeriesContent";
 import SeasonContent from "@/pages/ItemDetail/SeasonContent";
 import EpisodeContent from "@/pages/ItemDetail/EpisodeContent";
 import AudiobookContent from "@/pages/ItemDetail/AudiobookContent";
+import EbookContent from "@/pages/ItemDetail/EbookContent";
 import {
   CastSkeleton,
   CrewSkeleton,
@@ -103,6 +104,8 @@ export default function ItemDetail() {
       return (
         <AudiobookContent item={item as ItemDetail & { type: "audiobook" }} libraryId={libraryId} />
       );
+    case "ebook":
+      return <EbookContent item={item as ItemDetail & { type: "ebook" }} />;
     case "podcast":
       return <Navigate to={`/podcasts/show/${item.content_id}`} replace />;
     default:
