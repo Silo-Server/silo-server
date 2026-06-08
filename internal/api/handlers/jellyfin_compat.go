@@ -92,6 +92,7 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 		}
 		h.publishSettingChanged(r, key, value)
 	}
+	h.markServerRestartRequired("jellyfin_compat")
 	settings, ok := h.jellyfinCompatSettings(w, r)
 	if !ok {
 		return

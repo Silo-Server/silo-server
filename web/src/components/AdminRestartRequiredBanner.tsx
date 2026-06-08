@@ -1,18 +1,20 @@
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, RotateCcw } from "lucide-react";
+import { AlertTriangle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import { api } from "@/api/client";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import {
-  clearAdminRestartRequired,
-  useAdminRestartRequired,
+  useAdminServerStatus,
+  useRequestAdminServerRestart,
 } from "@/hooks/useAdminRestartRequired";
 
 export function AdminRestartRequiredBanner() {
-  const restartRequired = useAdminRestartRequired();
+  const { data: serverStatus } = useAdminServerStatus();
+  const requestRestart = useRequestAdminServerRestart();
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+  const restartRequired = Boolean(serverStatus?.restart_required);
+  const restartRequested = Boolean(serverStatus?.restart_requested);
 
   if (!restartRequired) {
     return null;
@@ -20,17 +22,12 @@ export function AdminRestartRequiredBanner() {
 
   async function handleRestart() {
     try {
-      await api("/admin/server/restart", { method: "POST" });
-      clearAdminRestartRequired();
+      await requestRestart.mutateAsync();
       toast.success("Server restart requested");
     } catch {
       toast.error("Could not restart server. Please restart manually.");
     }
     setShowRestartConfirm(false);
-  }
-
-  function handleMarkRestarted() {
-    clearAdminRestartRequired();
   }
 
   return (
@@ -55,18 +52,10 @@ export function AdminRestartRequiredBanner() {
             variant="outline"
             className="border-warning/35 text-warning hover:bg-warning/15 hover:text-warning"
             onClick={() => setShowRestartConfirm(true)}
+            disabled={restartRequested || requestRestart.isPending}
           >
             <RotateCcw className="h-4 w-4" />
-            Restart Server
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-warning hover:bg-warning/15 hover:text-warning"
-            onClick={handleMarkRestarted}
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            Mark Restarted
+            {restartRequested || requestRestart.isPending ? "Restart Requested" : "Restart Server"}
           </Button>
         </div>
       </section>

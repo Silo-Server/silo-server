@@ -154,6 +154,7 @@ type Dependencies struct {
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
 	RequestServerRestart   func(ctx context.Context) error
+	ServerRestartStatus    *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
@@ -760,7 +761,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
-	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher)
+	restartStatus := deps.ServerRestartStatus
+	if restartStatus == nil {
+		restartStatus = handlers.NewServerRestartStatusTracker()
+	}
+	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher, restartStatus)
 
 	// Build admin handler if we have a user repo.
 	var adminHandler *handlers.AdminHandler
@@ -776,6 +781,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
 		adminHandler.BootstrapSensitiveValues = deps.BootstrapSensitiveValues
+		adminHandler.RestartStatus = restartStatus
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
@@ -1756,6 +1762,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								deps.PluginHTTPProxy,
 								metadata.NewChainRepository(deps.DB),
 								deps.PluginImageResolver,
+								restartStatus,
 							)
 							r.Get("/plugins", pluginHandler.HandleListUserPluginSettings)
 							r.Get("/plugins/{installation_id}", pluginHandler.HandleGetUserPluginSettings)
@@ -2081,6 +2088,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
+							r.Get("/server/status", adminHandler.HandleGetServerStatus)
 							r.Post("/server/restart", serverControlHandler.HandleRestart)
 							r.Get("/jellyfin-compat/status", adminHandler.HandleGetJellyfinCompatStatus)
 							r.Patch("/jellyfin-compat/settings", adminHandler.HandleUpdateJellyfinCompatSettings)
@@ -2157,6 +2165,7 @@ func NewRouter(deps Dependencies) chi.Router {
 									deps.PluginHTTPProxy,
 									metadata.NewChainRepository(deps.DB),
 									deps.PluginImageResolver,
+									restartStatus,
 								)
 								r.Route("/plugins", func(r chi.Router) {
 									r.Get("/repositories", pluginHandler.HandleListRepositories)
@@ -2334,10 +2343,10 @@ func NewRouter(deps Dependencies) chi.Router {
 
 							// Rate limit admin routes. Mounted even when the limiter is not
 							// running (deps.RateLimitMW == nil) so admins can always reach the
-							// config — otherwise disabling rate limiting and restarting would
-							// permanently lock the settings page out of re-enabling it.
+							// config; otherwise disabling rate limiting and restarting would
+							// lock the settings page out of re-enabling it.
 							if settingsRepo != nil {
-								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus)
+								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus, restartStatus)
 								r.Route("/rate-limits", func(r chi.Router) {
 									r.Get("/config", rateLimitHandler.HandleGetConfig)
 									r.Put("/config", rateLimitHandler.HandleUpdateConfig)

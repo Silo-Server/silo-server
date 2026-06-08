@@ -14,7 +14,6 @@ import {
   useUpdateServerSetting,
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
-import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 import {
   useRecommendationsStatus,
   useTriggerEmbeddings,
@@ -345,7 +344,6 @@ export default function AdminRecommendations() {
         return next;
       });
       setRestartRequired(true);
-      markAdminRestartRequired();
     } catch {
       // useUpdateServerSetting already reports failures.
     }
@@ -359,7 +357,6 @@ export default function AdminRecommendations() {
       {
         onSuccess: () => {
           setRestartRequired(true);
-          markAdminRestartRequired();
         },
       },
     );
@@ -384,7 +381,6 @@ export default function AdminRecommendations() {
       });
 
       setRestartRequired(true);
-      markAdminRestartRequired();
       setConnectionResult(null);
     } catch {
       // useUpdateServerSetting already reports failures.

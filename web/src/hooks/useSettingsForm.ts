@@ -5,7 +5,6 @@ import {
   useUpdateServerSetting,
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
-import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 
 interface UseSettingsFormOptions {
   /** Setting keys this section manages */
@@ -70,7 +69,6 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     // until the server actually restarts.
     if (results.some((r) => r?.restart_required)) {
       setRestartRequired(true);
-      markAdminRestartRequired();
     }
   }, [dirty, localValues, updateSetting]);
 

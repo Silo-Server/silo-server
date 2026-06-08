@@ -11,7 +11,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
-import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
@@ -165,7 +164,6 @@ export default function LogRetentionSettings() {
       await Promise.all(requests);
       setDirty(new Set());
       setRestartRequired(true);
-      markAdminRestartRequired();
     } catch {
       setSaveError("Failed to save some settings. Please try again.");
     }

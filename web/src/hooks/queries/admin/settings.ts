@@ -8,7 +8,6 @@ import type {
   JellyfinCompatStatus,
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
-import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 import { adminKeys } from "../keys";
 import { toast } from "sonner";
 
@@ -41,6 +40,7 @@ export function useUpdateServerSetting() {
         queryClient.invalidateQueries({
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
       ];
       if (variables.key.startsWith("jellyfin_compat.")) {
         invalidations.push(
@@ -98,10 +98,10 @@ export function useUpdateJellyfinCompatSettings() {
         body: JSON.stringify(body),
       }),
     onSuccess: async () => {
-      markAdminRestartRequired();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
       ]);
     },
     onError: (err) => {

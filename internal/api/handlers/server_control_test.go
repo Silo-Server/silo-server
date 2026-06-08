@@ -24,10 +24,11 @@ func TestServerControlRestartRequestsShutdown(t *testing.T) {
 	t.Parallel()
 
 	called := 0
+	restartStatus := NewServerRestartStatusTracker()
 	handler := NewServerControlHandler(func(context.Context) error {
 		called++
 		return nil
-	}, nil)
+	}, nil, restartStatus)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/server/restart", nil)
 	rec := httptest.NewRecorder()
@@ -50,12 +51,15 @@ func TestServerControlRestartRequestsShutdown(t *testing.T) {
 	if resp.NotifiedSessions != 0 {
 		t.Fatalf("notified_sessions = %d, want 0", resp.NotifiedSessions)
 	}
+	if snapshot := restartStatus.Snapshot(); !snapshot.RestartRequested {
+		t.Fatal("RestartRequested = false, want true")
+	}
 }
 
 func TestServerControlRestartUnavailable(t *testing.T) {
 	t.Parallel()
 
-	handler := NewServerControlHandler(nil, nil)
+	handler := NewServerControlHandler(nil, nil, NewServerRestartStatusTracker())
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/server/restart", nil)
 	rec := httptest.NewRecorder()
@@ -71,7 +75,7 @@ func TestServerControlRestartAlreadyRequested(t *testing.T) {
 
 	handler := NewServerControlHandler(func(context.Context) error {
 		return ErrServerRestartAlreadyRequested
-	}, nil)
+	}, nil, NewServerRestartStatusTracker())
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/server/restart", nil)
 	rec := httptest.NewRecorder()
@@ -110,7 +114,7 @@ func TestServerControlRestartNotifiesPlaybackSessions(t *testing.T) {
 	dispatcher := playback.NewCommandDispatcher(sessionMgr, realtimeHub, nil)
 	handler := NewServerControlHandler(func(context.Context) error {
 		return nil
-	}, dispatcher)
+	}, dispatcher, NewServerRestartStatusTracker())
 
 	req := httptest.NewRequest(
 		http.MethodPost,

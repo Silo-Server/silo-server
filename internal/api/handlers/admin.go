@@ -96,6 +96,7 @@ type AdminHandler struct {
 	BootstrapSensitiveValues     map[string]string
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
+	RestartStatus                *ServerRestartStatusTracker
 }
 
 // NewAdminHandler creates a new AdminHandler backed by the given
@@ -2149,6 +2150,7 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 	if h.OnServerSettingUpdated != nil {
 		h.OnServerSettingUpdated(r.Context(), key, req.Value)
 	}
+	h.markServerRestartRequired("server_settings")
 
 	restartRequired := config.RestartRequired(key)
 	if sensitiveSettingKeys[key] {

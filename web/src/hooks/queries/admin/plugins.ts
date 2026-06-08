@@ -22,7 +22,6 @@ import {
   type ChunkedUploadProgress,
   uploadFileInChunks,
 } from "@/lib/chunkedUpload";
-import { markAdminRestartRequired } from "@/hooks/useAdminRestartRequired";
 import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
@@ -352,7 +351,7 @@ export function useSavePluginTaskBinding() {
       ),
     onSuccess: (response) => {
       if (response.restart_required) {
-        markAdminRestartRequired();
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() });
       }
       toast.success("Task binding saved");
       invalidatePluginQueries(queryClient);
