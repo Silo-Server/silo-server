@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { api, apiBlob } from "@/api/client";
 import type { FileVersion } from "@/api/types";
@@ -31,6 +31,11 @@ export type EbookReaderProgressPayload = {
 export type EbookReaderProgress = EbookReaderProgressPayload & {
   content_id?: string;
   updated_at?: string;
+};
+
+export type FoliateBookReaderHandle = {
+  next: () => void;
+  prev: () => void;
 };
 
 type RelocateDetail = {
@@ -103,6 +108,12 @@ export function progressFromRelocate(
   };
 }
 
+export function formatReaderProgress(progress: number | null | undefined): string | null {
+  if (typeof progress !== "number" || !Number.isFinite(progress)) return null;
+  const bounded = Math.min(1, Math.max(0, progress));
+  return `${Math.round(bounded * 100)}%`;
+}
+
 export async function fetchEbookReaderProgress(
   contentID: string,
 ): Promise<EbookReaderProgress | null> {
@@ -159,17 +170,25 @@ function readerStyles() {
   `;
 }
 
-export default function FoliateBookReader({
-  contentID,
-  file,
-  title,
-  onFileLoaded,
-}: {
+type FoliateBookReaderProps = {
   contentID: string;
   file: FileVersion;
   title: string;
   onFileLoaded?: (state: ReaderLoadState | null) => void;
-}) {
+  onProgressChange?: (progress: number | null) => void;
+};
+
+const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderProps>(
+function FoliateBookReader(
+  {
+    contentID,
+    file,
+    title,
+    onFileLoaded,
+    onProgressChange,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<FoliateViewElement | null>(null);
   const initializedRef = useRef(false);
@@ -178,12 +197,18 @@ export default function FoliateBookReader({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  useImperativeHandle(ref, () => ({
+    next: () => viewRef.current?.next?.(),
+    prev: () => viewRef.current?.prev?.(),
+  }), []);
+
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
     setLoading(true);
     setError("");
     onFileLoaded?.(null);
+    onProgressChange?.(null);
 
     const flushProgress = () => {
       const pending = pendingProgressRef.current;
@@ -231,7 +256,10 @@ export default function FoliateBookReader({
             (event as CustomEvent<RelocateDetail>).detail,
             file.file_id,
           );
-          if (progress) scheduleProgressSave(progress);
+          if (progress) {
+            onProgressChange?.(progress.progress);
+            scheduleProgressSave(progress);
+          }
         });
         await view.open(book);
 
@@ -243,6 +271,7 @@ export default function FoliateBookReader({
         renderer?.setAttribute("max-column-count", "2");
         await renderer?.render?.();
         if (savedProgress?.location && savedProgress.file_id === file.file_id) {
+          onProgressChange?.(savedProgress.progress);
           await view.init({ lastLocation: savedProgress.location });
         } else {
           await view.goToFraction(0);
@@ -271,8 +300,9 @@ export default function FoliateBookReader({
       viewRef.current = null;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       onFileLoaded?.(null);
+      onProgressChange?.(null);
     };
-  }, [contentID, file, onFileLoaded, title]);
+  }, [contentID, file, onFileLoaded, onProgressChange, title]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-white text-neutral-950">
@@ -289,4 +319,6 @@ export default function FoliateBookReader({
       )}
     </div>
   );
-}
+});
+
+export default FoliateBookReader;

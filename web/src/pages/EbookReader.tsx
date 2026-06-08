@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { ArrowLeft, Download, Library, Loader2 } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Library, Loader2 } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router";
 
 import type { FileVersion } from "@/api/types";
@@ -7,7 +7,9 @@ import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import FoliateBookReader, {
+  formatReaderProgress,
   readerFileFormat,
+  type FoliateBookReaderHandle,
   type ReaderLoadState,
 } from "@/reader/FoliateBookReader";
 
@@ -45,9 +47,15 @@ export default function EbookReader() {
     [item?.versions, requestedFileID],
   );
   const format = readerFileFormat(selectedFile);
+  const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
+  const [readerProgress, setReaderProgress] = useState<number | null>(null);
+  const progressLabel = formatReaderProgress(readerProgress);
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
+  }, []);
+  const handleProgressChange = useCallback((progress: number | null) => {
+    setReaderProgress(progress);
   }, []);
 
   if (isLoading) {
@@ -89,6 +97,31 @@ export default function EbookReader() {
             <div className="truncate text-sm font-semibold">{item.title}</div>
             <div className="truncate text-xs text-muted-foreground">{format.toUpperCase()}</div>
           </div>
+          {progressLabel && (
+            <div className="hidden min-w-12 text-center text-xs tabular-nums text-muted-foreground sm:block">
+              {progressLabel}
+            </div>
+          )}
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Previous page"
+              title="Previous page"
+              onClick={() => readerRef.current?.prev()}
+            >
+              <ChevronLeft className="size-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Next page"
+              title="Next page"
+              onClick={() => readerRef.current?.next()}
+            >
+              <ChevronRight className="size-5" />
+            </Button>
+          </div>
           {loadedFile && (
             <Button asChild variant="outline" size="sm">
               <a href={loadedFile.objectUrl} download={loadedFile.filename}>
@@ -103,10 +136,12 @@ export default function EbookReader() {
       <main className="h-[calc(100vh-3.5rem)]">
         {READEST_FORMATS.has(format) ? (
           <FoliateBookReader
+            ref={readerRef}
             contentID={contentId}
             file={selectedFile}
             title={item.title}
             onFileLoaded={handleFileLoaded}
+            onProgressChange={handleProgressChange}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-6">

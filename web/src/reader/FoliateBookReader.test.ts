@@ -4,6 +4,7 @@ import type { FileVersion } from "@/api/types";
 import {
   ebookProgressPath,
   ebookReadPath,
+  formatReaderProgress,
   progressFromRelocate,
   readerFileFormat,
   readerMimeType,
@@ -63,6 +64,15 @@ describe("FoliateBookReader helpers", () => {
       location: "epubcfi(/6/4)",
       progress: 0.3,
     });
+  });
+
+  it("formats reader progress for compact controls", () => {
+    expect(formatReaderProgress(null)).toBeNull();
+    expect(formatReaderProgress(Number.NaN)).toBeNull();
+    expect(formatReaderProgress(0)).toBe("0%");
+    expect(formatReaderProgress(0.421)).toBe("42%");
+    expect(formatReaderProgress(1)).toBe("100%");
+    expect(formatReaderProgress(1.5)).toBe("100%");
   });
 
   it("ignores relocate events without a usable location", () => {
