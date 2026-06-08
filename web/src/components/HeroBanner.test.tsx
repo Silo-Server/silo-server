@@ -50,7 +50,7 @@ describe("HeroBanner", () => {
           libraryId={7}
           items={[
             {
-              content_id: "ebook-1",
+              content_id: "ebook 1",
               type: "ebook",
               title: "Featured Ebook",
               year: 2024,
@@ -69,8 +69,8 @@ describe("HeroBanner", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain('href="/reader/ebook/ebook-1?libraryId=7"');
-    expect(markup).not.toContain('href="/watch/ebook-1');
+    expect(markup).toContain('href="/reader/ebook/ebook%201?libraryId=7"');
+    expect(markup).not.toContain('href="/watch/ebook');
     expect(markup).toContain("Read");
   });
 });

@@ -42,7 +42,7 @@ interface HeroBannerProps {
 function buildPlayHref(item: SectionItem, libraryId?: number): string {
   const q = libraryId ? `?libraryId=${libraryId}` : "";
   if (item.type === "ebook") {
-    return `/reader/ebook/${item.content_id}${q}`;
+    return `/reader/ebook/${encodeURIComponent(item.content_id)}${q}`;
   }
   if (item.type === "movie" || item.type === "episode") {
     return `/watch/${item.content_id}${q}`;
