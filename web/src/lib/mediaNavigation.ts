@@ -1,4 +1,4 @@
-type PlayableMediaType = "movie" | "series" | "season" | "episode" | "audiobook";
+type PlayableMediaType = "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
 
 interface MediaHrefInput {
   contentId: string;
