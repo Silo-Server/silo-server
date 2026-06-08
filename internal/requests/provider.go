@@ -128,9 +128,9 @@ func (p *pluginRouterProvider) Fulfill(ctx context.Context, installationID int, 
 	if err != nil {
 		return nil, "", err
 	}
-	qs := make([]string, 0, len(qualities))
+	qs := make([]*pluginv1.RequestedQuality, 0, len(qualities))
 	for _, q := range qualities {
-		qs = append(qs, string(q))
+		qs = append(qs, &pluginv1.RequestedQuality{Id: string(q), Is4K: q == Quality2160p})
 	}
 	pconns, err := routerProtoConns(conns)
 	if err != nil {

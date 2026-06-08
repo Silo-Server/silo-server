@@ -54,8 +54,12 @@ func TestPluginRouterProviderFulfillTranslates(t *testing.T) {
 	if msg != "" || len(targets) != 1 || targets[0].Status != StatusQueued || targets[0].ExternalID != "7" {
 		t.Fatalf("unexpected result: %+v msg=%q", targets, msg)
 	}
-	if fc.lastReq.GetRequest().GetExternalIds()["tmdb"] != "42" || len(fc.lastReq.GetQualities()) != 1 {
+	gotQ := fc.lastReq.GetQualities()
+	if fc.lastReq.GetRequest().GetExternalIds()["tmdb"] != "42" || len(gotQ) != 1 {
 		t.Fatalf("descriptor/qualities not forwarded: %+v", fc.lastReq)
+	}
+	if gotQ[0].GetId() != "1080p" || gotQ[0].GetIs4K() {
+		t.Fatalf("1080p should be id=1080p is4k=false, got %+v", gotQ[0])
 	}
 }
 
