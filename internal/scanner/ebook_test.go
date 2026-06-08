@@ -127,6 +127,39 @@ func TestParseEbookEPUBSkipsUUIDIdentifierBeforeISBN(t *testing.T) {
 	}
 }
 
+func TestReadEPUBZipEntryRejectsOversizedEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.epub")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	w, err := zw.Create("OPS/content.opf")
+	if err != nil {
+		t.Fatalf("create zip entry: %v", err)
+	}
+	if _, err := w.Write([]byte(strings.Repeat("x", maxEPUBMetadataEntrySize+1))); err != nil {
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close file: %v", err)
+	}
+
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+	defer reader.Close()
+
+	_, err = readEPUBZipEntry(&reader.Reader, "OPS/content.opf")
+	if err == nil || !strings.Contains(err.Error(), "epub entry too large") {
+		t.Fatalf("readEPUBZipEntry error = %v, want size limit error", err)
+	}
+}
+
 func TestParseEbookFB2Metadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "book.fb2")
 	if err := os.WriteFile(path, []byte(`<?xml version="1.0" encoding="UTF-8"?>
@@ -355,6 +388,23 @@ func TestResolveEbookExistingRootAppliesParsedMetadata(t *testing.T) {
 	}
 	if strings.Join(item.Studios, ",") != "New Press" || strings.Join(item.Genres, ",") != "Fiction" {
 		t.Fatalf("updated item studios/genres = %+v/%+v", item.Studios, item.Genres)
+	}
+}
+
+func TestApplyEbookToMediaItemPreservesExistingYearWhenParsedYearMissing(t *testing.T) {
+	item := &models.MediaItem{
+		Type:  "ebook",
+		Title: "Existing",
+		Year:  1999,
+	}
+
+	applyEbookToMediaItem(item, &parsedEbook{Title: "Updated", Year: 0})
+
+	if item.Title != "Updated" {
+		t.Fatalf("Title = %q, want Updated", item.Title)
+	}
+	if item.Year != 1999 {
+		t.Fatalf("Year = %d, want preserved 1999", item.Year)
 	}
 }
 

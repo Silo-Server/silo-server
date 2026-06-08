@@ -134,10 +134,13 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 	}
 
 	for _, p := range candidates {
-		if ctx.Err() != nil {
-			break
+		select {
+		case ch <- p:
+		case <-ctx.Done():
+			close(ch)
+			wg.Wait()
+			return ctx.Err()
 		}
-		ch <- p
 	}
 	close(ch)
 	wg.Wait()
@@ -361,7 +364,9 @@ func applyEbookToMediaItem(item *models.MediaItem, book *parsedEbook) {
 	if title := strings.TrimSpace(book.Title); title != "" {
 		item.Title = title
 	}
-	item.Year = book.Year
+	if book.Year > 0 {
+		item.Year = book.Year
+	}
 	if book.Description != "" && item.Overview == "" {
 		item.Overview = book.Description
 	}
