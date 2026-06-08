@@ -14,6 +14,7 @@ import {
   PanelRightOpen,
   Pause,
   Play,
+  RotateCcw,
   Search,
   Settings,
   StickyNote,
@@ -27,7 +28,6 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
-import { useEinkMode } from "@/hooks/useEinkMode";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -150,7 +150,6 @@ export default function EbookReader() {
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsVoiceURI, setTtsVoiceURI] = useState("");
-  const [einkEnabled, setEinkEnabled] = useEinkMode();
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
   const configLoadedRef = useRef(false);
@@ -206,6 +205,18 @@ export default function EbookReader() {
     },
     [contentId],
   );
+  const resetReaderSettings = useCallback(() => {
+    const defaults = normalizeReaderSettings(DEFAULT_READER_SETTINGS);
+    if (saveConfigTimerRef.current !== null) {
+      window.clearTimeout(saveConfigTimerRef.current);
+      saveConfigTimerRef.current = null;
+    }
+    saveReaderSettings(defaults);
+    setReaderSettings(defaults);
+    if (contentId) {
+      void saveEbookReaderConfig(contentId, { settings: defaults });
+    }
+  }, [contentId]);
   const handleSearchSubmit = useCallback(async () => {
     const query = searchText.trim();
     if (!query) {
@@ -486,7 +497,7 @@ export default function EbookReader() {
         )}
         {panelOpen && isReaderSupportedFile(selectedFile) && (
           <aside className="border-border bg-background min-h-0 min-w-0 overflow-hidden border-t lg:border-t-0 lg:border-l">
-            <div className="border-border/70 flex h-11 items-center border-b px-2">
+            <div className="border-border/70 grid grid-cols-4 gap-1 border-b px-2 py-1.5">
               {[
                 {
                   id: "toc" as const,
@@ -517,16 +528,21 @@ export default function EbookReader() {
                     aria-label={tab.aria}
                     title={tab.label}
                     onClick={() => setPanel(tab.id)}
-                    className="flex-1"
+                    className="h-10 min-w-0 flex-col gap-0.5 px-1 text-[0.68rem] leading-none"
                   >
-                    <Icon className="size-4" />
-                    <span className="hidden xl:inline">{tab.label}</span>
+                    <Icon className="size-3.5 shrink-0" />
+                    <span
+                      data-reader-panel-tab-label
+                      className="min-w-0 whitespace-normal break-words text-center leading-3"
+                    >
+                      {tab.label}
+                    </span>
                   </Button>
                 );
               })}
             </div>
 
-            <div className="h-[calc(100%-2.75rem)] overflow-y-auto p-3">
+            <div className="h-[calc(100%-3.25rem)] overflow-y-auto p-3">
               {panel === "toc" && (
                 <div className="space-y-1">
                   {tocEntries.length === 0 ? (
@@ -651,6 +667,16 @@ export default function EbookReader() {
 
               {panel === "settings" && (
                 <div className="space-y-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label="Reset reader settings"
+                    onClick={resetReaderSettings}
+                    className="w-full justify-center"
+                  >
+                    <RotateCcw className="size-4" />
+                    Reset
+                  </Button>
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       <Volume2 className="size-4" />
@@ -718,15 +744,6 @@ export default function EbookReader() {
                         onChange={(event) => setWakeLockEnabled(event.target.checked)}
                       />
                     </label>
-                    <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>E-ink mode</span>
-                      <input
-                        aria-label="E-ink mode"
-                        type="checkbox"
-                        checked={einkEnabled}
-                        onChange={(event) => setEinkEnabled(event.target.checked)}
-                      />
-                    </label>
                   </div>
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Type className="size-4" />
@@ -780,15 +797,6 @@ export default function EbookReader() {
                     step={1}
                     suffix="%"
                     onChange={(fontBrightness) => updateReaderSettings({ fontBrightness })}
-                  />
-                  <ReaderRange
-                    label="Zoom"
-                    value={readerSettings.zoom}
-                    min={75}
-                    max={160}
-                    step={1}
-                    suffix="%"
-                    onChange={(zoom) => updateReaderSettings({ zoom })}
                   />
                   <ReaderRange
                     label="Line height"
@@ -857,22 +865,24 @@ export default function EbookReader() {
                       <option value="vertical-rl">Vertical</option>
                     </select>
                   </label>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Spread</span>
-                    <select
-                      aria-label="Spread"
-                      value={readerSettings.spread}
-                      onChange={(event) =>
-                        updateReaderSettings({
-                          spread: event.target.value as ReaderSettings["spread"],
-                        })
-                      }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="none">Single page</option>
-                    </select>
-                  </label>
+                  {readerSettings.flow !== "scrolled" && (
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs font-medium">Spread</span>
+                      <select
+                        aria-label="Spread"
+                        value={readerSettings.spread}
+                        onChange={(event) =>
+                          updateReaderSettings({
+                            spread: event.target.value as ReaderSettings["spread"],
+                          })
+                        }
+                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="none">Single page</option>
+                      </select>
+                    </label>
+                  )}
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground text-xs font-medium">Flow</span>
                     <select

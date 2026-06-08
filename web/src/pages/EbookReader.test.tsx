@@ -545,6 +545,55 @@ describe("EbookReader", () => {
     vi.useRealTimers();
   });
 
+  it("resets reader settings to stock defaults", async () => {
+    vi.useFakeTimers();
+    mocks.fetchEbookReaderConfig.mockResolvedValue({
+      settings: { theme: "dark", fontSize: 140, flow: "scrolled" },
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const reset = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reset reader settings"]',
+    );
+    await act(async () => {
+      reset?.click();
+      vi.advanceTimersByTime(450);
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ theme: "light", fontSize: 112, flow: "paginated" }),
+    );
+    expect(mocks.saveEbookReaderConfig).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ theme: "light", fontSize: 112, flow: "paginated" }),
+      }),
+    );
+    expect(localStorage.getItem("silo.ebook.reader.settings")).toContain('"theme":"light"');
+
+    vi.useRealTimers();
+  });
+
   it("constrains the reader grid so the side panel stays inside the viewport", async () => {
     await act(async () => {
       root.render(
@@ -678,10 +727,10 @@ describe("EbookReader", () => {
 
     expect(container.querySelector('button[aria-label="Speak text"]')).not.toBeNull();
     expect(container.querySelector('input[aria-label="Keep screen awake"]')).not.toBeNull();
-    expect(container.querySelector('input[aria-label="E-ink mode"]')).not.toBeNull();
+    expect(container.querySelector('input[aria-label="E-ink mode"]')).toBeNull();
   });
 
-  it("shows advanced reader controls without diagnostics UI", async () => {
+  it("shows useful advanced reader controls without diagnostics UI or no-op controls", async () => {
     vi.useFakeTimers();
 
     await act(async () => {
@@ -707,7 +756,6 @@ describe("EbookReader", () => {
     const brightness = container.querySelector<HTMLInputElement>(
       'input[aria-label="Brightness"]',
     );
-    const zoom = container.querySelector<HTMLInputElement>('input[aria-label="Zoom"]');
     const hyphenation = container.querySelector<HTMLInputElement>(
       'input[aria-label="Hyphenation"]',
     );
@@ -717,15 +765,14 @@ describe("EbookReader", () => {
     );
 
     expect(brightness).not.toBeNull();
-    expect(zoom).not.toBeNull();
+    expect(container.querySelector('input[aria-label="Zoom"]')).toBeNull();
     expect(hyphenation).not.toBeNull();
     expect(rtl).not.toBeNull();
     expect(writingMode).not.toBeNull();
 
     await act(async () => {
-      if (!brightness || !zoom || !hyphenation || !rtl || !writingMode) return;
+      if (!brightness || !hyphenation || !rtl || !writingMode) return;
       setInputValue(brightness, "112");
-      setInputValue(zoom, "125");
       hyphenation.click();
       rtl.click();
       writingMode.value = "vertical-rl";
@@ -736,7 +783,6 @@ describe("EbookReader", () => {
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({
         fontBrightness: 112,
-        zoom: 125,
         hyphenation: false,
         rtl: true,
         writingMode: "vertical-rl",
@@ -744,6 +790,27 @@ describe("EbookReader", () => {
     );
 
     vi.useRealTimers();
+  });
+
+  it("keeps side panel tab labels visible in the narrow panel", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    const label = settingsTab?.querySelector("[data-reader-panel-tab-label]");
+
+    expect(settingsTab?.className).toContain("flex-col");
+    expect(label?.textContent).toBe("Settings");
+    expect(label?.className).toContain("whitespace-normal");
   });
 
   it("keeps range labels readable in the settings panel", async () => {
@@ -777,7 +844,7 @@ describe("EbookReader", () => {
     expect(value?.className).toContain("justify-self-end");
   });
 
-  it("hides width control in scrolled flow because it fills the viewport", async () => {
+  it("hides paginated-only controls in scrolled flow", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
@@ -796,6 +863,7 @@ describe("EbookReader", () => {
     });
 
     expect(container.querySelector('input[aria-label="Width"]')).not.toBeNull();
+    expect(container.querySelector('select[aria-label="Spread"]')).not.toBeNull();
 
     const flow = container.querySelector<HTMLSelectElement>('select[aria-label="Flow"]');
     await act(async () => {
@@ -805,5 +873,6 @@ describe("EbookReader", () => {
     });
 
     expect(container.querySelector('input[aria-label="Width"]')).toBeNull();
+    expect(container.querySelector('select[aria-label="Spread"]')).toBeNull();
   });
 });

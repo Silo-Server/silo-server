@@ -83,7 +83,6 @@ export type ReaderSettings = {
   fontBrightness: number;
   rtl: boolean;
   writingMode: ReaderWritingMode;
-  zoom: number;
 };
 
 export type ReaderReadyState = {
@@ -161,7 +160,6 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   fontBrightness: 100,
   rtl: false,
   writingMode: "auto",
-  zoom: 100,
 };
 
 export function ebookReadPath(contentID: string, fileID: number): string {
@@ -315,7 +313,6 @@ export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): Rea
     writingMode: isReaderWritingMode(settings?.writingMode)
       ? settings.writingMode
       : DEFAULT_READER_SETTINGS.writingMode,
-    zoom: clampNumber(settings?.zoom, DEFAULT_READER_SETTINGS.zoom, 75, 160),
   };
 }
 
@@ -416,7 +413,6 @@ export function readerRendererAttributes(settings: ReaderSettings) {
     margin: `${settings.margin}px`,
     maxInlineSize: scrolled ? "9999px" : `${maxInlinePx}px`,
     maxColumnCount: scrolled ? "1" : settings.spread === "none" ? "1" : "2",
-    scale: `${settings.zoom}`,
   };
 }
 
@@ -496,7 +492,6 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       renderer?.setAttribute("margin", attributes.margin);
       renderer?.setAttribute("max-inline-size", attributes.maxInlineSize);
       renderer?.setAttribute("max-column-count", attributes.maxColumnCount);
-      renderer?.setAttribute("scale", attributes.scale);
       if (attributes.flow) {
         renderer?.setAttribute("flow", attributes.flow);
       } else {

@@ -157,7 +157,6 @@ describe("FoliateBookReader helpers", () => {
         theme: "sepia",
         flow: "scrolled",
         spread: "none",
-        zoom: 200,
       }),
     ).toMatchObject({
       fontSize: 180,
@@ -167,7 +166,6 @@ describe("FoliateBookReader helpers", () => {
       theme: "sepia",
       flow: "scrolled",
       spread: "none",
-      zoom: 160,
     });
   });
 
@@ -224,7 +222,6 @@ describe("FoliateBookReader helpers", () => {
       margin: "20px",
       maxColumnCount: "2",
       maxInlineSize: "680px",
-      scale: "100",
     });
 
     expect(
@@ -242,7 +239,6 @@ describe("FoliateBookReader helpers", () => {
       margin: "20px",
       maxColumnCount: "1",
       maxInlineSize: "9999px",
-      scale: "100",
     });
   });
 });
