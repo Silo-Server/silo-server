@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -241,5 +242,20 @@ func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
 	}
 	if walkModeEbook.acceptsExt(".mp3") {
 		t.Fatal("walkModeEbook should reject audio extensions")
+	}
+}
+
+func TestScanFolderEbookLibraryReturnsNotImplemented(t *testing.T) {
+	scanner := &Scanner{}
+	result, err := scanner.ScanFolder(context.Background(), &models.MediaFolder{
+		ID:    0,
+		Type:  " ebooks ",
+		Paths: []string{t.TempDir()},
+	})
+	if !errors.Is(err, errEbookScanningNotImplemented) {
+		t.Fatalf("ScanFolder ebook error = %v, want %v", err, errEbookScanningNotImplemented)
+	}
+	if result != nil {
+		t.Fatalf("ScanFolder ebook result = %+v, want nil", result)
 	}
 }
