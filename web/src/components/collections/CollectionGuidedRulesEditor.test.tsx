@@ -295,6 +295,46 @@ describe("guidedStateToQueryDefinition", () => {
     expect(rules).toContainEqual({ field: "series", op: "is", value: "Mistborn" });
   });
 
+  it("round-trips ebook-native fields without narrator", () => {
+    const original: QueryDefinition = {
+      library_ids: [10],
+      media_scope: "ebook",
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          rules: [
+            { field: "author", op: "is", value: "Ursula K. Le Guin" },
+            { field: "narrator", op: "is", value: "Should Not Apply" },
+            { field: "series", op: "is", value: "Earthsea" },
+          ],
+        },
+      ],
+      sort: { field: "author", order: "asc" },
+    };
+
+    const state = queryDefinitionToGuidedState(original);
+    expect(state.author).toBe("Ursula K. Le Guin");
+    expect(state.narrator).toBe("");
+    expect(state.series).toBe("Earthsea");
+
+    const rebuilt = guidedStateToQueryDefinition(
+      {
+        ...state,
+        narrator: "Should Not Serialize",
+      },
+      original,
+    );
+    const rules = rebuilt.groups[0]!.rules;
+    expect(rules).toContainEqual({ field: "author", op: "is", value: "Ursula K. Le Guin" });
+    expect(rules).toContainEqual({ field: "series", op: "is", value: "Earthsea" });
+    expect(rules).not.toContainEqual({
+      field: "narrator",
+      op: "is",
+      value: "Should Not Serialize",
+    });
+  });
+
   it("round-trips last_air_date sort through parse and serialize", () => {
     const original: QueryDefinition = {
       library_ids: [1],
@@ -365,5 +405,26 @@ describe("CollectionGuidedRulesEditor original language field", () => {
     );
 
     expect(markup).toContain("Media Type");
+  });
+
+  it("renders ebook book-native filters without audiobook narrator or video-only filters", () => {
+    const markup = renderToStaticMarkup(
+      <CollectionGuidedRulesEditor
+        value={{
+          ...createEmptyQueryDefinition(),
+          media_scope: "ebook",
+        }}
+        onChange={() => {}}
+        libraryType="ebooks"
+      />,
+    );
+
+    expect(markup).toContain("Author");
+    expect(markup).toContain("Series");
+    expect(markup).not.toContain("Narrator");
+    expect(markup).not.toContain("Actor");
+    expect(markup).not.toContain("Director");
+    expect(markup).not.toContain("Minimum IMDb Rating");
+    expect(markup).not.toContain("Video Quality");
   });
 });

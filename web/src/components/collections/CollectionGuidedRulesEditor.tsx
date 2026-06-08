@@ -189,7 +189,9 @@ export function queryDefinitionToGuidedState(
         if (rule.op === "is") state.author = String(rule.value);
         break;
       case "narrator":
-        if (rule.op === "is") state.narrator = String(rule.value);
+        if (rule.op === "is" && normalized.media_scope === "audiobook") {
+          state.narrator = String(rule.value);
+        }
         break;
       case "series":
         if (rule.op === "is") state.series = String(rule.value);
@@ -298,7 +300,7 @@ export function guidedStateToQueryDefinition(
   if (state.author) {
     rules.push({ field: "author", op: "is", value: state.author });
   }
-  if (state.narrator) {
+  if (state.narrator && state.mediaScope === "audiobook") {
     rules.push({ field: "narrator", op: "is", value: state.narrator });
   }
   if (state.series) {
@@ -387,10 +389,10 @@ interface CollectionGuidedRulesEditorProps {
   // When the editor is scoped to a single library (e.g. on the library
   // browse page) pass its type so video-only filter sections (Director,
   // Studio, Network, Content Rating, Video Quality, etc.) can be hidden
-  // for audiobook libraries.
+  // for book libraries.
   libraryType?: string;
-  // When set, the audiobook-native facet sections (Author / Narrator /
-  // Series) switch to typeahead-backed FacetSearchSelect, querying
+  // When set, the book-native facet sections (Author / Series, and
+  // audiobook-only Narrator) switch to typeahead-backed FacetSearchSelect, querying
   // /api/v1/catalog/filters/search scoped to this state. Without it
   // they fall back to the bulk filters payload (top 1000 alphabetical).
   catalogState?: CatalogSearchState;
@@ -416,10 +418,15 @@ export default function CollectionGuidedRulesEditor({
   const metadataFiltersQuery = useCatalogMetadataFilters();
   const filters = providedFilters ?? metadataFiltersQuery.data;
   const filtersLoading = providedFiltersLoading ?? metadataFiltersQuery.isLoading;
-  // Audiobook-only libraries should hide video-only filter sections.
-  // Backend stores type as the plural "audiobooks"; the singular form
-  // shows up in some API surfaces — accept either.
-  const isAudiobookLibrary = libraryType === "audiobook" || libraryType === "audiobooks";
+  // Backend stores book library types as plurals, while some API surfaces
+  // use singular media scopes; accept both.
+  const isAudiobookLibrary =
+    libraryType === "audiobook" ||
+    libraryType === "audiobooks" ||
+    state.mediaScope === "audiobook";
+  const isEbookLibrary =
+    libraryType === "ebook" || libraryType === "ebooks" || state.mediaScope === "ebook";
+  const isBookLibrary = isAudiobookLibrary || isEbookLibrary;
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
@@ -562,7 +569,7 @@ export default function CollectionGuidedRulesEditor({
         </div>
       </div>
 
-      {isAudiobookLibrary ? null : (
+      {isBookLibrary ? null : (
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Minimum IMDb Rating</Label>
@@ -604,7 +611,7 @@ export default function CollectionGuidedRulesEditor({
         />
       </div>
 
-      {isAudiobookLibrary ? null : (
+      {isBookLibrary ? null : (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -671,7 +678,7 @@ export default function CollectionGuidedRulesEditor({
         </>
       )}
 
-      {isAudiobookLibrary ? (
+      {isBookLibrary ? (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -696,28 +703,30 @@ export default function CollectionGuidedRulesEditor({
                 />
               )}
             </div>
-            <div className="space-y-2">
-              <Label>Narrator</Label>
-              {catalogState ? (
-                <FacetSearchSelect
-                  facet="narrator"
-                  state={catalogState}
-                  value={state.narrator}
-                  onChange={(narrator) => update({ narrator })}
-                  placeholder="Search narrators..."
-                  disabled={readOnly}
-                />
-              ) : (
-                <SearchableSelect
-                  options={filters?.narrators ?? []}
-                  value={state.narrator}
-                  onChange={(narrator) => update({ narrator })}
-                  placeholder="Select narrator..."
-                  disabled={readOnly}
-                  isLoading={filtersLoading}
-                />
-              )}
-            </div>
+            {isAudiobookLibrary ? (
+              <div className="space-y-2">
+                <Label>Narrator</Label>
+                {catalogState ? (
+                  <FacetSearchSelect
+                    facet="narrator"
+                    state={catalogState}
+                    value={state.narrator}
+                    onChange={(narrator) => update({ narrator })}
+                    placeholder="Search narrators..."
+                    disabled={readOnly}
+                  />
+                ) : (
+                  <SearchableSelect
+                    options={filters?.narrators ?? []}
+                    value={state.narrator}
+                    onChange={(narrator) => update({ narrator })}
+                    placeholder="Select narrator..."
+                    disabled={readOnly}
+                    isLoading={filtersLoading}
+                  />
+                )}
+              </div>
+            ) : null}
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -806,7 +815,7 @@ export default function CollectionGuidedRulesEditor({
         ) : null}
       </div>
 
-      {isAudiobookLibrary ? null : (
+      {isBookLibrary ? null : (
         <div className="space-y-2">
           <Label>Video Quality</Label>
           <div className="flex flex-wrap gap-2">
