@@ -16,7 +16,7 @@ import FoliateBookReader, {
 
 function chooseReaderFile(files: FileVersion[], requestedID: number | null): FileVersion | undefined {
   const requested = requestedID ? files.find((file) => file.file_id === requestedID) : undefined;
-  if (requested) return requested;
+  if (requested && isReaderSupportedFile(requested)) return requested;
   return (
     files.find((file) => readerFileFormat(file) === "epub") ??
     files.find((file) => isReaderSupportedFile(file)) ??

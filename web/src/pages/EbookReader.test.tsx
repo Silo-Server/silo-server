@@ -235,4 +235,30 @@ describe("EbookReader", () => {
 
     expect(options).toEqual(["EPUB · Reader.epub", "PDF · Reader.pdf"]);
   });
+
+  it("falls back to a supported reader file when the requested file is unsupported", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [
+          makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
+          makeVersion({ file_id: 9, file_name: "Reader.docx", container: "docx" }),
+        ],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=9"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("reader surface Reader.epub");
+    expect(container.textContent).not.toContain("Unsupported ebook format.");
+  });
 });
