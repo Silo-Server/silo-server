@@ -177,7 +177,6 @@ func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 		ExternalStatus:  "queued",
 	}}
 	service := newTestService(store)
-	service.SetSecretResolver(fakeSecrets{"request.radarr.api_key": "radarr-key"})
 	service.SetFulfillmentAdapters(adapter, nil)
 
 	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
@@ -195,39 +194,6 @@ func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 	}
 }
 
-func TestCreateRequestAutoApprovalSecretFailureMarksTargetFailed(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	qualityProfileID := 1
-	store.integrations = []Integration{{
-		Kind:             "radarr",
-		Enabled:          true,
-		IsDefault:        true,
-		BaseURL:          "http://radarr.local",
-		APIKeyRef:        "requests.radarr.api_key",
-		RootFolder:       "/movies",
-		QualityProfileID: &qualityProfileID,
-	}}
-	service := newTestService(store)
-	service.SetSecretResolver(fakeSecretError{err: errors.New("secret lookup unavailable")})
-	service.SetFulfillmentAdapters(&fakeMovieAdapter{}, nil)
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Title:     "Fight Club",
-	})
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	// The auto-approval gate no longer resolves secrets; submission does. A
-	// secret-resolution failure now surfaces as a failed fulfillment target.
-	if req.Outcome != OutcomeFailed {
-		t.Fatalf("outcome = %q, want failed (secret resolution failed during submit)", req.Outcome)
-	}
-}
-
 func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -238,7 +204,7 @@ func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 		Enabled:          true,
 		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
-		APIKeyRef:        "requests.radarr.api_key",
+		APIKeyRef:        "radarr-key",
 		RootFolder:       "/movies",
 		QualityProfileID: &qualityProfileID,
 	}}
@@ -248,7 +214,6 @@ func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 		ExternalStatus:  "queued",
 	}}
 	service := newTestService(store)
-	service.SetSecretResolver(fakeSecrets{"requests.radarr.api_key": "radarr-key"})
 	service.SetFulfillmentAdapters(adapter, nil)
 
 	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
@@ -265,8 +230,10 @@ func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 	if adapter.calls != 1 {
 		t.Fatalf("adapter calls = %d, want 1", adapter.calls)
 	}
+	// The repo decrypts api_key_ref on read, so the adapter receives the literal
+	// key verbatim — no resolver indirection.
 	if got := adapter.gotIntegration.APIKeyRef; got != "radarr-key" {
-		t.Fatalf("adapter api key = %q, want resolved key", got)
+		t.Fatalf("adapter api key = %q, want radarr-key", got)
 	}
 }
 
@@ -1771,18 +1738,4 @@ func TestSubmitApprovedFansOutDualQuality(t *testing.T) {
 	if len(rec.ids) != 2 {
 		t.Fatalf("expected 2 submissions (hd+uhd), got %d: %v", len(rec.ids), rec.ids)
 	}
-}
-
-type fakeSecrets map[string]string
-
-func (f fakeSecrets) Get(_ context.Context, key string) (string, error) {
-	return f[key], nil
-}
-
-type fakeSecretError struct {
-	err error
-}
-
-func (f fakeSecretError) Get(context.Context, string) (string, error) {
-	return "", f.err
 }

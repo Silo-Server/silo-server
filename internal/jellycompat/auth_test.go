@@ -120,7 +120,7 @@ func TestRequireSession_NoAuthService_PassesThroughExpiredStreamAppToken(t *test
 }
 
 func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
-	authn := NewAdminAPIKeyAuthenticator(
+	authn := newAdminAPIKeyAuthForTest(
 		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
 		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
 	)
@@ -141,7 +141,7 @@ func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
 }
 
 func TestRequireAdminAPIKey_RejectsNonAdminKey(t *testing.T) {
-	authn := NewAdminAPIKeyAuthenticator(
+	authn := newAdminAPIKeyAuthForTest(
 		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
 		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "user", Enabled: true}},
 	)
@@ -159,7 +159,7 @@ func TestRequireAdminAPIKey_RejectsNonAdminKey(t *testing.T) {
 }
 
 func TestRequireAdminAPIKey_RejectsNilAPIKey(t *testing.T) {
-	authn := NewAdminAPIKeyAuthenticator(
+	authn := newAdminAPIKeyAuthForTest(
 		&fakeAPIKeyValidator{returnNilWithoutError: true},
 		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
 	)
@@ -178,7 +178,7 @@ func TestRequireAdminAPIKey_RejectsNilAPIKey(t *testing.T) {
 
 func TestRequireAdminAPIKey_LastUsedUpdateHasDeadline(t *testing.T) {
 	called := make(chan bool, 1)
-	authn := NewAdminAPIKeyAuthenticator(
+	authn := newAdminAPIKeyAuthForTest(
 		&fakeAPIKeyValidator{
 			key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"},
 			update: func(ctx context.Context, _ int64) error {
@@ -210,13 +210,21 @@ func TestRequireAdminAPIKey_LastUsedUpdateHasDeadline(t *testing.T) {
 	}
 }
 
+// newAdminAPIKeyAuthForTest builds an authenticator without a UserStoreProvider,
+// exercising the admin-bool path only (no session synthesis).
+func newAdminAPIKeyAuthForTest(keys apiKeyValidator, users apiKeyUserLoader) *AdminAPIKeyAuthenticator {
+	return NewAdminAPIKeyAuthenticator(keys, users, nil, nil)
+}
+
 type fakeAPIKeyValidator struct {
 	key                   *models.APIKey
 	returnNilWithoutError bool
+	getCalls              int
 	update                func(context.Context, int64) error
 }
 
 func (f *fakeAPIKeyValidator) GetByKey(_ context.Context, key string) (*models.APIKey, error) {
+	f.getCalls++
 	if f.returnNilWithoutError {
 		return nil, nil
 	}

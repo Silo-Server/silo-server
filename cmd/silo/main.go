@@ -77,6 +77,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
+	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -141,7 +142,7 @@ func mustGetSetting(store interface {
 func configureOperationalLogging(
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	settingsRepo *catalog.ServerSettingsRepo,
+	settingsRepo catalog.SettingsStore,
 	redisCfg config.RedisConfig,
 	logStreamHub *logstream.Hub,
 	baseHandler slog.Handler,
@@ -252,6 +253,38 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 	}
 }
 
+// runCredentialBackfills sweeps any plaintext server-owned credential to
+// ciphertext on the primary (migration-running) node. All passes are
+// best-effort: a failed row leaves the prior plaintext (no new exposure) and
+// still reads via the read-path pass-through, so a backfill error must never
+// block boot. The sensitive-settings pass runs first so the arr
+// resolve-then-encrypt pass sees consistent referenced settings.
+func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
+	settingsN, err := settings.BackfillSensitiveSettings(ctx)
+	if err != nil {
+		slog.Error("secret backfill: sensitive settings", "error", err)
+	}
+	columnsN, err := secret.BackfillColumns(ctx, pool, cipher, secret.ColumnBackfillTargets())
+	if err != nil {
+		slog.Error("secret backfill: credential columns", "error", err)
+	}
+	historyServersN, err := historyimport.NewRepository(pool, cipher).BackfillSessionServerSecrets(ctx)
+	if err != nil {
+		slog.Error("secret backfill: history import session server credentials", "error", err)
+	}
+	// The arr resolver is the encrypting settings decorator: it decrypts a
+	// sensitive target (e.g. requests.radarr.api_key) or passes through a
+	// plaintext custom key, exactly replicating the deleted resolveAPIKey.
+	arrN, err := secret.BackfillReferencedColumns(ctx, pool, cipher, settings.Get, secret.ArrKeyBackfillTargets())
+	if err != nil {
+		slog.Error("secret backfill: arr api keys", "error", err)
+	}
+	if total := settingsN + columnsN + historyServersN + arrN; total > 0 {
+		slog.Info("secret backfill: encrypted plaintext credentials at rest",
+			"settings", settingsN, "columns", columnsN, "history_session_servers", historyServersN, "arr_keys", arrN, "total", total)
+	}
+}
+
 func main() {
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
@@ -264,6 +297,15 @@ func main() {
 	bc, err := config.LoadBootstrap(*envFile)
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
+	}
+
+	// Construct the at-rest credential cipher from SECRET_KEY immediately after
+	// bootstrap, before any settings repo is built. It is threaded explicitly as
+	// a dependency into every repo that stores a server-owned secret — never a
+	// package-level global.
+	dataCipher, err := secret.New(bc.SecretKey)
+	if err != nil {
+		log.Fatalf("secret cipher: %v", err)
 	}
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool with default max connections)
@@ -314,7 +356,11 @@ func main() {
 	// Run migrations only for integrated/api modes. Proxy and transcode nodes
 	// should never alter the schema — they may scale independently and would
 	// race or apply migrations before the primary node is deliberately upgraded.
-	if bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == "" {
+	// The same gate decides whether this node runs the credential-encryption
+	// backfills: only the primary (migration-running) node sweeps plaintext to
+	// ciphertext; secondary nodes read whatever the primary encrypted.
+	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
+	if isPrimaryNode {
 		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
 		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql"); migErr != nil {
 			migCancel()
@@ -324,8 +370,14 @@ func main() {
 		slog.Info("database migrations applied")
 	}
 
-	// Step 3: Load settings from DB
-	settingsRepo := catalog.NewServerSettingsRepo(pool)
+	// Step 3: Load settings from DB. settingsRepo is the encrypting decorator so
+	// every consumer (config.LoadFromDB, admin, ABS, watchers) transparently sees
+	// plaintext while sensitive keys rest as ciphertext. The settings backfill
+	// (run after migrations, before this GetAll) is wired further below.
+	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	if isPrimaryNode {
+		runCredentialBackfills(ctx, pool, dataCipher, settingsRepo)
+	}
 	settings, err := settingsRepo.GetAll(ctx)
 	if err != nil {
 		log.Fatalf("loading settings: %v", err)
@@ -396,7 +448,9 @@ func main() {
 			log.Fatalf("recreating pool with configured max_connections: %v", err)
 		}
 	}
-	settingsRepo = catalog.NewServerSettingsRepo(pool)
+	// Re-wrap with the encrypting decorator so the recreated pool's settings repo
+	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
+	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
 	nodeID := resolveNodeIdentity()
 
 	// Step 9: Validate
@@ -460,7 +514,7 @@ func main() {
 			DatabaseURL: cfg.Database.URL,
 			JFListen:    cfg.JellyfinCompat.Listen,
 		}
-		watcher := nodeconfig.NewWatcher(pool, eventBus, bootstrap)
+		watcher := nodeconfig.NewWatcher(pool, dataCipher, eventBus, bootstrap)
 		if err := watcher.Start(appCtx); err != nil {
 			slog.Error("config watcher start failed", "error", err)
 			os.Exit(1)
@@ -519,6 +573,7 @@ func main() {
 		BootstrapSensitiveValues:     bootstrapSensitiveValues,
 		AppContext:                   appCtx,
 		DB:                           pool,
+		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
@@ -595,7 +650,7 @@ func main() {
 			log.Fatalf("register watch provider: %v", err)
 		}
 		watchProviderService = watchsync.NewService(
-			watchsync.NewPostgresRepository(deps.DB),
+			watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher),
 			watchProviderRegistry,
 		)
 		deps.WatchProviderService = watchProviderService
@@ -1180,7 +1235,7 @@ func main() {
 		deps.UserStoreProvider = userStoreProvider
 	}
 	if watchProviderService != nil {
-		historyRepo := historyimport.NewRepository(deps.DB)
+		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
@@ -1479,14 +1534,13 @@ func main() {
 			taskMgr.Register(tasks.NewSyncWatchProvidersTask(watchProviderService))
 		}
 		requestReconcileSvc := mediarequests.NewService(
-			mediarequests.NewRepository(deps.DB),
+			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 			nil,
 			mediarequests.NewCatalogPresence(
 				catalog.NewItemRepository(deps.DB),
 				catalog.NewProviderIDRepository(deps.DB),
 			),
 		)
-		requestReconcileSvc.SetSecretResolver(settingsRepo)
 		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
 		if userStoreProvider != nil {
 			reconcileResolver := access.NewResolver(
@@ -1498,7 +1552,7 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
-			autoscanRepo := autoscan.NewRepository(deps.DB)
+			autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 			if err := autoscanRepo.MarkInterruptedEvents(appCtx); err != nil {
 				slog.Warn("autoscan: failed to mark interrupted polls", "err", err)
 			}
@@ -1506,8 +1560,7 @@ func main() {
 				autoscanRepo,
 				pluginService,
 				pluginInstallationStore,
-				mediarequests.NewRepository(deps.DB),
-				settingsRepo,
+				mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 				deps.FolderRepo,
 				deps.LibraryScanQueue,
 				deps.RedisClient,
@@ -1827,6 +1880,7 @@ func main() {
 		compatDeps := jellycompat.Dependencies{
 			Config:           cfg,
 			DB:               deps.DB,
+			SecretCipher:     dataCipher,
 			ClientIPResolver: ipResolver,
 			ProxyPool:        deps.ProxyPool,
 			TranscodePool:    deps.TranscodePool,
@@ -1880,7 +1934,7 @@ func main() {
 				compatDeps.FileResolver = deps.FileRepo
 			}
 
-			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB)
+			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)
@@ -2380,7 +2434,7 @@ func mapFolderTypeToMediaType(t string) string {
 // exposes Get) to the audiobooks.SettingsReader interface (which
 // requires GetString). The two signatures are identical modulo name.
 type audiobooksSettingsAdapter struct {
-	repo *catalog.ServerSettingsRepo
+	repo catalog.SettingsStore
 }
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {

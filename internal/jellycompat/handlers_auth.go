@@ -176,6 +176,23 @@ func (h *AuthHandler) HandleCurrentUser(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, h.userDTO(session))
 }
 
+// HandleUsers serves GET /Users.
+//
+// Jellyfin's user-list endpoint accepts any authenticated caller (including an
+// API key) and is what Tunarr probes to verify an API-key connection (the key
+// has no "me"). Silo separates login accounts from household profiles and is
+// multi-account, so we return only the caller's own user as a single-element
+// list rather than enumerating every account's profiles — listing all users
+// would leak identities across households.
+func (h *AuthHandler) HandleUsers(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	writeJSON(w, http.StatusOK, []userDTOResponse{h.userDTO(session)})
+}
+
 // HandleUserByID serves GET /Users/{id}.
 func (h *AuthHandler) HandleUserByID(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())

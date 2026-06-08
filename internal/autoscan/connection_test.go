@@ -6,9 +6,10 @@ import (
 	"testing"
 )
 
-// fakeRequestLookup implements RequestIntegrationLookup from a static map.
+// fakeRequestLookup implements RequestIntegrationLookup from a static map. The
+// returned apiKey is already plaintext (the Requests repo decrypts on read).
 type fakeRequestLookup struct {
-	entries map[string]struct{ baseURL, apiKeyRef string }
+	entries map[string]struct{ baseURL, apiKey string }
 	err     error
 }
 
@@ -20,30 +21,17 @@ func (f fakeRequestLookup) Get(_ context.Context, id string) (string, string, er
 	if !ok {
 		return "", "", errors.New("integration not found: " + id)
 	}
-	return e.baseURL, e.apiKeyRef, nil
-}
-
-// fakeSecrets implements SecretResolver from a static map; unknown refs resolve
-// to empty (so the ref itself is used).
-type fakeSecrets struct {
-	values map[string]string
-	err    error
-}
-
-func (f fakeSecrets) Get(_ context.Context, ref string) (string, error) {
-	if f.err != nil {
-		return "", f.err
-	}
-	return f.values[ref], nil
+	return e.baseURL, e.apiKey, nil
 }
 
 func TestResolveConnectionOwnCredentials(t *testing.T) {
-	secrets := fakeSecrets{values: map[string]string{"ownref": "OWNKEY"}}
-	r := NewConnectionResolver(fakeRequestLookup{}, secrets)
+	// The autoscan repo already decrypted api_key_ref, so the connection carries
+	// the literal key; Resolve returns it verbatim (trimmed).
+	r := NewConnectionResolver(fakeRequestLookup{})
 
 	got, err := r.Resolve(context.Background(), Connection{
 		BaseURL:   "http://own:8989",
-		APIKeyRef: "ownref",
+		APIKeyRef: "OWNKEY",
 	})
 	if err != nil {
 		t.Fatalf("Resolve own: %v", err)
@@ -54,11 +42,10 @@ func TestResolveConnectionOwnCredentials(t *testing.T) {
 }
 
 func TestResolveConnectionLinked(t *testing.T) {
-	lookup := fakeRequestLookup{entries: map[string]struct{ baseURL, apiKeyRef string }{
-		"req-1": {baseURL: "http://req:7878", apiKeyRef: "rk"},
+	lookup := fakeRequestLookup{entries: map[string]struct{ baseURL, apiKey string }{
+		"req-1": {baseURL: "http://req:7878", apiKey: "REQKEY"},
 	}}
-	secrets := fakeSecrets{values: map[string]string{"rk": "REQKEY"}}
-	r := NewConnectionResolver(lookup, secrets)
+	r := NewConnectionResolver(lookup)
 
 	id := "req-1"
 	got, err := r.Resolve(context.Background(), Connection{RequestIntegrationID: &id})
@@ -71,7 +58,7 @@ func TestResolveConnectionLinked(t *testing.T) {
 }
 
 func TestResolveConnectionLinkedMissingErrors(t *testing.T) {
-	r := NewConnectionResolver(fakeRequestLookup{}, fakeSecrets{})
+	r := NewConnectionResolver(fakeRequestLookup{})
 	id := "gone"
 	if _, err := r.Resolve(context.Background(), Connection{RequestIntegrationID: &id}); err == nil {
 		t.Fatal("expected error when linked Requests integration is missing")
@@ -79,7 +66,7 @@ func TestResolveConnectionLinkedMissingErrors(t *testing.T) {
 }
 
 func TestResolveConnectionLinkedLookupErrors(t *testing.T) {
-	r := NewConnectionResolver(fakeRequestLookup{err: errors.New("boom")}, fakeSecrets{})
+	r := NewConnectionResolver(fakeRequestLookup{err: errors.New("boom")})
 	id := "req-1"
 	if _, err := r.Resolve(context.Background(), Connection{RequestIntegrationID: &id}); err == nil {
 		t.Fatal("expected error when the lookup itself fails")
@@ -92,13 +79,12 @@ func TestResolveConnectionEmptyIntegrationIDIsNotALink(t *testing.T) {
 	// requests.Get(""). The lookup here errors on any call, so reaching it fails.
 	r := NewConnectionResolver(
 		fakeRequestLookup{err: errors.New("lookup must not be called")},
-		fakeSecrets{values: map[string]string{"ownref": "OWNKEY"}},
 	)
 	for _, empty := range []string{"", "   "} {
 		id := empty
 		got, err := r.Resolve(context.Background(), Connection{
 			BaseURL:              "http://own:8989",
-			APIKeyRef:            "ownref",
+			APIKeyRef:            "OWNKEY",
 			RequestIntegrationID: &id,
 		})
 		if err != nil {
@@ -110,20 +96,18 @@ func TestResolveConnectionEmptyIntegrationIDIsNotALink(t *testing.T) {
 	}
 }
 
-func TestResolveConnectionTrimsAndFallsBackOnEmptySecret(t *testing.T) {
-	// Whitespace-padded ref; secret resolves to whitespace-only -> fall back to
-	// the trimmed ref (parity with requests.resolveAPIKey).
-	secrets := fakeSecrets{values: map[string]string{"ownref": "   "}}
-	r := NewConnectionResolver(fakeRequestLookup{}, secrets)
+func TestResolveConnectionTrimsKey(t *testing.T) {
+	// Resolve trims surrounding whitespace from the (decrypted) key.
+	r := NewConnectionResolver(fakeRequestLookup{})
 
 	got, err := r.Resolve(context.Background(), Connection{
 		BaseURL:   "http://own:8989",
-		APIKeyRef: "  ownref  ",
+		APIKeyRef: "  OWNKEY  ",
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if got.APIKey != "ownref" {
-		t.Fatalf("expected trimmed ref fallback, got %q", got.APIKey)
+	if got.APIKey != "OWNKEY" {
+		t.Fatalf("expected trimmed key, got %q", got.APIKey)
 	}
 }

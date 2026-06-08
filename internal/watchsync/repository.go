@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 type Repository interface {
@@ -45,11 +48,22 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
 }
 
-func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+func NewPostgresRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PostgresRepository {
+	return &PostgresRepository{pool: pool, cipher: cipher}
+}
+
+// TokenAAD binds an access/refresh token ciphertext to its connection. It uses
+// the stable UNIQUE business key (provider, user_id, profile_id) rather than the
+// surrogate id, because UpsertConnection lets Postgres assign/keep the id (ON
+// CONFLICT), so the id is not known before the write — the tuple is, and it
+// identifies the row just as uniquely. Exported so the (raw-SQL) Trakt
+// collection-token resolver binds tokens identically.
+func TokenAAD(column, provider string, userID int, profileID string) string {
+	return secret.RowAAD("watch_provider_connections", column, provider+":"+strconv.Itoa(userID)+":"+profileID)
 }
 
 func (r *PostgresRepository) GetServerSetting(ctx context.Context, key string) (string, error) {
@@ -61,7 +75,14 @@ func (r *PostgresRepository) GetServerSetting(ctx context.Context, key string) (
 	if err != nil {
 		return "", fmt.Errorf("server_settings get %q: %w", key, err)
 	}
-	return value, nil
+	// This repo reads watchsync.<provider>.client_id/client_secret (sensitive
+	// settings) directly, bypassing the settings decorator, so apply the same
+	// read-path decryption here.
+	out, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+	if err != nil {
+		return "", fmt.Errorf("decrypt server_settings %q: %w", key, err)
+	}
+	return out, nil
 }
 
 func (r *PostgresRepository) UpsertAuthSession(
@@ -126,6 +147,14 @@ func (r *PostgresRepository) GetAuthSession(ctx context.Context, id string) (Dev
 }
 
 func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connection) (Connection, error) {
+	accessToken, err := r.cipher.Encrypt(conn.AccessToken, TokenAAD("access_token", conn.Provider, conn.UserID, conn.ProfileID))
+	if err != nil {
+		return Connection{}, fmt.Errorf("encrypt watch access token: %w", err)
+	}
+	refreshToken, err := r.cipher.Encrypt(conn.RefreshToken, TokenAAD("refresh_token", conn.Provider, conn.UserID, conn.ProfileID))
+	if err != nil {
+		return Connection{}, fmt.Errorf("encrypt watch refresh token: %w", err)
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO watch_provider_connections (
 			id, provider, user_id, profile_id, provider_account_id, provider_username,
@@ -176,8 +205,8 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		conn.ProfileID,
 		conn.ProviderAccountID,
 		conn.ProviderUsername,
-		conn.AccessToken,
-		conn.RefreshToken,
+		accessToken,
+		refreshToken,
 		conn.TokenExpiresAt,
 		conn.ImportWatchedEnabled,
 		conn.ImportProgressEnabled,
@@ -195,7 +224,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		conn.LastError,
 		encodeSyncCursors(conn.SyncCursors),
 	)
-	saved, err := scanConnection(row)
+	saved, err := r.scanConnection(row)
 	if err != nil {
 		return Connection{}, fmt.Errorf("upsert watch provider connection: %w", err)
 	}
@@ -219,7 +248,7 @@ func (r *PostgresRepository) GetConnection(
 		FROM watch_provider_connections
 		WHERE provider = $1 AND user_id = $2 AND profile_id = $3
 	`, provider, userID, profileID)
-	conn, err := scanConnection(row)
+	conn, err := r.scanConnection(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Connection{}, false, nil
 	}
@@ -241,7 +270,7 @@ func (r *PostgresRepository) GetConnectionByID(ctx context.Context, id string) (
 		FROM watch_provider_connections
 		WHERE id = $1::uuid
 	`, id)
-	conn, err := scanConnection(row)
+	conn, err := r.scanConnection(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Connection{}, false, nil
 	}
@@ -300,7 +329,7 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 
 	var conns []Connection
 	for rows.Next() {
-		conn, scanErr := scanConnection(rows)
+		conn, scanErr := r.scanConnection(rows)
 		if scanErr != nil {
 			return nil, fmt.Errorf("scan due watch provider connection: %w", scanErr)
 		}
@@ -509,7 +538,7 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 
 	var conns []Connection
 	for rows.Next() {
-		conn, scanErr := scanConnection(rows)
+		conn, scanErr := r.scanConnection(rows)
 		if scanErr != nil {
 			return nil, fmt.Errorf("scan local watch event connection: %w", scanErr)
 		}
@@ -555,7 +584,7 @@ func (r *PostgresRepository) ListFavoriteEventConnections(
 
 	var conns []Connection
 	for rows.Next() {
-		conn, scanErr := scanConnection(rows)
+		conn, scanErr := r.scanConnection(rows)
 		if scanErr != nil {
 			return nil, fmt.Errorf("scan favorite event connection: %w", scanErr)
 		}
@@ -862,7 +891,7 @@ func (r *PostgresRepository) ListScrobbleConnections(ctx context.Context, userID
 	defer rows.Close()
 	var conns []Connection
 	for rows.Next() {
-		conn, err := scanConnection(rows)
+		conn, err := r.scanConnection(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan scrobble connection: %w", err)
 		}
@@ -1033,7 +1062,7 @@ func scanSyncRun(row pgx.Row) (SyncRun, error) {
 	return run, nil
 }
 
-func scanConnection(row pgx.Row) (Connection, error) {
+func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 	var conn Connection
 	var rawSyncCursors []byte
 	err := row.Scan(
@@ -1066,6 +1095,14 @@ func scanConnection(row pgx.Row) (Connection, error) {
 	)
 	if err != nil {
 		return Connection{}, err
+	}
+	// Decrypt the tokens (read-path contract), bound to the connection's stable
+	// business key — matching TokenAAD on the write path.
+	if conn.AccessToken, err = r.cipher.DecryptIfEncrypted(conn.AccessToken, TokenAAD("access_token", conn.Provider, conn.UserID, conn.ProfileID)); err != nil {
+		return Connection{}, fmt.Errorf("decrypt watch access token: %w", err)
+	}
+	if conn.RefreshToken, err = r.cipher.DecryptIfEncrypted(conn.RefreshToken, TokenAAD("refresh_token", conn.Provider, conn.UserID, conn.ProfileID)); err != nil {
+		return Connection{}, fmt.Errorf("decrypt watch refresh token: %w", err)
 	}
 	conn.SyncCursors = decodeSyncCursors(rawSyncCursors)
 	return conn, nil
