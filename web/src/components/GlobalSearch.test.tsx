@@ -127,6 +127,7 @@ describe("GlobalSearch", () => {
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
 
     expect(markup).toContain('data-testid="dialog"');
+    expect(markup).toContain('placeholder="Search library..."');
     expect(markup).toContain("Test Movie");
     expect(markup).toContain("Showing top 8 of 50");
     expect(markup).toContain("Press Enter for all results");

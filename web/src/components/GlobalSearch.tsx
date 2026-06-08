@@ -231,7 +231,7 @@ export function GlobalSearch({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search movies, series..."
+              placeholder="Search library..."
               className="placeholder:text-muted-foreground flex h-12 w-full bg-transparent text-sm outline-none"
               autoFocus
               aria-label="Search"
