@@ -31,6 +31,19 @@ type Worker struct {
 	cancelFunc            context.CancelFunc
 }
 
+const tasteProfileRefreshSubjectsQuery = `
+	SELECT DISTINCT user_id, profile_id FROM user_ratings
+	UNION
+	SELECT DISTINCT user_id, profile_id FROM user_taste_profiles
+	UNION
+	SELECT DISTINCT user_id, profile_id FROM user_watch_progress
+	UNION
+	SELECT DISTINCT user_id, profile_id FROM ebook_reader_progress
+	UNION
+	SELECT DISTINCT user_id, profile_id FROM user_favorites
+	UNION
+	SELECT DISTINCT user_id, profile_id FROM user_watchlist`
+
 // NewWorker creates a new recommendation Worker.
 func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron string) (*Worker, error) {
 	w := &Worker{
@@ -266,16 +279,7 @@ func (w *Worker) doTasteProfiles() {
 	defer cancel()
 	slog.Info("starting taste profile refresh")
 
-	rows, err := w.engine.pool.Query(ctx, `
-		SELECT DISTINCT user_id, profile_id FROM user_ratings
-		UNION
-		SELECT DISTINCT user_id, profile_id FROM user_taste_profiles
-		UNION
-		SELECT DISTINCT user_id, profile_id FROM user_watch_progress
-		UNION
-		SELECT DISTINCT user_id, profile_id FROM user_favorites
-		UNION
-		SELECT DISTINCT user_id, profile_id FROM user_watchlist`)
+	rows, err := w.engine.pool.Query(ctx, tasteProfileRefreshSubjectsQuery)
 	if err != nil {
 		slog.Error("taste profile query failed", "error", err)
 		return

@@ -39,15 +39,53 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 const minHNSWEfSearch = 200
 
+const watchedActivityCTE = `
+watched_activity AS (
+	SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
+	       wp.media_item_id AS leaf_item_id,
+	       wp.user_id,
+	       wp.profile_id,
+	       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id,
+	       wp.updated_at,
+	       wp.completed AS completed
+	FROM   user_watch_progress wp
+	LEFT JOIN episodes e ON e.content_id = wp.media_item_id
+	WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
+	  AND  NOT EXISTS (
+		SELECT 1
+		FROM   user_history_hidden_items hhi
+		WHERE  hhi.user_id = wp.user_id
+		  AND  hhi.profile_id = wp.profile_id
+		  AND  hhi.media_item_id = wp.media_item_id
+		  AND  wp.updated_at <= hhi.hidden_before
+	  )
+	UNION ALL
+	SELECT erp.content_id AS item_id,
+	       erp.content_id AS leaf_item_id,
+	       erp.user_id,
+	       erp.profile_id,
+	       erp.user_id::text || ':' || COALESCE(erp.profile_id, '') AS watcher_id,
+	       erp.updated_at,
+	       erp.progress >= 0.9 AS completed
+	FROM   ebook_reader_progress erp
+	WHERE  erp.progress >= 0.5
+	  AND  NOT EXISTS (
+		SELECT 1
+		FROM   user_history_hidden_items hhi
+		WHERE  hhi.user_id = erp.user_id
+		  AND  hhi.profile_id = erp.profile_id
+		  AND  hhi.media_item_id = erp.content_id
+		  AND  erp.updated_at <= hhi.hidden_before
+	  )
+)`
+
 const tasteSeedCandidateQuery = `
-			WITH watched_counts AS (
-				SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-				       COUNT(DISTINCT wp.user_id::text || ':' || COALESCE(wp.profile_id, '')) AS watch_count
-				FROM   user_watch_progress wp
-				LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-				WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-				  AND  wp.updated_at > NOW() - INTERVAL '180 days'
-				GROUP  BY 1
+			WITH ` + watchedActivityCTE + `,
+			watched_counts AS (
+				SELECT item_id, COUNT(DISTINCT watcher_id) AS watch_count
+				FROM   watched_activity
+				WHERE  updated_at > NOW() - INTERVAL '180 days'
+				GROUP  BY item_id
 			)
 			SELECT mi.content_id
 			FROM   media_items mi
@@ -1221,29 +1259,20 @@ func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID strin
 // Used for co-watch matrix computation.
 func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser int) (map[string][]string, error) {
 	// Get all watch progress entries where progress >= 50% or completed
-	rows, err := r.pool.Query(ctx, `
-		WITH user_watches AS (
+	query := fmt.Sprintf(`
+		WITH %s,
+		user_watches AS (
 			SELECT user_id::text || ':' || COALESCE(profile_id, '') AS watcher_id,
-			       media_item_id,
+			       item_id AS media_item_id,
 			       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY updated_at DESC) AS rn
-			FROM   user_watch_progress
-			WHERE  (completed = true
-			   OR  (duration_seconds > 0 AND position_seconds / duration_seconds >= 0.5))
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = user_watch_progress.user_id
-				  AND  hhi.profile_id = user_watch_progress.profile_id
-				  AND  hhi.media_item_id = user_watch_progress.media_item_id
-				  AND  user_watch_progress.updated_at <= hhi.hidden_before
-			  )
+			FROM   watched_activity
 		)
 		SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
 		FROM   user_watches
 		WHERE  rn <= $1
 		GROUP  BY media_item_id
-		HAVING COUNT(*) >= $2`,
-		maxPerUser, minWatchers)
+		HAVING COUNT(*) >= $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, maxPerUser, minWatchers)
 	if err != nil {
 		return nil, fmt.Errorf("get item watchers: %w", err)
 	}
@@ -1266,30 +1295,20 @@ func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser 
 // GetPopularItems returns the most-watched series/movies over the given number of days.
 // Episodes are resolved to their parent series.
 func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_items AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  wp.updated_at > NOW() - ($1 || ' days')::interval
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = wp.user_id
-				  AND  hhi.profile_id = wp.profile_id
-				  AND  hhi.media_item_id = wp.media_item_id
-				  AND  wp.updated_at <= hhi.hidden_before
-			  )
+	query := fmt.Sprintf(`
+		WITH %s,
+		watched_items AS (
+			SELECT item_id, watcher_id
+			FROM   watched_activity
+			WHERE  updated_at > NOW() - ($1 || ' days')::interval
 		)
 		SELECT wi.item_id, COUNT(DISTINCT wi.watcher_id) AS watch_count
 		FROM   watched_items wi
 		JOIN   media_items mi ON mi.content_id = wi.item_id
 		GROUP  BY wi.item_id
 		ORDER  BY watch_count DESC
-		LIMIT  $2`,
-		fmt.Sprintf("%d", days), limit)
+		LIMIT  $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, fmt.Sprintf("%d", days), limit)
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
@@ -1392,21 +1411,11 @@ func (r *Repo) GetTasteSeedCandidates(ctx context.Context, limit, offset int) ([
 // GetTopGenres returns the most popular genres by watch count.
 // Episodes are resolved to their parent series for genre lookup.
 func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_items AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = wp.user_id
-				  AND  hhi.profile_id = wp.profile_id
-				  AND  hhi.media_item_id = wp.media_item_id
-				  AND  wp.updated_at <= hhi.hidden_before
-			  )
+	query := fmt.Sprintf(`
+		WITH %s,
+		watched_items AS (
+			SELECT item_id, watcher_id
+			FROM   watched_activity
 		)
 		SELECT g.genre, COUNT(DISTINCT wi.watcher_id) AS watchers
 		FROM   watched_items wi
@@ -1414,8 +1423,8 @@ func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
 		CROSS JOIN LATERAL UNNEST(mi.genres) AS g(genre)
 		GROUP  BY g.genre
 		ORDER  BY watchers DESC
-		LIMIT  $1`,
-		limit)
+		LIMIT  $1`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get top genres: %w", err)
 	}
@@ -1435,21 +1444,11 @@ func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
 
 // GetGenreSamplerItems returns the most-watched series/movies in a specific genre.
 func (r *Repo) GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_items AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = wp.user_id
-				  AND  hhi.profile_id = wp.profile_id
-				  AND  hhi.media_item_id = wp.media_item_id
-				  AND  wp.updated_at <= hhi.hidden_before
-			  )
+	query := fmt.Sprintf(`
+		WITH %s,
+		watched_items AS (
+			SELECT item_id, watcher_id
+			FROM   watched_activity
 		)
 		SELECT wi.item_id, COUNT(DISTINCT wi.watcher_id) AS watch_count
 		FROM   watched_items wi
@@ -1457,8 +1456,8 @@ func (r *Repo) GetGenreSamplerItems(ctx context.Context, genre string, limit int
 		WHERE  $1 = ANY(mi.genres)
 		GROUP  BY wi.item_id
 		ORDER  BY watch_count DESC
-		LIMIT  $2`,
-		genre, limit)
+		LIMIT  $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, genre, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get genre sampler items: %w", err)
 	}
@@ -1657,21 +1656,12 @@ func (r *Repo) GetAllUsersWithTasteProfiles(ctx context.Context) ([]StaleProfile
 // GetWatchedItemIDs returns content IDs of series/movies the user has watched
 // (>= 50% progress or completed). Episodes are resolved to their parent series.
 func (r *Repo) GetWatchedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT COALESCE(e.series_id, wp.media_item_id) AS item_id
-		FROM   user_watch_progress wp
-		LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-		WHERE  wp.user_id = $1 AND wp.profile_id = $2
-		  AND  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-		  AND  NOT EXISTS (
-			SELECT 1
-			FROM   user_history_hidden_items hhi
-			WHERE  hhi.user_id = wp.user_id
-			  AND  hhi.profile_id = wp.profile_id
-			  AND  hhi.media_item_id = wp.media_item_id
-			  AND  wp.updated_at <= hhi.hidden_before
-		  )`,
-		userID, profileID)
+	query := fmt.Sprintf(`
+		WITH %s
+		SELECT DISTINCT item_id
+		FROM   watched_activity
+		WHERE  user_id = $1 AND profile_id = $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get watched item IDs: %w", err)
 	}
@@ -1735,21 +1725,15 @@ func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profil
 		return []string{}, nil
 	}
 
-	rows, err := r.pool.Query(ctx, `
-		SELECT media_item_id
-		FROM   user_watch_progress
+	query := fmt.Sprintf(`
+		WITH %s
+		SELECT leaf_item_id
+		FROM   watched_activity
 		WHERE  user_id = $1 AND profile_id = $2 AND completed = true
-		  AND  NOT EXISTS (
-			SELECT 1
-			FROM   user_history_hidden_items hhi
-			WHERE  hhi.user_id = user_watch_progress.user_id
-			  AND  hhi.profile_id = user_watch_progress.profile_id
-			  AND  hhi.media_item_id = user_watch_progress.media_item_id
-			  AND  user_watch_progress.updated_at <= hhi.hidden_before
-		  )
-		ORDER  BY updated_at DESC, media_item_id ASC
+		ORDER  BY updated_at DESC, leaf_item_id ASC
 		LIMIT  $3
-	`, userID, profileID, limit)
+	`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, userID, profileID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get recent completed item IDs: %w", err)
 	}

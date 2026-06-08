@@ -24,6 +24,21 @@ func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
 	}
 }
 
+func TestWatchedActivityCTEIncludesEbookReaderProgress(t *testing.T) {
+	query := strings.Join(strings.Fields(watchedActivityCTE), " ")
+
+	for _, term := range []string{
+		"FROM ebook_reader_progress erp",
+		"erp.progress >= 0.5",
+		"erp.progress >= 0.9 AS completed",
+		"hhi.media_item_id = erp.content_id",
+	} {
+		if !strings.Contains(query, term) {
+			t.Fatalf("watched activity CTE missing %q: %s", term, query)
+		}
+	}
+}
+
 func TestEmbeddingEligibilityWhereClauseIncludesBookTypes(t *testing.T) {
 	clause := embeddingEligibilityWhereClause()
 
@@ -58,6 +73,16 @@ func TestRecommendationItemEligibilityWhereClauseDefaultsAlias(t *testing.T) {
 	if !strings.Contains(clause, "media_items.status = 'matched'") {
 		t.Fatalf("default eligibility alias missing media_items qualification: %s", clause)
 	}
+}
+
+func TestTasteProfileRefreshSubjectsQueryIncludesEbookReaderProgress(t *testing.T) {
+	query := strings.Join(strings.Fields(tasteProfileRefreshSubjectsQuery), " ")
+
+	assertQueryTermsInOrder(t, query,
+		"SELECT DISTINCT user_id, profile_id FROM user_watch_progress",
+		"UNION",
+		"SELECT DISTINCT user_id, profile_id FROM ebook_reader_progress",
+	)
 }
 
 func assertQueryTermsInOrder(t *testing.T, query string, terms ...string) {
