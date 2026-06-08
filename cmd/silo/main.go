@@ -47,6 +47,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -943,6 +944,7 @@ func main() {
 	var seasonRepo *catalog.SeasonRepository
 	var episodeRepo *catalog.EpisodeRepository
 	var audiobookEnricher *audiobooks.Enricher
+	var ebookEnricher *ebooks.Enricher
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
@@ -1024,6 +1026,14 @@ func main() {
 			personRepo,
 			providerIDRepo,
 		)
+		ebookEnricher = ebooks.NewEnricher(
+			deps.DB,
+			chainRepo,
+			pluginResolver,
+			itemRepo,
+			personRepo,
+			providerIDRepo,
+		)
 
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
@@ -1045,6 +1055,9 @@ func main() {
 			if audiobookEnricher != nil {
 				audiobookEnricher.SetImageCacher(imageCacher)
 				audiobookEnricher.SetFFmpegPath(scanner.FFmpegPathFromFFprobe(scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)))
+			}
+			if ebookEnricher != nil {
+				ebookEnricher.SetImageCacher(imageCacher)
 			}
 		}
 
@@ -1586,6 +1599,9 @@ func main() {
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
 		if audiobookEnricher != nil {
 			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
+		}
+		if ebookEnricher != nil {
+			taskMgr.Register(tasks.NewSyncEbookMetadataTask(ebookEnricher))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
