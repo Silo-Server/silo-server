@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -195,6 +196,81 @@ func TestEbookSeriesDesiredParsesIndex(t *testing.T) {
 	}
 	if idx == nil || *idx != 2 {
 		t.Fatalf("series index = %v, want 2", idx)
+	}
+}
+
+func TestUpsertEbookSeriesNilScannerReturnsError(t *testing.T) {
+	var s *Scanner
+	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}); err == nil {
+		t.Fatal("upsertEbookSeries nil scanner error = nil, want error")
+	}
+}
+
+func TestUpsertEbookSeriesNilFileRepoReturnsError(t *testing.T) {
+	s := &Scanner{}
+	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}); err == nil {
+		t.Fatal("upsertEbookSeries nil fileRepo error = nil, want error")
+	}
+}
+
+func TestPlanEbookSeriesWriteInsertsWhenRowAbsent(t *testing.T) {
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " Series ", SeriesIndex: "2 of 9"}, nil, nil, pgx.ErrNoRows)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteUpsert || plan.Name != "Series" {
+		t.Fatalf("plan = %+v, want upsert Series", plan)
+	}
+	if plan.Index == nil || *plan.Index != 2 {
+		t.Fatalf("index = %v, want 2", plan.Index)
+	}
+}
+
+func TestPlanEbookSeriesWriteBlankSeriesDeletesExistingAndSkipsAbsent(t *testing.T) {
+	currentName := "Series"
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " "}, &currentName, nil, nil)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite delete: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteDelete {
+		t.Fatalf("blank existing plan = %+v, want delete", plan)
+	}
+
+	plan, err = planEbookSeriesWrite(&parsedEbook{Series: ""}, nil, nil, pgx.ErrNoRows)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite absent: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteNone {
+		t.Fatalf("blank absent plan = %+v, want none", plan)
+	}
+}
+
+func TestPlanEbookSeriesWriteSkipsIdenticalRow(t *testing.T) {
+	currentName := "Series"
+	currentIdx := 3.5
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "Series", SeriesIndex: "3.5"}, &currentName, &currentIdx, nil)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteNone {
+		t.Fatalf("identical plan = %+v, want none", plan)
+	}
+}
+
+func TestPlanEbookSeriesWriteAllowsNullNumericIndex(t *testing.T) {
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "Series", SeriesIndex: "appendix"}, nil, nil, pgx.ErrNoRows)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteUpsert || plan.Index != nil {
+		t.Fatalf("plan = %+v, want upsert with nil index", plan)
+	}
+}
+
+func TestPlanEbookSeriesWriteReturnsQueryError(t *testing.T) {
+	queryErr := errors.New("query failed")
+	if _, err := planEbookSeriesWrite(&parsedEbook{Series: "Series"}, nil, nil, queryErr); !errors.Is(err, queryErr) {
+		t.Fatalf("planEbookSeriesWrite error = %v, want query error", err)
 	}
 }
 
