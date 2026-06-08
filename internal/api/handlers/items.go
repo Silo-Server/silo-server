@@ -748,7 +748,10 @@ func (h *ItemsHandler) listItemUserStates(r *http.Request, items []*models.Media
 	if !ok {
 		return map[string]*itemUserStateResponse{}
 	}
-	states, err := resolveItemUserStates(r.Context(), store, profileID, h.episodeRepo, items)
+	states, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.episodeRepo, items, itemUserStateOptions{
+		UserID:             apimw.GetUserID(r.Context()),
+		EbookProgressStore: h.ebookProgressStore,
+	})
 	if err != nil {
 		return map[string]*itemUserStateResponse{}
 	}
