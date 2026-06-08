@@ -256,6 +256,9 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	cleanSubtree := filepath.Clean(subtreePath)
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
+	if isEbookLibraryType(folder.Type) {
+		return nil, errEbookScanningNotImplemented
+	}
 	return s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
 }
 
