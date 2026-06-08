@@ -111,6 +111,32 @@ func TestApplyMediaTypeFloorNoopsWithoutSupplementalType(t *testing.T) {
 	}
 }
 
+func TestApplyMediaTypeFloorIncludesEbookSupplement(t *testing.T) {
+	items := []ScoredItem{
+		{MediaItemID: "s1", Score: 1.00},
+		{MediaItemID: "s2", Score: 0.99},
+		{MediaItemID: "s3", Score: 0.98},
+		{MediaItemID: "s4", Score: 0.97},
+		{MediaItemID: "s5", Score: 0.96},
+	}
+	candidates := append([]ScoredItem(nil), items...)
+	candidates = append(candidates, ScoredItem{MediaItemID: "e1", Score: 0.95})
+	mediaTypes := map[string]string{
+		"s1": "series",
+		"s2": "series",
+		"s3": "series",
+		"s4": "series",
+		"s5": "series",
+		"e1": "ebook",
+	}
+
+	mixed := applyMediaTypeFloor(items, candidates, mediaTypes)
+
+	if got := countMediaType(mixed, mediaTypes, "ebook"); got != 1 {
+		t.Fatalf("expected 1 ebook from supplemental candidates, got %d in %#v", got, mixed)
+	}
+}
+
 func TestApplyGenreCapDoesNotCollapseConcentratedRows(t *testing.T) {
 	items := []ScoredItem{
 		{MediaItemID: "a", Score: 1.0},
