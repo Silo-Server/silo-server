@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { RefreshCw, Tv } from "lucide-react";
 import type { SwipeCard as SwipeCardType } from "@/hooks/queries/recommendations";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -36,6 +36,7 @@ export default function CardStack({
   const [topIndex, setTopIndex] = useState(0);
   const prefetchTriggered = useRef(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const playbackController = useWatchPlaybackController();
 
   const visibleCards = cards.slice(topIndex, topIndex + 3);
@@ -61,11 +62,15 @@ export default function CardStack({
     const card = cards[topIndex];
     if (!card) return;
     onClose();
+    if (card.type === "ebook") {
+      navigate(`/reader/ebook/${encodeURIComponent(card.content_id)}`);
+      return;
+    }
     playbackController.startPlayback({
       contentId: card.content_id,
       returnHref: `${location.pathname}${location.search}`,
     });
-  }, [cards, topIndex, onClose, playbackController, location.pathname, location.search]);
+  }, [cards, topIndex, onClose, navigate, playbackController, location.pathname, location.search]);
 
   // Keyboard navigation.
   useEffect(() => {
