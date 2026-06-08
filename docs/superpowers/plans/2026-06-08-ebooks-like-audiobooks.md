@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add ebooks as a core silo media type by mirroring the audiobook scanner and metadata enrichment architecture in `main`.
+**Goal:** Add ebooks as a core silo media type by mirroring the audiobook scanner architecture in `main`. Metadata enrichment is documented below as follow-up PR work, not part of the foundation PR.
 
-**Architecture:** Ebooks are scanned by core `internal/scanner` code, then enriched by a core `internal/ebooks.Enricher` task that resolves plugin metadata providers with `content_level = 'ebook'`. The first-party `silo-plugin-ebook-metadata` provides lookup data; there is no ebook scanner plugin and no ebook details repository/table.
+**Architecture:** The foundation PR scans ebooks through core `internal/scanner` code. Later PRs add a core `internal/ebooks.Enricher` task that resolves plugin metadata providers with `content_level = 'ebook'`. The first-party `silo-plugin-ebook-metadata` provides lookup data; there is no ebook scanner plugin and no ebook details repository/table.
 
 **Tech Stack:** Go, PostgreSQL Goose migrations, Silo scanner/catalog repositories, Silo metadata plugin chain, taskmanager scheduled tasks.
 
@@ -16,9 +16,9 @@
 - `internal/scanner/ebook_scan.go`: ebook scan flow matching `audiobook_scan.go`.
 - `internal/scanner/scanner.go`: route `ebook(s)` libraries to the ebook scanner and add ebook walk mode.
 - `migrations/sql/20260608000100_ebook_series.sql`: `ebook_series` table equivalent to `audiobook_series`.
-- `internal/ebooks/enrichment.go`: ebook metadata sweep equivalent to `internal/audiobooks/enrichment.go`.
-- `internal/taskmanager/tasks/sync_ebook_metadata.go`: scheduled/manual metadata task equivalent to `sync_audiobook_metadata.go`.
-- `cmd/silo/main.go`: wire `ebooks.NewEnricher` next to `audiobooks.NewEnricher`.
+- Follow-up PR: `internal/ebooks/enrichment.go`: ebook metadata sweep equivalent to `internal/audiobooks/enrichment.go`.
+- Follow-up PR: `internal/taskmanager/tasks/sync_ebook_metadata.go`: scheduled/manual metadata task equivalent to `sync_audiobook_metadata.go`.
+- Follow-up PR: `cmd/silo/main.go`: wire `ebooks.NewEnricher` next to `audiobooks.NewEnricher`.
 - Tests live beside changed files and should pin “authors only, ISBN only, content_level ebook.”
 
 ### Task 1: Scanner Routing And Local Parser
