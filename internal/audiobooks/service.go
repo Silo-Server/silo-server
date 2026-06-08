@@ -42,8 +42,8 @@ type ABSHandlerDeps struct {
 	Pool           *pgxpool.Pool
 	Items          *catalog.ItemRepository
 	Files          *scanner.FileRepository
-	Settings       *catalog.ServerSettingsRepo
-	Auth           absAuthAdapter // see BuildABSHandler below
+	Settings       catalog.SettingsStore // encrypting decorator in production
+	Auth           absAuthAdapter        // see BuildABSHandler below
 	AccessResolver abs.AccessResolver
 	// Recs is the recommendations repository used to power the
 	// /items/{id}/similar endpoint via embedding nearest-neighbor search.

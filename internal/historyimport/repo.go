@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 var (
@@ -26,11 +29,135 @@ var (
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
 }
 
-func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func NewRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *Repository {
+	return &Repository{pool: pool, cipher: cipher}
+}
+
+// AAD builders binding each history-import secret column to its row id.
+func sourceAdminTokenAAD(sourceID int) string {
+	return secret.RowAAD("history_import_sources", "admin_token", strconv.Itoa(sourceID))
+}
+func connectServerAccessKeyAAD(sessionID string, index int, server ConnectServer) string {
+	return secret.RowAAD("history_import_connect_sessions", "servers_json.access_key", sessionID+":"+strconv.Itoa(index)+":"+server.ID)
+}
+func connectSessionTokenAAD(sessionID string) string {
+	return secret.RowAAD("history_import_connect_sessions", "connect_access_token", sessionID)
+}
+func plexServerAccessTokenAAD(sessionID string, index int, server PlexServer) string {
+	return secret.RowAAD("history_import_plex_sessions", "servers_json.access_token", sessionID+":"+strconv.Itoa(index)+":"+server.ClientIdentifier)
+}
+func plexSessionTokenAAD(sessionID string) string {
+	return secret.RowAAD("history_import_plex_sessions", "auth_token", sessionID)
+}
+
+func (r *Repository) encryptSourceAdminToken(sourceID int, token string) (string, error) {
+	return r.cipher.Encrypt(token, sourceAdminTokenAAD(sourceID))
+}
+
+func (r *Repository) encryptConnectServers(sessionID string, servers []ConnectServer) ([]ConnectServer, error) {
+	out := append([]ConnectServer(nil), servers...)
+	for i := range out {
+		if out[i].AccessKey == "" {
+			continue
+		}
+		accessKey, err := r.cipher.Encrypt(out[i].AccessKey, connectServerAccessKeyAAD(sessionID, i, out[i]))
+		if err != nil {
+			return nil, fmt.Errorf("encrypt connect server access key: %w", err)
+		}
+		out[i].AccessKey = accessKey
+	}
+	return out, nil
+}
+
+func (r *Repository) encryptPlaintextConnectServers(sessionID string, servers []ConnectServer) ([]ConnectServer, bool, error) {
+	out := append([]ConnectServer(nil), servers...)
+	changed := false
+	for i := range out {
+		accessKey, didChange, err := r.cipher.EncryptIfPlaintext(out[i].AccessKey, connectServerAccessKeyAAD(sessionID, i, out[i]))
+		if err != nil {
+			return nil, false, fmt.Errorf("encrypt connect server access key: %w", err)
+		}
+		if didChange {
+			out[i].AccessKey = accessKey
+			changed = true
+		}
+	}
+	return out, changed, nil
+}
+
+func (r *Repository) decryptConnectServers(sessionID string, servers []ConnectServer) ([]ConnectServer, error) {
+	out := append([]ConnectServer(nil), servers...)
+	for i := range out {
+		accessKey, err := r.cipher.DecryptIfEncrypted(out[i].AccessKey, connectServerAccessKeyAAD(sessionID, i, out[i]))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt connect server access key: %w", err)
+		}
+		out[i].AccessKey = accessKey
+	}
+	return out, nil
+}
+
+func (r *Repository) marshalConnectServersForWrite(sessionID string, servers []ConnectServer) ([]byte, error) {
+	encrypted, err := r.encryptConnectServers(sessionID, servers)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(encrypted)
+}
+
+func (r *Repository) encryptPlexServers(sessionID string, servers []PlexServer) ([]PlexServer, error) {
+	out := append([]PlexServer(nil), servers...)
+	for i := range out {
+		if out[i].AccessToken == "" {
+			continue
+		}
+		accessToken, err := r.cipher.Encrypt(out[i].AccessToken, plexServerAccessTokenAAD(sessionID, i, out[i]))
+		if err != nil {
+			return nil, fmt.Errorf("encrypt plex server access token: %w", err)
+		}
+		out[i].AccessToken = accessToken
+	}
+	return out, nil
+}
+
+func (r *Repository) encryptPlaintextPlexServers(sessionID string, servers []PlexServer) ([]PlexServer, bool, error) {
+	out := append([]PlexServer(nil), servers...)
+	changed := false
+	for i := range out {
+		accessToken, didChange, err := r.cipher.EncryptIfPlaintext(out[i].AccessToken, plexServerAccessTokenAAD(sessionID, i, out[i]))
+		if err != nil {
+			return nil, false, fmt.Errorf("encrypt plex server access token: %w", err)
+		}
+		if didChange {
+			out[i].AccessToken = accessToken
+			changed = true
+		}
+	}
+	return out, changed, nil
+}
+
+func (r *Repository) decryptPlexServers(sessionID string, servers []PlexServer) ([]PlexServer, error) {
+	out := append([]PlexServer(nil), servers...)
+	for i := range out {
+		accessToken, err := r.cipher.DecryptIfEncrypted(out[i].AccessToken, plexServerAccessTokenAAD(sessionID, i, out[i]))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt plex server access token: %w", err)
+		}
+		out[i].AccessToken = accessToken
+	}
+	return out, nil
+}
+
+func (r *Repository) marshalPlexServersForWrite(sessionID string, servers []PlexServer) ([]byte, error) {
+	encrypted, err := r.encryptPlexServers(sessionID, servers)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(encrypted)
 }
 
 func (r *Repository) ListEnabledSources(ctx context.Context) ([]Source, error) {
@@ -80,19 +207,43 @@ func (r *Repository) GetSourceByID(ctx context.Context, id int) (*Source, error)
 }
 
 func (r *Repository) CreateSource(ctx context.Context, input CreateSourceInput) (*Source, error) {
-	row := r.pool.QueryRow(ctx, `
-		INSERT INTO history_import_sources (name, source_type, base_url, system_id, enabled, sort_order,
-		                                    admin_token)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, NULLIF($7, ''))
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin creating history import source: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO history_import_sources (name, source_type, base_url, system_id, enabled, sort_order)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6)
 		RETURNING id, name, source_type, base_url, COALESCE(system_id, ''), enabled, sort_order,
 		          (admin_token IS NOT NULL) AS has_admin_token,
 		          created_at, updated_at`,
 		input.Name, input.SourceType, input.BaseURL, input.SystemID, input.Enabled, input.SortOrder,
-		input.AdminToken,
 	)
 	source, err := scanSource(row)
 	if err != nil {
 		return nil, fmt.Errorf("creating history import source: %w", err)
+	}
+	if input.AdminToken != "" {
+		encryptedToken, err := r.encryptSourceAdminToken(source.ID, input.AdminToken)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt admin token for source %d: %w", source.ID, err)
+		}
+		result, err := tx.Exec(ctx, `
+			UPDATE history_import_sources
+			SET admin_token = $2, updated_at = NOW()
+			WHERE id = $1`, source.ID, encryptedToken)
+		if err != nil {
+			return nil, fmt.Errorf("setting admin token for source %d: %w", source.ID, err)
+		}
+		if result.RowsAffected() == 0 {
+			return nil, ErrSourceNotFound
+		}
+		source.HasAdminToken = true
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit creating history import source: %w", err)
 	}
 	return source, nil
 }
@@ -135,18 +286,22 @@ func (r *Repository) DeleteSource(ctx context.Context, id int) error {
 }
 
 func (r *Repository) CreateConnectSession(ctx context.Context, session ConnectSession) (*ConnectSession, error) {
-	serversJSON, err := json.Marshal(session.Servers)
+	serversJSON, err := r.marshalConnectServersForWrite(session.ID, session.Servers)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling connect servers: %w", err)
+	}
+	accessToken, err := r.cipher.Encrypt(session.ConnectAccessToken, connectSessionTokenAAD(session.ID))
+	if err != nil {
+		return nil, fmt.Errorf("encrypt connect access token: %w", err)
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO history_import_connect_sessions (
 			id, user_id, connect_user_id, connect_access_token, servers_json, expires_at
 		) VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, user_id, connect_user_id, connect_access_token, servers_json, expires_at, consumed_at, created_at, updated_at`,
-		session.ID, session.UserID, session.ConnectUserID, session.ConnectAccessToken, serversJSON, session.ExpiresAt,
+		session.ID, session.UserID, session.ConnectUserID, accessToken, serversJSON, session.ExpiresAt,
 	)
-	stored, err := scanConnectSession(row)
+	stored, err := r.scanConnectSession(row)
 	if err != nil {
 		return nil, fmt.Errorf("creating connect session: %w", err)
 	}
@@ -158,7 +313,7 @@ func (r *Repository) GetConnectSession(ctx context.Context, userID int, sessionI
 		SELECT id, user_id, connect_user_id, connect_access_token, servers_json, expires_at, consumed_at, created_at, updated_at
 		FROM history_import_connect_sessions
 		WHERE id = $1 AND user_id = $2`, sessionID, userID)
-	session, err := scanConnectSession(row)
+	session, err := r.scanConnectSession(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrConnectSessionNotFound
 	}
@@ -199,18 +354,22 @@ func (r *Repository) DeleteExpiredConnectSessions(ctx context.Context) error {
 }
 
 func (r *Repository) CreatePlexSession(ctx context.Context, session PlexSession) (*PlexSession, error) {
-	serversJSON, err := json.Marshal(session.Servers)
+	serversJSON, err := r.marshalPlexServersForWrite(session.ID, session.Servers)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling plex servers: %w", err)
+	}
+	authToken, err := r.cipher.Encrypt(session.AuthToken, plexSessionTokenAAD(session.ID))
+	if err != nil {
+		return nil, fmt.Errorf("encrypt plex auth token: %w", err)
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO history_import_plex_sessions (
 			id, user_id, pin_id, pin_code, auth_token, servers_json, expires_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, user_id, pin_id, pin_code, auth_token, servers_json, expires_at, consumed_at, created_at, updated_at`,
-		session.ID, session.UserID, session.PinID, session.PinCode, nilIfEmpty(session.AuthToken), serversJSON, session.ExpiresAt,
+		session.ID, session.UserID, session.PinID, session.PinCode, nilIfEmpty(authToken), serversJSON, session.ExpiresAt,
 	)
-	stored, err := scanPlexSession(row)
+	stored, err := r.scanPlexSession(row)
 	if err != nil {
 		return nil, fmt.Errorf("creating plex session: %w", err)
 	}
@@ -222,7 +381,7 @@ func (r *Repository) GetPlexSession(ctx context.Context, userID int, sessionID s
 		SELECT id, user_id, pin_id, pin_code, COALESCE(auth_token, ''), servers_json, expires_at, consumed_at, created_at, updated_at
 		FROM history_import_plex_sessions
 		WHERE id = $1 AND user_id = $2`, sessionID, userID)
-	session, err := scanPlexSession(row)
+	session, err := r.scanPlexSession(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPlexSessionNotFound
 	}
@@ -239,14 +398,18 @@ func (r *Repository) GetPlexSession(ctx context.Context, userID int, sessionID s
 }
 
 func (r *Repository) UpdatePlexSessionAuth(ctx context.Context, sessionID, authToken string, servers []PlexServer) error {
-	serversJSON, err := json.Marshal(servers)
+	serversJSON, err := r.marshalPlexServersForWrite(sessionID, servers)
 	if err != nil {
 		return fmt.Errorf("marshaling plex servers: %w", err)
+	}
+	encryptedToken, err := r.cipher.Encrypt(authToken, plexSessionTokenAAD(sessionID))
+	if err != nil {
+		return fmt.Errorf("encrypt plex auth token: %w", err)
 	}
 	result, err := r.pool.Exec(ctx, `
 		UPDATE history_import_plex_sessions
 		SET auth_token = $2, servers_json = $3, updated_at = NOW()
-		WHERE id = $1`, sessionID, authToken, serversJSON)
+		WHERE id = $1`, sessionID, encryptedToken, serversJSON)
 	if err != nil {
 		return fmt.Errorf("updating plex session auth %s: %w", sessionID, err)
 	}
@@ -278,6 +441,136 @@ func (r *Repository) DeleteExpiredPlexSessions(ctx context.Context) error {
 		return fmt.Errorf("deleting expired plex sessions: %w", err)
 	}
 	return nil
+}
+
+// BackfillSessionServerSecrets encrypts credentials nested inside history-import
+// session server JSON. The top-level session token columns are handled by the
+// generic column backfill, but Emby Connect access keys and Plex per-server
+// access tokens live inside servers_json and need a typed JSON pass.
+func (r *Repository) BackfillSessionServerSecrets(ctx context.Context) (int, error) {
+	connectN, connectErr := r.backfillConnectSessionServerSecrets(ctx)
+	plexN, plexErr := r.backfillPlexSessionServerSecrets(ctx)
+	return connectN + plexN, errors.Join(connectErr, plexErr)
+}
+
+func (r *Repository) backfillConnectSessionServerSecrets(ctx context.Context) (int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, servers_json::text
+		FROM history_import_connect_sessions
+		WHERE servers_json <> '[]'::jsonb`)
+	if err != nil {
+		return 0, fmt.Errorf("select connect sessions: %w", err)
+	}
+	type rec struct{ id, raw string }
+	var recs []rec
+	for rows.Next() {
+		var r rec
+		if err := rows.Scan(&r.id, &r.raw); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan connect session: %w", err)
+		}
+		recs = append(recs, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate connect sessions: %w", err)
+	}
+
+	count := 0
+	var errs []error
+	for _, rec := range recs {
+		var servers []ConnectServer
+		if err := json.Unmarshal([]byte(rec.raw), &servers); err != nil {
+			errs = append(errs, fmt.Errorf("decode connect session %s servers: %w", rec.id, err))
+			continue
+		}
+		encrypted, changed, err := r.encryptPlaintextConnectServers(rec.id, servers)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("encrypt connect session %s servers: %w", rec.id, err))
+			continue
+		}
+		if !changed {
+			continue
+		}
+		body, err := json.Marshal(encrypted)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("encode connect session %s servers: %w", rec.id, err))
+			continue
+		}
+		tag, err := r.pool.Exec(ctx, `
+			UPDATE history_import_connect_sessions
+			SET servers_json = $2::jsonb, updated_at = NOW()
+			WHERE id = $1 AND servers_json = $3::jsonb`,
+			rec.id, string(body), rec.raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("update connect session %s servers: %w", rec.id, err))
+			continue
+		}
+		if tag.RowsAffected() > 0 {
+			count++
+		}
+	}
+	return count, errors.Join(errs...)
+}
+
+func (r *Repository) backfillPlexSessionServerSecrets(ctx context.Context) (int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, servers_json::text
+		FROM history_import_plex_sessions
+		WHERE servers_json <> '[]'::jsonb`)
+	if err != nil {
+		return 0, fmt.Errorf("select plex sessions: %w", err)
+	}
+	type rec struct{ id, raw string }
+	var recs []rec
+	for rows.Next() {
+		var r rec
+		if err := rows.Scan(&r.id, &r.raw); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan plex session: %w", err)
+		}
+		recs = append(recs, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate plex sessions: %w", err)
+	}
+
+	count := 0
+	var errs []error
+	for _, rec := range recs {
+		var servers []PlexServer
+		if err := json.Unmarshal([]byte(rec.raw), &servers); err != nil {
+			errs = append(errs, fmt.Errorf("decode plex session %s servers: %w", rec.id, err))
+			continue
+		}
+		encrypted, changed, err := r.encryptPlaintextPlexServers(rec.id, servers)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("encrypt plex session %s servers: %w", rec.id, err))
+			continue
+		}
+		if !changed {
+			continue
+		}
+		body, err := json.Marshal(encrypted)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("encode plex session %s servers: %w", rec.id, err))
+			continue
+		}
+		tag, err := r.pool.Exec(ctx, `
+			UPDATE history_import_plex_sessions
+			SET servers_json = $2::jsonb, updated_at = NOW()
+			WHERE id = $1 AND servers_json = $3::jsonb`,
+			rec.id, string(body), rec.raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("update plex session %s servers: %w", rec.id, err))
+			continue
+		}
+		if tag.RowsAffected() > 0 {
+			count++
+		}
+	}
+	return count, errors.Join(errs...)
 }
 
 func (r *Repository) ProfileExistsForUser(ctx context.Context, userID int, profileID string) (bool, error) {
@@ -770,7 +1063,7 @@ func scanSources(rows pgx.Rows) ([]Source, error) {
 	return sources, rows.Err()
 }
 
-func scanConnectSession(scanner interface{ Scan(dest ...any) error }) (*ConnectSession, error) {
+func (r *Repository) scanConnectSession(scanner interface{ Scan(dest ...any) error }) (*ConnectSession, error) {
 	var session ConnectSession
 	var serversJSON []byte
 	if err := scanner.Scan(
@@ -779,9 +1072,18 @@ func scanConnectSession(scanner interface{ Scan(dest ...any) error }) (*ConnectS
 	); err != nil {
 		return nil, err
 	}
+	token, err := r.cipher.DecryptIfEncrypted(session.ConnectAccessToken, connectSessionTokenAAD(session.ID))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt connect access token: %w", err)
+	}
+	session.ConnectAccessToken = token
 	if len(serversJSON) > 0 {
 		if err := json.Unmarshal(serversJSON, &session.Servers); err != nil {
 			return nil, fmt.Errorf("unmarshaling connect session servers: %w", err)
+		}
+		session.Servers, err = r.decryptConnectServers(session.ID, session.Servers)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return &session, nil
@@ -921,7 +1223,7 @@ func nonNilUnmatchedSamples(values []UnmatchedSample) []UnmatchedSample {
 	return values
 }
 
-func scanPlexSession(scanner interface{ Scan(dest ...any) error }) (*PlexSession, error) {
+func (r *Repository) scanPlexSession(scanner interface{ Scan(dest ...any) error }) (*PlexSession, error) {
 	var session PlexSession
 	var authToken *string
 	var serversJSON []byte
@@ -935,9 +1237,18 @@ func scanPlexSession(scanner interface{ Scan(dest ...any) error }) (*PlexSession
 	if authToken != nil {
 		session.AuthToken = *authToken
 	}
+	token, err := r.cipher.DecryptIfEncrypted(session.AuthToken, plexSessionTokenAAD(session.ID))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt plex auth token: %w", err)
+	}
+	session.AuthToken = token
 	if len(serversJSON) > 0 {
 		if err := json.Unmarshal(serversJSON, &session.Servers); err != nil {
 			return nil, fmt.Errorf("unmarshaling plex session servers: %w", err)
+		}
+		session.Servers, err = r.decryptPlexServers(session.ID, session.Servers)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return &session, nil
