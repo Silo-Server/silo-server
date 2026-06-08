@@ -194,3 +194,33 @@ describe("SchemaForm collapsible sections", () => {
     expect(screen.getByText("Verbose")).toBeTruthy();
   });
 });
+
+it("marks a show_when-gated field as nested when it is revealed", () => {
+  const d: PluginAdminForm = {
+    fields: [
+      {
+        key: "service_kind",
+        label: "Service",
+        control: "SELECT",
+        required: false,
+        secret: false,
+        multiline: false,
+        options: [{ value: "sonarr", label: "Sonarr" }],
+      },
+      {
+        key: "series_type",
+        label: "Series type",
+        control: "SELECT",
+        required: false,
+        secret: false,
+        multiline: false,
+        show_when: [{ field: "service_kind", equals: ["sonarr"] }],
+        options: [{ value: "standard", label: "Standard" }],
+      },
+    ],
+  };
+  const { container } = render(
+    <SchemaForm descriptor={d} values={{ service_kind: "sonarr" }} onChange={vi.fn()} />,
+  );
+  expect(container.querySelector('[data-nested="true"]')).not.toBeNull();
+});

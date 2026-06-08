@@ -6,6 +6,7 @@ import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } fr
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -263,8 +264,15 @@ export function SchemaForm({
   // A non-switch field: label + optional description stacked above the control.
   function renderField(field: PluginAdminFormField): React.ReactNode {
     const err = mergedErrors[field.key];
+    // A field that only appears because its show_when passed reads as nested
+    // under whatever toggle gates it (e.g. the anime overrides under anime_enabled).
+    const nested = Boolean(field.show_when);
     return (
-      <div key={field.key} className="space-y-2">
+      <div
+        key={field.key}
+        data-nested={nested ? "true" : undefined}
+        className={cn("space-y-2", nested && "border-border/60 ml-0.5 border-l pl-3")}
+      >
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-${field.key}`}>{field.label || field.key}</Label>
           {field.description ? (
