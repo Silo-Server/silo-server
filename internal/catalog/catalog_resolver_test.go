@@ -259,6 +259,67 @@ func (s *stubFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters Br
 	return nil, false, nil
 }
 
+type recordingFacetFetcher struct {
+	mu               sync.Mutex
+	peopleKinds      []models.PersonKind
+	searchPeopleKind models.PersonKind
+	searchMediaScope string
+}
+
+func (s *recordingFacetFetcher) DistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *recordingFacetFetcher) DistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *recordingFacetFetcher) Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *recordingFacetFetcher) JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *recordingFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *recordingFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	s.mu.Lock()
+	s.peopleKinds = append(s.peopleKinds, kind)
+	s.mu.Unlock()
+	if kind == models.PersonKindAuthor {
+		return []string{"Author"}, nil
+	}
+	return []string{"Narrator"}, nil
+}
+
+func (s *recordingFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *recordingFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return nil, false, nil
+}
+
+func (s *recordingFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return nil, false, nil
+}
+
+func (s *recordingFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	s.mu.Lock()
+	s.searchPeopleKind = kind
+	s.searchMediaScope = mediaScope
+	s.mu.Unlock()
+	return []string{"Author"}, false, nil
+}
+
+func (s *recordingFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+	return nil, false, nil
+}
+
 // countingExecutor is a previewExecutor stub that records the number of
 // PreviewPage calls and the AccessFilter passed in (so tests can confirm
 // NamePrefix made it through). It returns an empty result set so the resolver
@@ -341,4 +402,93 @@ func TestListFiltersWithOptions_RunsFacetQueriesConcurrently(t *testing.T) {
 	}
 
 	barrier.assertConcurrent(t)
+}
+
+func TestListFiltersWithOptions_EbookScopeSkipsNarratorFacet(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	resolver := &CatalogResolver{
+		browseRepo: &BrowseRepository{},
+		facets:     facets,
+	}
+
+	result, err := resolver.ListFiltersWithOptions(
+		context.Background(),
+		CatalogRequest{
+			Source: CatalogSourceQuery,
+			Query:  QueryDefinition{MediaScope: "ebook"},
+		},
+		AccessFilter{},
+		CatalogFilterOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ListFiltersWithOptions returned error: %v", err)
+	}
+
+	facets.mu.Lock()
+	defer facets.mu.Unlock()
+	for _, kind := range facets.peopleKinds {
+		if kind == models.PersonKindNarrator {
+			t.Fatal("ebook filters should not request narrator facets")
+		}
+	}
+	if len(result.Narrators) != 0 {
+		t.Fatalf("ebook filters returned narrators = %v, want empty", result.Narrators)
+	}
+}
+
+func TestSearchFacet_EbookScopeForwardsMediaScope(t *testing.T) {
+	facets := &recordingFacetFetcher{}
+	resolver := &CatalogResolver{
+		browseRepo: &BrowseRepository{},
+		facets:     facets,
+	}
+
+	result, err := resolver.SearchFacet(
+		context.Background(),
+		CatalogRequest{
+			Source: CatalogSourceQuery,
+			Query:  QueryDefinition{MediaScope: "ebook"},
+		},
+		AccessFilter{},
+		"author",
+		"Au",
+		20,
+	)
+	if err != nil {
+		t.Fatalf("SearchFacet returned error: %v", err)
+	}
+	if len(result.Matches) != 1 || result.Matches[0] != "Author" {
+		t.Fatalf("matches = %v, want Author", result.Matches)
+	}
+
+	facets.mu.Lock()
+	defer facets.mu.Unlock()
+	if facets.searchPeopleKind != models.PersonKindAuthor {
+		t.Fatalf("searchPeopleKind = %v, want author", facets.searchPeopleKind)
+	}
+	if facets.searchMediaScope != "ebook" {
+		t.Fatalf("search mediaScope = %q, want ebook", facets.searchMediaScope)
+	}
+}
+
+func TestSearchFacet_EbookScopeRejectsNarratorFacet(t *testing.T) {
+	resolver := &CatalogResolver{
+		browseRepo: &BrowseRepository{},
+		facets:     &recordingFacetFetcher{},
+	}
+
+	_, err := resolver.SearchFacet(
+		context.Background(),
+		CatalogRequest{
+			Source: CatalogSourceQuery,
+			Query:  QueryDefinition{MediaScope: "ebook"},
+		},
+		AccessFilter{},
+		"narrator",
+		"Na",
+		20,
+	)
+	if err == nil {
+		t.Fatal("expected narrator facet to be rejected for ebook scope")
+	}
 }

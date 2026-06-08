@@ -709,7 +709,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 		return r.listFiltersForSource(ctx, filters, options, episodeCatalogBaseRelation, req.Query.MediaScope)
 	}
 
-	return r.listFiltersForSource(ctx, filters, options, "media_items mi", "")
+	return r.listFiltersForSource(ctx, filters, options, "media_items mi", req.Query.MediaScope)
 }
 
 // CatalogFacetSearchResult is the typed return for SearchFacet. Matches
@@ -797,10 +797,9 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	}
 
 	baseRelation := "media_items mi"
-	mediaScope := ""
+	mediaScope := req.Query.MediaScope
 	if isEpisodeCatalogScope(req.Query.MediaScope) {
 		baseRelation = episodeCatalogBaseRelation
-		mediaScope = req.Query.MediaScope
 	}
 
 	facets := r.facets
@@ -836,6 +835,9 @@ func dispatchFacetSearch(ctx context.Context, facets facetFetcher, facet string,
 	case "author":
 		return facets.SearchPeopleByKind(ctx, models.PersonKindAuthor, filters, baseRelation, mediaScope, prefix, limit)
 	case "narrator":
+		if mediaScope == "ebook" {
+			return nil, false, fmt.Errorf("%w: narrator facet is not available for ebook scope", ErrInvalidCatalogRequest)
+		}
 		return facets.SearchPeopleByKind(ctx, models.PersonKindNarrator, filters, baseRelation, mediaScope, prefix, limit)
 	case "series":
 		return facets.SearchAudiobookSeries(ctx, filters, baseRelation, mediaScope, prefix, limit)
@@ -957,14 +959,16 @@ func (r *CatalogResolver) listFiltersForSource(
 		authors = out
 		return nil
 	}))
-	eg.Go(withLimit(func() error {
-		out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
-		if err != nil {
-			return fmt.Errorf("listing catalog narrators: %w", err)
-		}
-		narrators = out
-		return nil
-	}))
+	if mediaScope != "ebook" {
+		eg.Go(withLimit(func() error {
+			out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
+			if err != nil {
+				return fmt.Errorf("listing catalog narrators: %w", err)
+			}
+			narrators = out
+			return nil
+		}))
+	}
 	eg.Go(withLimit(func() error {
 		out, err := facets.AudiobookSeries(gctx, filters, baseRelation, mediaScope)
 		if err != nil {
