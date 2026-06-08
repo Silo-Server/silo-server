@@ -2645,10 +2645,16 @@ func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []stri
 // UpdateContentID sets the content_id on a media file, linking it to a matched
 // media item. This is called by the matcher after a successful resolution.
 func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, contentID string) error {
-	_, err := r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(ctx,
 		"UPDATE media_files SET content_id = $1, updated_at = NOW() WHERE id = $2",
 		contentID, fileID)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrFileNotFound
+	}
+	return nil
 }
 
 // ReplaceContentID reassigns all files linked to one content item to another.

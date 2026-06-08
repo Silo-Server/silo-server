@@ -70,6 +70,10 @@ type metadataItemRepo interface {
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
 }
 
+type metadataItemDeleteRepo interface {
+	Delete(ctx context.Context, contentID string) ([]string, error)
+}
+
 type metadataProviderIDRepo interface {
 	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaItemProviderID, error)
 	ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error
@@ -3741,18 +3745,9 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		return s.hooks.createOrFindSkeleton(ctx, file, folderID)
 	}
 
-	libraryType := ""
-	if s != nil && s.folderRepo != nil && folderID > 0 {
-		folder, err := s.folderRepo.GetByID(ctx, folderID)
-		if err != nil {
-			slog.Warn("metadata: failed to load folder context for path classification",
-				"folder_id", folderID,
-				"file_path", file.FilePath,
-				"error", err,
-			)
-		} else if folder != nil {
-			libraryType = folder.Type
-		}
+	libraryType, err := s.folderTypeForSkeleton(ctx, folderID)
+	if err != nil {
+		return nil, err
 	}
 
 	contentRootPath := filepath.Dir(file.FilePath)
@@ -4027,7 +4022,12 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// pre-confirmation ownership claims. Matching is driven by explicit IDs or
 	// later provider confirmation to avoid cross-root false merges.
 
-	// No existing item — create skeleton.
+	// No existing item — create skeleton. Re-check the folder state while still
+	// under the dedup lock so a library disabled for deletion cannot receive new
+	// skeleton items from a matcher that passed an older outer enabled check.
+	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
+		return nil, err
+	}
 	contentID, err := generateContentID()
 	if err != nil {
 		return nil, fmt.Errorf("generate content id: %w", err)
@@ -4054,15 +4054,99 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 
 	// Link file, claim root, and create library membership.
 	if err := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); err != nil {
+		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
+			slog.Warn("metadata: failed to clean up unlinked skeleton",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", cleanupErr,
+			)
+		}
 		return nil, fmt.Errorf("linking file to skeleton: %w", err)
 	}
+	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
+		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
+			slog.Warn("metadata: failed to clear file link after disabled skeleton folder",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", clearErr,
+			)
+		}
+		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
+			slog.Warn("metadata: failed to clean up skeleton for disabled folder",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", cleanupErr,
+			)
+		}
+		return nil, fmt.Errorf("validating skeleton folder before membership: %w", err)
+	}
 	if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
-		s.logLibraryMembershipError("upserting skeleton membership", contentID, folderID, err)
+		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
+			slog.Warn("metadata: failed to clear file link after skeleton membership failure",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", clearErr,
+			)
+		}
+		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
+			slog.Warn("metadata: failed to clean up membershipless skeleton",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", cleanupErr,
+			)
+		}
+		return nil, fmt.Errorf("upserting skeleton membership: %w", err)
 	}
 
 	res.ContentID = contentID
 	res.IsNew = true
 	return res, nil
+}
+
+func (s *MetadataService) folderTypeForSkeleton(ctx context.Context, folderID int) (string, error) {
+	if s == nil || s.folderRepo == nil || folderID <= 0 {
+		return "", nil
+	}
+
+	folder, err := s.folderRepo.GetByID(ctx, folderID)
+	if err != nil {
+		return "", fmt.Errorf("loading folder context for skeleton: %w", err)
+	}
+	if folder == nil {
+		return "", fmt.Errorf("folder %d is unavailable for skeleton creation", folderID)
+	}
+	if !folder.Enabled {
+		return "", fmt.Errorf("folder %d is disabled for skeleton creation", folderID)
+	}
+	return folder.Type, nil
+}
+
+func (s *MetadataService) deleteCreatedSkeleton(ctx context.Context, contentID string) error {
+	if s == nil || strings.TrimSpace(contentID) == "" {
+		return nil
+	}
+	if repo, ok := s.itemRepo.(metadataItemDeleteRepo); ok {
+		if _, err := repo.Delete(ctx, contentID); err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
+			return err
+		}
+		return nil
+	}
+	if s.dbPool == nil {
+		return nil
+	}
+	_, err := s.dbPool.Exec(ctx, `
+		DELETE FROM media_items
+		WHERE content_id = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_item_libraries mil
+			WHERE mil.content_id = media_items.content_id
+		  )`, contentID)
+	return err
 }
 
 // claimRoot records a canonical root path claim for dedup. Failures are logged
