@@ -112,7 +112,7 @@ export function getActiveFilterBadges(state: GuidedFormState): ActiveFilterBadge
     });
   }
 
-  if (state.narrator) {
+  if (state.narrator && state.mediaScope === "audiobook") {
     badges.push({
       key: "narrator",
       label: `Narrator: ${state.narrator}`,
