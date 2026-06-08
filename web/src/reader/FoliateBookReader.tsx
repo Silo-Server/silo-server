@@ -34,6 +34,10 @@ export type EbookReaderProgress = EbookReaderProgressPayload & {
   updated_at?: string;
 };
 
+export type RestoreProgressTarget =
+  | { type: "location"; location: string }
+  | { type: "fraction"; fraction: number };
+
 export type FoliateBookReaderHandle = {
   next: () => void;
   prev: () => void;
@@ -131,15 +135,31 @@ export function progressFromRelocate(
   detail: RelocateDetail,
   fileID: number,
 ): EbookReaderProgressPayload | null {
-  const location = typeof detail.cfi === "string" ? detail.cfi.trim() : "";
   const current = detail.location?.current ?? 0;
   const total = detail.location?.total ?? 0;
-  if (!location || total <= 0 || current < 0) return null;
+  if (total <= 0 || current < 0) return null;
+  const progress = Math.min(1, Math.max(0, (current + 1) / total));
+  const cfi = typeof detail.cfi === "string" ? detail.cfi.trim() : "";
   return {
     file_id: fileID,
-    location,
-    progress: Math.min(1, Math.max(0, (current + 1) / total)),
+    location: cfi || `fraction:${progress.toFixed(6)}`,
+    progress,
   };
+}
+
+export function restoreProgressTarget(
+  progress: Pick<EbookReaderProgress, "location" | "progress"> | null | undefined,
+): RestoreProgressTarget | null {
+  if (!progress || typeof progress.location !== "string") return null;
+  const location = progress.location.trim();
+  if (!location) return null;
+  if (location.startsWith("fraction:")) {
+    const value = Number(location.slice("fraction:".length));
+    const fraction = Number.isFinite(value) ? value : progress.progress;
+    if (!Number.isFinite(fraction)) return null;
+    return { type: "fraction", fraction: Math.min(1, Math.max(0, fraction)) };
+  }
+  return { type: "location", location };
 }
 
 export function formatReaderProgress(progress: number | null | undefined): string | null {
@@ -307,9 +327,14 @@ function FoliateBookReader(
         renderer?.setAttribute("max-inline-size", "74ch");
         renderer?.setAttribute("max-column-count", "2");
         await renderer?.render?.();
-        if (savedProgress?.location && savedProgress.file_id === file.file_id) {
+        const restoreTarget =
+          savedProgress?.file_id === file.file_id ? restoreProgressTarget(savedProgress) : null;
+        if (restoreTarget?.type === "location") {
           onProgressChange?.(savedProgress.progress);
-          await view.init({ lastLocation: savedProgress.location });
+          await view.init({ lastLocation: restoreTarget.location });
+        } else if (restoreTarget?.type === "fraction") {
+          onProgressChange?.(savedProgress.progress);
+          await view.goToFraction(restoreTarget.fraction);
         } else {
           await view.goToFraction(0);
         }

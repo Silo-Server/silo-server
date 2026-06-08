@@ -8,6 +8,7 @@ import {
   ebookReaderProgressQueryKey,
   ebookReadPath,
   formatReaderProgress,
+  restoreProgressTarget,
   progressFromRelocate,
   readerFileFormat,
   readerMimeType,
@@ -86,6 +87,38 @@ describe("FoliateBookReader helpers", () => {
     });
   });
 
+  it("converts non-CFI relocate events into fraction-backed progress", () => {
+    expect(
+      progressFromRelocate(
+        {
+          location: { current: 4, total: 10 },
+        },
+        42,
+      ),
+    ).toEqual({
+      file_id: 42,
+      location: "fraction:0.500000",
+      progress: 0.5,
+    });
+  });
+
+  it("chooses a fraction restore target for non-CFI reader progress", () => {
+    expect(
+      restoreProgressTarget({
+        file_id: 42,
+        location: "fraction:0.500000",
+        progress: 0.5,
+      }),
+    ).toEqual({ type: "fraction", fraction: 0.5 });
+    expect(
+      restoreProgressTarget({
+        file_id: 42,
+        location: "epubcfi(/6/4)",
+        progress: 0.3,
+      }),
+    ).toEqual({ type: "location", location: "epubcfi(/6/4)" });
+  });
+
   it("formats reader progress for compact controls", () => {
     expect(formatReaderProgress(null)).toBeNull();
     expect(formatReaderProgress(Number.NaN)).toBeNull();
@@ -96,7 +129,6 @@ describe("FoliateBookReader helpers", () => {
   });
 
   it("ignores relocate events without a usable location", () => {
-    expect(progressFromRelocate({ location: { current: 2, total: 10 } }, 42)).toBeNull();
     expect(progressFromRelocate({ cfi: "epubcfi(/6/4)", location: { total: 0 } }, 42)).toBeNull();
   });
 });
