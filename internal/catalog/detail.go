@@ -1061,6 +1061,10 @@ func firstNonEmptyString(values []string) string {
 	return ""
 }
 
+func (s *DetailService) presignAudiobookPosterURL(ctx context.Context, posterPath string) string {
+	return s.PresignImageURL(ctx, posterPath, "poster", "")
+}
+
 func appendAudiobookItemAccessConditions(
 	alias string,
 	filter AccessFilter,
@@ -1146,7 +1150,7 @@ func (s *DetailService) fetchAudiobookAlsoByAuthor(ctx context.Context, contentI
 			continue
 		}
 		seen[item.ContentID] = struct{}{}
-		item.PosterURL = s.PresignURL(ctx, posterPath, "featured")
+		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath)
 		out = append(out, item)
 	}
 	return out
@@ -1205,7 +1209,7 @@ func (s *DetailService) fetchAudiobookSimilarByGenres(ctx context.Context, conte
 		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
 			return []AudiobookRelatedItem{}
 		}
-		item.PosterURL = s.PresignURL(ctx, posterPath, "featured")
+		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath)
 		out = append(out, item)
 	}
 	return out
@@ -1266,7 +1270,7 @@ func (s *DetailService) fetchAudiobookSeries(ctx context.Context, contentID stri
 				item.SeriesIndex = &n
 			}
 		}
-		item.PosterURL = s.PresignURL(ctx, poster, "featured")
+		item.PosterURL = s.presignAudiobookPosterURL(ctx, poster)
 		entries = append(entries, item)
 	}
 	if len(entries) < 2 {
