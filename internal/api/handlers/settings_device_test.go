@@ -47,6 +47,14 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 	return r.users[id], nil
 }
 
+func TestRegisterRequestDeviceNilStore(t *testing.T) {
+	registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
+		DeviceID:       "device-1",
+		DeviceName:     "Living Room",
+		DevicePlatform: "web",
+	})
+}
+
 type mappedTestUserStoreProvider struct {
 	stores map[int]userstore.UserStore
 }
@@ -176,7 +184,7 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	handler := NewSettingsHandler(testUserStoreProvider{store: store})
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/settings/effective?keys=playback.preferred_quality,player.playback_speed,player.hdr_enabled",
+		"/settings/effective?keys=playback.preferred_quality,player.playback_speed,player.hdr_enabled,ui.remember_library_page_state",
 		nil,
 	)
 	req.Header.Set(deviceIDHeader, "apple-tv")
@@ -192,7 +200,7 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Settings) != 3 {
+	if len(resp.Settings) != 4 {
 		t.Fatalf("settings len = %d", len(resp.Settings))
 	}
 	byKey := make(map[string]effectiveSettingResponse, len(resp.Settings))
@@ -207,6 +215,9 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	}
 	if got := byKey["player.hdr_enabled"]; got.EffectiveValue != "true" || got.Source != "default" {
 		t.Fatalf("hdr_enabled = %#v", got)
+	}
+	if got := byKey[rememberLibraryPageStateSettingKey]; got.EffectiveValue != "true" || got.Source != "default" {
+		t.Fatalf("remember_library_page_state = %#v", got)
 	}
 }
 
@@ -227,6 +238,129 @@ func TestGenericSettingsRejectInvalidRegisteredValues(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLibraryPageStateIsDeviceScopedJSONSetting(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.library_page_state",
+		bytes.NewBufferString(`{"value":"{\"version\":1,\"libraries\":{\"7\":{\"search\":\"tab=library\"}}}"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "browser", libraryPageStateSettingKey)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting: %v", err)
+	}
+	if entry == nil || !strings.Contains(entry.Value, `"tab=library"`) {
+		t.Fatalf("entry = %#v", entry)
+	}
+}
+
+func TestLibraryPageStateRejectsInvalidJSONAndUserScope(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.library_page_state",
+		bytes.NewBufferString(`{"value":"not json"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/settings/ui.library_page_state",
+		bytes.NewBufferString(`{"value":"{\"version\":1,\"libraries\":{}}"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}))
+	rec = httptest.NewRecorder()
+
+	handler.HandleSetSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("user-scope status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRememberLibraryPageStateIsDeviceScopedBoolSetting(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.remember_library_page_state",
+		bytes.NewBufferString(`{"value":"false"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": rememberLibraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "browser", rememberLibraryPageStateSettingKey)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting: %v", err)
+	}
+	if entry == nil || entry.Value != "false" {
+		t.Fatalf("entry = %#v", entry)
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/ui.remember_library_page_state",
+		bytes.NewBufferString(`{"value":"maybe"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": rememberLibraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec = httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid bool status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/settings/ui.remember_library_page_state",
+		bytes.NewBufferString(`{"value":"false"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": rememberLibraryPageStateSettingKey})
+	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}))
+	rec = httptest.NewRecorder()
+
+	handler.HandleSetSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("user-scope status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -346,6 +480,18 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetDeviceSetting store1 second: %v", err)
 	}
+	store1Registry, ok := store1.(userstore.DeviceRegistry)
+	if !ok {
+		t.Fatalf("store1 does not support device registry")
+	}
+	if err := store1Registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID:      "profile-1",
+		DeviceID:       "bedroom",
+		DeviceName:     "Bedroom TV",
+		DevicePlatform: "Android TV",
+	}); err != nil {
+		t.Fatalf("RegisterDevice store1: %v", err)
+	}
 	if err := store2.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
 		ProfileID:      "profile-1",
 		DeviceID:       "phone",
@@ -382,8 +528,21 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&listResp); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if len(listResp.Devices) != 2 {
-		t.Fatalf("devices len = %d, want 2", len(listResp.Devices))
+	if len(listResp.Devices) != 3 {
+		t.Fatalf("devices len = %d, want 3", len(listResp.Devices))
+	}
+	var bedroom *adminDeviceSummaryResponse
+	for i := range listResp.Devices {
+		if listResp.Devices[i].DeviceID == "bedroom" {
+			bedroom = &listResp.Devices[i]
+			break
+		}
+	}
+	if bedroom == nil {
+		t.Fatalf("registered device without overrides missing: %#v", listResp.Devices)
+	}
+	if bedroom.OverrideCount != 0 || bedroom.ProfileCount != 1 || bedroom.DeviceName != "Bedroom TV" {
+		t.Fatalf("registered device summary = %#v", bedroom)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/admin/devices/7/living-room", nil)
@@ -402,6 +561,26 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}
 	if len(detailResp.Settings) != 2 {
 		t.Fatalf("detail settings len = %d, want 2", len(detailResp.Settings))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/admin/devices/7/bedroom", nil)
+	req = withRouteParams(req, map[string]string{"user_id": "7", "device_id": "bedroom"})
+	rec = httptest.NewRecorder()
+	handler.HandleGetDevice(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("registered detail status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&detailResp); err != nil {
+		t.Fatalf("decode registered detail: %v", err)
+	}
+	if detailResp.DeviceName != "Bedroom TV" || detailResp.OverrideCount != 0 {
+		t.Fatalf("registered detail response = %#v", detailResp)
+	}
+	if len(detailResp.Settings) != 0 {
+		t.Fatalf("registered detail settings len = %d, want 0", len(detailResp.Settings))
+	}
+	if len(detailResp.Profiles) != 1 || detailResp.Profiles[0].ProfileID != "profile-1" {
+		t.Fatalf("registered detail profiles = %#v", detailResp.Profiles)
 	}
 }
 
@@ -432,6 +611,24 @@ func TestAdminCanResetAllOverridesForOneDevice(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].DeviceID != "phone" {
 		t.Fatalf("entries after delete = %#v", entries)
+	}
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		t.Fatalf("store does not support device registry")
+	}
+	devices, err := registry.ListDevices(context.Background())
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	foundLivingRoom := false
+	for _, device := range devices {
+		if device.ProfileID == "profile-1" && device.DeviceID == "living-room" {
+			foundLivingRoom = true
+			break
+		}
+	}
+	if !foundLivingRoom {
+		t.Fatalf("registry devices after delete = %#v", devices)
 	}
 }
 

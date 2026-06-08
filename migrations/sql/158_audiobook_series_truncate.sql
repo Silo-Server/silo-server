@@ -1,0 +1,34 @@
+-- +goose Up
+-- +goose StatementBegin
+-- Truncate audiobook_series so the table can be repopulated cleanly by
+-- the next library scan. The data shipped by migration 145's regex
+-- backfill (and subsequently overwritten by the scanner) was 87%
+-- singletons: a separate analysis traced the singleton flood to
+-- internal/scanner/audiobook.go's parser, which until commit <fixed
+-- alongside this migration> used `tags["album"]` as a Series fallback.
+-- In audiobook tagging conventions `album` holds the book title, so
+-- every book without an explicit `series` or `mvnm` tag produced
+-- series_name = title, populating the table with one unique "series"
+-- per book.
+--
+-- With the parser fixed (Series no longer falls back to album), this
+-- TRUNCATE clears the polluted state so the next scan rebuilds the
+-- table from real `series` / `mvnm` tag data only. Books without those
+-- tags simply don't get an audiobook_series row, which is the correct
+-- end state.
+--
+-- The Series filter dropdown will be empty between deploy and the
+-- next library scan completing; acceptable because 87% of the prior
+-- entries were fake anyway.
+TRUNCATE TABLE audiobook_series;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+-- TRUNCATE cannot be undone — the table contents were discarded
+-- intentionally because they were 87% noise from a parser bug. Down
+-- migration is a no-op; the next library scan after rolling back the
+-- parser fix would repopulate the table with the same polluted data,
+-- which is not a desirable rollback target.
+SELECT 1 WHERE FALSE; -- no-op
+-- +goose StatementEnd

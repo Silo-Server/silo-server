@@ -1,6 +1,14 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
-import { updateLibraryPageSearchParams, parseLibraryPageState } from "./libraryPageSearchParams";
+import {
+  applySavedLibraryPageSearchParams,
+  hasLibraryPageSearchParams,
+  parseLibraryPageState,
+  serializeLibraryPageSearchParams,
+  updateLibraryPageSearchParams,
+} from "./libraryPageSearchParams";
 
 function params(search: string) {
   return new URLSearchParams(search);
@@ -126,6 +134,14 @@ describe("parseLibraryPageState", () => {
     ]);
   });
 
+  it("preserves audiobook scope for mixed library filters", () => {
+    const state = parseLibraryPageState(params("tab=library&type=audiobook&sort=author"), "mixed");
+
+    expect(state.activeTab).toBe("library");
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
+    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
+  });
+
   it("accepts grouped query params and canonical sorts", () => {
     const state = parseLibraryPageState(
       params(
@@ -167,6 +183,24 @@ describe("parseLibraryPageState", () => {
 
     expect(state.browseType).toBe("episode");
     expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
+  });
+
+  it("normalizes video-only sorts away on audiobook libraries", () => {
+    const state = parseLibraryPageState(
+      params("tab=library&sort=rating_imdb&order=desc"),
+      "audiobooks",
+    );
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
+    expect(state.queryDefinition.sort).toEqual({ field: "title", order: "asc" });
+  });
+
+  it("keeps audiobook-applicable sorts on audiobook libraries", () => {
+    const state = parseLibraryPageState(
+      params("tab=library&sort=runtime&order=desc"),
+      "audiobooks",
+    );
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
+    expect(state.queryDefinition.sort).toEqual({ field: "runtime", order: "desc" });
   });
 
   it("normalizes legacy sort aliases to canonical values", () => {
@@ -298,6 +332,71 @@ describe("updateLibraryPageSearchParams", () => {
       foo: "bar",
       tab: "library",
       type: "episode",
+    });
+  });
+
+  it("does not write a redundant type param for audiobook libraries", () => {
+    const next = updateLibraryPageSearchParams(
+      params("foo=bar"),
+      {
+        activeTab: "library",
+        browseType: "series",
+        queryDefinition: {
+          library_ids: [],
+          media_scope: "audiobook",
+          match: "all",
+          groups: [],
+          sort: { field: "author", order: "asc" },
+        },
+      },
+      "audiobooks",
+    );
+
+    expect(asObject(next)).toEqual({
+      foo: "bar",
+      tab: "library",
+      sort: "author",
+      order: "asc",
+    });
+  });
+});
+
+describe("library page saved state helpers", () => {
+  it("detects explicit library state params", () => {
+    expect(hasLibraryPageSearchParams(params(""))).toBe(false);
+    expect(hasLibraryPageSearchParams(params("foo=bar"))).toBe(false);
+    expect(hasLibraryPageSearchParams(params("tab=collections"))).toBe(true);
+    expect(hasLibraryPageSearchParams(params("sort=year"))).toBe(true);
+    expect(hasLibraryPageSearchParams(params("groups[0][rules][0][field]=genre"))).toBe(true);
+  });
+
+  it("serializes only library state params", () => {
+    const serialized = serializeLibraryPageSearchParams(
+      params(
+        "foo=bar&tab=library&sort=year&order=desc&groups[0][match]=all&groups[0][rules][0][field]=genre",
+      ),
+    );
+
+    expect(Object.fromEntries(new URLSearchParams(serialized).entries())).toEqual({
+      tab: "library",
+      sort: "year",
+      order: "desc",
+      "groups[0][match]": "all",
+      "groups[0][rules][0][field]": "genre",
+    });
+  });
+
+  it("applies saved library state while preserving unrelated params", () => {
+    const next = applySavedLibraryPageSearchParams(
+      params("foo=bar"),
+      "tab=library&sort=year&order=desc",
+    );
+
+    expect(asObject(next)).toEqual({
+      foo: "bar",
+      tab: "library",
+      sort: "year",
+      order: "desc",
     });
   });
 });

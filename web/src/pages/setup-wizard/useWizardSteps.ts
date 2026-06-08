@@ -18,12 +18,11 @@ export type WizardStepId =
   | "nodes";
 
 export function useWizardSteps() {
-  const { user, profiles, libraries, stepDone } = useWizardContext();
+  const { user, profiles, stepDone } = useWizardContext();
 
   const accountComplete = !!user;
   const profileComplete = profiles.length > 0;
-  const libraryComplete = libraries.length > 0;
-  const libraryDone = libraryComplete || stepDone.library;
+  const libraryDone = stepDone.library;
 
   const currentStep: WizardStepId = !accountComplete
     ? "account"

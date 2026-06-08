@@ -42,6 +42,9 @@ type catalogFiltersResponse struct {
 	Countries         []string  `json:"countries"`
 	OriginalLanguages []string  `json:"original_languages"`
 	ContentRatings    []string  `json:"content_ratings"`
+	Authors           []string  `json:"authors"`
+	Narrators         []string  `json:"narrators"`
+	Series            []string  `json:"series"`
 	Resolutions       *[]string `json:"resolutions,omitempty"`
 	AudioLanguages    *[]string `json:"audio_languages,omitempty"`
 	SubtitleLanguages *[]string `json:"subtitle_languages,omitempty"`
@@ -77,6 +80,17 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 	overlaySummaries := h.itemsH.listOverlaySummaries(r.Context(), result.Items, h.itemsH.accessFilter(r))
 	userStates := h.itemsH.listItemUserStates(r, result.Items)
 	episodeMetadata := h.itemsH.listEpisodeBrowseMetadata(r.Context(), result.Items)
+	sortField := catalog.NormalizeQuerySort(req.Query.Sort).Field
+	store, profileID, _ := h.itemsH.userStoreForRequest(r)
+	sortMetrics := h.itemsH.listSortMetrics(
+		r.Context(),
+		result.Items,
+		sortField,
+		h.itemsH.accessFilter(r),
+		overlaySummaries,
+		store,
+		profileID,
+	)
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
 		resp := h.itemsH.toItemListResponseWithOverlay(
@@ -90,6 +104,7 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 			resp.SeasonNumber = meta.SeasonNumber
 			resp.EpisodeNumber = meta.EpisodeNumber
 		}
+		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
 	}
 
@@ -151,9 +166,91 @@ func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.
 		Countries:         filters.Countries,
 		OriginalLanguages: filters.OriginalLanguages,
 		ContentRatings:    filters.ContentRatings,
+		Authors:           filters.Authors,
+		Narrators:         filters.Narrators,
+		Series:            filters.Series,
 		Resolutions:       resolutions,
 		AudioLanguages:    audioLanguages,
 		SubtitleLanguages: subtitleLanguages,
+	})
+}
+
+// catalogFacetSearchResponse mirrors catalog.CatalogFacetSearchResult on
+// the wire. matches[] is always present (empty when no hits); has_more
+// is true when the underlying result set held more entries than the
+// requested limit.
+type catalogFacetSearchResponse struct {
+	Matches []string `json:"matches"`
+	HasMore bool     `json:"has_more"`
+}
+
+// HandleGetCatalogFacetSearch — GET /api/v1/catalog/filters/search
+//
+// Prefix-typeahead for the high-cardinality filter facets (authors /
+// narrators / series, plus genre / studio / network / country /
+// original_language / content_rating for consistency). Query
+// parameters: same as /api/v1/catalog/filters for scope (source,
+// library_id, etc.), plus facet=<name>, q=<prefix>, limit=<N>.
+//
+// The bulk /api/v1/catalog/filters endpoint stays as the source for
+// the initial dropdown render (top 1000 alphabetical); this endpoint
+// takes over once the user starts typing.
+func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.resolver == nil || h.itemsH == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Catalog is not configured")
+		return
+	}
+
+	req, err := catalog.ParseCatalogRequest(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
+	facet := strings.TrimSpace(r.URL.Query().Get("facet"))
+	if facet == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "facet parameter is required")
+		return
+	}
+	prefix := r.URL.Query().Get("q")
+
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		n, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
+			return
+		}
+		if n > 100 {
+			n = 100
+		}
+		limit = n
+	}
+
+	result, err := h.resolver.SearchFacet(
+		r.Context(),
+		req,
+		h.itemsH.accessFilter(r),
+		facet,
+		prefix,
+		limit,
+	)
+	if err != nil {
+		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to search catalog facet")
+		return
+	}
+
+	matches := result.Matches
+	if matches == nil {
+		matches = []string{}
+	}
+	writeJSON(w, http.StatusOK, catalogFacetSearchResponse{
+		Matches: matches,
+		HasMore: result.HasMore,
 	})
 }
 

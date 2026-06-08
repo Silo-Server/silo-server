@@ -42,9 +42,15 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 	if err != nil {
 		slog.Warn("could not fetch source metadata, skipping validation", "item_id", itemID, "error", err)
 	}
+	sourceType := ""
+	if sourceMeta != nil {
+		sourceType = sourceMeta.Type
+	}
 
-	// 3. Embedding search (3x limit for filtering headroom).
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, limit*3)
+	// 3. Embedding search (3x limit for filtering headroom). Constrain to the
+	// source item's media type so an audiobook never appears in a movie's
+	// Similar rail (and vice versa) once audiobook embeddings exist.
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3)
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}

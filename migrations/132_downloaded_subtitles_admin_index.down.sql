@@ -1,2 +1,0 @@
-DROP INDEX IF EXISTS idx_downloaded_subtitles_provider_created;
-DROP INDEX IF EXISTS idx_downloaded_subtitles_created;

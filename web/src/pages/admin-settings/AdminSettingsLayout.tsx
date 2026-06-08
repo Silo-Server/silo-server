@@ -1,12 +1,13 @@
 import { useSearchParams } from "react-router";
 import {
   Settings2,
+  Captions,
   PlayCircle,
   ScanSearch,
   Gauge,
   Download,
   Puzzle,
-  MonitorPlay,
+  Network,
   Database,
   HardDrive,
   ScrollText,
@@ -18,9 +19,10 @@ import type { LucideIcon } from "lucide-react";
 import GeneralSettings from "./GeneralSettings";
 import PlaybackSettings from "./PlaybackSettings";
 import ScannerSettings from "./ScannerSettings";
+import IntroSettings from "./IntroSettings";
 import RateLimitSettings from "./RateLimitSettings";
 import IntegrationsSettings from "./IntegrationsSettings";
-import JellyfinSettings from "./JellyfinSettings";
+import CompatibilityProxiesSettings from "./CompatibilityProxiesSettings";
 import DatabaseSettings from "./DatabaseSettings";
 import StorageSettings from "./StorageSettings";
 import DownloadSettings from "./DownloadSettings";
@@ -39,11 +41,17 @@ const SETTINGS_NAV: SettingsNav[] = [
   { id: "general", label: "General", icon: Settings2, component: GeneralSettings },
   { id: "theming", label: "Theming", icon: Paintbrush, component: ThemeSettings },
   { id: "playback", label: "Playback", icon: PlayCircle, component: PlaybackSettings },
+  { id: "intro", label: "Intro Markers", icon: Captions, component: IntroSettings },
   { id: "scanner", label: "Scanner & Matcher", icon: ScanSearch, component: ScannerSettings },
   { id: "rate-limiting", label: "Rate Limiting", icon: Gauge, component: RateLimitSettings },
   { id: "downloads", label: "Downloads", icon: Download, component: DownloadSettings },
   { id: "integrations", label: "Integrations", icon: Puzzle, component: IntegrationsSettings },
-  { id: "jellyfin", label: "Jellyfin Compat", icon: MonitorPlay, component: JellyfinSettings },
+  {
+    id: "compatibility-proxies",
+    label: "Compatibility Proxies",
+    icon: Network,
+    component: CompatibilityProxiesSettings,
+  },
   { id: "database", label: "Database", icon: Database, component: DatabaseSettings },
   { id: "storage", label: "Storage", icon: HardDrive, component: StorageSettings },
   {
@@ -57,7 +65,8 @@ const SETTINGS_NAV: SettingsNav[] = [
 
 export default function AdminSettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeId = searchParams.get("tab") || "general";
+  const rawActiveId = searchParams.get("tab") || "general";
+  const activeId = rawActiveId === "jellyfin" ? "compatibility-proxies" : rawActiveId;
 
   function setActiveId(id: string) {
     setSearchParams({ tab: id }, { replace: true });

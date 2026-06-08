@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/go-chi/chi/v5"
 )
@@ -96,20 +95,7 @@ type downloadSubtitleRequest struct {
 }
 
 func (h *SubtitleSearchHandler) authorizeMediaFile(w http.ResponseWriter, r *http.Request, fileID int) bool {
-	if h.FileAuthorizer == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Media file authorization is not configured")
-		return false
-	}
-	if _, err := h.FileAuthorizer.Authorize(r, fileID); err != nil {
-		switch {
-		case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "Media file not found")
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize media file")
-		}
-		return false
-	}
-	return true
+	return authorizeMediaFileAccess(w, r, h.FileAuthorizer, fileID)
 }
 
 // HandleSearch handles POST /api/v1/subtitles/search

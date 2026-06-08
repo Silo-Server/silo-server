@@ -79,6 +79,7 @@ export function WatchPage({
   autoSkipIntro,
   autoSkipRecap,
   autoPlayNextPreview,
+  canEditMarkers,
   seriesContext,
   onNavigateEpisode,
   onEnded,
@@ -172,6 +173,10 @@ export function WatchPage({
       if (!seriesId) return;
 
       const track = index !== null ? playableSubtitles.find((s) => s.index === index) : null;
+      // Never persist an index we can't resolve to a real track (e.g. the
+      // in-progress AI live track's sentinel index): it would store a
+      // nonexistent track with empty language and clobber the saved preference.
+      if (index !== null && !track) return;
       const trackSignature: PlayerSubtitleTrackSignature | null = track
         ? {
             source: track.source,
@@ -467,6 +472,19 @@ export function WatchPage({
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
       autoPlayNextPreview={autoPlayNextPreview}
+      canEditMarkers={canEditMarkers}
+      onMarkersEdited={(fileId, markers) =>
+        setPlaybackVersions((current) =>
+          patchVersionMarkers(
+            current,
+            fileId,
+            markers.intro,
+            markers.credits,
+            markers.recap,
+            markers.preview,
+          ),
+        )
+      }
       duration={selectedDuration}
       qualityPreference={qualityPreference}
       seriesContext={seriesContext}

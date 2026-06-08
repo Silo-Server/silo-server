@@ -197,11 +197,13 @@ export function buildAdminSectionPayload({
     config = recipeParams ?? {};
   }
 
+  const safeTitle = title.trim() || sectionTypeLabel(sectionType);
+
   return {
     ...(section ? { id: section.id } : {}),
     scope,
     ...(scope === "library" && currentLibraryId != null ? { library_id: currentLibraryId } : {}),
-    title,
+    title: safeTitle,
     section_type: sectionType,
     item_limit: itemLimit,
     featured,
@@ -327,6 +329,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
           collections,
         }),
       );
+      props.onOpenChange(false);
     } else {
       props.onSave(
         buildAdminSectionPayload({
@@ -345,7 +348,6 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
         }),
       );
     }
-    props.onOpenChange(false);
   }
 
   const saveDisabled =
@@ -477,7 +479,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                         media_scope:
                           value === "all"
                             ? undefined
-                            : (value as "movie" | "series" | "episode"),
+                            : (value as "movie" | "series" | "episode" | "audiobook"),
                       })
                     }
                   >
@@ -489,6 +491,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                       <SelectItem value="movie">Movies</SelectItem>
                       <SelectItem value="series">Series</SelectItem>
                       <SelectItem value="episode">Episodes</SelectItem>
+                      <SelectItem value="audiobook">Audiobooks</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

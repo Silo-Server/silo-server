@@ -42,6 +42,7 @@ type playbackSessionRow struct {
 	FileDuration             *int      `json:"file_duration"`
 	StartedAt                time.Time `json:"started_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
+	PositionSeconds          float64   `json:"position_seconds"`
 	IsPaused                 bool      `json:"is_paused"`
 	HasPlaybackControl       bool      `json:"has_playback_control"`
 	ClientIP                 string    `json:"client_ip,omitempty"`
@@ -53,6 +54,7 @@ type playbackSessionRow struct {
 	TargetVideoCodec         string    `json:"target_video_codec,omitempty"`
 	TargetAudioCodec         string    `json:"target_audio_codec,omitempty"`
 	TargetBitrateKbps        *int      `json:"target_bitrate_kbps"`
+	TranscodeHWAccel         string    `json:"transcode_hw_accel,omitempty"`
 	SourceContainer          string    `json:"source_container,omitempty"`
 	SourceBitrateKbps        *int      `json:"source_bitrate_kbps"`
 	SourceVideoCodec         string    `json:"source_video_codec,omitempty"`
@@ -143,6 +145,7 @@ func (l *PlaybackSessionsLoader) Load(
 			mf.duration,
 			s.started_at,
 			s.updated_at,
+			COALESCE(s.position_seconds, 0),
 			COALESCE(s.is_paused, FALSE),
 			COALESCE(s.has_websocket, FALSE),
 			COALESCE(HOST(s.client_ip), ''),
@@ -154,6 +157,7 @@ func (l *PlaybackSessionsLoader) Load(
 			COALESCE(s.target_video_codec, ''),
 			COALESCE(s.target_audio_codec, ''),
 			s.target_bitrate_kbps,
+			COALESCE(s.transcode_hw_accel, ''),
 			COALESCE(mf.container, ''),
 			mf.bitrate,
 			COALESCE(mf.codec_video, ''),
@@ -199,9 +203,9 @@ func (l *PlaybackSessionsLoader) Load(
 			&s.MediaTitle, &s.MediaType, &s.SeriesName, &s.EpisodeName, &s.SeasonNumber, &s.EpisodeNumber,
 			&posterPath,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.StartedAt, &s.UpdatedAt,
-			&s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
+			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
-			&s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
+			&s.TranscodeHWAccel, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
 		); err != nil {
 			return nil, fmt.Errorf("scanning playback session: %w", err)
@@ -314,7 +318,7 @@ func sessionComponentDecision(playMethod string, transcodeAudio bool, targetVide
 		}
 		audioDec := "transcode"
 		if !transcodeAudio {
-			audioDec = "direct"
+			audioDec = "remux"
 		}
 		return videoDec, audioDec
 	default:

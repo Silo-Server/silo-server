@@ -112,12 +112,43 @@ func TestScanStateUpdateReasons_DetectsMissingExternalSubtitle(t *testing.T) {
 		ExternalSubtitlePaths: []string{filepath.Join(t.TempDir(), "Movie.en.srt")},
 	}
 
-	reasons := scanStateUpdateReasons(existing, 1_000, modifiedAt, fileRootAssignment{}, fileGroupAssignment{}, "movies", false)
+	reasons := scanStateUpdateReasons(existing, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", false)
 	if !testStringSliceContains(reasons, "external_subtitle_missing") {
 		t.Fatalf("expected external_subtitle_missing reason, got %#v", reasons)
 	}
 	if shouldSkipStableConfirmedScanState(existing, "matched", 1_000, modifiedAt, reasons, false) {
 		t.Fatal("expected missing external subtitle to bypass stable scan-state skip")
+	}
+}
+
+func TestScanStateUpdateReasons_DetectsExternalSubtitleInventoryChange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
+	existing := &scanStateFile{
+		ContentID:             "matched-content",
+		FileSize:              1_000,
+		FileModifiedAt:        &modifiedAt,
+		ExternalSubtitlePaths: []string{filepath.Join(dir, "Movie.en.srt")},
+	}
+
+	reasons := scanStateUpdateReasons(
+		existing,
+		1_000,
+		modifiedAt,
+		[]string{filepath.Join(dir, "Movie.en.srt"), filepath.Join(dir, "Movie.fr.srt")},
+		true,
+		fileRootAssignment{},
+		fileGroupAssignment{},
+		"movies",
+		false,
+	)
+	if !testStringSliceContains(reasons, "external_subtitle_changed") {
+		t.Fatalf("expected external_subtitle_changed reason, got %#v", reasons)
+	}
+	if shouldSkipStableConfirmedScanState(existing, "matched", 1_000, modifiedAt, reasons, false) {
+		t.Fatal("expected external subtitle change to bypass stable scan-state skip")
 	}
 }
 
@@ -128,4 +159,44 @@ func testStringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func TestIsAudiobookLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"audiobooks", true},
+		{"audiobook", true},
+		{"Audiobook", true},
+		{"  AUDIOBOOKS  ", true},
+		{"movies", false},
+		{"series", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isAudiobookLibraryType(tc.in); got != tc.want {
+			t.Errorf("isAudiobookLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIsPodcastLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"podcasts", true},
+		{"podcast", true},
+		{"Podcast", true},
+		{"  PODCASTS  ", true},
+		{"series", false},
+		{"audiobooks", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isPodcastLibraryType(tc.in); got != tc.want {
+			t.Errorf("isPodcastLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
 }

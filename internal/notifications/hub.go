@@ -13,13 +13,17 @@ import (
 type Type string
 
 const (
-	TypeLibraryChanged   Type = "library.changed"
-	TypeLibraryItemAdded Type = "library.item_added"
-	TypeMetadataUpdated  Type = "metadata.updated"
+	TypeCatalogLibraryChanged Type = "catalog.library.changed"
+	TypeCatalogItemChanged    Type = "catalog.item.changed"
+
+	TypeLibraryChanged   Type = "library.changed"    // legacy catalog event name
+	TypeLibraryItemAdded Type = "library.item_added" // legacy catalog event name
+	TypeMetadataUpdated  Type = "metadata.updated"   // legacy catalog event name
 	TypeJobCreated       Type = "job.created"
 	TypeJobProgress      Type = "job.progress"
 	TypeJobCompleted     Type = "job.completed"
 	TypeJobFailed        Type = "job.failed"
+	TypeJobCancelled     Type = "job.cancelled"
 )
 
 type Envelope struct {
@@ -29,6 +33,8 @@ type Envelope struct {
 	AdminOnly              bool             `json:"admin_only,omitempty"`
 	LibraryID              int              `json:"library_id,omitempty"`
 	ContentID              string           `json:"content_id,omitempty"`
+	Reason                 string           `json:"reason,omitempty"`
+	Change                 string           `json:"change,omitempty"`
 	New                    int              `json:"new,omitempty"`
 	Updated                int              `json:"updated,omitempty"`
 	Missing                int              `json:"missing,omitempty"`
@@ -40,6 +46,7 @@ type Envelope struct {
 
 type LibraryChangeEvent struct {
 	LibraryID              int
+	Reason                 string
 	New                    int
 	Updated                int
 	Missing                int
@@ -51,6 +58,7 @@ type LibraryChangeEvent struct {
 type MetadataUpdateEvent struct {
 	LibraryID int
 	ContentID string
+	Change    string
 }
 
 type Hub struct {
@@ -95,15 +103,7 @@ func (h *Hub) PublishLibraryChanged(ctx context.Context, event LibraryChangeEven
 		return nil
 	}
 
-	payload := map[string]any{
-		"library_id":               event.LibraryID,
-		"new":                      event.New,
-		"updated":                  event.Updated,
-		"missing":                  event.Missing,
-		"matched_files":            event.MatchedFiles,
-		"retried_items":            event.RetriedItems,
-		"still_unmatched_warnings": event.StillUnmatchedWarnings,
-	}
+	payload := libraryChangePayload(event)
 	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeLibraryChanged), payload, evt.PublishOptions{}); err != nil {
 		return err
 	}
@@ -116,6 +116,16 @@ func (h *Hub) PublishLibraryChanged(ctx context.Context, event LibraryChangeEven
 	}, evt.PublishOptions{})
 }
 
+func (h *Hub) PublishCatalogLibraryChanged(ctx context.Context, event LibraryChangeEvent) error {
+	if h == nil || h.inner == nil {
+		return nil
+	}
+	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogLibraryChanged), libraryChangePayload(event), evt.PublishOptions{}); err != nil {
+		return err
+	}
+	return h.PublishLibraryChanged(ctx, event)
+}
+
 func (h *Hub) PublishMetadataUpdated(ctx context.Context, event MetadataUpdateEvent) error {
 	if h == nil || h.inner == nil {
 		return nil
@@ -124,6 +134,24 @@ func (h *Hub) PublishMetadataUpdated(ctx context.Context, event MetadataUpdateEv
 		"library_id": event.LibraryID,
 		"content_id": event.ContentID,
 	}, evt.PublishOptions{})
+}
+
+func (h *Hub) PublishCatalogItemChanged(ctx context.Context, event MetadataUpdateEvent) error {
+	if h == nil || h.inner == nil {
+		return nil
+	}
+	change := event.Change
+	if change == "" {
+		change = "metadata_updated"
+	}
+	if err := h.inner.PublishJSON(ctx, evt.ChannelCatalog, string(TypeCatalogItemChanged), map[string]any{
+		"library_id": event.LibraryID,
+		"content_id": event.ContentID,
+		"change":     change,
+	}, evt.PublishOptions{}); err != nil {
+		return err
+	}
+	return h.PublishMetadataUpdated(ctx, event)
 }
 
 func (h *Hub) PublishJob(ctx context.Context, eventType Type, job *models.AdminJob) error {
@@ -142,6 +170,23 @@ func (h *Hub) EventsHub() *evt.Hub {
 	return h.inner
 }
 
+func libraryChangePayload(event LibraryChangeEvent) map[string]any {
+	reason := event.Reason
+	if reason == "" {
+		reason = "scan"
+	}
+	return map[string]any{
+		"library_id":               event.LibraryID,
+		"reason":                   reason,
+		"new":                      event.New,
+		"updated":                  event.Updated,
+		"missing":                  event.Missing,
+		"matched_files":            event.MatchedFiles,
+		"retried_items":            event.RetriedItems,
+		"still_unmatched_warnings": event.StillUnmatchedWarnings,
+	}
+}
+
 func convertEnvelope(env evt.Envelope) (Envelope, bool) {
 	converted := Envelope{
 		Type:      Type(env.Event),
@@ -157,6 +202,8 @@ func convertEnvelope(env evt.Envelope) (Envelope, bool) {
 		var payload struct {
 			LibraryID              int    `json:"library_id"`
 			ContentID              string `json:"content_id"`
+			Reason                 string `json:"reason"`
+			Change                 string `json:"change"`
 			New                    int    `json:"new"`
 			Updated                int    `json:"updated"`
 			Missing                int    `json:"missing"`
@@ -169,6 +216,8 @@ func convertEnvelope(env evt.Envelope) (Envelope, bool) {
 		}
 		converted.LibraryID = payload.LibraryID
 		converted.ContentID = payload.ContentID
+		converted.Reason = payload.Reason
+		converted.Change = payload.Change
 		converted.New = payload.New
 		converted.Updated = payload.Updated
 		converted.Missing = payload.Missing

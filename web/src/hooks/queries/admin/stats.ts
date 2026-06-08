@@ -5,10 +5,14 @@ import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
 
+export function fetchAdminStats(options: { refresh?: boolean } = {}) {
+  return api<AdminStats>(`/admin/stats${options.refresh ? "?refresh=1" : ""}`);
+}
+
 export function useAdminStats() {
   return useQuery({
     queryKey: adminKeys.stats(),
-    queryFn: () => api<AdminStats>("/admin/stats"),
+    queryFn: () => fetchAdminStats(),
     staleTime: ADMIN_STALE_TIME,
   });
 }

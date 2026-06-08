@@ -66,10 +66,24 @@ function getLibrarySortRelevanceScope(
   if (libraryType === "movie" || libraryType === "series") {
     return libraryType;
   }
-  if (mediaScope === "movie" || mediaScope === "series" || mediaScope === "episode") {
+  // The DB stores audiobook library type as the plural "audiobooks";
+  // the sort scope is the singular "audiobook" (matches QueryDefinition.media_scope).
+  if (libraryType === "audiobook" || libraryType === "audiobooks") {
+    return "audiobook";
+  }
+  if (
+    mediaScope === "movie" ||
+    mediaScope === "series" ||
+    mediaScope === "episode" ||
+    mediaScope === "audiobook"
+  ) {
     return mediaScope;
   }
   return "all";
+}
+
+function isAudiobookLibraryType(libraryType: string): boolean {
+  return libraryType === "audiobook" || libraryType === "audiobooks";
 }
 
 function readString(value: string | null): string | undefined {
@@ -260,9 +274,12 @@ export function parseLibraryPageState(
     libraryType === "mixed" &&
     (mediaScopeParam === "movie" ||
       mediaScopeParam === "series" ||
-      mediaScopeParam === "episode")
+      mediaScopeParam === "episode" ||
+      mediaScopeParam === "audiobook")
       ? mediaScopeParam
-      : undefined;
+      : isAudiobookLibraryType(libraryType)
+        ? "audiobook"
+        : undefined;
   const sortRelevanceScope =
     libraryType === "series" && browseType === "episode"
       ? "all"
@@ -290,6 +307,20 @@ export function parseLibraryPageState(
   };
 }
 
+export function hasLibraryPageSearchParams(searchParams: URLSearchParams): boolean {
+  for (const key of searchParams.keys()) {
+    if (
+      LIBRARY_QUERY_KEYS.has(key) ||
+      GROUP_MATCH_PATTERN.test(key) ||
+      GROUP_RULE_PATTERN.test(key) ||
+      GROUP_RULE_VALUE_PATTERN.test(key)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function deleteLibraryQueryParams(nextSearchParams: URLSearchParams) {
   for (const key of Array.from(nextSearchParams.keys())) {
     if (
@@ -301,6 +332,34 @@ function deleteLibraryQueryParams(nextSearchParams: URLSearchParams) {
       nextSearchParams.delete(key);
     }
   }
+}
+
+export function serializeLibraryPageSearchParams(searchParams: URLSearchParams): string {
+  const librarySearchParams = new URLSearchParams(searchParams);
+  for (const key of Array.from(librarySearchParams.keys())) {
+    if (
+      !LIBRARY_QUERY_KEYS.has(key) &&
+      !GROUP_MATCH_PATTERN.test(key) &&
+      !GROUP_RULE_PATTERN.test(key) &&
+      !GROUP_RULE_VALUE_PATTERN.test(key)
+    ) {
+      librarySearchParams.delete(key);
+    }
+  }
+  return librarySearchParams.toString();
+}
+
+export function applySavedLibraryPageSearchParams(
+  currentSearchParams: URLSearchParams,
+  savedSearch: string,
+): URLSearchParams {
+  const nextSearchParams = new URLSearchParams(currentSearchParams);
+  deleteLibraryQueryParams(nextSearchParams);
+  const savedSearchParams = new URLSearchParams(savedSearch);
+  savedSearchParams.forEach((value, key) => {
+    nextSearchParams.append(key, value);
+  });
+  return nextSearchParams;
 }
 
 export function updateLibraryPageSearchParams(

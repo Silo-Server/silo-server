@@ -204,8 +204,11 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 // The values are minimal: each carries the required (non-omitempty) fields
 // only. Clients that consume this data downstream will see a single source
 // with a stub ID, a single Video stream at index 0, and a single placeholder
-// person; standard Jellyfin clients refetch real MediaSources via
-// /Items/{id}/PlaybackInfo on play, so this stub is never load-bearing.
+// person. The stub is a FALLBACK, not a no-op: Infuse and SenPlayer build
+// their Continue Watching rows from the listing's MediaSources, so pages
+// within the detail-upgrade cap get real sources (upgradeProgressPageToDetail)
+// and only overflow/error entries see the stub — which must therefore still
+// look playable and serialize collections as empty, never null.
 var (
 	stubDetailPerson      = personDTO{ID: "0", Name: ""}
 	stubDetailMediaSource = mediaSourceDTO{ID: "0"}
@@ -214,10 +217,11 @@ var (
 
 // stubDetailListFields sets the four detail-only fields on a list-mapped DTO
 // to single-element placeholder slices when the client requested them via
-// Fields=People|Chapters|MediaStreams|MediaSources. Used by the Resume
-// hydrator, which deliberately skips per-item GetItemDetail fanout; clients
-// that need real MediaSources refetch them via /Items/{id}/PlaybackInfo on
-// play.
+// Fields=People|Chapters|MediaStreams|MediaSources. Used by the Resume/NextUp
+// scan phase, which deliberately skips per-item GetItemDetail fanout; the
+// returned page is then re-mapped through the real detail path
+// (upgradeProgressPageToDetail), so these stubs reach clients only for
+// entries past the detail-upgrade cap or whose detail fetch failed.
 func stubDetailListFields(dto *baseItemDTO, fields map[string]bool) {
 	if len(fields) == 0 {
 		return
@@ -234,7 +238,31 @@ func stubDetailListFields(dto *baseItemDTO, fields map[string]bool) {
 		dto.MediaStreams = []mediaStreamDTO{stubDetailMediaStream}
 	}
 	if fields["mediasources"] && dto.MediaSources == nil {
-		dto.MediaSources = []mediaSourceDTO{stubDetailMediaSource}
+		// The stub must still look PLAYABLE: some clients (SenPlayer) decide
+		// whether to render a Resume row entry from the listing's
+		// MediaSources, and an all-false playability stub makes them drop
+		// every item. Keep the stub ID ("0" — never a registered media source
+		// owner) but mirror the shape detailMediaSourceDTO produces; the real
+		// source set is still refetched via /Items/{id}/PlaybackInfo on play.
+		src := stubDetailMediaSource
+		src.Protocol = "File"
+		src.Type = "Default"
+		src.VideoType = "VideoFile"
+		src.Name = dto.Name
+		src.RunTimeTicks = dto.RunTimeTicks
+		src.SupportsTranscoding = true
+		src.SupportsDirectStream = true
+		src.SupportsDirectPlay = true
+		src.SupportsProbing = true
+		src.TranscodingSubProtocol = "hls"
+		src.MediaStreams = []mediaStreamDTO{stubDetailMediaStream}
+		// Real servers never serialize these as JSON null (always []/{});
+		// strict client deserializers fail the whole response on a null
+		// array, which empties the Resume/NextUp rows entirely.
+		src.Formats = []string{}
+		src.RequiredHTTPHeaders = map[string]string{}
+		src.MediaAttachments = []map[string]any{}
+		dto.MediaSources = []mediaSourceDTO{src}
 	}
 }
 

@@ -199,11 +199,19 @@ func (f *fakePluginClient) MetadataProvider(string) (*pluginhost.MetadataProvide
 	return nil, nil
 }
 
+func (f *fakePluginClient) MarkerProvider(string) (*pluginhost.MarkerProviderClient, error) {
+	return nil, nil
+}
+
 func (f *fakePluginClient) MediaAnalyzer(string) (*pluginhost.MediaAnalyzerClient, error) {
 	return nil, nil
 }
 
 func (f *fakePluginClient) ScheduledTask(string) (*pluginhost.ScheduledTaskClient, error) {
+	return nil, nil
+}
+
+func (f *fakePluginClient) ScanSource(string) (*pluginhost.ScanSourceClient, error) {
 	return nil, nil
 }
 

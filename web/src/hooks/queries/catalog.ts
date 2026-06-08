@@ -88,6 +88,36 @@ export async function fetchCatalogFilters(
   );
 }
 
+export type CatalogFacetName =
+  | "genre"
+  | "studio"
+  | "network"
+  | "country"
+  | "original_language"
+  | "content_rating"
+  | "author"
+  | "narrator"
+  | "series";
+
+export interface CatalogFacetSearchResponse {
+  matches: string[];
+  has_more: boolean;
+}
+
+export async function fetchCatalogFacetSearch(
+  state: CatalogSearchState,
+  facet: CatalogFacetName,
+  prefix: string,
+  limit: number,
+  options?: RequestInit,
+): Promise<CatalogFacetSearchResponse> {
+  const params = buildCatalogApiSearchParams(state);
+  params.set("facet", facet);
+  params.set("q", prefix);
+  params.set("limit", String(limit));
+  return api<CatalogFacetSearchResponse>(`/catalog/filters/search?${params.toString()}`, options);
+}
+
 export function createCatalogSearchState(
   source: CatalogSource,
   patch: Partial<CatalogSearchState> = {},
@@ -197,7 +227,9 @@ export function useCatalogWindow(
     let highestPageIndex = -1;
     let highestPageHasMore = false;
     pageResults.forEach((page, pageIndex) => {
-      maxLoadedEnd = Math.max(maxLoadedEnd, pageIndex * limit + page.items.length);
+      if (page.items.length > 0) {
+        maxLoadedEnd = Math.max(maxLoadedEnd, pageIndex * limit + page.items.length);
+      }
       if (pageIndex >= highestPageIndex) {
         highestPageIndex = pageIndex;
         highestPageHasMore = page.has_more;

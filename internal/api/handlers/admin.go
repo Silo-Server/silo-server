@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,20 +113,34 @@ func NewAdminHandler(
 
 // createUserRequest represents the JSON body for POST /admin/users.
 type createUserRequest struct {
-	Username                 string   `json:"username"`
-	Email                    string   `json:"email"`
-	Password                 string   `json:"password"`
-	Role                     string   `json:"role"`
-	Permissions              []string `json:"permissions"`
-	CreateDefaultProfile     bool     `json:"create_default_profile"`
-	DefaultProfileName       string   `json:"default_profile_name,omitempty"`
-	LibraryIDs               []int    `json:"library_ids"`
-	MaxPlaybackQuality       string   `json:"max_playback_quality"`
-	MaxStreams               *int     `json:"max_streams,omitempty"`
-	MaxTranscodes            *int     `json:"max_transcodes,omitempty"`
-	MaxProfiles              *int     `json:"max_profiles,omitempty"`
-	DownloadAllowed          *bool    `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool    `json:"download_transcode_allowed,omitempty"`
+	Username                 string                 `json:"username"`
+	Email                    string                 `json:"email"`
+	Password                 string                 `json:"password"`
+	Role                     string                 `json:"role"`
+	Permissions              createStringSliceField `json:"permissions"`
+	CreateDefaultProfile     bool                   `json:"create_default_profile"`
+	DefaultProfileName       string                 `json:"default_profile_name,omitempty"`
+	LibraryIDs               []int                  `json:"library_ids"`
+	MaxPlaybackQuality       string                 `json:"max_playback_quality"`
+	MaxStreams               *int                   `json:"max_streams,omitempty"`
+	MaxTranscodes            *int                   `json:"max_transcodes,omitempty"`
+	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
+	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
+	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
+}
+
+type createStringSliceField struct {
+	Set   bool
+	Value []string
+}
+
+func (f *createStringSliceField) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		f.Value = []string{}
+		return nil
+	}
+	return json.Unmarshal(data, &f.Value)
 }
 
 type updateLibraryIDsField struct {
@@ -390,7 +405,11 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
-	permissions, err := auth.NormalizePermissions(req.Permissions)
+	permissions := auth.DefaultUserPermissions()
+	if req.Permissions.Set {
+		permissions = req.Permissions.Value
+	}
+	permissions, err := auth.NormalizePermissions(permissions)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -463,7 +482,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		permissions = &normalized
 	}
 
-	err = h.userRepo.Update(r.Context(), id, models.UpdateUserInput{
+	updateInput := models.UpdateUserInput{
 		Username:                 req.Username,
 		Email:                    req.Email,
 		Password:                 req.Password,
@@ -477,12 +496,31 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		MaxProfiles:              req.MaxProfiles,
 		DownloadAllowed:          req.DownloadAllowed,
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
-	})
+	}
+
+	var currentUser *models.User
+	if updateMayRequireSessionRevocation(updateInput) {
+		currentUser, err = h.userRepo.GetByID(r.Context(), id)
+		if err != nil {
+			if auth.IsNotFound(err) {
+				writeError(w, http.StatusNotFound, "not_found", "User not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+			return
+		}
+	}
+
+	err = h.userRepo.Update(r.Context(), id, updateInput)
 	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(req) {
+	if updateRequiresSessionRevocation(currentUser, updateInput) {
 		if err := h.revokeUserSessions(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
 			return
@@ -750,13 +788,35 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func updateRequiresSessionRevocation(req updateUserRequest) bool {
-	return req.Password != nil ||
-		req.Role != nil ||
-		req.Enabled != nil ||
-		req.LibraryIDs.Set ||
-		req.Permissions.Set ||
-		req.MaxPlaybackQuality != nil
+func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
+	return input.Password != nil ||
+		input.Role != nil ||
+		input.Enabled != nil ||
+		input.Permissions != nil ||
+		input.MaxPlaybackQuality != nil
+}
+
+func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
+	if input.Password != nil {
+		return true
+	}
+	if current == nil {
+		return updateMayRequireSessionRevocation(input)
+	}
+	if input.Role != nil && *input.Role != current.Role {
+		return true
+	}
+	if input.Enabled != nil && *input.Enabled != current.Enabled {
+		return true
+	}
+	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
+		return true
+	}
+	if input.MaxPlaybackQuality != nil &&
+		access.NormalizePlaybackQuality(*input.MaxPlaybackQuality) != access.NormalizePlaybackQuality(current.MaxPlaybackQuality) {
+		return true
+	}
+	return false
 }
 
 func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
@@ -833,6 +893,9 @@ func (h *AdminHandler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	var resp AdminStats
 
 	if h.StatsSource != nil {
+		if isTruthyQuery(r.URL.Query().Get("refresh")) {
+			h.StatsSource.Invalidate()
+		}
 		stats, err := h.StatsSource.Get(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get stats")
@@ -857,6 +920,15 @@ func (h *AdminHandler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func isTruthyQuery(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *AdminHandler) invalidateStats(ctx context.Context, channel, eventType, payload string) {
@@ -1082,6 +1154,7 @@ var sensitiveSettingKeys = map[string]bool{
 	"mdblist.api_key":                      true,
 	"requests.radarr.api_key":              true,
 	"requests.sonarr.api_key":              true,
+	"subtitle_ai.api_key":                  true,
 	"watchsync.trakt.client_id":            true,
 	"watchsync.trakt.client_secret":        true,
 	"watchsync.simkl.client_id":            true,
@@ -1214,6 +1287,9 @@ type adminDeviceDetailResponse struct {
 	DeviceID       string                       `json:"device_id"`
 	DeviceName     string                       `json:"device_name"`
 	DevicePlatform string                       `json:"device_platform"`
+	OverrideCount  int                          `json:"override_count"`
+	ProfileCount   int                          `json:"profile_count"`
+	Profiles       []adminDeviceProfileSummary  `json:"profiles"`
 	LastUpdated    string                       `json:"last_updated"`
 	Settings       []adminDeviceSettingResponse `json:"settings"`
 }
@@ -1456,6 +1532,12 @@ func (h *AdminHandler) HandleUpdateUserDeviceSetting(w http.ResponseWriter, r *h
 	if existing != nil {
 		entry.DeviceName = existing.DeviceName
 		entry.DevicePlatform = existing.DevicePlatform
+	} else if registered, err := registeredDeviceForProfile(r.Context(), store, profileID, deviceID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
+		return
+	} else if registered != nil {
+		entry.DeviceName = registered.DeviceName
+		entry.DevicePlatform = registered.DevicePlatform
 	}
 	if err := store.SetDeviceSetting(r.Context(), entry); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update device setting")
@@ -1578,6 +1660,10 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 			if err != nil {
 				return fmt.Errorf("list device settings: %w", err)
 			}
+			devices, err := listRegisteredDevices(gctx, store)
+			if err != nil {
+				return fmt.Errorf("list devices: %w", err)
+			}
 			profileNames, err := listProfileNamesByID(gctx, store)
 			if err != nil {
 				slog.Warn("admin list devices profile lookup failed",
@@ -1586,7 +1672,14 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 				)
 				profileNames = map[string]string{}
 			}
-			perUser[i] = buildAdminDeviceSummaries(user.ID, user.Username, user.Email, entries, profileNames)
+			perUser[i] = buildAdminDeviceSummaries(
+				user.ID,
+				user.Username,
+				user.Email,
+				entries,
+				devices,
+				profileNames,
+			)
 			return nil
 		})
 	}
@@ -1650,6 +1743,11 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
 		return
 	}
+	registeredDevices, err := listRegisteredDevices(r.Context(), store)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
+		return
+	}
 	profileNames, err := listProfileNamesByID(r.Context(), store)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
@@ -1662,12 +1760,26 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 			deviceEntries = append(deviceEntries, entry)
 		}
 	}
-	if len(deviceEntries) == 0 {
+	deviceRegistrations := make([]userstore.DeviceEntry, 0)
+	for _, entry := range registeredDevices {
+		if entry.DeviceID == deviceID {
+			deviceRegistrations = append(deviceRegistrations, entry)
+		}
+	}
+	summaries := buildAdminDeviceSummaries(
+		user.ID,
+		user.Username,
+		user.Email,
+		deviceEntries,
+		deviceRegistrations,
+		profileNames,
+	)
+	if len(summaries) == 0 {
 		writeError(w, http.StatusNotFound, "not_found", "Device not found")
 		return
 	}
 
-	summary := buildAdminDeviceSummaries(user.ID, user.Username, user.Email, deviceEntries, profileNames)[0]
+	summary := summaries[0]
 	writeJSON(w, http.StatusOK, adminDeviceDetailResponse{
 		UserID:         user.ID,
 		Username:       user.Username,
@@ -1675,9 +1787,39 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 		DeviceID:       summary.DeviceID,
 		DeviceName:     summary.DeviceName,
 		DevicePlatform: summary.DevicePlatform,
+		OverrideCount:  summary.OverrideCount,
+		ProfileCount:   summary.ProfileCount,
+		Profiles:       summary.Profiles,
 		LastUpdated:    summary.LastUpdated,
 		Settings:       buildAdminDeviceSettingsResponse(user.ID, profileNames, deviceEntries).Settings,
 	})
+}
+
+func listRegisteredDevices(ctx context.Context, store userstore.UserStore) ([]userstore.DeviceEntry, error) {
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		return nil, nil
+	}
+	return registry.ListDevices(ctx)
+}
+
+func registeredDeviceForProfile(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	deviceID string,
+) (*userstore.DeviceEntry, error) {
+	devices, err := listRegisteredDevices(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	for _, device := range devices {
+		if device.ProfileID == profileID && device.DeviceID == deviceID {
+			matched := device
+			return &matched, nil
+		}
+	}
+	return nil, nil
 }
 
 func buildAdminDeviceSettingsResponse(userID int, profileNames map[string]string, entries []userstore.DeviceSettingEntry) adminDeviceSettingsListResponse {
@@ -1705,6 +1847,7 @@ func buildAdminDeviceSummaries(
 	username string,
 	email string,
 	entries []userstore.DeviceSettingEntry,
+	registeredDevices []userstore.DeviceEntry,
 	profileNames map[string]string,
 ) []adminDeviceSummaryResponse {
 	type profileAccumulator struct {
@@ -1718,10 +1861,10 @@ func buildAdminDeviceSummaries(
 	}
 
 	byDevice := make(map[string]*summary)
-	for _, entry := range entries {
-		deviceID := strings.TrimSpace(entry.DeviceID)
+
+	ensureDevice := func(deviceID, deviceName, devicePlatform, lastUpdated string) *summary {
 		if deviceID == "" {
-			continue
+			return nil
 		}
 		current, ok := byDevice[deviceID]
 		if !ok {
@@ -1731,49 +1874,86 @@ func buildAdminDeviceSummaries(
 					Username:       username,
 					Email:          email,
 					DeviceID:       deviceID,
-					DeviceName:     entry.DeviceName,
-					DevicePlatform: entry.DevicePlatform,
-					LastUpdated:    entry.UpdatedAt,
+					DeviceName:     deviceName,
+					DevicePlatform: devicePlatform,
+					LastUpdated:    lastUpdated,
 				},
 				keys:     make(map[string]struct{}),
 				profiles: make(map[string]*profileAccumulator),
 			}
 			byDevice[deviceID] = current
 		}
-		current.keys[entry.ProfileID+":"+entry.Key] = struct{}{}
+		if current.device.DeviceName == "" && deviceName != "" {
+			current.device.DeviceName = deviceName
+		}
+		if current.device.DevicePlatform == "" && devicePlatform != "" {
+			current.device.DevicePlatform = devicePlatform
+		}
+		if lastUpdated > current.device.LastUpdated {
+			current.device.LastUpdated = lastUpdated
+			if deviceName != "" {
+				current.device.DeviceName = deviceName
+			}
+			if devicePlatform != "" {
+				current.device.DevicePlatform = devicePlatform
+			}
+		}
+		return current
+	}
+
+	ensureProfile := func(current *summary, profileID, lastUpdated string) *profileAccumulator {
+		if current == nil || profileID == "" {
+			return nil
+		}
+		profile, exists := current.profiles[profileID]
+		if !exists {
+			profile = &profileAccumulator{
+				summary: adminDeviceProfileSummary{
+					ProfileID:   profileID,
+					ProfileName: profileNames[profileID],
+					LastUpdated: lastUpdated,
+				},
+				keys: make(map[string]struct{}),
+			}
+			current.profiles[profileID] = profile
+			return profile
+		}
+		if lastUpdated > profile.summary.LastUpdated {
+			profile.summary.LastUpdated = lastUpdated
+		}
+		return profile
+	}
+
+	for _, device := range registeredDevices {
+		deviceID := strings.TrimSpace(device.DeviceID)
+		profileID := strings.TrimSpace(device.ProfileID)
+		current := ensureDevice(
+			deviceID,
+			device.DeviceName,
+			device.DevicePlatform,
+			device.LastSeenAt,
+		)
+		ensureProfile(current, profileID, device.LastSeenAt)
+	}
+
+	for _, entry := range entries {
+		deviceID := strings.TrimSpace(entry.DeviceID)
 		profileID := strings.TrimSpace(entry.ProfileID)
-		if profileID != "" {
-			profile, exists := current.profiles[profileID]
-			if !exists {
-				profile = &profileAccumulator{
-					summary: adminDeviceProfileSummary{
-						ProfileID:   profileID,
-						ProfileName: profileNames[profileID],
-						LastUpdated: entry.UpdatedAt,
-					},
-					keys: make(map[string]struct{}),
-				}
-				current.profiles[profileID] = profile
-			}
+		current := ensureDevice(
+			deviceID,
+			entry.DeviceName,
+			entry.DevicePlatform,
+			entry.UpdatedAt,
+		)
+		if current == nil {
+			continue
+		}
+		if profileID != "" && entry.Key != "" {
+			current.keys[profileID+":"+entry.Key] = struct{}{}
+		}
+		profile := ensureProfile(current, profileID, entry.UpdatedAt)
+		if profile != nil && entry.Key != "" {
 			profile.keys[entry.Key] = struct{}{}
-			if entry.UpdatedAt > profile.summary.LastUpdated {
-				profile.summary.LastUpdated = entry.UpdatedAt
-			}
-		}
-		if current.device.DeviceName == "" && entry.DeviceName != "" {
-			current.device.DeviceName = entry.DeviceName
-		}
-		if current.device.DevicePlatform == "" && entry.DevicePlatform != "" {
-			current.device.DevicePlatform = entry.DevicePlatform
-		}
-		if entry.UpdatedAt > current.device.LastUpdated {
-			current.device.LastUpdated = entry.UpdatedAt
-			if entry.DeviceName != "" {
-				current.device.DeviceName = entry.DeviceName
-			}
-			if entry.DevicePlatform != "" {
-				current.device.DevicePlatform = entry.DevicePlatform
-			}
 		}
 	}
 

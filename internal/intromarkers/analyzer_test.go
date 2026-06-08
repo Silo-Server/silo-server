@@ -102,6 +102,20 @@ func (f *fakeBoundaryRefiner) RefineChapterEnd(_ context.Context, candidate Cand
 	return refined, true, nil
 }
 
+type fakeChromaprintStartRefiner struct {
+	calls    int
+	segments map[int]Segment
+}
+
+func (f *fakeChromaprintStartRefiner) RefineChromaprintStart(_ context.Context, candidate Candidate, segment Segment) (Segment, bool, error) {
+	f.calls++
+	refined, ok := f.segments[candidate.FileID]
+	if !ok {
+		return segment, false, nil
+	}
+	return refined, true, nil
+}
+
 func TestAnalyzeEpisodeNoCandidatesIsNoOp(t *testing.T) {
 	repo := &fakeIntroRepository{episodeCandidates: map[string][]Candidate{}}
 	extractor := &fakeFingerprintExtractor{}
@@ -260,7 +274,7 @@ func TestAnalyzeEpisodeCopiesMarkerToCompatibleEpisodeVersion(t *testing.T) {
 			{Index: 2, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
 		},
 	}
-	target := Candidate{FileID: 11, EpisodeID: "ep1", DurationSeconds: 1200.5}
+	target := Candidate{FileID: 11, EpisodeID: "ep1", DurationSeconds: 1202.5}
 	repo := &fakeIntroRepository{episodeCandidates: map[string][]Candidate{"ep1": []Candidate{source, target}}}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg")}
 
@@ -417,6 +431,65 @@ func TestAnalyzeEpisodeChromaprintOnlyPatchesRequestedEpisode(t *testing.T) {
 	}
 	if len(repo.upsertedStates) != 0 {
 		t.Fatalf("episode redetect should not persist season-wide state, got %d upserts", len(repo.upsertedStates))
+	}
+}
+
+func TestAnalyzeEpisodePersistsRefinedChromaprintSegment(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	target := Candidate{
+		FileID:          1,
+		EpisodeID:       "ep1",
+		SeasonID:        "season1",
+		MediaFolderID:   7,
+		FileHash:        "hash1",
+		FileSize:        100,
+		DurationSeconds: 1200,
+	}
+	sibling := Candidate{
+		FileID:          2,
+		EpisodeID:       "ep2",
+		SeasonID:        "season1",
+		MediaFolderID:   7,
+		FileHash:        "hash2",
+		FileSize:        200,
+		DurationSeconds: 1200,
+	}
+	groupCandidates := []Candidate{target, sibling}
+	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
+	repo := &fakeIntroRepository{
+		episodeCandidates: map[string][]Candidate{"ep1": []Candidate{target}},
+		groupCandidates:   map[string][]Candidate{group: groupCandidates},
+		fingerprints: map[int]*Fingerprint{
+			target.FileID:  cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
+			sibling.FileID: cachedFingerprint(sibling, cfg, sharedIntroPoints(5000)),
+		},
+	}
+	refiner := &fakeChromaprintStartRefiner{segments: map[int]Segment{
+		target.FileID: {Start: 12.5, End: 36.5, Confidence: 0.85, Algorithm: ChromaprintDialogueAlgorithm},
+	}}
+	analyzer := &Analyzer{
+		repo:               repo,
+		extractor:          &fakeFingerprintExtractor{},
+		chromaprintRefiner: refiner,
+		config:             cfg,
+	}
+
+	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
+	if err != nil {
+		t.Fatalf("AnalyzeEpisode returned error: %v", err)
+	}
+	if refiner.calls != 1 {
+		t.Fatalf("expected one refinement call for requested file, got %d", refiner.calls)
+	}
+	if summary.DialogueRefinementsAttempted != 1 || summary.DialogueRefinementsApplied != 1 {
+		t.Fatalf("expected one applied dialogue refinement, got attempted=%d applied=%d",
+			summary.DialogueRefinementsAttempted, summary.DialogueRefinementsApplied)
+	}
+	if len(repo.patches) != 1 {
+		t.Fatalf("expected one patch, got %d", len(repo.patches))
+	}
+	if repo.patches[0].Start != 12.5 || repo.patches[0].Algorithm != ChromaprintDialogueAlgorithm {
+		t.Fatalf("patch = %+v, want refined chromaprint marker", repo.patches[0])
 	}
 }
 

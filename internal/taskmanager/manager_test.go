@@ -57,8 +57,16 @@ type fakeTrigger struct {
 	stopCh chan struct{}
 }
 
-func (t *fakeTrigger) Start(_ *taskmanager.ExecutionResult) {
-	t.next = time.Now().Add(time.Minute)
+func (t *fakeTrigger) Start(lastResult *taskmanager.ExecutionResult) {
+	interval := time.Minute
+	if t.cfg.IntervalMs > 0 {
+		interval = time.Duration(t.cfg.IntervalMs) * time.Millisecond
+	}
+	base := time.Now()
+	if lastResult != nil && !lastResult.CompletedAt.IsZero() {
+		base = lastResult.CompletedAt
+	}
+	t.next = base.Add(interval)
 }
 
 func (t *fakeTrigger) Stop() {
@@ -115,6 +123,26 @@ func newFakeTrigger(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
 		ch:     make(chan struct{}),
 		stopCh: make(chan struct{}),
 	}
+}
+
+type recordingObserver struct {
+	mu      sync.Mutex
+	updates []taskmanager.TaskInfo
+}
+
+func (o *recordingObserver) TaskUpdated(info taskmanager.TaskInfo) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.updates = append(o.updates, info)
+}
+
+func (o *recordingObserver) last() taskmanager.TaskInfo {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.updates) == 0 {
+		return taskmanager.TaskInfo{}
+	}
+	return o.updates[len(o.updates)-1]
 }
 
 func TestTaskManagerStartSeedsCleanupTaskDefaults(t *testing.T) {
@@ -189,5 +217,51 @@ func TestTaskManagerStartPreservesExistingTriggers(t *testing.T) {
 
 	if got := manager.GetTaskInfo("cleanup_activity_log").Triggers; !reflect.DeepEqual(got, existing) {
 		t.Fatalf("worker triggers = %#v, want %#v", got, existing)
+	}
+}
+
+func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
+	const taskKey = "refresh_metadata"
+	triggerRepo := &fakeTriggerRepository{
+		triggers: map[string][]taskmanager.TriggerConfig{
+			taskKey: {
+				{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)},
+			},
+		},
+	}
+	observer := &recordingObserver{}
+	manager := taskmanager.New(
+		triggerRepo,
+		fakeExecutionRepository{},
+		newFakeTrigger,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	manager.AddObserver(observer)
+	manager.Register(stubTask{key: taskKey})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer manager.Stop()
+	defer cancel()
+	manager.Start(ctx)
+
+	if err := manager.RunTask(ctx, taskKey); err != nil {
+		t.Fatalf("RunTask() error = %v", err)
+	}
+
+	last := observer.last()
+	if last.LastExecution == nil {
+		t.Fatal("last notification missing execution result")
+	}
+	if last.NextRunAt == nil {
+		t.Fatal("last notification missing next run time")
+	}
+	if !last.NextRunAt.After(last.LastExecution.CompletedAt) {
+		t.Fatalf("next run = %s, want after completed_at %s",
+			last.NextRunAt.Format(time.RFC3339Nano),
+			last.LastExecution.CompletedAt.Format(time.RFC3339Nano))
+	}
+	if last.NextRunAt.Sub(last.LastExecution.CompletedAt) < 59*time.Minute {
+		t.Fatalf("next run was not rearmed from the latest completion: got %s after completion",
+			last.NextRunAt.Sub(last.LastExecution.CompletedAt))
 	}
 }

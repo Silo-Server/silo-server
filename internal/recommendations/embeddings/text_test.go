@@ -30,6 +30,37 @@ func TestBuildEmbeddingTextSortsCrewDeterministically(t *testing.T) {
 	}
 }
 
+func TestBuildEmbeddingTextAudiobookUsesAuthorAndNarrator(t *testing.T) {
+	item := &models.MediaItem{
+		Title:    "The Ice Angels",
+		Type:     "audiobook",
+		Year:     2026,
+		Genres:   []string{"Thriller", "Mystery"},
+		Overview: "Detective Elea Baker hunts a child killer in Lincoln.",
+		People: []models.ItemPerson{
+			{Person: models.Person{ID: 1, Name: "Caroline Mitchell"}, Kind: models.PersonKindAuthor},
+			{Person: models.Person{ID: 2, Name: "Aryana Ramkhalawon"}, Kind: models.PersonKindNarrator},
+			// Cast/director/writer rows must be ignored for audiobooks.
+			{Person: models.Person{ID: 3, Name: "Bystander"}, Kind: models.PersonKindActor, Character: "Detective"},
+		},
+	}
+
+	text := BuildEmbeddingText(item)
+
+	if !strings.Contains(text, "Thriller, Mystery audiobook about Detective Elea Baker") {
+		t.Fatalf("audiobook lede missing or wrong: %q", text)
+	}
+	if !strings.Contains(text, "Written by Caroline Mitchell") {
+		t.Fatalf("author missing: %q", text)
+	}
+	if !strings.Contains(text, "Narrated by Aryana Ramkhalawon") {
+		t.Fatalf("narrator missing: %q", text)
+	}
+	if strings.Contains(text, "Cast:") || strings.Contains(text, "Directed by") {
+		t.Fatalf("audiobook text should not contain cast/director credits: %q", text)
+	}
+}
+
 func TestBuildEmbeddingTextSortsActorsBeforeTopFive(t *testing.T) {
 	item := &models.MediaItem{
 		Title: "Example",

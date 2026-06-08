@@ -22,7 +22,9 @@ type AdminStats struct {
 	TotalFiles            int                   `json:"total_files"`
 	TotalUsers            int                   `json:"total_users"`
 	TotalMovies           int                   `json:"total_movies"`
+	TotalMovieFiles       int                   `json:"total_movie_files"`
 	TotalShows            int                   `json:"total_shows"`
+	TotalShowFiles        int                   `json:"total_show_files"`
 	ActiveStreams         int                   `json:"active_streams"`
 	TotalStorageBytes     int64                 `json:"total_storage_bytes"`
 	WatchProviderActivity WatchProviderActivity `json:"watch_provider_activity"`
@@ -127,13 +129,15 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 	}
 
 	var (
-		totalUsers    int64
-		totalItems    int64
-		totalFiles    int64
-		totalMovies   int64
-		totalShows    int64
-		activeStreams int64
-		totalStorage  int64
+		totalUsers      int64
+		totalItems      int64
+		totalFiles      int64
+		totalMovies     int64
+		totalMovieFiles int64
+		totalShows      int64
+		totalShowFiles  int64
+		activeStreams   int64
+		totalStorage    int64
 	)
 
 	row := pool.QueryRow(ctx, `
@@ -151,8 +155,34 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 		file_stats AS (
 			SELECT
 				COUNT(*)::bigint AS total_files,
+				COUNT(*) FILTER (WHERE file_kind = 'movie')::bigint AS total_movie_files,
+				COUNT(*) FILTER (WHERE file_kind = 'series')::bigint AS total_show_files,
 				COALESCE(SUM(file_size), 0)::bigint AS total_storage_bytes
-			FROM media_files
+			FROM (
+				SELECT
+					media_files.file_size,
+					CASE
+						WHEN lower(trim(COALESCE(NULLIF(media_items.type, ''), ''))) = 'movie'
+							THEN 'movie'
+						WHEN lower(trim(COALESCE(NULLIF(media_items.type, ''), ''))) = 'series'
+							THEN 'series'
+						WHEN episodes.content_id IS NOT NULL
+							THEN 'series'
+						WHEN lower(trim(COALESCE(NULLIF(media_files.base_type, ''), ''))) IN ('movie', 'movies')
+							THEN 'movie'
+						WHEN lower(trim(COALESCE(NULLIF(media_files.base_type, ''), ''))) IN ('series', 'tv', 'show', 'shows', 'tvshows')
+							THEN 'series'
+						WHEN lower(trim(media_folders.type)) IN ('movie', 'movies')
+							THEN 'movie'
+						WHEN lower(trim(media_folders.type)) IN ('series', 'tv', 'show', 'shows', 'tvshows')
+							THEN 'series'
+						ELSE ''
+					END AS file_kind
+				FROM media_files
+				JOIN media_folders ON media_folders.id = media_files.media_folder_id
+				LEFT JOIN media_items ON media_items.content_id = media_files.content_id
+				LEFT JOIN episodes ON episodes.content_id = media_files.episode_id
+			) classified_files
 		),
 		session_stats AS (
 			SELECT COUNT(*)::bigint AS active_streams
@@ -163,7 +193,9 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 			item_stats.total_items,
 			file_stats.total_files,
 			item_stats.total_movies,
+			file_stats.total_movie_files,
 			item_stats.total_shows,
+			file_stats.total_show_files,
 			session_stats.active_streams,
 			file_stats.total_storage_bytes
 		FROM user_stats
@@ -176,7 +208,9 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 		&totalItems,
 		&totalFiles,
 		&totalMovies,
+		&totalMovieFiles,
 		&totalShows,
+		&totalShowFiles,
 		&activeStreams,
 		&totalStorage,
 	); err != nil {
@@ -194,7 +228,9 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 		TotalItems:            int(totalItems),
 		TotalFiles:            int(totalFiles),
 		TotalMovies:           int(totalMovies),
+		TotalMovieFiles:       int(totalMovieFiles),
 		TotalShows:            int(totalShows),
+		TotalShowFiles:        int(totalShowFiles),
 		ActiveStreams:         int(activeStreams),
 		TotalStorageBytes:     totalStorage,
 		WatchProviderActivity: activity,

@@ -33,6 +33,7 @@ type ProbeData struct {
 	AudioTracks    []AudioTrackInfo
 	SubtitleTracks []SubtitleTrackInfo
 	Chapters       []ChapterInfo
+	FormatTags     map[string]string // format-level tags from ffprobe (title, artist, album, date, etc.)
 }
 
 // VideoTrackInfo describes a probed video track.
@@ -124,6 +125,26 @@ type MarkerUpdate struct {
 	MarkersProvider   *string
 	MarkersConfidence *float64
 	MarkersAlgorithm  string
+
+	// Optional per-segment provenance overrides. When set for a segment,
+	// UpsertMarkers writes these source/provider/confidence/algorithm values
+	// for that segment instead of the shared Markers* fields above. Used by
+	// merged multi-provider results where each segment may come from a
+	// different provider/source class; left nil for single-source writes
+	// (scanner/s3/local).
+	IntroProvenance   *SegmentProvenance
+	CreditsProvenance *SegmentProvenance
+	RecapProvenance   *SegmentProvenance
+	PreviewProvenance *SegmentProvenance
+}
+
+// SegmentProvenance is a per-segment attribution override for MarkerUpdate.
+// When Source is empty, the shared MarkerUpdate.MarkersSource applies.
+type SegmentProvenance struct {
+	Source     string
+	Provider   *string
+	Confidence *float64
+	Algorithm  string
 }
 
 // HasAnySegment reports whether the update would write at least one segment.

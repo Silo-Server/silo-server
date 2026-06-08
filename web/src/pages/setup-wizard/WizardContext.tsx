@@ -4,36 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { Library, Profile } from "@/api/types";
 import { useAuth } from "@/hooks/useAuth";
-
-const SKIPPABLE_STEPS = [
-  "library",
-  "server",
-  "integrations",
-  "downloads",
-  "recommendations",
-] as const;
-export type SkippableStep = (typeof SKIPPABLE_STEPS)[number];
-
-const STORAGE_KEYS: Record<SkippableStep, string> = {
-  library: "setup_wizard_skip_library",
-  server: "setup_wizard_server_done",
-  integrations: "setup_wizard_integrations_done",
-  downloads: "setup_wizard_downloads_done",
-  recommendations: "setup_wizard_recommendations_done",
-};
-
-function readFlag(step: SkippableStep): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(STORAGE_KEYS[step]) === "true";
-}
-
-function writeFlag(step: SkippableStep, value: boolean) {
-  if (value) {
-    window.localStorage.setItem(STORAGE_KEYS[step], "true");
-  } else {
-    window.localStorage.removeItem(STORAGE_KEYS[step]);
-  }
-}
+import {
+  clearSetupWizardStorage,
+  createEmptySetupWizardFlags,
+  readSetupWizardFlags,
+  type SkippableStep,
+  writeSetupWizardFlag,
+} from "./setupStorage";
 
 interface WizardContextValue {
   // Auth-derived
@@ -54,6 +31,7 @@ interface WizardContextValue {
   // Step completion flags
   stepDone: Record<SkippableStep, boolean>;
   markDone: (step: SkippableStep) => void;
+  clearProgress: () => void;
 }
 
 const WizardCtx = createContext<WizardContextValue | null>(null);
@@ -76,11 +54,11 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   const isAdmin = user?.role === "admin";
 
   const [stepDone, setStepDone] = useState<Record<SkippableStep, boolean>>(() => {
-    const flags = {} as Record<SkippableStep, boolean>;
-    for (const step of SKIPPABLE_STEPS) {
-      flags[step] = readFlag(step);
+    if (setupRequired && !user) {
+      clearSetupWizardStorage();
+      return createEmptySetupWizardFlags();
     }
-    return flags;
+    return readSetupWizardFlags();
   });
 
   const profilesQuery = useQuery({
@@ -100,8 +78,13 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   });
 
   const markDone = useCallback((step: SkippableStep) => {
-    writeFlag(step, true);
+    writeSetupWizardFlag(step, true);
     setStepDone((prev) => ({ ...prev, [step]: true }));
+  }, []);
+
+  const clearProgress = useCallback(() => {
+    clearSetupWizardStorage();
+    setStepDone(createEmptySetupWizardFlags());
   }, []);
 
   return (
@@ -120,6 +103,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
         refetchLibraries: () => void librariesQuery.refetch(),
         stepDone,
         markDone,
+        clearProgress,
       }}
     >
       {children}

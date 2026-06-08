@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -79,6 +80,16 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	cp := *item
 	r.items[item.ContentID] = &cp
 	return nil
+}
+
+func (r *fakeItemRepo) Delete(_ context.Context, contentID string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok {
+		return nil, catalog.ErrItemNotFound
+	}
+	delete(r.items, contentID)
+	return nil, nil
 }
 
 func (r *fakeItemRepo) IncrementRefreshFailure(_ context.Context, contentID string) error {
@@ -259,6 +270,8 @@ type fakeFileRepo struct {
 	groupContent        map[string]string // "folderID:version:key" -> contentID
 	groupFiles          map[string][]*models.MediaFile
 	matchStamps         map[int]time.Time // fileID -> match_attempted_at
+	updateErrors        map[int]error
+	afterUpdate         func(fileID int, contentID string)
 	claimUnmatchedCalls int
 	claimNonSeriesCalls int
 	claimMixedCalls     int
@@ -273,13 +286,22 @@ func newFakeFileRepo() *fakeFileRepo {
 		groupContent:        make(map[string]string),
 		groupFiles:          make(map[string][]*models.MediaFile),
 		matchStamps:         make(map[int]time.Time),
+		updateErrors:        make(map[int]error),
 	}
 }
 
 func (r *fakeFileRepo) UpdateContentID(_ context.Context, fileID int, contentID string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	if err := r.updateErrors[fileID]; err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	r.contentIDs[fileID] = contentID
+	afterUpdate := r.afterUpdate
+	r.mu.Unlock()
+	if afterUpdate != nil {
+		afterUpdate(fileID, contentID)
+	}
 	return nil
 }
 
@@ -986,6 +1008,98 @@ func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 	}
 }
 
+func TestRefreshSeriesEpisodeMetadataStateUsesActionableDebt(t *testing.T) {
+	now := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+
+	t.Run("provider numbered episode clears stale debt", func(t *testing.T) {
+		h := newTestHarness()
+		ctx := context.Background()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		h.itemRepo.items["series-provider"] = &models.MediaItem{
+			ContentID:                 "series-provider",
+			Type:                      "series",
+			EpisodeMetadataIncomplete: true,
+		}
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID:      "episode-provider",
+			SeriesID:       "series-provider",
+			SeasonID:       "season-provider",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "Episode 1",
+			TvdbID:         "9607609",
+			MetadataSource: "provider",
+		}); err != nil {
+			t.Fatalf("seed provider episode: %v", err)
+		}
+		debts.debts[fakeRefreshDebtKey(RefreshTargetEpisode, "episode-provider")] = &models.MetadataRefreshDebt{
+			TargetType: RefreshTargetEpisode,
+			ContentID:  "episode-provider",
+			ReasonMask: RefreshDebtReasonEpisodeIncomplete,
+		}
+
+		h.service.refreshSeriesEpisodeMetadataState(ctx, "series-provider", now)
+
+		item, err := h.itemRepo.GetByID(ctx, "series-provider")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if item.EpisodeMetadataIncomplete {
+			t.Fatal("expected provider numbered episode to clear series incomplete flag")
+		}
+		if item.EpisodeMetadataLastCheckedAt == nil || !item.EpisodeMetadataLastCheckedAt.Equal(now) {
+			t.Fatalf("last checked at = %v, want %v", item.EpisodeMetadataLastCheckedAt, now)
+		}
+		if _, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-provider"); !errors.Is(err, ErrRefreshDebtNotFound) {
+			t.Fatalf("provider episode debt after refresh = %v, want ErrRefreshDebtNotFound", err)
+		}
+	})
+
+	t.Run("scanner fallback episode creates debt", func(t *testing.T) {
+		h := newTestHarness()
+		ctx := context.Background()
+		episodes := newFakeEpisodeRepo()
+		debts := newFakeRefreshDebtRepo()
+		h.service.episodeRepo = episodes
+		h.service.refreshDebtRepo = debts
+		h.itemRepo.items["series-fallback"] = &models.MediaItem{
+			ContentID: "series-fallback",
+			Type:      "series",
+		}
+		if err := episodes.Upsert(ctx, &models.Episode{
+			ContentID:      "episode-fallback",
+			SeriesID:       "series-fallback",
+			SeasonID:       "season-fallback",
+			SeasonNumber:   1,
+			EpisodeNumber:  1,
+			Title:          "Episode 1",
+			MetadataSource: "scanner_fallback",
+		}); err != nil {
+			t.Fatalf("seed fallback episode: %v", err)
+		}
+
+		h.service.refreshSeriesEpisodeMetadataState(ctx, "series-fallback", now)
+
+		item, err := h.itemRepo.GetByID(ctx, "series-fallback")
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if !item.EpisodeMetadataIncomplete {
+			t.Fatal("expected fallback episode to keep series incomplete flag")
+		}
+		debt, err := debts.GetTarget(ctx, RefreshTargetEpisode, "episode-fallback")
+		if err != nil {
+			t.Fatalf("GetTarget fallback debt: %v", err)
+		}
+		if !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) {
+			t.Fatalf("fallback debt reason mask = %d, want episode incomplete", debt.ReasonMask)
+		}
+	})
+}
+
 func TestRequestStaleMetadataRefreshStartsOnDemandRefreshOnce(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -1073,6 +1187,109 @@ func TestCreateOrFindSkeleton_NoFolderIDs(t *testing.T) {
 	// The file should be linked.
 	if cid, ok := h.fileRepo.contentIDs[file.ID]; !ok || cid != result.ContentID {
 		t.Errorf("file not linked to skeleton item: got %q", cid)
+	}
+}
+
+func TestCreateOrFindSkeleton_DisabledFolderDoesNotCreateItem(t *testing.T) {
+	h := newTestHarness()
+	h.service.folderRepo = &fakeMetadataFolderRepo{
+		folders: map[int]*models.MediaFolder{
+			10: {ID: 10, Type: "movies", Enabled: false},
+		},
+	}
+	ctx := context.Background()
+
+	file := &models.MediaFile{
+		ID:            1,
+		MediaFolderID: 10,
+		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
+	}
+
+	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
+	if err == nil {
+		t.Fatal("expected disabled folder error")
+	}
+	if result != nil {
+		t.Fatalf("expected no result, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected disabled error, got %v", err)
+	}
+	if len(h.itemRepo.items) != 0 {
+		t.Fatalf("expected no items to be created, got %d", len(h.itemRepo.items))
+	}
+	if cid := h.fileRepo.contentIDs[file.ID]; cid != "" {
+		t.Fatalf("expected file to remain unlinked, got content_id %q", cid)
+	}
+}
+
+func TestCreateOrFindSkeleton_LinkFailureDeletesSkeleton(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	linkErr := errors.New("media file not found")
+	h.fileRepo.updateErrors[1] = linkErr
+
+	file := &models.MediaFile{
+		ID:            1,
+		MediaFolderID: 10,
+		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
+	}
+
+	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
+	if err == nil {
+		t.Fatal("expected link error")
+	}
+	if result != nil {
+		t.Fatalf("expected no result, got %+v", result)
+	}
+	if !errors.Is(err, linkErr) {
+		t.Fatalf("expected wrapped link error, got %v", err)
+	}
+	if len(h.itemRepo.items) != 0 {
+		t.Fatalf("expected skeleton item to be deleted, got %d items", len(h.itemRepo.items))
+	}
+	if len(h.libraryRepo.memberships) != 0 {
+		t.Fatalf("expected no library memberships, got %d", len(h.libraryRepo.memberships))
+	}
+}
+
+func TestCreateOrFindSkeleton_DisabledBeforeMembershipDeletesSkeleton(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	folder := &models.MediaFolder{ID: 10, Type: "movies", Enabled: true}
+	h.service.folderRepo = &fakeMetadataFolderRepo{
+		folders: map[int]*models.MediaFolder{10: folder},
+	}
+	h.fileRepo.afterUpdate = func(_ int, contentID string) {
+		if contentID != "" {
+			folder.Enabled = false
+		}
+	}
+
+	file := &models.MediaFile{
+		ID:            1,
+		MediaFolderID: 10,
+		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
+	}
+
+	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
+	if err == nil {
+		t.Fatal("expected disabled folder error")
+	}
+	if result != nil {
+		t.Fatalf("expected no result, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected disabled error, got %v", err)
+	}
+	if len(h.itemRepo.items) != 0 {
+		t.Fatalf("expected skeleton item to be deleted, got %d items", len(h.itemRepo.items))
+	}
+	if len(h.libraryRepo.memberships) != 0 {
+		t.Fatalf("expected no library memberships, got %d", len(h.libraryRepo.memberships))
+	}
+	if cid := h.fileRepo.contentIDs[file.ID]; cid != "" {
+		t.Fatalf("expected file link to be cleared, got content_id %q", cid)
 	}
 }
 

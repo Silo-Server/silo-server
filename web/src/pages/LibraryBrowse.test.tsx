@@ -182,4 +182,28 @@ describe("LibraryBrowse", () => {
     expect(state.type_override).toBe("episode");
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
+
+  it("uses audiobook media scope for audiobook libraries", () => {
+    renderToStaticMarkup(
+      <LibraryBrowse
+        libraryId={10}
+        libraryType="audiobooks"
+        browseType="series"
+        queryDefinition={{
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "title", order: "asc" },
+        }}
+        onBrowseTypeChange={() => {}}
+        onQueryDefinitionChange={() => {}}
+      />,
+    );
+
+    const [state] = mocks.useCatalogWindow.mock.calls[
+      mocks.useCatalogWindow.mock.calls.length - 1
+    ] as [CatalogSearchState, Record<string, unknown>];
+    expect(state.library_id).toBe(10);
+    expect(state.query_definition.media_scope).toBe("audiobook");
+  });
 });

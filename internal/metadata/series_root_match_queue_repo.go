@@ -520,6 +520,23 @@ func (r *SeriesRootMatchQueueRepository) Delete(ctx context.Context, folderID in
 	return nil
 }
 
+func (r *SeriesRootMatchQueueRepository) DeleteByFolder(ctx context.Context, folderID int) (int, error) {
+	if err := r.requireConfigured(); err != nil {
+		return 0, err
+	}
+	if err := requirePositiveSeriesQueueID("folder id", folderID); err != nil {
+		return 0, err
+	}
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM series_root_match_queue
+		WHERE media_folder_id = $1
+	`, folderID)
+	if err != nil {
+		return 0, fmt.Errorf("deleting series root queue rows for folder: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (r *SeriesRootMatchQueueRepository) UpdateError(ctx context.Context, folderID int, observedRootPath string, errText string) error {
 	if err := r.requireConfigured(); err != nil {
 		return err

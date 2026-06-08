@@ -60,6 +60,7 @@ import {
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
 import {
+  PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
   hasAssignedPermission,
   setAssignedPermission,
@@ -529,7 +530,9 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(user?.role ?? "user");
   const [enabled, setEnabled] = useState(user?.enabled ?? true);
-  const [permissions, setPermissions] = useState<string[]>(user?.permissions ?? []);
+  const [permissions, setPermissions] = useState<string[]>(
+    user?.permissions ?? [PERMISSION_MARKER_EDIT],
+  );
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user?.library_ids ?? null);
   const [maxStreams, setMaxStreams] = useState<number>(
     user?.max_streams ?? Number(settings?.["defaults.max_streams"] ?? "6"),
@@ -557,6 +560,7 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   const passwordId = useId();
   const roleId = useId();
   const enabledId = useId();
+  const markerEditId = useId();
   const metadataCurationId = useId();
   const downloadAllowedId = useId();
   const downloadTranscodeAllowedId = useId();
@@ -693,6 +697,23 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
               value={libraryIDs}
               onChange={setLibraryIDs}
             />
+            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <Label htmlFor={markerEditId}>Marker Editing</Label>
+                <p className="text-muted-foreground text-xs">
+                  Edit intro, recap, credits, and preview markers within assigned libraries.
+                </p>
+              </div>
+              <Switch
+                id={markerEditId}
+                checked={hasAssignedPermission(permissions, PERMISSION_MARKER_EDIT)}
+                onCheckedChange={(checked) =>
+                  setPermissions((current) =>
+                    setAssignedPermission(current, PERMISSION_MARKER_EDIT, checked),
+                  )
+                }
+              />
+            </div>
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
               <div>
                 <Label htmlFor={metadataCurationId}>Metadata Curation</Label>

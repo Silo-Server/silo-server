@@ -1,10 +1,13 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web-bundle migrate-continuum-check verify-local-paths install-hooks
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web-bundle migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
 SHARED_MAKEFILE_LOCAL := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/../Makefile.local))
 DEFAULT_PLUGIN_SDK_DIR := $(abspath ../silo-plugin-sdk)
 SHARED_PLUGIN_SDK_DIR := $(if $(MAIN_CHECKOUT_ROOT),$(abspath $(MAIN_CHECKOUT_ROOT)/../silo-plugin-sdk))
+GOOSE := go run github.com/pressly/goose/v3/cmd/goose@v3.27.1
+GOOSE_DIR := migrations/sql
+ENV_FILE ?= .env
 
 ifneq ($(wildcard $(DEFAULT_PLUGIN_SDK_DIR)),)
 DEV_PLUGIN_SDK_DIR ?= $(DEFAULT_PLUGIN_SDK_DIR)
@@ -53,6 +56,23 @@ lint:
 # Check committed content for local machine path leaks.
 verify-local-paths:
 	scripts/check-local-path-leaks.sh
+
+# Create a timestamped Goose SQL migration. Usage: make migrate-create NAME=add_thing
+migrate-create:
+	@if [ -z "$(NAME)" ]; then echo "usage: make migrate-create NAME=add_thing"; exit 1; fi
+	$(GOOSE) -dir $(GOOSE_DIR) create "$(NAME)" sql
+
+# Validate Goose migration annotations and SQL parsing without touching a database.
+migrate-validate:
+	$(GOOSE) -dir $(GOOSE_DIR) validate
+
+# Show Goose migration status through Silo's bootstrapping runner.
+migrate-status:
+	go run ./cmd/silo/ --env "$(ENV_FILE)" --migrate-status
+
+# Apply pending Goose migrations through Silo's bootstrapping runner.
+migrate-up:
+	go run ./cmd/silo/ --env "$(ENV_FILE)" --migrate-only
 
 # Install repo-local git hooks for this checkout/worktree.
 install-hooks:

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ParsedCue } from "../utils/parseVTT";
 import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
 import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
+import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
@@ -15,6 +17,7 @@ import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitlePositionStyle } from "../hooks/useSubtitlePositionStyle";
 import { useNextEpisode } from "../hooks/useNextEpisode";
+import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { COMPATIBILITY_QUALITY_ID, useTranscodeQuality } from "../hooks/useTranscodeQuality";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
@@ -43,12 +46,21 @@ import type {
   PlayerSubtitleInfo,
   PlayerSubtitleTrackSignature,
   PlayerTimeRange,
+  MarkerDraft,
+  MarkerRegionView,
   SeriesContext,
   SubtitleMode,
 } from "../types";
 import { toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
 import { buildWatchTogetherInviteUrl } from "@/lib/watchTogether";
 import { toast } from "sonner";
+
+// Reserved index for the in-progress live AI translation track. Sits well above
+// any real subtitle index so it never collides.
+const LIVE_SUBTITLE_INDEX = 1_000_000;
+// Resume playback once translated cues cover at least this far ahead of the
+// playhead; a hard cap also resumes so we never wait forever.
+const TRANSLATION_RESUME_TIMEOUT_MS = 30_000;
 
 interface VideoPlayerProps {
   title: string;
@@ -76,6 +88,9 @@ interface VideoPlayerProps {
   autoSkipRecap?: boolean;
   preview?: PlayerTimeRange | null;
   autoPlayNextPreview?: boolean;
+  canEditMarkers?: boolean;
+  /** Notified after a successful in-player marker edit so the host can patch local state. */
+  onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
   duration?: number;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
@@ -163,6 +178,8 @@ export function VideoPlayer({
   autoSkipRecap = false,
   preview = null,
   autoPlayNextPreview = false,
+  canEditMarkers = true,
+  onMarkersEdited,
   duration: propDuration,
   seriesContext,
   onNavigateEpisode,
@@ -243,6 +260,63 @@ export function VideoPlayer({
   useEffect(() => {
     setSubtitleDelayMs(0);
   }, [activeFileId]);
+
+  // -- Live AI subtitle translation (streamed over the realtime websocket) --
+  // While a translation runs, a synthetic "live" track is added to the list and
+  // selected; cues arrive over the websocket and the player pauses until the
+  // region near the playhead is covered, then resumes.
+  const [liveTranslation, setLiveTranslation] = useState<{
+    trackKey: string;
+    language: string;
+    label: string;
+  } | null>(null);
+  const [liveCues, setLiveCues] = useState<ParsedCue[]>([]);
+  const [translationBuffering, setTranslationBuffering] = useState(false);
+  const translationPauseRef = useRef(false);
+  const translationResumeTimerRef = useRef<number | null>(null);
+  // Whether playback should auto-resume once buffering ends. Captured at
+  // translation start: if the viewer had deliberately paused, we don't yank
+  // them back into playback.
+  const translationResumeOnFinishRef = useRef(false);
+  // The subtitle selection active before a translation hijacked it, so a failed
+  // translation can restore it instead of leaving subtitles off.
+  const preTranslationSubtitleIndexRef = useRef<number | null>(null);
+  // The persisted downloaded-subtitle id to switch to once a completed
+  // translation's track lands in the refreshed list.
+  const pendingTranslatedSubtitleIdRef = useRef<number | null>(null);
+
+  // Drop any live translation when the media changes so a stale track from the
+  // previous file never lingers.
+  useEffect(() => {
+    // Disarm any pending resume timeout so a translation from the previous file
+    // can't fire its 30s callback against the new playback state.
+    if (translationResumeTimerRef.current !== null) {
+      window.clearTimeout(translationResumeTimerRef.current);
+      translationResumeTimerRef.current = null;
+    }
+    setLiveTranslation(null);
+    setLiveCues([]);
+    setTranslationBuffering(false);
+    translationPauseRef.current = false;
+    pendingTranslatedSubtitleIdRef.current = null;
+  }, [activeFileId]);
+
+  // Merge the live track into the track list the player + menu see.
+  const effectiveSubtitleTracks = useMemo(() => {
+    if (!liveTranslation) return subtitleUrls;
+    return [
+      ...subtitleUrls,
+      {
+        index: LIVE_SUBTITLE_INDEX,
+        language: liveTranslation.language,
+        label: liveTranslation.label || "AI translation",
+        source: "downloaded" as const,
+        codec: "srt",
+        url: "",
+        live: true,
+      },
+    ];
+  }, [subtitleUrls, liveTranslation]);
 
   // -- Transcode quality switching --
   // Remux also uses HLS (codec copy) via the transcode pipeline.
@@ -739,9 +813,159 @@ export function VideoPlayer({
     (index: number | null) => {
       subtitleSelectionWasManualRef.current = true;
       setActiveSubtitleIndex(index);
+      // The in-progress live translation track is synthetic (a sentinel index
+      // that exists only in memory); never persist it as the saved preference or
+      // we'd store a nonexistent track and lose the real selection.
+      if (index === LIVE_SUBTITLE_INDEX) return;
       onSubtitleChanged?.(index);
     },
     [onSubtitleChanged],
+  );
+
+  // The media-time playhead, sent with a translate request so the server starts
+  // where the viewer is watching.
+  const getSubtitleStartPosition = useCallback(
+    () => toMediaTime(videoRef.current?.currentTime ?? 0, streamOriginRef.current ?? 0),
+    [],
+  );
+
+  const resumeFromTranslationPause = useCallback(() => {
+    if (translationResumeTimerRef.current !== null) {
+      window.clearTimeout(translationResumeTimerRef.current);
+      translationResumeTimerRef.current = null;
+    }
+    if (translationPauseRef.current) {
+      translationPauseRef.current = false;
+      // Only resume if the viewer was playing when the translation began; if
+      // they had paused on purpose, leave them paused.
+      if (translationResumeOnFinishRef.current) {
+        void videoRef.current?.play().catch(() => {});
+      }
+    }
+    setTranslationBuffering(false);
+  }, []);
+
+  // Intercept live-translation events; forward everything else to the parent.
+  const handleRealtimeEvent = useCallback(
+    (event: PlaybackRealtimeEventEnvelope) => {
+      switch (event.name) {
+        case "subtitle_ready": {
+          // Broadcast to every viewer of the file when a generated track is
+          // persisted. Refresh the list so it appears (the requesting session
+          // also auto-selects it via the completed handler below).
+          if (event.payload.file_id === activeFileId) {
+            onRefreshSubtitles?.();
+          }
+          break;
+        }
+        case "subtitle_translation_started": {
+          // Remember the real selection we're displacing and whether we were
+          // playing, so completion/failure can restore the right state.
+          const wasPlaying = !(videoRef.current?.paused ?? true);
+          translationResumeOnFinishRef.current = wasPlaying;
+          setActiveSubtitleIndex((idx) => {
+            if (idx !== LIVE_SUBTITLE_INDEX) {
+              preTranslationSubtitleIndexRef.current = idx;
+            }
+            return LIVE_SUBTITLE_INDEX;
+          });
+          pendingTranslatedSubtitleIdRef.current = null;
+          setLiveCues([]);
+          setLiveTranslation({
+            trackKey: event.payload.track_key,
+            language: event.payload.language,
+            label: event.payload.label ?? "",
+          });
+          subtitleSelectionWasManualRef.current = true;
+          translationPauseRef.current = true;
+          setTranslationBuffering(true);
+          // Only pause if the viewer was playing; don't disturb a deliberate pause.
+          if (wasPlaying) videoRef.current?.pause();
+          if (translationResumeTimerRef.current !== null) {
+            window.clearTimeout(translationResumeTimerRef.current);
+          }
+          translationResumeTimerRef.current = window.setTimeout(
+            resumeFromTranslationPause,
+            TRANSLATION_RESUME_TIMEOUT_MS,
+          );
+          break;
+        }
+        case "subtitle_translation_cues": {
+          const cues = event.payload.cues.map((c) => ({
+            start: c.start,
+            end: c.end,
+            text: c.text,
+          }));
+          setLiveCues((prev) => [...prev, ...cues]);
+          break;
+        }
+        case "subtitle_translation_completed": {
+          resumeFromTranslationPause();
+          // Hand off from the ephemeral live track to the persisted downloaded
+          // track: refresh the list and let the effect below select it by id
+          // once it lands. Without a refresh callback we keep the live track
+          // (which already holds the full cue set) as a best-effort fallback.
+          if (onRefreshSubtitles) {
+            pendingTranslatedSubtitleIdRef.current = event.payload.subtitle_id;
+            onRefreshSubtitles();
+          }
+          break;
+        }
+        case "subtitle_translation_failed": {
+          resumeFromTranslationPause();
+          setLiveTranslation(null);
+          setLiveCues([]);
+          pendingTranslatedSubtitleIdRef.current = null;
+          // Restore the selection the translation displaced rather than leaving
+          // subtitles off.
+          const restore = preTranslationSubtitleIndexRef.current;
+          setActiveSubtitleIndex((idx) => (idx === LIVE_SUBTITLE_INDEX ? restore : idx));
+          toast.error(
+            event.payload.message
+              ? `Translation failed: ${event.payload.message}`
+              : "Subtitle translation failed",
+          );
+          break;
+        }
+        default:
+          onRealtimeEvent?.(event);
+      }
+    },
+    [onRealtimeEvent, onRefreshSubtitles, activeFileId, resumeFromTranslationPause],
+  );
+
+  // Once a completed translation's persisted track lands in the refreshed list,
+  // switch to it (selecting by downloaded-subtitle id) and drop the live track,
+  // so the viewer ends up on the real saved subtitle rather than the synthetic
+  // one that would vanish on reload.
+  useEffect(() => {
+    const pendingId = pendingTranslatedSubtitleIdRef.current;
+    if (pendingId == null) return;
+    const match = subtitleUrls.find((t) => t.id === pendingId);
+    if (!match) return;
+    pendingTranslatedSubtitleIdRef.current = null;
+    setLiveTranslation(null);
+    setLiveCues([]);
+    handleSubtitleSelect(match.index);
+  }, [subtitleUrls, handleSubtitleSelect]);
+
+  // Resume as soon as the first translated cues arrive. Playhead-first
+  // translation means the cues covering the current position are delivered
+  // first, so the first batch is enough; and when the playhead is past the last
+  // cue (e.g. end credits) there is nothing at the playhead to wait for, so we
+  // still resume here rather than stalling until the 30s timeout.
+  useEffect(() => {
+    if (!translationPauseRef.current || liveCues.length === 0) return;
+    resumeFromTranslationPause();
+  }, [liveCues, resumeFromTranslationPause]);
+
+  useEffect(
+    () => () => {
+      if (translationResumeTimerRef.current !== null) {
+        window.clearTimeout(translationResumeTimerRef.current);
+      }
+    },
+    [],
   );
 
   // -- PiP toggle --
@@ -1312,6 +1536,34 @@ export function VideoPlayer({
     };
   }, [playing, resetControlsTimer]);
 
+  // -- Marker editing --
+  const currentMarkers = useMemo<MarkerDraft>(
+    () => ({ intro, recap, credits, preview }),
+    [intro, recap, credits, preview],
+  );
+  const markerEditor = useMarkerEditor({
+    fileId: activeFileId,
+    duration,
+    canEdit: canEditMarkers,
+    markers: currentMarkers,
+    onSaved: (saved) => {
+      if (activeFileId != null) onMarkersEdited?.(activeFileId, saved);
+    },
+  });
+  // While editing, the seek bar reflects the live draft; otherwise the saved
+  // props. All four kinds are shown so recap/preview are visible too.
+  const markerRegions = useMemo<MarkerRegionView[]>(() => {
+    const source = markerEditor.editing ? markerEditor.draft : currentMarkers;
+    const out: MarkerRegionView[] = [];
+    for (const kind of MARKER_KINDS) {
+      const range = source[kind];
+      if (range && range.end > range.start) {
+        out.push({ kind, start: range.start, end: range.end });
+      }
+    }
+    return out;
+  }, [markerEditor.editing, markerEditor.draft, currentMarkers]);
+
   // -- Playback info overlay --
   const [showPlaybackInfo, setShowPlaybackInfo] = useState(false);
 
@@ -1335,10 +1587,12 @@ export function VideoPlayer({
   // (which has browser bugs with stale cues persisting after seek).
   const activeCueTexts = useSubtitleTracks(
     videoRef,
-    subtitleUrls,
+    effectiveSubtitleTracks,
     activeSubtitleIndex,
     streamOriginRef,
     subtitleDelayMs,
+    liveCues,
+    liveTranslation?.trackKey ?? null,
   );
 
   // -- ASS/SSA subtitle rendering via JASSUB (client-side libass) --
@@ -1356,14 +1610,14 @@ export function VideoPlayer({
     if (subtitleSelectionWasManualRef.current) {
       const selectionStillExists =
         activeSubtitleIndex === null ||
-        subtitleUrls.some((track) => track.index === activeSubtitleIndex);
+        effectiveSubtitleTracks.some((track) => track.index === activeSubtitleIndex);
       if (selectionStillExists) {
         return;
       }
       subtitleSelectionWasManualRef.current = false;
     }
 
-    if (subtitleUrls.length === 0) {
+    if (effectiveSubtitleTracks.length === 0) {
       setActiveSubtitleIndex(null);
       lastSubtitleIndexRef.current = null;
       return;
@@ -1376,7 +1630,7 @@ export function VideoPlayer({
 
     const match = resolveSubtitleAutoSelect({
       mode: effectiveMode,
-      tracks: subtitleUrls,
+      tracks: effectiveSubtitleTracks,
       preferredLanguage: preferredSubtitleLanguage ?? null,
       preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
       audioLanguage: audioLang,
@@ -1395,7 +1649,7 @@ export function VideoPlayer({
     activeSubtitleIndex,
     preferredSubtitleLanguage,
     preferredSubtitleTrackSignature,
-    subtitleUrls,
+    effectiveSubtitleTracks,
     subtitleMode,
     showForcedSubtitles,
     profileLanguage,
@@ -1719,7 +1973,7 @@ export function VideoPlayer({
   const realtime = usePlaybackRealtime({
     sessionId,
     onCommand: executeRealtimeCommand,
-    onEvent: onRealtimeEvent,
+    onEvent: handleRealtimeEvent,
   });
 
   useEffect(() => {
@@ -2034,6 +2288,11 @@ export function VideoPlayer({
       {!isDetached && showIntroSkip && <IntroSkipButton onSkip={skipIntro} />}
       {!isDetached && showRecapSkip && <IntroSkipButton onSkip={skipRecap} label="Skip Recap" />}
 
+      {/* Marker editor */}
+      {!isDetached && markerEditor.editing && (
+        <MarkerEditPanel editor={markerEditor} currentTime={currentTime} />
+      )}
+
       {/* Next episode overlay */}
       {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (
         <NextEpisodeOverlay
@@ -2044,21 +2303,36 @@ export function VideoPlayer({
         />
       )}
 
+      {/* Live translation buffering indicator */}
+      {translationBuffering && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+          <div className="flex items-center gap-3 rounded-lg bg-black/80 px-4 py-3 text-sm text-white shadow-lg">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            Preparing {liveTranslation?.label || "translated"} subtitles…
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       {!isDetached && isPlayerReady && (
         <PlayerControls
-          visible={controlsVisible}
+          visible={controlsVisible || markerEditor.editing}
           playing={playing}
           currentTime={currentTime}
           duration={duration}
           buffered={buffered}
           chapters={chapters}
-          introRegion={intro}
-          creditsRegion={credits}
+          regions={markerRegions}
+          editing={markerEditor.editing}
+          activeEditKind={markerEditor.activeKind}
+          onRegionEdgeChange={markerEditor.setEdge}
+          markerEditAvailable={markerEditor.canEdit}
+          markerEditActive={markerEditor.editing}
+          onToggleMarkerEdit={markerEditor.editing ? markerEditor.cancel : markerEditor.begin}
           volume={volume}
           muted={muted}
           isFullscreen={isFullscreen}
-          subtitleTracks={subtitleUrls}
+          subtitleTracks={effectiveSubtitleTracks}
           activeSubtitleIndex={activeSubtitleIndex}
           onSubtitleSelect={handleSubtitleSelect}
           subtitleDelayMs={subtitleDelayMs}
@@ -2066,6 +2340,8 @@ export function VideoPlayer({
           mediaFileId={activeFileId ?? undefined}
           playerConfig={playerConfig}
           onRefreshSubtitles={onRefreshSubtitles}
+          sessionId={sessionId}
+          getSubtitleStartPosition={getSubtitleStartPosition}
           audioTracks={audioTracks}
           activeAudioIndex={activeAudioIndex}
           onAudioSelect={onAudioSelect}

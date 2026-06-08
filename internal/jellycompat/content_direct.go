@@ -27,9 +27,14 @@ type LibraryPosterPresigner interface {
 // directContentService relies on. Defined as an interface so tests can
 // substitute a stub without standing up a Postgres pool.
 type browseSource interface {
-	Browse(ctx context.Context, filters catalog.BrowseFilters) (*catalog.BrowseResult, error)
+	BrowsePage(ctx context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error)
 	ListGenres(ctx context.Context, filters catalog.BrowseFilters) ([]string, error)
 }
+
+const (
+	compatBrowseChunkLimit = 100
+	compatBrowseMaxLimit   = 1000
+)
 
 // itemAccessSource is the subset of *catalog.ItemRepository that
 // directContentService season/episode handlers rely on. Defined as an
@@ -39,6 +44,14 @@ type itemAccessSource interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
 	Search(ctx context.Context, query string, itemTypes []string, limit, offset int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error)
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
+}
+
+// folderListSource is the subset of *catalog.FolderRepository that
+// directContentService relies on. Defined as an interface so tests can
+// substitute a stub without standing up a Postgres pool.
+type folderListSource interface {
+	GetEnabled(ctx context.Context) ([]*models.MediaFolder, error)
+	ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error)
 }
 
 // seasonListSource is the subset of *catalog.SeasonRepository that
@@ -56,6 +69,7 @@ type seasonListSource interface {
 type episodeListSource interface {
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeriesGroupedBySeason(ctx context.Context, seriesID string) (map[int][]*models.Episode, error)
+	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
 }
 
 // directContentService implements ContentService by calling catalog repos directly.
@@ -65,7 +79,7 @@ type directContentService struct {
 	seasonRepo      seasonListSource
 	episodeRepo     episodeListSource
 	detailSvc       *catalog.DetailService
-	folderRepo      *catalog.FolderRepository
+	folderRepo      folderListSource
 	storeProvider   userstore.UserStoreProvider
 	accessFilter    AccessFilterResolver
 	posterPresigner LibraryPosterPresigner
@@ -78,7 +92,7 @@ func newDirectContentService(
 	seasonRepo *catalog.SeasonRepository,
 	episodeRepo *catalog.EpisodeRepository,
 	detailSvc *catalog.DetailService,
-	folderRepo *catalog.FolderRepository,
+	folderRepo folderListSource,
 	storeProvider userstore.UserStoreProvider,
 	accessFilter AccessFilterResolver,
 ) *directContentService {
@@ -130,7 +144,12 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 
 	var folders []*models.MediaFolder
 	var err error
-	if len(filter.AllowedLibraryIDs) > 0 {
+	if filter.AllowedLibraryIDs != nil {
+		// A non-nil allowlist means the viewer is restricted; an empty
+		// allowlist grants access to no libraries at all.
+		if len(filter.AllowedLibraryIDs) == 0 {
+			return []upstreamUserLibrary{}, nil
+		}
 		folders, err = s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
 	} else {
 		folders, err = s.folderRepo.GetEnabled(ctx)
@@ -139,8 +158,16 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 		return nil, fmt.Errorf("list libraries: %w", err)
 	}
 
+	disabled := make(map[int]struct{}, len(filter.DisabledLibraryIDs))
+	for _, id := range filter.DisabledLibraryIDs {
+		disabled[id] = struct{}{}
+	}
+
 	libraries := make([]upstreamUserLibrary, 0, len(folders))
 	for _, f := range folders {
+		if _, ok := disabled[f.ID]; ok {
+			continue
+		}
 		lib := upstreamUserLibrary{
 			ID:         f.ID,
 			Name:       f.Name,
@@ -165,17 +192,23 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	filter := s.resolveFilter(ctx, session)
 	isPlayedFilter := params.Get("is_played") // "", "true", or "false"
 	contentIDs := parseContentIDParam(params.Get("content_ids"))
+	includeTotal := parseBool(params.Get("include_total"), true)
 
 	requestedLimit := catalog.ParseIntParam(params.Get("limit"))
 	if requestedLimit <= 0 {
 		requestedLimit = 24
 	}
-	requestedOffset := catalog.ParseIntParam(params.Get("offset"))
+	if requestedLimit > compatBrowseMaxLimit {
+		requestedLimit = compatBrowseMaxLimit
+	}
+	requestedOffset := max(catalog.ParseIntParam(params.Get("offset")), 0)
 
-	// When filtering by played status, over-fetch to compensate for filtered-out items.
 	fetchLimit := requestedLimit
 	if isPlayedFilter != "" {
-		fetchLimit = min(requestedLimit*3, 100)
+		// Played status is a profile overlay, so browse over-fetches bounded
+		// chunks and filters them locally instead of asking catalog for every
+		// row in a large library.
+		fetchLimit = min(max(requestedLimit*3, compatBrowseChunkLimit), compatBrowseMaxLimit)
 	}
 
 	filters := catalog.BrowseFilters{
@@ -191,19 +224,31 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		Sort:               params.Get("sort"),
 		Order:              params.Get("order"),
 		Limit:              fetchLimit,
+		MaxLimit:           compatBrowseMaxLimit,
 		Offset:             requestedOffset,
 	}
 
 	var collected []upstreamListItem
 	totalFromCatalog := 0
-	maxIterations := 5
+	totalKnown := false
+	hasMore := false
+	scannedRows := 0
+	maxScannedRows := requestedLimit
+	if isPlayedFilter != "" {
+		maxScannedRows = max(requestedLimit*5, compatBrowseChunkLimit)
+	}
 
-	for range maxIterations {
-		result, err := s.browseRepo.Browse(ctx, filters)
+	for len(collected) < requestedLimit && scannedRows < maxScannedRows {
+		wantTotal := includeTotal && !totalKnown
+		result, err := s.browseRepo.BrowsePage(ctx, filters, wantTotal)
 		if err != nil {
 			return nil, fmt.Errorf("browse items: %w", err)
 		}
-		totalFromCatalog = result.Total
+		if wantTotal {
+			totalFromCatalog = result.Total
+			totalKnown = true
+		}
+		hasMore = result.HasMore
 
 		batch := make([]upstreamListItem, 0, len(result.Items))
 		for _, mi := range result.Items {
@@ -212,10 +257,9 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 					mi = localized
 				}
 			}
-			item := mediaItemToListItem(mi)
-			s.presignListItem(ctx, &item)
-			batch = append(batch, item)
+			batch = append(batch, mediaItemToListItem(mi))
 		}
+		s.presignListItems(ctx, batch)
 		if isPlayedFilter != "" {
 			// Need user data to filter by played status. The handler's
 			// resolveUserStateForContentIDs call covers UserData on the wire
@@ -232,11 +276,11 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 			collected = append(collected, batch...)
 		}
 
-		// Stop if we have enough or catalog is exhausted.
-		if len(collected) >= requestedLimit || len(result.Items) < filters.Limit {
+		scannedRows += len(result.Items)
+		if len(result.Items) == 0 || !result.HasMore {
 			break
 		}
-		filters.Offset += filters.Limit
+		filters.Offset += len(result.Items)
 	}
 
 	// Trim to requested limit.
@@ -244,9 +288,24 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		collected = collected[:requestedLimit]
 	}
 
+	// The handler's resolveUserStateForContentIDs overlay only covers items
+	// with their own progress rows, which a series never has — aggregate
+	// series watch state here so library views carry Played/UnplayedItemCount.
+	// The is_played path already did this via enrichListItemsUserData.
+	// That same absence is what keeps this safe from the handler overlay:
+	// userDataDTO only overrides item-level UserData when a direct progress
+	// row exists, and one never does for a series id.
+	if isPlayedFilter == "" {
+		s.enrichSeriesUserData(ctx, session, collected)
+	}
+
+	if totalKnown {
+		hasMore = totalFromCatalog > requestedOffset+requestedLimit
+	}
+
 	return &upstreamBrowseResponse{
 		Total:   totalFromCatalog,
-		HasMore: totalFromCatalog > requestedOffset+requestedLimit,
+		HasMore: hasMore,
 		Items:   collected,
 	}, nil
 }
@@ -287,10 +346,9 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 				mi = localized
 			}
 		}
-		item := mediaItemToListItem(mi)
-		s.presignListItem(ctx, &item)
-		listItems = append(listItems, item)
+		listItems = append(listItems, mediaItemToListItem(mi))
 	}
+	s.presignListItems(ctx, listItems)
 	s.enrichListItemsUserData(ctx, session, listItems)
 
 	return &upstreamBrowseResponse{
@@ -321,6 +379,17 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 					DurationSeconds: progress.DurationSeconds,
 					Played:          progress.Completed,
 					IsInProgress:    progress.PositionSeconds > 0 && !progress.Completed,
+				}
+			}
+
+			// A series never has a progress row of its own, so roll watch
+			// state up from its episodes (mirrors applySeasonUserData) to
+			// give clients Played/UnplayedItemCount at the series level.
+			if result.UserData == nil && strings.EqualFold(result.Type, "series") && s.episodeRepo != nil {
+				if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
+					episodes := episodesBySeries[contentID]
+					progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, modelEpisodeContentIDs(episodes))
+					result.UserData = seriesUserDataFromEpisodes(episodes, progressMap)
 				}
 			}
 		}
@@ -521,6 +590,128 @@ func (s *directContentService) enrichListItemsUserData(ctx context.Context, sess
 			items[i].UserData = seasonUserDataFromProgress(progress)
 		}
 	}
+
+	s.enrichSeriesListUserData(ctx, session, store, items)
+}
+
+// enrichSeriesUserData is enrichSeriesListUserData with store acquisition,
+// for callers that haven't already resolved the user store.
+func (s *directContentService) enrichSeriesUserData(ctx context.Context, session *Session, items []upstreamListItem) {
+	if s.storeProvider == nil || len(items) == 0 {
+		return
+	}
+	store, err := s.userStore(ctx, session)
+	if err != nil {
+		return
+	}
+	s.enrichSeriesListUserData(ctx, session, store, items)
+}
+
+// enrichSeriesListUserData fills aggregated user data for series rows in a
+// list response. A series never has a progress row of its own, so Played and
+// UnplayedItemCount are rolled up from episode progress, mirroring
+// applySeasonUserData semantics.
+func (s *directContentService) enrichSeriesListUserData(ctx context.Context, session *Session, store userstore.UserStore, items []upstreamListItem) {
+	if s.episodeRepo == nil {
+		return
+	}
+	seriesIDs := make([]string, 0, len(items))
+	for i := range items {
+		if items[i].UserData == nil && items[i].ContentID != "" && strings.EqualFold(items[i].Type, "series") {
+			seriesIDs = append(seriesIDs, items[i].ContentID)
+		}
+	}
+	if len(seriesIDs) == 0 {
+		return
+	}
+	// Cap the rollup so a max-limit browse (compatBrowseMaxLimit) of a
+	// series-only library can't materialize hundreds of thousands of episode
+	// rows in one request. Series past the cap keep a nil UserData — the same
+	// shape they had before series aggregation existed. Real clients page at
+	// 20-100 items, well under the cap.
+	const maxSeriesUserDataRollups = 250
+	if len(seriesIDs) > maxSeriesUserDataRollups {
+		seriesIDs = seriesIDs[:maxSeriesUserDataRollups]
+	}
+	episodesBySeries, err := s.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
+	if err != nil {
+		return
+	}
+	episodeIDs := make([]string, 0, 256)
+	for _, episodes := range episodesBySeries {
+		episodeIDs = append(episodeIDs, modelEpisodeContentIDs(episodes)...)
+	}
+	progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, episodeIDs)
+	for i := range items {
+		if items[i].UserData != nil || !strings.EqualFold(items[i].Type, "series") {
+			continue
+		}
+		if episodes, ok := episodesBySeries[items[i].ContentID]; ok {
+			items[i].UserData = seriesUserDataFromEpisodes(episodes, progressMap)
+		}
+	}
+}
+
+// seriesUserDataFromEpisodes computes WatchedCount/UnplayedCount/
+// InProgressCount/Played for a whole series from a pre-fetched progressMap.
+// Pure function — no I/O. Counting semantics match the native API's series
+// rollup (all episodes including specials; in-progress = started but not
+// completed).
+func seriesUserDataFromEpisodes(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) *catalog.SeasonUserData {
+	watched := 0
+	unplayed := 0
+	inProgress := 0
+	for _, ep := range episodes {
+		if ep == nil {
+			continue
+		}
+		progress, ok := progressMap[ep.ContentID]
+		if ok && progress.Completed {
+			watched++
+			continue
+		}
+		if ok && progress.PositionSeconds > 0 {
+			inProgress++
+		}
+		unplayed++
+	}
+	return &catalog.SeasonUserData{
+		WatchedCount:    watched,
+		UnplayedCount:   unplayed,
+		InProgressCount: inProgress,
+		Played:          unplayed == 0 && len(episodes) > 0,
+	}
+}
+
+// modelEpisodeContentIDs returns the non-empty content ids of the given episodes.
+func modelEpisodeContentIDs(episodes []*models.Episode) []string {
+	ids := make([]string, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep != nil && ep.ContentID != "" {
+			ids = append(ids, ep.ContentID)
+		}
+	}
+	return ids
+}
+
+// chunkedProgressByMediaItems batches ListProgressByMediaItems calls when a
+// series list expands to thousands of episode ids: per-user stores may be
+// SQLite-backed (999 bind-variable default), and chunking also keeps
+// Postgres IN-lists at a sane size. Returns an empty map (never nil); chunks
+// that error are skipped.
+func chunkedProgressByMediaItems(ctx context.Context, store userstore.UserStore, profileID string, mediaItemIDs []string) map[string]userstore.WatchProgress {
+	const chunkSize = 500
+	result := make(map[string]userstore.WatchProgress, len(mediaItemIDs))
+	for start := 0; start < len(mediaItemIDs); start += chunkSize {
+		chunk, err := store.ListProgressByMediaItems(ctx, profileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
+		if err != nil {
+			continue
+		}
+		for id, progress := range chunk {
+			result[id] = progress
+		}
+	}
+	return result
 }
 
 // enrichSeasonUserData adds aggregated user data for a season. Used by
@@ -626,6 +817,39 @@ func seasonUserDataFromProgress(progress userstore.WatchProgress) *catalog.Seaso
 // --- Image URL presigning helpers ---
 
 func (s *directContentService) presignListItem(ctx context.Context, item *upstreamListItem) {
+	if item == nil {
+		return
+	}
+	items := []upstreamListItem{*item}
+	s.presignListItems(ctx, items)
+	*item = items[0]
+}
+
+func (s *directContentService) presignListItems(ctx context.Context, items []upstreamListItem) {
+	if len(items) == 0 {
+		return
+	}
+	for i := range items {
+		ensureListItemImagePaths(&items[i])
+	}
+	if s.detailSvc == nil {
+		return
+	}
+
+	posterURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.PosterURL }), "poster", compatCardImageSize)
+	backdropURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.BackdropURL }), "backdrop", compatCardImageSize)
+	logoURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.LogoURL }), "logo", compatCardImageSize)
+	stillURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.StillURL }), "still", compatCardImageSize)
+
+	for i := range items {
+		items[i].PosterURL = resolvedListImageURL(posterURLs, items[i].PosterURL)
+		items[i].BackdropURL = resolvedListImageURL(backdropURLs, items[i].BackdropURL)
+		items[i].LogoURL = resolvedListImageURL(logoURLs, items[i].LogoURL)
+		items[i].StillURL = resolvedListImageURL(stillURLs, items[i].StillURL)
+	}
+}
+
+func ensureListItemImagePaths(item *upstreamListItem) {
 	if item.PosterPath == "" {
 		item.PosterPath = item.PosterURL
 	}
@@ -638,10 +862,33 @@ func (s *directContentService) presignListItem(ctx context.Context, item *upstre
 	if item.StillPath == "" {
 		item.StillPath = item.StillURL
 	}
-	item.PosterURL = compatPresignImage(s.detailSvc, ctx, item.PosterURL, "poster", compatCardImageSize)
-	item.BackdropURL = compatPresignImage(s.detailSvc, ctx, item.BackdropURL, "backdrop", compatCardImageSize)
-	item.LogoURL = compatPresignImage(s.detailSvc, ctx, item.LogoURL, "logo", compatCardImageSize)
-	item.StillURL = compatPresignImage(s.detailSvc, ctx, item.StillURL, "still", compatCardImageSize)
+}
+
+func collectListImagePaths(items []upstreamListItem, pick func(upstreamListItem) string) []string {
+	paths := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		path := pick(item)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func resolvedListImageURL(resolved map[string]catalog.ResolvedImageURL, path string) string {
+	if path == "" {
+		return ""
+	}
+	if value, ok := resolved[path]; ok {
+		return value.URL
+	}
+	return ""
 }
 
 func (s *directContentService) presignSeason(ctx context.Context, season *upstreamSeason) {

@@ -34,6 +34,10 @@ type EpisodeFileProvider interface {
 	ListByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error)
 }
 
+type batchEpisodeFileProvider interface {
+	ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
+}
+
 type MetadataRefreshRequester interface {
 	RequestStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error
 }
@@ -146,7 +150,7 @@ func (h *ItemsHandler) maybeRequestStaleEpisodeMetadataRefresh(ctx context.Conte
 	if h == nil || h.metadataRefreshRequester == nil || episode == nil {
 		return
 	}
-	if metadata.EpisodeHasIncompleteMetadata(episode, time.Now()) {
+	if metadata.EpisodeHasActionableMetadataDebt(episode, time.Now()) {
 		h.requestStaleMetadataRefresh(ctx, "episode", episode.ContentID)
 	}
 }
@@ -157,7 +161,7 @@ func (h *ItemsHandler) maybeRequestStaleSeasonMetadataRefresh(ctx context.Contex
 	}
 	now := time.Now()
 	for _, episode := range episodes {
-		if metadata.EpisodeHasIncompleteMetadata(episode, now) {
+		if metadata.EpisodeHasActionableMetadataDebt(episode, now) {
 			h.requestStaleMetadataRefresh(ctx, "season", seasonID)
 			return
 		}
@@ -209,7 +213,18 @@ type itemListResponse struct {
 	LastAirDate       *string                `json:"last_air_date,omitempty"`
 	AddedAt           *time.Time             `json:"added_at,omitempty"`
 	OverlaySummary    *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	SortMetrics       *sortMetricsResponse   `json:"sort_metrics,omitempty"`
 	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
+}
+
+type sortMetricsResponse struct {
+	ReleaseDate    *string  `json:"release_date,omitempty"`
+	RuntimeMinutes *int     `json:"runtime_minutes,omitempty"`
+	Resolution     string   `json:"resolution,omitempty"`
+	BitrateKbps    *int     `json:"bitrate_kbps,omitempty"`
+	ProgressRatio  *float64 `json:"progress_ratio,omitempty"`
+	ViewedAt       string   `json:"viewed_at,omitempty"`
+	PlayCount      *int     `json:"play_count,omitempty"`
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -461,7 +476,9 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 	}
 
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
-	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, id, "", "watched", "watched.updated")
+	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, id, "", "watched", userStateEventState{
+		Played: boolPtr(played),
+	})
 
 	writeJSON(w, http.StatusOK, watchedStateResponse{
 		ContentID:     id,
@@ -817,6 +834,147 @@ func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models
 		return summaries
 	}
 
+	groupedFiles := h.listBrowseItemFiles(ctx, items, filter)
+	for contentID, files := range groupedFiles {
+		if summary := overlays.BuildSummary(files); summary != nil {
+			summaries[contentID] = summary
+		}
+	}
+	return summaries
+}
+
+func (h *ItemsHandler) listSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	sortField string,
+	filter catalog.AccessFilter,
+	overlaySummaries map[string]*models.OverlaySummary,
+	store userstore.UserStore,
+	profileID string,
+) map[string]*sortMetricsResponse {
+	metrics := make(map[string]*sortMetricsResponse, len(items))
+	switch sortField {
+	case "release_date":
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			releaseDate := firstNonBlankPtr(item.ReleaseDate, item.FirstAirDate)
+			if releaseDate != nil {
+				metrics[item.ContentID] = &sortMetricsResponse{ReleaseDate: releaseDate}
+			}
+		}
+	case "runtime":
+		for _, item := range items {
+			if item == nil || item.Runtime <= 0 {
+				continue
+			}
+			runtimeMinutes := item.Runtime
+			metrics[item.ContentID] = &sortMetricsResponse{RuntimeMinutes: &runtimeMinutes}
+		}
+	case "resolution":
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			if summary := overlaySummaries[item.ContentID]; summary != nil && strings.TrimSpace(summary.Resolution) != "" {
+				metrics[item.ContentID] = &sortMetricsResponse{Resolution: summary.Resolution}
+			}
+		}
+	case "bitrate":
+		groupedFiles := h.listBrowseItemFiles(ctx, items, filter)
+		for contentID, files := range groupedFiles {
+			if bitrate := maxFileBitrate(files); bitrate > 0 {
+				value := bitrate
+				metrics[contentID] = &sortMetricsResponse{BitrateKbps: &value}
+			}
+		}
+	case "progress", "date_viewed", "plays":
+		h.listUserSortMetrics(ctx, items, sortField, store, profileID, metrics)
+	}
+	return metrics
+}
+
+func (h *ItemsHandler) listUserSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	sortField string,
+	store userstore.UserStore,
+	profileID string,
+	metrics map[string]*sortMetricsResponse,
+) {
+	if store == nil || profileID == "" || len(items) == 0 {
+		return
+	}
+	contentIDs := uniqueItemContentIDs(items)
+	if len(contentIDs) == 0 {
+		return
+	}
+
+	progressMap, err := store.ListProgressByMediaItems(ctx, profileID, contentIDs)
+	if err != nil {
+		return
+	}
+
+	switch sortField {
+	case "progress":
+		for _, item := range items {
+			if item == nil || item.ContentID == "" {
+				continue
+			}
+			progress, ok := progressMap[item.ContentID]
+			if !ok || progress.Completed || progress.PositionSeconds <= 0 || progress.DurationSeconds <= 0 {
+				continue
+			}
+			ratio := progress.PositionSeconds / progress.DurationSeconds
+			metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
+		}
+	case "date_viewed", "plays":
+		history, err := listCompletedHistoryForItems(ctx, store, profileID, contentIDs)
+		if err != nil {
+			return
+		}
+		historyCounts := make(map[string]int, len(contentIDs))
+		historyViewedAt := make(map[string]string, len(contentIDs))
+		for _, entry := range history {
+			if entry.MediaItemID == "" {
+				continue
+			}
+			historyCounts[entry.MediaItemID]++
+			if entry.WatchedAt > historyViewedAt[entry.MediaItemID] {
+				historyViewedAt[entry.MediaItemID] = entry.WatchedAt
+			}
+		}
+		for _, item := range items {
+			if item == nil || item.ContentID == "" {
+				continue
+			}
+			resp := &sortMetricsResponse{}
+			if sortField == "date_viewed" {
+				viewedAt := historyViewedAt[item.ContentID]
+				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
+					viewedAt = progress.UpdatedAt
+				}
+				if viewedAt == "" {
+					continue
+				}
+				resp.ViewedAt = viewedAt
+			} else {
+				playCount := historyCounts[item.ContentID]
+				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
+					playCount = 1
+				}
+				if playCount <= 0 {
+					continue
+				}
+				resp.PlayCount = &playCount
+			}
+			metrics[item.ContentID] = resp
+		}
+	}
+}
+
+func uniqueItemContentIDs(items []*models.MediaItem) []string {
 	contentIDs := make([]string, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
@@ -829,21 +987,100 @@ func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models
 		seen[item.ContentID] = struct{}{}
 		contentIDs = append(contentIDs, item.ContentID)
 	}
-	if len(contentIDs) == 0 {
-		return summaries
-	}
+	return contentIDs
+}
 
-	groupedFiles, err := h.fileRepo.ListByContentIDs(ctx, contentIDs)
-	if err != nil {
-		return summaries
-	}
-	for contentID, files := range groupedFiles {
-		files = catalog.FilterMediaFilesByAccess(files, filter)
-		if summary := overlays.BuildSummary(files); summary != nil {
-			summaries[contentID] = summary
+func listCompletedHistoryForItems(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	contentIDs []string,
+) ([]userstore.WatchHistoryEntry, error) {
+	const pageSize = 500
+	var all []userstore.WatchHistoryEntry
+	for offset := 0; ; offset += pageSize {
+		page, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
+			ProfileID:    profileID,
+			MediaItemIDs: contentIDs,
+			Limit:        pageSize,
+			Offset:       offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < pageSize {
+			return all, nil
 		}
 	}
-	return summaries
+}
+
+func (h *ItemsHandler) listBrowseItemFiles(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string][]*models.MediaFile {
+	grouped := make(map[string][]*models.MediaFile, len(items))
+	if h.fileRepo == nil || len(items) == 0 {
+		return grouped
+	}
+
+	contentIDs := make([]string, 0, len(items))
+	episodeIDs := make([]string, 0)
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		if item.Type == "episode" {
+			episodeIDs = append(episodeIDs, item.ContentID)
+		} else {
+			contentIDs = append(contentIDs, item.ContentID)
+		}
+	}
+
+	if len(contentIDs) > 0 {
+		contentFiles, err := h.fileRepo.ListByContentIDs(ctx, contentIDs)
+		if err == nil {
+			for contentID, files := range contentFiles {
+				grouped[contentID] = catalog.FilterMediaFilesByAccess(files, filter)
+			}
+		}
+	}
+
+	if len(episodeIDs) > 0 {
+		if batchProvider, ok := h.fileRepo.(batchEpisodeFileProvider); ok {
+			episodeFiles, err := batchProvider.ListByEpisodeIDs(ctx, episodeIDs)
+			if err == nil {
+				for episodeID, files := range episodeFiles {
+					grouped[episodeID] = catalog.FilterMediaFilesByAccess(files, filter)
+				}
+			}
+		}
+	}
+
+	return grouped
+}
+
+func firstNonBlankPtr(values ...*string) *string {
+	for _, value := range values {
+		if value == nil || strings.TrimSpace(*value) == "" {
+			continue
+		}
+		copyValue := *value
+		return &copyValue
+	}
+	return nil
+}
+
+func maxFileBitrate(files []*models.MediaFile) int {
+	maxBitrate := 0
+	for _, file := range files {
+		if file != nil && file.Bitrate > maxBitrate {
+			maxBitrate = file.Bitrate
+		}
+	}
+	return maxBitrate
 }
 
 // toSeasonResponse converts a Season model to an API response.

@@ -153,8 +153,6 @@ export default function AdminCollections() {
         }}
       />
 
-      <CollectionApplyJobBanner job={latestApplyJob} />
-
       <div className="page-header gap-5">
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Collections</h1>
@@ -187,6 +185,8 @@ export default function AdminCollections() {
           </Button>
         </div>
       </div>
+
+      <CollectionApplyJobBanner job={latestApplyJob} />
 
       <CollectionTemplateGallery
         open={galleryOpen}
