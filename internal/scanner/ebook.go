@@ -106,8 +106,13 @@ func uniqueTrimmedStrings(values []string) []string {
 
 func normalizeEbookISBN(value string) string {
 	value = strings.ToUpper(strings.TrimSpace(value))
-	value = strings.TrimPrefix(value, "ISBN:")
-	value = strings.TrimPrefix(value, "ISBN")
+	for _, prefix := range []string{"ISBN-13", "ISBN-10", "ISBN"} {
+		if strings.HasPrefix(value, prefix) {
+			value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
+			value = strings.TrimLeft(value, ": ")
+			break
+		}
+	}
 	var out strings.Builder
 	for _, r := range value {
 		if r >= '0' && r <= '9' {

@@ -30,6 +30,21 @@ func TestSupportsEbookFile(t *testing.T) {
 	}
 }
 
+func TestNormalizeEbookISBNHandlesCommonLabels(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"ISBN-13: 978-0-306-40615-7", "9780306406157"},
+		{"ISBN-10: 0-9752298-0-x", "097522980X"},
+	}
+	for _, tc := range cases {
+		if got := normalizeEbookISBN(tc.in); got != tc.want {
+			t.Errorf("normalizeEbookISBN(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestParseEbookEPUBMetadata(t *testing.T) {
 	path := writeTestEPUB(t, []string{"ISBN: 978-0-306-40615-7"})
 
