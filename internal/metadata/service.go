@@ -3897,6 +3897,37 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			}
 		}
 	}
+	// Misplaced-TV guard: a strict movie-type library should never turn a TV
+	// episode living inside a "Season NN/" (or "Specials") directory into a
+	// per-episode "Season NN" movie item. Such trees are series dropped into a
+	// movie library (e.g. fan supercut packs) and never match a movie provider;
+	// creating an item per episode just pollutes the catalog. Record the root
+	// for admin visibility and skip skeleton creation. "mixed" libraries are
+	// left untouched because they legitimately host series.
+	//
+	// This fires on the structural signal alone (season dir + SxxExx), even when
+	// a provider id was parsed — a "Season NN" folder otherwise yields a bogus
+	// id (the season number, e.g. tmdb="01"), so effectiveExternalIDs must NOT
+	// gate the skip.
+	if libNorm := strings.ToLower(strings.TrimSpace(libraryType)); (libNorm == "movie" || libNorm == "movies") &&
+		naming.IsMisplacedSeriesFile(file.FilePath) {
+		if s != nil && s.skippedRootRepo != nil {
+			if err := s.skippedRootRepo.Upsert(ctx, models.SkippedMediaRoot{
+				MediaFolderID:  folderID,
+				RootPath:       observedRootPath,
+				Reason:         "series_in_movie_library",
+				SampleFilePath: file.FilePath,
+				FileCount:      1,
+			}); err != nil {
+				slog.Warn("metadata: failed to record misplaced-series root",
+					"folder_id", folderID,
+					"root_path", observedRootPath,
+					"error", err)
+			}
+		}
+		res.ItemStatus = "skipped"
+		return res, nil
+	}
 	if effectiveExternalIDs == nil {
 		// Record for admin diagnostics only — no longer bail out.
 		if s != nil && s.skippedRootRepo != nil {
