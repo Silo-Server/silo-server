@@ -259,3 +259,24 @@ func TestScanFolderEbookLibraryReturnsNotImplemented(t *testing.T) {
 		t.Fatalf("ScanFolder ebook result = %+v, want nil", result)
 	}
 }
+
+func TestScanSubtreeEbookLibraryReturnsNotImplemented(t *testing.T) {
+	subtree := t.TempDir()
+	ebookPath := filepath.Join(subtree, "Book.epub")
+	if err := os.WriteFile(ebookPath, []byte("not a real epub"), 0o644); err != nil {
+		t.Fatalf("write ebook fixture: %v", err)
+	}
+
+	scanner := &Scanner{}
+	result, err := scanner.ScanSubtree(context.Background(), &models.MediaFolder{
+		ID:    0,
+		Type:  "ebook",
+		Paths: []string{subtree},
+	}, subtree)
+	if !errors.Is(err, errEbookScanningNotImplemented) {
+		t.Fatalf("ScanSubtree ebook error = %v, want %v", err, errEbookScanningNotImplemented)
+	}
+	if result != nil {
+		t.Fatalf("ScanSubtree ebook result = %+v, want nil", result)
+	}
+}

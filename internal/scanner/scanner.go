@@ -269,6 +269,9 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		}
 		return &ScanResult{}, nil
 	}
+	if isEbookLibraryType(folder.Type) {
+		return nil, errEbookScanningNotImplemented
+	}
 	return s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
 }
 
