@@ -54,6 +54,27 @@ vi.mock("@/components/DownloadVersionPicker", () => ({
   ),
 }));
 
+vi.mock("@/pages/audiobooks/components/RelatedRail", () => ({
+  RelatedRail: ({
+    heading,
+    items,
+  }: {
+    heading: string;
+    items: Array<{ content_id: string; title: string; subtitle?: string; highlight?: boolean }>;
+  }) => (
+    <section>
+      <h2>{heading}</h2>
+      {items.map((item) => (
+        <div key={item.content_id}>
+          <span>{item.title}</span>
+          {item.subtitle && <span>{item.subtitle}</span>}
+          {item.highlight && <span>Current</span>}
+        </div>
+      ))}
+    </section>
+  ),
+}));
+
 vi.mock("./DetailHero", () => ({
   default: ({
     title,
@@ -181,5 +202,45 @@ describe("EbookContent", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
     markup = renderToStaticMarkup(<EbookContent item={makeEbookItem({ versions: [] })} />);
     expect(markup).not.toContain("Download");
+  });
+
+  it("renders ebook series and related rails from ebook detail extension", () => {
+    const markup = renderToStaticMarkup(
+      <EbookContent
+        item={makeEbookItem({
+          ebook: {
+            authors: [{ name: "Becky Chambers" }],
+            publisher: "Tor",
+            series: {
+              name: "Monk and Robot",
+              entries: [
+                {
+                  content_id: "ebook-1",
+                  title: "A Psalm for the Wild-Built",
+                  series_index: 1,
+                },
+                {
+                  content_id: "ebook-2",
+                  title: "A Prayer for the Crown-Shy",
+                  series_index: 2,
+                },
+              ],
+            },
+            related: {
+              also_by_author: [{ content_id: "ebook-3", title: "The Long Way", year: 2014 }],
+              similar: [{ content_id: "ebook-4", title: "All Systems Red", year: 2017 }],
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(markup).toContain("In Monk and Robot");
+    expect(markup).toContain("A Prayer for the Crown-Shy");
+    expect(markup).toContain("Book 2");
+    expect(markup).toContain("Also by Becky Chambers");
+    expect(markup).toContain("The Long Way");
+    expect(markup).toContain("You might also like");
+    expect(markup).toContain("All Systems Red");
   });
 });

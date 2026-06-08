@@ -568,6 +568,16 @@ export interface AudiobookDetailExtension {
   };
 }
 
+export interface EbookDetailExtension {
+  authors: AudiobookPerson[];
+  publisher?: string;
+  series?: AudiobookSeriesGroup;
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -991,6 +1001,7 @@ export interface ItemDetail {
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
   audiobook?: AudiobookDetailExtension;
+  ebook?: EbookDetailExtension;
 }
 
 export interface WatchDetail {

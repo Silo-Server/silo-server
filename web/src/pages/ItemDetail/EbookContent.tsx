@@ -7,11 +7,18 @@ import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
 
 function authorNames(item: ItemDetail): string[] {
+  const extensionAuthors = (item.ebook?.authors ?? [])
+    .map((author) => author.name)
+    .filter((name) => name.trim() !== "");
+  if (extensionAuthors.length > 0) {
+    return extensionAuthors;
+  }
   return (item.crew ?? [])
     .filter((credit) => credit.job === "Author")
     .map((credit) => credit.name)
@@ -23,7 +30,7 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
   const { user } = useAuth();
   const [downloadOpen, setDownloadOpen] = useState(false);
   const authors = authorNames(item);
-  const publisher = (item.studios ?? [])[0];
+  const publisher = item.ebook?.publisher || (item.studios ?? [])[0];
   const year = item.year ? String(item.year) : "";
   const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
 
@@ -76,6 +83,44 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
       />
 
       <div className="page-shell space-y-12 py-10 sm:space-y-14">
+        {item.ebook?.series && item.ebook.series.entries.length > 0 && (
+          <RelatedRail
+            heading={item.ebook.series.name ? `In ${item.ebook.series.name}` : "In this series"}
+            items={item.ebook.series.entries.map((entry) => ({
+              content_id: entry.content_id,
+              title: entry.title,
+              poster_url: entry.poster_url,
+              subtitle:
+                typeof entry.series_index === "number" ? `Book ${entry.series_index}` : undefined,
+              highlight: entry.content_id === item.content_id,
+            }))}
+          />
+        )}
+
+        {(item.ebook?.related.also_by_author ?? []).length > 0 && (
+          <RelatedRail
+            heading={`Also by ${authors[0] ?? "this author"}`}
+            items={(item.ebook?.related.also_by_author ?? []).map((entry) => ({
+              content_id: entry.content_id,
+              title: entry.title,
+              poster_url: entry.poster_url,
+              subtitle: entry.year ? String(entry.year) : undefined,
+            }))}
+          />
+        )}
+
+        {(item.ebook?.related.similar ?? []).length > 0 && (
+          <RelatedRail
+            heading="You might also like"
+            items={(item.ebook?.related.similar ?? []).map((entry) => ({
+              content_id: entry.content_id,
+              title: entry.title,
+              poster_url: entry.poster_url,
+              subtitle: entry.year ? String(entry.year) : undefined,
+            }))}
+          />
+        )}
+
         <MediaLocations
           title="Files"
           versions={item.versions}
