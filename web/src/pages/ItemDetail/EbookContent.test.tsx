@@ -253,6 +253,23 @@ describe("EbookContent", () => {
     expect(markup).not.toContain("Read");
   });
 
+  it("does not show read action when ebook files are not reader-supported", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent
+          item={makeEbookItem({
+            versions: [makeVersion({ container: "docx", file_name: "Book.docx" })],
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).not.toContain("Read");
+    expect(markup).toContain("Download");
+  });
+
   it("shows continue action and saved progress when ebook progress exists", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
     mocks.useEbookReaderProgress.mockReturnValue({

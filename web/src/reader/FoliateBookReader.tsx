@@ -47,6 +47,20 @@ type RelocateDetail = {
   };
 };
 
+const READEST_FORMATS = new Set([
+  "epub",
+  "pdf",
+  "mobi",
+  "azw",
+  "azw3",
+  "cbz",
+  "cbr",
+  "fb2",
+  "fbz",
+  "txt",
+  "md",
+]);
+
 export function ebookReadPath(contentID: string, fileID: number): string {
   return `/ebooks/${encodeURIComponent(contentID)}/files/${fileID}/read`;
 }
@@ -75,6 +89,10 @@ export function readerFileFormat(file: FileVersion | undefined): string {
   if (fileName.toLowerCase().endsWith(".fb2.zip")) return "fbz";
   const match = /\.([a-z0-9]+)$/i.exec(fileName);
   return match?.[1]?.toLowerCase() ?? "";
+}
+
+export function isReaderSupportedFile(file: FileVersion | undefined): boolean {
+  return READEST_FORMATS.has(readerFileFormat(file));
 }
 
 export function readerMimeType(format: string): string {

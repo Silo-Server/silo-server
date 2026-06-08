@@ -10,7 +10,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useEbookReaderProgress } from "@/hooks/queries/ebookReaderProgress";
 import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
-import { formatReaderProgress } from "@/reader/FoliateBookReader";
+import {
+  formatReaderProgress,
+  isReaderSupportedFile,
+  readerFileFormat,
+} from "@/reader/FoliateBookReader";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
@@ -37,16 +41,11 @@ function ebookVersionSummary(version: ItemDetail["versions"][number]): string {
   ]);
 }
 
-function ebookFileFormat(file: FileVersion): string {
-  const container = file.container?.trim().toLowerCase();
-  if (container) return container.replace(/^\./, "");
-  const fileName = file.file_name || file.file_path || "";
-  if (fileName.toLowerCase().endsWith(".fb2.zip")) return "fbz";
-  return /\.([a-z0-9]+)$/i.exec(fileName)?.[1]?.toLowerCase() ?? "";
-}
-
 function preferredReadVersion(versions: FileVersion[]): FileVersion | undefined {
-  return versions.find((version) => ebookFileFormat(version) === "epub") ?? versions[0];
+  return (
+    versions.find((version) => readerFileFormat(version) === "epub") ??
+    versions.find((version) => isReaderSupportedFile(version))
+  );
 }
 
 function progressReadVersion(
@@ -54,7 +53,7 @@ function progressReadVersion(
   fileID: number | undefined,
 ): FileVersion | undefined {
   if (typeof fileID !== "number") return undefined;
-  return versions.find((version) => version.file_id === fileID);
+  return versions.find((version) => version.file_id === fileID && isReaderSupportedFile(version));
 }
 
 export default function EbookContent({ item }: { item: ItemDetail & { type: "ebook" } }) {
@@ -65,13 +64,13 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
   const authors = authorNames(item);
   const publisher = item.ebook?.publisher || (item.studios ?? [])[0];
   const year = item.year ? String(item.year) : "";
-  const canRead = item.versions.length > 0;
-  const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
   const progressLabel = formatReaderProgress(readerProgress?.progress);
   const hasSavedProgress = Boolean(readerProgress && progressLabel);
   const readVersion =
     (hasSavedProgress ? progressReadVersion(item.versions, readerProgress?.file_id) : undefined) ??
     preferredReadVersion(item.versions);
+  const canRead = Boolean(readVersion);
+  const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
   const readerHref = readVersion
     ? `/reader/ebook/${encodeURIComponent(item.content_id)}?file_id=${readVersion.file_id}`
     : `/reader/ebook/${encodeURIComponent(item.content_id)}`;

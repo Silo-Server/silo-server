@@ -8,31 +8,18 @@ import { Button } from "@/components/ui/button";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import FoliateBookReader, {
   formatReaderProgress,
+  isReaderSupportedFile,
   readerFileFormat,
   type FoliateBookReaderHandle,
   type ReaderLoadState,
 } from "@/reader/FoliateBookReader";
-
-const READEST_FORMATS = new Set([
-  "epub",
-  "pdf",
-  "mobi",
-  "azw",
-  "azw3",
-  "cbz",
-  "cbr",
-  "fb2",
-  "fbz",
-  "txt",
-  "md",
-]);
 
 function chooseReaderFile(files: FileVersion[], requestedID: number | null): FileVersion | undefined {
   const requested = requestedID ? files.find((file) => file.file_id === requestedID) : undefined;
   if (requested) return requested;
   return (
     files.find((file) => readerFileFormat(file) === "epub") ??
-    files.find((file) => READEST_FORMATS.has(readerFileFormat(file))) ??
+    files.find((file) => isReaderSupportedFile(file)) ??
     files[0]
   );
 }
@@ -164,7 +151,7 @@ export default function EbookReader() {
       </header>
 
       <main className="h-[calc(100vh-3.5rem)]">
-        {READEST_FORMATS.has(format) ? (
+        {isReaderSupportedFile(selectedFile) ? (
           <FoliateBookReader
             ref={readerRef}
             contentID={contentId}
