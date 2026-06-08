@@ -121,7 +121,15 @@ type EmbeddingTextCandidate struct {
 }
 
 func embeddingEligibilityWhereClause() string {
-	return "(mi.status = 'matched' OR mi.type = 'audiobook' OR mi.type = 'ebook')"
+	return recommendationItemEligibilityWhereClause("mi")
+}
+
+func recommendationItemEligibilityWhereClause(alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		alias = "media_items"
+	}
+	return fmt.Sprintf("(%s.status = 'matched' OR %s.type = 'audiobook' OR %s.type = 'ebook')", alias, alias, alias)
 }
 
 // UpsertEmbedding stores or updates an embedding for a media item.
@@ -1277,14 +1285,14 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 
 // GetRecentlyAddedItems returns items added within the given number of days.
 func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, created_at
-		FROM   media_items
-		WHERE  status = 'matched'
-		  AND  created_at > NOW() - ($1 || ' days')::interval
-		ORDER  BY created_at DESC
-		LIMIT  $2`,
-		fmt.Sprintf("%d", days), limit)
+	query := fmt.Sprintf(`
+		SELECT mi.content_id, mi.created_at
+		FROM   media_items mi
+		WHERE  %s
+		  AND  mi.created_at > NOW() - ($1 || ' days')::interval
+		ORDER  BY mi.created_at DESC
+		LIMIT  $2`, recommendationItemEligibilityWhereClause("mi"))
+	rows, err := r.pool.Query(ctx, query, fmt.Sprintf("%d", days), limit)
 	if err != nil {
 		return nil, fmt.Errorf("get recently added: %w", err)
 	}

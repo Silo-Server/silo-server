@@ -42,6 +42,24 @@ func TestEmbeddingEligibilityWhereClauseUsesMediaItemsAlias(t *testing.T) {
 	}
 }
 
+func TestRecommendationItemEligibilityWhereClauseIncludesBookTypes(t *testing.T) {
+	clause := recommendationItemEligibilityWhereClause("mi")
+
+	for _, term := range []string{"mi.status = 'matched'", "mi.type = 'audiobook'", "mi.type = 'ebook'"} {
+		if !strings.Contains(clause, term) {
+			t.Fatalf("recommendation item eligibility clause missing %q: %s", term, clause)
+		}
+	}
+}
+
+func TestRecommendationItemEligibilityWhereClauseDefaultsAlias(t *testing.T) {
+	clause := recommendationItemEligibilityWhereClause("")
+
+	if !strings.Contains(clause, "media_items.status = 'matched'") {
+		t.Fatalf("default eligibility alias missing media_items qualification: %s", clause)
+	}
+}
+
 func assertQueryTermsInOrder(t *testing.T, query string, terms ...string) {
 	t.Helper()
 
