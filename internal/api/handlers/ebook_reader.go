@@ -217,6 +217,9 @@ func isEbookFile(file *models.MediaFile) bool {
 	if !strings.EqualFold(file.BaseType, "ebook") {
 		return false
 	}
+	if strings.HasSuffix(strings.ToLower(file.FilePath), ".fb2.zip") {
+		return true
+	}
 	return isEbookReaderFormat(file.Container) || isEbookReaderFormat(filepath.Ext(file.FilePath))
 }
 

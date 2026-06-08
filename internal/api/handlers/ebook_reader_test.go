@@ -171,6 +171,17 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 	}
 }
 
+func TestEbookReaderRecognizesFBZFromCompoundFilenameWithoutContainer(t *testing.T) {
+	file := &models.MediaFile{
+		FilePath: "/library/book.fb2.zip",
+		BaseType: "ebook",
+	}
+
+	if !isEbookFile(file) {
+		t.Fatal("expected .fb2.zip path to be treated as an ebook reader format")
+	}
+}
+
 func TestEbookReaderMapsAccessFailureToNotFound(t *testing.T) {
 	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
 		FileResolver: stubMediaFileResolver{
