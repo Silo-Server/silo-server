@@ -120,6 +120,10 @@ type EmbeddingTextCandidate struct {
 	CanonicalText string
 }
 
+func embeddingEligibilityWhereClause() string {
+	return "(mi.status = 'matched' OR mi.type = 'audiobook' OR mi.type = 'ebook')"
+}
+
 // UpsertEmbedding stores or updates an embedding for a media item.
 func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error {
 	padded, err := ensureCanonicalDimensions(embedding)
@@ -416,18 +420,18 @@ func (r *Repo) findTasteProfileCandidates(
 
 // ItemsNeedingEmbedding returns content IDs of media items that either have no
 // embedding or whose embedding was generated with a different model.
-// Audiobooks bypass the status='matched' gate because they don't go through
-// the external-provider match pipeline; their tag-derived metadata is
-// authoritative as soon as the scan completes.
+// Books bypass the status='matched' gate because their scanner/plugin-derived
+// metadata is authoritative as soon as the scan/enrichment completes.
 func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel string, limit int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
+	query := fmt.Sprintf(`
 		SELECT mi.content_id
 		FROM   media_items mi
 		LEFT JOIN media_item_embeddings e ON e.media_item_id = mi.content_id
-		WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
+		WHERE  %s
 		  AND  (e.media_item_id IS NULL OR e.model != $1)
 		LIMIT  $2
-	`, currentModel, limit)
+	`, embeddingEligibilityWhereClause())
+	rows, err := r.pool.Query(ctx, query, currentModel, limit)
 	if err != nil {
 		return nil, fmt.Errorf("items needing embedding: %w", err)
 	}
@@ -448,7 +452,7 @@ func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel string, l
 }
 
 func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error) {
-	rows, err := r.pool.Query(ctx, `
+	query := fmt.Sprintf(`
 		-- Keep current_text in sync with embeddings.BuildEmbeddingText. This lets
 		-- the embedding job page over only missing, model-stale, or text-stale rows.
 		-- Book lines map to embeddings.mediaTypeLabel + the author/narrator
@@ -536,7 +540,7 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 8
 			) narrators ON TRUE
-			WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
+			WHERE  %s
 			  AND  ($1 = '' OR mi.content_id > $1)
 		)
 		SELECT mi.content_id,
@@ -548,7 +552,8 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 		   OR  mi.canonical_text IS DISTINCT FROM mi.current_text
 		ORDER  BY mi.content_id
 		LIMIT  $3
-	`, afterID, currentModel, limit)
+	`, embeddingEligibilityWhereClause())
+	rows, err := r.pool.Query(ctx, query, afterID, currentModel, limit)
 	if err != nil {
 		return nil, fmt.Errorf("embedding text candidates: %w", err)
 	}
@@ -583,7 +588,8 @@ func (r *Repo) EmbeddingCount(ctx context.Context) (int, error) {
 // (used by the admin worker UI) lines up with what the job actually does.
 func (r *Repo) TotalMediaItemCount(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE status = 'matched' OR type = 'audiobook'`).Scan(&count)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM media_items mi WHERE %s`, embeddingEligibilityWhereClause())
+	err := r.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("total media item count: %w", err)
 	}

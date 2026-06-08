@@ -24,6 +24,24 @@ func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
 	}
 }
 
+func TestEmbeddingEligibilityWhereClauseIncludesBookTypes(t *testing.T) {
+	clause := embeddingEligibilityWhereClause()
+
+	for _, term := range []string{"mi.status = 'matched'", "mi.type = 'audiobook'", "mi.type = 'ebook'"} {
+		if !strings.Contains(clause, term) {
+			t.Fatalf("embedding eligibility clause missing %q: %s", term, clause)
+		}
+	}
+}
+
+func TestEmbeddingEligibilityWhereClauseUsesMediaItemsAlias(t *testing.T) {
+	clause := embeddingEligibilityWhereClause()
+
+	if strings.Contains(clause, " type =") || strings.Contains(clause, " status =") {
+		t.Fatalf("embedding eligibility clause should qualify media_items columns: %s", clause)
+	}
+}
+
 func assertQueryTermsInOrder(t *testing.T, query string, terms ...string) {
 	t.Helper()
 
