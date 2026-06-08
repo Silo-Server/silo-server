@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { BookOpen, Download } from "lucide-react";
 import { Link } from "react-router";
-import type { ItemDetail } from "@/api/types";
+import type { FileVersion, ItemDetail } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import MediaLocations from "@/components/MediaLocations";
 import PageBack from "@/components/PageBack";
@@ -35,6 +35,18 @@ function ebookVersionSummary(version: ItemDetail["versions"][number]): string {
   ]);
 }
 
+function ebookFileFormat(file: FileVersion): string {
+  const container = file.container?.trim().toLowerCase();
+  if (container) return container.replace(/^\./, "");
+  const fileName = file.file_name || file.file_path || "";
+  if (fileName.toLowerCase().endsWith(".fb2.zip")) return "fbz";
+  return /\.([a-z0-9]+)$/i.exec(fileName)?.[1]?.toLowerCase() ?? "";
+}
+
+function preferredReadVersion(versions: FileVersion[]): FileVersion | undefined {
+  return versions.find((version) => ebookFileFormat(version) === "epub") ?? versions[0];
+}
+
 export default function EbookContent({ item }: { item: ItemDetail & { type: "ebook" } }) {
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
@@ -44,9 +56,9 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
   const year = item.year ? String(item.year) : "";
   const canRead = item.versions.length > 0;
   const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
-  const firstVersion = item.versions[0];
-  const readerHref = firstVersion
-    ? `/reader/ebook/${encodeURIComponent(item.content_id)}?file_id=${firstVersion.file_id}`
+  const readVersion = preferredReadVersion(item.versions);
+  const readerHref = readVersion
+    ? `/reader/ebook/${encodeURIComponent(item.content_id)}?file_id=${readVersion.file_id}`
     : `/reader/ebook/${encodeURIComponent(item.content_id)}`;
 
   return (

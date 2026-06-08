@@ -246,6 +246,25 @@ describe("EbookContent", () => {
     expect(markup).not.toContain("Read");
   });
 
+  it("prefers EPUB for the read action when multiple ebook files exist", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent
+          item={makeEbookItem({
+            versions: [
+              makeVersion({ file_id: 1, container: "pdf", file_name: "Book.pdf" }),
+              makeVersion({ file_id: 2, container: "epub", file_name: "Book.epub" }),
+            ],
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("/reader/ebook/ebook-1?file_id=2");
+  });
+
   it("renders ebook series and related rails from ebook detail extension", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
