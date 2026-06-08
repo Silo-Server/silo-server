@@ -451,8 +451,8 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 	rows, err := r.pool.Query(ctx, `
 		-- Keep current_text in sync with embeddings.BuildEmbeddingText. This lets
 		-- the embedding job page over only missing, model-stale, or text-stale rows.
-		-- Audiobook lines map to embeddings.mediaTypeLabel + the author/narrator
-		-- branch in BuildEmbeddingText; any divergence here forces every audiobook
+		-- Book lines map to embeddings.mediaTypeLabel + the author/narrator
+		-- branch in BuildEmbeddingText; any divergence here forces book items
 		-- to re-embed every job run.
 		WITH text_candidates AS (
 			SELECT mi.content_id,
@@ -461,11 +461,11 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			       array_to_string(array_remove(ARRAY[
 			           CASE
 			               WHEN cardinality(COALESCE(mi.genres, ARRAY[]::text[])) > 0 AND COALESCE(mi.overview, '') <> ''
-			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END || ' about ' || substr(mi.overview, 1, 1000)
+			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' WHEN mi.type = 'ebook' THEN 'ebook' ELSE 'movie' END || ' about ' || substr(mi.overview, 1, 1000)
 			               WHEN cardinality(COALESCE(mi.genres, ARRAY[]::text[])) > 0
-			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END
+			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' WHEN mi.type = 'ebook' THEN 'ebook' ELSE 'movie' END
 			               WHEN COALESCE(mi.overview, '') <> ''
-			                   THEN CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END || '. ' || substr(mi.overview, 1, 1000)
+			                   THEN CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' WHEN mi.type = 'ebook' THEN 'ebook' ELSE 'movie' END || '. ' || substr(mi.overview, 1, 1000)
 			               ELSE NULL
 			           END,
 			           CASE WHEN COALESCE(mi.year, 0) > 0
@@ -474,11 +474,11 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			           END,
 			           CASE WHEN COALESCE(mi.content_rating, '') <> '' THEN 'Rated ' || mi.content_rating ELSE NULL END,
 			           CASE WHEN COALESCE(mi.tagline, '') <> '' THEN '"' || mi.tagline || '"' ELSE NULL END,
-			           CASE WHEN mi.type <> 'audiobook' AND actors.names <> '' THEN 'Cast: ' || actors.names ELSE NULL END,
-			           CASE WHEN mi.type <> 'audiobook' AND directors.names <> '' THEN 'Directed by ' || directors.names ELSE NULL END,
+			           CASE WHEN mi.type NOT IN ('audiobook', 'ebook') AND actors.names <> '' THEN 'Cast: ' || actors.names ELSE NULL END,
+			           CASE WHEN mi.type NOT IN ('audiobook', 'ebook') AND directors.names <> '' THEN 'Directed by ' || directors.names ELSE NULL END,
 			           CASE
-			               WHEN mi.type = 'audiobook' AND authors.names <> '' THEN 'Written by ' || authors.names
-			               WHEN mi.type <> 'audiobook' AND writers.names <> '' THEN 'Written by ' || writers.names
+			               WHEN mi.type IN ('audiobook', 'ebook') AND authors.names <> '' THEN 'Written by ' || authors.names
+			               WHEN mi.type NOT IN ('audiobook', 'ebook') AND writers.names <> '' THEN 'Written by ' || writers.names
 			               ELSE NULL
 			           END,
 			           CASE WHEN mi.type = 'audiobook' AND narrators.names <> '' THEN 'Narrated by ' || narrators.names ELSE NULL END,
