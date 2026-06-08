@@ -21,12 +21,34 @@ import {
   type QuerySortRelevanceScope,
 } from "@/lib/querySortOptions";
 
+type FilterRuleMediaScope = "all" | "movie" | "series" | "episode" | "audiobook" | "ebook";
+
 interface FilterRuleEditorProps {
   value: FilterConfig;
   onChange: (config: FilterConfig) => void;
   allowPersonalizedFilters?: boolean;
   allowPersonalizedSorts?: boolean;
   sortRelevanceScope?: QuerySortRelevanceScope;
+  mediaScope?: FilterRuleMediaScope;
+}
+
+export function getFilterRuleFieldOptions(
+  allowPersonalizedFilters = false,
+  mediaScope: FilterRuleMediaScope = "all",
+) {
+  return COLLECTION_FIELD_OPTIONS.filter(
+    (option) => allowPersonalizedFilters || !option.personalized,
+  ).map((option) => {
+    if (mediaScope !== "ebook") {
+      return option;
+    }
+    switch (option.value) {
+      case "watched":
+        return { ...option, label: "Read" };
+      default:
+        return option;
+    }
+  });
 }
 
 export default function FilterRuleEditor({
@@ -35,6 +57,7 @@ export default function FilterRuleEditor({
   allowPersonalizedFilters = false,
   allowPersonalizedSorts = false,
   sortRelevanceScope,
+  mediaScope = "all",
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
@@ -42,9 +65,7 @@ export default function FilterRuleEditor({
     { field: config.sort, order: config.order },
     { includePersonalized: allowPersonalizedSorts, relevanceScope: sortRelevanceScope },
   );
-  const fieldOptions = COLLECTION_FIELD_OPTIONS.filter(
-    (option) => allowPersonalizedFilters || !option.personalized,
-  );
+  const fieldOptions = getFilterRuleFieldOptions(allowPersonalizedFilters, mediaScope);
 
   function getDefaultRuleValue(field: string, op: string): FilterRule["value"] {
     const fieldDef = getCollectionFieldOption(field);

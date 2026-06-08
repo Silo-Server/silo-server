@@ -111,6 +111,7 @@ export default function CollectionRulesEditor({
           allowPersonalizedFilters={allowPersonalizedFilters}
           allowPersonalizedSorts={allowPersonalizedSorts}
           sortRelevanceScope={sortRelevanceScope}
+          mediaScope={value.media_scope ?? "all"}
           onChange={(next) =>
             onChange({
               ...value,
