@@ -433,7 +433,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
-		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
+		requestsRepo := mediarequests.NewRepository(deps.DB)
 		requestSvc := mediarequests.NewService(
 			requestsRepo,
 			tmdb.NewClient(tmdbAPIKey, 40),

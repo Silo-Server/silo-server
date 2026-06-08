@@ -1532,7 +1532,7 @@ func main() {
 			taskMgr.Register(tasks.NewSyncWatchProvidersTask(watchProviderService))
 		}
 		requestReconcileSvc := mediarequests.NewService(
-			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
+			mediarequests.NewRepository(deps.DB),
 			nil,
 			mediarequests.NewCatalogPresence(
 				catalog.NewItemRepository(deps.DB),
@@ -1560,7 +1560,7 @@ func main() {
 				autoscanRepo,
 				pluginService,
 				pluginInstallationStore,
-				mediarequests.NewRepository(deps.DB, deps.SecretCipher),
+				mediarequests.NewRepository(deps.DB),
 				deps.FolderRepo,
 				deps.LibraryScanQueue,
 				deps.RedisClient,
