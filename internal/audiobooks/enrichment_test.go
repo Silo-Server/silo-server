@@ -63,6 +63,36 @@ func TestEnricherRunFansOut(t *testing.T) {
 	}
 }
 
+func TestNewEnricherUsesConfiguredBatchSize(t *testing.T) {
+	t.Setenv("SILO_AUDIOBOOK_ENRICH_BATCH_SIZE", "123")
+	t.Setenv("SILO_AUDIOBOOK_ENRICH_WORKERS", "8")
+
+	e := NewEnricher(nil, nil, nil, nil, nil, nil)
+
+	if e.batchSize != 123 {
+		t.Fatalf("batchSize = %d, want 123", e.batchSize)
+	}
+	if e.workers != 8 {
+		t.Fatalf("workers = %d, want 8", e.workers)
+	}
+}
+
+func TestAudiobookEnrichWorkersCapsAtBatchSize(t *testing.T) {
+	t.Setenv("SILO_AUDIOBOOK_ENRICH_WORKERS", "8")
+
+	if got := audiobookEnrichWorkers(3); got != 3 {
+		t.Fatalf("audiobookEnrichWorkers(3) = %d, want 3", got)
+	}
+}
+
+func TestAudiobookEnrichBatchSizeIgnoresInvalidEnv(t *testing.T) {
+	t.Setenv("SILO_AUDIOBOOK_ENRICH_BATCH_SIZE", "nope")
+
+	if got := audiobookEnrichBatchSize(); got != defaultEnrichBatchSize {
+		t.Fatalf("audiobookEnrichBatchSize() = %d, want %d", got, defaultEnrichBatchSize)
+	}
+}
+
 func TestCacheRemotePosterCachesProviderURL(t *testing.T) {
 	cacher := &fakeAudiobookImageCacher{}
 	e := &Enricher{imageCacher: cacher}
