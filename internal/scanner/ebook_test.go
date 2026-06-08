@@ -428,7 +428,7 @@ func TestEbookPeopleCreditsEqualAuthorsOnly(t *testing.T) {
 	}
 }
 
-func TestEbookPeopleMergePreservesExistingNonAuthorCredits(t *testing.T) {
+func TestEbookPeopleMergePreservesExistingNonAuthorCreditsExceptNarrators(t *testing.T) {
 	existing := []models.ItemPerson{
 		{Person: models.Person{ID: 10, Name: "Old Author"}, Kind: models.PersonKindAuthor, SortOrder: 0},
 		{Person: models.Person{ID: 20, Name: "Manual Writer"}, Kind: models.PersonKindWriter, SortOrder: 1, Character: "essay"},
@@ -439,16 +439,13 @@ func TestEbookPeopleMergePreservesExistingNonAuthorCredits(t *testing.T) {
 	}
 
 	got := mergeEbookPeople(existing, authors)
-	if len(got) != 3 {
-		t.Fatalf("merged people len = %d, want 3: %+v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("merged people len = %d, want 2: %+v", len(got), got)
 	}
 	if got[0].Person.ID != 20 || got[0].Kind != models.PersonKindWriter || got[0].Character != "essay" {
 		t.Fatalf("first preserved non-author = %+v", got[0])
 	}
-	if got[1].Person.ID != 30 || got[1].Kind != models.PersonKindNarrator {
-		t.Fatalf("second preserved non-author = %+v", got[1])
-	}
-	if got[2].Person.ID != 40 || got[2].Kind != models.PersonKindAuthor || got[2].SortOrder != 2 {
+	if got[1].Person.ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
 		t.Fatalf("new author credit = %+v", got[2])
 	}
 }

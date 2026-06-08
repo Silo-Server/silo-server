@@ -494,7 +494,7 @@ type ebookResolvedAuthor struct {
 func mergeEbookPeople(existing []models.ItemPerson, authors []ebookResolvedAuthor) []models.ItemPerson {
 	people := make([]models.ItemPerson, 0, len(existing)+len(authors))
 	for _, p := range existing {
-		if p.Kind == models.PersonKindAuthor {
+		if p.Kind == models.PersonKindAuthor || p.Kind == models.PersonKindNarrator {
 			continue
 		}
 		p.SortOrder = len(people)
