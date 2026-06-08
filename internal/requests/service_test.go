@@ -208,39 +208,15 @@ func TestCreateRequestAutoApprovalRespectsSupportedMediaTypes(t *testing.T) {
 	}
 }
 
-func TestCreateRequestAutoApprovalSecretFailureMarksFailed(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	store.settings.GlobalAutoApprovalEnabled = true
-	store.integrations = []Integration{autoApproveRouterInst("router-1", "requests.radarr.api_key")}
-	service := newTestService(store)
-	service.SetSecretResolver(fakeSecretError{err: errors.New("secret lookup unavailable")})
-	service.SetRouterProvider(&fakeRouterProvider{})
-
-	// A connection whose credentials can't be resolved is skipped (never sent
-	// unauthenticated). With no usable connection left, submission fails the
-	// request rather than aborting the whole CreateRequest call.
-	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Title:     "Fight Club",
-	})
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.Outcome != OutcomeFailed || req.LastError != "no fulfillment backend configured" {
-		t.Fatalf("request = %+v, want failed with no-backend message", req)
-	}
-}
-
 func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
 	store.settings.GlobalAutoApprovalEnabled = true
-	store.integrations = []Integration{autoApproveRouterInst("router-1", "requests.radarr.api_key")}
+	// The repo decrypts api_key_ref on read, so the connection carries the literal
+	// key here (no host-side secret resolution).
+	store.integrations = []Integration{autoApproveRouterInst("router-1", "radarr-key")}
 	router := &fakeRouterProvider{}
 	service := newTestService(store)
-	service.SetSecretResolver(fakeSecrets{"requests.radarr.api_key": "radarr-key"})
 	service.SetRouterProvider(router)
 
 	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
@@ -846,19 +822,17 @@ func TestReconcileRequestsResolvesGlobalInputsOncePerCycle(t *testing.T) {
 	store.integrations = []Integration{routerInst("router-1")} // APIKeyRef "key-router-1"
 
 	// Three approved candidates that all share the same router connection. Each
-	// one drives submitApprovedRequest, which resolves the router connection (and
-	// thus the connection's api key). Without per-cycle caching this would fetch
-	// integrations/settings and decrypt the key once per request.
+	// one drives submitApprovedRequest, which resolves the router connection.
+	// Without per-cycle caching this would fetch integrations/settings once per
+	// request.
 	for _, id := range []string{"req-1", "req-2", "req-3"} {
 		req := &Request{ID: id, MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusApproved, Outcome: OutcomeActive}
 		store.candidates = append(store.candidates, req)
 		store.requests[id] = req
 	}
 
-	secrets := newCountingSecrets(map[string]string{"key-router-1": "radarr-key"})
 	service := newTestService(store)
 	service.SetRouterProvider(&fakeRouterProvider{})
-	service.SetSecretResolver(secrets)
 
 	result, err := service.ReconcileRequests(context.Background(), 100)
 	if err != nil {
@@ -868,12 +842,8 @@ func TestReconcileRequestsResolvesGlobalInputsOncePerCycle(t *testing.T) {
 		t.Fatalf("result = %+v, want 3 checked / 3 submitted", result)
 	}
 
-	// The connection's api key is decrypted ONCE for the whole cycle, not once per
-	// request (which would be 3).
-	if got := secrets.count("key-router-1"); got != 1 {
-		t.Fatalf("secret Get(\"key-router-1\") calls = %d, want 1 per cycle", got)
-	}
-	// Integrations and settings are likewise fetched once per cycle.
+	// Integrations and settings are fetched once per cycle (the connection's key is
+	// already decrypted by the repo on read, so there is nothing to re-resolve).
 	if store.listIntegrationsCalls != 1 {
 		t.Fatalf("ListIntegrations calls = %d, want 1 per cycle", store.listIntegrationsCalls)
 	}
@@ -1002,7 +972,7 @@ func TestUpdateIntegrationRefusesStoredKeyReuseOnChangedBaseURL(t *testing.T) {
 		Name:           "router-1",
 		CapabilityID:   "arr",
 		BaseURL:        "http://attacker.example", // changed from the stored base URL
-		APIKeyRef:      "",                         // blank -> "keep saved key"
+		APIKeyRef:      "",                        // blank -> "keep saved key"
 		InstallationID: &install,
 	})
 	var ve *ValidationError
@@ -1038,7 +1008,7 @@ func TestUpdateIntegrationKeepsKeyWhenBaseURLUnchanged(t *testing.T) {
 		Name:           "router-1-renamed",
 		CapabilityID:   "arr",
 		BaseURL:        "http://router-1.local", // unchanged
-		APIKeyRef:      "",                       // blank -> keep saved key
+		APIKeyRef:      "",                      // blank -> keep saved key
 		InstallationID: &install,
 	})
 	if err != nil {
@@ -2306,19 +2276,16 @@ func TestSubmitApprovedSkipsMismatchedMediaType(t *testing.T) {
 
 func TestSubmitApprovedSkipsBadConnectionUsesSibling(t *testing.T) {
 	store := newFakeStore()
-	// Two connections on the same installation: one's key fails to resolve, the
-	// other resolves cleanly. The healthy sibling must still fulfill the request.
+	// Two connections on the same installation: one has no api key (unconfigured),
+	// the other carries a literal key. The healthy sibling must still fulfill the
+	// request, and the no-key connection must never pin the installation.
 	bad := routerInstOn("router-bad", 1)
-	bad.APIKeyRef = "broken-ref"
+	bad.APIKeyRef = ""
 	good := routerInstOn("router-good", 1)
-	good.APIKeyRef = "good-ref"
+	good.APIKeyRef = "good-key"
 	store.integrations = []Integration{bad, good}
 	router := &fakeRouterProvider{}
 	svc := newTestService(store)
-	svc.SetSecretResolver(selectiveSecrets{
-		fail:   map[string]bool{"broken-ref": true},
-		values: map[string]string{"good-ref": "good-key"},
-	})
 	svc.SetRouterProvider(router)
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
@@ -2471,58 +2438,6 @@ func TestSubmitApprovedUnboundInstallationFailsWithGuidance(t *testing.T) {
 		got.LastError != "request backend connection is not bound to a plugin installation; re-save it in admin" {
 		t.Fatalf("request = %+v, want failed with unbound-installation guidance", got)
 	}
-}
-
-// selectiveSecrets resolves some refs and fails others, for skip-bad-connection tests.
-type selectiveSecrets struct {
-	fail   map[string]bool
-	values map[string]string
-}
-
-func (s selectiveSecrets) Get(_ context.Context, key string) (string, error) {
-	if s.fail[key] {
-		return "", errors.New("secret unavailable: " + key)
-	}
-	return s.values[key], nil
-}
-
-type fakeSecrets map[string]string
-
-func (f fakeSecrets) Get(_ context.Context, key string) (string, error) {
-	return f[key], nil
-}
-
-// countingSecrets wraps a value map and counts Get calls per key, so tests can
-// assert that per-cycle memoization decrypts each ref only once.
-type countingSecrets struct {
-	mu     sync.Mutex
-	values map[string]string
-	calls  map[string]int
-}
-
-func newCountingSecrets(values map[string]string) *countingSecrets {
-	return &countingSecrets{values: values, calls: map[string]int{}}
-}
-
-func (c *countingSecrets) Get(_ context.Context, key string) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.calls[key]++
-	return c.values[key], nil
-}
-
-func (c *countingSecrets) count(key string) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.calls[key]
-}
-
-type fakeSecretError struct {
-	err error
-}
-
-func (f fakeSecretError) Get(context.Context, string) (string, error) {
-	return "", f.err
 }
 
 type fakeRequesterIdentity struct {

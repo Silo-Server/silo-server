@@ -13,14 +13,29 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
 }
 
-func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func NewRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *Repository {
+	return &Repository{pool: pool, cipher: cipher}
+}
+
+func apiKeyAAD(id string) string {
+	return secret.RowAAD("request_integrations", "api_key_ref", id)
+}
+
+func (r *Repository) encryptAPIKey(id, apiKey string) (string, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return "", nil
+	}
+	return r.cipher.Encrypt(apiKey, apiKeyAAD(id))
 }
 
 func (r *Repository) GetSettings(ctx context.Context) (Settings, error) {
@@ -465,7 +480,7 @@ func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error
 
 	var out []Integration
 	for rows.Next() {
-		integration, err := scanIntegration(rows)
+		integration, err := r.scanIntegration(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -480,7 +495,7 @@ func (r *Repository) ListIntegrations(ctx context.Context) ([]Integration, error
 func (r *Repository) GetIntegration(ctx context.Context, id string) (*Integration, error) {
 	row := r.pool.QueryRow(ctx, `SELECT `+integrationColumns+
 		` FROM request_integrations WHERE id = $1`, id)
-	i, err := scanIntegration(row)
+	i, err := r.scanIntegration(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -517,6 +532,10 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 	if supportedMediaTypes == nil {
 		supportedMediaTypes = []string{}
 	}
+	apiKeyRef, err := r.encryptAPIKey(i.ID, i.APIKeyRef)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt api key: %w", err)
+	}
 	row := exec.QueryRow(ctx, `
 		INSERT INTO request_integrations (
 			id, name, enabled, base_url, api_key_ref,
@@ -525,8 +544,8 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
 		RETURNING `+integrationColumns,
 		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
-		strings.TrimSpace(i.APIKeyRef), capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
-	out, err := scanIntegration(row)
+		apiKeyRef, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
+	out, err := r.scanIntegration(row)
 	if err != nil {
 		return nil, fmt.Errorf("create request integration: %w", err)
 	}
@@ -551,6 +570,12 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 	if supportedMediaTypes == nil {
 		supportedMediaTypes = []string{}
 	}
+	// Encrypt the incoming key; an empty result preserves the keep-existing CASE
+	// (a blank edit leaves the stored key untouched).
+	apiKeyRef, err := r.encryptAPIKey(i.ID, i.APIKeyRef)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt api key: %w", err)
+	}
 	row := exec.QueryRow(ctx, `
 		UPDATE request_integrations SET
 			name=$2, enabled=$3, base_url=$4,
@@ -560,8 +585,8 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 		WHERE id=$1
 		RETURNING `+integrationColumns,
 		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
-		strings.TrimSpace(i.APIKeyRef), capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
-	out, err := scanIntegration(row)
+		apiKeyRef, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
+	out, err := r.scanIntegration(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -744,7 +769,7 @@ type integrationScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanIntegration(row integrationScanner) (Integration, error) {
+func (r *Repository) scanIntegration(row integrationScanner) (Integration, error) {
 	var i Integration
 	var installationID sql.NullInt64
 	var pluginConfigRaw []byte
@@ -756,6 +781,14 @@ func scanIntegration(row integrationScanner) (Integration, error) {
 	); err != nil {
 		return Integration{}, err
 	}
+	// Decrypt the stored api key (read-path contract: legacy plaintext passes
+	// through, enc:v1: values decrypt, corrupt ciphertext errors). Callers
+	// receive the literal key — there is no longer a ref/literal ambiguity.
+	apiKey, err := r.cipher.DecryptIfEncrypted(i.APIKeyRef, apiKeyAAD(i.ID))
+	if err != nil {
+		return Integration{}, fmt.Errorf("decrypt request integration %s api key: %w", i.ID, err)
+	}
+	i.APIKeyRef = apiKey
 	if installationID.Valid {
 		v := int(installationID.Int64)
 		i.InstallationID = &v

@@ -433,13 +433,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
-		requestsRepo := mediarequests.NewRepository(deps.DB)
+		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
 		requestSvc := mediarequests.NewService(
 			requestsRepo,
 			tmdb.NewClient(tmdbAPIKey, 40),
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
-		requestSvc.SetSecretResolver(settingsRepo)
 		AttachRequestRouter(requestSvc, deps.PluginService)
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))

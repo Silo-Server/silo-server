@@ -27,10 +27,6 @@ type TMDBExternalIDClient interface {
 
 const externalIDHydrationConcurrency = 4
 
-type SecretResolver interface {
-	Get(ctx context.Context, key string) (string, error)
-}
-
 type EntitlementResolver interface {
 	// MaxPlaybackQuality returns the requester's effective playback-quality
 	// ceiling (already combining account- and profile-level caps). Empty string
@@ -48,7 +44,6 @@ type Service struct {
 	store             Store
 	tmdb              TMDBClient
 	presence          PresenceResolver
-	secrets           SecretResolver
 	router            RequestRouterProvider
 	entitlements      EntitlementResolver
 	requesterIdentity RequesterIdentityResolver
@@ -71,10 +66,6 @@ func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *
 		presence: presence,
 		Now:      func() time.Time { return time.Now().UTC() },
 	}
-}
-
-func (s *Service) SetSecretResolver(resolver SecretResolver) {
-	s.secrets = resolver
 }
 
 func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
@@ -130,7 +121,6 @@ func (s *Service) allowedQualities(ctx context.Context, req Request, settings Se
 type fulfillContext struct {
 	integrations []Integration
 	settings     Settings
-	secrets      map[string]string // apiKeyRef -> plaintext, memoized within the cycle
 }
 
 func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error) {
@@ -142,25 +132,7 @@ func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error
 	if err != nil {
 		return nil, err
 	}
-	return &fulfillContext{integrations: integrations, settings: settings, secrets: map[string]string{}}, nil
-}
-
-// resolveAPIKeyCached memoizes resolveAPIKey per apiKeyRef within the cycle.
-func (s *Service) resolveAPIKeyCached(ctx context.Context, fc *fulfillContext, in Integration) (string, error) {
-	ref := strings.TrimSpace(in.APIKeyRef)
-	if fc != nil && ref != "" {
-		if v, ok := fc.secrets[ref]; ok {
-			return v, nil
-		}
-	}
-	v, err := s.resolveAPIKey(ctx, in)
-	if err != nil {
-		return "", err
-	}
-	if fc != nil && ref != "" {
-		fc.secrets[ref] = v
-	}
-	return v, nil
+	return &fulfillContext{integrations: integrations, settings: settings}, nil
 }
 
 // resolveRouterConnections turns enabled request_router integrations that serve
@@ -190,13 +162,10 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 		if chosen && (*in.InstallationID != installationID || in.CapabilityID != capabilityID) {
 			continue
 		}
-		apiKey, err := s.resolveAPIKeyCached(ctx, fc, in)
-		if err != nil {
-			slog.WarnContext(ctx, "requests: skipping router connection with unresolvable api key", "connection_id", in.ID, "error", err)
-			continue
-		}
-		if strings.TrimSpace(apiKey) == "" {
-			slog.WarnContext(ctx, "requests: skipping router connection with empty api key", "connection_id", in.ID)
+		// in.APIKeyRef was decrypted by the repo on read; empty means unconfigured.
+		apiKey := strings.TrimSpace(in.APIKeyRef)
+		if apiKey == "" {
+			slog.WarnContext(ctx, "requests: skipping router connection with no api key", "connection_id", in.ID)
 			continue
 		}
 		// Lock on the first SUCCESSFULLY resolved connection so a skipped
@@ -869,10 +838,11 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 		return nil
 	}
 	// On UPDATE the client omits api_key_ref ("leave blank to keep saved key"),
-	// so resolveAPIKey would otherwise validate against an empty credential. Mirror
+	// so we would otherwise validate against an empty credential. Mirror
 	// LoadIntegrationOptions's backfill: load the stored row by id and reuse the
-	// saved api key ref (and BaseURL/PluginConfig if also blank). Nil-safe — a
-	// brand-new id has no stored row, so just proceed with what the body carries.
+	// saved (already-decrypted) api key (and BaseURL/PluginConfig if also blank).
+	// Nil-safe — a brand-new id has no stored row, so just proceed with what the
+	// body carries.
 	if strings.TrimSpace(in.APIKeyRef) == "" && strings.TrimSpace(in.ID) != "" {
 		stored, err := s.store.GetIntegration(ctx, in.ID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -894,10 +864,9 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			}
 		}
 	}
-	apiKey, err := s.resolveAPIKey(ctx, in)
-	if err != nil {
-		return err
-	}
+	// in.APIKeyRef is the decrypted literal (from the body, or backfilled from the
+	// stored row above).
+	apiKey := strings.TrimSpace(in.APIKeyRef)
 	conn := ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig}
 	siblings, err := s.siblingConnections(ctx, in)
 	if err != nil {
@@ -997,10 +966,7 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 	}
 
-	apiKey, err := s.resolveAPIKey(ctx, integration)
-	if err != nil {
-		return nil, err
-	}
+	apiKey := strings.TrimSpace(integration.APIKeyRef)
 	if s.router == nil || integration.InstallationID == nil {
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
@@ -1608,22 +1574,6 @@ func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, erro
 		return false, err
 	}
 	return matches[req.TMDBID].Available, nil
-}
-
-func (s *Service) resolveAPIKey(ctx context.Context, integration Integration) (string, error) {
-	value := strings.TrimSpace(integration.APIKeyRef)
-	if value == "" || s.secrets == nil {
-		return value, nil
-	}
-	resolved, err := s.secrets.Get(ctx, value)
-	if err != nil {
-		return "", err
-	}
-	resolved = strings.TrimSpace(resolved)
-	if resolved == "" {
-		return value, nil
-	}
-	return resolved, nil
 }
 
 func (s *Service) now() time.Time {

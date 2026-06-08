@@ -1532,14 +1532,13 @@ func main() {
 			taskMgr.Register(tasks.NewSyncWatchProvidersTask(watchProviderService))
 		}
 		requestReconcileSvc := mediarequests.NewService(
-			mediarequests.NewRepository(deps.DB),
+			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 			nil,
 			mediarequests.NewCatalogPresence(
 				catalog.NewItemRepository(deps.DB),
 				catalog.NewProviderIDRepository(deps.DB),
 			),
 		)
-		requestReconcileSvc.SetSecretResolver(settingsRepo)
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		if userStoreProvider != nil {
@@ -1560,7 +1559,7 @@ func main() {
 				autoscanRepo,
 				pluginService,
 				pluginInstallationStore,
-				mediarequests.NewRepository(deps.DB),
+				mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 				deps.FolderRepo,
 				deps.LibraryScanQueue,
 				deps.RedisClient,
