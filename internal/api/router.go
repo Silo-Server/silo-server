@@ -373,7 +373,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	var requestHandler *handlers.RequestsHandler
 	var autoscanHandler *handlers.AutoscanHandler
 	var ebookReaderHandler *handlers.EbookReaderHandler
+	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	if deps.DB != nil {
+		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
@@ -424,15 +426,18 @@ func NewRouter(deps Dependencies) chi.Router {
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalWatchEventDispatcher); ok {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
 		}
-		if deps.FileRepo != nil {
-			ebookProgressStore := handlers.NewPGEbookReaderProgressStore(deps.DB)
+		if ebookProgressStore != nil {
 			itemsHandler.SetEbookReaderProgressStore(ebookProgressStore)
+		}
+		if deps.FileRepo != nil {
 			ebookReaderHandler = handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{
 				FileResolver:  deps.FileRepo,
 				ItemAccess:    itemRepo,
 				EpisodeLookup: episodeRepo,
 			})
-			ebookReaderHandler.ProgressStore = ebookProgressStore
+			if ebookProgressStore != nil {
+				ebookReaderHandler.ProgressStore = ebookProgressStore
+			}
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogHandler = handlers.NewCatalogHandler(
@@ -510,6 +515,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
 		if detailSvc != nil {
 			personalDataHandler.SetDetailService(detailSvc)
+		}
+		if ebookProgressStore != nil {
+			personalDataHandler.SetEbookReaderProgressStore(ebookProgressStore)
 		}
 		personalDataHandler.SetEpisodeRepo(episodeRepo)
 		personalDataHandler.SetSeasonRepo(seasonRepo)
@@ -950,6 +958,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		sectionHandler.EpisodeRepo = episodeRepo
 		sectionHandler.DetailSvc = detailSvc
+		if ebookProgressStore != nil {
+			sectionHandler.EbookProgress = ebookProgressStore
+		}
 		if userRepo != nil {
 			sectionHandler.UserRepo = userRepo
 		}
@@ -1131,6 +1142,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		recsHandler.CalendarRepo = calendarRepo
 		recsHandler.EpisodeRepo = episodeRepo
+		if ebookProgressStore != nil {
+			recsHandler.EbookProgress = ebookProgressStore
+		}
 		if deps.PersonRepo != nil {
 			recsHandler.CastFetcher = deps.PersonRepo
 		}
