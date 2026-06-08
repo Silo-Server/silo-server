@@ -17,6 +17,10 @@ import { getCachedWatchedInvalidationKeys } from "@/pages/ItemDetail/watchedStat
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
+function itemPathID(id: string): string {
+  return encodeURIComponent(id);
+}
+
 export async function fetchWatchDetail(
   id: string,
   fileId?: number,
@@ -27,7 +31,7 @@ export async function fetchWatchDetail(
   if (fileId != null) searchParams.set("fileId", String(fileId));
   if (libraryId != null) searchParams.set("library_id", String(libraryId));
   const query = searchParams.toString();
-  return api<WatchDetail>(`/watch/${id}${query ? `?${query}` : ""}`, options);
+  return api<WatchDetail>(`/watch/${itemPathID(id)}${query ? `?${query}` : ""}`, options);
 }
 
 export function useWatchDetail(id: string | undefined, fileId?: number, libraryId?: number) {
@@ -64,10 +68,13 @@ export function useRefreshItemMetadata() {
   const { awaitAdminJob } = useRealtimeEvents();
   return useMutation({
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
-      const job = await api<AdminJob>(`/admin/items/${item.content_id}/refresh-metadata`, {
-        method: "POST",
-        body: JSON.stringify({ mode }),
-      });
+      const job = await api<AdminJob>(
+        `/admin/items/${itemPathID(item.content_id)}/refresh-metadata`,
+        {
+          method: "POST",
+          body: JSON.stringify({ mode }),
+        },
+      );
       const completed = await awaitAdminJob(job.id);
       return { job: completed };
     },
@@ -169,9 +176,12 @@ export interface RedetectEpisodeIntroResponse {
 export async function redetectEpisodeIntro(
   episodeId: string,
 ): Promise<RedetectEpisodeIntroResponse> {
-  return api<RedetectEpisodeIntroResponse>(`/admin/items/${episodeId}/redetect-intro`, {
-    method: "POST",
-  });
+  return api<RedetectEpisodeIntroResponse>(
+    `/admin/items/${itemPathID(episodeId)}/redetect-intro`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function useRedetectEpisodeIntro() {
@@ -226,7 +236,7 @@ export function useUpdateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: UpdateItemMetadataRequest) =>
-      api<ItemDetail>(`/admin/items/${contentId}/metadata`, {
+      api<ItemDetail>(`/admin/items/${itemPathID(contentId)}/metadata`, {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
@@ -252,7 +262,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
 
   return useMutation({
     mutationFn: (nextPlayed: boolean) =>
-      api(`/watched/${item.content_id}`, {
+      api(`/watched/${itemPathID(item.content_id)}`, {
         method: nextPlayed ? "POST" : "DELETE",
       }),
     onError: (err) => {
@@ -276,7 +286,7 @@ export function useSearchItemMatchCandidates(contentId: string) {
 
   return useMutation({
     mutationFn: (params: ItemMatchSearchRequest) =>
-      api<ItemMatchSearchResponse>(`/admin/items/${contentId}/match/search`, {
+      api<ItemMatchSearchResponse>(`/admin/items/${itemPathID(contentId)}/match/search`, {
         method: "POST",
         body: JSON.stringify(params),
       }),
@@ -300,7 +310,7 @@ export function useApplyItemMatch() {
       item: ApplyMatchItem;
       providerIds: Record<string, string>;
     }) => {
-      return api(`/admin/items/${item.content_id}/match/apply`, {
+      return api(`/admin/items/${itemPathID(item.content_id)}/match/apply`, {
         method: "POST",
         body: JSON.stringify({ provider_ids: providerIds }),
       });
@@ -365,7 +375,7 @@ export function useApplyItemMatch() {
 export function useItemImages(contentId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: adminKeys.itemImages(contentId!),
-    queryFn: () => api<ItemImagesResponse>(`/admin/items/${contentId}/images`),
+    queryFn: () => api<ItemImagesResponse>(`/admin/items/${itemPathID(contentId!)}/images`),
     enabled: !!contentId && enabled,
     staleTime: 5 * 60_000,
   });
@@ -384,10 +394,13 @@ export function useApplyItemImage() {
       item: ApplyImageItem;
       request: ApplyItemImageRequest;
     }) =>
-      api<ApplyItemImageResponse>(`/admin/items/${item.content_id}/images/apply`, {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
+      api<ApplyItemImageResponse>(
+        `/admin/items/${itemPathID(item.content_id)}/images/apply`,
+        {
+          method: "POST",
+          body: JSON.stringify(request),
+        },
+      ),
     onSuccess: async (_, { item }) => {
       toast.success("Image applied successfully");
 
