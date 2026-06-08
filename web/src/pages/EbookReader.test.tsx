@@ -32,10 +32,11 @@ vi.mock("@/reader/FoliateBookReader", async () => {
     default: forwardRef<
       { prev: () => void; next: () => void },
       {
+        file: FileVersion;
         onProgressChange?: (progress: number | null) => void;
         onFileLoaded?: (state: { objectUrl: string; filename: string } | null) => void;
       }
-    >(function MockFoliateBookReader({ onProgressChange, onFileLoaded }, ref) {
+    >(function MockFoliateBookReader({ file, onProgressChange, onFileLoaded }, ref) {
       useImperativeHandle(ref, () => ({
         prev: mocks.readerPrev,
         next: mocks.readerNext,
@@ -45,7 +46,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         onProgressChange?.(0.421);
         return () => onFileLoaded?.(null);
       }, [onFileLoaded, onProgressChange]);
-      return <div>reader surface</div>;
+      return <div>reader surface {file.file_name}</div>;
     }),
   };
 });
@@ -66,7 +67,7 @@ function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
   };
 }
 
-function makeEbookItem(): ItemDetail & { type: "ebook" } {
+function makeEbookItem(overrides: Partial<ItemDetail & { type: "ebook" }> = {}): ItemDetail & { type: "ebook" } {
   return {
     content_id: "ebook-1",
     type: "ebook",
@@ -110,6 +111,7 @@ function makeEbookItem(): ItemDetail & { type: "ebook" } {
     subtitles: [],
     intro: null,
     credits: null,
+    ...overrides,
   };
 }
 
@@ -167,5 +169,40 @@ describe("EbookReader", () => {
 
     expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches between multiple ebook files from the reader header", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [
+          makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
+          makeVersion({ file_id: 9, file_name: "Reader.pdf", container: "pdf" }),
+        ],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("reader surface Reader.epub");
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Reader file"]');
+    expect(select).not.toBeNull();
+
+    await act(async () => {
+      if (!select) return;
+      select.value = "9";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("reader surface Reader.pdf");
   });
 });

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Library, Loader2 } from "lucide-react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
@@ -37,8 +37,15 @@ function chooseReaderFile(files: FileVersion[], requestedID: number | null): Fil
   );
 }
 
+function readerFileLabel(file: FileVersion): string {
+  const format = readerFileFormat(file).toUpperCase();
+  const name = file.file_name || file.file_path?.split(/[\\/]/).pop() || `File ${file.file_id}`;
+  return format ? `${format} · ${name}` : name;
+}
+
 export default function EbookReader() {
   const { contentId = "" } = useParams<{ contentId: string }>();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedFileID = Number(searchParams.get("file_id") || "");
   const { data: item, isLoading, error } = useCatalogItemDetail(contentId || undefined);
@@ -57,6 +64,15 @@ export default function EbookReader() {
   const handleProgressChange = useCallback((progress: number | null) => {
     setReaderProgress(progress);
   }, []);
+  const handleFileChange = useCallback(
+    (fileID: string) => {
+      if (!contentId) return;
+      navigate(`/reader/ebook/${encodeURIComponent(contentId)}?file_id=${encodeURIComponent(fileID)}`, {
+        replace: true,
+      });
+    },
+    [contentId, navigate],
+  );
 
   if (isLoading) {
     return (
@@ -101,6 +117,20 @@ export default function EbookReader() {
             <div className="hidden min-w-12 text-center text-xs tabular-nums text-muted-foreground sm:block">
               {progressLabel}
             </div>
+          )}
+          {item.versions.length > 1 && (
+            <select
+              aria-label="Reader file"
+              value={selectedFile.file_id}
+              onChange={(event) => handleFileChange(event.target.value)}
+              className="border-border bg-background text-foreground hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:block"
+            >
+              {item.versions.map((file) => (
+                <option key={file.file_id} value={file.file_id}>
+                  {readerFileLabel(file)}
+                </option>
+              ))}
+            </select>
           )}
           <div className="flex shrink-0 items-center gap-1">
             <Button
