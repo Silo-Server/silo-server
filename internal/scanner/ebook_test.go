@@ -11,7 +11,19 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+type recordingEbookExecutor struct {
+	queries []string
+	args    [][]any
+}
+
+func (r *recordingEbookExecutor) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	r.queries = append(r.queries, query)
+	r.args = append(r.args, append([]any(nil), args...))
+	return pgconn.CommandTag{}, nil
+}
 
 func TestSupportsEbookFile(t *testing.T) {
 	cases := []struct {
@@ -219,18 +231,87 @@ func TestEbookPeopleCreditsEqualAuthorsOnly(t *testing.T) {
 	existing := []models.ItemPerson{
 		{Person: models.Person{Name: "Ada Writer"}, Kind: models.PersonKindAuthor, SortOrder: 0},
 		{Person: models.Person{Name: "Ben Author"}, Kind: models.PersonKindAuthor, SortOrder: 1},
+		{Person: models.Person{Name: "Manual Contributor"}, Kind: models.PersonKindWriter, SortOrder: 2},
 	}
 	desired := []ebookCredit{
 		{Name: "Ada Writer", Kind: models.PersonKindAuthor},
 		{Name: "Ben Author", Kind: models.PersonKindAuthor},
 	}
 	if !ebookPeopleCreditsEqual(existing, desired) {
-		t.Fatal("expected matching author credits to compare equal")
+		t.Fatal("expected matching author credits to compare equal while ignoring non-authors")
 	}
 
-	existing = append(existing, models.ItemPerson{Person: models.Person{Name: "Narrator"}, Kind: models.PersonKindNarrator, SortOrder: 2})
+	existing[1] = models.ItemPerson{Person: models.Person{Name: "Other Author"}, Kind: models.PersonKindAuthor, SortOrder: 1}
 	if ebookPeopleCreditsEqual(existing, desired) {
-		t.Fatal("expected narrator credit to make ebook author-only set differ")
+		t.Fatal("expected different author credit to make ebook author set differ")
+	}
+}
+
+func TestEbookPeopleMergePreservesExistingNonAuthorCredits(t *testing.T) {
+	existing := []models.ItemPerson{
+		{Person: models.Person{ID: 10, Name: "Old Author"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+		{Person: models.Person{ID: 20, Name: "Manual Writer"}, Kind: models.PersonKindWriter, SortOrder: 1, Character: "essay"},
+		{Person: models.Person{ID: 30, Name: "Manual Narrator"}, Kind: models.PersonKindNarrator, SortOrder: 2},
+	}
+	authors := []ebookResolvedAuthor{
+		{ID: 40, Name: "New Author"},
+	}
+
+	got := mergeEbookPeople(existing, authors)
+	if len(got) != 3 {
+		t.Fatalf("merged people len = %d, want 3: %+v", len(got), got)
+	}
+	if got[0].Person.ID != 20 || got[0].Kind != models.PersonKindWriter || got[0].Character != "essay" {
+		t.Fatalf("first preserved non-author = %+v", got[0])
+	}
+	if got[1].Person.ID != 30 || got[1].Kind != models.PersonKindNarrator {
+		t.Fatalf("second preserved non-author = %+v", got[1])
+	}
+	if got[2].Person.ID != 40 || got[2].Kind != models.PersonKindAuthor || got[2].SortOrder != 2 {
+		t.Fatalf("new author credit = %+v", got[2])
+	}
+}
+
+func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
+	modifiedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	book := &parsedEbook{Format: "epub", Title: "Book", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157"}
+
+	got := buildEbookMediaFile(&models.MediaFolder{ID: 44}, "content-1", "/library/Book.epub", 1234, modifiedAt, book)
+	if got.ContentID != "content-1" || got.MediaFolderID != 44 {
+		t.Fatalf("ids = %q/%d, want content-1/44", got.ContentID, got.MediaFolderID)
+	}
+	if got.BaseType != "ebook" || got.BaseTitle != "Book" || got.BaseYear != 2024 || got.Container != "epub" || got.ProbeSource != "local" {
+		t.Fatalf("ebook file metadata = %+v", got)
+	}
+	if got.CanonicalRootPath != "/library/Book.epub" || got.ObservedRootPath != "/library/Book.epub" || got.FilePath != "/library/Book.epub" {
+		t.Fatalf("ebook paths = canonical %q observed %q file %q", got.CanonicalRootPath, got.ObservedRootPath, got.FilePath)
+	}
+	if got.FileSize != 1234 || got.FileModifiedAt == nil || !got.FileModifiedAt.Equal(modifiedAt) {
+		t.Fatalf("file facts = size %d modified %v", got.FileSize, got.FileModifiedAt)
+	}
+}
+
+func TestScanEbookPersistenceSQLWritesLibraryMembershipAndISBNOnly(t *testing.T) {
+	ctx := context.Background()
+	exec := &recordingEbookExecutor{}
+
+	if err := insertEbookLibraryMembership(ctx, exec, "content-1", 44); err != nil {
+		t.Fatalf("insertEbookLibraryMembership: %v", err)
+	}
+	if err := insertEbookISBNProviderID(ctx, exec, "content-1", "9780306406157"); err != nil {
+		t.Fatalf("insertEbookISBNProviderID: %v", err)
+	}
+	if len(exec.queries) != 2 {
+		t.Fatalf("queries = %d, want 2", len(exec.queries))
+	}
+	if !strings.Contains(exec.queries[0], "media_item_libraries") || exec.args[0][0] != "content-1" || exec.args[0][1] != 44 {
+		t.Fatalf("library membership write = query %q args %+v", exec.queries[0], exec.args[0])
+	}
+	if !strings.Contains(exec.queries[1], "media_item_provider_ids") || !strings.Contains(exec.queries[1], "'isbn'") || !strings.Contains(exec.queries[1], "'ebook'") {
+		t.Fatalf("ISBN provider write query = %q", exec.queries[1])
+	}
+	if strings.Contains(exec.queries[1], "asin") || exec.args[1][0] != "content-1" || exec.args[1][1] != "9780306406157" {
+		t.Fatalf("ISBN provider write args/query = query %q args %+v", exec.queries[1], exec.args[1])
 	}
 }
 
