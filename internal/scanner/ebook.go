@@ -8,7 +8,9 @@ import (
 	"html"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -319,6 +321,9 @@ func parseEbookEPUB(path string) (parsedEbook, error) {
 	if err := parseEPUBOPFMetadata(opf, &book); err != nil {
 		return book, err
 	}
+	if cover, err := extractEPUBCover(&reader.Reader, opfPath, opf); err == nil {
+		book.Cover = cover
+	}
 	return book, nil
 }
 
@@ -364,16 +369,26 @@ func parseEbookCBZ(path string) (parsedEbook, error) {
 	}
 	defer reader.Close()
 
+	var pages []*zip.File
 	for _, file := range reader.File {
 		if isComicArchivePage(file.Name) {
 			book.PageCount++
+			pages = append(pages, file)
+		}
+	}
+	sort.Slice(pages, func(i, j int) bool {
+		return normalizedArchivePath(pages[i].Name) < normalizedArchivePath(pages[j].Name)
+	})
+	if len(pages) > 0 {
+		if cover, err := readArchiveImageCover(pages[0]); err == nil {
+			book.Cover = cover
 		}
 	}
 	return book, nil
 }
 
 func isComicArchivePage(name string) bool {
-	clean := strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+	clean := normalizedArchivePath(name)
 	if clean == "" || strings.HasSuffix(clean, "/") {
 		return false
 	}
@@ -393,6 +408,38 @@ func isComicArchivePage(name string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizedArchivePath(name string) string {
+	return strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+}
+
+func readArchiveImageCover(file *zip.File) (*parsedEbookCover, error) {
+	if file == nil {
+		return nil, fmt.Errorf("nil archive image")
+	}
+	if file.UncompressedSize64 > maxEPUBMetadataEntrySize {
+		return nil, fmt.Errorf("archive cover entry too large: %s", file.Name)
+	}
+	entry, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer entry.Close()
+	data, err := io.ReadAll(io.LimitReader(entry, maxEPUBMetadataEntrySize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxEPUBMetadataEntrySize {
+		return nil, fmt.Errorf("archive cover entry too large: %s", file.Name)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("archive cover entry empty: %s", file.Name)
+	}
+	return &parsedEbookCover{
+		ContentType: ebookImageContentType(file.Name),
+		Bytes:       data,
+	}, nil
 }
 
 func parseEbookFB2Reader(reader io.Reader, format string) (parsedEbook, error) {
@@ -666,6 +713,132 @@ func parseEPUBOPFMetadata(opf []byte, book *parsedEbook) error {
 		}
 	}
 	return nil
+}
+
+func extractEPUBCover(reader *zip.Reader, opfPath string, opf []byte) (*parsedEbookCover, error) {
+	var parsed struct {
+		Metadata struct {
+			Meta []struct {
+				Name    string `xml:"name,attr"`
+				Content string `xml:"content,attr"`
+			} `xml:"meta"`
+		} `xml:"metadata"`
+		Manifest struct {
+			Items []struct {
+				ID         string `xml:"id,attr"`
+				Href       string `xml:"href,attr"`
+				MediaType  string `xml:"media-type,attr"`
+				Properties string `xml:"properties,attr"`
+			} `xml:"item"`
+		} `xml:"manifest"`
+	}
+	if err := xml.Unmarshal(opf, &parsed); err != nil {
+		return nil, err
+	}
+
+	coverID := ""
+	for _, meta := range parsed.Metadata.Meta {
+		if strings.EqualFold(strings.TrimSpace(meta.Name), "cover") {
+			coverID = strings.TrimSpace(meta.Content)
+			break
+		}
+	}
+
+	var coverHref string
+	var coverType string
+	for _, item := range parsed.Manifest.Items {
+		id := strings.TrimSpace(item.ID)
+		props := strings.Fields(strings.ToLower(item.Properties))
+		isCover := coverID != "" && id == coverID
+		for _, prop := range props {
+			if prop == "cover-image" {
+				isCover = true
+				break
+			}
+		}
+		if !isCover {
+			continue
+		}
+		coverHref = strings.TrimSpace(item.Href)
+		coverType = strings.TrimSpace(item.MediaType)
+		break
+	}
+	if coverHref == "" {
+		return nil, fmt.Errorf("epub cover not referenced")
+	}
+
+	coverPath := resolveEPUBRelativePath(opfPath, coverHref)
+	data, err := readEPUBZipEntry(reader, coverPath)
+	if err != nil {
+		return nil, err
+	}
+	if coverType == "" {
+		coverType = ebookImageContentType(coverPath)
+	}
+	return &parsedEbookCover{ContentType: coverType, Bytes: data}, nil
+}
+
+func resolveEPUBRelativePath(baseFile string, href string) string {
+	cleanHref := strings.TrimSpace(href)
+	if decoded, err := urlPathUnescape(cleanHref); err == nil {
+		cleanHref = decoded
+	}
+	baseDir := path.Dir(strings.ReplaceAll(baseFile, "\\", "/"))
+	if baseDir == "." || strings.HasPrefix(cleanHref, "/") {
+		baseDir = ""
+	}
+	return strings.TrimPrefix(path.Clean(path.Join(baseDir, cleanHref)), "/")
+}
+
+func urlPathUnescape(value string) (string, error) {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '%' || i+2 >= len(value) {
+			out.WriteByte(value[i])
+			continue
+		}
+		hi := fromHex(value[i+1])
+		lo := fromHex(value[i+2])
+		if hi < 0 || lo < 0 {
+			out.WriteByte(value[i])
+			continue
+		}
+		out.WriteByte(byte(hi<<4 | lo))
+		i += 2
+	}
+	return out.String(), nil
+}
+
+func fromHex(b byte) int {
+	switch {
+	case b >= '0' && b <= '9':
+		return int(b - '0')
+	case b >= 'a' && b <= 'f':
+		return int(b-'a') + 10
+	case b >= 'A' && b <= 'F':
+		return int(b-'A') + 10
+	default:
+		return -1
+	}
+}
+
+func ebookImageContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".avif":
+		return "image/avif"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func parseEbookDate(value string) (time.Time, bool) {

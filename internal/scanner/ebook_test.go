@@ -223,6 +223,25 @@ func TestParseEbookEPUBMetadataReadsISBNFromMetaTags(t *testing.T) {
 	}
 }
 
+func TestParseEbookEPUBExtractsManifestCover(t *testing.T) {
+	path := writeTestEPUBWithCover(t, "Images/cover.jpg", "image/jpeg", []byte("epub-cover-bytes"))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Cover == nil {
+		t.Fatal("Cover = nil, want embedded EPUB cover")
+	}
+	if got.Cover.ContentType != "image/jpeg" {
+		t.Fatalf("Cover.ContentType = %q, want image/jpeg", got.Cover.ContentType)
+	}
+	if string(got.Cover.Bytes) != "epub-cover-bytes" {
+		t.Fatalf("Cover.Bytes = %q, want EPUB cover bytes", string(got.Cover.Bytes))
+	}
+}
+
 func TestReadEPUBZipEntryRejectsOversizedEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "large.epub")
 	file, err := os.Create(path)
@@ -452,6 +471,52 @@ func TestParseEbookCBZPageCount(t *testing.T) {
 	}
 	if got.PageCount != 3 {
 		t.Fatalf("PageCount = %d, want 3", got.PageCount)
+	}
+}
+
+func TestParseEbookCBZExtractsFirstReadablePageAsCover(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "comic.cbz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create cbz: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	for _, entry := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "Comic/002.png", body: []byte("second-page")},
+		{name: "Comic/001.jpg", body: []byte("first-page")},
+		{name: "Comic/notes.txt", body: []byte("ignored")},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", entry.name, err)
+		}
+		if _, err := w.Write(entry.body); err != nil {
+			t.Fatalf("write zip entry %s: %v", entry.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close cbz: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Cover == nil {
+		t.Fatal("Cover = nil, want first CBZ page as cover")
+	}
+	if got.Cover.ContentType != "image/jpeg" {
+		t.Fatalf("Cover.ContentType = %q, want image/jpeg", got.Cover.ContentType)
+	}
+	if string(got.Cover.Bytes) != "first-page" {
+		t.Fatalf("Cover.Bytes = %q, want first page bytes", string(got.Cover.Bytes))
 	}
 }
 
@@ -802,6 +867,30 @@ func TestApplyEbookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
 	}
 }
 
+func TestApplyEbookSidecarCoverCachesSameDirectoryCover(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "book.epub"), []byte("book"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cover.jpg"), []byte("ebook-sidecar-cover"), 0o644); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
+	cacher := &fakeEbookCoverCacher{}
+	updater := &fakeEbookMetadataUpdater{}
+
+	err := applyEbookSidecarCover(context.Background(), updater, cacher, "content-1", filepath.Join(dir, "book.epub"))
+	if err != nil {
+		t.Fatalf("applyEbookSidecarCover: %v", err)
+	}
+
+	if cacher.calls != 1 || string(cacher.data) != "ebook-sidecar-cover" {
+		t.Fatalf("cache call = calls %d data %q", cacher.calls, string(cacher.data))
+	}
+	if updater.update == nil || updater.update.PosterPath == nil || *updater.update.PosterPath != "local/ebooks/content-1/poster/original.webp" {
+		t.Fatalf("poster update = %#v", updater.update)
+	}
+}
+
 func TestScanEbookPersistenceSQLWritesLibraryMembershipAndISBNOnly(t *testing.T) {
 	ctx := context.Background()
 	exec := &recordingEbookExecutor{}
@@ -942,6 +1031,51 @@ func writeTestEPUBWithDescriptionAndMeta(t *testing.T, identifiers []string, des
 `+extraMetaXML+`
   </metadata>
 </package>`)
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
+	return path
+}
+
+func writeTestEPUBWithCover(t *testing.T, coverHref string, coverType string, coverBytes []byte) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "book.epub")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	add := func(name string, body []byte) {
+		t.Helper()
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write(body); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	add("META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	add("OPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+  <metadata>
+    <dc:title>The Test Ebook</dc:title>
+    <meta name="cover" content="cover-image"/>
+  </metadata>
+  <manifest>
+    <item id="cover-image" href="`+coverHref+`" media-type="`+coverType+`"/>
+  </manifest>
+</package>`))
+	add("OPS/"+coverHref, coverBytes)
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip: %v", err)
 	}

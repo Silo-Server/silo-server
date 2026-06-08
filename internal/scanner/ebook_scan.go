@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -229,6 +230,14 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	}
 	if err := s.upsertEbookMediaFile(ctx, folder, contentID, filePath, size, modifiedAt, &parsed); err != nil {
 		return fmt.Errorf("upsert ebook file: %w", err)
+	}
+	if err := applyEbookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, filePath); err != nil {
+		slog.Warn("ebook scan: sidecar cover upload failed",
+			"folder_id", folder.ID,
+			"content_id", contentID,
+			"path", filePath,
+			"error", err,
+		)
 	}
 	if err := applyEbookEmbeddedCover(ctx, s.itemRepo, s.imageCacher, contentID, &parsed); err != nil {
 		slog.Warn("ebook scan: embedded cover upload failed",
@@ -478,6 +487,24 @@ func applyEbookEmbeddedCover(ctx context.Context, store ebookCoverMetadataStore,
 	if store == nil || cacher == nil || contentID == "" || book == nil || book.Cover == nil || len(book.Cover.Bytes) == 0 {
 		return nil
 	}
+	return cacheEbookCoverBytes(ctx, store, cacher, contentID, book.Cover.Bytes)
+}
+
+func applyEbookSidecarCover(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, ebookFilePath string) error {
+	if store == nil || cacher == nil || contentID == "" || ebookFilePath == "" {
+		return nil
+	}
+	cover, _, err := findSidecarBookCover(filepath.Dir(ebookFilePath))
+	if err != nil || cover == nil {
+		return err
+	}
+	return cacheEbookCoverBytes(ctx, store, cacher, contentID, cover.Bytes)
+}
+
+func cacheEbookCoverBytes(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
 	items, err := store.GetByIDs(ctx, []string{contentID})
 	if err != nil {
 		return fmt.Errorf("get ebook media item for cover: %w", err)
@@ -485,7 +512,7 @@ func applyEbookEmbeddedCover(ctx context.Context, store ebookCoverMetadataStore,
 	if len(items) > 0 && items[0] != nil && strings.TrimSpace(items[0].PosterPath) != "" {
 		return nil
 	}
-	basePath, ext, thumbhash, err := cacher.CacheEbookCover(ctx, book.Cover.Bytes, contentID)
+	basePath, ext, thumbhash, err := cacher.CacheEbookCover(ctx, data, contentID)
 	if err != nil {
 		return err
 	}
@@ -495,6 +522,69 @@ func applyEbookEmbeddedCover(ctx context.Context, store ebookCoverMetadataStore,
 		update.PosterThumbhash = &thumbhash
 	}
 	return store.UpdateMetadata(ctx, contentID, update)
+}
+
+var sidecarCoverNames = []string{"cover", "folder", "front", "poster", "thumbnail"}
+var sidecarCoverExtensions = []string{".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".bmp"}
+
+func findSidecarBookCover(dir string) (*parsedEbookCover, string, error) {
+	if dir == "" {
+		return nil, "", nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, "", err
+	}
+	byName := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		byName[strings.ToLower(entry.Name())] = filepath.Join(dir, entry.Name())
+	}
+	for _, name := range sidecarCoverNames {
+		for _, ext := range sidecarCoverExtensions {
+			path := byName[name+ext]
+			if path == "" {
+				continue
+			}
+			data, err := readSidecarCover(path)
+			if err != nil {
+				return nil, path, err
+			}
+			return &parsedEbookCover{
+				ContentType: ebookImageContentType(path),
+				Bytes:       data,
+			}, path, nil
+		}
+	}
+	return nil, "", nil
+}
+
+func readSidecarCover(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxEPUBMetadataEntrySize {
+		return nil, fmt.Errorf("sidecar cover too large: %s", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxEPUBMetadataEntrySize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxEPUBMetadataEntrySize {
+		return nil, fmt.Errorf("sidecar cover too large: %s", path)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("sidecar cover empty: %s", path)
+	}
+	return data, nil
 }
 
 func insertEbookLibraryMembership(ctx context.Context, exec ebookSQLExecutor, contentID string, folderID int) error {
