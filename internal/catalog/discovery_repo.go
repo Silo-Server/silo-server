@@ -36,10 +36,10 @@ type RatingFilter struct {
 	Filter AccessFilter
 }
 
-// ListByRatingThreshold returns media items whose rating_imdb is >= f.Min,
-// ordered by rating_imdb DESC NULLS LAST.  Items without an IMDb rating are
-// always excluded.
-func (r *DiscoveryRepository) ListByRatingThreshold(ctx context.Context, f RatingFilter) ([]*models.MediaItem, error) {
+// buildRatingThresholdQuery builds the SQL statement and bind args for ListByRatingThreshold.
+// It returns an empty query string when access rules exclude every
+// library, signalling the caller to skip the query and return no rows.
+func buildRatingThresholdQuery(f RatingFilter) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
@@ -60,7 +60,7 @@ func (r *DiscoveryRepository) ListByRatingThreshold(ctx context.Context, f Ratin
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 		if f.Filter.AllowedLibraryIDs != nil {
 			if len(f.Filter.AllowedLibraryIDs) == 0 {
-				return []*models.MediaItem{}, nil
+				return "", nil
 			}
 			placeholders := make([]string, len(f.Filter.AllowedLibraryIDs))
 			for i, id := range f.Filter.AllowedLibraryIDs {
@@ -85,7 +85,7 @@ func (r *DiscoveryRepository) ListByRatingThreshold(ctx context.Context, f Ratin
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
-		itemColumns,
+		qualifiedItemColumns("mi"),
 		fromClause,
 		strings.Join(conditions, " AND "),
 	)
@@ -93,6 +93,18 @@ func (r *DiscoveryRepository) ListByRatingThreshold(ctx context.Context, f Ratin
 	if f.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", argIdx)
 		args = append(args, f.Limit)
+	}
+
+	return query, args
+}
+
+// ListByRatingThreshold returns media items whose rating_imdb is >= f.Min,
+// ordered by rating_imdb DESC NULLS LAST.  Items without an IMDb rating are
+// always excluded.
+func (r *DiscoveryRepository) ListByRatingThreshold(ctx context.Context, f RatingFilter) ([]*models.MediaItem, error) {
+	query, args := buildRatingThresholdQuery(f)
+	if query == "" {
+		return []*models.MediaItem{}, nil
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -122,17 +134,10 @@ type UnplayedFilter struct {
 	Filter AccessFilter
 }
 
-// ListUnplayedHighRated returns high-rated items that the given user/profile has
-// never started watching.  "Never started" means no row exists in
-// user_watch_history for (user_id, profile_id, media_item_id), regardless of
-// completion status.  Items without an IMDb rating are excluded.
-//
-// Results are ordered by rating_imdb DESC NULLS LAST.
-func (r *DiscoveryRepository) ListUnplayedHighRated(ctx context.Context, f UnplayedFilter) ([]*models.MediaItem, error) {
-	if f.UserID <= 0 || strings.TrimSpace(f.ProfileID) == "" {
-		return nil, fmt.Errorf("ListUnplayedHighRated: UserID and ProfileID are required")
-	}
-
+// buildUnplayedHighRatedQuery builds the SQL statement and bind args for ListUnplayedHighRated.
+// It returns an empty query string when access rules exclude every
+// library, signalling the caller to skip the query and return no rows.
+func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
@@ -161,7 +166,7 @@ func (r *DiscoveryRepository) ListUnplayedHighRated(ctx context.Context, f Unpla
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 		if f.Filter.AllowedLibraryIDs != nil {
 			if len(f.Filter.AllowedLibraryIDs) == 0 {
-				return []*models.MediaItem{}, nil
+				return "", nil
 			}
 			placeholders := make([]string, len(f.Filter.AllowedLibraryIDs))
 			for i, id := range f.Filter.AllowedLibraryIDs {
@@ -186,7 +191,7 @@ func (r *DiscoveryRepository) ListUnplayedHighRated(ctx context.Context, f Unpla
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
-		itemColumns,
+		qualifiedItemColumns("mi"),
 		fromClause,
 		strings.Join(conditions, " AND "),
 	)
@@ -194,6 +199,25 @@ func (r *DiscoveryRepository) ListUnplayedHighRated(ctx context.Context, f Unpla
 	if f.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", argIdx)
 		args = append(args, f.Limit)
+	}
+
+	return query, args
+}
+
+// ListUnplayedHighRated returns high-rated items that the given user/profile has
+// never started watching.  "Never started" means no row exists in
+// user_watch_history for (user_id, profile_id, media_item_id), regardless of
+// completion status.  Items without an IMDb rating are excluded.
+//
+// Results are ordered by rating_imdb DESC NULLS LAST.
+func (r *DiscoveryRepository) ListUnplayedHighRated(ctx context.Context, f UnplayedFilter) ([]*models.MediaItem, error) {
+	if f.UserID <= 0 || strings.TrimSpace(f.ProfileID) == "" {
+		return nil, fmt.Errorf("ListUnplayedHighRated: UserID and ProfileID are required")
+	}
+
+	query, args := buildUnplayedHighRatedQuery(f)
+	if query == "" {
+		return []*models.MediaItem{}, nil
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -225,13 +249,10 @@ type ForgottenFavoritesFilter struct {
 	Filter AccessFilter
 }
 
-// ListForgottenFavorites returns high-rated items (rating_imdb >= 7.0) that the
-// user/profile either has never watched OR last watched more than LookbackDays
-// ago.  Results are ordered by rating_imdb DESC NULLS LAST.
-func (r *DiscoveryRepository) ListForgottenFavorites(ctx context.Context, f ForgottenFavoritesFilter) ([]*models.MediaItem, error) {
-	if f.UserID <= 0 || strings.TrimSpace(f.ProfileID) == "" {
-		return nil, fmt.Errorf("ListForgottenFavorites: UserID and ProfileID are required")
-	}
+// buildForgottenFavoritesQuery builds the SQL statement and bind args for ListForgottenFavorites.
+// It returns an empty query string when access rules exclude every
+// library, signalling the caller to skip the query and return no rows.
+func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
 	if f.LookbackDays <= 0 {
 		f.LookbackDays = 365
 	}
@@ -261,7 +282,7 @@ func (r *DiscoveryRepository) ListForgottenFavorites(ctx context.Context, f Forg
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 		if f.Filter.AllowedLibraryIDs != nil {
 			if len(f.Filter.AllowedLibraryIDs) == 0 {
-				return []*models.MediaItem{}, nil
+				return "", nil
 			}
 			placeholders := make([]string, len(f.Filter.AllowedLibraryIDs))
 			for i, id := range f.Filter.AllowedLibraryIDs {
@@ -286,7 +307,7 @@ func (r *DiscoveryRepository) ListForgottenFavorites(ctx context.Context, f Forg
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
-		itemColumns,
+		qualifiedItemColumns("mi"),
 		fromClause,
 		strings.Join(conditions, " AND "),
 	)
@@ -294,6 +315,21 @@ func (r *DiscoveryRepository) ListForgottenFavorites(ctx context.Context, f Forg
 	if f.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", argIdx)
 		args = append(args, f.Limit)
+	}
+
+	return query, args
+}
+
+// ListForgottenFavorites returns high-rated items (rating_imdb >= 7.0) that the
+// user/profile either has never watched OR last watched more than LookbackDays
+// ago.  Results are ordered by rating_imdb DESC NULLS LAST.
+func (r *DiscoveryRepository) ListForgottenFavorites(ctx context.Context, f ForgottenFavoritesFilter) ([]*models.MediaItem, error) {
+	if f.UserID <= 0 || strings.TrimSpace(f.ProfileID) == "" {
+		return nil, fmt.Errorf("ListForgottenFavorites: UserID and ProfileID are required")
+	}
+	query, args := buildForgottenFavoritesQuery(f)
+	if query == "" {
+		return []*models.MediaItem{}, nil
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)

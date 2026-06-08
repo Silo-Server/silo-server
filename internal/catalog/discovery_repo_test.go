@@ -13,130 +13,6 @@ import (
 	"testing"
 )
 
-// buildRatingThresholdQuery is the testable extraction of the SQL generation
-// logic from ListByRatingThreshold so we can inspect it without a pool.
-func buildRatingThresholdQuery(f RatingFilter) (string, []any) {
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	conditions = append(conditions, "mi.rating_imdb >= $1")
-	args = append(args, f.Min)
-	argIdx++
-
-	fromClause := "media_items mi"
-	if f.LibraryID != nil {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-		conditions = append(conditions, "mil.media_folder_id = $2")
-		args = append(args, *f.LibraryID)
-		argIdx++
-	} else if f.Filter.AllowedLibraryIDs != nil || len(f.Filter.DisabledLibraryIDs) > 0 {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-		if f.Filter.AllowedLibraryIDs != nil {
-			if len(f.Filter.AllowedLibraryIDs) == 0 {
-				return "", nil // early empty
-			}
-			placeholders := make([]string, len(f.Filter.AllowedLibraryIDs))
-			for i, id := range f.Filter.AllowedLibraryIDs {
-				placeholders[i] = "$" + itoa(argIdx)
-				args = append(args, id)
-				argIdx++
-			}
-			conditions = append(conditions, "mil.media_folder_id IN ("+strings.Join(placeholders, ", ")+")")
-		}
-		if len(f.Filter.DisabledLibraryIDs) > 0 {
-			placeholders := make([]string, len(f.Filter.DisabledLibraryIDs))
-			for i, id := range f.Filter.DisabledLibraryIDs {
-				placeholders[i] = "$" + itoa(argIdx)
-				args = append(args, id)
-				argIdx++
-			}
-			conditions = append(conditions, "mil.media_folder_id NOT IN ("+strings.Join(placeholders, ", ")+")")
-		}
-	}
-
-	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
-
-	query := "SELECT " + itemColumns + " FROM " + fromClause +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		" ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC"
-
-	if f.Limit > 0 {
-		query += " LIMIT $" + itoa(argIdx)
-		args = append(args, f.Limit)
-	}
-	return query, args
-}
-
-// buildUnplayedHighRatedQuery mirrors the SQL-building portion of
-// ListUnplayedHighRated for unit testing.
-func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	conditions = append(conditions, "mi.rating_imdb >= $1")
-	args = append(args, f.MinRating)
-	argIdx++
-
-	conditions = append(conditions, "NOT EXISTS (\n\t\tSELECT 1\n\t\tFROM user_watch_history uwh\n\t\tWHERE uwh.user_id = $"+itoa(argIdx)+"\n\t\t  AND uwh.profile_id = $"+itoa(argIdx+1)+"\n\t\t  AND uwh.media_item_id = mi.content_id\n\t)")
-	args = append(args, f.UserID, f.ProfileID)
-	argIdx += 2
-
-	fromClause := "media_items mi"
-	if f.Filter.AllowedLibraryIDs != nil || len(f.Filter.DisabledLibraryIDs) > 0 {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-		if f.Filter.AllowedLibraryIDs != nil {
-			if len(f.Filter.AllowedLibraryIDs) == 0 {
-				return "", nil // early empty
-			}
-			placeholders := make([]string, len(f.Filter.AllowedLibraryIDs))
-			for i, id := range f.Filter.AllowedLibraryIDs {
-				placeholders[i] = "$" + itoa(argIdx)
-				args = append(args, id)
-				argIdx++
-			}
-			conditions = append(conditions, "mil.media_folder_id IN ("+strings.Join(placeholders, ", ")+")")
-		}
-		if len(f.Filter.DisabledLibraryIDs) > 0 {
-			placeholders := make([]string, len(f.Filter.DisabledLibraryIDs))
-			for i, id := range f.Filter.DisabledLibraryIDs {
-				placeholders[i] = "$" + itoa(argIdx)
-				args = append(args, id)
-				argIdx++
-			}
-			conditions = append(conditions, "mil.media_folder_id NOT IN ("+strings.Join(placeholders, ", ")+")")
-		}
-	}
-
-	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
-
-	query := "SELECT " + itemColumns + " FROM " + fromClause +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		" ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC"
-
-	if f.Limit > 0 {
-		query += " LIMIT $" + itoa(argIdx)
-		args = append(args, f.Limit)
-	}
-	return query, args
-}
-
-// itoa is a local helper to avoid importing strconv.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	buf := [20]byte{}
-	pos := len(buf)
-	for n > 0 {
-		pos--
-		buf[pos] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[pos:])
-}
-
 // ---------------------------------------------------------------------------
 // ListByRatingThreshold SQL generation tests
 // ---------------------------------------------------------------------------
@@ -370,62 +246,6 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 // ListForgottenFavorites SQL generation tests
 // ---------------------------------------------------------------------------
 
-// buildForgottenFavoritesQuery is the testable extraction of the SQL
-// generation logic from ListForgottenFavorites.
-func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
-	if f.LookbackDays <= 0 {
-		f.LookbackDays = 365
-	}
-
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	conditions = append(conditions, "mi.rating_imdb >= 7.0")
-
-	conditions = append(conditions, "NOT EXISTS (\n\t\tSELECT 1\n\t\tFROM user_watch_history uwh\n\t\tWHERE uwh.user_id = $"+itoa(argIdx)+"\n\t\t  AND uwh.profile_id = $"+itoa(argIdx+1)+"\n\t\t  AND uwh.media_item_id = mi.content_id\n\t\t  AND uwh.watched_at >= NOW() - ($"+itoa(argIdx+2)+" || ' days')::interval\n\t)")
-	args = append(args, f.UserID, f.ProfileID, f.LookbackDays)
-	argIdx += 3
-
-	fromClause := "media_items mi"
-	if f.Filter.AllowedLibraryIDs != nil || len(f.Filter.DisabledLibraryIDs) > 0 {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-		if f.Filter.AllowedLibraryIDs != nil {
-			if len(f.Filter.AllowedLibraryIDs) == 0 {
-				return "", nil // early empty
-			}
-			placeholders := make([]string, len(f.Filter.AllowedLibraryIDs))
-			for i, id := range f.Filter.AllowedLibraryIDs {
-				placeholders[i] = "$" + itoa(argIdx)
-				args = append(args, id)
-				argIdx++
-			}
-			conditions = append(conditions, "mil.media_folder_id IN ("+strings.Join(placeholders, ", ")+")")
-		}
-		if len(f.Filter.DisabledLibraryIDs) > 0 {
-			placeholders := make([]string, len(f.Filter.DisabledLibraryIDs))
-			for i, id := range f.Filter.DisabledLibraryIDs {
-				placeholders[i] = "$" + itoa(argIdx)
-				args = append(args, id)
-				argIdx++
-			}
-			conditions = append(conditions, "mil.media_folder_id NOT IN ("+strings.Join(placeholders, ", ")+")")
-		}
-	}
-
-	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
-
-	query := "SELECT " + itemColumns + " FROM " + fromClause +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		" ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC"
-
-	if f.Limit > 0 {
-		query += " LIMIT $" + itoa(argIdx)
-		args = append(args, f.Limit)
-	}
-	return query, args
-}
-
 func TestForgottenFavorites_BasicQuery(t *testing.T) {
 	query, args := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
 		LookbackDays: 365,
@@ -540,3 +360,41 @@ func TestForgottenFavorites_DefaultLookbackApplied(t *testing.T) {
 		t.Fatalf("expected lookback default 365, got %v", args[2])
 	}
 }
+
+// TestDiscoveryQueries_QualifyContentIDUnderLibraryJoin is a regression guard
+// for the "column reference \"content_id\" is ambiguous" (SQLSTATE 42702)
+// failure. When a viewer has library restrictions, each discovery query joins
+// media_item_libraries (which also has a content_id column). The SELECT list
+// must therefore qualify its columns with the mi alias; a bare column list
+// makes content_id ambiguous and the query fails at runtime.
+func TestDiscoveryQueries_QualifyContentIDUnderLibraryJoin(t *testing.T) {
+	restricted := AccessFilter{AllowedLibraryIDs: []int{1, 2}}
+
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"rating_threshold", mustQuery(buildRatingThresholdQuery(RatingFilter{Min: 7, Filter: restricted}))},
+		{"unplayed_high_rated", mustQuery(buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7, UserID: 1, ProfileID: "p", Filter: restricted}))},
+		{"forgotten_favorites", mustQuery(buildForgottenFavoritesQuery(ForgottenFavoritesFilter{UserID: 1, ProfileID: "p", LookbackDays: 365, Filter: restricted}))},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Precondition: the join that introduces the ambiguity is present.
+			if !strings.Contains(tc.query, "JOIN media_item_libraries mil") {
+				t.Fatalf("expected library join in query, got:\n%s", tc.query)
+			}
+			// The SELECT list must be alias-qualified.
+			if !strings.HasPrefix(tc.query, "SELECT mi.content_id,") {
+				t.Fatalf("SELECT list is not qualified with the mi alias (ambiguous content_id), got:\n%s", tc.query)
+			}
+			// And must not contain a bare, unqualified content_id column.
+			if strings.Contains(tc.query, "SELECT content_id,") {
+				t.Fatalf("SELECT list uses an unqualified content_id, got:\n%s", tc.query)
+			}
+		})
+	}
+}
+
+func mustQuery(query string, _ []any) string { return query }
