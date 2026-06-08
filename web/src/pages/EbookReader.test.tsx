@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
   readerPrev: vi.fn(),
   readerNext: vi.fn(),
+  readerGoTo: vi.fn(),
+  readerGoToFraction: vi.fn(),
+  readerSearch: vi.fn(),
+  captureReaderSettings: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -30,22 +34,60 @@ vi.mock("@/reader/FoliateBookReader", async () => {
   return {
     ...actual,
     default: forwardRef<
-      { prev: () => void; next: () => void },
+      {
+        prev: () => void;
+        next: () => void;
+        goTo: (href: string) => void;
+        goToFraction: (fraction: number) => Promise<void>;
+        search: (
+          query: string,
+        ) => Promise<Array<{ cfi: string; label?: string; excerpt?: string }>>;
+        clearSearch: () => void;
+      },
       {
         file: FileVersion;
+        settings?: unknown;
         onProgressChange?: (progress: number | null) => void;
         onFileLoaded?: (state: { objectUrl: string; filename: string } | null) => void;
+        onReady?: (state: {
+          toc: Array<{
+            id: number;
+            label: string;
+            href: string;
+            index: number;
+            subitems?: Array<{ id: number; label: string; href: string; index: number }>;
+          }>;
+        }) => void;
       }
-    >(function MockFoliateBookReader({ file, onProgressChange, onFileLoaded }, ref) {
+    >(function MockFoliateBookReader(
+      { file, settings, onProgressChange, onFileLoaded, onReady },
+      ref,
+    ) {
+      mocks.captureReaderSettings(settings);
       useImperativeHandle(ref, () => ({
         prev: mocks.readerPrev,
         next: mocks.readerNext,
+        goTo: mocks.readerGoTo,
+        goToFraction: mocks.readerGoToFraction,
+        search: mocks.readerSearch,
+        clearSearch: vi.fn(),
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
         onProgressChange?.(0.421);
+        onReady?.({
+          toc: [
+            {
+              id: 1,
+              label: "Opening",
+              href: "chapter-1.xhtml",
+              index: 0,
+              subitems: [{ id: 2, label: "Aboard", href: "chapter-1.xhtml#aboard", index: 0 }],
+            },
+          ],
+        });
         return () => onFileLoaded?.(null);
-      }, [onFileLoaded, onProgressChange]);
+      }, [onFileLoaded, onProgressChange, onReady]);
       return <div>reader surface {file.file_name}</div>;
     }),
   };
@@ -67,7 +109,9 @@ function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
   };
 }
 
-function makeEbookItem(overrides: Partial<ItemDetail & { type: "ebook" }> = {}): ItemDetail & { type: "ebook" } {
+function makeEbookItem(
+  overrides: Partial<ItemDetail & { type: "ebook" }> = {},
+): ItemDetail & { type: "ebook" } {
   return {
     content_id: "ebook-1",
     type: "ebook",
@@ -115,6 +159,35 @@ function makeEbookItem(overrides: Partial<ItemDetail & { type: "ebook" }> = {}):
   };
 }
 
+function installStorage() {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+    removeItem: vi.fn((key: string) => values.delete(key)),
+    clear: vi.fn(() => values.clear()),
+    key: vi.fn((index: number) => Array.from(values.keys())[index] ?? null),
+    get length() {
+      return values.size;
+    },
+  } as Storage;
+  Object.defineProperty(window, "localStorage", {
+    value: storage,
+    configurable: true,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    value: storage,
+    configurable: true,
+  });
+  return storage;
+}
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 describe("EbookReader", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -127,9 +200,18 @@ describe("EbookReader", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    installStorage();
     mocks.useCatalogItemDetail.mockReset();
     mocks.readerPrev.mockReset();
     mocks.readerNext.mockReset();
+    mocks.readerGoTo.mockReset();
+    mocks.readerGoToFraction.mockReset();
+    mocks.readerSearch.mockReset();
+    mocks.captureReaderSettings.mockReset();
+    mocks.readerSearch.mockResolvedValue([
+      { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
+    ]);
+    localStorage.clear();
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem(),
       isLoading: false,
@@ -157,7 +239,9 @@ describe("EbookReader", () => {
 
     expect(container.textContent).toContain("42%");
 
-    const previous = container.querySelector<HTMLButtonElement>('button[aria-label="Previous page"]');
+    const previous = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Previous page"]',
+    );
     const next = container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]');
     expect(previous).not.toBeNull();
     expect(next).not.toBeNull();
@@ -274,5 +358,133 @@ describe("EbookReader", () => {
 
     expect(container.textContent).toContain("reader surface Reader.epub");
     expect(container.textContent).not.toContain("Unsupported ebook format.");
+  });
+
+  it("shows the table of contents and navigates to a selected section", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("Opening");
+    expect(container.textContent).toContain("Aboard");
+
+    const aboard = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent === "Aboard",
+    );
+
+    await act(async () => {
+      aboard?.click();
+    });
+
+    expect(mocks.readerGoTo).toHaveBeenCalledWith("chapter-1.xhtml#aboard");
+  });
+
+  it("searches inside the reader and navigates to a selected result", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const searchTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Search book"]',
+    );
+    await act(async () => {
+      searchTab?.click();
+    });
+
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Search text"]');
+    await act(async () => {
+      if (!input) return;
+      setInputValue(input, "Shanghai");
+    });
+
+    const submit = container.querySelector<HTMLButtonElement>('button[aria-label="Run search"]');
+    await act(async () => {
+      submit?.click();
+    });
+
+    expect(mocks.readerSearch).toHaveBeenCalledWith("Shanghai");
+    expect(container.textContent).toContain("Shanghai harbor");
+
+    const result = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.includes("Shanghai harbor"),
+    );
+    await act(async () => {
+      result?.click();
+    });
+
+    expect(mocks.readerGoTo).toHaveBeenCalledWith("epubcfi(/6/8)");
+  });
+
+  it("persists reader settings and passes them to the reader", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
+    await act(async () => {
+      if (!theme) return;
+      theme.value = "dark";
+      theme.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ theme: "dark" }),
+    );
+    expect(localStorage.getItem("silo.ebook.reader.settings")).toContain('"theme":"dark"');
+  });
+
+  it("scrubs reader progress and supports keyboard page navigation", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const scrubber = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Reading progress"]',
+    );
+    await act(async () => {
+      if (!scrubber) return;
+      setInputValue(scrubber, "65");
+    });
+
+    expect(mocks.readerGoToFraction).toHaveBeenCalledWith(0.65);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+    });
+
+    expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
+    expect(mocks.readerNext).toHaveBeenCalledTimes(1);
   });
 });

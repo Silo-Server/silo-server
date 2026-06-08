@@ -10,6 +10,8 @@ import {
   ebookReadPath,
   formatReaderProgress,
   isReaderSupportedFile,
+  normalizeReaderSettings,
+  readerStyles,
   restoreProgressTarget,
   progressFromRelocate,
   readerFileFormat,
@@ -142,5 +144,50 @@ describe("FoliateBookReader helpers", () => {
 
   it("ignores relocate events without a usable location", () => {
     expect(progressFromRelocate({ cfi: "epubcfi(/6/4)", location: { total: 0 } }, 42)).toBeNull();
+  });
+
+  it("normalizes reader settings into bounded values", () => {
+    expect(
+      normalizeReaderSettings({
+        fontSize: 400,
+        lineHeight: 0.2,
+        margin: -10,
+        maxWidth: 200,
+        theme: "sepia",
+        flow: "scrolled",
+        spread: "none",
+      }),
+    ).toMatchObject({
+      fontSize: 180,
+      lineHeight: 1.1,
+      margin: 0,
+      maxWidth: 96,
+      theme: "sepia",
+      flow: "scrolled",
+      spread: "none",
+    });
+  });
+
+  it("builds reader styles from settings", () => {
+    const styles = readerStyles(
+      normalizeReaderSettings({
+        theme: "dark",
+        fontFamily: "Georgia, serif",
+        fontSize: 128,
+        fontWeight: 500,
+        lineHeight: 1.8,
+        maxWidth: 68,
+        hyphenation: false,
+      }),
+    );
+
+    expect(styles).toContain("color-scheme: dark");
+    expect(styles).toContain("background: #111827 !important");
+    expect(styles).toContain("font-family: Georgia, serif !important");
+    expect(styles).toContain("font-size: 128% !important");
+    expect(styles).toContain("font-weight: 500 !important");
+    expect(styles).toContain("hyphens: none !important");
+    expect(styles).toContain("line-height: 1.8 !important");
+    expect(styles).toContain("max-width: 68ch !important");
   });
 });

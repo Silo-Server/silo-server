@@ -1,20 +1,51 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Library, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Library,
+  ListTree,
+  Loader2,
+  PanelRightClose,
+  PanelRightOpen,
+  Search,
+  Settings,
+  Type,
+} from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { cn } from "@/lib/utils";
+import type { TOCItem } from "@/reader/readest/libs/document";
 import FoliateBookReader, {
+  DEFAULT_READER_SETTINGS,
   formatReaderProgress,
   isReaderSupportedFile,
+  normalizeReaderSettings,
   readerFileFormat,
   type FoliateBookReaderHandle,
   type ReaderLoadState,
+  type ReaderSearchResult,
+  type ReaderSettings,
 } from "@/reader/FoliateBookReader";
 
-function chooseReaderFile(files: FileVersion[], requestedID: number | null): FileVersion | undefined {
+export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
+
+type ReaderPanel = "toc" | "search" | "settings";
+
+type TocEntry = TOCItem & {
+  depth: number;
+};
+
+function chooseReaderFile(
+  files: FileVersion[],
+  requestedID: number | null,
+): FileVersion | undefined {
   const requested = requestedID ? files.find((file) => file.file_id === requestedID) : undefined;
   if (requested && isReaderSupportedFile(requested)) return requested;
   return (
@@ -30,6 +61,41 @@ function readerFileLabel(file: FileVersion): string {
   return format ? `${format} · ${name}` : name;
 }
 
+function flattenToc(items: TOCItem[] = [], depth = 0): TocEntry[] {
+  return items.flatMap((item) => [
+    { ...item, depth },
+    ...flattenToc(item.subitems ?? [], depth + 1),
+  ]);
+}
+
+function readerStorage(): Storage | null {
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function loadStoredReaderSettings(): ReaderSettings {
+  try {
+    const raw = readerStorage()?.getItem(EBOOK_READER_SETTINGS_STORAGE_KEY);
+    if (!raw) return DEFAULT_READER_SETTINGS;
+    return normalizeReaderSettings(JSON.parse(raw) as Partial<ReaderSettings>);
+  } catch {
+    return DEFAULT_READER_SETTINGS;
+  }
+}
+
+function saveReaderSettings(settings: ReaderSettings) {
+  readerStorage()?.setItem(EBOOK_READER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
 export default function EbookReader() {
   const { contentId = "" } = useParams<{ contentId: string }>();
   const navigate = useNavigate();
@@ -38,7 +104,11 @@ export default function EbookReader() {
   const libraryIdParam = searchParams.get("libraryId");
   const { data: item, isLoading, error } = useCatalogItemDetail(contentId || undefined);
   const selectedFile = useMemo(
-    () => chooseReaderFile(item?.versions ?? [], Number.isFinite(requestedFileID) ? requestedFileID : null),
+    () =>
+      chooseReaderFile(
+        item?.versions ?? [],
+        Number.isFinite(requestedFileID) ? requestedFileID : null,
+      ),
     [item?.versions, requestedFileID],
   );
   const readerFiles = useMemo(
@@ -49,12 +119,25 @@ export default function EbookReader() {
   const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
   const [readerProgress, setReaderProgress] = useState<number | null>(null);
+  const [toc, setToc] = useState<TOCItem[]>([]);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [panel, setPanel] = useState<ReaderPanel>("toc");
+  const [readerSettings, setReaderSettings] = useState<ReaderSettings>(() =>
+    loadStoredReaderSettings(),
+  );
+  const [searchText, setSearchText] = useState("");
+  const [searchResults, setSearchResults] = useState<ReaderSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const progressLabel = formatReaderProgress(readerProgress);
+  const tocEntries = useMemo(() => flattenToc(toc), [toc]);
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
   }, []);
   const handleProgressChange = useCallback((progress: number | null) => {
     setReaderProgress(progress);
+  }, []);
+  const handleReaderReady = useCallback(({ toc: readyToc }: { toc: TOCItem[] }) => {
+    setToc(readyToc);
   }, []);
   const handleFileChange = useCallback(
     (fileID: string) => {
@@ -70,10 +153,50 @@ export default function EbookReader() {
     },
     [contentId, libraryIdParam, navigate],
   );
+  const updateReaderSettings = useCallback((next: Partial<ReaderSettings>) => {
+    setReaderSettings((current) => {
+      const merged = normalizeReaderSettings({ ...current, ...next });
+      saveReaderSettings(merged);
+      return merged;
+    });
+  }, []);
+  const handleSearchSubmit = useCallback(async () => {
+    const query = searchText.trim();
+    if (!query) {
+      setSearchResults([]);
+      readerRef.current?.clearSearch();
+      return;
+    }
+    setSearching(true);
+    try {
+      setSearchResults(await (readerRef.current?.search(query) ?? Promise.resolve([])));
+    } finally {
+      setSearching(false);
+    }
+  }, [searchText]);
+  const handleProgressScrub = useCallback((value: string) => {
+    const next = Math.min(1, Math.max(0, Number(value) / 100));
+    if (!Number.isFinite(next)) return;
+    setReaderProgress(next);
+    void readerRef.current?.goToFraction(next);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isEditableTarget(event.target)) return;
+      if (event.key === "ArrowLeft") {
+        readerRef.current?.prev();
+      } else if (event.key === "ArrowRight") {
+        readerRef.current?.next();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
-        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+        <Loader2 className="text-muted-foreground size-8 animate-spin" />
       </div>
     );
   }
@@ -82,7 +205,7 @@ export default function EbookReader() {
     return (
       <div className="page-shell py-10">
         <PageBack />
-        <div className="mt-10 text-sm text-muted-foreground">Ebook not found.</div>
+        <div className="text-muted-foreground mt-10 text-sm">Ebook not found.</div>
       </div>
     );
   }
@@ -95,14 +218,14 @@ export default function EbookReader() {
     return (
       <div className="page-shell py-10">
         <PageBack />
-        <div className="mt-10 text-sm text-muted-foreground">No ebook files found.</div>
+        <div className="text-muted-foreground mt-10 text-sm">No ebook files found.</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/95 backdrop-blur">
+    <div className="bg-background min-h-screen">
+      <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label="Back to ebook">
             <Link to={backHref}>
@@ -111,10 +234,10 @@ export default function EbookReader() {
           </Button>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{item.title}</div>
-            <div className="truncate text-xs text-muted-foreground">{format.toUpperCase()}</div>
+            <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
           </div>
           {progressLabel && (
-            <div className="hidden min-w-12 text-center text-xs tabular-nums text-muted-foreground sm:block">
+            <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
               {progressLabel}
             </div>
           )}
@@ -123,7 +246,7 @@ export default function EbookReader() {
               aria-label="Reader file"
               value={selectedFile.file_id}
               onChange={(event) => handleFileChange(event.target.value)}
-              className="border-border bg-background text-foreground hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:block"
+              className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
             >
               {readerFiles.map((file) => (
                 <option key={file.file_id} value={file.file_id}>
@@ -133,6 +256,19 @@ export default function EbookReader() {
             </select>
           )}
           <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
+              title={panelOpen ? "Close reader panel" : "Open reader panel"}
+              onClick={() => setPanelOpen((open) => !open)}
+            >
+              {panelOpen ? (
+                <PanelRightClose className="size-4" />
+              ) : (
+                <PanelRightOpen className="size-4" />
+              )}
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -161,28 +297,305 @@ export default function EbookReader() {
             </Button>
           )}
         </div>
+        <div className="border-border/60 flex h-10 items-center gap-3 border-t px-4">
+          <BookOpen className="text-muted-foreground size-4 shrink-0" />
+          <input
+            aria-label="Reading progress"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={Math.round((readerProgress ?? 0) * 100)}
+            onChange={(event) => handleProgressScrub(event.target.value)}
+            className="accent-primary h-2 min-w-0 flex-1"
+          />
+          <div className="text-muted-foreground w-11 text-right text-xs tabular-nums">
+            {progressLabel ?? "0%"}
+          </div>
+        </div>
       </header>
 
-      <main className="h-[calc(100vh-3.5rem)]">
+      <main
+        className={cn(
+          "grid h-[calc(100vh-6rem)] min-h-0",
+          panelOpen ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : "grid-cols-1",
+        )}
+      >
         {isReaderSupportedFile(selectedFile) ? (
-          <FoliateBookReader
-            ref={readerRef}
-            contentID={contentId}
-            file={selectedFile}
-            title={item.title}
-            onFileLoaded={handleFileLoaded}
-            onProgressChange={handleProgressChange}
-          />
+          <section className="min-h-0">
+            <FoliateBookReader
+              ref={readerRef}
+              contentID={contentId}
+              file={selectedFile}
+              title={item.title}
+              settings={readerSettings}
+              onFileLoaded={handleFileLoaded}
+              onProgressChange={handleProgressChange}
+              onReady={handleReaderReady}
+            />
+          </section>
         ) : (
           <div className="flex h-full items-center justify-center px-6">
             <div className="max-w-md text-center">
-              <Library className="mx-auto mb-4 size-10 text-muted-foreground" />
+              <Library className="text-muted-foreground mx-auto mb-4 size-10" />
               <h1 className="text-lg font-semibold">{item.title}</h1>
-              <p className="mt-2 text-sm text-muted-foreground">Unsupported ebook format.</p>
+              <p className="text-muted-foreground mt-2 text-sm">Unsupported ebook format.</p>
             </div>
           </div>
         )}
+        {panelOpen && isReaderSupportedFile(selectedFile) && (
+          <aside className="border-border bg-background min-h-0 border-t lg:border-t-0 lg:border-l">
+            <div className="border-border/70 flex h-11 items-center border-b px-2">
+              {[
+                {
+                  id: "toc" as const,
+                  label: "Contents",
+                  icon: ListTree,
+                  aria: "Table of contents",
+                },
+                { id: "search" as const, label: "Search", icon: Search, aria: "Search book" },
+                {
+                  id: "settings" as const,
+                  label: "Settings",
+                  icon: Settings,
+                  aria: "Reader settings",
+                },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <Button
+                    key={tab.id}
+                    variant={panel === tab.id ? "secondary" : "ghost"}
+                    size="sm"
+                    aria-label={tab.aria}
+                    title={tab.label}
+                    onClick={() => setPanel(tab.id)}
+                    className="flex-1"
+                  >
+                    <Icon className="size-4" />
+                    <span className="hidden xl:inline">{tab.label}</span>
+                  </Button>
+                );
+              })}
+            </div>
+
+            <div className="h-[calc(100%-2.75rem)] overflow-y-auto p-3">
+              {panel === "toc" && (
+                <div className="space-y-1">
+                  {tocEntries.length === 0 ? (
+                    <div className="text-muted-foreground px-2 py-8 text-center text-sm">
+                      No contents found.
+                    </div>
+                  ) : (
+                    tocEntries.map((entry) => (
+                      <Button
+                        key={`${entry.id}-${entry.href}`}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => readerRef.current?.goTo(entry.href)}
+                        className="h-auto w-full justify-start py-2 text-left text-sm whitespace-normal"
+                        style={{ paddingLeft: `${0.5 + entry.depth * 1}rem` }}
+                      >
+                        {entry.label}
+                      </Button>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {panel === "search" && (
+                <div className="space-y-3">
+                  <form
+                    className="flex gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleSearchSubmit();
+                    }}
+                  >
+                    <input
+                      aria-label="Search text"
+                      value={searchText}
+                      onChange={(event) => setSearchText(event.target.value)}
+                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 min-w-0 flex-1 rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"
+                    />
+                    <Button
+                      aria-label="Run search"
+                      title="Run search"
+                      size="icon"
+                      disabled={searching}
+                    >
+                      {searching ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Search className="size-4" />
+                      )}
+                    </Button>
+                  </form>
+                  <div className="space-y-1">
+                    {searchResults.map((result) => (
+                      <Button
+                        key={result.cfi}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => readerRef.current?.goTo(result.cfi)}
+                        className="h-auto w-full justify-start py-2 text-left whitespace-normal"
+                      >
+                        <span className="min-w-0">
+                          {result.label && (
+                            <span className="text-muted-foreground block text-xs">
+                              {result.label}
+                            </span>
+                          )}
+                          <span className="block text-sm">{result.excerpt || result.cfi}</span>
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {panel === "settings" && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Type className="size-4" />
+                    Typography
+                  </div>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground text-xs font-medium">Theme</span>
+                    <select
+                      aria-label="Theme"
+                      value={readerSettings.theme}
+                      onChange={(event) =>
+                        updateReaderSettings({
+                          theme: event.target.value as ReaderSettings["theme"],
+                        })
+                      }
+                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                    >
+                      <option value="light">Light</option>
+                      <option value="sepia">Sepia</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </label>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground text-xs font-medium">Font</span>
+                    <select
+                      aria-label="Font family"
+                      value={readerSettings.fontFamily}
+                      onChange={(event) => updateReaderSettings({ fontFamily: event.target.value })}
+                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                    >
+                      <option value="Inter, ui-sans-serif, system-ui, sans-serif">Inter</option>
+                      <option value="Georgia, serif">Georgia</option>
+                      <option value="Merriweather, Georgia, serif">Merriweather</option>
+                      <option value="ui-serif, Georgia, Cambria, serif">System Serif</option>
+                    </select>
+                  </label>
+                  <ReaderRange
+                    label="Font size"
+                    value={readerSettings.fontSize}
+                    min={80}
+                    max={180}
+                    step={1}
+                    suffix="%"
+                    onChange={(fontSize) => updateReaderSettings({ fontSize })}
+                  />
+                  <ReaderRange
+                    label="Line height"
+                    value={readerSettings.lineHeight}
+                    min={1.1}
+                    max={2.4}
+                    step={0.05}
+                    onChange={(lineHeight) => updateReaderSettings({ lineHeight })}
+                  />
+                  <ReaderRange
+                    label="Margin"
+                    value={readerSettings.margin}
+                    min={0}
+                    max={64}
+                    step={1}
+                    suffix="px"
+                    onChange={(margin) => updateReaderSettings({ margin })}
+                  />
+                  <ReaderRange
+                    label="Width"
+                    value={readerSettings.maxWidth}
+                    min={42}
+                    max={96}
+                    step={1}
+                    suffix="ch"
+                    onChange={(maxWidth) => updateReaderSettings({ maxWidth })}
+                  />
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground text-xs font-medium">Spread</span>
+                    <select
+                      aria-label="Spread"
+                      value={readerSettings.spread}
+                      onChange={(event) =>
+                        updateReaderSettings({
+                          spread: event.target.value as ReaderSettings["spread"],
+                        })
+                      }
+                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="none">Single page</option>
+                    </select>
+                  </label>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground text-xs font-medium">Flow</span>
+                    <select
+                      aria-label="Flow"
+                      value={readerSettings.flow}
+                      onChange={(event) =>
+                        updateReaderSettings({ flow: event.target.value as ReaderSettings["flow"] })
+                      }
+                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                    >
+                      <option value="paginated">Paginated</option>
+                      <option value="scrolled">Scrolled</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
       </main>
     </div>
+  );
+}
+
+type ReaderRangeProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  suffix?: string;
+  onChange: (value: number) => void;
+};
+
+function ReaderRange({ label, value, min, max, step, suffix = "", onChange }: ReaderRangeProps) {
+  return (
+    <label className="block space-y-1 text-sm">
+      <span className="text-muted-foreground flex items-center justify-between gap-3 text-xs font-medium">
+        <span>{label}</span>
+        <span className="tabular-nums">
+          {Number.isInteger(step) ? value : value.toFixed(2)}
+          {suffix}
+        </span>
+      </span>
+      <input
+        aria-label={label}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="accent-primary h-2 w-full"
+      />
+    </label>
   );
 }
