@@ -207,6 +207,11 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
 
 const QUERY_SORT_OPTION_MAP = new Map(QUERY_SORT_OPTIONS.map((option) => [option.value, option]));
 
+const EBOOK_SORT_LABELS: Partial<Record<QuerySortField, string>> = {
+  date_viewed: "Date Read",
+  plays: "Reads",
+};
+
 function normalizeQuerySortOptionsConfig(
   input: QuerySortOptionsInput = false,
 ): QuerySortOptionsConfig {
@@ -240,6 +245,10 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
     (option) =>
       (includePersonalized || !option.personalized) &&
       optionMatchesRelevanceScope(option, relevanceScope),
+  ).map((option) =>
+    relevanceScope === "ebook" && EBOOK_SORT_LABELS[option.value]
+      ? { ...option, label: EBOOK_SORT_LABELS[option.value] }
+      : option,
   );
 }
 
