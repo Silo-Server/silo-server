@@ -69,12 +69,15 @@ vi.mock("@/pages/audiobooks/components/RelatedRail", () => ({
   RelatedRail: ({
     heading,
     items,
+    coverAspect,
   }: {
     heading: string;
+    coverAspect?: "square" | "poster";
     items: Array<{ content_id: string; title: string; subtitle?: string; highlight?: boolean }>;
   }) => (
     <section>
       <h2>{heading}</h2>
+      {coverAspect && <span>aspect:{coverAspect}</span>}
       {items.map((item) => (
         <div key={item.content_id}>
           <span>{item.title}</span>
@@ -377,6 +380,7 @@ describe("EbookContent", () => {
     expect(markup).toContain("The Long Way");
     expect(markup).toContain("You might also like");
     expect(markup).toContain("All Systems Red");
+    expect(markup).toContain("aspect:poster");
   });
 
   it("shows ebook file format, size, and page count without video quality labels", () => {

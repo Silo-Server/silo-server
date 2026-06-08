@@ -148,6 +148,7 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
         {item.ebook?.series && item.ebook.series.entries.length > 0 && (
           <RelatedRail
             heading={item.ebook.series.name ? `In ${item.ebook.series.name}` : "In this series"}
+            coverAspect="poster"
             items={item.ebook.series.entries.map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,
@@ -162,6 +163,7 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
         {(item.ebook?.related.also_by_author ?? []).length > 0 && (
           <RelatedRail
             heading={`Also by ${authors[0] ?? "this author"}`}
+            coverAspect="poster"
             items={(item.ebook?.related.also_by_author ?? []).map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,
@@ -174,6 +176,7 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
         {(item.ebook?.related.similar ?? []).length > 0 && (
           <RelatedRail
             heading="You might also like"
+            coverAspect="poster"
             items={(item.ebook?.related.similar ?? []).map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,

@@ -12,10 +12,12 @@ interface RelatedRailProps {
   heading: string;
   subtitle?: string;
   items: RelatedRailItem[];
+  coverAspect?: "square" | "poster";
 }
 
-export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
+export function RelatedRail({ heading, subtitle, items, coverAspect = "square" }: RelatedRailProps) {
   if (items.length === 0) return null;
+  const coverAspectClass = coverAspect === "poster" ? "aspect-[2/3]" : "aspect-square";
   return (
     <section>
       <div className="mb-4">
@@ -31,7 +33,7 @@ export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
               item.highlight ? "ring-primary rounded-lg ring-2 ring-offset-2" : ""
             }`}
           >
-            <div className="bg-muted relative aspect-square overflow-hidden rounded-lg">
+            <div className={`bg-muted relative ${coverAspectClass} overflow-hidden rounded-lg`}>
               {item.poster_url ? (
                 <img
                   src={item.poster_url}
