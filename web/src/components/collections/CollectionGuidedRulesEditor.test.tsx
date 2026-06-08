@@ -427,4 +427,21 @@ describe("CollectionGuidedRulesEditor original language field", () => {
     expect(markup).not.toContain("Minimum IMDb Rating");
     expect(markup).not.toContain("Video Quality");
   });
+
+  it("uses reading labels for ebook personalized progress filters", () => {
+    const markup = renderToStaticMarkup(
+      <CollectionGuidedRulesEditor
+        value={{
+          ...createEmptyQueryDefinition(),
+          media_scope: "ebook",
+        }}
+        onChange={() => {}}
+        allowPersonalizedFilters
+        libraryType="ebooks"
+      />,
+    );
+
+    expect(markup).toContain("Read Status");
+    expect(markup).not.toContain("Watch Status");
+  });
 });

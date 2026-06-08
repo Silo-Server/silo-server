@@ -427,6 +427,9 @@ export default function CollectionGuidedRulesEditor({
   const isEbookLibrary =
     libraryType === "ebook" || libraryType === "ebooks" || state.mediaScope === "ebook";
   const isBookLibrary = isAudiobookLibrary || isEbookLibrary;
+  const progressStatusLabel = isEbookLibrary ? "Read Status" : "Watch Status";
+  const completedProgressLabel = isEbookLibrary ? "Read" : "Watched";
+  const unstartedProgressLabel = isEbookLibrary ? "Unread" : "Unwatched";
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
@@ -791,7 +794,7 @@ export default function CollectionGuidedRulesEditor({
 
         {allowPersonalizedFilters ? (
           <div className="space-y-2">
-            <Label>Watch Status</Label>
+            <Label>{progressStatusLabel}</Label>
             <Select
               value={state.watchStatus || "__any__"}
               onValueChange={(value) =>
@@ -806,8 +809,8 @@ export default function CollectionGuidedRulesEditor({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__any__">Any</SelectItem>
-                <SelectItem value="watched">Watched</SelectItem>
-                <SelectItem value="unwatched">Unwatched</SelectItem>
+                <SelectItem value="watched">{completedProgressLabel}</SelectItem>
+                <SelectItem value="unwatched">{unstartedProgressLabel}</SelectItem>
                 <SelectItem value="in_progress">In Progress</SelectItem>
               </SelectContent>
             </Select>

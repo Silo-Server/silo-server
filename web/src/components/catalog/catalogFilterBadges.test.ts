@@ -53,4 +53,22 @@ describe("catalogFilterBadges", () => {
       clearPatch: { narrator: "" },
     });
   });
+
+  it("labels progress status as read for ebook scope", () => {
+    expect(
+      getActiveFilterBadges(state({ mediaScope: "ebook", watchStatus: "in_progress" })),
+    ).toContainEqual({
+      key: "watchStatus",
+      label: "Read: in progress",
+      clearPatch: { watchStatus: "" },
+    });
+
+    expect(
+      getActiveFilterBadges(state({ mediaScope: "movie", watchStatus: "in_progress" })),
+    ).toContainEqual({
+      key: "watchStatus",
+      label: "Watch: in progress",
+      clearPatch: { watchStatus: "" },
+    });
+  });
 });

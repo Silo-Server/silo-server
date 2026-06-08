@@ -165,9 +165,10 @@ export function getActiveFilterBadges(state: GuidedFormState): ActiveFilterBadge
   }
 
   if (state.watchStatus) {
+    const statusLabel = state.mediaScope === "ebook" ? "Read" : "Watch";
     badges.push({
       key: "watchStatus",
-      label: `Watch: ${state.watchStatus.replace("_", " ")}`,
+      label: `${statusLabel}: ${state.watchStatus.replace("_", " ")}`,
       clearPatch: { watchStatus: "" },
     });
   }
