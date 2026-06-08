@@ -56,6 +56,19 @@ function progressReadVersion(
   return versions.find((version) => version.file_id === fileID && isReaderSupportedFile(version));
 }
 
+function genreHref(genre: string, libraryId?: number): string {
+  const params = new URLSearchParams();
+  if (libraryId) {
+    params.set("tab", "library");
+    params.set("genre", genre);
+    return `/library/${libraryId}?${params.toString()}`;
+  }
+  params.set("source", "query");
+  params.set("type", "ebook");
+  params.set("genre", genre);
+  return `/catalog?${params.toString()}`;
+}
+
 export default function EbookContent({
   item,
   libraryId,
@@ -123,6 +136,7 @@ export default function EbookContent({
           ) : undefined
         }
         genres={item.genres}
+        genreHref={(genre) => genreHref(genre, libraryId)}
         actions={
           canRead || canDownload ? (
             <div className="flex flex-wrap gap-3">

@@ -95,16 +95,25 @@ vi.mock("./DetailHero", () => ({
     context,
     crewLine,
     actions,
+    genres,
+    genreHref,
   }: {
     title: string;
     context?: ReactNode;
     crewLine?: ReactNode;
     actions?: ReactNode;
+    genres?: string[];
+    genreHref?: (genre: string) => string;
   }) => (
     <div>
       <span>{title}</span>
       <span>{context}</span>
       {crewLine}
+      {genres?.map((genre) => (
+        <a key={genre} href={genreHref?.(genre) ?? "#"}>
+          {genre}
+        </a>
+      ))}
       {actions}
     </div>
   ),
@@ -266,6 +275,30 @@ describe("EbookContent", () => {
     );
 
     expect(markup).toContain("/reader/ebook/ebook-1?file_id=1&amp;libraryId=12");
+  });
+
+  it("links ebook genres back to the scoped library", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem({ genres: ["Science Fiction"] })} libraryId={12} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('href="/library/12?tab=library&amp;genre=Science+Fiction"');
+  });
+
+  it("links ebook genres to the ebook catalog outside a library", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem({ genres: ["Science Fiction"] })} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('href="/catalog?source=query&amp;type=ebook&amp;genre=Science+Fiction"');
   });
 
   it("does not show read action when ebook files are not reader-supported", () => {
