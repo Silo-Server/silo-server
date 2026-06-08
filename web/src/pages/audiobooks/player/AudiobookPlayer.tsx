@@ -48,6 +48,7 @@ export default function AudiobookPlayer({
     files,
     initialPositionSeconds,
     autoPlay,
+    onStopRequested: onClose,
   });
   const [mode, setMode] = useState<"mini" | "now-listening">("mini");
 

@@ -129,6 +129,10 @@ func (failingSessionManager) SetTranscodeNodeURL(string, string) error { return 
 
 func (failingSessionManager) SetWebSocket(string, bool) error { return nil }
 
+func (failingSessionManager) SetRealtimeConnection(string, bool) error { return nil }
+
+func (failingSessionManager) SetProgressPersistenceDisabled(string, bool) error { return nil }
+
 func (failingSessionManager) StopSession(string) error { return nil }
 
 func (failingSessionManager) GetSession(string) (*playback.Session, error) { return nil, nil }
@@ -280,6 +284,64 @@ func TestHandleStartPlayback_UsesExplicitZeroStartPositionInsteadOfStoredResume(
 				t.Fatalf("position = %v, want %v", resp.Position, tt.wantPosition)
 			}
 		})
+	}
+}
+
+func TestPlaybackSessionProgressPersistenceCanBeDisabled(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	if err := store.SetProgress(context.Background(), "profile-1", "book-1", 500, 1200, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("seed progress: %v", err)
+	}
+
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: "book-1",
+		FilePath:  writePlaybackTestMediaFile(t, "book.m4b"),
+		Duration:  600,
+	}
+	sessionMgr := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	req := httptest.NewRequest("POST", "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","play_method":"direct","start_position":120,"disable_progress_persistence":true}`))
+	req = req.WithContext(newAuthorizedPlaybackContext())
+
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, req)
+	if rr.Code != 201 {
+		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp playbackSessionResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	progressReq := httptest.NewRequest("POST", "/api/v1/playback/"+resp.SessionID+"/progress", strings.NewReader(`{"position":240,"is_paused":false}`))
+	progressReq = progressReq.WithContext(newAuthorizedPlaybackContext())
+	progressReq = withPlaybackRouteParam(progressReq, "session_id", resp.SessionID)
+	progressRR := httptest.NewRecorder()
+	handler.HandleUpdateProgress(progressRR, progressReq)
+	if progressRR.Code != 204 {
+		t.Fatalf("progress status = %d, body = %s", progressRR.Code, progressRR.Body.String())
+	}
+
+	stopReq := httptest.NewRequest("DELETE", "/api/v1/playback/"+resp.SessionID, nil)
+	stopReq = stopReq.WithContext(newAuthorizedPlaybackContext())
+	stopReq = withPlaybackRouteParam(stopReq, "session_id", resp.SessionID)
+	stopRR := httptest.NewRecorder()
+	handler.HandleStopPlayback(stopRR, stopReq)
+	if stopRR.Code != 204 {
+		t.Fatalf("stop status = %d, body = %s", stopRR.Code, stopRR.Body.String())
+	}
+
+	progress, err := store.GetProgress(context.Background(), "profile-1", "book-1")
+	if err != nil {
+		t.Fatalf("get progress: %v", err)
+	}
+	if progress == nil || progress.PositionSeconds != 500 || progress.DurationSeconds != 1200 {
+		t.Fatalf("progress after disabled session = %+v, want 500/1200", progress)
 	}
 }
 

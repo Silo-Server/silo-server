@@ -1,5 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { getAccessToken, getProfileToken } from "@/api/client";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
+import { PlayerConfigProvider, type PlayerConfig } from "@/player";
+import { storage } from "@/utils/storage";
 import AudiobookPlayer, {
   type AudiobookPlayerControls,
   type AudiobookPlayerStatus,
@@ -29,8 +32,9 @@ export interface AudiobookPlaybackControllerValue {
   toggleActivePlayback: () => void;
 }
 
-const AudiobookPlaybackControllerContext =
-  createContext<AudiobookPlaybackControllerValue | null>(null);
+const AudiobookPlaybackControllerContext = createContext<AudiobookPlaybackControllerValue | null>(
+  null,
+);
 
 export function useAudiobookPlaybackController() {
   return useContext(AudiobookPlaybackControllerContext);
@@ -40,6 +44,15 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
   const [activeRequest, setActiveRequest] = useState<ActiveAudiobookPlayback | null>(null);
   const [active, setActive] = useState<AudiobookPlayerStatus | null>(null);
   const [controls, setControls] = useState<AudiobookPlayerControls | null>(null);
+  const playerConfig = useMemo<PlayerConfig>(
+    () => ({
+      apiBaseUrl: "/api/v1",
+      getAccessToken: () => getAccessToken(),
+      getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
+      getProfileToken: () => getProfileToken(),
+    }),
+    [],
+  );
 
   const startPlayback = useCallback((input: AudiobookPlaybackStartInput) => {
     setControls(null);
@@ -82,20 +95,22 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
     <AudiobookPlaybackControllerContext.Provider value={value}>
       {children}
       {activeRequest && (
-        <AudiobookPlayer
-          key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
-          contentId={activeRequest.contentId}
-          title={activeRequest.title}
-          author={activeRequest.author}
-          narrator={activeRequest.narrator}
-          posterUrl={activeRequest.posterUrl}
-          files={activeRequest.files}
-          initialPositionSeconds={activeRequest.initialPositionSeconds}
-          autoPlay={activeRequest.autoPlay}
-          onClose={stopPlayback}
-          onPlaybackStateChange={setActive}
-          onControlsChange={setControls}
-        />
+        <PlayerConfigProvider config={playerConfig}>
+          <AudiobookPlayer
+            key={`${activeRequest.contentId}-${activeRequest.requestKey}`}
+            contentId={activeRequest.contentId}
+            title={activeRequest.title}
+            author={activeRequest.author}
+            narrator={activeRequest.narrator}
+            posterUrl={activeRequest.posterUrl}
+            files={activeRequest.files}
+            initialPositionSeconds={activeRequest.initialPositionSeconds}
+            autoPlay={activeRequest.autoPlay}
+            onClose={stopPlayback}
+            onPlaybackStateChange={setActive}
+            onControlsChange={setControls}
+          />
+        </PlayerConfigProvider>
       )}
     </AudiobookPlaybackControllerContext.Provider>
   );
