@@ -75,7 +75,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.recommender = deps.Recommender
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
-	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader)
+	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
 		r.With(RequireSessionOrAdminAPIKey(deps.Authenticator, adminAPIKeyAuth)).
@@ -126,8 +126,9 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
-			r.Use(deps.Authenticator.RequireSession)
+			r.Use(RequireSessionOrAPIKeySession(deps.Authenticator, adminAPIKeyAuth))
 			r.Get("/Users/Me", authHandler.HandleCurrentUser)
+			r.Get("/Users", authHandler.HandleUsers)
 			r.Get("/Users/{id}", authHandler.HandleUserByID)
 			r.Get("/UserViews", itemsHandler.HandleViews)
 			r.Get("/UserViews/GroupingOptions", itemsHandler.HandleGroupingOptionsStub)
@@ -205,7 +206,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Stream routes: use playback-session auth fallback for media players
 	// (e.g. libmpv) that don't forward auth headers or query parameters.
 	r.Group(func(r chi.Router) {
-		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore))
+		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
 		r.Method(http.MethodHead, "/Videos/{id}/stream", http.HandlerFunc(playbackHandler.HandleVideoStream))
 		r.Get("/Videos/{id}/stream", playbackHandler.HandleVideoStream)
 		r.Method(http.MethodHead, "/Videos/{id}/stream.{container}", http.HandlerFunc(playbackHandler.HandleVideoStream))

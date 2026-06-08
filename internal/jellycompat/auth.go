@@ -128,8 +128,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 			}
 		}
 
-		ctx := context.WithValue(r.Context(), compatSessionKey, session)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		serveWithSession(next, w, r, session)
 	})
 }
 
@@ -141,28 +140,55 @@ func safeTokenPrefix(token string) string {
 	return token[:8] + "..."
 }
 
+// serveWithSession injects the resolved compat session into the request context
+// and continues the handler chain.
+func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
+	ctx := context.WithValue(r.Context(), compatSessionKey, session)
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// resolveCompatToken resolves a token to a compat session: a session-store token
+// (normal login) or, matching Jellyfin, an sa_ admin API key (synthesized
+// session bound to the key user's primary profile). Returns false when the token
+// matches neither. keyAuth may be nil (resolveSession handles a nil receiver).
+func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *AdminAPIKeyAuthenticator, token string) (*Session, bool) {
+	if token == "" {
+		return nil, false
+	}
+	if session, ok := sessions.Get(token); ok {
+		return session, true
+	}
+	if strings.HasPrefix(token, "sa_") {
+		if session, _, _ := keyAuth.resolveSession(ctx, token); session != nil {
+			return session, true
+		}
+	}
+	return nil, false
+}
+
 // PlaybackSessionAuth creates middleware that falls back to playback session
 // authentication for media stream endpoints where external players (e.g. libmpv)
 // don't forward auth headers or query parameters.
-func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionStore) func(next http.Handler) http.Handler {
+func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionStore, keyAuth *AdminAPIKeyAuthenticator) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Try standard token auth first.
+			// Try standard token auth first — a compat session token or an sa_
+			// admin key (synthesized session).
 			if token, ok := ExtractToken(r); ok {
-				if session, sessionOK := sessions.Get(token); sessionOK {
-					ctx := context.WithValue(r.Context(), compatSessionKey, session)
-					next.ServeHTTP(w, r.WithContext(ctx))
+				if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, token); ok {
+					serveWithSession(next, w, r, session)
 					return
 				}
 			}
 
-			// Prefer the exact negotiated playback session when the client
-			// includes PlaySessionId on follow-up stream requests.
+			// Follow-up HLS requests (master/segment) carry only PlaySessionId,
+			// no auth header or api_key. Resolve the negotiated session's
+			// CompatToken — which for an API-key stream is itself the sa_ key,
+			// so it must go through the same session-or-API-key resolution.
 			if playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID")); playSessionID != "" {
 				if playSession, found := playbackStore.Get(playSessionID); found {
-					if session, ok := sessions.Get(playSession.CompatToken); ok {
-						ctx := context.WithValue(r.Context(), compatSessionKey, session)
-						next.ServeHTTP(w, r.WithContext(ctx))
+					if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
+						serveWithSession(next, w, r, session)
 						return
 					}
 					writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
