@@ -462,6 +462,9 @@ type ebookCredit struct {
 func ebookPeopleCreditsEqual(existing []models.ItemPerson, desired []ebookCredit) bool {
 	existingAuthors := make([]models.ItemPerson, 0, len(existing))
 	for _, p := range existing {
+		if p.Kind == models.PersonKindNarrator {
+			return false
+		}
 		if p.Kind == models.PersonKindAuthor {
 			existingAuthors = append(existingAuthors, p)
 		}

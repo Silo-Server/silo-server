@@ -428,6 +428,20 @@ func TestEbookPeopleCreditsEqualAuthorsOnly(t *testing.T) {
 	}
 }
 
+func TestEbookPeopleCreditsEqualRejectsStaleNarratorCredit(t *testing.T) {
+	existing := []models.ItemPerson{
+		{Person: models.Person{Name: "Ada Writer"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+		{Person: models.Person{Name: "Legacy Narrator"}, Kind: models.PersonKindNarrator, SortOrder: 1},
+	}
+	desired := []ebookCredit{
+		{Name: "Ada Writer", Kind: models.PersonKindAuthor},
+	}
+
+	if ebookPeopleCreditsEqual(existing, desired) {
+		t.Fatal("expected stale narrator credit to force ebook people replacement")
+	}
+}
+
 func TestEbookPeopleMergePreservesExistingNonAuthorCreditsExceptNarrators(t *testing.T) {
 	existing := []models.ItemPerson{
 		{Person: models.Person{ID: 10, Name: "Old Author"}, Kind: models.PersonKindAuthor, SortOrder: 0},
@@ -446,7 +460,7 @@ func TestEbookPeopleMergePreservesExistingNonAuthorCreditsExceptNarrators(t *tes
 		t.Fatalf("first preserved non-author = %+v", got[0])
 	}
 	if got[1].Person.ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
-		t.Fatalf("new author credit = %+v", got[2])
+		t.Fatalf("new author credit = %+v", got[1])
 	}
 }
 
