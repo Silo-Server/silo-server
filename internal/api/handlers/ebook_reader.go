@@ -232,7 +232,9 @@ func isEbookReaderFormat(value string) bool {
 
 func ebookMimeType(path, container string) string {
 	ext := strings.ToLower(filepath.Ext(path))
-	if ext == "" && container != "" {
+	if strings.HasSuffix(strings.ToLower(path), ".fb2.zip") {
+		ext = ".fbz"
+	} else if ext == "" && container != "" {
 		ext = "." + strings.TrimPrefix(strings.ToLower(container), ".")
 	}
 	switch ext {

@@ -141,6 +141,7 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 		"book.cbr":     "application/vnd.comicbook-rar",
 		"book.fb2":     "application/x-fictionbook+xml",
 		"book.fbz":     "application/x-zip-compressed-fb2",
+		"book.fb2.zip": "application/x-zip-compressed-fb2",
 		"book.txt":     "text/plain; charset=utf-8",
 		"book.md":      "text/markdown; charset=utf-8",
 		"book.unknown": "application/octet-stream",
@@ -148,7 +149,11 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 
 	for name, wantMime := range cases {
 		t.Run(name, func(t *testing.T) {
-			file := &models.MediaFile{FilePath: "/library/" + name, Container: name}
+			container := name
+			if name == "book.fb2.zip" {
+				container = "fbz"
+			}
+			file := &models.MediaFile{FilePath: "/library/" + name, Container: container}
 			if name == "book.unknown" {
 				if isEbookFile(file) {
 					t.Fatal("unknown extension should not be treated as an ebook reader format")
