@@ -39,7 +39,7 @@ type TranscodeOpts struct {
 	SegmentDuration    int    // seconds, default 6
 	StartSegmentNumber int    // -hls_segment_start_number, default 0
 	FFmpegPath         string // optional explicit ffmpeg binary path
-	HWAccel            string // auto, qsv, vaapi, none
+	HWAccel            string // auto, qsv, vaapi, nvenc, none
 	HWDevice           string // e.g., /dev/dri/renderD128 (default if empty)
 	SubtitleTrackIndex int    // -1 = no subtitles
 	SubtitleBurnIn     bool
@@ -93,10 +93,11 @@ type SegmentProgress struct {
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
 // for ffmpeg or seek-restart immediately.
 type SegmentRecoveryDecision struct {
-	Wait        bool
-	WaitTimeout time.Duration
-	Reason      string
-	Progress    SegmentProgress
+	Wait             bool
+	WaitTimeout      time.Duration
+	RestartOnTimeout bool
+	Reason           string
+	Progress         SegmentProgress
 }
 
 // defaultSegmentDuration is the segment length when not specified. Short
@@ -109,6 +110,7 @@ const maxPersistedFFmpegChars = 2000
 
 const (
 	maxSequentialMissingSegments = 2
+	activeSegmentWait            = 12 * time.Second
 	segmentWaitGrace             = 1500 * time.Millisecond
 	maxSegmentWait               = 6 * time.Second
 	minSegmentWait               = 3 * time.Second
@@ -120,6 +122,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
+	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 
 	// Ensure output directory exists.
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
@@ -219,18 +222,10 @@ func IsMPEG4Part2VideoCodec(codec string) bool {
 func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// Resolve "auto" into a concrete accel method once so all downstream
 	// helpers (appendHWAccelArgs, appendVideoArgs, etc.) see the real value.
-	opts.HWAccel = ResolveHWAccel(opts.HWAccel)
+	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 
 	isVideoCopy := opts.TargetCodecVideo == "copy"
 	isAudioCopy := opts.TargetCodecAudio == "copy"
-	if !isVideoCopy && IsMPEG4Part2VideoCodec(opts.SourceVideoCodec) && opts.HWAccel != "none" {
-		slog.Info("disabling hardware video transcode for MPEG-4 Part 2 source",
-			"source_video_codec", opts.SourceVideoCodec,
-			"requested_hw_accel", opts.HWAccel,
-			"playback_session_id", opts.SessionID,
-		)
-		opts.HWAccel = "none"
-	}
 
 	args := []string{
 		"-hide_banner",
@@ -299,6 +294,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		} else if opts.HWAccel == "vaapi" {
 			scale := vaapiScaleFilter(opts.TargetResolution)
 			args = append(args, "-vf", scale)
+		} else if opts.HWAccel == "nvenc" {
+			scale := nvencScaleFilter(opts.TargetResolution)
+			args = append(args, "-vf", scale)
 		} else if opts.TargetResolution != "" {
 			scale := resolutionToScale(opts.TargetResolution)
 			if scale != "" {
@@ -353,6 +351,20 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	args = append(args, manifestPath)
 
 	return args
+}
+
+func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
+	hwAccel := ResolveHWAccelWithFFmpeg(opts.HWAccel, opts.FFmpegPath)
+	if hwAccel == "" {
+		return ""
+	}
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+		return "none"
+	}
+	if IsMPEG4Part2VideoCodec(opts.SourceVideoCodec) {
+		return "none"
+	}
+	return hwAccel
 }
 
 // appendStreamSelectionArgs limits output to primary video/audio streams.
@@ -413,12 +425,12 @@ func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
 			fmt.Sprintf("expr:gte(t,n_forced*%d)", opts.SegmentDuration))
 	}
 
-	// Hardware encoders (QSV, VAAPI) may not reliably honor
+	// Hardware encoders (QSV, VAAPI, NVENC) may not reliably honor
 	// force_key_frames expressions. Set explicit GOP size so segment
 	// boundaries always start with an IDR frame. We assume 30 fps as a
 	// safe ceiling — the GOP will be at most segmentDuration * 30 frames.
 	// Matches Jellyfin's approach for hardware encoders.
-	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" {
+	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" || opts.HWAccel == "nvenc" {
 		gopSize := fmt.Sprintf("%d", opts.SegmentDuration*30)
 		args = append(args, "-g", gopSize, "-keyint_min", gopSize)
 	}
@@ -456,6 +468,15 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
 		)
+	case "nvenc":
+		args = append(args,
+			"-hwaccel", "cuda",
+			"-hwaccel_output_format", "cuda",
+			"-noautorotate",
+		)
+		if hwDevice := strings.TrimSpace(opts.HWDevice); hwDevice != "" {
+			args = append(args, "-hwaccel_device", hwDevice)
+		}
 	}
 	return args
 }
@@ -520,6 +541,26 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 			args = append(args,
 				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
 				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		}
+	case opts.HWAccel == "nvenc" && codec == "h264":
+		args = append(args, "-c:v", "h264_nvenc", "-rc:v", "vbr")
+		if hasBitrateCap {
+			args = append(args,
+				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		} else {
+			args = append(args, "-cq:v", "23", "-b:v", "0")
+		}
+	case opts.HWAccel == "nvenc" && codec == "hevc":
+		args = append(args, "-c:v", "hevc_nvenc", "-rc:v", "vbr")
+		if hasBitrateCap {
+			args = append(args,
+				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		} else {
+			args = append(args, "-cq:v", "28", "-b:v", "0")
 		}
 	default:
 		// CPU fallback — match Jellyfin's proven browser-compatible settings.
@@ -600,6 +641,10 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 		// VAAPI-only: download, apply CPU filters, convert to nv12, upload back.
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
 		args = append(args, "-vf", vf)
+	case "nvenc":
+		// NVENC/CUDA: download to CPU for subtitle rendering, then upload back.
+		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload_cuda"
+		args = append(args, "-vf", vf)
 	default:
 		// CPU encoding: filters run directly on decoded frames.
 		args = append(args, "-vf", cpuFilters)
@@ -667,6 +712,25 @@ func vaapiScaleFilter(res string) string {
 		return "scale_vaapi=w=-2:h=328:format=nv12"
 	default:
 		return "scale_vaapi=format=nv12"
+	}
+}
+
+func nvencScaleFilter(res string) string {
+	switch res {
+	case "2160p":
+		return "scale_cuda=w=-2:h=2160:format=nv12"
+	case "1080p":
+		return "scale_cuda=w=-2:h=1080:format=nv12"
+	case "720p":
+		return "scale_cuda=w=-2:h=720:format=nv12"
+	case "480p":
+		return "scale_cuda=w=-2:h=480:format=nv12"
+	case "420p":
+		return "scale_cuda=w=-2:h=420:format=nv12"
+	case "328p":
+		return "scale_cuda=w=-2:h=328:format=nv12"
+	default:
+		return "scale_cuda=format=nv12"
 	}
 }
 
@@ -1089,8 +1153,9 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) SegmentRecoveryDecision {
 	progress := s.SegmentProgress(now)
 	decision := SegmentRecoveryDecision{
-		WaitTimeout: segmentWaitTimeout(progress.SegmentDuration),
-		Progress:    progress,
+		WaitTimeout:      segmentWaitTimeout(progress.SegmentDuration),
+		RestartOnTimeout: true,
+		Progress:         progress,
 	}
 
 	switch {
@@ -1105,6 +1170,8 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	case !progress.HasManifest:
 		if segNum <= progress.StartSegmentNumber+1 {
 			decision.Wait = true
+			decision.WaitTimeout = activeSegmentWait
+			decision.RestartOnTimeout = false
 			decision.Reason = "startup_manifest_not_ready"
 		} else {
 			decision.Reason = "startup_request_beyond_window"
@@ -1115,6 +1182,8 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 		decision.Reason = "produced_output_stale"
 	default:
 		decision.Wait = true
+		decision.WaitTimeout = activeSegmentWait
+		decision.RestartOnTimeout = false
 		decision.Reason = "near_produced_head"
 	}
 

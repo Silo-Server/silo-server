@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Check, Film, Loader2, Plus, Tv } from "lucide-react";
+import { Check, Film, Library, Loader2, Plus, Tv } from "lucide-react";
 import type { MediaRequest, RequestMediaResult } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { formatRequestReason, formatRequestStatus, tmdbImageURL } from "@/lib/mediaRequests";
@@ -81,9 +81,14 @@ function DiscoverCard({
           title={item.title}
           mediaType={item.media_type}
           dim={!requestable}
-          accent={ribbon?.kind ?? null}
         >
-          {ribbon && <StatusRibbon status={ribbon.kind} label={ribbon.label} />}
+          {ribbon && (
+            <StatusRibbon
+              status={ribbon.kind}
+              label={ribbon.label}
+              reserveLibrarySpace={Boolean(item.library_content_id)}
+            />
+          )}
         </PosterFrame>
 
         <CardMeta
@@ -120,13 +125,16 @@ function DiscoverCard({
           </button>
         </div>
       )}
+
+      {item.library_content_id ? (
+        <LibraryCardLink contentID={item.library_content_id} title={item.title} />
+      ) : null}
     </div>
   );
 }
 
 function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }) {
   const poster = tmdbImageURL(request.poster_path);
-  const isDownloading = request.status === "downloading";
   const isCompleted = request.status === "completed";
   const isFailed =
     request.outcome === "failed" ||
@@ -137,73 +145,81 @@ function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }
   const label = isFailed ? formatOutcome(request.outcome) : formatRequestStatus(request.status);
 
   return (
-    <Link
-      to={`/requests/${request.media_type}/${request.tmdb_id}`}
+    <div
       className={cn(
         "group/req-card relative block focus:outline-none focus-visible:outline-none",
         fluid ? "w-full" : POSTER_WIDTH,
       )}
     >
-      <PosterFrame
-        poster={poster}
-        title={request.title}
-        mediaType={request.media_type}
-        dim={isFailed}
-        accent={kind}
+      <Link
+        to={`/requests/${request.media_type}/${request.tmdb_id}`}
+        className="block focus:outline-none focus-visible:outline-none"
       >
-        <StatusRibbon status={kind} label={label} />
-
-        {isDownloading && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-black/40">
-            <div className="downloading-shimmer h-full bg-sky-400" />
-          </div>
-        )}
-        {isCompleted && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center bg-gradient-to-t from-emerald-950/90 via-emerald-900/40 to-transparent p-3">
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-emerald-200 ring-1 ring-emerald-400/30">
-              <Check className="h-3 w-3 stroke-[2.5]" />
-              Ready to watch
-            </span>
-          </div>
-        )}
-      </PosterFrame>
-
-      <CardMeta title={request.title} year={request.year} mediaType={request.media_type} />
-
-      {request.last_error ? (
-        <p
-          className="mt-1 line-clamp-2 text-[11px] leading-tight text-red-300/90"
-          title={request.last_error}
+        <PosterFrame
+          poster={poster}
+          title={request.title}
+          mediaType={request.media_type}
+          dim={isFailed}
         >
-          {request.last_error}
-        </p>
+          <StatusRibbon
+            status={kind}
+            label={label}
+            reserveLibrarySpace={Boolean(request.library_content_id)}
+          />
+
+          {isCompleted && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center bg-gradient-to-t from-emerald-950/90 via-emerald-900/40 to-transparent p-3">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-emerald-200 ring-1 ring-emerald-400/30">
+                <Check className="h-3 w-3 stroke-[2.5]" />
+                Ready to watch
+              </span>
+            </div>
+          )}
+        </PosterFrame>
+
+        <CardMeta title={request.title} year={request.year} mediaType={request.media_type} />
+
+        {request.last_error ? (
+          <p
+            className="mt-1 line-clamp-2 text-[11px] leading-tight text-red-300/90"
+            title={request.last_error}
+          >
+            {request.last_error}
+          </p>
+        ) : null}
+      </Link>
+
+      {request.library_content_id ? (
+        <LibraryCardLink contentID={request.library_content_id} title={request.title} />
       ) : null}
-    </Link>
+    </div>
   );
 }
 
-const ACCENT_BAR: Record<RibbonKind, string> = {
-  pending: "bg-amber-300/70",
-  approved: "bg-emerald-300/70",
-  queued: "bg-sky-300/70",
-  downloading: "bg-sky-300/70",
-  completed: "bg-emerald-300/70",
-  blocked: "bg-zinc-400/40",
-};
+function LibraryCardLink({ contentID, title }: { contentID: string; title: string }) {
+  return (
+    <Link
+      to={`/item/${encodeURIComponent(contentID)}`}
+      aria-label={`Open ${title} in library`}
+      className="absolute top-2 left-2 inline-flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full bg-black/70 px-2 py-[3px] text-[10px] leading-none font-semibold tracking-[0.06em] text-white uppercase shadow-sm ring-1 shadow-white/15 backdrop-blur-md transition-colors hover:bg-black/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+    >
+      <Library className="h-3 w-3 shrink-0" strokeWidth={2.4} aria-hidden />
+      <span className="truncate">Library</span>
+    </Link>
+  );
+}
 
 function PosterFrame({
   poster,
   title,
   mediaType,
   dim,
-  accent,
   children,
 }: {
   poster: string | null;
   title: string;
   mediaType: "movie" | "series";
   dim?: boolean;
-  accent?: RibbonKind | null;
   children?: React.ReactNode;
 }) {
   return (
@@ -223,15 +239,6 @@ function PosterFrame({
       )}
       {/* subtle bottom vignette for legibility behind ribbons / hover overlays */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent opacity-90" />
-      {/* thin status accent bar, hugs bottom edge */}
-      {accent && (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 h-[2px] opacity-90",
-            ACCENT_BAR[accent],
-          )}
-        />
-      )}
       {children}
     </div>
   );
@@ -343,12 +350,21 @@ const RIBBON_STYLES: Record<RibbonKind, string> = {
   blocked: "bg-zinc-900/80 text-zinc-200 ring-white/10 [&_.dot]:bg-zinc-400",
 };
 
-function StatusRibbon({ status, label }: { status: string; label: string }) {
+function StatusRibbon({
+  status,
+  label,
+  reserveLibrarySpace,
+}: {
+  status: string;
+  label: string;
+  reserveLibrarySpace?: boolean;
+}) {
   const kind = (RIBBON_STYLES[status as RibbonKind] ? status : "blocked") as RibbonKind;
   return (
     <span
       className={cn(
-        "absolute top-2 right-2 inline-flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full px-2 py-[3px] text-[10px] leading-none font-medium tracking-[0.06em] uppercase shadow-sm ring-1 shadow-black/40 backdrop-blur-md",
+        "absolute top-2 right-2 inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-[10px] leading-none font-medium tracking-[0.06em] uppercase shadow-sm ring-1 shadow-black/40 backdrop-blur-md",
+        reserveLibrarySpace ? "max-w-[calc(100%-5.75rem)]" : "max-w-[calc(100%-1rem)]",
         RIBBON_STYLES[kind],
       )}
     >

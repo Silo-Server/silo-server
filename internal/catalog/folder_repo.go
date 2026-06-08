@@ -563,16 +563,6 @@ func (r *FolderRepository) DeleteWithStats(
 		}
 	}
 
-	// Filter accumulated image dirs once, now that orphans are gone, against
-	// any surviving content. Empty deleting-set means "exclude nothing".
-	if len(rawDirs) > 0 {
-		filtered, err := filterUnreferencedImageDirs(ctx, r.pool, dirSetToSlice(rawDirs), []string{})
-		if err != nil {
-			return nil, err
-		}
-		stats.OrphanedImageDirs = filtered
-	}
-
 	// Phase 2: delete this folder's media_files (folder-tied, not item-tied).
 	if progress != nil {
 		progress(orphanTotal, orphanTotal, "Deleting media files")
@@ -592,22 +582,29 @@ func (r *FolderRepository) DeleteWithStats(
 	}
 
 	// Phase 3: delete remaining folder memberships (shared items kept; only the
-	// membership in this folder is removed).
+	// membership in this folder is removed). Deleting the memberships with
+	// RETURNING lets us catch skeleton items that a matcher created after the
+	// phase-1 orphan sweep but before the delete job reached this phase.
 	if progress != nil {
 		progress(orphanTotal, orphanTotal, "Removing library memberships")
 	}
-	if _, err := deleteInBatches(ctx, folderChildDeleteBatch, func(ctx context.Context) (int64, error) {
-		tag, e := r.pool.Exec(ctx, `
-			DELETE FROM media_item_libraries
-			WHERE ctid IN (
-				SELECT ctid FROM media_item_libraries WHERE media_folder_id = $1 LIMIT $2
-			)`, id, folderChildDeleteBatch)
-		if e != nil {
-			return 0, e
-		}
-		return tag.RowsAffected(), nil
-	}); err != nil {
+	lateOrphans, lateImageDirs, err := r.deleteFolderMemberships(ctx, id)
+	if err != nil {
 		return nil, fmt.Errorf("deleting media item links: %w", err)
+	}
+	stats.OrphanedItems += lateOrphans
+	for _, d := range lateImageDirs {
+		rawDirs[d] = struct{}{}
+	}
+
+	// Filter accumulated image dirs once, now that all item orphans are gone,
+	// against any surviving content. Empty deleting-set means "exclude nothing".
+	if len(rawDirs) > 0 {
+		filtered, err := filterUnreferencedImageDirs(ctx, r.pool, dirSetToSlice(rawDirs), []string{})
+		if err != nil {
+			return nil, err
+		}
+		stats.OrphanedImageDirs = filtered
 	}
 
 	// Phase 4: delete the now-lightweight folder row. Tolerate 0 rows so a
@@ -654,6 +651,129 @@ func (r *FolderRepository) collectOrphanBatch(ctx context.Context, folderID, lim
 		return nil, fmt.Errorf("iterating orphan rows: %w", err)
 	}
 	return ids, nil
+}
+
+// deleteFolderMemberships removes this folder's remaining item memberships and
+// deletes any content that becomes orphaned as a result. This is intentionally
+// separate from the phase-1 orphan sweep because in-flight matchers can create
+// new skeleton memberships after phase 1 has already drained.
+func (r *FolderRepository) deleteFolderMemberships(ctx context.Context, folderID int) (int, []string, error) {
+	var orphaned int
+	var imageDirs []string
+	for {
+		var contentIDs []string
+		if err := retryOnDeadlock(ctx, func() error {
+			ids, err := r.deleteFolderMembershipBatch(ctx, folderID, folderChildDeleteBatch)
+			if err != nil {
+				return err
+			}
+			contentIDs = ids
+			return nil
+		}); err != nil {
+			return orphaned, imageDirs, err
+		}
+		if len(contentIDs) > 0 {
+			deleted, dirs, err := r.deleteOrphanedItemsByContentID(ctx, contentIDs)
+			if err != nil {
+				return orphaned, imageDirs, err
+			}
+			orphaned += deleted
+			imageDirs = append(imageDirs, dirs...)
+		}
+		if len(contentIDs) < folderChildDeleteBatch {
+			return orphaned, imageDirs, nil
+		}
+	}
+}
+
+func (r *FolderRepository) deleteFolderMembershipBatch(ctx context.Context, folderID, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		DELETE FROM media_item_libraries
+		WHERE ctid IN (
+			SELECT ctid FROM media_item_libraries WHERE media_folder_id = $1 LIMIT $2
+		)
+		RETURNING content_id`, folderID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var contentIDs []string
+	for rows.Next() {
+		var contentID string
+		if err := rows.Scan(&contentID); err != nil {
+			return nil, fmt.Errorf("scanning deleted membership content_id: %w", err)
+		}
+		contentIDs = append(contentIDs, contentID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return contentIDs, nil
+}
+
+const collectOrphanedProvisionalIDsByContentIDSQL = `
+	SELECT mi.content_id
+	FROM public.media_items mi
+	WHERE mi.content_id = ANY($1)
+	  AND ` + orphanedProvisionalMediaItemConditions
+
+const deleteOrphanedProvisionalIDsByContentIDSQL = `
+	DELETE FROM public.media_items mi
+	WHERE mi.content_id = ANY($1)
+	  AND ` + orphanedProvisionalMediaItemConditions
+
+func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, contentIDs []string) (int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, nil, nil
+	}
+
+	orphanIDs, err := r.collectOrphanedProvisionalIDsByContentID(ctx, contentIDs)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(orphanIDs) == 0 {
+		return 0, nil, nil
+	}
+
+	imageDirs, err := collectImageDirs(ctx, r.pool, orphanIDs)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var deleted int64
+	if err := retryOnDeadlock(ctx, func() error {
+		tag, err := r.pool.Exec(ctx, deleteOrphanedProvisionalIDsByContentIDSQL, orphanIDs)
+		if err != nil {
+			return err
+		}
+		deleted = tag.RowsAffected()
+		return nil
+	}); err != nil {
+		return 0, nil, err
+	}
+	return int(deleted), imageDirs, nil
+}
+
+func (r *FolderRepository) collectOrphanedProvisionalIDsByContentID(ctx context.Context, contentIDs []string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, collectOrphanedProvisionalIDsByContentIDSQL, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orphanIDs []string
+	for rows.Next() {
+		var contentID string
+		if err := rows.Scan(&contentID); err != nil {
+			return nil, fmt.Errorf("scanning orphan content_id: %w", err)
+		}
+		orphanIDs = append(orphanIDs, contentID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return orphanIDs, nil
 }
 
 // dirSetToSlice returns the keys of set as a slice (nil if empty).

@@ -252,6 +252,11 @@ function normalizeApiError(apiErr: Partial<ApiError> | null, res: Response): Api
   };
 }
 
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const target = name.toLowerCase();
+  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+}
+
 async function parseApiError(res: Response): Promise<ApiError> {
   let apiErr: Partial<ApiError> = {};
   try {
@@ -311,28 +316,7 @@ export async function restoreUserSession<TUser>({
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string>),
-  };
-  if (!(options.body instanceof FormData)) {
-    headers["Content-Type"] = "application/json";
-  }
-
-  if (accessToken) {
-    headers["Authorization"] = `Bearer ${accessToken}`;
-  }
-
-  const profileId = getProfileId();
-  if (profileId) {
-    headers["X-Profile-Id"] = profileId;
-  }
-
-  const profToken = getProfileToken();
-  if (profToken) {
-    headers["X-Profile-Token"] = profToken;
-  }
-
-  Object.assign(headers, getDeviceHeaders());
+  const headers = buildApiHeaders(options);
 
   let res = await fetch(`/api/v1${path}`, { ...options, headers });
 
@@ -374,8 +358,8 @@ function buildApiHeaders(options: RequestInit = {}): Record<string, string> {
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
-  if (!(options.body instanceof FormData)) {
-    headers["Content-Type"] = headers["Content-Type"] ?? "application/json";
+  if (!(options.body instanceof FormData) && !hasHeader(headers, "Content-Type")) {
+    headers["Content-Type"] = "application/json";
   }
   if (accessToken) {
     headers["Authorization"] = `Bearer ${accessToken}`;

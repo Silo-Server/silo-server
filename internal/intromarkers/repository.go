@@ -45,6 +45,8 @@ const baseCandidateSelect = `
 	       COALESCE(mf.edition_key, ''),
 	       mf.chapters,
 	       mf.audio_tracks,
+	       mf.subtitle_tracks,
+	       mf.external_subtitles,
 	       mf.intro_start,
 	       mf.intro_end,
 	       mf.intro_markers_source,
@@ -200,7 +202,7 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 	var candidates []Candidate
 	for rows.Next() {
 		var c Candidate
-		var chaptersJSON, audioTracksJSON []byte
+		var chaptersJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON []byte
 		if err := rows.Scan(
 			&c.FileID,
 			&c.EpisodeID,
@@ -214,6 +216,8 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 			&c.EditionKey,
 			&chaptersJSON,
 			&audioTracksJSON,
+			&subtitleTracksJSON,
+			&externalSubtitlesJSON,
 			&c.IntroStart,
 			&c.IntroEnd,
 			&c.IntroMarkersSource,
@@ -234,6 +238,16 @@ func scanCandidates(rows pgx.Rows) ([]Candidate, error) {
 				return nil, fmt.Errorf("unmarshaling audio tracks for file %d: %w", c.FileID, err)
 			}
 			c.AudioLanguage = effectiveAudioLanguage(tracks)
+		}
+		if len(subtitleTracksJSON) > 0 {
+			if err := json.Unmarshal(subtitleTracksJSON, &c.SubtitleTracks); err != nil {
+				return nil, fmt.Errorf("unmarshaling subtitle tracks for file %d: %w", c.FileID, err)
+			}
+		}
+		if len(externalSubtitlesJSON) > 0 {
+			if err := json.Unmarshal(externalSubtitlesJSON, &c.ExternalSubtitles); err != nil {
+				return nil, fmt.Errorf("unmarshaling external subtitles for file %d: %w", c.FileID, err)
+			}
 		}
 		candidates = append(candidates, c)
 	}
@@ -484,7 +498,7 @@ func (r *Repository) LoadSeasonState(ctx context.Context, state SeasonState, cfg
 		state.MediaFolderID,
 		state.AnalysisGroupKey,
 		AlgorithmVersion,
-		cfg.ConfigHash(),
+		cfg.AnalysisConfigHash(),
 	).Scan(
 		&existing.SeasonID,
 		&existing.MediaFolderID,
@@ -535,7 +549,7 @@ func (r *Repository) UpsertSeasonState(ctx context.Context, state SeasonState, c
 		state.MediaFolderID,
 		state.AnalysisGroupKey,
 		AlgorithmVersion,
-		cfg.ConfigHash(),
+		cfg.AnalysisConfigHash(),
 		state.InputSignature,
 		state.EpisodeCount,
 		state.FileCount,
@@ -576,19 +590,55 @@ func shouldApplyIntroPatch(row markerRow, patch IntroMarkerPatch) bool {
 	if models.MarkerSourcePriority(source) < models.MarkerSourcePriority(patch.Source) {
 		return true
 	}
-	if row.IntroMarkersAlgorithm == nil || *row.IntroMarkersAlgorithm != patch.Algorithm {
-		return true
-	}
 	if row.IntroMarkersConfidence == nil {
 		return true
+	}
+
+	existingAlgorithm := ""
+	if row.IntroMarkersAlgorithm != nil {
+		existingAlgorithm = *row.IntroMarkersAlgorithm
+	}
+	if existingAlgorithm == "" {
+		return true
+	}
+	patchPriority := scannerAlgorithmPriority(patch.Algorithm)
+	existingPriority := scannerAlgorithmPriority(existingAlgorithm)
+	if patchPriority > existingPriority {
+		return true
+	}
+	if patchPriority < existingPriority {
+		return false
 	}
 	if patch.Confidence > *row.IntroMarkersConfidence {
 		return true
 	}
-	if patch.Confidence >= *row.IntroMarkersConfidence && introRangeDiffers(row, patch, 0.5) {
+	if patch.Confidence < *row.IntroMarkersConfidence {
+		return false
+	}
+	if existingAlgorithm != patch.Algorithm && patchPriority == 0 {
+		return true
+	}
+	if existingAlgorithm == patch.Algorithm && introRangeDiffers(row, patch, 0.5) {
 		return true
 	}
 	return false
+}
+
+func scannerAlgorithmPriority(algorithm string) int {
+	switch algorithm {
+	case ChapterSilenceAlgorithm:
+		return 40
+	case ChapterAlgorithm:
+		return 30
+	case EpisodeVersionCopyAlgorithm:
+		return 20
+	case ChromaprintDialogueAlgorithm:
+		return 15
+	case ChromaprintAlgorithm:
+		return 10
+	default:
+		return 0
+	}
 }
 
 func introRangeDiffers(row markerRow, patch IntroMarkerPatch, tolerance float64) bool {
@@ -622,9 +672,42 @@ func effectiveAudioLanguage(tracks []models.AudioTrack) string {
 func InputSignature(candidates []Candidate) string {
 	parts := make([]string, 0, len(candidates))
 	for _, c := range candidates {
-		parts = append(parts, fmt.Sprintf("%d:%s:%d:%.3f:%s", c.FileID, c.FileHash, c.FileSize, c.DurationSeconds, c.EpisodeID))
+		parts = append(parts, fmt.Sprintf("%d:%s:%d:%.3f:%s:%s",
+			c.FileID,
+			c.FileHash,
+			c.FileSize,
+			c.DurationSeconds,
+			c.EpisodeID,
+			subtitleInventorySignature(c),
+		))
 	}
 	sort.Strings(parts)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(sum[:])
+}
+
+func subtitleInventorySignature(candidate Candidate) string {
+	parts := make([]string, 0, len(candidate.ExternalSubtitles)+len(candidate.SubtitleTracks))
+	for _, sub := range candidate.ExternalSubtitles {
+		parts = append(parts, fmt.Sprintf("ext:%s:%s:%s:%t:%t:%t",
+			sub.Path,
+			sub.Language,
+			sub.Format,
+			sub.Forced,
+			sub.Default,
+			sub.HearingImpaired,
+		))
+	}
+	for _, track := range candidate.SubtitleTracks {
+		parts = append(parts, fmt.Sprintf("emb:%d:%s:%s:%t:%t:%t",
+			track.Index,
+			track.Language,
+			track.Codec,
+			track.Forced,
+			track.Default,
+			track.HearingImpaired,
+		))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }

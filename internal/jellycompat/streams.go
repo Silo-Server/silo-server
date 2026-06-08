@@ -165,6 +165,10 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 					return
 				}
 				if err := h.startRemoteTranscode(r.Context(), playSession.UpstreamSessionID, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
+					if errors.Is(err, errTranscode4KDisallowed) {
+						writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
+						return
+					}
 					writeError(w, http.StatusBadGateway, "TranscodeStartFailed", "Transcode node rejected the request")
 					return
 				}
@@ -182,6 +186,10 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	// Ensure the transcode process is running.
 	_, err = h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
 	if err != nil {
+		if errors.Is(err, errTranscode4KDisallowed) {
+			writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
+			return
+		}
 		if errors.Is(err, playback.ErrManifestNotReady) {
 			writeError(w, http.StatusServiceUnavailable, "NotReady", "Transcode playlist not ready")
 			return
@@ -228,6 +236,10 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	// Ensure the transcode process is running.
 	_, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
 	if err != nil {
+		if errors.Is(err, errTranscode4KDisallowed) {
+			writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
+			return
+		}
 		if errors.Is(err, playback.ErrManifestNotReady) {
 			writeError(w, http.StatusServiceUnavailable, "NotReady", "Transcode playlist not ready")
 			return
@@ -337,7 +349,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				}
 			}
 
-			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
+			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := transcodeSession.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
 					slog.Error("resolve transcode seek target",
@@ -810,6 +822,9 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	if existing := h.getTranscodeSession(upstreamSessionID); existing != nil {
 		return existing, nil
 	}
+	if !source.TranscodeAudio && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
+		return nil, errTranscode4KDisallowed
+	}
 	if h.fileResolver == nil {
 		return nil, fmt.Errorf("file resolver not available")
 	}
@@ -1019,8 +1034,9 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 
 	playSessionID := h.codec.EncodeStringID(EncodedIDPlaySession, uuidNewString())
 	sources := make([]PlaybackMediaSource, 0, len(detail.Versions))
+	allow4KTranscode := h.allow4KVideoTranscode(ctx)
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{})
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 

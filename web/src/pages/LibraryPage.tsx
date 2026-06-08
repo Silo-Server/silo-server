@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { QueryDefinition } from "@/api/types";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -9,16 +9,53 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import LibraryRecommended from "./LibraryRecommended";
 import LibraryBrowse from "./LibraryBrowse";
 import LibraryCollections from "./LibraryCollections";
-import { parseLibraryPageState, updateLibraryPageSearchParams } from "./libraryPageSearchParams";
+import { useLibraryPageStatePreference } from "@/hooks/queries/libraryPageState";
+import {
+  applySavedLibraryPageSearchParams,
+  hasLibraryPageSearchParams,
+  parseLibraryPageState,
+  serializeLibraryPageSearchParams,
+  updateLibraryPageSearchParams,
+} from "./libraryPageSearchParams";
 
 export default function LibraryPage() {
   const { libraryId } = useParams<{ libraryId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries, isLoading } = useUserLibraries();
+  const {
+    isLoading: libraryPageStateLoading,
+    preference: libraryPageStatePreference,
+    rememberEnabled: rememberLibraryPageState,
+    saveLibrarySearch,
+  } = useLibraryPageStatePreference();
+  const savedStateHydratedLibraryIdRef = useRef<number | null>(null);
+  const applyingSavedSearchParamsRef = useRef<string | null>(null);
+  const applyingSavedSearchParamsLibraryIdRef = useRef<number | null>(null);
 
   const id = Number(libraryId);
   const library = libraries?.find((l) => l.id === id);
   const libraryType = library?.type ?? "";
+  const savedLibrarySearch =
+    Number.isFinite(id) && id > 0
+      ? libraryPageStatePreference.libraries[String(id)]?.search
+      : undefined;
+  const shouldApplySavedLibrarySearch =
+    Boolean(libraryType) &&
+    Number.isFinite(id) &&
+    id > 0 &&
+    !libraryPageStateLoading &&
+    rememberLibraryPageState &&
+    savedStateHydratedLibraryIdRef.current !== id &&
+    savedLibrarySearch != null &&
+    !hasLibraryPageSearchParams(searchParams) &&
+    savedLibrarySearch !== serializeLibraryPageSearchParams(searchParams);
+  const shouldWaitForSavedLibrarySearch =
+    Boolean(libraryType) &&
+    Number.isFinite(id) &&
+    id > 0 &&
+    libraryPageStateLoading &&
+    savedStateHydratedLibraryIdRef.current !== id &&
+    !hasLibraryPageSearchParams(searchParams);
   const { activeTab, browseType, queryDefinition } = parseLibraryPageState(
     searchParams,
     libraryType,
@@ -37,8 +74,44 @@ export default function LibraryPage() {
   useDocumentTitle(library?.name ?? "Library");
 
   useEffect(() => {
-    if (!libraryType) {
+    if (
+      !libraryType ||
+      !Number.isFinite(id) ||
+      id <= 0 ||
+      libraryPageStateLoading ||
+      !rememberLibraryPageState ||
+      savedStateHydratedLibraryIdRef.current === id ||
+      !shouldApplySavedLibrarySearch
+    ) {
       return;
+    }
+
+    savedStateHydratedLibraryIdRef.current = id;
+    const nextSearchParams = applySavedLibraryPageSearchParams(searchParams, savedLibrarySearch);
+    if (nextSearchParams.toString() !== searchParams.toString()) {
+      applyingSavedSearchParamsRef.current = serializeLibraryPageSearchParams(nextSearchParams);
+      applyingSavedSearchParamsLibraryIdRef.current = id;
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [
+    id,
+    libraryPageStateLoading,
+    libraryType,
+    rememberLibraryPageState,
+    savedLibrarySearch,
+    searchParams,
+    setSearchParams,
+    shouldApplySavedLibrarySearch,
+  ]);
+
+  useEffect(() => {
+    if (!libraryType || shouldApplySavedLibrarySearch) {
+      return;
+    }
+
+    if (applyingSavedSearchParamsLibraryIdRef.current !== id) {
+      applyingSavedSearchParamsRef.current = null;
+      applyingSavedSearchParamsLibraryIdRef.current = id;
     }
 
     const normalizedSearchParams = updateLibraryPageSearchParams(
@@ -50,7 +123,60 @@ export default function LibraryPage() {
     if (normalizedSearchParams.toString() !== searchParams.toString()) {
       setSearchParams(normalizedSearchParams, { replace: true });
     }
-  }, [activeTab, browseType, queryDefinition, libraryType, searchParams, setSearchParams]);
+  }, [
+    activeTab,
+    browseType,
+    queryDefinition,
+    libraryType,
+    searchParams,
+    setSearchParams,
+    shouldApplySavedLibrarySearch,
+  ]);
+
+  useEffect(() => {
+    if (
+      !libraryType ||
+      !Number.isFinite(id) ||
+      id <= 0 ||
+      libraryPageStateLoading ||
+      !rememberLibraryPageState ||
+      shouldApplySavedLibrarySearch
+    ) {
+      return;
+    }
+
+    const normalizedSearchParams = updateLibraryPageSearchParams(
+      searchParams,
+      { activeTab, browseType, queryDefinition },
+      libraryType,
+    );
+    if (normalizedSearchParams.toString() !== searchParams.toString()) {
+      return;
+    }
+
+    const canonicalSearch = serializeLibraryPageSearchParams(normalizedSearchParams);
+    if (applyingSavedSearchParamsRef.current != null) {
+      if (applyingSavedSearchParamsRef.current === canonicalSearch) {
+        applyingSavedSearchParamsRef.current = null;
+      }
+      return;
+    }
+    if (savedLibrarySearch !== canonicalSearch) {
+      saveLibrarySearch(id, canonicalSearch);
+    }
+  }, [
+    activeTab,
+    browseType,
+    id,
+    libraryPageStateLoading,
+    libraryType,
+    queryDefinition,
+    rememberLibraryPageState,
+    saveLibrarySearch,
+    savedLibrarySearch,
+    searchParams,
+    shouldApplySavedLibrarySearch,
+  ]);
 
   const handleTabChange = (value: string) => {
     const nextSearchParams = updateLibraryPageSearchParams(
@@ -92,7 +218,7 @@ export default function LibraryPage() {
     setSearchParams(nextSearchParams);
   };
 
-  if (isLoading) {
+  if (isLoading || shouldWaitForSavedLibrarySearch || shouldApplySavedLibrarySearch) {
     return (
       <div className="h-full px-4 py-4 sm:px-6 sm:py-6 lg:px-10 xl:px-12">
         <Skeleton className="mb-6 h-10 w-48" />

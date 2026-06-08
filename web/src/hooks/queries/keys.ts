@@ -50,6 +50,7 @@ export const itemKeys = {
     ["items", "detail", id, libraryId ?? "default"] as const,
   watchDetail: (id: string, fileId?: number, libraryId?: number) =>
     ["items", "watchDetail", id, fileId ?? "default", libraryId ?? "default"] as const,
+  markers: (id: string) => ["items", "markers", id] as const,
   browse: (params: BrowseParams) => ["items", "browse", params] as const,
   infiniteBrowse: (params: InfiniteBrowseParams) => ["items", "infiniteBrowse", params] as const,
   filters: () => ["items", "filters"] as const,
@@ -324,6 +325,9 @@ export const adminKeys = {
   libraries: () => ["admin", "libraries"] as const,
   libraryRoots: (libraryId?: number, state?: string) =>
     ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all"] as const,
+  libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
+  libraryMatchQueueDetail: (libraryId: number) =>
+    ["admin", "libraries", "metadataMatchQueue", libraryId] as const,
   filesystemBrowse: (path: string) => ["admin", "filesystem", "browse", path] as const,
   librarySkippedRoots: () => ["admin", "libraries", "skippedRoots"] as const,
   staleMediaIDs: () => ["admin", "libraries", "staleMediaIDs"] as const,
@@ -383,6 +387,14 @@ export const adminKeys = {
   task: (key: string) => ["admin", "tasks", key] as const,
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
+  markerProviders: () => ["admin", "markerProviders"] as const,
+  markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
+  markerProviderValidation: (provider: string) =>
+    ["admin", "markerProviders", provider, "validation"] as const,
+  markerHistoryRoot: () => ["admin", "markerHistory"] as const,
+  markerHistory: (limit: number) => ["admin", "markerHistory", "all", limit] as const,
+  markerItemHistory: (itemId: string) => ["admin", "markerHistory", "items", itemId] as const,
+  markerFileHistory: (fileId: number) => ["admin", "markerHistory", "files", fileId] as const,
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
@@ -393,4 +405,13 @@ export const adminKeys = {
   itemImages: (id: string) => ["admin", "items", id, "images"] as const,
   buildInfo: () => ["admin", "system", "buildInfo"] as const,
   hwAccel: () => ["admin", "system", "hwAccel"] as const,
+  autoscanSettings: () => ["admin", "autoscan", "settings"] as const,
+  autoscanConnections: () => ["admin", "autoscan", "connections"] as const,
+  autoscanSources: () => ["admin", "autoscan", "sources"] as const,
+  autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
+  autoscanStatus: () => ["admin", "autoscan", "status"] as const,
+  autoscanScans: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "scans", params ?? {}] as const,
+  autoscanEvents: (params?: Record<string, unknown>) =>
+    ["admin", "autoscan", "events", params ?? {}] as const,
 };

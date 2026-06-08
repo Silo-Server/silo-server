@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fetchRecipeCatalog, fetchCandidates, previewSection } from "./recipes";
 
 beforeEach(() => {
-  vi.spyOn(global, "fetch" as never).mockReset();
+  vi.spyOn(globalThis, "fetch").mockReset();
 });
 
 describe("recipes API client", () => {
   it("fetchRecipeCatalog returns categories", async () => {
-    vi.spyOn(global, "fetch" as never).mockResolvedValue({
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       text: async () =>
@@ -19,7 +19,7 @@ describe("recipes API client", () => {
   });
 
   it("fetchCandidates returns candidate list", async () => {
-    vi.spyOn(global, "fetch" as never).mockResolvedValue({
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       text: async () =>
@@ -33,7 +33,7 @@ describe("recipes API client", () => {
   });
 
   it("previewSection POSTs body and returns items", async () => {
-    vi.spyOn(global, "fetch" as never).mockResolvedValue({
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       text: async () => JSON.stringify({ items: [{ content_id: "x" }], total_count: 1 }),

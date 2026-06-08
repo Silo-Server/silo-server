@@ -391,13 +391,17 @@ func (h *EventsHandler) writeSnapshotFrame(
 ) error {
 	data, err := h.snapshotForChannel(r, claims, channel)
 	if err != nil {
-		writeWebSocketError(conn, "internal_error", "Failed to load snapshot")
-		_ = writeWebSocketControl(
-			conn,
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "snapshot failed"),
+		slog.Error(
+			"events: failed to build initial snapshot",
+			"channel",
+			channel,
+			"user_id",
+			claims.UserID,
+			"error",
+			err,
 		)
-		return err
+		writeWebSocketError(conn, "internal_error", "Failed to load snapshot")
+		return nil
 	}
 	return writeWebSocketJSON(conn, evt.EventsSnapshotMessage{
 		Type:      "snapshot",

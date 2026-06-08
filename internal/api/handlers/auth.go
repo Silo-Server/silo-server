@@ -17,9 +17,10 @@ import (
 
 // AuthHandler handles authentication-related HTTP endpoints.
 type AuthHandler struct {
-	service *auth.Service
-	jwt     *auth.JWTService
-	device  *auth.DeviceLoginService
+	service              *auth.Service
+	jwt                  *auth.JWTService
+	device               *auth.DeviceLoginService
+	oauthRoutesAvailable bool
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -30,6 +31,13 @@ func NewAuthHandler(service *auth.Service, jwt *auth.JWTService, device *auth.De
 		jwt:     jwt,
 		device:  device,
 	}
+}
+
+// SetOAuthRoutesAvailable controls whether OAuth login providers are
+// advertised by /auth/providers. The router only mounts OAuth routes when the
+// server has enough configuration to complete the flow.
+func (h *AuthHandler) SetOAuthRoutesAvailable(available bool) {
+	h.oauthRoutesAvailable = available
 }
 
 // --- Request/Response types ---
@@ -181,6 +189,9 @@ func (h *AuthHandler) HandleProviders(w http.ResponseWriter, r *http.Request) {
 	providers := h.service.ListProviders()
 	response := make([]authProviderResponse, 0, len(providers))
 	for _, provider := range providers {
+		if provider.Mode == "oauth" && !h.oauthRoutesAvailable {
+			continue
+		}
 		response = append(response, authProviderResponse{
 			ID:             provider.ID,
 			DisplayName:    provider.DisplayName,

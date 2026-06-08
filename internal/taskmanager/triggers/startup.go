@@ -14,6 +14,7 @@ const startupDelay = 5 * time.Second
 type StartupTrigger struct {
 	cfg     taskmanager.TriggerConfig
 	ch      chan struct{}
+	delay   time.Duration
 	nextRun time.Time
 	timer   *time.Timer
 	stopCh  chan struct{}
@@ -23,8 +24,9 @@ type StartupTrigger struct {
 
 func NewStartupTrigger(cfg taskmanager.TriggerConfig) *StartupTrigger {
 	return &StartupTrigger{
-		cfg: cfg,
-		ch:  make(chan struct{}, 1),
+		cfg:   cfg,
+		ch:    make(chan struct{}, 1),
+		delay: startupDelay,
 	}
 }
 
@@ -39,13 +41,14 @@ func (s *StartupTrigger) Start(_ *taskmanager.ExecutionResult) {
 	}
 
 	if s.fired {
+		s.nextRun = time.Time{}
 		return
 	}
 	s.fired = true
 
 	s.stopCh = make(chan struct{})
-	s.nextRun = time.Now().Add(startupDelay)
-	s.timer = time.NewTimer(startupDelay)
+	s.nextRun = time.Now().Add(s.delay)
+	s.timer = time.NewTimer(s.delay)
 
 	go func() {
 		select {
@@ -58,6 +61,9 @@ func (s *StartupTrigger) Start(_ *taskmanager.ExecutionResult) {
 			}
 			return
 		case <-s.timer.C:
+			s.mu.Lock()
+			s.nextRun = time.Time{}
+			s.mu.Unlock()
 			select {
 			case s.ch <- struct{}{}:
 			default:
@@ -76,6 +82,7 @@ func (s *StartupTrigger) Stop() {
 			close(s.stopCh)
 		}
 	}
+	s.nextRun = time.Time{}
 }
 
 func (s *StartupTrigger) NextRunTime() time.Time {

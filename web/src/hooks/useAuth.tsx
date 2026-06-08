@@ -358,7 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         setSetupRequired(status.needs_setup);
-        setProviders((availableProviders ?? []).filter((entry) => entry.mode === "credentials"));
+        setProviders(availableProviders ?? []);
       } catch {
         if (!cancelled) {
           setSetupRequired(false);

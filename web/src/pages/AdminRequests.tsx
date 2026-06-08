@@ -1,7 +1,21 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Check, Plug, RefreshCw, Save, Settings2, SlidersHorizontal, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Library,
+  Plug,
+  Plus,
+  RefreshCw,
+  Save,
+  Settings2,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from "lucide-react";
 import type {
   MediaRequest,
   MediaRequestOutcome,
@@ -11,6 +25,7 @@ import type {
   RequestIntegrationOptions,
   RequestLimitMode,
   RequestSettings,
+  RequestTarget,
   RequestUserLimit,
 } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -47,13 +62,15 @@ import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminMediaRequests,
   useApproveMediaRequest,
+  useCreateRequestIntegration,
   useDeclineMediaRequest,
+  useDeleteRequestIntegration,
   useLoadRequestIntegrationOptions,
   useRequestIntegrations,
   useRequestSettings,
   useRequestUserLimit,
   useRetryMediaRequest,
-  useUpdateRequestIntegrations,
+  useUpdateRequestIntegration,
   useUpdateRequestSettings,
   useUpdateRequestUserLimit,
 } from "@/hooks/queries/useRequests";
@@ -339,6 +356,15 @@ function RequestQueueRow({
                 {requesterLabel}
               </Link>
             ) : null}
+            {request.library_content_id ? (
+              <Link
+                to={`/item/${encodeURIComponent(request.library_content_id)}`}
+                className="hover:text-foreground inline-flex items-center gap-1 hover:underline"
+              >
+                <Library className="h-3 w-3" />
+                Library
+              </Link>
+            ) : null}
           </div>
           {request.last_error ? (
             <p className="text-destructive mt-1 max-w-md text-xs">{request.last_error}</p>
@@ -357,8 +383,20 @@ function RequestQueueRow({
         </Badge>
       </TableCell>
       <TableCell className="text-muted-foreground text-xs">
-        {request.integration_kind || "Not submitted"}
-        {request.external_status ? <span className="block">{request.external_status}</span> : null}
+        {request.targets?.length ? (
+          <div className="flex flex-col gap-1.5">
+            {request.is_anime ? (
+              <Badge variant="secondary" className="w-fit">
+                Anime
+              </Badge>
+            ) : null}
+            {request.targets.map((target) => (
+              <RequestTargetBadge key={target.id} target={target} />
+            ))}
+          </div>
+        ) : (
+          "Not submitted"
+        )}
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-2">
@@ -390,11 +428,35 @@ function RequestQueueRow({
   );
 }
 
+function RequestTargetBadge({ target }: { target: RequestTarget }) {
+  const qualityLabel = target.quality === "2160p" ? "2160p" : "1080p";
+  const instanceLabel = target.instance_name || target.integration_kind || "Unknown";
+  const failed = target.status === "failed";
+  const statusLabel = target.status === "failed" ? "Failed" : formatRequestStatus(target.status);
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline">{qualityLabel}</Badge>
+        <span className="text-foreground">{instanceLabel}</span>
+        <Badge variant={failed ? "destructive" : "secondary"}>{statusLabel}</Badge>
+        {target.external_status ? <span>{target.external_status}</span> : null}
+      </div>
+      {failed && target.last_error ? (
+        <p className="text-destructive flex max-w-xs items-start gap-1">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{target.last_error}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 type SettingsFormState = {
   requests_enabled: boolean;
   global_max_requests: string;
   global_window_days: string;
   global_auto_approval_enabled: boolean;
+  force_dual_quality: boolean;
   updated_at: string;
 };
 
@@ -419,6 +481,7 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
     global_max_requests: String(settings.global_max_requests),
     global_window_days: String(settings.global_window_days),
     global_auto_approval_enabled: settings.global_auto_approval_enabled,
+    force_dual_quality: settings.force_dual_quality,
     updated_at: settings.updated_at,
   }));
 
@@ -428,6 +491,7 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
       global_max_requests: Math.max(0, Number(form.global_max_requests) || 0),
       global_window_days: Math.max(1, Number(form.global_window_days) || 1),
       global_auto_approval_enabled: form.global_auto_approval_enabled,
+      force_dual_quality: form.force_dual_quality,
       updated_at: form.updated_at,
     };
     updateSettings.mutate(payload);
@@ -475,6 +539,16 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
             }
           />
         </Field>
+        <div className="sm:col-span-2">
+          <SwitchField
+            label="Always fulfill in both 1080p and 4K"
+            description="Applies to all requests when both a Default HD and Default 4K instance exist, regardless of user role."
+            checked={form.force_dual_quality}
+            onCheckedChange={(checked) =>
+              setForm((current) => ({ ...current, force_dual_quality: checked }))
+            }
+          />
+        </div>
       </div>
 
       <Button onClick={saveSettings} disabled={updateSettings.isPending}>
@@ -486,13 +560,22 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
 }
 
 type IntegrationFormState = {
+  id: string;
+  name: string;
   kind: "radarr" | "sonarr";
   enabled: boolean;
+  is_4k: boolean;
+  is_default: boolean;
+  is_default_4k: boolean;
   base_url: string;
   api_key_ref: string;
   root_folder: string;
   quality_profile_id: string;
   tags: string;
+  anime_enabled: boolean;
+  anime_quality_profile_id: string;
+  anime_root_folder: string;
+  anime_tags: string;
   search_on_add: boolean;
   minimum_availability: string;
   series_type: string;
@@ -519,86 +602,133 @@ function RequestIntegrationsTab() {
     );
   }
 
-  return (
-    <RequestIntegrationsForm
-      key={integrationsFormKey(integrations.data ?? [])}
-      integrations={integrations.data ?? []}
-    />
-  );
+  const list = integrations.data ?? [];
+  const integrationsKey =
+    list.length === 0
+      ? "empty"
+      : list.map((integration) => `${integration.id}:${integration.updated_at ?? ""}`).join("|");
+
+  return <RequestIntegrationsForm key={integrationsKey} integrations={list} />;
+}
+
+type IntegrationCard = {
+  key: string;
+  form: IntegrationFormState;
+  source: RequestIntegration | null;
+};
+
+let integrationCardCounter = 0;
+
+function nextCardKey(): string {
+  integrationCardCounter += 1;
+  return `card-${integrationCardCounter}`;
 }
 
 function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegration[] }) {
-  const updateIntegrations = useUpdateRequestIntegrations();
-  const [forms, setForms] = useState<IntegrationFormState[]>(() =>
-    INTEGRATION_KINDS.map((kind) =>
-      integrationToForm(
-        kind,
-        integrations.find((integration) => integration.kind === kind),
-      ),
-    ),
+  const [cards, setCards] = useState<IntegrationCard[]>(() =>
+    integrations.map((integration) => ({
+      key: integration.id || nextCardKey(),
+      form: integrationToForm(integration.kind === "sonarr" ? "sonarr" : "radarr", integration),
+      source: integration,
+    })),
   );
 
-  function updateForm(kind: "radarr" | "sonarr", patch: Partial<IntegrationFormState>) {
-    setForms((current) =>
-      current.map((form) => (form.kind === kind ? { ...form, ...patch } : form)),
+  function updateCard(key: string, patch: Partial<IntegrationFormState>) {
+    setCards((current) =>
+      current.map((card) =>
+        card.key === key ? { ...card, form: { ...card.form, ...patch } } : card,
+      ),
     );
   }
 
-  function saveIntegrations() {
-    updateIntegrations.mutate(forms.map(formToIntegration));
+  function addCard(kind: "radarr" | "sonarr") {
+    setCards((current) => [
+      ...current,
+      { key: nextCardKey(), form: integrationToForm(kind), source: null },
+    ]);
+  }
+
+  function removeCard(key: string) {
+    setCards((current) => current.filter((card) => card.key !== key));
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-2">
-        {forms.map((form) => (
-          <IntegrationEditor
-            key={form.kind}
-            form={form}
-            onChange={(patch) => updateForm(form.kind, patch)}
-          />
-        ))}
-      </div>
-      <Button onClick={saveIntegrations} disabled={updateIntegrations.isPending}>
-        <Save className="h-4 w-4" />
-        Save Integrations
-      </Button>
+    <div className="space-y-8">
+      {INTEGRATION_KINDS.map((kind) => {
+        const kindCards = cards.filter((card) => card.form.kind === kind);
+        const title = kind === "radarr" ? "Radarr" : "Sonarr";
+        return (
+          <div key={kind} className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold tracking-normal">{title} instances</h2>
+              <Button type="button" variant="outline" size="sm" onClick={() => addCard(kind)}>
+                <Plus className="h-4 w-4" />
+                Add {title} instance
+              </Button>
+            </div>
+            {kindCards.length === 0 ? (
+              <EmptyPanel
+                title={`No ${title} instances`}
+                detail={`Add a ${title} instance to route requests.`}
+              />
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-2">
+                {kindCards.map((card) => (
+                  <IntegrationEditor
+                    key={card.key}
+                    form={card.form}
+                    source={card.source}
+                    onChange={(patch) => updateCard(card.key, patch)}
+                    onRemove={() => removeCard(card.key)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function integrationsFormKey(integrations: RequestIntegration[]): string {
-  if (integrations.length === 0) return "empty";
-  return integrations
-    .map(
-      (integration) =>
-        `${integration.kind}:${integration.updated_at ?? ""}:${integration.enabled}:${integration.has_api_key}`,
-    )
-    .join("|");
-}
-
 function IntegrationEditor({
   form,
+  source,
   onChange,
+  onRemove,
 }: {
   form: IntegrationFormState;
+  source: RequestIntegration | null;
   onChange: (patch: Partial<IntegrationFormState>) => void;
+  onRemove: () => void;
 }) {
   const title = form.kind === "radarr" ? "Radarr" : "Sonarr";
+  const isNew = form.id === "";
+  const createIntegration = useCreateRequestIntegration();
+  const updateIntegration = useUpdateRequestIntegration();
+  const deleteIntegration = useDeleteRequestIntegration();
+  const [animeOpen, setAnimeOpen] = useState(form.anime_enabled);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const animePanelID = useId();
+  const isDirty = !isNew && source !== null && isIntegrationDirty(form, source);
   const loadOptions = useLoadRequestIntegrationOptions();
   const [options, setOptions] = useState<RequestIntegrationOptions | null>(null);
   const rootFolders = rootFolderChoices(options, form.root_folder);
   const qualityProfiles = qualityProfileChoices(options, form.quality_profile_id);
+  const animeRootFolders = rootFolderChoices(options, form.anime_root_folder);
+  const animeQualityProfiles = qualityProfileChoices(options, form.anime_quality_profile_id);
   const tags = options?.tags ?? [];
   const selectedTags = parseTags(form.tags);
+  const selectedAnimeTags = parseTags(form.anime_tags);
   const canLoadOptions =
     form.base_url.trim().length > 0 && Boolean(form.api_key_ref.trim() || form.has_api_key);
 
   async function handleLoadOptions() {
     try {
       const loaded = await loadOptions.mutateAsync({
-        kind: form.kind,
+        id: form.id || "new",
         body: {
+          kind: form.kind,
           base_url: form.base_url,
           api_key_ref: form.api_key_ref.trim() || undefined,
         },
@@ -620,6 +750,21 @@ function IntegrationEditor({
     }
   }
 
+  const saving = createIntegration.isPending || updateIntegration.isPending;
+  // New instances must carry an API key (there's no saved key to fall back on);
+  // edits may leave it blank to keep the stored key (has_api_key).
+  const hasApiKey = form.api_key_ref.trim().length > 0 || form.has_api_key;
+  const canSave = form.name.trim().length > 0 && form.base_url.trim().length > 0 && hasApiKey;
+
+  function handleSave() {
+    const payload = formToIntegration(form);
+    if (isNew) {
+      createIntegration.mutate(payload);
+    } else {
+      updateIntegration.mutate(payload);
+    }
+  }
+
   return (
     <div className="border-border bg-card space-y-5 rounded-lg border p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -627,6 +772,8 @@ function IntegrationEditor({
           <Plug className="text-primary h-4 w-4" />
           <h2 className="text-lg font-semibold tracking-normal">{title}</h2>
           {form.has_api_key ? <Badge variant="secondary">Key saved</Badge> : null}
+          {isNew ? <Badge variant="outline">New</Badge> : null}
+          {isDirty ? <Badge variant="secondary">Unsaved changes</Badge> : null}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -637,10 +784,53 @@ function IntegrationEditor({
             disabled={!canLoadOptions || loadOptions.isPending}
           >
             <RefreshCw className="h-4 w-4" />
-            {loadOptions.isPending ? "Loading" : "Load Settings"}
+            {loadOptions.isPending ? "Loading" : "Test connection"}
           </Button>
           <Switch checked={form.enabled} onCheckedChange={(enabled) => onChange({ enabled })} />
         </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Name">
+          <Input
+            value={form.name}
+            onChange={(event) => onChange({ name: event.target.value })}
+            placeholder={`${title} instance`}
+          />
+        </Field>
+        <SwitchField
+          label="4K instance"
+          checked={form.is_4k}
+          onCheckedChange={(is_4k) =>
+            onChange({
+              is_4k,
+              is_default: is_4k ? false : form.is_default,
+              is_default_4k: is_4k ? form.is_default_4k : false,
+            })
+          }
+        />
+        <SwitchField
+          label="Default (HD)"
+          description={
+            form.is_4k
+              ? "Disabled because this is a 4K instance."
+              : "Default instance for 1080p requests."
+          }
+          checked={form.is_default}
+          disabled={form.is_4k}
+          onCheckedChange={(is_default) => onChange({ is_default })}
+        />
+        <SwitchField
+          label="Default 4K"
+          description={
+            form.is_4k
+              ? "Default instance for 2160p requests."
+              : "Enable the 4K instance toggle to set this."
+          }
+          checked={form.is_default_4k}
+          disabled={!form.is_4k}
+          onCheckedChange={(is_default_4k) => onChange({ is_default_4k })}
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -785,6 +975,174 @@ function IntegrationEditor({
           {options.tags.length === 1 ? "" : "s"}.
         </p>
       ) : null}
+
+      <div className="border-border space-y-4 rounded-lg border p-3">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-2 text-left"
+          onClick={() => setAnimeOpen((open) => !open)}
+          aria-expanded={animeOpen}
+          aria-controls={animePanelID}
+        >
+          <div className="flex items-center gap-2">
+            {animeOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            <span className="text-sm font-medium">Anime overrides</span>
+            {form.anime_enabled ? <Badge variant="secondary">On</Badge> : null}
+          </div>
+        </button>
+        {animeOpen ? (
+          <div id={animePanelID} className="space-y-4" role="region" aria-label="Anime overrides">
+            <SwitchField
+              label="Enable anime overrides"
+              description="Route anime requests to a dedicated profile, root folder, and tags."
+              checked={form.anime_enabled}
+              onCheckedChange={(anime_enabled) => onChange({ anime_enabled })}
+            />
+            {form.anime_enabled ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Anime quality profile">
+                  {animeQualityProfiles.length > 0 ? (
+                    <Select
+                      value={form.anime_quality_profile_id}
+                      onValueChange={(anime_quality_profile_id) =>
+                        onChange({ anime_quality_profile_id })
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select quality profile" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {animeQualityProfiles.map((profile) => (
+                          <SelectItem key={profile.id} value={String(profile.id)}>
+                            {profile.name} ({profile.id})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      type="number"
+                      min={1}
+                      value={form.anime_quality_profile_id}
+                      onChange={(event) =>
+                        onChange({ anime_quality_profile_id: event.target.value })
+                      }
+                    />
+                  )}
+                </Field>
+                <Field label="Anime root folder">
+                  {animeRootFolders.length > 0 ? (
+                    <Select
+                      value={form.anime_root_folder}
+                      onValueChange={(anime_root_folder) => onChange({ anime_root_folder })}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select root folder" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {animeRootFolders.map((folder) => (
+                          <SelectItem key={folder.path} value={folder.path}>
+                            {rootFolderLabel(folder)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={form.anime_root_folder}
+                      onChange={(event) => onChange({ anime_root_folder: event.target.value })}
+                      placeholder="/media/anime"
+                    />
+                  )}
+                </Field>
+                <Field label="Anime tags">
+                  <Input
+                    value={form.anime_tags}
+                    onChange={(event) => onChange({ anime_tags: event.target.value })}
+                    placeholder="1, 2"
+                  />
+                  {tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {tags.map((tag) => {
+                        const selected = selectedAnimeTags.includes(tag.id);
+                        return (
+                          <Button
+                            key={tag.id}
+                            type="button"
+                            size="xs"
+                            variant={selected ? "secondary" : "outline"}
+                            onClick={() =>
+                              onChange({ anime_tags: toggleTag(form.anime_tags, tag.id) })
+                            }
+                          >
+                            {tag.label || `Tag ${tag.id}`}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </Field>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" onClick={handleSave} disabled={!canSave || saving}>
+          <Save className="h-4 w-4" />
+          {isNew ? "Create instance" : "Save"}
+        </Button>
+        {isNew ? (
+          <Button type="button" variant="ghost" onClick={onRemove}>
+            <X className="h-4 w-4" />
+            Discard
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-destructive"
+            onClick={() => setConfirmDelete(true)}
+            disabled={deleteIntegration.isPending}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
+        )}
+      </div>
+
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(false);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete instance</DialogTitle>
+            <DialogDescription>
+              {`"${form.name.trim() || title}" will be permanently removed. New requests will no longer route to this instance.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                deleteIntegration.mutate(form.id);
+                setConfirmDelete(false);
+              }}
+              disabled={deleteIntegration.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -795,8 +1153,13 @@ function integrationToForm(
 ): IntegrationFormState {
   const options = integration?.options ?? {};
   return {
+    id: integration?.id ?? "",
+    name: integration?.name ?? "",
     kind,
-    enabled: integration?.enabled ?? false,
+    enabled: integration?.enabled ?? true,
+    is_4k: integration?.is_4k ?? false,
+    is_default: integration?.is_default ?? false,
+    is_default_4k: integration?.is_default_4k ?? false,
     base_url: integration?.base_url ?? "",
     api_key_ref: "",
     root_folder: integration?.root_folder ?? "",
@@ -804,6 +1167,12 @@ function integrationToForm(
       ? String(integration.quality_profile_id)
       : "",
     tags: integration?.tags?.join(", ") ?? "",
+    anime_enabled: integration?.anime_enabled ?? false,
+    anime_quality_profile_id: integration?.anime_quality_profile_id
+      ? String(integration.anime_quality_profile_id)
+      : "",
+    anime_root_folder: integration?.anime_root_folder ?? "",
+    anime_tags: integration?.anime_tags?.join(", ") ?? "",
     search_on_add: boolOption(options, "search_on_add", true),
     minimum_availability: stringOption(options, "minimum_availability", "released"),
     series_type: stringOption(options, "series_type", "standard"),
@@ -814,6 +1183,7 @@ function integrationToForm(
 
 function formToIntegration(form: IntegrationFormState): RequestIntegration {
   const qualityProfileID = Number(form.quality_profile_id);
+  const animeQualityProfileID = Number(form.anime_quality_profile_id);
   const options: Record<string, unknown> = {
     search_on_add: form.search_on_add,
   };
@@ -825,16 +1195,49 @@ function formToIntegration(form: IntegrationFormState): RequestIntegration {
   }
 
   return {
+    id: form.id,
+    name: form.name.trim(),
     kind: form.kind,
     enabled: form.enabled,
+    is_4k: form.is_4k,
+    is_default: form.is_default,
+    is_default_4k: form.is_default_4k,
     base_url: form.base_url.trim(),
     api_key_ref: form.api_key_ref.trim() || undefined,
     root_folder: form.root_folder.trim(),
     quality_profile_id:
       Number.isFinite(qualityProfileID) && qualityProfileID > 0 ? qualityProfileID : undefined,
     tags: parseTags(form.tags),
+    anime_enabled: form.anime_enabled,
+    anime_quality_profile_id:
+      Number.isFinite(animeQualityProfileID) && animeQualityProfileID > 0
+        ? animeQualityProfileID
+        : undefined,
+    anime_root_folder: form.anime_root_folder.trim() || undefined,
+    anime_tags: parseTags(form.anime_tags),
     options,
   };
+}
+
+function isIntegrationDirty(form: IntegrationFormState, source: RequestIntegration): boolean {
+  // A pending API key entry always counts as an unsaved change.
+  if (form.api_key_ref.trim().length > 0) return true;
+
+  const next = formToIntegration(form);
+  const seeded = integrationToForm(form.kind, source);
+  const original = formToIntegration(seeded);
+
+  return (
+    JSON.stringify(stripIntegrationForCompare(next)) !==
+    JSON.stringify(stripIntegrationForCompare(original))
+  );
+}
+
+function stripIntegrationForCompare(integration: RequestIntegration): Record<string, unknown> {
+  // api_key_ref is write-only (never round-trips from the source) and is handled
+  // separately above, so exclude it from the structural comparison.
+  const { api_key_ref: _apiKeyRef, ...rest } = integration;
+  return rest;
 }
 
 function rootFolderChoices(options: RequestIntegrationOptions | null, currentPath: string) {
@@ -1077,15 +1480,22 @@ function SwitchField({
   label,
   checked,
   onCheckedChange,
+  description,
+  disabled,
 }: {
   label: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  description?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="border-border flex items-center justify-between gap-3 rounded-lg border p-3">
-      <Label>{label}</Label>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      <div className="space-y-1">
+        <Label>{label}</Label>
+        {description ? <p className="text-muted-foreground text-xs">{description}</p> : null}
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </div>
   );
 }

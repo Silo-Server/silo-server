@@ -3,6 +3,7 @@ package userdb
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -81,7 +82,64 @@ func GetDeviceSetting(db *sql.DB, profileID, deviceID, key string) (*userstore.D
 	return &entry, nil
 }
 
+func RegisterDevice(db *sql.DB, entry userstore.DeviceEntry) error {
+	if strings.TrimSpace(entry.ProfileID) == "" || strings.TrimSpace(entry.DeviceID) == "" {
+		return nil
+	}
+	lastSeenAt := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := db.Exec(
+		`INSERT INTO user_devices
+			(profile_id, device_id, device_name, device_platform, last_seen_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(profile_id, device_id) DO UPDATE SET
+			device_name = CASE
+				WHEN excluded.device_name <> '' THEN excluded.device_name
+				ELSE user_devices.device_name
+			END,
+			device_platform = CASE
+				WHEN excluded.device_platform <> '' THEN excluded.device_platform
+				ELSE user_devices.device_platform
+			END,
+			last_seen_at = excluded.last_seen_at`,
+		entry.ProfileID, entry.DeviceID, entry.DeviceName, entry.DevicePlatform, lastSeenAt,
+	)
+	if err != nil {
+		return fmt.Errorf("registering device %q: %w", entry.DeviceID, err)
+	}
+	return nil
+}
+
+func ListDevices(db *sql.DB) ([]userstore.DeviceEntry, error) {
+	rows, err := db.Query(
+		`SELECT profile_id, device_id, device_name, device_platform, last_seen_at
+		 FROM user_devices
+		 ORDER BY last_seen_at DESC, profile_id ASC, device_name ASC, device_id ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing devices: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []userstore.DeviceEntry
+	for rows.Next() {
+		var entry userstore.DeviceEntry
+		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("scanning device: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
 func SetDeviceSetting(db *sql.DB, entry userstore.DeviceSettingEntry) error {
+	if err := RegisterDevice(db, userstore.DeviceEntry{
+		ProfileID:      entry.ProfileID,
+		DeviceID:       entry.DeviceID,
+		DeviceName:     entry.DeviceName,
+		DevicePlatform: entry.DevicePlatform,
+	}); err != nil {
+		return err
+	}
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := db.Exec(
 		`INSERT INTO user_device_settings

@@ -20,7 +20,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -69,6 +68,10 @@ type metadataItemRepo interface {
 	IncrementRefreshFailure(ctx context.Context, contentID string) error
 	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
+}
+
+type metadataItemDeleteRepo interface {
+	Delete(ctx context.Context, contentID string) ([]string, error)
 }
 
 type metadataProviderIDRepo interface {
@@ -239,6 +242,28 @@ func handleProvider404(
 	}
 	logAttrs = append(logAttrs, "error", err)
 	slog.Info("metadata: provider returned 404 for stale or invalid external id", logAttrs...)
+	return true
+}
+
+func handleChildProvider404(
+	provider string,
+	providerIDs map[string]string,
+	err error,
+	attrs ...any,
+) bool {
+	if !isProvider404(err) {
+		return false
+	}
+
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	logAttrs := append([]any{"provider", provider}, attrs...)
+	if provider != "" && providerIDs != nil {
+		if providerID := strings.TrimSpace(providerIDs[provider]); providerID != "" {
+			logAttrs = append(logAttrs, "provider_id", providerID)
+		}
+	}
+	logAttrs = append(logAttrs, "error", err)
+	slog.Info("metadata: provider returned 404 for unavailable child metadata", logAttrs...)
 	return true
 }
 
@@ -1137,7 +1162,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				Language:    req.Language,
 			})
 			if err != nil {
-				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+				// Pass nil for provider404s so this refresh can drop the
+				// provider from the in-memory merge without recording a durable
+				// stale item ID from the season chain.
+				if handleProvider404(nil, accumulatedIDs, p.Slug(), err,
 					"content_id", req.ContentID,
 					"season", 0,
 				) {
@@ -1170,7 +1198,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						Language:     req.Language,
 					})
 					if err != nil {
-						if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+						if handleChildProvider404(p.Slug(), accumulatedIDs, err,
 							"content_id", req.ContentID,
 							"season", season.SeasonNumber,
 						) {
@@ -1210,18 +1238,28 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 
 	// Refresh stale ID records on successful refresh: clear anything resolved,
 	// then keep only the providers that still 404ed during this run.
-	if s.staleIDRepo != nil && req.ContentID != "" {
-		if delErr := s.staleIDRepo.DeleteByContentID(ctx, req.ContentID); delErr != nil {
+	// Stale-ID follow-up targets the canonical content ID the item was
+	// persisted/merged into. When mergeAndPersist canonicalizes this item into
+	// an existing one, req.ContentID is the now-deleted source: clearing or
+	// recording stale IDs against it would touch nothing (or FK-violate), so
+	// the still-404ing providers must be recorded on result.ContentID instead.
+	// provider404s is only allocated when req.ContentID was set (the refresh
+	// targeted a known item). Guarding on it preserves the original gating so a
+	// content-id-less refresh that canonicalizes into an existing item does not
+	// wipe that item's stale rows without re-recording any.
+	followUpContentID := refreshFollowUpContentID(req.ContentID, result)
+	if s.staleIDRepo != nil && followUpContentID != "" && provider404s != nil {
+		if delErr := s.staleIDRepo.DeleteByContentID(ctx, followUpContentID); delErr != nil {
 			slog.Warn("metadata: failed to clear stale IDs after refresh",
-				"content_id", req.ContentID, "error", delErr)
+				"content_id", followUpContentID, "error", delErr)
 		}
 		for slug, providerID := range provider404s {
 			if providerID == "" {
 				continue
 			}
-			if upsertErr := s.staleIDRepo.Upsert(ctx, req.ContentID, slug, providerID); upsertErr != nil {
+			if upsertErr := s.staleIDRepo.Upsert(ctx, followUpContentID, slug, providerID); upsertErr != nil {
 				slog.Warn("metadata: failed to persist stale provider ID after partial refresh",
-					"content_id", req.ContentID,
+					"content_id", followUpContentID,
 					"provider", slug,
 					"provider_id", providerID,
 					"error", upsertErr)
@@ -1237,6 +1275,19 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 
 	return result, nil
+}
+
+// refreshFollowUpContentID returns the content ID that a completed refresh's
+// follow-up writes (stale-ID clear/record, debt sync) should target: the
+// canonical ID the item was persisted or merged into when available, falling
+// back to the requested ID. mergeAndPersist can canonicalize an item into an
+// existing one, deleting the requested ID, so follow-up writes keyed on
+// req.ContentID would miss the surviving item.
+func refreshFollowUpContentID(reqContentID string, result *ProcessResult) string {
+	if result != nil && strings.TrimSpace(result.ContentID) != "" {
+		return result.ContentID
+	}
+	return reqContentID
 }
 
 // mergeAndPersist handles the final merge into existing item and DB persistence.
@@ -1917,7 +1968,7 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	reasonMask := int64(0)
 	now := time.Now().UTC()
 	for _, episode := range episodes {
-		if EpisodeHasIncompleteMetadata(episode, now) {
+		if EpisodeHasActionableMetadataDebt(episode, now) {
 			reasonMask = RefreshDebtReasonEpisodeIncomplete
 			break
 		}
@@ -1952,7 +2003,7 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 	}
 	reasonMask := int64(0)
 	now := time.Now().UTC()
-	if EpisodeHasIncompleteMetadata(episode, now) {
+	if EpisodeHasActionableMetadataDebt(episode, now) {
 		reasonMask = RefreshDebtReasonEpisodeIncomplete
 	}
 	if reasonMask == 0 {
@@ -2336,7 +2387,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			Language:     language,
 		})
 		if err != nil {
-			if handleProvider404(nil, providerIDs, p.Slug(), err, "season", seasonNumber) {
+			if handleChildProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}
 			slog.Warn("metadata: target episode provider error",
@@ -3468,7 +3519,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 
 	incomplete := false
 	for _, episode := range episodes {
-		if EpisodeHasIncompleteMetadata(episode, now) {
+		if EpisodeHasActionableMetadataDebt(episode, now) {
 			incomplete = true
 		}
 		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
@@ -3487,7 +3538,7 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	if s == nil || s.refreshDebtRepo == nil || episode == nil || strings.TrimSpace(episode.ContentID) == "" {
 		return nil
 	}
-	if !EpisodeHasIncompleteMetadata(episode, now) {
+	if !EpisodeHasActionableMetadataDebt(episode, now) {
 		return s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetEpisode, episode.ContentID)
 	}
 	reasonMask := RefreshDebtReasonEpisodeIncomplete
@@ -3694,18 +3745,9 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		return s.hooks.createOrFindSkeleton(ctx, file, folderID)
 	}
 
-	libraryType := ""
-	if s != nil && s.folderRepo != nil && folderID > 0 {
-		folder, err := s.folderRepo.GetByID(ctx, folderID)
-		if err != nil {
-			slog.Warn("metadata: failed to load folder context for path classification",
-				"folder_id", folderID,
-				"file_path", file.FilePath,
-				"error", err,
-			)
-		} else if folder != nil {
-			libraryType = folder.Type
-		}
+	libraryType, err := s.folderTypeForSkeleton(ctx, folderID)
+	if err != nil {
+		return nil, err
 	}
 
 	contentRootPath := filepath.Dir(file.FilePath)
@@ -3980,7 +4022,12 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// pre-confirmation ownership claims. Matching is driven by explicit IDs or
 	// later provider confirmation to avoid cross-root false merges.
 
-	// No existing item — create skeleton.
+	// No existing item — create skeleton. Re-check the folder state while still
+	// under the dedup lock so a library disabled for deletion cannot receive new
+	// skeleton items from a matcher that passed an older outer enabled check.
+	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
+		return nil, err
+	}
 	contentID, err := generateContentID()
 	if err != nil {
 		return nil, fmt.Errorf("generate content id: %w", err)
@@ -4007,15 +4054,99 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 
 	// Link file, claim root, and create library membership.
 	if err := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); err != nil {
+		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
+			slog.Warn("metadata: failed to clean up unlinked skeleton",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", cleanupErr,
+			)
+		}
 		return nil, fmt.Errorf("linking file to skeleton: %w", err)
 	}
+	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
+		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
+			slog.Warn("metadata: failed to clear file link after disabled skeleton folder",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", clearErr,
+			)
+		}
+		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
+			slog.Warn("metadata: failed to clean up skeleton for disabled folder",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", cleanupErr,
+			)
+		}
+		return nil, fmt.Errorf("validating skeleton folder before membership: %w", err)
+	}
 	if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
-		s.logLibraryMembershipError("upserting skeleton membership", contentID, folderID, err)
+		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
+			slog.Warn("metadata: failed to clear file link after skeleton membership failure",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", clearErr,
+			)
+		}
+		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
+			slog.Warn("metadata: failed to clean up membershipless skeleton",
+				"content_id", contentID,
+				"file_id", file.ID,
+				"folder_id", folderID,
+				"error", cleanupErr,
+			)
+		}
+		return nil, fmt.Errorf("upserting skeleton membership: %w", err)
 	}
 
 	res.ContentID = contentID
 	res.IsNew = true
 	return res, nil
+}
+
+func (s *MetadataService) folderTypeForSkeleton(ctx context.Context, folderID int) (string, error) {
+	if s == nil || s.folderRepo == nil || folderID <= 0 {
+		return "", nil
+	}
+
+	folder, err := s.folderRepo.GetByID(ctx, folderID)
+	if err != nil {
+		return "", fmt.Errorf("loading folder context for skeleton: %w", err)
+	}
+	if folder == nil {
+		return "", fmt.Errorf("folder %d is unavailable for skeleton creation", folderID)
+	}
+	if !folder.Enabled {
+		return "", fmt.Errorf("folder %d is disabled for skeleton creation", folderID)
+	}
+	return folder.Type, nil
+}
+
+func (s *MetadataService) deleteCreatedSkeleton(ctx context.Context, contentID string) error {
+	if s == nil || strings.TrimSpace(contentID) == "" {
+		return nil
+	}
+	if repo, ok := s.itemRepo.(metadataItemDeleteRepo); ok {
+		if _, err := repo.Delete(ctx, contentID); err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
+			return err
+		}
+		return nil
+	}
+	if s.dbPool == nil {
+		return nil
+	}
+	_, err := s.dbPool.Exec(ctx, `
+		DELETE FROM media_items
+		WHERE content_id = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_item_libraries mil
+			WHERE mil.content_id = media_items.content_id
+		  )`, contentID)
+	return err
 }
 
 // claimRoot records a canonical root path claim for dedup. Failures are logged
@@ -4422,14 +4553,7 @@ func rebindDeletableStatuses(allowMatchedSource bool) []string {
 }
 
 func isProviderIDUniqueConflict(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-	return pgErr.Code == "23505" && pgErr.ConstraintName == "media_item_provider_ids_provider_provider_id_item_type_key"
+	return isPgConstraintViolation(err, "23505", "media_item_provider_ids_provider_provider_id_item_type_key")
 }
 
 func (s *MetadataService) repairMatchedDuplicateProviderOwnersByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) (int, error) {

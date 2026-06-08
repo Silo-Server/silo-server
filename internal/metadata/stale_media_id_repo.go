@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,10 +56,39 @@ func (r *StaleMediaIDRepository) Upsert(ctx context.Context, contentID, provider
 		SET provider_id = EXCLUDED.provider_id,
 		    last_seen_at = NOW()
 	`, contentID, provider, providerID)
-	if err != nil {
-		return fmt.Errorf("upserting stale media ID: %w", err)
+	return resolveStaleUpsertError(err, contentID, provider)
+}
+
+// staleMediaIDContentFKConstraint is the Postgres-auto-generated name of the
+// stale_media_ids.content_id → media_items(content_id) foreign key, declared
+// inline in migrations/sql/036_stale_media_ids.sql (hence "{table}_{column}_fkey").
+const staleMediaIDContentFKConstraint = "stale_media_ids_content_id_fkey"
+
+// resolveStaleUpsertError maps an Upsert error to the value Upsert should
+// return. The referenced media item can be deleted or merged away (e.g. by
+// provider-ID canonicalization) between a metadata refresh starting and its
+// 404 landing here; the parent row is then gone and there is nothing left to
+// track, so the resulting foreign-key violation is a logged no-op. Every other
+// error is wrapped and propagated.
+func resolveStaleUpsertError(err error, contentID, provider string) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	if isMissingContentForeignKeyViolation(err) {
+		slog.Info("metadata: skipping stale media ID for missing content item",
+			"content_id", contentID,
+			"provider", provider,
+		)
+		return nil
+	}
+	return fmt.Errorf("upserting stale media ID: %w", err)
+}
+
+// isMissingContentForeignKeyViolation reports whether err is a Postgres
+// foreign-key violation against stale_media_ids.content_id — i.e. the media
+// item the stale ID would reference no longer exists.
+func isMissingContentForeignKeyViolation(err error) bool {
+	return isPgConstraintViolation(err, "23503", staleMediaIDContentFKConstraint)
 }
 
 // GetByContentID loads all stale external ID records for a single item.

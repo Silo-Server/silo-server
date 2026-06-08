@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -16,24 +14,32 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -50,7 +56,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/markers"
-	"github.com/Silo-Server/silo-server/internal/markers/introdb"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -183,8 +188,74 @@ func configureOperationalLogging(
 	return operationalWriter, opslog.NewRepo(pool), opsPM
 }
 
+func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxConnections int, mode string) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "integrated", "api":
+	default:
+		return
+	}
+
+	opts, err := database.LoadPostgresTuneOptionsFromEnv(appMaxConnections)
+	if err != nil {
+		slog.Warn("postgres auto-tuning disabled", "error", err)
+		return
+	}
+	if !opts.Enabled {
+		return
+	}
+
+	tuneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, err := database.ApplyPostgresTuning(tuneCtx, pool, opts)
+	for _, failure := range result.Failures {
+		slog.Warn("postgres auto-tuning setting failed",
+			"name", failure.Name,
+			"value", failure.Value,
+			"error", failure.Err,
+		)
+	}
+	if err != nil {
+		slog.Warn("postgres auto-tuning failed",
+			"error", err,
+			"applied", result.Applied,
+			"failures", len(result.Failures),
+		)
+		return
+	}
+
+	slog.Info("postgres auto-tuning applied",
+		"profile", opts.Profile,
+		"postgres_major", result.PostgresMajorVersion,
+		"settings", result.Applied,
+		"resets", len(result.Reset),
+		"failures", len(result.Failures),
+		"memory_budget_bytes", opts.MemoryBudgetBytes,
+		"detected_memory_bytes", opts.DetectedMemoryBytes,
+		"memory_source", opts.MemorySource,
+		"memory_budget_percent", opts.MemoryBudgetPercent,
+		"cpus", opts.CPUs,
+		"connections", opts.Connections,
+		"storage", opts.Storage,
+		"db_size", result.DBSize,
+		"database_size_bytes", result.DatabaseSizeBytes,
+	)
+	if len(result.RestartRequired) > 0 {
+		slog.Warn("postgres restart required to finish applying auto-tuned settings",
+			"settings", strings.Join(result.RestartRequired, ","),
+		)
+	}
+	if len(result.Reset) > 0 {
+		slog.Info("postgres auto-tuning reset stale settings",
+			"settings", strings.Join(result.Reset, ","),
+		)
+	}
+}
+
 func main() {
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
+	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
+	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -204,12 +275,48 @@ func main() {
 	defer pool.Close()
 	slog.Info("connected to PostgreSQL")
 
+	if *migrateStatus {
+		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		statuses, statusErr := database.MigrationStatuses(migCtx, pool, migrations.FS, "sql")
+		migCancel()
+		if statusErr != nil {
+			log.Fatalf("failed to read migration status: %v", statusErr)
+		}
+
+		fmt.Printf("%-8s %8s %-25s %s\n", "STATE", "VERSION", "APPLIED_AT", "MIGRATION")
+		for _, status := range statuses {
+			appliedAt := "-"
+			if !status.AppliedAt.IsZero() {
+				appliedAt = status.AppliedAt.UTC().Format(time.RFC3339)
+			}
+			source := status.Source
+			if source != "" {
+				source = filepath.Base(source)
+			} else {
+				source = "-"
+			}
+			fmt.Printf("%-8s %8d %-25s %s\n", status.State, status.Version, appliedAt, source)
+		}
+		return
+	}
+
+	if *migrateOnly {
+		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
+		migCancel()
+		if migErr != nil {
+			log.Fatalf("failed to run migrations: %v", migErr)
+		}
+		slog.Info("database migrations applied")
+		return
+	}
+
 	// Run migrations only for integrated/api modes. Proxy and transcode nodes
 	// should never alter the schema — they may scale independently and would
 	// race or apply migrations before the primary node is deliberately upgraded.
 	if bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == "" {
 		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
-		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "."); migErr != nil {
+		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql"); migErr != nil {
 			migCancel()
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
@@ -313,10 +420,13 @@ func main() {
 	slog.SetDefault(slog.New(logfilter.New(baseHandler, cfg.Server.LogQuiet)))
 
 	mode := cfg.Server.Mode
+	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
 	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
+	restartReqCh := make(chan struct{}, 1)
+	var restartRequested atomic.Bool
 
 	eventBus := cache.NewEventBus(cfg.Redis.URL)
 	logStreamHub := logstream.NewHub(nodeID, eventBus)
@@ -417,7 +527,22 @@ func main() {
 		OpsLogRepo:                   opsRepo,
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
+		RequestServerRestart: func(context.Context) error {
+			if !restartRequested.CompareAndSwap(false, true) {
+				return handlers.ErrServerRestartAlreadyRequested
+			}
+			restartReqCh <- struct{}{}
+			return nil
+		},
 	}
+	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
+	absCompatEnabled, err := audiobooksService.ABSCompatEnabled(appCtx)
+	if err != nil {
+		slog.Warn("Audiobookshelf compatibility disabled; failed to read setting", "err", err)
+		absCompatEnabled = false
+	}
+	adminJobCancelRegistry := adminjob.NewCancelRegistry()
+	deps.AdminJobCancelRegistry = adminJobCancelRegistry
 	if needsWorkers && deps.DB != nil {
 		deps.IntroRepository = intromarkers.NewRepository(deps.DB)
 		deps.IntroAnalyzer = intromarkers.NewAnalyzer(
@@ -428,36 +553,34 @@ func main() {
 	}
 	if deps.DB != nil {
 		markerRegistry := markers.NewRegistry(slog.Default())
-		introdbAPIKey, err := settingsRepo.Get(appCtx, "introdb.api_key")
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("load introdb.api_key from settings failed; provider will run with no key",
+		markerProviderConfig := markers.NewProviderConfigStore(deps.DB)
+		if err := markerProviderConfig.Reload(appCtx); err != nil {
+			slog.Warn("load marker provider config failed; falling back to registration-order fetch",
 				"error", err)
-			introdbAPIKey = ""
-		}
-		introdbClient := introdb.NewClient(introdbAPIKey)
-		if err := markerRegistry.Register(introdb.NewProvider(introdbClient)); err != nil {
-			log.Fatalf("register introdb marker provider: %v", err)
-		}
-		deps.OnServerSettingUpdated = func(_ context.Context, key, value string) {
-			if key == "introdb.api_key" {
-				introdbClient.SetAPIKey(value)
+		} else {
+			markerRegistry.UseConfigStore(markerProviderConfig)
+			if deps.EventBus != nil {
+				if err := deps.EventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+					if event.Type != cache.EventMarkerProviderConfigChanged {
+						return
+					}
+					if err := markerProviderConfig.Reload(appCtx); err != nil {
+						slog.Warn("reload marker provider config failed", "provider", event.Payload, "error", err)
+					}
+				}); err != nil {
+					slog.Warn("subscribe marker provider config reload failed", "error", err)
+				}
 			}
 		}
-		if eventBus != nil {
-			_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
-				if event.Type != cache.EventSettingsChanged || event.Payload != "introdb.api_key" {
-					return
-				}
-				value, loadErr := settingsRepo.Get(context.Background(), "introdb.api_key")
-				if loadErr != nil {
-					slog.Warn("introdb api key reload failed", "error", loadErr)
-					return
-				}
-				introdbClient.SetAPIKey(value)
-			})
-		}
+		deps.MarkerProviderConfig = markerProviderConfig
 		deps.MarkerRegistry = markerRegistry
-		deps.MarkerResolver = markers.NewDBExternalIDResolver(deps.DB)
+		markerResolver := markers.NewDBExternalIDResolver(deps.DB)
+		deps.MarkerResolver = markerResolver
+		markerContributionStore := markers.NewContributionStore(deps.DB)
+		deps.MarkerContributionStore = markerContributionStore
+		deps.MarkerContributionService = markers.NewContributionService(
+			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore, slog.Default(),
+		)
 	}
 	var watchProviderService *watchsync.Service
 	if deps.DB != nil {
@@ -669,6 +792,22 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
+			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
+			pluginService.AddLifecycleHook(func(ctx context.Context) {
+				if err := reloadMarkerPluginProviders(
+					ctx,
+					deps.MarkerRegistry,
+					deps.MarkerProviderConfig,
+					installationStore,
+					runtimeConfigStore,
+					settingsRepo,
+					markerPluginResolver,
+				); err != nil {
+					slog.Warn("reload marker plugin providers failed", "error", err)
+				}
+			})
+		}
 		if err := pluginService.PreloadEnabled(appCtx); err != nil {
 			log.Fatalf("preload enabled plugins: %v", err)
 		}
@@ -748,6 +887,7 @@ func main() {
 	var groupClaimRepo *catalog.GroupClaimRepository
 	var seasonRepo *catalog.SeasonRepository
 	var episodeRepo *catalog.EpisodeRepository
+	var audiobookEnricher *audiobooks.Enricher
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
@@ -803,6 +943,8 @@ func main() {
 		providerIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		movieQueueRepo = metadata.NewMovieMatchQueueRepository(deps.DB, deps.FileRepo)
 		seriesQueueRepo = metadata.NewSeriesRootMatchQueueRepository(deps.DB)
+		deps.MovieMatchQueueRepo = movieQueueRepo
+		deps.SeriesRootMatchQueueRepo = seriesQueueRepo
 		matchQueueCoordinator = metadata.NewMatchQueueCoordinator(movieQueueRepo, seriesQueueRepo)
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)
@@ -816,6 +958,18 @@ func main() {
 		personRefreshService = metadata.NewPersonRefreshService(deps.DB, pluginResolver, personRepo)
 		personRefreshService.SetImageResolver(imageResolver)
 
+		// Wire the audiobook enricher. It uses the same plugin resolver and chain
+		// repo as the movie/TV pipeline, but resolves providers at
+		// content_level='audiobook' and sweeps items directly rather than via a queue.
+		audiobookEnricher = audiobooks.NewEnricher(
+			deps.DB,
+			chainRepo,
+			pluginResolver,
+			itemRepo,
+			personRepo,
+			providerIDRepo,
+		)
+
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
 		metadataService.SetImageResolver(imageResolver)
@@ -826,13 +980,21 @@ func main() {
 			imageCacher := imagecache.New(deps.S3Public)
 			metadataService.SetImageCacher(imageCacher)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
+			if deps.Scanner != nil {
+				deps.Scanner.SetImageCacher(imageCacher)
+			}
 			if cfg.Metadata.CacheImages {
 				personRefreshService.SetImageCacher(imageCacher)
 				slog.Info("metadata image caching enabled")
 			}
+			if audiobookEnricher != nil {
+				audiobookEnricher.SetImageCacher(imageCacher)
+				audiobookEnricher.SetFFmpegPath(scanner.FFmpegPathFromFFprobe(scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)))
+			}
 		}
 
 		matchWorker = metadata.NewMatchWorker(metadataService, deps.FileRepo, cfg.Matcher.Workers, cfg.Matcher.BatchSize, 30*time.Second)
+		matchWorker.SetRealtimeHub(deps.RealtimeHub)
 		if movieQueueRepo != nil {
 			matchWorker.SetMovieFileClaimer(movieQueueRepo)
 		}
@@ -1281,8 +1443,14 @@ func main() {
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil {
 			taskMgr.Register(tasks.NewScanLibrariesTask(deps.FolderRepo, deps.LibraryScanQueue, deps.EventBus))
 		}
+		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
 		if deps.IntroAnalyzer != nil {
 			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
+		}
+		if deps.MarkerContributionService != nil && deps.MarkerProviderConfig != nil && deps.MarkerContributionStore != nil && deps.FileRepo != nil {
+			taskMgr.Register(tasks.NewContributeMarkersTask(
+				deps.MarkerContributionService, deps.MarkerProviderConfig, deps.MarkerContributionStore, deps.FileRepo,
+			))
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
@@ -1320,13 +1488,52 @@ func main() {
 		)
 		requestReconcileSvc.SetSecretResolver(settingsRepo)
 		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		if userStoreProvider != nil {
+			reconcileResolver := access.NewResolver(
+				auth.NewUserRepository(deps.DB),
+				userStoreProvider,
+				access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
+			)
+			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
+		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
+		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
+			autoscanRepo := autoscan.NewRepository(deps.DB)
+			if err := autoscanRepo.MarkInterruptedEvents(appCtx); err != nil {
+				slog.Warn("autoscan: failed to mark interrupted polls", "err", err)
+			}
+			autoscanSvc := api.BuildAutoscanService(
+				autoscanRepo,
+				pluginService,
+				pluginInstallationStore,
+				mediarequests.NewRepository(deps.DB),
+				settingsRepo,
+				deps.FolderRepo,
+				deps.LibraryScanQueue,
+				deps.RedisClient,
+			)
+			// The poll task's default interval seeds the schedule from the stored
+			// settings (DefaultPollIntervalSeconds); per-cycle gating still runs
+			// off the live settings inside PollOnce. Seed in MILLISECONDS as
+			// seconds*1000 — the SAME computation HandleUpdateSettings uses to
+			// reschedule — so startup and reschedule agree for sub-minute and
+			// non-60-multiple intervals (the old seconds/60 minutes path diverged).
+			var intervalMs int64 = 10 * 60 * 1000
+			if settings, serr := autoscanRepo.GetSettings(appCtx); serr == nil && settings.DefaultPollIntervalSeconds > 0 {
+				intervalMs = int64(settings.DefaultPollIntervalSeconds) * 1000
+			}
+			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMs))
+		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)
 		historyReconciler := watchstate.NewHistoryReconciler(deps.DB, historyResolver)
 		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
+		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
+		if audiobookEnricher != nil {
+			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
+		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
 			if err != nil {
@@ -1342,6 +1549,57 @@ func main() {
 		deps.TaskManager = taskMgr
 		slog.Info("task manager started")
 	}
+
+	// Build the ABS-compatible REST + Socket.io handler when a DB pool is
+	// available. Routes are mounted at the root level by NewRouter (not under
+	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
+	// /abs/socket.io/* without path prefix hacks.
+	if absCompatEnabled && deps.DB != nil {
+		absUserRepo := auth.NewUserRepository(deps.DB)
+		absSessionRepo := auth.NewSessionRepository(deps.DB)
+		absJWTService := auth.NewJWTService(
+			cfg.Auth.JWTSecret,
+			cfg.Auth.AccessTokenExpiry,
+			cfg.Auth.RefreshTokenExpiry,
+		)
+		absAuthSvc := auth.NewService(
+			auth.NewLocalProvider(absUserRepo, absSessionRepo),
+			absJWTService,
+			absSessionRepo,
+			absUserRepo,
+			nil, // invite codes: not needed for ABS compat
+			nil, // settings: not needed here
+			nil, // user store: not needed here
+		)
+		absItemRepo := catalog.NewItemRepository(deps.DB)
+		absEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
+		absSeasonRepo := catalog.NewSeasonRepository(deps.DB)
+		absPersonRepo := catalog.NewPersonRepository(deps.DB)
+		var absFileFetcher catalog.FileVersionFetcher
+		if deps.FileRepo != nil {
+			absFileFetcher = deps.FileRepo
+		}
+		absDetailSvc := catalog.NewDetailService(absItemRepo, absEpisodeRepo, absSeasonRepo, absPersonRepo, absFileFetcher)
+		if deps.ImageResolver != nil {
+			absDetailSvc.SetImageResolver(deps.ImageResolver)
+		}
+		absHDeps := audiobooks.ABSHandlerDeps{
+			Pool:     deps.DB,
+			Items:    absItemRepo,
+			Files:    deps.FileRepo,
+			Settings: settingsRepo,
+			Auth: &audiobooks.SiloCredValidator{
+				Auth: absAuthSvc,
+				Pool: deps.DB,
+			},
+			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider),
+			Recs:           recommendations.NewRepo(deps.DB),
+			Detail:         absDetailSvc,
+		}
+		absH := audiobooksService.BuildABSHandler(absHDeps)
+		deps.ABSHandler = absH
+	}
+	_ = audiobooksService
 
 	if deps.DB != nil && pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && deps.PluginService != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
@@ -1464,6 +1722,11 @@ func main() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.Handler())
 	metricsMux.Handle("/api/", router)
+	// ABS-compat is NOT mounted on the main listener — see the "ABS compat
+	// listener" block below. It binds its own port so the discovery probes
+	// (/ping, /healthcheck, /status, /init, /login, /socket.io) own the URL
+	// space without collision with silo's SPA fallback. Mirrors how the
+	// Jellyfin compat server is set up at :8096.
 	metricsMux.Handle("/", server.FrontendHandler())
 
 	// Step 9: Start background workers (if needed).
@@ -1530,6 +1793,7 @@ func main() {
 			templateBundleApplyExecutor,
 			deps.RealtimeHub,
 		)
+		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
 
@@ -1632,47 +1896,17 @@ func main() {
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
 
-			// Access filter resolver for profile-scoped library access.
-			compatDeps.AccessFilterFn = func(ctx context.Context, userID int, profileID string) catalog.AccessFilter {
-				if userStoreProvider == nil {
-					return catalog.AccessFilter{}
-				}
-				store, err := userStoreProvider.ForUser(ctx, userID)
-				if err != nil {
-					return catalog.AccessFilter{}
-				}
-				profile, err := store.GetProfile(ctx, profileID)
-				if err != nil || profile == nil {
-					return catalog.AccessFilter{}
-				}
-				filter := catalog.AccessFilter{
-					MaxContentRating: profile.MaxContentRating,
-				}
-				if profile.LibraryRestrictionsEnabled && len(profile.AllowedLibraryIDs) > 0 {
-					filter.AllowedLibraryIDs = profile.AllowedLibraryIDs
-				}
-				// Apply user-disabled library IDs.
-				if raw, err := store.GetSetting(ctx, "disabled_library_ids"); err == nil && raw != "" {
-					var disabled []int
-					if json.Unmarshal([]byte(raw), &disabled) == nil && len(disabled) > 0 {
-						if filter.AllowedLibraryIDs != nil {
-							filtered := make([]int, 0, len(filter.AllowedLibraryIDs))
-							disSet := make(map[int]struct{}, len(disabled))
-							for _, id := range disabled {
-								disSet[id] = struct{}{}
-							}
-							for _, id := range filter.AllowedLibraryIDs {
-								if _, ok := disSet[id]; !ok {
-									filtered = append(filtered, id)
-								}
-							}
-							filter.AllowedLibraryIDs = filtered
-						} else {
-							filter.DisabledLibraryIDs = disabled
-						}
-					}
-				}
-				return filter
+			// Access filter resolver for viewer-scoped library access.
+			// Backed by the shared access.Resolver so account-level library
+			// restrictions (users.library_ids), profile restrictions,
+			// user-disabled libraries, and rating/quality ceilings apply to
+			// the compat API exactly as they do to the native API.
+			if userStoreProvider != nil {
+				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(access.NewResolver(
+					userRepo,
+					userStoreProvider,
+					nil, // profile tokens unused: compat login already verifies PINs
+				))
 			}
 		}
 
@@ -1683,6 +1917,28 @@ func main() {
 		compatSrv.ReadTimeout = 30 * time.Second
 		compatSrv.WriteTimeout = 0
 		compatSrv.IdleTimeout = 120 * time.Second
+	}
+
+	// ABS-compat listener — dedicated http.Server bound to its own port
+	// (default :13378) that hosts the Audiobookshelf-compatible API.
+	// Mirrors the Jellyfin compat layout above. The ABS handler mounts
+	// onto a fresh chi router here so /ping, /healthcheck, /status, /login,
+	// /socket.io, etc. own the URL space at the root — no SPA fallback,
+	// no collision with silo's /api/v1.
+	var absSrv *http.Server
+	if (mode == "integrated" || mode == "api") && deps.ABSHandler != nil && cfg.AudiobookshelfCompat.Listen != "" {
+		absRouter := chi.NewRouter()
+		absRouter.Use(chimiddleware.Recoverer)
+		absRouter.Use(chimiddleware.Compress(5))
+		deps.ABSHandler.Mount(absRouter)
+		absSrv = &http.Server{
+			Addr:              cfg.AudiobookshelfCompat.Listen,
+			Handler:           absRouter,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      0,
+			IdleTimeout:       120 * time.Second,
+		}
 	}
 
 	// Run non-critical startup work in the background so it doesn't delay the
@@ -1709,7 +1965,7 @@ func main() {
 		}()
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() {
 		slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
 		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
@@ -1724,6 +1980,14 @@ func main() {
 			}
 		}()
 	}
+	if absSrv != nil {
+		go func() {
+			slog.Info("ABS compat server listening", "addr", absSrv.Addr)
+			if listenErr := absSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
+				errCh <- fmt.Errorf("abs compat server error: %w", listenErr)
+			}
+		}()
+	}
 
 	// Step 11: Wait for termination signal.
 	sigCh := make(chan os.Signal, 1)
@@ -1734,6 +1998,9 @@ func main() {
 	case sig := <-sigCh:
 		appCancel()
 		slog.Info("received signal, shutting down", "signal", sig)
+	case <-restartReqCh:
+		appCancel()
+		slog.Info("server restart requested, shutting down")
 	case serverErr := <-errCh:
 		appCancel()
 		slog.Error("server error, shutting down", "error", serverErr)
@@ -1751,6 +2018,11 @@ func main() {
 	if compatSrv != nil {
 		if shutdownErr := compatSrv.Shutdown(shutdownCtx); shutdownErr != nil {
 			slog.Error("jellyfin compat shutdown error", "error", shutdownErr)
+		}
+	}
+	if absSrv != nil {
+		if shutdownErr := absSrv.Shutdown(shutdownCtx); shutdownErr != nil {
+			slog.Error("abs compat shutdown error", "error", shutdownErr)
 		}
 	}
 
@@ -1898,6 +2170,198 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	}
 }
 
+type markerPluginCapabilityStore interface {
+	ListEnabled(ctx context.Context) ([]*plugins.Installation, error)
+	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
+}
+
+type markerPluginRuntimeConfigStore interface {
+	ListGlobalConfigs(ctx context.Context, installationID int) ([]*plugins.RuntimeConfig, error)
+	PutGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) error
+}
+
+type markerLegacySettingsStore interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
+func reloadMarkerPluginProviders(
+	ctx context.Context,
+	registry *markers.Registry,
+	configStore *markers.ProviderConfigStore,
+	store markerPluginCapabilityStore,
+	runtimeConfigs markerPluginRuntimeConfigStore,
+	legacySettings markerLegacySettingsStore,
+	resolver *markers.PluginResolverAdapter,
+) error {
+	if registry == nil {
+		return nil
+	}
+	var providers []markers.Provider
+	if store == nil || resolver == nil {
+		return registry.SetProviders(providers)
+	}
+
+	installations, err := store.ListEnabled(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled plugin installations: %w", err)
+	}
+	sort.Slice(installations, func(i, j int) bool {
+		if installations[i] == nil {
+			return false
+		}
+		if installations[j] == nil {
+			return true
+		}
+		return installations[i].ID < installations[j].ID
+	})
+
+	nextPriority := 1000
+	for _, installation := range installations {
+		if installation == nil {
+			continue
+		}
+		capabilities, err := store.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			return fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
+		}
+		sort.Slice(capabilities, func(i, j int) bool {
+			if capabilities[i] == nil {
+				return false
+			}
+			if capabilities[j] == nil {
+				return true
+			}
+			return capabilities[i].ID < capabilities[j].ID
+		})
+		for _, capability := range capabilities {
+			if capability == nil || capability.Type != sdkcapability.MarkerProvider {
+				continue
+			}
+			descriptor, err := plugins.DecodeCapability(capability)
+			if err != nil {
+				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
+			}
+			metadataMap := markerCapabilityMetadata(descriptor)
+			provider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
+				InstallationID:      installation.ID,
+				CapabilityID:        capability.ID,
+				DisplayName:         firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
+				PluginID:            installation.PluginID,
+				RequiredExternalIDs: markers.PluginRequiredExternalIDsFromMetadata(metadataMap),
+			}, resolver)
+			if err != nil {
+				return err
+			}
+			providers = append(providers, provider)
+
+			priority := nextPriority
+			nextPriority++
+			if configuredPriority, ok := markers.PluginDefaultFetchPriorityFromMetadata(metadataMap); ok {
+				priority = configuredPriority
+			}
+			if configStore != nil {
+				defaultConfig := markers.ProviderConfig{
+					Provider:                provider.ID(),
+					FetchEnabled:            true,
+					FetchPriority:           priority,
+					ContributeEnabled:       false,
+					ContributeAutoLocal:     false,
+					ContributeMinConfidence: 0.95,
+				}
+				if legacy, ok := legacyIntroDBProviderConfig(configStore, installation, capability, provider.ID()); ok {
+					defaultConfig = legacy
+				}
+				if err := configStore.Ensure(ctx, defaultConfig); err != nil {
+					return err
+				}
+			}
+			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
+				return err
+			}
+		}
+	}
+	return registry.SetProviders(providers)
+}
+
+func legacyIntroDBProviderConfig(
+	configStore *markers.ProviderConfigStore,
+	installation *plugins.Installation,
+	capability *plugins.Capability,
+	providerID string,
+) (markers.ProviderConfig, bool) {
+	if configStore == nil ||
+		installation == nil ||
+		capability == nil ||
+		installation.PluginID != "silo.theintrodb" ||
+		capability.ID != "introdb" {
+		return markers.ProviderConfig{}, false
+	}
+	if _, exists := configStore.Get(providerID); exists {
+		return markers.ProviderConfig{}, false
+	}
+	legacy, ok := configStore.Get("introdb")
+	if !ok {
+		return markers.ProviderConfig{}, false
+	}
+	legacy.Provider = providerID
+	return legacy, true
+}
+
+func copyLegacyIntroDBPluginConfig(
+	ctx context.Context,
+	runtimeConfigs markerPluginRuntimeConfigStore,
+	legacySettings markerLegacySettingsStore,
+	installation *plugins.Installation,
+	capability *plugins.Capability,
+) error {
+	if runtimeConfigs == nil ||
+		legacySettings == nil ||
+		installation == nil ||
+		capability == nil ||
+		installation.PluginID != "silo.theintrodb" ||
+		capability.ID != "introdb" {
+		return nil
+	}
+	configs, err := runtimeConfigs.ListGlobalConfigs(ctx, installation.ID)
+	if err != nil {
+		return fmt.Errorf("list TheIntroDB plugin config: %w", err)
+	}
+	for _, config := range configs {
+		if config != nil && config.Key == "account" {
+			return nil
+		}
+	}
+	apiKey, err := legacySettings.Get(ctx, "introdb.api_key")
+	if err != nil {
+		return fmt.Errorf("load legacy introdb.api_key: %w", err)
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return nil
+	}
+	if err := runtimeConfigs.PutGlobalConfig(ctx, installation.ID, "account", map[string]any{
+		"api_key": strings.TrimSpace(apiKey),
+	}); err != nil {
+		return fmt.Errorf("copy legacy introdb.api_key to plugin config: %w", err)
+	}
+	return nil
+}
+
+func markerCapabilityMetadata(descriptor *pluginv1.CapabilityDescriptor) map[string]any {
+	if descriptor == nil || descriptor.GetMetadata() == nil {
+		return nil
+	}
+	return descriptor.GetMetadata().AsMap()
+}
+
+func firstNonEmptyMarkerText(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 // mapFolderTypeToMediaType maps silo's MediaFolder.Type values
 // ("movies", "series", "mixed") to the SDK's MediaType values
 // ("movie", "tv", "mixed"). Unknown values map to "mixed".
@@ -1910,4 +2374,15 @@ func mapFolderTypeToMediaType(t string) string {
 	default:
 		return "mixed"
 	}
+}
+
+// audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which
+// exposes Get) to the audiobooks.SettingsReader interface (which
+// requires GetString). The two signatures are identical modulo name.
+type audiobooksSettingsAdapter struct {
+	repo *catalog.ServerSettingsRepo
+}
+
+func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
+	return a.repo.Get(ctx, key)
 }

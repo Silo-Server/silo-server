@@ -9,6 +9,7 @@ import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 interface SharedItemGridProps {
   loading?: boolean;
   sortField?: string;
+  libraryId?: number;
   selectionMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (item: BrowseItem) => void;
@@ -42,7 +43,14 @@ const GRID_CLASSES =
   "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-3";
 
 export default function ItemGrid(props: ItemGridProps) {
-  const { loading, sortField, selectionMode = false, selectedIds, onToggleSelect } = props;
+  const {
+    loading,
+    sortField,
+    libraryId,
+    selectionMode = false,
+    selectedIds,
+    onToggleSelect,
+  } = props;
   const { prefs: overlayPrefs } = useOverlayPrefs();
   const totalItems = hasStaticItems(props) ? props.items.length : props.totalItems;
   const pages = hasStaticItems(props)
@@ -147,6 +155,7 @@ export default function ItemGrid(props: ItemGridProps) {
                     <div key={item.content_id} role="listitem">
                       <ItemCard
                         item={item}
+                        libraryId={libraryId}
                         sortField={sortField}
                         overlayPrefs={overlayPrefs}
                         selectionMode={selectionMode}

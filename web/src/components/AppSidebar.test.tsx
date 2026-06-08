@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -44,6 +46,12 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
 vi.mock("@/hooks/queries/pluginSettings", () => ({
   usePluginSettingsList: () => ({
     data: { installations: [] },
+  }),
+}));
+
+vi.mock("@/hooks/queries/useRequests", () => ({
+  useRequestFeatureStatus: () => ({
+    data: { requests_enabled: false },
   }),
 }));
 
@@ -131,6 +139,12 @@ describe("AppSidebar", () => {
 
     expect(markup).toContain("text-sidebar-accent-foreground bg-sidebar-accent");
     expect(markup).not.toContain("text-sidebar-primary-foreground bg-sidebar-accent");
+  });
+
+  it("preserves the current library query when linking to the active library", () => {
+    const markup = renderSidebar("/library/7?tab=library&sort=year&order=desc");
+
+    expect(markup).toContain('href="/library/7?tab=library&amp;sort=year&amp;order=desc"');
   });
 
   it("keeps collapsed navigation rows left-anchored instead of centering icons", () => {

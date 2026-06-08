@@ -22,6 +22,8 @@ const (
 	StatusCompleted   Status = "completed"
 )
 
+const StatusFailed Status = "failed" // target-only status; requests use outcome=failed
+
 type Outcome string
 
 const (
@@ -30,6 +32,31 @@ const (
 	OutcomeCancelled Outcome = "cancelled"
 	OutcomeFailed    Outcome = "failed"
 )
+
+type Quality string
+
+const (
+	Quality1080p Quality = "1080p"
+	Quality2160p Quality = "2160p"
+)
+
+// Target is one fulfillment of a request against a single instance at a single
+// quality. A request fans out to one Target per resolved quality.
+type Target struct {
+	ID              int64     `json:"id"`
+	RequestID       string    `json:"request_id"`
+	IntegrationID   string    `json:"integration_id,omitempty"`
+	IntegrationKind string    `json:"integration_kind,omitempty"`
+	InstanceName    string    `json:"instance_name,omitempty"`
+	Quality         Quality   `json:"quality"`
+	IsAnime         bool      `json:"is_anime"`
+	ExternalID      string    `json:"external_id,omitempty"`
+	ExternalStatus  string    `json:"external_status,omitempty"`
+	Status          Status    `json:"status"`
+	LastError       string    `json:"last_error,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
 
 type Availability string
 
@@ -67,6 +94,7 @@ type Settings struct {
 	GlobalMaxRequests         int       `json:"global_max_requests"`
 	GlobalWindowDays          int       `json:"global_window_days"`
 	GlobalAutoApprovalEnabled bool      `json:"global_auto_approval_enabled"`
+	ForceDualQuality          bool      `json:"force_dual_quality"`
 	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
@@ -112,8 +140,11 @@ type Request struct {
 	RequestedByUserID    int        `json:"requested_by_user_id,omitempty"`
 	RequestedByProfileID string     `json:"requested_by_profile_id,omitempty"`
 	IntegrationKind      string     `json:"integration_kind,omitempty"`
+	IsAnime              bool       `json:"is_anime"`
+	Targets              []Target   `json:"targets,omitempty"`
 	ExternalID           string     `json:"external_id,omitempty"`
 	ExternalStatus       string     `json:"external_status,omitempty"`
+	LibraryContentID     string     `json:"library_content_id,omitempty"`
 	LastError            string     `json:"last_error,omitempty"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
@@ -139,18 +170,19 @@ type RequestState struct {
 }
 
 type MediaResult struct {
-	MediaType    MediaType    `json:"media_type"`
-	TMDBID       int          `json:"tmdb_id"`
-	Title        string       `json:"title"`
-	Year         int          `json:"year,omitempty"`
-	Overview     string       `json:"overview,omitempty"`
-	PosterPath   string       `json:"poster_path,omitempty"`
-	BackdropPath string       `json:"backdrop_path,omitempty"`
-	ReleaseDate  string       `json:"release_date,omitempty"`
-	Popularity   float64      `json:"popularity,omitempty"`
-	VoteAverage  float64      `json:"vote_average,omitempty"`
-	Availability Availability `json:"availability"`
-	Request      RequestState `json:"request"`
+	MediaType        MediaType    `json:"media_type"`
+	TMDBID           int          `json:"tmdb_id"`
+	Title            string       `json:"title"`
+	Year             int          `json:"year,omitempty"`
+	Overview         string       `json:"overview,omitempty"`
+	PosterPath       string       `json:"poster_path,omitempty"`
+	BackdropPath     string       `json:"backdrop_path,omitempty"`
+	ReleaseDate      string       `json:"release_date,omitempty"`
+	Popularity       float64      `json:"popularity,omitempty"`
+	VoteAverage      float64      `json:"vote_average,omitempty"`
+	Availability     Availability `json:"availability"`
+	LibraryContentID string       `json:"library_content_id,omitempty"`
+	Request          RequestState `json:"request"`
 }
 
 type MediaPage struct {
@@ -198,6 +230,7 @@ type MediaDetail struct {
 	Creators            []string          `json:"creators,omitempty"`
 	Recommendations     []MediaResult     `json:"recommendations,omitempty"`
 	Availability        Availability      `json:"availability"`
+	LibraryContentID    string            `json:"library_content_id,omitempty"`
 	Request             RequestState      `json:"request"`
 }
 
@@ -221,18 +254,27 @@ type ListFilter struct {
 }
 
 type Integration struct {
-	Kind             string         `json:"kind"`
-	Enabled          bool           `json:"enabled"`
-	BaseURL          string         `json:"base_url"`
-	APIKeyRef        string         `json:"api_key_ref,omitempty"`
-	RootFolder       string         `json:"root_folder"`
-	QualityProfileID *int           `json:"quality_profile_id,omitempty"`
-	Tags             []int          `json:"tags"`
-	Options          map[string]any `json:"options"`
-	LastCheckAt      *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckStatus  string         `json:"last_check_status,omitempty"`
-	LastCheckError   string         `json:"last_check_error,omitempty"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID                    string         `json:"id"`
+	Name                  string         `json:"name"`
+	Kind                  string         `json:"kind"`
+	Enabled               bool           `json:"enabled"`
+	Is4K                  bool           `json:"is_4k"`
+	IsDefault             bool           `json:"is_default"`
+	IsDefault4K           bool           `json:"is_default_4k"`
+	AnimeEnabled          bool           `json:"anime_enabled"`
+	AnimeQualityProfileID *int           `json:"anime_quality_profile_id,omitempty"`
+	AnimeRootFolder       string         `json:"anime_root_folder,omitempty"`
+	AnimeTags             []int          `json:"anime_tags"`
+	BaseURL               string         `json:"base_url"`
+	APIKeyRef             string         `json:"api_key_ref,omitempty"`
+	RootFolder            string         `json:"root_folder"`
+	QualityProfileID      *int           `json:"quality_profile_id,omitempty"`
+	Tags                  []int          `json:"tags"`
+	Options               map[string]any `json:"options"`
+	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
+	LastCheckStatus       string         `json:"last_check_status,omitempty"`
+	LastCheckError        string         `json:"last_check_error,omitempty"`
+	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
 type IntegrationRootFolder struct {
@@ -257,12 +299,6 @@ type IntegrationOptions struct {
 	RootFolders     []IntegrationRootFolder     `json:"root_folders"`
 	QualityProfiles []IntegrationQualityProfile `json:"quality_profiles"`
 	Tags            []IntegrationTag            `json:"tags"`
-}
-
-type QueueUpdate struct {
-	IntegrationKind string
-	ExternalID      string
-	ExternalStatus  string
 }
 
 type FulfillmentResult struct {

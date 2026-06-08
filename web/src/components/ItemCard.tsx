@@ -9,12 +9,56 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function formatDate(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(DATE_ONLY_PATTERN.test(value) ? `${value}T00:00:00` : value);
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatRuntime(minutes?: number | null) {
+  if (!minutes || minutes <= 0) {
+    return null;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours === 0) {
+    return `${remainingMinutes}m`;
+  }
+  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+}
+
+function formatRating(value?: number | null, max = 10) {
+  return value != null ? `${value.toFixed(1)} / ${max}` : null;
+}
+
+function formatPercent(value?: number | null) {
+  return value != null ? `${value}%` : null;
+}
+
+function formatBitrate(kbps?: number | null) {
+  if (!kbps || kbps <= 0) {
+    return null;
+  }
+  return `${kbps.toLocaleString()} kbps`;
+}
+
+function formatProgress(ratio?: number | null) {
+  if (ratio == null) {
+    return null;
+  }
+  return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+}
+
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
   const episodeLabels = buildEpisodeCardLabels(item);
-  if (episodeLabels) {
-    return <>{episodeLabels.episodeCode}</>;
-  }
-
   const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
     .filter(Boolean)
     .join(" · ");
@@ -25,6 +69,19 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
       const ago = item.added_at ? timeAgo(item.added_at) : null;
       return <>{ago ?? defaultLabel}</>;
     }
+    case "title":
+      if (episodeLabels) {
+        return <>{episodeLabels.episodeCode}</>;
+      }
+      return <>{defaultLabel}</>;
+    case "year":
+      return <>{item.year || defaultLabel}</>;
+    case "content_rating":
+      return <>{item.content_rating || defaultLabel}</>;
+    case "runtime":
+      return (
+        <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
+      );
     case "rating_imdb":
       return item.rating_imdb != null ? (
         <>
@@ -33,31 +90,34 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
       ) : (
         <>{defaultLabel}</>
       );
+    case "rating_tmdb":
+      return <>{formatRating(item.rating_tmdb) ?? defaultLabel}</>;
+    case "rating_rt_critic":
+      return <>{formatPercent(item.rating_rt_critic) ?? defaultLabel}</>;
+    case "rating_rt_audience":
+      return <>{formatPercent(item.rating_rt_audience) ?? defaultLabel}</>;
     case "release_date":
-      return item.release_date ? (
-        <>
-          {new Date(item.release_date).toLocaleDateString(undefined, {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-          })}
-        </>
-      ) : (
-        <>{defaultLabel}</>
+      return (
+        <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>
       );
     case "last_air_date":
-      return item.last_air_date ? (
-        <>
-          {new Date(item.last_air_date).toLocaleDateString(undefined, {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-          })}
-        </>
-      ) : (
-        <>{defaultLabel}</>
+      return <>{formatDate(item.last_air_date) ?? defaultLabel}</>;
+    case "resolution":
+      return (
+        <>{item.sort_metrics?.resolution || item.overlay_summary?.resolution || defaultLabel}</>
       );
+    case "bitrate":
+      return <>{formatBitrate(item.sort_metrics?.bitrate_kbps) ?? defaultLabel}</>;
+    case "progress":
+      return <>{formatProgress(item.sort_metrics?.progress_ratio) ?? defaultLabel}</>;
+    case "date_viewed":
+      return <>{formatDate(item.sort_metrics?.viewed_at) ?? defaultLabel}</>;
+    case "plays":
+      return <>{item.sort_metrics?.play_count ?? defaultLabel}</>;
     default:
+      if (episodeLabels) {
+        return <>{episodeLabels.episodeCode}</>;
+      }
       return <>{defaultLabel}</>;
   }
 }
@@ -94,7 +154,9 @@ export default function ItemCard({
           className="block overflow-hidden rounded-xl"
         >
           <div
-            className="media-card-image relative aspect-[2/3]"
+            className={`media-card-image relative ${
+              item.type === "audiobook" ? "aspect-square" : "aspect-[2/3]"
+            }`}
             style={
               thumbhashUrl
                 ? {

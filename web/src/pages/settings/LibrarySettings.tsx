@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { LibraryPlaybackPreference, Profile, UserLibrary } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { SettingRow } from "@/components/settings/SettingRow";
+import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,7 +29,17 @@ import {
   serializeLibraryOrder,
   useAvailableUserLibraries,
 } from "@/hooks/queries/libraries";
-import { useSetting, useSetSetting } from "@/hooks/queries/settings";
+import {
+  useDeleteDeviceSetting,
+  useEffectiveSettings,
+  useSetting,
+  useSetDeviceSetting,
+  useSetSetting,
+} from "@/hooks/queries/settings";
+import {
+  LIBRARY_PAGE_STATE_SETTING_KEY,
+  REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
+} from "@/hooks/queries/libraryPageState";
 import {
   buildInheritedLanguageLabel,
   buildInheritedShowForcedSubtitlesLabel,
@@ -73,6 +85,49 @@ import { CSS } from "@dnd-kit/utilities";
 function sortLibrariesByOrder(libraries: UserLibrary[], ids: number[]) {
   const selected = new Set(ids);
   return libraries.filter((library) => selected.has(library.id)).map((library) => library.id);
+}
+
+function RememberLibraryPageStateSetting({ profileId }: { profileId: string }) {
+  const { data: effective = {} } = useEffectiveSettings(profileId, [
+    REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
+  ]);
+  const setDeviceSetting = useSetDeviceSetting();
+  const deleteDeviceSetting = useDeleteDeviceSetting();
+  const rememberLibraryPages =
+    effective[REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY]?.effective_value !== "false";
+  const pending = setDeviceSetting.isPending || deleteDeviceSetting.isPending;
+
+  async function handleChange(checked: boolean) {
+    try {
+      if (checked) {
+        await deleteDeviceSetting.mutateAsync({ key: REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY });
+      } else {
+        await deleteDeviceSetting.mutateAsync({ key: LIBRARY_PAGE_STATE_SETTING_KEY });
+        await setDeviceSetting.mutateAsync({
+          key: REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
+          value: "false",
+        });
+      }
+      toast.success("Library page preference saved");
+    } catch {
+      toast.error("Failed to save library page preference");
+    }
+  }
+
+  return (
+    <SettingRow
+      label="Remember library pages"
+      description="Return each library to the last tab, sort, and filters used on this profile and device."
+      control={(id) => (
+        <Switch
+          id={id}
+          checked={rememberLibraryPages}
+          disabled={pending}
+          onCheckedChange={handleChange}
+        />
+      )}
+    />
+  );
 }
 
 function PlaybackField({
@@ -497,6 +552,13 @@ export default function LibrarySettings() {
           library.
         </p>
       </div>
+
+      <SettingsGroup
+        title="Browsing"
+        description="These preferences apply to this profile on the current device."
+      >
+        <RememberLibraryPageStateSetting profileId={currentProfile.id} />
+      </SettingsGroup>
 
       <div className="surface-panel-subtle flex flex-col gap-4 rounded-[1.4rem] p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-muted-foreground text-sm leading-relaxed">

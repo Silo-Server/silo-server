@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`cmd/silo` contains the main server entrypoint. Backend code lives in `internal/`, organized by domain (`api`, `catalog`, `metadata`, `playback`, `scanner`, `jellycompat`, etc.); keep new code in the package that owns the behavior instead of creating catch-all helpers. Database changes belong in `migrations/` as paired numbered `.up.sql` and `.down.sql` files. The React frontend lives in `web/src/`, with feature code split across `components/`, `pages/`, `hooks/`, `player/`, and `lib/`. Reference material belongs in `docs/architecture/` or `docs/superpowers/{specs,plans}/`; ad hoc SQL helpers live in `scripts/`.
+`cmd/silo` contains the main server entrypoint. Backend code lives in `internal/`, organized by domain (`api`, `catalog`, `metadata`, `playback`, `scanner`, `jellycompat`, etc.); keep new code in the package that owns the behavior instead of creating catch-all helpers. Database changes belong in `migrations/sql/` as Goose SQL migrations. Legacy converted migrations intentionally keep their original numeric versions so existing `schema_versions` rows can bootstrap cleanly into Goose. New migrations must use timestamped filenames created with `make migrate-create NAME=add_thing`; do not run `goose fix` or create paired `.up.sql` / `.down.sql` files. The React frontend lives in `web/src/`, with feature code split across `components/`, `pages/`, `hooks/`, `player/`, and `lib/`. Reference material belongs in `docs/architecture/` or `docs/superpowers/{specs,plans}/`; ad hoc SQL helpers live in `scripts/`.
 
 When creating or editing `docs/superpowers/specs/` or `docs/superpowers/plans/`, never include local absolute filesystem paths or transient worktree IDs. Use repository-relative paths and wording like "Commands assume the repository root is the cwd."
 
@@ -53,6 +53,7 @@ Use the checked-in `Makefile` for the common paths:
 - `make dev-frontend`: start the Vite dev server with HMR
 - `make dev-proxy` / `make dev-transcode`: run standalone worker modes
 - `make lint`: run `golangci-lint` and frontend ESLint
+- `make migrate-status` / `make migrate-up`: inspect or apply Goose migrations through Silo's legacy-safe bootstrapping runner
 
 Run before opening a merge request:
 

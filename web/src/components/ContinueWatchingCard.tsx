@@ -143,10 +143,19 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const containerWidth = isPoster
     ? "w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
     : "w-[260px] shrink-0 sm:w-[315px]";
-  const imageAspect = isPoster ? "aspect-[2/3]" : "aspect-video";
+  // Audiobook covers are square (Audible-style); use 1:1 for the poster
+  // variant so they don't get top/bottom-cropped into a 2:3 frame.
+  const imageAspect = isPoster
+    ? card.type === "audiobook"
+      ? "aspect-square"
+      : "aspect-[2/3]"
+    : "aspect-video";
   const isSectionEpisode = "sectionItem" in props && props.sectionItem?.type === "episode";
-  // Section episode payloads use poster_url for vertical season/series artwork
-  // and backdrop_url for the episode still used by wide cards.
+  // Episodes store the horizontal still in poster_url (see
+  // episode_catalog_source.go); wide-variant movies/series/seasons need the
+  // backdrop for the 16:9 card. Poster variant always wants the vertical
+  // poster, except section-episode payloads which use poster_url for the
+  // vertical season/series artwork and backdrop_url for the episode still.
   const imagePrimary = isPoster
     ? card.posterUrl
     : isSectionEpisode

@@ -36,7 +36,10 @@ import {
   type EpisodeNavigationState,
 } from "./itemDetailLayout";
 import { getWatchedActionLabel } from "./watchedState";
-import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import {
+  canCurateMetadata as canCurateMetadataForUser,
+  canEditMarkers as canEditMarkersForUser,
+} from "@/lib/permissions";
 
 function formatDuration(minutes: number): string {
   if (minutes <= 0) return "";
@@ -52,6 +55,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const canCurateMetadata = canCurateMetadataForUser(user);
+  const canEditMarkers = canEditMarkersForUser(user);
   const { profile: currentProfile } = useCurrentProfile();
   const [editOpen, setEditOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -315,6 +319,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             isRedetectingIntro={redetectIntroMutation.isPending}
             isAdmin={isAdmin}
             canCurateMetadata={canCurateMetadata}
+            canEditMarkers={canEditMarkers}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             versions={item.versions ?? []}
             playbackVariants={item.playback_variants}

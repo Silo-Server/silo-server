@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -164,12 +165,20 @@ func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 	store.integrations = []Integration{{
 		Kind:             "radarr",
 		Enabled:          true,
+		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
 		APIKeyRef:        "request.radarr.api_key",
 		RootFolder:       "/movies",
 		QualityProfileID: &qualityProfileID,
 	}}
+	adapter := &fakeMovieAdapter{result: FulfillmentResult{
+		IntegrationKind: "radarr",
+		ExternalID:      "123",
+		ExternalStatus:  "queued",
+	}}
 	service := newTestService(store)
+	service.SetSecretResolver(fakeSecrets{"request.radarr.api_key": "radarr-key"})
+	service.SetFulfillmentAdapters(adapter, nil)
 
 	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
 		MediaType: MediaTypeMovie,
@@ -179,12 +188,14 @@ func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest returned error: %v", err)
 	}
-	if req.Status != StatusApproved {
-		t.Fatalf("status = %q, want approved", req.Status)
+	// A configured HD default auto-approves and immediately submits, so the
+	// request lands in the fulfillment pipeline (aggregate of one queued target).
+	if req.Status != StatusQueued {
+		t.Fatalf("status = %q, want queued (auto-approved and submitted)", req.Status)
 	}
 }
 
-func TestCreateRequestAutoApprovalFallsBackToPendingOnIntegrationCheckError(t *testing.T) {
+func TestCreateRequestAutoApprovalSecretFailureMarksTargetFailed(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
 	store.settings.GlobalAutoApprovalEnabled = true
@@ -192,6 +203,7 @@ func TestCreateRequestAutoApprovalFallsBackToPendingOnIntegrationCheckError(t *t
 	store.integrations = []Integration{{
 		Kind:             "radarr",
 		Enabled:          true,
+		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
 		APIKeyRef:        "requests.radarr.api_key",
 		RootFolder:       "/movies",
@@ -199,6 +211,7 @@ func TestCreateRequestAutoApprovalFallsBackToPendingOnIntegrationCheckError(t *t
 	}}
 	service := newTestService(store)
 	service.SetSecretResolver(fakeSecretError{err: errors.New("secret lookup unavailable")})
+	service.SetFulfillmentAdapters(&fakeMovieAdapter{}, nil)
 
 	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
 		MediaType: MediaTypeMovie,
@@ -208,8 +221,10 @@ func TestCreateRequestAutoApprovalFallsBackToPendingOnIntegrationCheckError(t *t
 	if err != nil {
 		t.Fatalf("CreateRequest returned error: %v", err)
 	}
-	if req.Status != StatusPending {
-		t.Fatalf("status = %q, want pending", req.Status)
+	// The auto-approval gate no longer resolves secrets; submission does. A
+	// secret-resolution failure now surfaces as a failed fulfillment target.
+	if req.Outcome != OutcomeFailed {
+		t.Fatalf("outcome = %q, want failed (secret resolution failed during submit)", req.Outcome)
 	}
 }
 
@@ -221,6 +236,7 @@ func TestCreateRequestAutoApprovalSubmitsMovie(t *testing.T) {
 	store.integrations = []Integration{{
 		Kind:             "radarr",
 		Enabled:          true,
+		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
 		APIKeyRef:        "requests.radarr.api_key",
 		RootFolder:       "/movies",
@@ -262,6 +278,7 @@ func TestCreateRequestSubmissionFailureMarksFailed(t *testing.T) {
 	store.integrations = []Integration{{
 		Kind:             "radarr",
 		Enabled:          true,
+		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
 		APIKeyRef:        "radarr-key",
 		RootFolder:       "/movies",
@@ -303,6 +320,65 @@ func TestCreateRequestEnrichesSeriesTVDBID(t *testing.T) {
 	}
 	if store.created[0].Input.TVDBID == nil || *store.created[0].Input.TVDBID != 12345 {
 		t.Fatalf("tvdb_id = %v, want 12345", store.created[0].Input.TVDBID)
+	}
+}
+
+func TestListMineAttachesTargets(t *testing.T) {
+	store := newFakeStore()
+	store.mine = []*Request{{
+		ID:                "req-1",
+		MediaType:         MediaTypeMovie,
+		TMDBID:            550,
+		Status:            StatusQueued,
+		Outcome:           OutcomeActive,
+		RequestedByUserID: 1,
+	}}
+	store.targets = map[string][]Target{
+		"req-1": {{
+			ID:        10,
+			RequestID: "req-1",
+			Quality:   Quality2160p,
+			Status:    StatusQueued,
+		}},
+	}
+
+	got, err := newTestService(store).ListMine(context.Background(), testViewer(1), ListFilter{})
+	if err != nil {
+		t.Fatalf("ListMine returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListMine returned %d requests, want 1", len(got))
+	}
+	if len(got[0].Targets) != 1 || got[0].Targets[0].Quality != Quality2160p {
+		t.Fatalf("targets = %+v, want attached 2160p target", got[0].Targets)
+	}
+}
+
+func TestListMineAttachesLibraryContentID(t *testing.T) {
+	store := newFakeStore()
+	store.mine = []*Request{{
+		ID:                "req-1",
+		Provider:          "tmdb",
+		MediaType:         MediaTypeMovie,
+		TMDBID:            42,
+		Title:             "Test Movie",
+		Status:            StatusCompleted,
+		Outcome:           OutcomeActive,
+		RequestedByUserID: 1,
+	}}
+	presence := &fakePresence{available: map[MediaType]map[int]bool{
+		MediaTypeMovie: {42: true},
+	}}
+
+	got, err := NewService(store, &fakeTMDBClient{}, presence).ListMine(context.Background(), testViewer(1), ListFilter{})
+	if err != nil {
+		t.Fatalf("ListMine returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListMine returned %d requests, want 1", len(got))
+	}
+	if got[0].LibraryContentID != "movie-42" {
+		t.Fatalf("library content id = %q, want movie-42", got[0].LibraryContentID)
 	}
 }
 
@@ -412,6 +488,9 @@ func TestSearchMarksSeriesAvailableByHydratedTVDBID(t *testing.T) {
 	}
 	if got := page.Results[0].Availability; got != AvailabilityAvailable {
 		t.Fatalf("availability = %q, want available", got)
+	}
+	if got := page.Results[0].LibraryContentID; got != "series-201992" {
+		t.Fatalf("library content id = %q, want series-201992", got)
 	}
 	if page.Results[0].Request.Reason != "already_available" {
 		t.Fatalf("request reason = %q, want already_available", page.Results[0].Request.Reason)
@@ -742,8 +821,10 @@ func TestReconcileRequestsMarksDownloadingFromAdapter(t *testing.T) {
 	store := newFakeStore()
 	qualityProfileID := 1
 	store.integrations = []Integration{{
+		ID:               "radarr-hd",
 		Kind:             "radarr",
 		Enabled:          true,
+		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
 		APIKeyRef:        "radarr-key",
 		RootFolder:       "/movies",
@@ -757,6 +838,14 @@ func TestReconcileRequestsMarksDownloadingFromAdapter(t *testing.T) {
 		Outcome:    OutcomeActive,
 		ExternalID: "123",
 	}}
+	// Reconcile now drives status per-target; seed a queued target for the request.
+	store.requests["req-1"] = &Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "radarr-hd", IntegrationKind: "radarr",
+		Quality: Quality1080p, Status: StatusQueued, ExternalID: "123",
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
 	adapter := &fakeMovieAdapter{status: FulfillmentStatus{
 		Status:          StatusDownloading,
 		IntegrationKind: "radarr",
@@ -775,6 +864,36 @@ func TestReconcileRequestsMarksDownloadingFromAdapter(t *testing.T) {
 	}
 	if adapter.statusCalls != 1 {
 		t.Fatalf("status adapter calls = %d, want 1", adapter.statusCalls)
+	}
+}
+
+func TestDeleteIntegrationRejectsLiveTargets(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{{
+		ID:      "radarr-hd",
+		Kind:    "radarr",
+		Enabled: true,
+	}}
+	store.targets = map[string][]Target{
+		"req-1": {{
+			ID:            10,
+			RequestID:     "req-1",
+			IntegrationID: "radarr-hd",
+			Quality:       Quality1080p,
+			Status:        StatusDownloading,
+		}},
+	}
+
+	err := newTestService(store).DeleteIntegration(
+		context.Background(),
+		Viewer{UserID: 1, IsAdmin: true},
+		"radarr-hd",
+	)
+	if !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("err = %v, want ErrInvalidState", err)
+	}
+	if len(store.integrations) != 1 {
+		t.Fatalf("integrations = %d, want delete blocked", len(store.integrations))
 	}
 }
 
@@ -903,6 +1022,7 @@ func TestRetryResubmitsFailedQueuedRequest(t *testing.T) {
 	store.integrations = []Integration{{
 		Kind:             "radarr",
 		Enabled:          true,
+		IsDefault:        true,
 		BaseURL:          "http://radarr.local",
 		APIKeyRef:        "radarr-key",
 		RootFolder:       "/movies",
@@ -930,9 +1050,9 @@ func TestRetryResubmitsFailedQueuedRequest(t *testing.T) {
 	if adapter.calls != 1 {
 		t.Fatalf("adapter calls = %d, want 1", adapter.calls)
 	}
-	if adapter.gotReq.Status != StatusApproved {
-		t.Fatalf("submitted status = %q, want approved", adapter.gotReq.Status)
-	}
+	// Retry re-routes the failed request to its default instance and re-submits
+	// a fresh target; the request aggregate returns to queued with the new
+	// external id reported by the adapter.
 	if req.Status != StatusQueued || req.ExternalID != "99" {
 		t.Fatalf("request = %+v, want re-queued with external id 99", req)
 	}
@@ -960,10 +1080,12 @@ type fakeStore struct {
 	active        map[MediaType]map[int]*Request
 	created       []CreateRequestRecord
 	integrations  []Integration
-	queued        []QueueUpdate
 	candidates    []*Request
+	mine          []*Request
 	statusUpdates []Status
 	requests      map[string]*Request
+	targets       map[string][]Target
+	targetSeq     int64
 }
 
 func newFakeStore() *fakeStore {
@@ -1067,7 +1189,7 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 		}
 	}
 	f.created = append(f.created, input)
-	return &Request{
+	req := &Request{
 		ID:                   input.ID,
 		Provider:             "tmdb",
 		MediaType:            input.Input.MediaType,
@@ -1077,11 +1199,15 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 		Title:                input.Input.Title,
 		Status:               input.Status,
 		Outcome:              input.Outcome,
+		IsAnime:              input.IsAnime,
 		RequestedByUserID:    input.Requester.UserID,
 		RequestedByProfileID: input.Requester.ProfileID,
 		CreatedAt:            input.Now,
 		UpdatedAt:            input.Now,
-	}, nil
+	}
+	f.requests[input.ID] = req
+	copy := *req
+	return &copy, nil
 }
 
 func (f *fakeStore) GetRequest(_ context.Context, id string) (*Request, error) {
@@ -1102,7 +1228,9 @@ func (f *fakeStore) ListReconciliationCandidates(context.Context, int) ([]*Reque
 }
 
 func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*Request(nil), f.mine...), nil
 }
 
 func (f *fakeStore) ListAdmin(context.Context, ListFilter) ([]*Request, error) {
@@ -1119,24 +1247,6 @@ func (f *fakeStore) SetStatus(_ context.Context, id string, status Status, _ Vie
 		f.requests[id] = req
 	}
 	req.Status = status
-	copy := *req
-	return &copy, nil
-}
-
-func (f *fakeStore) MarkQueued(_ context.Context, id string, update QueueUpdate, _ Viewer) (*Request, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.queued = append(f.queued, update)
-	req := f.requests[id]
-	if req == nil {
-		req = &Request{ID: id}
-		f.requests[id] = req
-	}
-	req.Status = StatusQueued
-	req.Outcome = OutcomeActive
-	req.IntegrationKind = update.IntegrationKind
-	req.ExternalID = update.ExternalID
-	req.ExternalStatus = update.ExternalStatus
 	copy := *req
 	return &copy, nil
 }
@@ -1161,15 +1271,165 @@ func (f *fakeStore) ListIntegrations(context.Context) ([]Integration, error) {
 	return f.integrations, nil
 }
 
-func (f *fakeStore) UpsertIntegration(context.Context, Integration) (*Integration, error) {
-	return nil, nil
-}
-
-func (f *fakeStore) UpsertIntegrations(_ context.Context, integrations []Integration) ([]Integration, error) {
+func (f *fakeStore) GetIntegration(_ context.Context, id string) (*Integration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.integrations = append([]Integration(nil), integrations...)
-	return append([]Integration(nil), integrations...), nil
+	for i := range f.integrations {
+		if f.integrations[i].ID == id {
+			cp := f.integrations[i]
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (f *fakeStore) CreateIntegration(_ context.Context, in Integration) (*Integration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.integrations = append(f.integrations, in)
+	cp := in
+	return &cp, nil
+}
+
+func (f *fakeStore) UpdateIntegration(_ context.Context, in Integration) (*Integration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.integrations {
+		if f.integrations[i].ID == in.ID {
+			f.integrations[i] = in
+			cp := in
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (f *fakeStore) SaveIntegrationWithDefaults(_ context.Context, in Integration, isCreate bool) (*Integration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.integrations {
+		if f.integrations[i].Kind != in.Kind || f.integrations[i].ID == in.ID {
+			continue
+		}
+		if in.IsDefault {
+			f.integrations[i].IsDefault = false
+		}
+		if in.IsDefault4K {
+			f.integrations[i].IsDefault4K = false
+		}
+	}
+	if isCreate {
+		f.integrations = append(f.integrations, in)
+		cp := in
+		return &cp, nil
+	}
+	for i := range f.integrations {
+		if f.integrations[i].ID == in.ID {
+			f.integrations[i] = in
+			cp := in
+			return &cp, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (f *fakeStore) DeleteIntegration(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, targets := range f.targets {
+		for _, target := range targets {
+			if target.IntegrationID == id && (target.Status == StatusQueued || target.Status == StatusDownloading) {
+				return ErrInvalidState
+			}
+		}
+	}
+	for i := range f.integrations {
+		if f.integrations[i].ID == id {
+			f.integrations = append(f.integrations[:i], f.integrations[i+1:]...)
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (f *fakeStore) ListTargets(_ context.Context, requestID string) ([]Target, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Target(nil), f.targets[requestID]...), nil
+}
+
+func (f *fakeStore) CreateTarget(_ context.Context, t Target) (Target, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.targets == nil {
+		f.targets = map[string][]Target{}
+	}
+	f.targetSeq++
+	t.ID = f.targetSeq
+	f.targets[t.RequestID] = append(f.targets[t.RequestID], t)
+	return t, nil
+}
+
+func (f *fakeStore) DeleteTarget(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for rid, ts := range f.targets {
+		for i := range ts {
+			if ts[i].ID == id {
+				f.targets[rid] = append(ts[:i], ts[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return ErrNotFound
+}
+
+func (f *fakeStore) UpdateTargetStatus(_ context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, _ Viewer) (*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var requestID string
+	for rid, ts := range f.targets {
+		for i := range ts {
+			if ts[i].ID == targetID {
+				if externalID != "" {
+					f.targets[rid][i].ExternalID = externalID
+				}
+				if externalStatus != "" {
+					f.targets[rid][i].ExternalStatus = externalStatus
+				}
+				f.targets[rid][i].Status = status
+				f.targets[rid][i].LastError = lastErr
+				requestID = rid
+			}
+		}
+	}
+	if requestID == "" {
+		return nil, ErrNotFound
+	}
+	f.statusUpdates = append(f.statusUpdates, status)
+	st, outcome := aggregateStatus(f.targets[requestID])
+	req := f.requests[requestID]
+	if req == nil {
+		req = &Request{ID: requestID}
+		f.requests[requestID] = req
+	}
+	req.Status = st
+	req.Outcome = outcome
+	// Surface the first target's external identity on the request snapshot so
+	// existing assertions on req.ExternalID/IntegrationKind keep working.
+	for _, t := range f.targets[requestID] {
+		if t.ExternalID != "" {
+			req.ExternalID = t.ExternalID
+			req.ExternalStatus = t.ExternalStatus
+			req.IntegrationKind = t.IntegrationKind
+			break
+		}
+	}
+	if outcome == OutcomeFailed {
+		req.LastError = lastErr
+	}
+	copy := *req
+	return &copy, nil
 }
 
 func TestListStudiosReturnsBundleWithDuotoneLogos(t *testing.T) {
@@ -1366,16 +1626,28 @@ func (f *fakePresence) Lookup(_ context.Context, mediaType MediaType, candidates
 	f.got = append(f.got, candidates...)
 	for _, candidate := range candidates {
 		if f.available != nil && f.available[mediaType][candidate.TMDBID] {
-			out[candidate.TMDBID] = PresenceMatch{Available: true, MatchedProvider: "tmdb"}
+			out[candidate.TMDBID] = PresenceMatch{
+				Available:       true,
+				ContentID:       fakePresenceContentID(mediaType, candidate.TMDBID),
+				MatchedProvider: "tmdb",
+			}
 			continue
 		}
 		if candidate.TVDBID != nil && f.byTVDB != nil {
 			if tmdbID, ok := f.byTVDB[mediaType][*candidate.TVDBID]; ok && tmdbID == candidate.TMDBID {
-				out[candidate.TMDBID] = PresenceMatch{Available: true, MatchedProvider: "tvdb"}
+				out[candidate.TMDBID] = PresenceMatch{
+					Available:       true,
+					ContentID:       fakePresenceContentID(mediaType, candidate.TMDBID),
+					MatchedProvider: "tvdb",
+				}
 			}
 		}
 	}
 	return out, nil
+}
+
+func fakePresenceContentID(mediaType MediaType, tmdbID int) string {
+	return fmt.Sprintf("%s-%d", mediaType, tmdbID)
 }
 
 func (f *fakePresence) LookupTMDB(_ context.Context, mediaType MediaType, ids []int) (map[int]bool, error) {
@@ -1460,6 +1732,45 @@ func (f *fakeMovieAdapter) CheckMovieStatus(_ context.Context, req Request, inte
 	f.gotReq = req
 	f.gotIntegration = integration
 	return f.status, f.statusErr
+}
+
+type fixedCeiling struct{ q string }
+
+func (f fixedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
+	return f.q, nil
+}
+
+type recordingMovieAdapter struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+func (a *recordingMovieAdapter) SubmitMovie(_ context.Context, _ Request, integration Integration) (FulfillmentResult, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ids = append(a.ids, integration.ID)
+	return FulfillmentResult{IntegrationKind: integration.Kind, ExternalID: "ext-" + integration.ID, ExternalStatus: "queued"}, nil
+}
+
+func TestSubmitApprovedFansOutDualQuality(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{
+		inst("radarr", "hd", true, false, false),
+		inst("radarr", "uhd", false, true, false),
+	}
+	rec := &recordingMovieAdapter{}
+	svc := NewService(store, &fakeTMDBClient{}, &fakePresence{})
+	svc.SetFulfillmentAdapters(rec, nil)
+	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(rec.ids) != 2 {
+		t.Fatalf("expected 2 submissions (hd+uhd), got %d: %v", len(rec.ids), rec.ids)
+	}
 }
 
 type fakeSecrets map[string]string

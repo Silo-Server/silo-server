@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -260,6 +261,86 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
+}
+
+// HandleSubtitleFonts extracts embedded container font attachments for ASS/SSA
+// playback. The web player loads these bytes into JASSUB before creating the
+// renderer so libass can resolve script font names deterministically.
+func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
+	userID := apimw.GetUserID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	sessionID := chi.URLParam(r, "session_id")
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "Session ID is required")
+		return
+	}
+	setPlaybackSessionLogContext(r, sessionID)
+
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil {
+		writePlaybackSessionNotFound(w)
+		return
+	}
+	if session.UserID != userID {
+		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
+		return
+	}
+
+	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
+		return
+	}
+	if file == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
+		return
+	}
+	if err := preflightPlaybackFile(r.Context(), file, h.MissingMarker, h.EventsHub); err != nil {
+		if isPlaybackFileMissing(err) {
+			h.abortPlaybackSession(r.Context(), session)
+		}
+		writePlaybackFilePreflightError(w, err)
+		return
+	}
+
+	trackParam := chi.URLParam(r, "track")
+	trackIndex, _, err := playback.ParseSubtitleTrackParam(trackParam)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid subtitle track index")
+		return
+	}
+
+	embeddedIndex := trackIndex - len(file.ExternalSubtitles)
+	if embeddedIndex < 0 || embeddedIndex >= len(file.SubtitleTracks) {
+		writeError(w, http.StatusNotFound, "not_found", "Embedded subtitle track not found")
+		return
+	}
+	if !playback.IsASS(file.SubtitleTracks[embeddedIndex].Codec) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Subtitle font bundles are only available for ASS/SSA tracks")
+		return
+	}
+
+	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.FFmpegPath)
+	if err != nil {
+		slog.WarnContext(r.Context(), "subtitle font extraction failed",
+			"file_id", file.ID,
+			"track", trackIndex,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "font_extract_failed", "Failed to extract subtitle fonts")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(playback.EncodeSubtitleFontBundle(fonts)); err != nil {
+		slog.WarnContext(r.Context(), "subtitle font response encode failed", "error", err)
+	}
 }
 
 func (h *StreamHandler) syncSessionsNow(ctx context.Context, reason string) {

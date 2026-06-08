@@ -97,6 +97,10 @@ func shouldSkipMovieSupplementalFile(path string) bool {
 }
 
 // Scanner discovers and indexes media files in media folders.
+// scannerImageCacher is the slice of imagecache.Cacher the audiobook
+// branch uses. Wired via SetImageCacher; nil-safe when absent.
+type scannerImageCacher = audiobookCoverCacher
+
 type Scanner struct {
 	fileRepo            *FileRepository
 	rootSnapshotRepo    *ScannedRootRepository
@@ -108,14 +112,28 @@ type Scanner struct {
 	folderRepo          *catalog.FolderRepository
 	libraryRepo         *catalog.LibraryItemRepository
 	episodeLibraryRepo  *catalog.EpisodeLibraryRepository
+	itemRepo            *catalog.ItemRepository
+	personRepo          *catalog.PersonRepository
+	episodeRepo         *catalog.EpisodeRepository
 	ffprobePath         string
 	s3Client            *s3client.Client // public assets bucket (may be nil)
+	imageCacher         scannerImageCacher
 	workers             int
 	emptyTrashAfterScan bool
 	markerFetcher       func(context.Context, string) *IntroCreditsMarkers
 	metadataQueue       MetadataQueueProducer
 	movieQueueSyncer    MovieQueueSyncer
 	seriesQueueSyncer   SeriesQueueSyncer
+}
+
+// SetImageCacher installs the imagecache.Cacher used by the audiobook
+// branch to push embedded M4B cover art into the public assets bucket.
+// Optional; if unset, audiobook covers are not extracted.
+func (s *Scanner) SetImageCacher(cacher scannerImageCacher) {
+	if s == nil {
+		return
+	}
+	s.imageCacher = cacher
 }
 
 const scanProgressLogInterval = 10 * time.Second
@@ -157,6 +175,9 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		folderRepo:          catalog.NewFolderRepository(fileRepo.Pool()),
 		libraryRepo:         catalog.NewLibraryItemRepository(fileRepo.Pool()),
 		episodeLibraryRepo:  catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
+		itemRepo:            catalog.NewItemRepository(fileRepo.Pool()),
+		personRepo:          catalog.NewPersonRepository(fileRepo.Pool()),
+		episodeRepo:         catalog.NewEpisodeRepository(fileRepo.Pool()),
 		ffprobePath:         ffprobePath,
 		s3Client:            s3Client,
 		workers:             workers,
@@ -192,9 +213,34 @@ func (s *Scanner) SetMetadataQueueProducer(producer MetadataQueueProducer) {
 // ScanFolder walks a media folder's directory tree, discovers media files,
 // probes them for technical data, and upserts them into the database.
 // Files previously in the DB that no longer exist on disk are marked as missing.
+//
+// Audiobook libraries are handled by ScanAudiobookFolder and podcast
+// libraries by ScanPodcastFolder; both bypass the per-file movie/TV
+// pipeline entirely.
 func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*ScanResult, error) {
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
+
+	if isAudiobookLibraryType(folder.Type) {
+		if err := s.ScanAudiobookFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+
+	if isPodcastLibraryType(folder.Type) {
+		if err := s.ScanPodcastFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+
 	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
 }
 
@@ -213,6 +259,61 @@ func isMovieLibraryType(libraryType string) bool {
 		return true
 	default:
 		return false
+	}
+}
+func isAudiobookLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "audiobook", "audiobooks":
+		return true
+	default:
+		return false
+	}
+}
+func isPodcastLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "podcast", "podcasts":
+		return true
+	default:
+		return false
+	}
+}
+
+// walkMode tells walkLogicalTree which file extensions to surface and
+// which library-specific filename heuristics (sample/extra skipping)
+// to apply.
+type walkMode int
+
+const (
+	walkModeVideo     walkMode = iota // bare video walk: video extensions, no movie skipping
+	walkModeMovie                     // movie library: video extensions + sample/extra skipping
+	walkModeAudiobook                 // audiobook library: audio extensions, no skipping
+	walkModePodcast                   // podcast library: audio extensions, no skipping
+)
+
+// walkModeFor derives a walkMode from a media_folders.type string.
+// Unknown types default to walkModeVideo so existing call sites that
+// pass arbitrary types preserve their prior behavior.
+func walkModeFor(folderType string) walkMode {
+	switch {
+	case isMovieLibraryType(folderType):
+		return walkModeMovie
+	case isAudiobookLibraryType(folderType):
+		return walkModeAudiobook
+	case isPodcastLibraryType(folderType):
+		return walkModePodcast
+	default:
+		return walkModeVideo
+	}
+}
+
+// acceptsExt reports whether the given lowercased extension belongs to
+// the file types this walk mode is looking for.
+func (m walkMode) acceptsExt(ext string) bool {
+	switch m {
+	case walkModeAudiobook, walkModePodcast:
+		return audioExtensions[ext]
+	default:
+		return videoExtensions[ext]
 	}
 }
 
@@ -236,7 +337,7 @@ func walkLogicalTree(
 	ctx context.Context,
 	logicalPath string,
 	physicalPath string,
-	movieLibrary bool,
+	mode walkMode,
 	visitedPhysicalDirs map[string]struct{},
 	filePaths *[]string,
 ) error {
@@ -264,22 +365,22 @@ func walkLogicalTree(
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, movieLibrary, visitedPhysicalDirs, filePaths)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, filePaths)
 		}
-		if movieLibrary && shouldSkipMovieSupplementalFile(logicalPath) {
+		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(logicalPath))] {
+		if mode.acceptsExt(strings.ToLower(filepath.Ext(logicalPath))) {
 			*filePaths = append(*filePaths, logicalPath)
 		}
 		return nil
 	}
 
 	if !info.IsDir() {
-		if movieLibrary && shouldSkipMovieSupplementalFile(logicalPath) {
+		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(logicalPath))] {
+		if mode.acceptsExt(strings.ToLower(filepath.Ext(logicalPath))) {
 			*filePaths = append(*filePaths, logicalPath)
 		}
 		return nil
@@ -298,7 +399,7 @@ func walkLogicalTree(
 	if isIgnoredDirectoryPath(logicalPath) {
 		return nil
 	}
-	if movieLibrary && shouldSkipMovieSupplementalDir(logicalPath) {
+	if mode == walkModeMovie && shouldSkipMovieSupplementalDir(logicalPath) {
 		return nil
 	}
 
@@ -329,31 +430,31 @@ func walkLogicalTree(
 				continue
 			}
 			if targetInfo.IsDir() {
-				if err := walkLogicalTree(ctx, logicalChild, resolved, movieLibrary, visitedPhysicalDirs, filePaths); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, filePaths); err != nil {
 					return err
 				}
 				continue
 			}
-			if movieLibrary && shouldSkipMovieSupplementalFile(logicalChild) {
+			if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 				continue
 			}
-			if videoExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+			if mode.acceptsExt(strings.ToLower(filepath.Ext(entry.Name()))) {
 				*filePaths = append(*filePaths, logicalChild)
 			}
 			continue
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, movieLibrary, visitedPhysicalDirs, filePaths); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, filePaths); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if movieLibrary && shouldSkipMovieSupplementalFile(logicalChild) {
+		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 			continue
 		}
-		if videoExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+		if mode.acceptsExt(strings.ToLower(filepath.Ext(entry.Name()))) {
 			*filePaths = append(*filePaths, logicalChild)
 		}
 	}
@@ -364,7 +465,7 @@ func walkLogicalTree(
 func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string) ([]string, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
-	movieLibrary := isMovieLibraryType(libraryType)
+	mode := walkModeFor(libraryType)
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
@@ -376,7 +477,7 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if cleanRoot == "" || cleanRoot == "." {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, movieLibrary, visitedPhysicalDirs, &filePaths); err != nil {
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths); err != nil {
 			return nil, err
 		}
 	}
@@ -422,7 +523,7 @@ func (s *Scanner) scanPaths(
 	for _, f := range existingFiles {
 		existingByPath[f.FilePath] = f
 	}
-	existingContentStatuses, err := s.loadItemStatuses(ctx, collectScanStateContentIDs(existingFiles))
+	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs(existingFiles))
 	if err != nil {
 		return nil, fmt.Errorf("loading item statuses for folder %d: %w", folder.ID, err)
 	}
@@ -504,6 +605,7 @@ func (s *Scanner) scanPaths(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workers)
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	subtitleCache := newExternalSubtitleDirCache()
 
 	for range s.workers {
 		wg.Go(func() {
@@ -511,7 +613,7 @@ func (s *Scanner) scanPaths(
 				if ctx.Err() != nil {
 					continue // drain channel
 				}
-				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path])
+				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
 				if processErr != nil {
 					slog.Error("scanner: file processing failed", "path", path, "error", processErr)
 					errorCount.Add(1)
@@ -934,7 +1036,7 @@ func (s *Scanner) scanScope(
 	for _, f := range existingFiles {
 		existingByPath[f.FilePath] = f
 	}
-	existingContentStatuses, err := s.loadItemStatuses(ctx, collectScanStateContentIDs(existingFiles))
+	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs(existingFiles))
 	if err != nil {
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
@@ -980,6 +1082,7 @@ func (s *Scanner) scanScope(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workers)
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	subtitleCache := newExternalSubtitleDirCache()
 
 	for range s.workers {
 		wg.Go(func() {
@@ -987,7 +1090,7 @@ func (s *Scanner) scanScope(
 				if ctx.Err() != nil {
 					continue
 				}
-				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path])
+				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
 				if processErr != nil {
 					slog.Error("scanner: file processing failed", "path", path, "error", processErr)
 					errorCount.Add(1)
@@ -1260,6 +1363,31 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 	return nil
 }
 
+func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderID int) error {
+	if err := s.syncPresentLibraryState(ctx, folderID); err != nil {
+		return err
+	}
+
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id)
+		SELECT DISTINCT mf.media_folder_id, mf.canonical_root_path, mf.content_id
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.media_folder_id = $1
+		  AND mf.missing_since IS NULL
+		  AND mf.content_id IS NOT NULL
+		  AND COALESCE(mf.canonical_root_path, '') <> ''
+		  AND mi.type IN ('audiobook', 'podcast')
+		ON CONFLICT (media_folder_id, canonical_root_path)
+		DO UPDATE SET content_id = EXCLUDED.content_id,
+			last_seen_at = NOW()
+	`, folderID); err != nil {
+		return fmt.Errorf("restoring folder-scoped audio roots: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int) (int, int, []string, error) {
 	if s.episodeLibraryRepo != nil {
 		if _, err := s.episodeLibraryRepo.ReconcileFolderMembership(ctx, folderID); err != nil {
@@ -1267,37 +1395,6 @@ func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int)
 		}
 	}
 	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID)
-}
-
-func (s *Scanner) loadItemStatuses(ctx context.Context, contentIDs []string) (map[string]string, error) {
-	statuses := make(map[string]string)
-	if s == nil || s.fileRepo == nil || len(contentIDs) == 0 {
-		return statuses, nil
-	}
-
-	rows, err := s.fileRepo.Pool().Query(ctx, `
-		SELECT content_id, status
-		FROM media_items
-		WHERE content_id = ANY($1)
-	`, contentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying item statuses: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var contentID string
-		var status string
-		if err := rows.Scan(&contentID, &status); err != nil {
-			return nil, fmt.Errorf("scanning item status: %w", err)
-		}
-		statuses[contentID] = status
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating item statuses: %w", err)
-	}
-
-	return statuses, nil
 }
 
 func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []int {
@@ -1369,7 +1466,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err == nil {
 		existingByPath[filePath] = scanStateFromMediaFile(existing)
 	}
-	existingContentStatuses, err := s.loadItemStatuses(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
+	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
 	}
@@ -1399,7 +1496,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return fmt.Errorf("loading group overrides for file: %w", err)
 	}
 	applyGroupOverrides(&groupInference, groupOverrides)
-	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)])
+	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache())
 	if err != nil {
 		return err
 	}
@@ -1541,6 +1638,7 @@ func (s *Scanner) processFile(
 	existingContentStatuses map[string]string,
 	assignment fileRootAssignment,
 	groupAssignment fileGroupAssignment,
+	subtitleCache *externalSubtitleDirCache,
 ) (fileAction, []string, error) {
 	// Stat the file.
 	info, err := os.Stat(filePath)
@@ -1550,13 +1648,33 @@ func (s *Scanner) processFile(
 
 	fileSize := info.Size()
 	fileModifiedAt := normalizeFileModifiedAt(info.ModTime())
+	var externalSubs []ExternalSubtitleInfo
+	externalSubsLoaded := false
+	externalSubsChecked := false
+	loadExternalSubs := func() []ExternalSubtitleInfo {
+		if externalSubsLoaded {
+			return externalSubs
+		}
+		externalSubsLoaded = true
+		var subErr error
+		externalSubs, subErr = subtitleCache.Detect(filePath)
+		if subErr != nil {
+			slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
+			externalSubs = nil
+			externalSubsChecked = false
+			return externalSubs
+		}
+		externalSubsChecked = true
+		return externalSubs
+	}
 
 	// Check if unchanged (same size) only when playback-critical probe data
 	// is already present or this scanner cannot repair it on this node. This
 	// lets rescans repair legacy rows when local ffprobe metadata is available
 	// without forcing endless rewrites on nodes that cannot probe.
 	if existing, ok := existingByPath[filePath]; ok {
-		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, assignment, groupAssignment, folder.Type, s.ffprobePath != "")
+		currentExternalSubtitlePaths := externalSubtitleInfoPaths(loadExternalSubs())
+		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, currentExternalSubtitlePaths, externalSubsChecked, assignment, groupAssignment, folder.Type, s.ffprobePath != "")
 		if shouldSkipStableConfirmedScanState(existing, existingContentStatuses[existing.ContentID], fileSize, fileModifiedAt, updateReasons, s.ffprobePath != "") {
 			return actionUnchanged, nil, nil
 		}
@@ -1572,10 +1690,7 @@ func (s *Scanner) processFile(
 		probe, probeSource := s.probeFile(ctx, filePath)
 
 		// Detect external subtitles.
-		externalSubs, subErr := DetectExternalSubtitles(filePath)
-		if subErr != nil {
-			slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
-		}
+		externalSubs = loadExternalSubs()
 
 		// Check for intro/credits markers from S3.
 		markerFetcher := s.markerFetcher
@@ -1696,10 +1811,7 @@ func (s *Scanner) processFile(
 	probe, probeSource := s.probeFile(ctx, filePath)
 
 	// Detect external subtitles.
-	externalSubs, subErr := DetectExternalSubtitles(filePath)
-	if subErr != nil {
-		slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
-	}
+	externalSubs = loadExternalSubs()
 
 	// Check for intro/credits markers from S3.
 	markerFetcher := s.markerFetcher
@@ -1817,6 +1929,8 @@ func scanStateUpdateReasons(
 	existing *scanStateFile,
 	fileSize int64,
 	fileModifiedAt time.Time,
+	currentExternalSubtitlePaths []string,
+	externalSubtitlesChecked bool,
 	assignment fileRootAssignment,
 	groupAssignment fileGroupAssignment,
 	libraryType string,
@@ -1839,7 +1953,11 @@ func scanStateUpdateReasons(
 	if canRepairProbe && needsCriticalProbeRepairScanState(existing) {
 		reasons = append(reasons, "probe_repair")
 	}
-	if hasMissingExternalSubtitlePath(existing.ExternalSubtitlePaths) {
+	if externalSubtitlesChecked {
+		if !sameStringSet(existing.ExternalSubtitlePaths, currentExternalSubtitlePaths) {
+			reasons = append(reasons, "external_subtitle_changed")
+		}
+	} else if hasMissingExternalSubtitlePath(existing.ExternalSubtitlePaths) {
 		reasons = append(reasons, "external_subtitle_missing")
 	}
 	if scanStateRootAssignmentChanged(existing, assignment, libraryType) {
@@ -1849,6 +1967,45 @@ func scanStateUpdateReasons(
 		reasons = append(reasons, "group_assignment_changed")
 	}
 	return reasons
+}
+
+func externalSubtitleInfoPaths(subtitles []ExternalSubtitleInfo) []string {
+	paths := make([]string, 0, len(subtitles))
+	for _, subtitle := range subtitles {
+		path := strings.TrimSpace(subtitle.Path)
+		if path == "" {
+			continue
+		}
+		paths = append(paths, filepath.Clean(path))
+	}
+	return paths
+}
+
+func sameStringSet(left, right []string) bool {
+	seen := make(map[string]int, len(left))
+	for _, value := range left {
+		value = filepath.Clean(strings.TrimSpace(value))
+		if value == "." || value == "" {
+			continue
+		}
+		seen[value]++
+	}
+	for _, value := range right {
+		value = filepath.Clean(strings.TrimSpace(value))
+		if value == "." || value == "" {
+			continue
+		}
+		if seen[value] == 0 {
+			return false
+		}
+		seen[value]--
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func hasMissingExternalSubtitlePath(paths []string) bool {

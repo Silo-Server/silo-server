@@ -21,6 +21,7 @@ import {
   Blocks,
   Puzzle,
   Send,
+  RefreshCw,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -114,6 +115,11 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
           href: "/admin/requests",
         },
         {
+          label: "Autoscan",
+          icon: <RefreshCw className="h-[18px] w-[18px]" />,
+          href: "/admin/autoscan",
+        },
+        {
           label: "Sections",
           icon: <PanelsTopLeft className="h-[18px] w-[18px]" />,
           href: "/admin/sections",
@@ -142,6 +148,11 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
           label: "Playback History",
           icon: <History className="h-[18px] w-[18px]" />,
           href: "/admin/history",
+        },
+        {
+          label: "Marker History",
+          icon: <Captions className="h-[18px] w-[18px]" />,
+          href: "/admin/marker-history",
         },
         {
           label: "History Import",
@@ -223,8 +234,15 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   return (
     <aside className="border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 flex w-[240px] flex-col border-r backdrop-blur-2xl">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 pt-6 pb-1">
-        <SiloBrand className="h-12 w-[112px]" />
+      <div className="flex items-center gap-2.5 px-5 pt-6 pb-4">
+        <Link
+          to="/"
+          onClick={onNavigate}
+          aria-label="Go to app home"
+          className="focus-visible:ring-ring/50 inline-flex rounded-md transition-opacity hover:opacity-85 focus-visible:ring-[3px] focus-visible:outline-none"
+        >
+          <SiloBrand className="h-12 w-[112px]" />
+        </Link>
       </div>
       {/* Nav sections */}
       <nav

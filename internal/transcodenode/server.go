@@ -44,6 +44,7 @@ type TranscodeStartRequest struct {
 type TranscodeStartResponse struct {
 	SessionID string `json:"session_id"`
 	Status    string `json:"status"`
+	HWAccel   string `json:"hw_accel,omitempty"`
 }
 
 // HealthResponse is the JSON response for GET /api/v1/health.
@@ -111,7 +112,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleHWCapabilities(w http.ResponseWriter, _ *http.Request) {
-	info := playback.DetectHWAccel()
+	ffmpegPath := ""
+	if cfg := s.watcher.Config(); cfg != nil {
+		ffmpegPath = cfg.Playback.FFmpegPath
+	}
+	info := playback.DetectHWAccelWithFFmpeg(ffmpegPath)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
@@ -238,6 +243,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(1)
 
 	// Track session in Redis
+	effectiveHWAccel := session.Opts().HWAccel
 	s.tracker.Track(r.Context(), nodesessions.SessionInfo{
 		SessionID:  req.SessionID,
 		NodeURL:    s.tracker.NodeURL(),
@@ -246,7 +252,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		CodecVideo: req.TargetCodecVideo,
 		CodecAudio: req.TargetCodecAudio,
 		Resolution: req.TargetResolution,
-		HWAccel:    opts.HWAccel,
+		HWAccel:    effectiveHWAccel,
 		StartedAt:  time.Now().UTC().Format(time.RFC3339),
 	})
 
@@ -254,6 +260,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(TranscodeStartResponse{
 		SessionID: req.SessionID,
 		Status:    "started",
+		HWAccel:   effectiveHWAccel,
 	})
 }
 
@@ -374,7 +381,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if err != nil && err == playback.ErrSegmentNotFound {
+			if err != nil && err == playback.ErrSegmentNotFound && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := session.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
 					slog.Error("resolve transcode node seek target", "error", seekErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)

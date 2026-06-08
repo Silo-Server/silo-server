@@ -52,34 +52,12 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 		return nil, nil
 	}
 
-	store, err := r.storeProvider.ForUser(ctx, q.UserID)
-	if err != nil {
-		return nil, fmt.Errorf("getting user store: %w", err)
-	}
-
-	// Get recently completed episodes (limit 100 for performance)
-	completedEntries, err := store.ListProgress(ctx, q.ProfileID, "completed", 100, 0)
-	if err != nil {
-		return nil, fmt.Errorf("listing completed progress: %w", err)
-	}
-	if len(completedEntries) == 0 {
-		if q.EnableResumable {
-			return r.listResumableFirstEpisodes(ctx, q)
-		}
-		return nil, nil
-	}
-
-	completedIDs := make([]string, 0, len(completedEntries))
-	for _, entry := range completedEntries {
-		completedIDs = append(completedIDs, entry.MediaItemID)
-	}
-
 	limit := q.Limit
 	if limit <= 0 {
 		limit = 20
 	}
 
-	query, args := buildListNextUpQuery(q, completedIDs, limit)
+	query, args := buildListNextUpQuery(q, limit)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -131,9 +109,9 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 	return results, nil
 }
 
-func buildListNextUpQuery(q NextUpQuery, completedIDs []string, limit int) (string, []interface{}) {
-	args := []interface{}{q.UserID, q.ProfileID, completedIDs, limit}
-	argIdx := 5
+func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
+	args := []interface{}{q.UserID, q.ProfileID, limit}
+	argIdx := 4
 
 	seriesFilter := ""
 	if q.SeriesID != "" {
@@ -188,10 +166,17 @@ func buildListNextUpQuery(q NextUpQuery, completedIDs []string, limit int) (stri
 			WHERE uwp.user_id = $1
 			  AND uwp.profile_id = $2
 			  AND uwp.completed = TRUE
-			  AND uwp.media_item_id = ANY($3)
+			  AND NOT EXISTS (
+				  SELECT 1
+				  FROM user_history_hidden_items hhi
+				  WHERE hhi.user_id = uwp.user_id
+				    AND hhi.profile_id = uwp.profile_id
+				    AND hhi.media_item_id = uwp.media_item_id
+				    AND uwp.updated_at <= hhi.hidden_before
+			  )
 			  %s
 			  %s
-			ORDER BY e.series_id, uwp.updated_at DESC
+			ORDER BY e.series_id, uwp.updated_at DESC, e.season_number DESC, e.episode_number DESC
 		)
 		%s
 		SELECT
@@ -219,7 +204,7 @@ func buildListNextUpQuery(q NextUpQuery, completedIDs []string, limit int) (stri
 			LIMIT 1
 		) next_ep ON true
 		ORDER BY es.updated_at DESC
-		LIMIT $4`, seriesFilter, dateCutoffFilter, inProgressExclusion, sourceTable)
+		LIMIT $3`, seriesFilter, dateCutoffFilter, inProgressExclusion, sourceTable)
 
 	return query, args
 }

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import BulkApplyDialog from "./BulkApplyDialog";
 import RecipeParamFields from "./RecipeParamFields";
-import { api } from "@/api/client";
 import type { RecipeDefinition, GalleryPreset } from "@/lib/recipes";
 
 export interface AddPayload {
@@ -12,6 +11,7 @@ export interface AddPayload {
   enabled: boolean;
   config: Record<string, unknown>;
   apply_to_all_libraries?: boolean;
+  library_ids?: number[];
 }
 
 interface Props {
@@ -24,7 +24,7 @@ interface Props {
    * falls back to onCancel (closes the drawer entirely).
    */
   onBackToGallery?: () => void;
-  onAdd: (payload: AddPayload) => void;
+  onAdd: (payload: AddPayload) => void | Promise<void>;
   showBulkApply?: boolean;
   showEnabled?: boolean;
 }
@@ -61,11 +61,7 @@ export default function RecipeConfigDrawer({
     if (collectionMissing) {
       return;
     }
-    if (showBulkApply && applyAll) {
-      setBulkOpen(true);
-      return;
-    }
-    onAdd({
+    const payload = {
       section_type: def.type,
       title,
       item_limit: limit,
@@ -73,6 +69,13 @@ export default function RecipeConfigDrawer({
       enabled,
       config: params,
       apply_to_all_libraries: false,
+    };
+    if (showBulkApply && applyAll) {
+      setBulkOpen(true);
+      return;
+    }
+    void Promise.resolve(onAdd(payload)).catch(() => {
+      // The owner reports the failure and keeps the drawer mounted for retry.
     });
   };
 
@@ -174,27 +177,18 @@ export default function RecipeConfigDrawer({
         <BulkApplyDialog
           open={bulkOpen}
           onClose={() => setBulkOpen(false)}
-          onConfirm={async (libraryIDs) => {
-            try {
-              await api("/admin/sections/bulk-create", {
-                method: "POST",
-                body: JSON.stringify({
-                  scope: "library",
-                  library_ids: libraryIDs,
-                  section_type: def.type,
-                  title,
-                  item_limit: limit,
-                  featured,
-                  enabled,
-                  config: params,
-                }),
-              });
-            } catch (err) {
-              console.error("bulk-create failed:", err);
-            }
-            setBulkOpen(false);
-            onCancel();
-          }}
+          onConfirm={(libraryIDs) =>
+            onAdd({
+              section_type: def.type,
+              title,
+              item_limit: limit,
+              featured,
+              enabled,
+              config: params,
+              apply_to_all_libraries: true,
+              library_ids: libraryIDs,
+            })
+          }
         />
       ) : null}
     </div>

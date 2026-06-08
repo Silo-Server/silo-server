@@ -42,3 +42,26 @@ func TestBuildOrderBy_LastAirDateReadsDenormColumn(t *testing.T) {
 		t.Fatalf("expected sparse last_air_date sort to push missing items last, got %q", got)
 	}
 }
+
+func TestBrowsePlan_ReleaseDateMovieOnlyUsesIndexedDateColumn(t *testing.T) {
+	repo := &BrowseRepository{}
+	plan, earlyEmpty, err := repo.buildBrowsePlan(BrowseFilters{
+		Type:  "movie",
+		Sort:  "release_date",
+		Order: "desc",
+		Limit: 1000,
+	})
+	if err != nil {
+		t.Fatalf("buildBrowsePlan error: %v", err)
+	}
+	if earlyEmpty {
+		t.Fatal("did not expect early empty result")
+	}
+	if strings.Contains(plan.orderBy, "COALESCE(") || strings.Contains(plan.orderBy, "::text") {
+		t.Fatalf("movie-only release_date sort must use the indexed date column, got %q", plan.orderBy)
+	}
+	want := "ORDER BY mi.release_date DESC NULLS LAST, mi.content_id ASC"
+	if plan.orderBy != want {
+		t.Fatalf("orderBy = %q, want %q", plan.orderBy, want)
+	}
+}

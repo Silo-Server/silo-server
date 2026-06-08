@@ -33,6 +33,7 @@ type BrowseFilters struct {
 	Sort               string   // created_at, release_date, rating_imdb, rating_tmdb, year, sort_title, recently_added
 	Order              string   // asc, desc
 	Limit              int
+	MaxLimit           int // optional caller-specific cap; zero keeps the default browse cap
 	Offset             int
 	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
 }
@@ -77,7 +78,7 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		return &BrowseResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false}, nil
 	}
 
-	dataQuery, queryArgs := plan.pagedSQL(includeTotal)
+	dataQuery, queryArgs := plan.pagedSQL(false)
 	rows, err := r.pool.Query(ctx, dataQuery, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("browsing media items: %w", err)
@@ -88,32 +89,31 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		items []*models.MediaItem
 		total int
 	)
-	if includeTotal {
-		items, total, err = scanBrowseItemsWithTotal(rows)
-	} else {
-		items, err = scanBrowseItems(rows)
-	}
+	items, err = scanBrowseItems(rows)
 	if err != nil {
 		return nil, err
 	}
 
 	hasMore := false
+	hasExtraRow := len(items) > plan.limit
+	if hasExtraRow {
+		items = items[:plan.limit]
+	}
 	if includeTotal {
-		// COUNT(*) OVER () emits no rows when the data SELECT is empty, so
-		// total stays 0 even when the broader result set has matching rows
-		// (e.g. OFFSET past the last page). Re-query the count to give
-		// callers the real total. Skip when offset == 0 because in that
-		// case an empty page genuinely means total = 0.
-		if len(items) == 0 && plan.offset > 0 {
+		switch {
+		case plan.offset == 0 && len(items) == 0:
+			total = 0
+		case !hasExtraRow && len(items) > 0:
+			total = plan.offset + len(items)
+		default:
 			countSQL, countArgs := plan.countSQL()
 			if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-				return nil, fmt.Errorf("count fallback for empty browse page: %w", err)
+				return nil, fmt.Errorf("count browse page: %w", err)
 			}
 		}
 		hasMore = total > plan.offset+plan.limit
-	} else if len(items) > plan.limit {
+	} else if hasExtraRow {
 		hasMore = true
-		items = items[:plan.limit]
 	}
 
 	return &BrowseResult{
@@ -151,12 +151,9 @@ type browseQueryPlan struct {
 
 // countSQL renders a count-only query that returns the total number of rows
 // matching the plan's FROM/WHERE/GROUP BY, ignoring LIMIT/OFFSET/ORDER BY.
-// Used as a fallback when pagedSQL(true) returned an empty page past offset 0:
-// COUNT(*) OVER () emits no rows when the data SELECT is empty, so the
-// caller would otherwise see total=0 even when the broader result set has
-// matching rows. Wraps the inner query in `SELECT COUNT(*) FROM (...) sub`
-// so any GROUP BY in the inner query is preserved (we count groups, matching
-// what COUNT(*) OVER () would compute).
+// Used by exact-total callers so the data SELECT can remain a pure page query.
+// Wraps the inner query in `SELECT COUNT(*) FROM (...) sub` so any GROUP BY in
+// the inner query is preserved.
 //
 // Binds only p.args (FROM/WHERE/GROUP BY values). orderArgs are deliberately
 // excluded — the count SQL has no ORDER BY clause to reference them, and
@@ -172,16 +169,12 @@ func (p browseQueryPlan) countSQL() (string, []any) {
 }
 
 // pagedSQL renders the final paged SELECT and returns it together with the
-// fully-bound arg list. When includeTotal is true the SELECT list is appended
-// with COUNT(*) OVER () AS total_count so the caller can read the total from
-// the first scanned row in a single round trip. When includeTotal is false the
-// caller has already requested a single-pass page, so we ask for one extra row
-// to detect whether more pages exist without an exact count.
-func (p browseQueryPlan) pagedSQL(includeTotal bool) (string, []any) {
+// fully-bound arg list. The query always asks for one extra row so callers can
+// detect whether more pages exist without coupling the sorted page fetch to an
+// exact count.
+func (p browseQueryPlan) pagedSQL(_ bool) (string, []any) {
 	queryLimit := p.limit
-	if !includeTotal {
-		queryLimit++
-	}
+	queryLimit++
 	// Bind order: where/from args, then order-by args, then LIMIT, then OFFSET.
 	// limitArgIdx is computed by buildBrowsePlan after consuming order args, so
 	// it correctly points at LIMIT after the orderArgs are bound below.
@@ -191,9 +184,6 @@ func (p browseQueryPlan) pagedSQL(includeTotal bool) (string, []any) {
 	offsetArgIdx := p.limitArgIdx + 1
 
 	selectList := p.selectClause
-	if includeTotal {
-		selectList += ", COUNT(*) OVER () AS total_count"
-	}
 	sql := fmt.Sprintf(
 		"SELECT %s FROM %s %s %s %s LIMIT $%d OFFSET $%d",
 		selectList, p.fromClause, p.whereClause, p.groupByClause, p.orderBy,
@@ -212,8 +202,12 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	if filters.Limit <= 0 {
 		filters.Limit = 20
 	}
-	if filters.Limit > 100 {
-		filters.Limit = 100
+	maxLimit := filters.MaxLimit
+	if maxLimit <= 0 {
+		maxLimit = 100
+	}
+	if filters.Limit > maxLimit {
+		filters.Limit = maxLimit
 	}
 	if filters.Offset < 0 {
 		filters.Offset = 0
@@ -367,7 +361,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	// bind only its FROM/WHERE/GROUP BY values; pagedSQL binds them together.
 	// argIdx still advances past them so limitArgIdx points at the right
 	// LIMIT placeholder once orderArgs are bound positionally before LIMIT.
-	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup)
+	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup, browseFiltersAreMovieOnly(filters))
 	argIdx += len(orderArgs)
 
 	selectClause := browseItemColumns("mi")
@@ -523,7 +517,8 @@ func listDistinctArrayColumnWithSource(
 		) vals
 		WHERE val <> ''
 		ORDER BY val ASC
-	`, column, fromClause, whereClause)
+		LIMIT %d
+	`, column, fromClause, whereClause, catalogFacetMaxValues)
 
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
@@ -576,7 +571,8 @@ func listDistinctScalarColumnWithSource(
 		%s
 		  AND mi.%s <> ''
 		ORDER BY mi.%s ASC
-	`, column, fromClause, whereClause, column, column)
+		LIMIT %d
+	`, column, fromClause, whereClause, column, column, catalogFacetMaxValues)
 
 	// When there are no WHERE conditions, the extra AND is invalid — prepend WHERE instead.
 	if whereClause == "" {
@@ -585,7 +581,8 @@ func listDistinctScalarColumnWithSource(
 			FROM %s
 			WHERE mi.%s <> ''
 			ORDER BY mi.%s ASC
-		`, column, fromClause, column, column)
+			LIMIT %d
+		`, column, fromClause, column, column, catalogFacetMaxValues)
 	}
 
 	rows, err := pool.Query(ctx, query, args...)
@@ -727,6 +724,273 @@ func (r *BrowseRepository) listDistinctJSONBLanguageWithFilters(ctx context.Cont
 	return listDistinctJSONBLanguageWithSource(ctx, r.pool, column, filters, "media_items mi", "")
 }
 
+// listDistinctPeopleByKindWithSource returns distinct people.name values for a
+// PersonKind across the scoped result set. Powers the Authors and Narrators
+// facets — both share item_people, just keyed by `kind`. The from/where
+// clauses from filterWhereClauseForSource gate by library / access / scope,
+// so an audiobook-only library or audiobook media_scope drops video-only
+// content automatically.
+func listDistinctPeopleByKindWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	kind models.PersonKind,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+) ([]string, error) {
+	fromClause, whereClause, args, earlyEmpty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if earlyEmpty {
+		return []string{}, nil
+	}
+	args = append(args, int(kind))
+	kindIdx := len(args)
+	query := fmt.Sprintf(`
+		SELECT DISTINCT p.name
+		FROM %s
+		JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = $%d
+		JOIN people p ON p.id = ip.person_id
+		%s
+		  AND p.name IS NOT NULL
+		  AND BTRIM(p.name) <> ''
+		ORDER BY p.name ASC
+		LIMIT %d
+	`, fromClause, kindIdx, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	return queryDistinctStrings(ctx, pool, query, args)
+}
+
+// listDistinctAudiobookSeriesWithSource returns distinct series_name values
+// from audiobook_series joined onto the scoped result set. Names are trimmed
+// and case-folded for sort so the picker doesn't show duplicates that differ
+// only by whitespace or casing — the literal trimmed series_name is still
+// returned so existing rules continue to match.
+//
+// The DISTINCT happens in an inline subquery (rather than directly on the
+// outer SELECT) so the outer ORDER BY can apply LOWER(...) without violating
+// Postgres' "ORDER BY expressions must appear in select list" rule for
+// SELECT DISTINCT.
+func listDistinctAudiobookSeriesWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+) ([]string, error) {
+	fromClause, whereClause, args, earlyEmpty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if earlyEmpty {
+		return []string{}, nil
+	}
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT BTRIM(s.series_name) AS name
+			FROM %s
+			JOIN audiobook_series s ON s.content_id = mi.content_id
+			%s
+			  AND s.series_name IS NOT NULL
+			  AND BTRIM(s.series_name) <> ''
+		) names
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, fromClause, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	return queryDistinctStrings(ctx, pool, query, args)
+}
+
+// searchDistinctArrayColumnWithSource prefix-searches the distinct values
+// of an array column (genres, studios, networks, countries) within the
+// scoped result set. Returns up to limit matches in alphabetical order
+// plus a hasMore flag (true when the underlying result set held more
+// rows than limit).
+func searchDistinctArrayColumnWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	column string,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+	prefix string,
+	limit int,
+) ([]string, bool, error) {
+	prefix = strings.TrimSpace(prefix)
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if empty {
+		return []string{}, false, nil
+	}
+	args = append(args, prefix+"%")
+	prefixIdx := len(args)
+	// LOWER() in ORDER BY: this query is already wrapped in a subquery
+	// (the DISTINCT UNNEST), so the outer ORDER BY can reference any
+	// expression freely.
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT UNNEST(mi.%s) AS name
+			FROM %s
+			%s
+		) vals
+		WHERE name IS NOT NULL
+		  AND BTRIM(name) <> ''
+		  AND LOWER(name) LIKE LOWER($%d)
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, column, fromClause, whereClause, prefixIdx, limit+1)
+	return queryFacetSearchResults(ctx, pool, query, args, limit)
+}
+
+// searchDistinctScalarColumnWithSource is the scalar (e.g. content_rating)
+// variant of searchDistinctArrayColumnWithSource.
+func searchDistinctScalarColumnWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	column string,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+	prefix string,
+	limit int,
+) ([]string, bool, error) {
+	prefix = strings.TrimSpace(prefix)
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if empty {
+		return []string{}, false, nil
+	}
+	args = append(args, prefix+"%")
+	prefixIdx := len(args)
+	// DISTINCT in an inline subquery so the outer ORDER BY can apply
+	// LOWER() without violating the SELECT DISTINCT rule.
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT mi.%s AS name
+			FROM %s
+			%s
+			  AND mi.%s IS NOT NULL
+			  AND BTRIM(mi.%s) <> ''
+			  AND LOWER(mi.%s) LIKE LOWER($%d)
+		) matches
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, column, fromClause, browseFilterPrefix(whereClause), column, column, column, prefixIdx, limit+1)
+	return queryFacetSearchResults(ctx, pool, query, args, limit)
+}
+
+// searchDistinctPeopleByKindWithSource is the typeahead equivalent of
+// listDistinctPeopleByKindWithSource; powers /api/v1/catalog/filters/search
+// for facet=author and facet=narrator.
+func searchDistinctPeopleByKindWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	kind models.PersonKind,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+	prefix string,
+	limit int,
+) ([]string, bool, error) {
+	prefix = strings.TrimSpace(prefix)
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if empty {
+		return []string{}, false, nil
+	}
+	args = append(args, int(kind))
+	kindIdx := len(args)
+	args = append(args, prefix+"%")
+	prefixIdx := len(args)
+	// DISTINCT in an inline subquery so the outer ORDER BY can apply
+	// LOWER() without violating Postgres' "ORDER BY expressions must
+	// appear in select list" rule for SELECT DISTINCT.
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT p.name AS name
+			FROM %s
+			JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = $%d
+			JOIN people p ON p.id = ip.person_id
+			%s
+			  AND p.name IS NOT NULL
+			  AND BTRIM(p.name) <> ''
+			  AND LOWER(p.name) LIKE LOWER($%d)
+		) matches
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, fromClause, kindIdx, browseFilterPrefix(whereClause), prefixIdx, limit+1)
+	return queryFacetSearchResults(ctx, pool, query, args, limit)
+}
+
+// searchDistinctAudiobookSeriesWithSource is the typeahead equivalent of
+// listDistinctAudiobookSeriesWithSource.
+func searchDistinctAudiobookSeriesWithSource(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	filters BrowseFilters,
+	baseRelation string,
+	mediaScope string,
+	prefix string,
+	limit int,
+) ([]string, bool, error) {
+	prefix = strings.TrimSpace(prefix)
+	if limit <= 0 {
+		return []string{}, false, nil
+	}
+	fromClause, whereClause, args, empty := filterWhereClauseForSource(filters, baseRelation, mediaScope)
+	if empty {
+		return []string{}, false, nil
+	}
+	args = append(args, prefix+"%")
+	prefixIdx := len(args)
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT DISTINCT BTRIM(s.series_name) AS name
+			FROM %s
+			JOIN audiobook_series s ON s.content_id = mi.content_id
+			%s
+			  AND s.series_name IS NOT NULL
+			  AND BTRIM(s.series_name) <> ''
+			  AND LOWER(BTRIM(s.series_name)) LIKE LOWER($%d)
+		) names
+		ORDER BY LOWER(name) ASC
+		LIMIT %d
+	`, fromClause, browseFilterPrefix(whereClause), prefixIdx, limit+1)
+	return queryFacetSearchResults(ctx, pool, query, args, limit)
+}
+
+// queryFacetSearchResults executes a facet search query that was built
+// with LIMIT N+1 and returns the first N rows plus a hasMore flag
+// indicating whether an additional row was present (i.e. the result set
+// exceeded the requested limit).
+func queryFacetSearchResults(ctx context.Context, pool *pgxpool.Pool, query string, args []any, limit int) ([]string, bool, error) {
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	values := make([]string, 0, limit)
+	hasMore := false
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, false, err
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if len(values) >= limit {
+			hasMore = true
+			continue
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	return values, hasMore, nil
+}
+
 func listDistinctJSONBLanguageWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -757,7 +1021,8 @@ func listDistinctJSONBLanguageWithSource(
 			  AND lang IS NOT NULL
 			  AND lang <> ''
 			ORDER BY value ASC
-		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause))
+			LIMIT %d
+		`, fromClause, mediaFileJoin, arrayColumn, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 		return queryDistinctStrings(ctx, pool, query, args)
 	}
 
@@ -770,7 +1035,8 @@ func listDistinctJSONBLanguageWithSource(
 		  AND mf.missing_since IS NULL
 		  AND COALESCE(track->>'language', '') <> ''
 		ORDER BY value ASC
-	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause))
+		LIMIT %d
+	`, fromClause, mediaFileJoin, column, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
@@ -932,81 +1198,13 @@ func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 	return items, nil
 }
 
-// scanBrowseItemsWithTotal scans rows that include a trailing total_count column
-// emitted by COUNT(*) OVER (). Used by browse() in the includeTotal path so we
-// don't fire a separate count query.
-func scanBrowseItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
-	var (
-		items []*models.MediaItem
-		total int
-	)
-	for rows.Next() {
-		var item models.MediaItem
-		var rowTotal int
-		err := rows.Scan(
-			&item.ContentID,
-			&item.Type,
-			&item.Title,
-			&item.SortTitle,
-			&item.OriginalTitle,
-			&item.Year,
-			&item.Genres,
-			&item.ContentRating,
-			&item.Runtime,
-			&item.Overview,
-			&item.Tagline,
-			&item.RatingIMDB,
-			&item.RatingTMDB,
-			&item.RatingRTCritic,
-			&item.RatingRTAudience,
-			&item.ImdbID,
-			&item.TmdbID,
-			&item.TvdbID,
-			&item.PosterPath,
-			&item.PosterThumbhash,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
-			&item.MetadataS3Path,
-			&item.MetadataEtag,
-			&item.SeasonCount,
-			&item.Studios,
-			&item.Networks,
-			&item.Countries,
-			&item.Keywords,
-			&item.OriginalLanguage,
-			&item.ReleaseDate,
-			&item.FirstAirDate,
-			&item.LastAirDate,
-			&item.ShowStatus,
-			&item.MatchedAt,
-			&item.EpisodeMetadataIncomplete,
-			&item.EpisodeMetadataLastCheckedAt,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-			&item.AddedAt,
-			&rowTotal,
-		)
-		if err != nil {
-			return nil, 0, fmt.Errorf("scanning browse item row with total: %w", err)
-		}
-		items = append(items, &item)
-		total = rowTotal
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterating browse item rows: %w", err)
-	}
-	return items, total, nil
-}
-
 // buildOrderBy constructs the ORDER BY clause from sort and order parameters.
 func buildOrderBy(sort, order string) string {
-	clause, _ := buildOrderByPlan(sort, order, nil, 0, false)
+	clause, _ := buildOrderByPlan(sort, order, nil, 0, false, false)
 	return clause
 }
 
-func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singleLibraryNoDedup bool) (string, []any) {
+func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singleLibraryNoDedup bool, movieOnly bool) (string, []any) {
 	direction := "DESC"
 	if strings.EqualFold(order, "asc") {
 		direction = "ASC"
@@ -1027,6 +1225,9 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 		}
 		return "ORDER BY RANDOM()", nil
 	case "release_date":
+		if movieOnly {
+			return fmt.Sprintf("ORDER BY mi.release_date %s%s, mi.content_id ASC", direction, nullsClause), nil
+		}
 		return fmt.Sprintf(
 			"ORDER BY COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), '')) %s%s, mi.content_id ASC",
 			direction,
@@ -1065,6 +1266,11 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 	default:
 		return fmt.Sprintf("ORDER BY mi.created_at %s, mi.content_id ASC", direction), nil
 	}
+}
+
+func browseFiltersAreMovieOnly(filters BrowseFilters) bool {
+	types := splitTypes(filters.Type)
+	return len(types) == 1 && types[0] == "movie"
 }
 
 // ParseContentRatings splits a comma-separated content rating string into

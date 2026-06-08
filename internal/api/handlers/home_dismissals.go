@@ -8,11 +8,13 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type HomeDismissalHandler struct {
 	storeProvider userstore.UserStoreProvider
+	EventsHub     *evt.Hub
 }
 
 type upsertHomeDismissalRequest struct {
@@ -76,6 +78,16 @@ func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save dismissal")
 		return
 	}
+	publishUserStateEvent(
+		r.Context(),
+		h.EventsHub,
+		userID,
+		profileID,
+		itemID,
+		req.SeriesID,
+		"home_dismissal",
+		userStateEventState{},
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -104,6 +116,16 @@ func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete dismissal")
 		return
 	}
+	publishUserStateEvent(
+		r.Context(),
+		h.EventsHub,
+		userID,
+		profileID,
+		itemID,
+		"",
+		"home_dismissal",
+		userStateEventState{},
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }

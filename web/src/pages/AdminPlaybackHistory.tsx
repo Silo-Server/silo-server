@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminPlaybackHistory, useAdminUserProfiles } from "@/hooks/queries/admin/history";
@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { History } from "lucide-react";
+import { History, RefreshCw } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -27,12 +27,15 @@ const ALL_USERS = "all";
 const ALL_PROFILES = "all";
 const ALL_COMPLETION = "all";
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
+const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 
 export default function AdminPlaybackHistory() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: users = [] } = useAdminUsers();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
+  const manualRefreshStartedAtRef = useRef<number | null>(null);
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
 
   const selectedUser = searchParams.get("user_id") ?? ALL_USERS;
   const selectedProfile = searchParams.get("profile_id") ?? ALL_PROFILES;
@@ -49,6 +52,26 @@ export default function AdminPlaybackHistory() {
     limit: 100,
   });
   const profiles = useAdminUserProfiles(selectedUserId);
+  const { refetch: refetchHistory } = history;
+
+  const refreshHistory = useCallback(async () => {
+    manualRefreshStartedAtRef.current = Date.now();
+    setIsManualRefreshPending(true);
+    try {
+      await refetchHistory();
+    } finally {
+      const startedAt = manualRefreshStartedAtRef.current;
+      if (startedAt !== null) {
+        const elapsed = Date.now() - startedAt;
+        const remaining = REFRESH_SPINNER_MIN_VISIBLE_MS - elapsed;
+        if (remaining > 0) {
+          await delay(remaining);
+        }
+      }
+      manualRefreshStartedAtRef.current = null;
+      setIsManualRefreshPending(false);
+    }
+  }, [refetchHistory]);
 
   useEffect(() => {
     if (selectedUser === ALL_USERS && selectedProfile !== ALL_PROFILES) {
@@ -166,6 +189,19 @@ export default function AdminPlaybackHistory() {
 
           <Button variant="outline" size="sm" onClick={resetFilters}>
             Reset
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-w-[8.25rem] justify-center"
+            onClick={() => {
+              void refreshHistory();
+            }}
+            disabled={isManualRefreshPending}
+            aria-busy={isManualRefreshPending}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`} />
+            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
       </div>
@@ -405,4 +441,10 @@ function formatRelative(value: string) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }

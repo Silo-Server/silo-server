@@ -101,7 +101,7 @@ function AddNodeForm({ onAdded }: { onAdded: (node: AddedNode) => void }) {
 
 export function NodesFinishStep() {
   const navigate = useNavigate();
-  const { profile, profiles, selectProfile } = useWizardContext();
+  const { clearProgress, profile, profiles, selectProfile } = useWizardContext();
   const [finishing, setFinishing] = useState(false);
   const [addedNodes, setAddedNodes] = useState<AddedNode[]>([]);
   const [showNodeForm, setShowNodeForm] = useState(false);
@@ -110,17 +110,23 @@ export function NodesFinishStep() {
     setAddedNodes((prev) => [...prev, node]);
   }
 
-  async function handleFinish() {
-    setFinishing(true);
-    try {
-      const chosenProfile = profile ?? profiles[0] ?? null;
-      if (chosenProfile && !profile) {
-        selectProfile(chosenProfile);
-      }
-      navigate("/");
-    } finally {
-      setFinishing(false);
+  function completeSetup(destination: string) {
+    const chosenProfile = profile ?? profiles[0] ?? null;
+    if (chosenProfile && !profile) {
+      selectProfile(chosenProfile);
     }
+    clearProgress();
+    navigate(destination);
+  }
+
+  function handleFinish() {
+    setFinishing(true);
+    completeSetup("/");
+  }
+
+  function handleGoToAdmin() {
+    setFinishing(true);
+    completeSetup("/admin/libraries");
   }
 
   return (
@@ -162,7 +168,8 @@ export function NodesFinishStep() {
         <Button
           type="button"
           variant="secondary"
-          onClick={() => navigate("/admin/libraries")}
+          onClick={handleGoToAdmin}
+          disabled={finishing}
           className="sm:flex-1"
         >
           Go to admin

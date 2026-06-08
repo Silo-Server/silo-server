@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,9 +21,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/uploads"
 )
 
-const maxPluginUploadSize = 256 << 20
+const (
+	maxPluginUploadSize      = 256 << 20
+	maxPluginUploadChunkSize = 1 << 20
+	defaultPluginChunkSize   = 512 << 10
+)
 
 type PluginHandler struct {
 	repositories  *plugins.RepositoryStore
@@ -33,6 +39,7 @@ type PluginHandler struct {
 	proxy         *plugins.HTTPProxy
 	chainRepo     *metadata.ChainRepository
 	imageResolver *metadata.PluginImageResolver
+	uploads       *uploads.Manager
 }
 
 func NewPluginHandler(
@@ -54,6 +61,10 @@ func NewPluginHandler(
 		proxy:         proxy,
 		chainRepo:     chainRepo,
 		imageResolver: imageResolver,
+		uploads: uploads.NewManager(uploads.ManagerOptions{
+			MaxSize:      maxPluginUploadSize,
+			MaxChunkSize: maxPluginUploadChunkSize,
+		}),
 	}
 }
 
@@ -95,6 +106,12 @@ type pluginTaskBindingRequest struct {
 
 type userPluginSettingsRequest struct {
 	Values map[string]string `json:"values"`
+}
+
+type pluginChunkedUploadCreateRequest struct {
+	Filename  string `json:"filename"`
+	SizeBytes int64  `json:"size_bytes"`
+	ChunkSize int64  `json:"chunk_size,omitempty"`
 }
 
 type pluginRepositoryResponse struct {
@@ -246,6 +263,18 @@ type pluginUserSettingsDetailResponse struct {
 
 type pluginTaskBindingUpdateResponse struct {
 	RestartRequired bool `json:"restart_required"`
+}
+
+type pluginChunkedUploadSessionResponse struct {
+	UploadID       string    `json:"upload_id"`
+	Filename       string    `json:"filename"`
+	SizeBytes      int64     `json:"size_bytes"`
+	ChunkSize      int64     `json:"chunk_size"`
+	TotalChunks    int       `json:"total_chunks"`
+	ReceivedChunks int       `json:"received_chunks"`
+	ReceivedBytes  int64     `json:"received_bytes"`
+	Complete       bool      `json:"complete"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 
 func (h *PluginHandler) HandleListRepositories(w http.ResponseWriter, r *http.Request) {
@@ -491,27 +520,114 @@ func (h *PluginHandler) HandleUploadInstallation(w http.ResponseWriter, r *http.
 		return
 	}
 
-	uploadData, err := os.ReadFile(tempPath)
-	if err != nil {
-		slog.Error("reading temp plugin upload file", "filename", header.Filename, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process plugin upload")
-		return
-	}
-
-	var result *plugins.InstallResult
-	if isZipUpload(uploadData) {
-		result, err = h.service.InstallLocal(r.Context(), plugins.InstallArchiveRequest{
-			ArchivePath: tempPath,
-		})
-	} else {
-		result, err = h.service.InstallBinaryUpload(r.Context(), uploadData)
-	}
+	result, err := h.installUploadedPlugin(r.Context(), tempPath)
 	if err != nil {
 		slog.Error("installing uploaded plugin", "filename", header.Filename, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to install uploaded plugin")
 		return
 	}
 
+	h.writeUploadedPluginResponse(w, r, result)
+}
+
+func (h *PluginHandler) HandleCreateChunkedUpload(w http.ResponseWriter, r *http.Request) {
+	var req pluginChunkedUploadCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if req.ChunkSize == 0 {
+		req.ChunkSize = defaultPluginChunkSize
+	}
+
+	session, err := h.uploads.Create(uploads.CreateRequest{
+		Filename:  req.Filename,
+		SizeBytes: req.SizeBytes,
+		ChunkSize: req.ChunkSize,
+	})
+	if err != nil {
+		status, message := uploadErrorResponse(err)
+		writeError(w, status, "upload_error", message)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, toPluginChunkedUploadSessionResponse(session))
+}
+
+func (h *PluginHandler) HandleUploadChunk(w http.ResponseWriter, r *http.Request) {
+	uploadID := chi.URLParam(r, "upload_id")
+	chunkIndex, err := strconv.Atoi(chi.URLParam(r, "chunk_index"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid chunk index")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, h.uploads.MaxChunkSize()+1)
+	defer r.Body.Close()
+
+	session, err := h.uploads.PutChunk(r.Context(), uploadID, chunkIndex, r.Body, r.ContentLength)
+	if err != nil {
+		status, message := uploadErrorResponse(err)
+		writeError(w, status, "upload_error", message)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toPluginChunkedUploadSessionResponse(session))
+}
+
+func (h *PluginHandler) HandleCompleteChunkedUpload(w http.ResponseWriter, r *http.Request) {
+	uploadID := chi.URLParam(r, "upload_id")
+	upload, err := h.uploads.Complete(uploadID)
+	if err != nil {
+		status, message := uploadErrorResponse(err)
+		writeError(w, status, "upload_error", message)
+		return
+	}
+	defer upload.Cleanup()
+
+	result, err := h.installUploadedPlugin(r.Context(), upload.Path)
+	if err != nil {
+		slog.Error("installing chunked plugin upload",
+			"filename", upload.Filename,
+			"upload_id", upload.ID,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to install uploaded plugin")
+		return
+	}
+
+	h.writeUploadedPluginResponse(w, r, result)
+}
+
+func (h *PluginHandler) HandleCancelChunkedUpload(w http.ResponseWriter, r *http.Request) {
+	if err := h.uploads.Cancel(chi.URLParam(r, "upload_id")); err != nil && !errors.Is(err, uploads.ErrNotFound) {
+		status, message := uploadErrorResponse(err)
+		writeError(w, status, "upload_error", message)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) (*plugins.InstallResult, error) {
+	zipUpload, err := isZipUploadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if zipUpload {
+		return h.service.InstallLocal(ctx, plugins.InstallArchiveRequest{
+			ArchivePath: path,
+		})
+	}
+
+	uploadData, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read uploaded plugin binary: %w", err)
+	}
+	return h.service.InstallBinaryUpload(ctx, uploadData)
+}
+
+func (h *PluginHandler) writeUploadedPluginResponse(w http.ResponseWriter, r *http.Request, result *plugins.InstallResult) {
 	h.syncMetadataProviders(r.Context(), result.Installation)
 	h.syncImageResolvers(r.Context(), result.Installation)
 
@@ -591,6 +707,55 @@ func isZipUpload(data []byte) bool {
 	return bytes.Equal(data[:4], []byte("PK\x03\x04")) ||
 		bytes.Equal(data[:4], []byte("PK\x05\x06")) ||
 		bytes.Equal(data[:4], []byte("PK\x07\x08"))
+}
+
+func isZipUploadFile(path string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("open uploaded plugin file: %w", err)
+	}
+	defer file.Close()
+
+	var header [4]byte
+	n, err := io.ReadFull(file, header[:])
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return false, fmt.Errorf("read uploaded plugin header: %w", err)
+	}
+	return isZipUpload(header[:n]), nil
+}
+
+func toPluginChunkedUploadSessionResponse(session uploads.SessionInfo) pluginChunkedUploadSessionResponse {
+	return pluginChunkedUploadSessionResponse{
+		UploadID:       session.ID,
+		Filename:       session.Filename,
+		SizeBytes:      session.SizeBytes,
+		ChunkSize:      session.ChunkSize,
+		TotalChunks:    session.TotalChunks,
+		ReceivedChunks: session.ReceivedChunks,
+		ReceivedBytes:  session.ReceivedBytes,
+		Complete:       session.Complete,
+		ExpiresAt:      session.ExpiresAt,
+	}
+}
+
+func uploadErrorResponse(err error) (int, string) {
+	var maxBytesErr *http.MaxBytesError
+	switch {
+	case errors.As(err, &maxBytesErr), errors.Is(err, uploads.ErrTooLarge):
+		return http.StatusRequestEntityTooLarge, "Upload exceeds the maximum allowed size"
+	case errors.Is(err, uploads.ErrNotFound):
+		return http.StatusNotFound, "Upload session not found"
+	case errors.Is(err, uploads.ErrExpired):
+		return http.StatusGone, "Upload session expired"
+	case errors.Is(err, uploads.ErrIncomplete):
+		return http.StatusConflict, "Upload session is incomplete"
+	case errors.Is(err, uploads.ErrAlreadyCompleted):
+		return http.StatusConflict, "Upload session is already complete"
+	case errors.Is(err, uploads.ErrInvalidChunk), errors.Is(err, uploads.ErrInvalidRequest):
+		return http.StatusBadRequest, err.Error()
+	default:
+		return http.StatusInternalServerError, "Failed to process upload"
+	}
 }
 
 func (h *PluginHandler) HandleUpdateInstallation(w http.ResponseWriter, r *http.Request) {

@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"sync"
 	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
@@ -21,8 +23,10 @@ import (
 type pluginClient interface {
 	Manifest() *pluginv1.PluginManifest
 	MetadataProvider(capabilityID string) (*pluginhost.MetadataProviderClient, error)
+	MarkerProvider(capabilityID string) (*pluginhost.MarkerProviderClient, error)
 	MediaAnalyzer(capabilityID string) (*pluginhost.MediaAnalyzerClient, error)
 	ScheduledTask(capabilityID string) (*pluginhost.ScheduledTaskClient, error)
+	ScanSource(capabilityID string) (*pluginhost.ScanSourceClient, error)
 	EventConsumer(capabilityID string) (*pluginhost.EventConsumerClient, error)
 	AuthProvider(capabilityID string) (*pluginhost.AuthProviderClient, error)
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
@@ -51,15 +55,17 @@ type serviceConfigStore interface {
 }
 
 type Service struct {
-	repositories  *RepositoryStore
-	installations serviceInstallationStore
-	configs       serviceConfigStore
-	catalog       *CatalogService
-	installer     *Installer
-	archiveCache  *ArchiveCache
-	host          Host
-	testConfigSeq atomic.Int64
-	dispatcher    *EventDispatcher
+	repositories   *RepositoryStore
+	installations  serviceInstallationStore
+	configs        serviceConfigStore
+	catalog        *CatalogService
+	installer      *Installer
+	archiveCache   *ArchiveCache
+	host           Host
+	testConfigSeq  atomic.Int64
+	dispatcher     *EventDispatcher
+	lifecycleMu    sync.RWMutex
+	lifecycleHooks []func(context.Context)
 }
 
 // SetEventDispatcher wires the EventDispatcher into the Service. The
@@ -68,12 +74,42 @@ type Service struct {
 // per-event store reads and needs no notification on install/enable/disable.
 func (s *Service) SetEventDispatcher(d *EventDispatcher) { s.dispatcher = d }
 
-// OnLifecycleChange is a public hook invoked by API handlers and the installer
-// after every install / enable / disable / uninstall. It currently does
-// nothing — the dispatcher reads the live installation set on each event —
-// but the entry point is preserved so future cache-warming logic has a place
-// to attach without touching every call site again.
-func (s *Service) OnLifecycleChange(_ context.Context) {}
+// AddLifecycleHook registers a callback invoked after plugin install, enable,
+// disable, uninstall, or preload lifecycle changes.
+func (s *Service) AddLifecycleHook(hook func(context.Context)) {
+	if s == nil || hook == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	s.lifecycleHooks = append(s.lifecycleHooks, hook)
+	s.lifecycleMu.Unlock()
+}
+
+// OnLifecycleChange is invoked by API handlers and the installer after every
+// plugin lifecycle mutation. Hooks should be best-effort and log their own
+// errors so plugin admin operations are not failed by secondary cache refreshes.
+func (s *Service) OnLifecycleChange(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	s.lifecycleMu.RLock()
+	hooks := append([]func(context.Context){}, s.lifecycleHooks...)
+	s.lifecycleMu.RUnlock()
+	for _, hook := range hooks {
+		func(hook func(context.Context)) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					slog.Error(
+						"plugin lifecycle hook panicked; continuing",
+						"panic", recovered,
+						"stack", string(debug.Stack()),
+					)
+				}
+			}()
+			hook(ctx)
+		}(hook)
+	}
+}
 
 func NewService(
 	repositories *RepositoryStore,
@@ -410,6 +446,18 @@ func (s *Service) MetadataProviderClient(
 	return client.MetadataProvider(capabilityID)
 }
 
+func (s *Service) MarkerProviderClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.MarkerProviderClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.MarkerProvider(capabilityID)
+}
+
 func (s *Service) ScheduledTaskClient(
 	ctx context.Context,
 	installationID int,
@@ -420,6 +468,65 @@ func (s *Service) ScheduledTaskClient(
 		return nil, err
 	}
 	return client.ScheduledTask(capabilityID)
+}
+
+func (s *Service) ScanSourceClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.ScanSourceClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ScanSource(capabilityID)
+}
+
+func (s *Service) ScanSourceClientByPluginID(
+	ctx context.Context,
+	pluginID string,
+	capabilityID string,
+) (*pluginhost.ScanSourceClient, error) {
+	if s == nil || s.installations == nil {
+		return nil, fmt.Errorf("scan source plugin resolver is not configured")
+	}
+	installations, err := s.installations.ListByPluginID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if len(installations) == 0 {
+		return nil, fmt.Errorf("scan source plugin %q is not installed", pluginID)
+	}
+	if len(installations) > 1 {
+		return nil, fmt.Errorf("scan source plugin %q is ambiguous across %d installations", pluginID, len(installations))
+	}
+
+	var matches []*Installation
+	for _, installation := range installations {
+		if installation == nil {
+			continue
+		}
+		capabilities, err := s.installations.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, capability := range capabilities {
+			if capability == nil {
+				continue
+			}
+			if capability.Type == "scan_source.v1" && capability.ID == capabilityID {
+				matches = append(matches, installation)
+				break
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("scan source capability %q is not installed for plugin %q", capabilityID, pluginID)
+	}
+	if !matches[0].Enabled {
+		return nil, fmt.Errorf("scan source plugin %q is disabled", pluginID)
+	}
+	return s.ScanSourceClient(ctx, matches[0].ID, capabilityID)
 }
 
 func (s *Service) EventConsumerClient(

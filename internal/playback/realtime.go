@@ -21,13 +21,23 @@ const (
 type RealtimeEventName string
 
 const (
-	RealtimeEventChapterThumbnailReady RealtimeEventName = "chapter_thumbnail_ready"
-	RealtimeEventMarkersUpdated        RealtimeEventName = "markers_updated"
+	RealtimeEventChapterThumbnailReady    RealtimeEventName = "chapter_thumbnail_ready"
+	RealtimeEventMarkersUpdated           RealtimeEventName = "markers_updated"
+	RealtimeEventSubtitleReady            RealtimeEventName = "subtitle_ready"
+	RealtimeEventSubtitleTranslationStart RealtimeEventName = "subtitle_translation_started"
+	RealtimeEventSubtitleTranslationCues  RealtimeEventName = "subtitle_translation_cues"
+	RealtimeEventSubtitleTranslationDone  RealtimeEventName = "subtitle_translation_completed"
+	RealtimeEventSubtitleTranslationFail  RealtimeEventName = "subtitle_translation_failed"
 )
 
 var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
-	RealtimeEventChapterThumbnailReady: {},
-	RealtimeEventMarkersUpdated:        {},
+	RealtimeEventChapterThumbnailReady:    {},
+	RealtimeEventMarkersUpdated:           {},
+	RealtimeEventSubtitleReady:            {},
+	RealtimeEventSubtitleTranslationStart: {},
+	RealtimeEventSubtitleTranslationCues:  {},
+	RealtimeEventSubtitleTranslationDone:  {},
+	RealtimeEventSubtitleTranslationFail:  {},
 }
 
 // CommandName identifies a supported realtime command.
@@ -125,6 +135,74 @@ type MarkersUpdatedPayload struct {
 	Preview   *TimeRangePayload `json:"preview"`
 }
 
+// SubtitleReadyPayload announces that a newly generated subtitle track (AI
+// translation, and later ASR) is available for the file, so the player can
+// refresh its track list and optionally select it.
+type SubtitleReadyPayload struct {
+	SessionID  string `json:"session_id"`
+	FileID     int    `json:"file_id"`
+	SubtitleID int    `json:"subtitle_id"`
+	Language   string `json:"language"`
+	Label      string `json:"label,omitempty"`
+}
+
+// StreamCue is one translated subtitle cue pushed to the player during a live
+// translation. Start/End are absolute media-time seconds; Text may contain
+// embedded newlines for multi-line cues.
+type StreamCue struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+	Text  string  `json:"text"`
+}
+
+// SubtitleTranslationStartedPayload tells the player a live translation has
+// begun, so it can create a placeholder track, select it, and pause until the
+// first cues near the playhead arrive. TrackKey identifies the live track for
+// subsequent cue/completion events.
+type SubtitleTranslationStartedPayload struct {
+	SessionID string `json:"session_id"`
+	FileID    int    `json:"file_id"`
+	JobID     int64  `json:"job_id"`
+	TrackKey  string `json:"track_key"`
+	Language  string `json:"language"`
+	Label     string `json:"label,omitempty"`
+	TotalCues int    `json:"total_cues"`
+}
+
+// SubtitleTranslationCuesPayload delivers a batch of translated cues for a live
+// track as it is produced. Done/Total track overall progress.
+type SubtitleTranslationCuesPayload struct {
+	SessionID string      `json:"session_id"`
+	FileID    int         `json:"file_id"`
+	JobID     int64       `json:"job_id"`
+	TrackKey  string      `json:"track_key"`
+	Cues      []StreamCue `json:"cues"`
+	Done      int         `json:"done"`
+	Total     int         `json:"total"`
+}
+
+// SubtitleTranslationCompletedPayload signals the live translation finished and
+// the full track is persisted as a downloaded subtitle (SubtitleID).
+type SubtitleTranslationCompletedPayload struct {
+	SessionID  string `json:"session_id"`
+	FileID     int    `json:"file_id"`
+	JobID      int64  `json:"job_id"`
+	TrackKey   string `json:"track_key"`
+	SubtitleID int    `json:"subtitle_id"`
+	Language   string `json:"language"`
+	Label      string `json:"label,omitempty"`
+}
+
+// SubtitleTranslationFailedPayload signals a live translation failed, so the
+// player can drop the placeholder track and resume playback.
+type SubtitleTranslationFailedPayload struct {
+	SessionID string `json:"session_id"`
+	FileID    int    `json:"file_id"`
+	JobID     int64  `json:"job_id"`
+	TrackKey  string `json:"track_key"`
+	Message   string `json:"message,omitempty"`
+}
+
 // NewEventEnvelope creates a validated realtime event envelope.
 func NewEventEnvelope(sessionID string, name RealtimeEventName, payload json.RawMessage) (EventEnvelope, error) {
 	normalizedPayload, err := normalizeJSONPayload(payload)
@@ -184,6 +262,74 @@ func NewMarkersUpdatedEvent(
 		return EventEnvelope{}, err
 	}
 	return NewEventEnvelope(sessionID, RealtimeEventMarkersUpdated, payload)
+}
+
+// NewSubtitleReadyEvent creates a validated subtitle-ready event.
+func NewSubtitleReadyEvent(
+	sessionID string,
+	fileID int,
+	subtitleID int,
+	language string,
+	label string,
+) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleReadyPayload{
+		SessionID:  sessionID,
+		FileID:     fileID,
+		SubtitleID: subtitleID,
+		Language:   language,
+		Label:      label,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleReady, payload)
+}
+
+// NewSubtitleTranslationStartedEvent creates a validated translation-started event.
+func NewSubtitleTranslationStartedEvent(sessionID string, fileID int, jobID int64, trackKey, language, label string, totalCues int) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleTranslationStartedPayload{
+		SessionID: sessionID, FileID: fileID, JobID: jobID,
+		TrackKey: trackKey, Language: language, Label: label, TotalCues: totalCues,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTranslationStart, payload)
+}
+
+// NewSubtitleTranslationCuesEvent creates a validated translation-cues event.
+func NewSubtitleTranslationCuesEvent(sessionID string, fileID int, jobID int64, trackKey string, cues []StreamCue, done, total int) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleTranslationCuesPayload{
+		SessionID: sessionID, FileID: fileID, JobID: jobID,
+		TrackKey: trackKey, Cues: cues, Done: done, Total: total,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTranslationCues, payload)
+}
+
+// NewSubtitleTranslationCompletedEvent creates a validated translation-completed event.
+func NewSubtitleTranslationCompletedEvent(sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleTranslationCompletedPayload{
+		SessionID: sessionID, FileID: fileID, JobID: jobID,
+		TrackKey: trackKey, SubtitleID: subtitleID, Language: language, Label: label,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTranslationDone, payload)
+}
+
+// NewSubtitleTranslationFailedEvent creates a validated translation-failed event.
+func NewSubtitleTranslationFailedEvent(sessionID string, fileID int, jobID int64, trackKey, message string) (EventEnvelope, error) {
+	payload, err := json.Marshal(SubtitleTranslationFailedPayload{
+		SessionID: sessionID, FileID: fileID, JobID: jobID, TrackKey: trackKey, Message: message,
+	})
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTranslationFail, payload)
 }
 
 // ParseEventEnvelope decodes and validates a realtime event envelope.

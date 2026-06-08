@@ -23,6 +23,32 @@ function stripVTTTags(text: string): string {
   return text.replace(/<[^>]+>/g, "");
 }
 
+/**
+ * Add parsed cues to a TextTrack, applying the stream origin and user delay and
+ * deduping against `seen`. Shared by the URL fetcher and the live-cue path.
+ */
+function addCuesToTrack(
+  track: TextTrack,
+  cues: ParsedCue[],
+  origin: number,
+  delaySec: number,
+  seen: Set<string>,
+): void {
+  for (const parsed of cues) {
+    if (parsed.end <= parsed.start) continue;
+    const startTime = Math.max(0, parsed.start - origin + delaySec);
+    const endTime = parsed.end - origin + delaySec;
+    if (endTime <= 0) continue;
+    // Key on the source cue times, not the delay-shifted display times: the
+    // delay can change between overlapping fetch windows, and a delay-relative
+    // key would let the same source cue re-add itself after a shift.
+    const key = `${parsed.start}|${parsed.end}|${parsed.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    track.addCue(new VTTCue(startTime, endTime, parsed.text));
+  }
+}
+
 /** Append or replace the `position` query param on a subtitle URL. */
 function appendPosition(url: string, position: number): string {
   const sep = url.includes("?") ? "&" : "?";
@@ -55,6 +81,10 @@ export function useSubtitleTracks(
   activeSubtitleIndex: number | null,
   streamOriginRef: React.RefObject<number>,
   subtitleDelayMs: number,
+  liveCues?: ParsedCue[] | null,
+  // Identifies the current live translation job. Changing it (a new job) rebuilds
+  // the track and resets the dedup set so cues from a prior run never linger.
+  liveTrackKey?: string | null,
 ): string[] {
   const [activeCueTexts, setActiveCueTexts] = useState<string[]>([]);
 
@@ -65,12 +95,22 @@ export function useSubtitleTracks(
   const activeUrl = activeSub?.url ?? null;
   const activeCodec = activeSub?.codec;
   const activeLang = activeSub?.language ?? "";
+  // A live track's cues arrive over the websocket (liveCues) instead of from a
+  // URL; the main effect builds the track but skips the sliding-window fetcher.
+  const activeIsLive = activeSub?.live === true;
 
   // Track which delay is currently baked into the VTTCues on the active track,
   // so the delay-update effect below can compute the exact shift to apply.
   // Cue-add paths also read this to keep new cues aligned with existing ones.
   const appliedDelayMsRef = useRef(0);
   const trackRef = useRef<TextTrack | null>(null);
+  // Cue dedup set, held in a ref so the live-cue effect and the URL fetcher
+  // share it. Reset whenever a fresh track is built.
+  const seenCueKeysRef = useRef<Set<string>>(new Set());
+  // How many of `liveCues` have already been pushed onto the live track. Lets the
+  // live-cue effect add only the new tail each batch instead of rescanning the
+  // whole (growing) array. Reset on every track rebuild.
+  const processedLiveCuesRef = useRef(0);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -80,7 +120,11 @@ export function useSubtitleTracks(
     setActiveCueTexts([]);
 
     // Skip entirely for ASS/SSA: JASSUB handles those via useASSSubtitles.
-    if (!activeUrl || isASSCodec(activeCodec)) {
+    if (isASSCodec(activeCodec)) {
+      return;
+    }
+    // Need either a URL to stream from or a live cue source.
+    if (!activeUrl && !activeIsLive) {
       return;
     }
 
@@ -91,6 +135,8 @@ export function useSubtitleTracks(
     const track = videoEl.addTextTrack("subtitles", "Silo", activeLang || undefined);
     track.mode = "hidden";
     trackRef.current = track;
+    seenCueKeysRef.current = new Set();
+    processedLiveCuesRef.current = 0;
 
     let cancelled = false;
     let hasFetched = false;
@@ -100,10 +146,6 @@ export function useSubtitleTracks(
     let windowEnd = 0;
     let atEOF = false;
     let inflight: AbortController | null = null;
-
-    // Persistent dedup: cues from overlapping windows key to the same string.
-    // Cleared alongside track cues on backward-seek resets.
-    const seenCueKeys = new Set<string>();
 
     function handleCueChange() {
       const active = track.activeCues;
@@ -124,7 +166,7 @@ export function useSubtitleTracks(
       for (const cue of Array.from(cues)) {
         track.removeCue(cue);
       }
-      seenCueKeys.clear();
+      seenCueKeysRef.current.clear();
     }
 
     function addParsedCues(newCues: ParsedCue[]) {
@@ -136,17 +178,7 @@ export function useSubtitleTracks(
       // baked in here so new cues line up with existing ones.
       const origin = streamOriginRef.current ?? 0;
       const delaySec = appliedDelayMsRef.current / 1000;
-
-      for (const parsed of newCues) {
-        if (parsed.end <= parsed.start) continue;
-        const startTime = Math.max(0, parsed.start - origin + delaySec);
-        const endTime = parsed.end - origin + delaySec;
-        if (endTime <= 0) continue;
-        const key = `${startTime}|${endTime}|${parsed.text}`;
-        if (seenCueKeys.has(key)) continue;
-        seenCueKeys.add(key);
-        track.addCue(new VTTCue(startTime, endTime, parsed.text));
-      }
+      addCuesToTrack(track, newCues, origin, delaySec, seenCueKeysRef.current);
     }
 
     async function fetchWindow(seekStart: number, resetExisting: boolean) {
@@ -251,15 +283,19 @@ export function useSubtitleTracks(
       }
     }
 
-    // Kick off the first window before any player event fires so cues
-    // are already in flight for the current position.
-    maybeFetch();
+    // URL-backed tracks run the sliding-window fetcher; live tracks receive
+    // their cues from the liveCues effect below instead.
+    if (!activeIsLive) {
+      // Kick off the first window before any player event fires so cues
+      // are already in flight for the current position.
+      maybeFetch();
 
-    // Cue activation is driven by the browser via `cuechange`; these
-    // listeners exist only to keep the sliding-window fetcher scheduled.
-    videoEl.addEventListener("timeupdate", maybeFetch);
-    videoEl.addEventListener("seeking", maybeFetch);
-    videoEl.addEventListener("seeked", maybeFetch);
+      // Cue activation is driven by the browser via `cuechange`; these
+      // listeners exist only to keep the sliding-window fetcher scheduled.
+      videoEl.addEventListener("timeupdate", maybeFetch);
+      videoEl.addEventListener("seeking", maybeFetch);
+      videoEl.addEventListener("seeked", maybeFetch);
+    }
 
     return () => {
       cancelled = true;
@@ -281,7 +317,7 @@ export function useSubtitleTracks(
     // `subtitleDelayMs` is intentionally excluded — nudging delay must not
     // tear down and refetch the track. The delay-update effect below shifts
     // existing cues in place instead.
-  }, [activeUrl, activeCodec, activeLang, streamOriginRef, videoRef]);
+  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, streamOriginRef, videoRef]);
 
   // Apply delay changes to already-loaded cues without rebuilding the track.
   // Runs after the main effect, so trackRef is current.
@@ -302,6 +338,38 @@ export function useSubtitleTracks(
       vc.endTime = vc.endTime + deltaSec;
     }
   }, [subtitleDelayMs]);
+
+  // Feed websocket-pushed cues into the active live track as they arrive. Only
+  // the new tail since the last push is added (liveCues is append-only within a
+  // job), so ingestion stays O(batch) rather than O(total) per push. When the
+  // job restarts liveCues is replaced with a shorter array, which the length
+  // check below detects to start over (the track itself is rebuilt via
+  // liveTrackKey, so a fresh seen-set and pointer are already in place).
+  useEffect(() => {
+    if (!activeIsLive) return;
+    const track = trackRef.current;
+    if (!track || !liveCues) return;
+    if (liveCues.length < processedLiveCuesRef.current) {
+      processedLiveCuesRef.current = 0;
+    }
+    const fresh = liveCues.slice(processedLiveCuesRef.current);
+    if (fresh.length === 0) return;
+    processedLiveCuesRef.current = liveCues.length;
+    const origin = streamOriginRef.current ?? 0;
+    const delaySec = appliedDelayMsRef.current / 1000;
+    addCuesToTrack(track, fresh, origin, delaySec, seenCueKeysRef.current);
+    // While paused, adding a cue over the playhead doesn't reliably fire
+    // `cuechange`, so refresh the on-screen text by hand. While playing the
+    // browser drives `cuechange`, so skip the redundant state update.
+    if (videoRef.current?.paused) {
+      const active = track.activeCues;
+      setActiveCueTexts(
+        active && active.length > 0
+          ? Array.from(active).map((c) => stripVTTTags((c as VTTCue).text))
+          : [],
+      );
+    }
+  }, [liveCues, activeIsLive, activeSubtitleIndex, liveTrackKey, streamOriginRef, videoRef]);
 
   return activeCueTexts;
 }

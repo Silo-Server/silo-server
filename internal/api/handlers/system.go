@@ -17,14 +17,16 @@ import (
 type SystemHandler struct {
 	transcodePool *nodepool.TranscodePool
 	jwtSecret     string
+	ffmpegPath    string
 	buildInfo     buildinfo.Info
 }
 
 // NewSystemHandler creates a SystemHandler.
-func NewSystemHandler(transcodePool *nodepool.TranscodePool, jwtSecret string) *SystemHandler {
+func NewSystemHandler(transcodePool *nodepool.TranscodePool, jwtSecret string, ffmpegPath string) *SystemHandler {
 	return &SystemHandler{
 		transcodePool: transcodePool,
 		jwtSecret:     jwtSecret,
+		ffmpegPath:    ffmpegPath,
 		buildInfo:     buildinfo.Current(),
 	}
 }
@@ -45,7 +47,7 @@ func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	info := playback.DetectHWAccel()
+	info := playback.DetectHWAccelWithFFmpeg(h.ffmpegPath)
 	writeJSON(w, http.StatusOK, info)
 }
 

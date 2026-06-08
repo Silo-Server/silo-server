@@ -9,14 +9,23 @@ import {
   RotateCw,
   SkipBack,
   SkipForward,
+  Tags,
 } from "lucide-react";
+import { CircleButton } from "./CircleButton";
 import { SeekBar, formatTime } from "./SeekBar";
 import { VolumeControl } from "./VolumeControl";
 import { QualityMenu } from "./QualityMenu";
 import { SubtitleMenu } from "./SubtitleMenu";
 import { AudioTrackMenu } from "./AudioTrackMenu";
 import { ChaptersMenu } from "./ChaptersMenu";
-import type { PlayerAudioTrack, PlayerChapter, PlayerSubtitleInfo, QualityOption } from "../types";
+import type {
+  MarkerKind,
+  MarkerRegionView,
+  PlayerAudioTrack,
+  PlayerChapter,
+  PlayerSubtitleInfo,
+  QualityOption,
+} from "../types";
 import type { VersionInfo } from "./QualityMenu";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 
@@ -30,8 +39,14 @@ interface PlayerControlsProps {
   buffered: TimeRanges | null;
   // Seek bar markers
   chapters?: PlayerChapter[];
-  introRegion?: { start: number; end: number } | null;
-  creditsRegion?: { start: number; end: number } | null;
+  regions?: MarkerRegionView[];
+  // Marker editing
+  editing?: boolean;
+  activeEditKind?: MarkerKind | null;
+  onRegionEdgeChange?: (kind: MarkerKind, edge: "start" | "end", seconds: number) => void;
+  markerEditAvailable?: boolean;
+  markerEditActive?: boolean;
+  onToggleMarkerEdit?: () => void;
   volume: number;
   muted: boolean;
   isFullscreen: boolean;
@@ -44,6 +59,8 @@ interface PlayerControlsProps {
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
+  sessionId?: string;
+  getSubtitleStartPosition?: () => number;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -89,8 +106,13 @@ export function PlayerControls({
   duration,
   buffered,
   chapters,
-  introRegion,
-  creditsRegion,
+  regions,
+  editing,
+  activeEditKind,
+  onRegionEdgeChange,
+  markerEditAvailable = false,
+  markerEditActive = false,
+  onToggleMarkerEdit,
   volume,
   muted,
   isFullscreen,
@@ -102,6 +124,8 @@ export function PlayerControls({
   mediaFileId,
   playerConfig,
   onRefreshSubtitles,
+  sessionId,
+  getSubtitleStartPosition,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
@@ -160,8 +184,10 @@ export function PlayerControls({
           duration={duration}
           buffered={buffered}
           chapters={chapters}
-          introRegion={introRegion}
-          creditsRegion={creditsRegion}
+          regions={regions}
+          editing={editing}
+          activeEditKind={activeEditKind}
+          onRegionEdgeChange={onRegionEdgeChange}
           onSeek={onSeek}
         />
 
@@ -304,6 +330,8 @@ export function PlayerControls({
               mediaFileId={mediaFileId}
               playerConfig={playerConfig}
               onRefreshSubtitles={onRefreshSubtitles}
+              sessionId={sessionId}
+              getSubtitleStartPosition={getSubtitleStartPosition}
             />
 
             <QualityMenu
@@ -315,6 +343,20 @@ export function PlayerControls({
               versions={versions}
               onSwitchVersion={onSwitchVersion}
             />
+
+            {markerEditAvailable && onToggleMarkerEdit && (
+              <button
+                type="button"
+                className="player-utility-btn"
+                onClick={onToggleMarkerEdit}
+                aria-label="Edit markers"
+                aria-pressed={markerEditActive}
+                title="Edit markers"
+                data-active={markerEditActive ? "true" : "false"}
+              >
+                <Tags className="h-[18px] w-[18px]" />
+              </button>
+            )}
 
             <button
               type="button"
@@ -360,52 +402,6 @@ export function PlayerControls({
 /* ─────────────────────────────────────────────────────────────────────
    Internal building blocks
    ───────────────────────────────────────────────────────────────────── */
-
-type CircleButtonProps = {
-  size: "sm" | "md" | "lg";
-  variant: "primary" | "secondary";
-  ariaLabel: string;
-  onClick?: () => void;
-  children: React.ReactNode;
-  "data-paused"?: boolean;
-};
-
-/**
- * Pill-circle button used in the centered playback cluster.
- * - `primary` = glossy white disc (play/pause).
- * - `secondary` = subtle glass disc (skip, prev/next episode).
- * Sizes: `sm` 40–44px for in-bar secondaries, `md` 52–56px for in-bar
- * play button, `lg` 80px reserved for a future floating variant.
- */
-function CircleButton({
-  size,
-  variant,
-  ariaLabel,
-  onClick,
-  children,
-  "data-paused": dataPaused,
-}: CircleButtonProps) {
-  const base =
-    "flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/75";
-  const sizing =
-    size === "lg"
-      ? "h-20 w-20"
-      : size === "md"
-        ? "h-12 w-12 sm:h-14 sm:w-14"
-        : "h-10 w-10 sm:h-11 sm:w-11";
-  const skin = variant === "primary" ? "player-disc-primary" : "player-disc-secondary";
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      onClick={onClick}
-      className={`${base} ${sizing} ${skin}`}
-      data-paused={dataPaused ? "true" : undefined}
-    >
-      {children}
-    </button>
-  );
-}
 
 /** Invisible placeholder that reserves the exact footprint of a CircleButton
  *  so the playback cluster stays symmetric when a neighboring episode isn't

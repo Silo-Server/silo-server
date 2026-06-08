@@ -48,13 +48,13 @@ RUN apt-get update && \
     echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian bookworm main" \
       > /etc/apt/sources.list.d/jellyfin.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends jellyfin-ffmpeg7 libvips42 && \
+    apt-get install -y --no-install-recommends jellyfin-ffmpeg7 libvips42 fonts-noto-core fonts-noto-cjk && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /tmp/silo-transcode
 COPY --from=build /silo /usr/local/bin/silo
 COPY third_party/jellyfin-web/ /srv/jellyfin-web/
-EXPOSE 8080 8096
+EXPOSE 8080 8096 13378
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || exit 1
 ENTRYPOINT ["silo"]

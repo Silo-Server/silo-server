@@ -198,6 +198,14 @@ type authConfigRaw struct {
 	RefreshTokenExpiry string `yaml:"refresh_token_expiry"`
 }
 
+// AudiobookshelfCompatConfig holds the dedicated ABS-compat listener setting.
+// The listener binds its own port (:13378, ABS's
+// conventional port) and serves the full ABS protocol — login, libraries,
+// items, sessions — without colliding with silo's SPA on the main listener.
+type AudiobookshelfCompatConfig struct {
+	Listen string `yaml:"-"`
+}
+
 // JellyfinCompatConfig holds compatibility proxy settings.
 type JellyfinCompatConfig struct {
 	Listen                string        `yaml:"listen"`
@@ -238,6 +246,20 @@ type RecommendationsConfig struct {
 	CowatchCron            string  `yaml:"-"`
 }
 
+// SubtitleAIConfig holds settings for on-demand AI subtitle translation (and,
+// in a follow-up, Whisper ASR generation) via a single OpenAI-compatible
+// endpoint — the operator can point it at OpenAI, Groq, a local Ollama server,
+// etc. Mirrors the recommendations embedding client's configuration style.
+type SubtitleAIConfig struct {
+	Enabled           bool   `yaml:"-"`
+	BaseURL           string `yaml:"-"`
+	APIKey            string `yaml:"-"`
+	ChatModel         string `yaml:"-"`
+	MaxConcurrentJobs int    `yaml:"-"`
+	BatchSize         int    `yaml:"-"`
+	ContextNeighbors  int    `yaml:"-"`
+}
+
 // DownloadConfig holds server-wide download policy settings.
 type DownloadConfig struct {
 	Enabled              bool          `yaml:"-"`
@@ -255,22 +277,24 @@ type MetadataConfig struct {
 
 // Config is the top-level configuration for Silo.
 type Config struct {
-	Server          ServerConfig          `yaml:"server"`
-	Database        DatabaseConfig        `yaml:"database"`
-	S3              S3Config              `yaml:"-"`
-	UserDB          UserDBConfig          `yaml:"-"`
-	Scanner         ScannerConfig         `yaml:"-"`
-	Matcher         MatcherConfig         `yaml:"matcher"`
-	Metadata        MetadataConfig        `yaml:"-"`
-	Playback        PlaybackConfig        `yaml:"playback"`
-	Redis           RedisConfig           `yaml:"redis"`
-	RateLimit       RateLimitConfig       `yaml:"rate_limiting"`
-	Auth            AuthConfig            `yaml:"-"`
-	JellyfinCompat  JellyfinCompatConfig  `yaml:"-"`
-	Recommendations RecommendationsConfig `yaml:"-"`
-	Download        DownloadConfig        `yaml:"-"`
-	TMDBAPIKey      string                `yaml:"-"`
-	MDBListAPIKey   string                `yaml:"-"`
+	Server               ServerConfig               `yaml:"server"`
+	Database             DatabaseConfig             `yaml:"database"`
+	S3                   S3Config                   `yaml:"-"`
+	UserDB               UserDBConfig               `yaml:"-"`
+	Scanner              ScannerConfig              `yaml:"-"`
+	Matcher              MatcherConfig              `yaml:"matcher"`
+	Metadata             MetadataConfig             `yaml:"-"`
+	Playback             PlaybackConfig             `yaml:"playback"`
+	Redis                RedisConfig                `yaml:"redis"`
+	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`
+	Auth                 AuthConfig                 `yaml:"-"`
+	JellyfinCompat       JellyfinCompatConfig       `yaml:"-"`
+	AudiobookshelfCompat AudiobookshelfCompatConfig `yaml:"-"`
+	Recommendations      RecommendationsConfig      `yaml:"-"`
+	SubtitleAI           SubtitleAIConfig           `yaml:"-"`
+	Download             DownloadConfig             `yaml:"-"`
+	TMDBAPIKey           string                     `yaml:"-"`
+	MDBListAPIKey        string                     `yaml:"-"`
 }
 
 // configRaw is used for initial YAML unmarshaling with string durations.

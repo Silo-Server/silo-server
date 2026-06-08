@@ -32,7 +32,7 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 		runExtract = runFFmpegFrameExtract
 	}
 
-	resolvedAccel := playback.ResolveHWAccel(opts.HWAccel)
+	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
 	resolvedDevice := opts.HWDevice
 	if resolvedDevice == "" && (resolvedAccel == "qsv" || resolvedAccel == "vaapi") {
 		resolvedDevice = playback.PickRenderDevice("")

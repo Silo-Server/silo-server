@@ -279,7 +279,7 @@ func (p *PluginProvider) autoProvisionUser(
 }
 
 func randomPluginOnlyPassword() (string, error) {
-	buf := make([]byte, 32)
+	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}

@@ -528,6 +528,46 @@ export interface CrewMember {
   photo_thumbhash?: string;
 }
 
+export interface AudiobookPerson {
+  person_id?: string;
+  name: string;
+  photo_url?: string;
+  photo_thumbhash?: string;
+}
+
+export interface AudiobookRelatedItem {
+  content_id: string;
+  title: string;
+  year?: number;
+  poster_url?: string;
+  series_index?: number;
+}
+
+export interface AudiobookSeriesGroup {
+  name?: string;
+  entries: AudiobookRelatedItem[];
+}
+
+export interface AudiobookNarration {
+  content_id: string;
+  title: string;
+  year?: number;
+  narrators: string[];
+}
+
+export interface AudiobookDetailExtension {
+  authors: AudiobookPerson[];
+  narrators: AudiobookPerson[];
+  publisher?: string;
+  total_duration_seconds: number;
+  series?: AudiobookSeriesGroup;
+  other_narrations: AudiobookNarration[];
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -596,9 +636,19 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
 }
 
+export interface BrowseItemSortMetrics {
+  release_date?: string;
+  runtime_minutes?: number;
+  resolution?: string;
+  bitrate_kbps?: number;
+  progress_ratio?: number;
+  viewed_at?: string;
+  play_count?: number;
+}
+
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -625,6 +675,7 @@ export interface BrowseItem {
   release_date?: string | null;
   last_air_date?: string | null;
   overlay_summary?: OverlaySummary | null;
+  sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
 }
 
@@ -664,6 +715,11 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   audio_languages?: string[];
   subtitle_languages?: string[];
   original_languages?: string[];
+  // Audiobook-native facets — populated when the scope contains audiobook
+  // items, empty otherwise. The UI gates these on libraryType=audiobook[s].
+  authors?: string[];
+  narrators?: string[];
+  series?: string[];
 }
 
 // Item Detail
@@ -685,6 +741,7 @@ export interface FileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
   multi_episode_start?: number;
   multi_episode_end?: number;
   effective_audio_track_index?: number;
@@ -799,9 +856,68 @@ export interface TimeRange {
   end: number;
 }
 
+/** The four editable marker kinds. "credits" is exposed as Jellyfin's "Outro". */
+export type MarkerKind = "intro" | "credits" | "recap" | "preview";
+
+/** A marker segment with provenance, as returned by the markers API. */
+export interface MarkerSegment {
+  start: number | null;
+  end: number | null;
+  source: string | null;
+  provider: string | null;
+  confidence: number | null;
+  algorithm: string | null;
+  detected_at: string | null;
+}
+
+/** Response shape from GET/PUT /markers/{items,files}/{id}. */
+export interface FileMarkersResponse {
+  file_id: number;
+  intro: MarkerSegment;
+  credits: MarkerSegment;
+  recap: MarkerSegment;
+  preview: MarkerSegment;
+}
+
+export interface MarkerEditAuditEntry {
+  id: number;
+  media_file_id: number;
+  item_id?: string;
+  item_type?: string;
+  media_title?: string;
+  file_path?: string;
+  segment: MarkerKind;
+  action: "set" | "clear";
+  before: MarkerSegment | null;
+  after: MarkerSegment | null;
+  user_id?: number;
+  username?: string;
+  impersonator_user_id?: number;
+  impersonator_username?: string;
+  api_key_id?: number;
+  request_id?: string;
+  client_ip?: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface MarkerEditAuditResponse {
+  history: MarkerEditAuditEntry[];
+}
+
+/** A single segment in a set-markers request: object to set, null to clear. */
+export type MarkerSegmentInput = { start?: number | null; end?: number | null };
+
+/**
+ * Request body for PUT /markers/{items,files}/{id}. Only present keys are
+ * acted on: an object sets the segment, null clears it, an absent key is
+ * left unchanged.
+ */
+export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | null>>;
+
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -874,6 +990,7 @@ export interface ItemDetail {
   effective_version_hdr?: boolean;
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
+  audiobook?: AudiobookDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1044,13 +1161,16 @@ export interface QuerySort {
     | "progress"
     | "date_viewed"
     | "plays"
+    | "author"
+    | "narrator"
+    | "series"
     | "relevance";
   order: "asc" | "desc";
 }
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode";
+  media_scope?: "movie" | "series" | "episode" | "audiobook";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -1412,6 +1532,7 @@ export interface RequestMediaResult {
   popularity?: number;
   vote_average?: number;
   availability: RequestAvailability;
+  library_content_id?: string;
   request: RequestState;
 }
 
@@ -1460,6 +1581,7 @@ export interface RequestMediaDetail {
   creators?: string[];
   recommendations?: RequestMediaResult[];
   availability: RequestAvailability;
+  library_content_id?: string;
   request: RequestState;
 }
 
@@ -1520,6 +1642,22 @@ export interface CreateMediaRequestInput {
   backdrop_path?: string;
 }
 
+export interface RequestTarget {
+  id: number;
+  request_id: string;
+  integration_id?: string;
+  integration_kind?: string;
+  instance_name?: string;
+  quality: "1080p" | "2160p";
+  is_anime: boolean;
+  external_id?: string;
+  external_status?: string;
+  status: MediaRequestStatus | "failed";
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MediaRequest {
   id: string;
   provider: string;
@@ -1536,9 +1674,12 @@ export interface MediaRequest {
   outcome: MediaRequestOutcome;
   requested_by_user_id?: number;
   requested_by_profile_id?: string;
+  is_anime?: boolean;
+  targets?: RequestTarget[];
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
+  library_content_id?: string;
   last_error?: string;
   created_at: string;
   updated_at: string;
@@ -1559,6 +1700,7 @@ export interface RequestSettings {
   global_max_requests: number;
   global_window_days: number;
   global_auto_approval_enabled: boolean;
+  force_dual_quality: boolean;
   updated_at: string;
 }
 
@@ -1572,14 +1714,23 @@ export interface RequestUserLimit {
 }
 
 export interface RequestIntegration {
+  id: string;
+  name: string;
   kind: string;
   enabled: boolean;
+  is_4k: boolean;
+  is_default: boolean;
+  is_default_4k: boolean;
   base_url: string;
   api_key_ref?: string;
   has_api_key?: boolean;
   root_folder: string;
   quality_profile_id?: number | null;
   tags: number[];
+  anime_enabled: boolean;
+  anime_quality_profile_id?: number | null;
+  anime_root_folder?: string;
+  anime_tags: number[];
   options: Record<string, unknown>;
   last_check_at?: string | null;
   last_check_status?: string;
@@ -1612,12 +1763,225 @@ export interface RequestIntegrationOptions {
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
+  kind: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
 }
 
 export interface RequestIntegrationsResponse {
   integrations: RequestIntegration[];
+}
+
+// --- Autoscan v2 types (matched to autoscan.go handler DTOs) ---
+
+export interface AutoscanSettings {
+  enabled: boolean;
+  default_poll_interval_seconds: number;
+  debounce_seconds: number;
+}
+
+export interface AutoscanConnection {
+  id: string;
+  name: string;
+  kind: string;
+  base_url?: string;
+  request_integration_id?: string | null;
+  has_api_key: boolean;
+}
+
+export interface AutoscanConnectionInput {
+  name: string;
+  kind: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionsResponse {
+  connections: AutoscanConnection[];
+}
+
+export interface AutoscanPathRewrite {
+  from: string;
+  to: string;
+}
+
+export interface AutoscanSource {
+  id: string;
+  plugin_id: string;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  poll_interval_seconds: number | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  path_rewrites: AutoscanPathRewrite[];
+  source_config: Record<string, string>;
+  label: string;
+}
+
+export interface AutoscanSourceInput {
+  connection_id: string | null;
+  enabled: boolean;
+  poll_interval_seconds: number | null;
+  path_rewrites?: AutoscanPathRewrite[];
+  source_config?: Record<string, string>;
+  label?: string;
+}
+
+export interface AutoscanSourcesResponse {
+  sources: AutoscanSource[];
+}
+
+export interface AutoscanAvailableSource {
+  plugin_id: string;
+  capability_id: string;
+  display_name: string;
+}
+
+export interface AutoscanAvailableSourcesResponse {
+  plugins: AutoscanAvailableSource[];
+}
+
+export interface AutoscanSourceCreateInput {
+  plugin_id: string;
+  capability_id: string;
+  connection_id?: string | null;
+  enabled: boolean;
+  poll_interval_seconds?: number | null;
+  path_rewrites: AutoscanPathRewrite[];
+  source_config?: Record<string, string>;
+}
+
+export interface AutoscanConnectionTestInput {
+  connection_id?: string;
+  base_url?: string;
+  api_key_ref?: string;
+  request_integration_id?: string | null;
+}
+
+export interface AutoscanConnectionTestResult {
+  ok: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface AutoscanProposedRewrite {
+  from: string;
+  to: string;
+  match_depth: number;
+}
+
+export interface AutoscanAmbiguousRoot {
+  root: string;
+  candidates: string[];
+}
+
+export interface AutoscanRewriteSuggestions {
+  proposed: AutoscanProposedRewrite[];
+  unmatched: string[];
+  ambiguous: AutoscanAmbiguousRoot[];
+  covered: string[];
+}
+
+export interface AutoscanStatusSource {
+  id: string;
+  plugin_id: string;
+  capability_id: string;
+  connection_id: string | null;
+  enabled: boolean;
+  label: string;
+  last_run_at: string | null;
+  last_error: string | null;
+}
+
+export interface AutoscanRunningPoll {
+  id: number;
+  source_id: string | null;
+  plugin_id: string;
+  capability_id: string;
+  started_at: string;
+  elapsed_ms: number;
+  marker_before?: string;
+}
+
+export interface AutoscanStatus {
+  enabled: boolean;
+  sources: AutoscanStatusSource[];
+  running_polls: AutoscanRunningPoll[];
+  active_scans: number;
+  accepted_scans: number;
+  running_scans: number;
+  latest_event_at?: string;
+}
+
+export type AutoscanEventStatus = "running" | "success" | "error" | "unresolved";
+
+export interface AutoscanEventScanRun {
+  id: string;
+  library_id: number;
+  mode: "library" | "subtree" | "file";
+  path?: string;
+  trigger: string;
+  status: "accepted" | "running" | "completed" | "failed" | "cancelled";
+  requested_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+}
+
+export interface AutoscanEvent {
+  id: number;
+  source_id: string | null;
+  plugin_id: string;
+  capability_id: string;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  status: AutoscanEventStatus;
+  changes_returned: number;
+  changes_resolved: number;
+  targets_claimed: number;
+  scans_created: number;
+  scans_reused: number;
+  scans_suppressed: number;
+  error_message?: string;
+  scan_runs: AutoscanEventScanRun[];
+}
+
+export interface AutoscanEventsResponse {
+  events: AutoscanEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type AutoscanScanStatus = "accepted" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AutoscanScan {
+  id: string;
+  library_id: number;
+  mode: "library" | "subtree" | "file";
+  path?: string;
+  trigger: string;
+  status: AutoscanScanStatus;
+  error_message?: string;
+  requested_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  autoscan_event_id?: number;
+  source_id?: string;
+  plugin_id?: string;
+  capability_id?: string;
+  event_status?: AutoscanEventStatus;
+  event_completed_at?: string;
+}
+
+export interface AutoscanScansResponse {
+  scans: AutoscanScan[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface RequestListParams {
@@ -1685,7 +2049,9 @@ export interface AdminStats {
   total_files: number;
   total_users: number;
   total_movies: number;
+  total_movie_files?: number;
   total_shows: number;
+  total_show_files?: number;
   active_streams: number;
   total_storage_bytes: number;
   watch_provider_activity: WatchProviderActivity;
@@ -1730,6 +2096,7 @@ export interface AdminSession {
   file_duration: number | null;
   started_at: string;
   updated_at: string;
+  position_seconds: number;
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
@@ -1740,6 +2107,7 @@ export interface AdminSession {
   target_video_codec?: string;
   target_audio_codec?: string;
   target_bitrate_kbps: number | null;
+  transcode_hw_accel?: string;
   source_container?: string;
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
@@ -1944,6 +2312,9 @@ export interface AdminDeviceDetail {
   device_id: string;
   device_name: string;
   device_platform: string;
+  override_count: number;
+  profile_count: number;
+  profiles: AdminDeviceProfileSummary[];
   last_updated: string;
   settings: {
     user_id: number;
@@ -2006,6 +2377,66 @@ export interface LibraryMountCheckResponse {
   checked_at: string;
   summary: string;
   roots: LibraryMountCheckRoot[];
+}
+
+export interface LibraryMetadataMatchQueueStatus {
+  library_id: number;
+  movie_count: number;
+  series_count: number;
+  raw_file_count: number;
+  total_count: number;
+}
+
+export interface LibraryMovieMatchQueueEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibrarySeriesMatchQueueEntry {
+  media_folder_id: number;
+  observed_root_path: string;
+  first_queued_at: string;
+  available_at: string;
+  last_attempted_at?: string;
+  attempt_count: number;
+  last_error?: string;
+  updated_at: string;
+}
+
+export interface LibraryRawMatchBacklogEntry {
+  media_file_id: number;
+  media_folder_id: number;
+  file_path: string;
+  base_title?: string;
+  base_year?: number;
+  base_type?: string;
+  last_attempted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryMetadataMatchQueueDetail extends LibraryMetadataMatchQueueStatus {
+  movies: LibraryMovieMatchQueueEntry[];
+  series: LibrarySeriesMatchQueueEntry[];
+  raw_files: LibraryRawMatchBacklogEntry[];
+}
+
+export interface LibraryMetadataMatchQueueActionResponse {
+  status: "queued" | "cancelled";
+  library_id: number;
+  movie_cancelled?: number;
+  series_cancelled?: number;
+  raw_file_cancelled?: number;
+  raw_file_retried?: number;
+  total_cancelled?: number;
+  queue: LibraryMetadataMatchQueueStatus;
 }
 
 export interface LibrarySkippedRoot {
@@ -2160,7 +2591,7 @@ export interface CatalogSeedImportResponse {
   unmatched_roots?: string[];
 }
 
-export type AdminJobStatus = "queued" | "running" | "completed" | "failed";
+export type AdminJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface LibraryRefreshJobRequest {
   library_id: number;
@@ -2517,7 +2948,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode";
+  type: "movie" | "series" | "season" | "episode" | "audiobook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -2676,7 +3107,8 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
     media_scope:
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
-      value?.media_scope === "episode"
+      value?.media_scope === "episode" ||
+      value?.media_scope === "audiobook"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
@@ -2736,7 +3168,9 @@ export function queryDefinitionFromSectionConfig(
         ? "series"
         : config.media_scope === "episode" || config.filter_type === "episode"
           ? "episode"
-          : undefined;
+          : config.media_scope === "audiobook" || config.filter_type === "audiobook"
+            ? "audiobook"
+            : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;
@@ -3048,6 +3482,51 @@ export interface SubtitleProviderTestRequest {
 
 export interface SubtitleProviderTestResponse {
   success: boolean;
+  error?: string;
+}
+
+// --- Marker Providers ---
+
+export interface MarkerProviderConfig {
+  provider: string;
+  display_name?: string;
+  source_type?: string;
+  plugin_id?: string;
+  plugin_installation_id?: number;
+  capability_id?: string;
+  is_submitter: boolean;
+  fetch_enabled: boolean;
+  fetch_priority: number;
+  contribute_enabled: boolean;
+  contribute_auto_local: boolean;
+  contribute_min_confidence: number;
+}
+
+export interface MarkerProviderUpdateRequest {
+  fetch_enabled?: boolean;
+  fetch_priority?: number;
+  contribute_enabled?: boolean;
+  contribute_auto_local?: boolean;
+  contribute_min_confidence?: number;
+}
+
+export interface MarkerProviderListResponse {
+  providers: MarkerProviderConfig[];
+}
+
+export interface MarkerUserStats {
+  total: number;
+  accepted: number;
+  pending: number;
+  rejected: number;
+  acceptance_rate: number;
+  current_streak: number;
+  best_streak: number;
+}
+
+export interface MarkerProviderValidationResponse {
+  valid: boolean;
+  stats?: MarkerUserStats;
   error?: string;
 }
 
