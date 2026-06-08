@@ -253,6 +253,51 @@ func TestMergeEnrichmentProviderIDsDropsAsinIDs(t *testing.T) {
 	}
 }
 
+func TestBuildEbookSearchQueryUsesFilteredScannerISBN(t *testing.T) {
+	item := enrichmentItemRow{
+		Title:    "Tagged Ebook",
+		Year:     2024,
+		Language: "en",
+		ProviderIDs: map[string]string{
+			" ISBN ":       " 9780306406157 ",
+			"ASIN":         "B00TEST",
+			"audible_asin": "B00AUDIO",
+		},
+	}
+
+	query, ids := buildEbookSearchQuery(item)
+
+	if query.Title != "Tagged Ebook" || query.Year != 2024 || query.Language != "en" || query.ContentType != "ebook" {
+		t.Fatalf("query basics = %+v", query)
+	}
+	if got := query.ProviderIDs["isbn"]; got != "9780306406157" {
+		t.Fatalf("query isbn = %q, want scanner ISBN", got)
+	}
+	if _, exists := query.ProviderIDs["ASIN"]; exists {
+		t.Fatal("query should not include ASIN for ebooks")
+	}
+	if got := ids["isbn"]; got != "9780306406157" {
+		t.Fatalf("accumulated isbn = %q, want scanner ISBN", got)
+	}
+}
+
+func TestBuildEbookMetadataRequestCarriesAccumulatedISBN(t *testing.T) {
+	req := buildEbookMetadataRequest(map[string]string{
+		" ISBN ":      " 9780306406157 ",
+		"openlibrary": "OL1M",
+	}, "fr")
+
+	if req.ContentType != "ebook" || req.Language != "fr" {
+		t.Fatalf("request basics = %+v", req)
+	}
+	if got := req.ProviderIDs["isbn"]; got != "9780306406157" {
+		t.Fatalf("request isbn = %q, want normalized key/value", got)
+	}
+	if got := req.ProviderIDs["openlibrary"]; got != "OL1M" {
+		t.Fatalf("request openlibrary = %q, want OL1M", got)
+	}
+}
+
 type fakeEbookImageCacher struct {
 	calls     int
 	req       metadata.CacheImageRequest

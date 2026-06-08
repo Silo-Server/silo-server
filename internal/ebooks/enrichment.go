@@ -258,19 +258,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
-	item.ProviderIDs = filterEbookProviderIDs(item.ProviderIDs)
-	accumulatedIDs := make(map[string]string, len(item.ProviderIDs))
-	for k, v := range item.ProviderIDs {
-		accumulatedIDs[k] = v
-	}
-
-	searchQuery := metadata.SearchQuery{
-		Title:       item.Title,
-		Year:        item.Year,
-		ContentType: ebookContentType(),
-		ProviderIDs: accumulatedIDs,
-		Language:    item.Language,
-	}
+	searchQuery, accumulatedIDs := buildEbookSearchQuery(item)
 
 	for _, p := range providers {
 		sp, ok := p.(metadata.SearchProvider)
@@ -312,11 +300,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		if !ok {
 			continue
 		}
-		result, getErr := mp.GetMetadata(ctx, metadata.MetadataRequest{
-			ProviderIDs: accumulatedIDs,
-			ContentType: ebookContentType(),
-			Language:    item.Language,
-		})
+		result, getErr := mp.GetMetadata(ctx, buildEbookMetadataRequest(accumulatedIDs, item.Language))
 		if getErr != nil {
 			slog.Warn("ebook enrichment: GetMetadata error",
 				"provider", p.Slug(),
@@ -574,6 +558,28 @@ func filterEbookPeople(people []models.ItemPerson) []models.ItemPerson {
 	return authors
 }
 
+func buildEbookSearchQuery(item enrichmentItemRow) (metadata.SearchQuery, map[string]string) {
+	accumulatedIDs := filterEbookProviderIDs(item.ProviderIDs)
+	if accumulatedIDs == nil {
+		accumulatedIDs = map[string]string{}
+	}
+	return metadata.SearchQuery{
+		Title:       item.Title,
+		Year:        item.Year,
+		ContentType: ebookContentType(),
+		ProviderIDs: accumulatedIDs,
+		Language:    item.Language,
+	}, accumulatedIDs
+}
+
+func buildEbookMetadataRequest(providerIDs map[string]string, language string) metadata.MetadataRequest {
+	return metadata.MetadataRequest{
+		ProviderIDs: filterEbookProviderIDs(providerIDs),
+		ContentType: ebookContentType(),
+		Language:    language,
+	}
+}
+
 func mergeEnrichmentProviderIDs(dst *metadata.MetadataResult, src *metadata.MetadataResult) {
 	if src == nil || len(src.ProviderIDs) == 0 {
 		return
@@ -601,7 +607,8 @@ func filterEbookProviderIDs(providerIDs map[string]string) map[string]string {
 		if provider == "" || providerID == "" {
 			continue
 		}
-		switch strings.ToLower(provider) {
+		provider = strings.ToLower(provider)
+		switch provider {
 		case "asin", "audible_asin":
 			continue
 		default:
