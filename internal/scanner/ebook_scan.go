@@ -79,6 +79,7 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 		"candidates", len(candidates),
 		"workers", workers,
 	)
+	reportEbookScanProgress(ctx, folder.ID, len(candidates), 0, 0, 0)
 
 	ch := make(chan string, workers*2)
 	var (
@@ -119,15 +120,18 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 					)
 				}
 				n := atomic.AddInt64(&processed, 1)
-				if n%500 == 0 {
+				if n%500 == 0 || n == int64(len(candidates)) {
+					failedCount := atomic.LoadInt64(&failed)
+					skippedCount := atomic.LoadInt64(&skipped)
 					slog.Info("ebook scan: progress",
 						"folder_id", folder.ID,
 						"processed", n,
-						"failed", atomic.LoadInt64(&failed),
-						"skipped", atomic.LoadInt64(&skipped),
+						"failed", failedCount,
+						"skipped", skippedCount,
 						"total", len(candidates),
 						"elapsed_sec", int(time.Since(start).Seconds()),
 					)
+					reportEbookScanProgress(ctx, folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
 				}
 			}
 		}()
@@ -166,6 +170,19 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 		}
 	}
 	return nil
+}
+
+func reportEbookScanProgress(ctx context.Context, folderID int, total, processed, failed, skipped int) {
+	reportProgress(ctx, ProgressUpdate{
+		Phase:           "ebook_scan",
+		Message:         fmt.Sprintf("Scanning ebooks in folder %d", folderID),
+		CurrentScope:    strconv.Itoa(folderID),
+		TotalFiles:      total,
+		FilesDiscovered: total,
+		FilesProcessed:  processed,
+		Errors:          failed,
+		Unchanged:       skipped,
+	})
 }
 
 func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFolder, filePath string, skipped *int64) error {

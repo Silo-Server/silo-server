@@ -734,6 +734,33 @@ func TestScanEbookFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestScanEbookFolderReportsProgress(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "broken.epub"), []byte("not a zip"), 0o644); err != nil {
+		t.Fatalf("write ebook fixture: %v", err)
+	}
+	var updates []ProgressUpdate
+	ctx := WithProgressReporter(context.Background(), func(update ProgressUpdate) {
+		updates = append(updates, update)
+	})
+
+	err := (&Scanner{}).ScanEbookFolder(ctx, &models.MediaFolder{ID: 44, Paths: []string{root}})
+	if err == nil {
+		t.Fatal("ScanEbookFolder returned nil, want aggregate failure")
+	}
+
+	if len(updates) == 0 {
+		t.Fatal("expected ebook scanner progress updates")
+	}
+	if updates[0].Phase != "ebook_scan" || updates[0].TotalFiles != 1 {
+		t.Fatalf("first progress update = %+v, want ebook_scan discovery total", updates[0])
+	}
+	last := updates[len(updates)-1]
+	if last.FilesProcessed != 1 || last.Errors != 1 {
+		t.Fatalf("last progress update = %+v, want processed/error counts", last)
+	}
+}
+
 func writeTestEPUB(t *testing.T, identifiers []string) string {
 	return writeTestEPUBWithMeta(t, identifiers, "")
 }
