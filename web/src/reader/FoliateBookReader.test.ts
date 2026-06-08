@@ -11,6 +11,7 @@ import {
   formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
+  readerRendererAttributes,
   readerStyles,
   restoreProgressTarget,
   progressFromRelocate,
@@ -189,5 +190,41 @@ describe("FoliateBookReader helpers", () => {
     expect(styles).toContain("hyphens: none !important");
     expect(styles).toContain("line-height: 1.8 !important");
     expect(styles).toContain("max-width: 68ch !important");
+  });
+
+  it("uses full available width in scrolled flow", () => {
+    expect(
+      readerRendererAttributes(
+        normalizeReaderSettings({
+          flow: "paginated",
+          maxWidth: 68,
+          margin: 20,
+          spread: "auto",
+        }),
+      ),
+    ).toEqual({
+      flow: null,
+      gap: "20px",
+      margin: "20px",
+      maxColumnCount: "2",
+      maxInlineSize: "68ch",
+    });
+
+    expect(
+      readerRendererAttributes(
+        normalizeReaderSettings({
+          flow: "scrolled",
+          maxWidth: 68,
+          margin: 20,
+          spread: "auto",
+        }),
+      ),
+    ).toEqual({
+      flow: "scrolled",
+      gap: "20px",
+      margin: "20px",
+      maxColumnCount: "1",
+      maxInlineSize: "100%",
+    });
   });
 });

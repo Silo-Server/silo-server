@@ -365,6 +365,17 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
   `;
 }
 
+export function readerRendererAttributes(settings: ReaderSettings) {
+  const scrolled = settings.flow === "scrolled";
+  return {
+    flow: scrolled ? "scrolled" : null,
+    gap: `${settings.margin}px`,
+    margin: `${settings.margin}px`,
+    maxInlineSize: scrolled ? "100%" : `${settings.maxWidth}ch`,
+    maxColumnCount: scrolled ? "1" : settings.spread === "none" ? "1" : "2",
+  };
+}
+
 function searchResultLabel(result: FoliateSearchResult, item?: { label?: string }): string {
   return item?.label || result.label || result.section?.label || "";
 }
@@ -420,13 +431,14 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       const normalized = normalizeReaderSettings(nextSettings);
       settingsRef.current = normalized;
       const renderer = viewRef.current?.renderer;
+      const attributes = readerRendererAttributes(normalized);
       renderer?.setStyles?.(readerStyles(normalized));
-      renderer?.setAttribute("gap", `${normalized.margin}px`);
-      renderer?.setAttribute("margin", `${normalized.margin}px`);
-      renderer?.setAttribute("max-inline-size", `${normalized.maxWidth}ch`);
-      renderer?.setAttribute("max-column-count", normalized.spread === "none" ? "1" : "2");
-      if (normalized.flow === "scrolled") {
-        renderer?.setAttribute("flow", "scrolled");
+      renderer?.setAttribute("gap", attributes.gap);
+      renderer?.setAttribute("margin", attributes.margin);
+      renderer?.setAttribute("max-inline-size", attributes.maxInlineSize);
+      renderer?.setAttribute("max-column-count", attributes.maxColumnCount);
+      if (attributes.flow) {
+        renderer?.setAttribute("flow", attributes.flow);
       } else {
         renderer?.removeAttribute("flow");
       }
