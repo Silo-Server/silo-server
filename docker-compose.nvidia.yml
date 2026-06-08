@@ -1,6 +1,5 @@
 services:
   silo:
-    runtime: nvidia
     deploy:
       resources:
         reservations:
@@ -10,9 +9,8 @@ services:
               capabilities: [gpu]
 
   # Optional distributed-mode example. Most single-host installs should
-  # just use the integrated service above.  
+  # just use the integrated service above.
   #  silo-transcode:
-  #  runtime: nvidia
   #  deploy:
   #    resources:
   #      reservations:

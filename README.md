@@ -35,24 +35,28 @@ The easiest way to run Silo is with Docker Compose. The default stack assumes yo
    If you already have PostgreSQL and Redis available, omit those bundled service examples from compose and point Silo at your existing `DATABASE_URL` and `REDIS_URL` instead.
 
    ### Optional NVIDIA/NVENC
-   
+
    GPU support is kept out of the default compose file so hosts without NVIDIA drivers work unchanged.
-   
+
+   Install the NVIDIA Container Toolkit and use a Docker Compose version with GPU reservation support before enabling this override.
+
    Use the optional override file when you want NVENC:
-   
+
    ```sh
    docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
    ```
-   
+
    If you want this controlled from `.env`, set `COMPOSE_FILE`:
-   
+
    ```dotenv
    COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml
    NVIDIA_GPU_COUNT=1
    ```
-   
+
+   Windows uses `;` instead of `:` between compose files.
+
    Then `docker compose up -d` will include the NVIDIA override automatically.
-   
+
 4. **Configure through the admin UI**
 
    Add libraries, users, metadata providers, and playback settings from the web interface.

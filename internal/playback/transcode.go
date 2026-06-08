@@ -354,7 +354,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 }
 
 func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
-	hwAccel := ResolveHWAccel(opts.HWAccel)
+	hwAccel := ResolveHWAccelWithFFmpeg(opts.HWAccel, opts.FFmpegPath)
 	if hwAccel == "" {
 		return ""
 	}
