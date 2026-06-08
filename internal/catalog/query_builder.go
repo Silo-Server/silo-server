@@ -1351,6 +1351,9 @@ func (qb *QueryBuilder) consumeIntArgs(values []int) ([]string, []any) {
 }
 
 func (qb *QueryBuilder) progressSortPlan() (string, []string, []any) {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookProgressSortPlan()
+	}
 	joinSQL := fmt.Sprintf(
 		`LEFT JOIN (
 			SELECT uwp.media_item_id AS content_id,
@@ -1379,7 +1382,31 @@ func (qb *QueryBuilder) progressSortPlan() (string, []string, []any) {
 	return "sort_progress.progress_ratio", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
+func (qb *QueryBuilder) ebookProgressSortPlan() (string, []string, []any) {
+	joinSQL := fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT erp.content_id,
+				CASE
+					WHEN erp.progress > 0
+					  AND erp.progress < 0.9
+					THEN erp.progress::double precision
+					ELSE NULL
+				END AS progress_ratio
+			FROM ebook_reader_progress erp
+			WHERE erp.user_id = $%d
+			  AND erp.profile_id = $%d
+		) sort_progress ON sort_progress.content_id = %s.content_id`,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.alias,
+	)
+	return "sort_progress.progress_ratio", []string{joinSQL}, []any{qb.userID, qb.profileID}
+}
+
 func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookDateViewedSortPlan()
+	}
 	historyJoin := fmt.Sprintf(
 		`LEFT JOIN (
 			SELECT uwh.media_item_id AS content_id, MAX(uwh.watched_at) AS viewed_at
@@ -1430,7 +1457,30 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
 }
 
+func (qb *QueryBuilder) ebookDateViewedSortPlan() (string, []string, []any) {
+	joinSQL := fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT erp.content_id,
+				CASE
+					WHEN erp.progress >= 0.9
+					THEN erp.updated_at
+					ELSE NULL
+				END AS viewed_at
+			FROM ebook_reader_progress erp
+			WHERE erp.user_id = $%d
+			  AND erp.profile_id = $%d
+		) sort_ebook_viewed ON sort_ebook_viewed.content_id = %s.content_id`,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.alias,
+	)
+	return "sort_ebook_viewed.viewed_at", []string{joinSQL}, []any{qb.userID, qb.profileID}
+}
+
 func (qb *QueryBuilder) playsSortPlan() (string, []string, []any) {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookPlaysSortPlan()
+	}
 	historyJoin := fmt.Sprintf(
 		`LEFT JOIN (
 			SELECT uwh.media_item_id AS content_id, COUNT(*) AS play_count
@@ -1479,6 +1529,26 @@ func (qb *QueryBuilder) playsSortPlan() (string, []string, []any) {
 		COALESCE(sort_progress_plays.completed_play_count, 0)
 	), 0)`
 	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
+}
+
+func (qb *QueryBuilder) ebookPlaysSortPlan() (string, []string, []any) {
+	joinSQL := fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT erp.content_id,
+				CASE
+					WHEN erp.progress >= 0.9
+					THEN 1
+					ELSE 0
+				END AS completed_play_count
+			FROM ebook_reader_progress erp
+			WHERE erp.user_id = $%d
+			  AND erp.profile_id = $%d
+		) sort_ebook_plays ON sort_ebook_plays.content_id = %s.content_id`,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.alias,
+	)
+	return "NULLIF(sort_ebook_plays.completed_play_count, 0)", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
 func (qb *QueryBuilder) lastAirDateSortPlan() (string, []string) {

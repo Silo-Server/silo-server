@@ -390,6 +390,52 @@ func TestBuildSortClause_PersonalizedComputedSorts(t *testing.T) {
 	}
 }
 
+func TestBuildSortClause_EbookPersonalizedComputedSortsUseReaderProgress(t *testing.T) {
+	builder := NewQueryBuilder("mi").WithMediaScope("ebook").WithUserScope(42, "profile-1")
+	tests := []struct {
+		field      string
+		expectJoin []string
+		expectExpr []string
+	}{
+		{
+			field:      "progress",
+			expectJoin: []string{"FROM ebook_reader_progress erp", "erp.progress > 0", "erp.progress < 0.9"},
+			expectExpr: []string{"sort_progress.progress_ratio"},
+		},
+		{
+			field:      "date_viewed",
+			expectJoin: []string{"FROM ebook_reader_progress erp", "erp.progress >= 0.9"},
+			expectExpr: []string{"sort_ebook_viewed.viewed_at"},
+		},
+		{
+			field:      "plays",
+			expectJoin: []string{"FROM ebook_reader_progress erp", "erp.progress >= 0.9", "completed_play_count"},
+			expectExpr: []string{"sort_ebook_plays.completed_play_count"},
+		},
+	}
+
+	for _, tt := range tests {
+		plan, err := builder.BuildSortPlan(QuerySort{Field: tt.field, Order: "desc"})
+		if err != nil {
+			t.Fatalf("%s: BuildSortPlan returned error: %v", tt.field, err)
+		}
+		if len(plan.Args) != 2 || plan.Args[0] != 42 || plan.Args[1] != "profile-1" {
+			t.Fatalf("%s: expected user scope args, got %v", tt.field, plan.Args)
+		}
+		joined := strings.Join(plan.Joins, "\n")
+		for _, fragment := range tt.expectJoin {
+			if !strings.Contains(joined, fragment) {
+				t.Fatalf("%s: expected joins to contain %q, got %q", tt.field, fragment, joined)
+			}
+		}
+		for _, fragment := range tt.expectExpr {
+			if !strings.Contains(plan.OrderBy, fragment) {
+				t.Fatalf("%s: expected order by to contain %q, got %q", tt.field, fragment, plan.OrderBy)
+			}
+		}
+	}
+}
+
 func TestBuild_ResolutionNormalizes4KAndScopesMediaFiles(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").
 		WithLibraryScope([]int{3}).
