@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { MemoryRouter } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import EbookContent from "./EbookContent";
 
@@ -183,7 +184,11 @@ describe("EbookContent", () => {
   });
 
   it("renders ebook authors without audiobook narrator credits", () => {
-    const markup = renderToStaticMarkup(<EbookContent item={makeEbookItem()} />);
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem()} />
+      </MemoryRouter>,
+    );
 
     expect(markup).toContain("Ebook");
     expect(markup).toContain("By");
@@ -192,47 +197,81 @@ describe("EbookContent", () => {
   });
 
   it("only shows download action when downloads are allowed and files exist", () => {
-    let markup = renderToStaticMarkup(<EbookContent item={makeEbookItem()} />);
+    let markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem()} />
+      </MemoryRouter>,
+    );
     expect(markup).toContain("Download");
 
     mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
-    markup = renderToStaticMarkup(<EbookContent item={makeEbookItem()} />);
+    markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem()} />
+      </MemoryRouter>,
+    );
     expect(markup).not.toContain("Download");
 
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
-    markup = renderToStaticMarkup(<EbookContent item={makeEbookItem({ versions: [] })} />);
+    markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem({ versions: [] })} />
+      </MemoryRouter>,
+    );
     expect(markup).not.toContain("Download");
+  });
+
+  it("shows read action for ebook files even when downloads are disabled", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+
+    let markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Read");
+    expect(markup).toContain("/reader/ebook/ebook-1?file_id=1");
+
+    markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem({ versions: [] })} />
+      </MemoryRouter>,
+    );
+    expect(markup).not.toContain("Read");
   });
 
   it("renders ebook series and related rails from ebook detail extension", () => {
     const markup = renderToStaticMarkup(
-      <EbookContent
-        item={makeEbookItem({
-          ebook: {
-            authors: [{ name: "Becky Chambers" }],
-            publisher: "Tor",
-            series: {
-              name: "Monk and Robot",
-              entries: [
-                {
-                  content_id: "ebook-1",
-                  title: "A Psalm for the Wild-Built",
-                  series_index: 1,
-                },
-                {
-                  content_id: "ebook-2",
-                  title: "A Prayer for the Crown-Shy",
-                  series_index: 2,
-                },
-              ],
+      <MemoryRouter>
+        <EbookContent
+          item={makeEbookItem({
+            ebook: {
+              authors: [{ name: "Becky Chambers" }],
+              publisher: "Tor",
+              series: {
+                name: "Monk and Robot",
+                entries: [
+                  {
+                    content_id: "ebook-1",
+                    title: "A Psalm for the Wild-Built",
+                    series_index: 1,
+                  },
+                  {
+                    content_id: "ebook-2",
+                    title: "A Prayer for the Crown-Shy",
+                    series_index: 2,
+                  },
+                ],
+              },
+              related: {
+                also_by_author: [{ content_id: "ebook-3", title: "The Long Way", year: 2014 }],
+                similar: [{ content_id: "ebook-4", title: "All Systems Red", year: 2017 }],
+              },
             },
-            related: {
-              also_by_author: [{ content_id: "ebook-3", title: "The Long Way", year: 2014 }],
-              similar: [{ content_id: "ebook-4", title: "All Systems Red", year: 2017 }],
-            },
-          },
-        })}
-      />,
+          })}
+        />
+      </MemoryRouter>,
     );
 
     expect(markup).toContain("In Monk and Robot");

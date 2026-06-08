@@ -413,6 +413,32 @@ export async function apiDownload(
   URL.revokeObjectURL(url);
 }
 
+export async function apiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  let headers = buildApiHeaders(options);
+  let res = await fetch(`/api/v1${path}`, { ...options, headers });
+
+  if (res.status === 401 && getRefreshToken()) {
+    if (!refreshPromise) {
+      refreshPromise = attemptRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const refreshed = await refreshPromise;
+    if (refreshed) {
+      headers = buildApiHeaders(options);
+      headers["Authorization"] = `Bearer ${accessToken}`;
+      res = await fetch(`/api/v1${path}`, { ...options, headers });
+    }
+  }
+
+  if (!res.ok) {
+    const apiErr = await parseApiError(res);
+    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+  }
+
+  return res.blob();
+}
+
 // People API
 export async function searchPeople(query: string, limit = 20): Promise<import("./types").Person[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });

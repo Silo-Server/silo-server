@@ -21,6 +21,11 @@ var ebookExtensions = map[string]bool{
 	".azw":  true,
 	".azw3": true,
 	".fb2":  true,
+	".fbz":  true,
+	".cbz":  true,
+	".cbr":  true,
+	".txt":  true,
+	".md":   true,
 }
 
 type parsedEbook struct {
@@ -46,6 +51,9 @@ type parsedEbookCover struct {
 }
 
 func SupportsEbookFile(filePath string) bool {
+	if strings.HasSuffix(strings.ToLower(filePath), ".fb2.zip") {
+		return true
+	}
 	return ebookExtensions[strings.ToLower(filepath.Ext(filePath))]
 }
 
@@ -55,18 +63,26 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 			err = fmt.Errorf("panic parsing ebook %s: %v", path, r)
 		}
 	}()
-	switch strings.ToLower(filepath.Ext(path)) {
+	format := ebookFileFormat(path)
+	switch format {
 	case ".epub":
 		book, err = parseEbookEPUB(path)
 	case ".fb2":
 		book, err = parseEbookFB2(path)
-	case ".pdf", ".mobi", ".azw", ".azw3":
-		book = parsedEbook{Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")}
+	case ".pdf", ".mobi", ".azw", ".azw3", ".cbz", ".cbr", ".fbz", ".txt", ".md":
+		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
 	}
 	book.sanitize()
 	return book, err
+}
+
+func ebookFileFormat(path string) string {
+	if strings.HasSuffix(strings.ToLower(path), ".fb2.zip") {
+		return ".fbz"
+	}
+	return strings.ToLower(filepath.Ext(path))
 }
 
 func (b *parsedEbook) sanitize() {

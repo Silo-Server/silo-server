@@ -31,6 +31,7 @@ import Profiles from "@/pages/Profiles";
 import Catalog from "@/pages/Catalog";
 import LibraryPage from "@/pages/LibraryPage";
 import ItemDetail from "@/pages/ItemDetail/index";
+import EbookReader from "@/pages/EbookReader";
 import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
@@ -355,6 +356,14 @@ function AppRoutes() {
                   element={
                     <RequireProfile>
                       <WatchRoute />
+                    </RequireProfile>
+                  }
+                />
+                <Route
+                  path="/reader/ebook/:contentId"
+                  element={
+                    <RequireProfile>
+                      <EbookReader />
                     </RequireProfile>
                   }
                 />

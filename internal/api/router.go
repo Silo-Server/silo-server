@@ -372,6 +372,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
 	var autoscanHandler *handlers.AutoscanHandler
+	var ebookReaderHandler *handlers.EbookReaderHandler
 	if deps.DB != nil {
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -422,6 +423,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalWatchEventDispatcher); ok {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
+		}
+		if deps.FileRepo != nil {
+			ebookReaderHandler = handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{
+				FileResolver:  deps.FileRepo,
+				ItemAccess:    itemRepo,
+				EpisodeLookup: episodeRepo,
+			})
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogHandler = handlers.NewCatalogHandler(
@@ -1703,6 +1711,14 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/", libraryPlaybackPrefHandler.HandleListLibraryPlaybackPrefs)
 						r.Put("/{library_id}", libraryPlaybackPrefHandler.HandleSetLibraryPlaybackPref)
 						r.Delete("/{library_id}", libraryPlaybackPrefHandler.HandleDeleteLibraryPlaybackPref)
+					})
+				}
+
+				if ebookReaderHandler != nil {
+					r.Route("/ebooks", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
 					})
 				}
 

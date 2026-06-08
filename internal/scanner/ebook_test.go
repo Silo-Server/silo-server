@@ -46,6 +46,12 @@ func TestSupportsEbookFile(t *testing.T) {
 		{"book.azw", true},
 		{"book.azw3", true},
 		{"book.FB2", true},
+		{"book.fb2.zip", true},
+		{"book.fbz", true},
+		{"book.cbz", true},
+		{"book.cbr", true},
+		{"book.txt", true},
+		{"book.md", true},
 		{"book.mp3", false},
 		{"movie.mkv", false},
 	}
@@ -53,6 +59,38 @@ func TestSupportsEbookFile(t *testing.T) {
 		if got := SupportsEbookFile(tc.path); got != tc.want {
 			t.Errorf("SupportsEbookFile(%q) = %v, want %v", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestParseEbookFileSupportsReaderFormatsWithoutEmbeddedMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		wantFormat string
+	}{
+		{"book.pdf", "pdf"},
+		{"book.mobi", "mobi"},
+		{"book.azw", "azw"},
+		{"book.azw3", "azw3"},
+		{"book.cbz", "cbz"},
+		{"book.cbr", "cbr"},
+		{"book.fbz", "fbz"},
+		{"book.fb2.zip", "fbz"},
+		{"book.txt", "txt"},
+		{"book.md", "md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), tc.name)
+			if err := os.WriteFile(path, []byte("placeholder"), 0o644); err != nil {
+				t.Fatalf("write file: %v", err)
+			}
+			got, err := parseEbookFile(path)
+			if err != nil {
+				t.Fatalf("parseEbookFile: %v", err)
+			}
+			if got.Format != tc.wantFormat {
+				t.Fatalf("Format = %q, want %q", got.Format, tc.wantFormat)
+			}
+		})
 	}
 }
 

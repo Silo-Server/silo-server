@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { BookOpen, Download } from "lucide-react";
+import { Link } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import MediaLocations from "@/components/MediaLocations";
@@ -32,7 +33,12 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
   const authors = authorNames(item);
   const publisher = item.ebook?.publisher || (item.studios ?? [])[0];
   const year = item.year ? String(item.year) : "";
+  const canRead = item.versions.length > 0;
   const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
+  const firstVersion = item.versions[0];
+  const readerHref = firstVersion
+    ? `/reader/ebook/${encodeURIComponent(item.content_id)}?file_id=${firstVersion.file_id}`
+    : `/reader/ebook/${encodeURIComponent(item.content_id)}`;
 
   return (
     <div>
@@ -69,15 +75,31 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
         }
         genres={item.genres}
         actions={
-          canDownload ? (
-            <Button
-              type="button"
-              className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
-              onClick={() => setDownloadOpen(true)}
-            >
-              <Download className="size-[18px]" />
-              Download
-            </Button>
+          canRead || canDownload ? (
+            <div className="flex flex-wrap gap-3">
+              {canRead && (
+                <Button
+                  asChild
+                  className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
+                >
+                  <Link to={readerHref}>
+                    <BookOpen className="size-[18px]" />
+                    Read
+                  </Link>
+                </Button>
+              )}
+              {canDownload && (
+                <Button
+                  type="button"
+                  variant={canRead ? "outline" : "default"}
+                  className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
+                  onClick={() => setDownloadOpen(true)}
+                >
+                  <Download className="size-[18px]" />
+                  Download
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       />
