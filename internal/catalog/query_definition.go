@@ -207,6 +207,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 			if def.personalized && !allowPersonalizedFields {
 				return fmt.Errorf("groups[%d].rules[%d].field %q requires profile scope", i, j, rule.Field)
 			}
+			if normalized.MediaScope == "ebook" && rule.Field == "narrator" {
+				return fmt.Errorf("groups[%d].rules[%d].field %q is not supported for ebook media_scope", i, j, rule.Field)
+			}
 			if !def.validOps[rule.Op] {
 				return fmt.Errorf("groups[%d].rules[%d].op %q is not supported for field %q", i, j, rule.Op, rule.Field)
 			}
@@ -220,6 +223,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 		}
 		if def.personalized && !allowPersonalizedSorts {
 			return fmt.Errorf("sort.field %q requires profile scope", normalized.Sort.Field)
+		}
+		if normalized.MediaScope == "ebook" && normalized.Sort.Field == "narrator" {
+			return fmt.Errorf("sort.field %q is not supported for ebook media_scope", normalized.Sort.Field)
 		}
 	}
 	if normalized.Sort.Order != "" && normalized.Sort.Order != "asc" && normalized.Sort.Order != "desc" {
