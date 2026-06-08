@@ -906,7 +906,7 @@ func audioSelectionChanged(session *PlaybackSession, mediaSourceID string, incom
 		return true
 	}
 	for _, source := range session.MediaSources {
-		if mediaSourceID != "" && source.ID != mediaSourceID {
+		if mediaSourceID != "" && !mediaSourceIDsEqual(source.ID, mediaSourceID) {
 			continue
 		}
 		if source.SelectedAudioStreamIndex == nil {
@@ -925,7 +925,7 @@ func (h *PlaybackHandler) setSelectedAudioStream(playSessionID, mediaSourceID st
 		if mediaSourceID != "" {
 			sourceIndex = -1
 			for index := range current.MediaSources {
-				if current.MediaSources[index].ID == mediaSourceID {
+				if mediaSourceIDsEqual(current.MediaSources[index].ID, mediaSourceID) {
 					sourceIndex = index
 					break
 				}
@@ -1099,7 +1099,7 @@ func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMe
 		return nil
 	}
 	for _, source := range session.MediaSources {
-		if source.ID == mediaSourceID {
+		if mediaSourceIDsEqual(source.ID, mediaSourceID) {
 			copy := source
 			return &copy
 		}
