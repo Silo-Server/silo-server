@@ -371,6 +371,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	if err != nil {
 		return SectionWithItems{}, fmt.Errorf("listing progress: %w", err)
 	}
+	ebookProgressEntries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, limit)
+	if err != nil {
+		return SectionWithItems{}, fmt.Errorf("listing ebook reader progress: %w", err)
+	}
+	progressEntries = mergeContinueWatchingProgress(progressEntries, ebookProgressEntries, limit)
 	progressEntries = f.filterContinueWatchingDismissals(ctx, store, profileID, progressEntries)
 
 	// Build in-progress items
@@ -482,6 +487,76 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		TotalCount:      len(orderedItems),
 		ItemMeta:        itemMeta,
 	}, nil
+}
+
+func (f *Fetcher) listEbookContinueWatchingProgress(ctx context.Context, userID int, profileID string, limit int) ([]userstore.WatchProgress, error) {
+	if f.pool == nil || userID <= 0 || profileID == "" || limit <= 0 {
+		return nil, nil
+	}
+
+	rows, err := f.pool.Query(ctx, `
+		SELECT content_id, progress::double precision, updated_at
+		FROM ebook_reader_progress
+		WHERE user_id = $1
+			AND profile_id = $2
+			AND progress > 0
+			AND progress < 0.9
+		ORDER BY updated_at DESC, content_id ASC
+		LIMIT $3
+	`, userID, profileID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]userstore.WatchProgress, 0)
+	for rows.Next() {
+		var contentID string
+		var progress float64
+		var updatedAt time.Time
+		if err := rows.Scan(&contentID, &progress, &updatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, userstore.WatchProgress{
+			MediaItemID:     contentID,
+			PositionSeconds: progress,
+			DurationSeconds: 1,
+			UpdatedAt:       updatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func mergeContinueWatchingProgress(videoEntries, ebookEntries []userstore.WatchProgress, limit int) []userstore.WatchProgress {
+	if len(ebookEntries) == 0 {
+		return videoEntries
+	}
+	merged := make([]userstore.WatchProgress, 0, len(videoEntries)+len(ebookEntries))
+	merged = append(merged, videoEntries...)
+	merged = append(merged, ebookEntries...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		left := parseWatchProgressUpdatedAt(merged[i].UpdatedAt)
+		right := parseWatchProgressUpdatedAt(merged[j].UpdatedAt)
+		if left.Equal(right) {
+			return merged[i].MediaItemID < merged[j].MediaItemID
+		}
+		return left.After(right)
+	})
+	if limit > 0 && len(merged) > limit {
+		merged = merged[:limit]
+	}
+	return merged
+}
+
+func parseWatchProgressUpdatedAt(value string) time.Time {
+	updatedAt, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return updatedAt
 }
 
 func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {

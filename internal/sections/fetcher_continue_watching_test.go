@@ -107,6 +107,36 @@ func TestFilterSupersededEpisodeProgressEntriesDropsOlderPartialsAfterLaterCompl
 	}
 }
 
+func TestMergeContinueWatchingProgressIncludesEbooksByUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	videoEntries := []userstore.WatchProgress{
+		{
+			MediaItemID:     "movie-1",
+			PositionSeconds: 240,
+			DurationSeconds: 1200,
+			UpdatedAt:       time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		},
+	}
+	ebookEntries := []userstore.WatchProgress{
+		{
+			MediaItemID:     "ebook-1",
+			PositionSeconds: 0.42,
+			DurationSeconds: 1,
+			UpdatedAt:       time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		},
+	}
+
+	merged := mergeContinueWatchingProgress(videoEntries, ebookEntries, 10)
+
+	if got, want := progressIDs(merged), []string{"ebook-1", "movie-1"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("merged IDs = %v, want %v", got, want)
+	}
+	if merged[0].PositionSeconds != 0.42 || merged[0].DurationSeconds != 1 {
+		t.Fatalf("ebook progress = %+v, want normalized reader progress", merged[0])
+	}
+}
+
 func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
 	t.Parallel()
 
@@ -167,6 +197,14 @@ func contentIDs(items []*models.MediaItem) []string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		ids = append(ids, item.ContentID)
+	}
+	return ids
+}
+
+func progressIDs(entries []userstore.WatchProgress) []string {
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.MediaItemID)
 	}
 	return ids
 }
