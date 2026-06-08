@@ -382,8 +382,8 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if detail.Type == "movie" || detail.Type == "episode" {
-		detail.UserData = h.getLeafUserData(r, detail.ContentID)
+	if detail.Type == "movie" || detail.Type == "episode" || detail.Type == "ebook" {
+		detail.UserData = h.getLeafUserData(r, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
 	}
 
@@ -1155,7 +1155,11 @@ func (h *ItemsHandler) toSeasonResponse(r *http.Request, seriesID string, s *mod
 	return resp
 }
 
-func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string) *catalog.SeasonUserData {
+func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string, itemType ...string) *catalog.SeasonUserData {
+	if len(itemType) > 0 && itemType[0] == "ebook" {
+		return h.getEbookLeafUserData(r, contentID)
+	}
+
 	store, profileID, ok := h.userStoreForRequest(r)
 	if !ok {
 		return nil
@@ -1176,6 +1180,33 @@ func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string) *catal
 		LastHDR:         progress.LastHDR,
 		LastCodecVideo:  progress.LastCodecVideo,
 		LastEditionKey:  progress.LastEditionKey,
+	}
+}
+
+func (h *ItemsHandler) getEbookLeafUserData(r *http.Request, contentID string) *catalog.SeasonUserData {
+	if h == nil || h.ebookProgressStore == nil {
+		return nil
+	}
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID <= 0 || profileID == "" || contentID == "" {
+		return nil
+	}
+
+	progress, err := h.ebookProgressStore.ListByContentIDs(r.Context(), userID, profileID, []string{contentID})
+	if err != nil {
+		return nil
+	}
+	row, ok := progress[contentID]
+	if !ok || row.Progress <= 0 {
+		return nil
+	}
+
+	return &catalog.SeasonUserData{
+		PositionSeconds: row.Progress,
+		DurationSeconds: 1,
+		IsInProgress:    row.Progress < 0.9,
+		Played:          row.Progress >= 0.9,
 	}
 }
 
