@@ -1151,6 +1151,32 @@ func (r *Repo) GetWatchProgressForUser(ctx context.Context, userID int, profileI
 	return result, rows.Err()
 }
 
+func (r *Repo) GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT content_id,
+		       progress::double precision AS position_seconds,
+		       1::double precision AS duration_seconds,
+		       progress >= 0.9 AS completed,
+		       updated_at
+		FROM   ebook_reader_progress
+		WHERE  user_id = $1 AND profile_id = $2`,
+		userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get ebook reader progress: %w", err)
+	}
+	defer rows.Close()
+
+	var result []WatchProgressRow
+	for rows.Next() {
+		var wp WatchProgressRow
+		if err := rows.Scan(&wp.MediaItemID, &wp.PositionSeconds, &wp.DurationSeconds, &wp.Completed, &wp.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan ebook reader progress: %w", err)
+		}
+		result = append(result, wp)
+	}
+	return result, rows.Err()
+}
+
 // RewatchCount holds the number of completed watches for an item.
 type RewatchCount struct {
 	MediaItemID   string
