@@ -226,7 +226,7 @@ func isEbookFile(file *models.MediaFile) bool {
 func isEbookReaderFormat(value string) bool {
 	format := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
 	switch format {
-	case "epub", "pdf", "mobi", "azw", "azw3", "cbz", "cbr", "fb2", "fbz", "txt", "md":
+	case "epub", "pdf", "mobi", "azw", "azw3", "cbz", "cbr", "fb2", "fbz", "md":
 		return true
 	default:
 		return false
@@ -259,8 +259,6 @@ func ebookMimeType(path, container string) string {
 		return "application/x-fictionbook+xml"
 	case ".fbz":
 		return "application/x-zip-compressed-fb2"
-	case ".txt":
-		return "text/plain; charset=utf-8"
 	case ".md":
 		return "text/markdown; charset=utf-8"
 	default:

@@ -142,7 +142,6 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 		"book.fb2":     "application/x-fictionbook+xml",
 		"book.fbz":     "application/x-zip-compressed-fb2",
 		"book.fb2.zip": "application/x-zip-compressed-fb2",
-		"book.txt":     "text/plain; charset=utf-8",
 		"book.md":      "text/markdown; charset=utf-8",
 		"book.unknown": "application/octet-stream",
 	}
@@ -168,6 +167,20 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 				t.Fatalf("ebookMimeType() = %q, want %q", got, wantMime)
 			}
 		})
+	}
+}
+
+func TestEbookReaderRejectsPlainText(t *testing.T) {
+	file := &models.MediaFile{
+		FilePath: "/library/book.txt",
+		BaseType: "ebook",
+	}
+
+	if isEbookFile(file) {
+		t.Fatal("plain text should not be treated as an ebook reader format")
+	}
+	if got := ebookMimeType(file.FilePath, file.Container); got == "text/plain; charset=utf-8" {
+		t.Fatal("plain text should not have an ebook reader MIME type")
 	}
 }
 
