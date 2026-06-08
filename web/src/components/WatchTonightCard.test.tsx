@@ -36,6 +36,7 @@ describe("WatchTonightCard", () => {
       </MemoryRouter>,
     );
 
+    expect(markup).toContain('href="/item/ebook%201"');
     expect(markup).toContain('href="/reader/ebook/ebook%201"');
     expect(markup).toContain("57% read");
     expect(markup).not.toContain('href="/watch/ebook');

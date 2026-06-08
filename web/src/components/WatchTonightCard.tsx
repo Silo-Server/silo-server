@@ -26,7 +26,7 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
     item.type === "ebook"
       ? `/reader/ebook/${encodeURIComponent(item.content_id)}`
       : `/watch/${item.content_id}`;
-  const itemHref = `/item/${item.content_id}`;
+  const itemHref = `/item/${encodeURIComponent(item.content_id)}`;
   const source = item.watch_tonight_source ?? "";
   const isInProgress = source === "continue_watching";
   const isNextUp = source === "next_up";
