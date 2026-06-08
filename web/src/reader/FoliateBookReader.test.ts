@@ -57,9 +57,9 @@ describe("FoliateBookReader helpers", () => {
       "azw3",
     );
     expect(readerFileFormat(version({ file_name: "book.fb2.zip" }))).toBe("fbz");
-    expect(readerFileFormat(version({ container: "zip", file_name: "book.fb2.zip" }))).toBe(
-      "fbz",
-    );
+    expect(readerFileFormat(version({ container: "zip", file_name: "book.fb2.zip" }))).toBe("fbz");
+    expect(readerFileFormat(version({ container: "zip", file_name: "comic.cbz" }))).toBe("cbz");
+    expect(readerFileFormat(version({ container: "rar", file_name: "comic.cbr" }))).toBe("cbr");
     expect(readerFileFormat(version({ file_path: "/library/book.cbz" }))).toBe("cbz");
   });
 

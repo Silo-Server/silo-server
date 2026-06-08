@@ -85,10 +85,13 @@ export function readerFileFormat(file: FileVersion | undefined): string {
   if (!file) return "";
   const fileName = file.file_name || file.file_path || "";
   if (fileName.toLowerCase().endsWith(".fb2.zip")) return "fbz";
+  const extension = /\.([a-z0-9]+)$/i.exec(fileName)?.[1]?.toLowerCase() ?? "";
   const container = file.container?.trim().toLowerCase();
-  if (container) return container.replace(/^\./, "");
-  const match = /\.([a-z0-9]+)$/i.exec(fileName);
-  return match?.[1]?.toLowerCase() ?? "";
+  const normalizedContainer = container ? container.replace(/^\./, "") : "";
+  if (normalizedContainer && normalizedContainer !== "zip" && normalizedContainer !== "rar") {
+    return normalizedContainer;
+  }
+  return extension || normalizedContainer;
 }
 
 export function isReaderSupportedFile(file: FileVersion | undefined): boolean {
