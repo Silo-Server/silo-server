@@ -113,7 +113,7 @@ func TestBuildFFmpegArgs_CopyVideoSeekPreservesCodecCopy(t *testing.T) {
 		t.Fatalf("copy-mode seek should preserve -c:v copy: %s", joined)
 	}
 	// Must not contain any video encoder.
-	for _, enc := range []string{"h264_qsv", "h264_vaapi", "libx264", "hevc_qsv"} {
+	for _, enc := range []string{"h264_qsv", "h264_vaapi", "h264_nvenc", "libx264", "hevc_qsv", "hevc_nvenc"} {
 		if strings.Contains(joined, enc) {
 			t.Fatalf("copy-mode seek should not use encoder %s: %s", enc, joined)
 		}
@@ -166,7 +166,7 @@ func TestBuildFFmpegArgs_MPEG2CopyVideoUsesMPEGTS(t *testing.T) {
 	if strings.Contains(joined, "movflags=+frag_discont") {
 		t.Fatalf("mpeg2 MPEG-TS copy-mode should not use fMP4 movflags: %s", joined)
 	}
-	for _, enc := range []string{"h264_qsv", "h264_vaapi", "libx264", "hevc_qsv", "libx265"} {
+	for _, enc := range []string{"h264_qsv", "h264_vaapi", "h264_nvenc", "libx264", "hevc_qsv", "hevc_nvenc", "libx265"} {
 		if strings.Contains(joined, enc) {
 			t.Fatalf("mpeg2 copy-mode should not use encoder %s: %s", enc, joined)
 		}
@@ -234,6 +234,11 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 			opts: TranscodeOpts{HWAccel: "vaapi", SourceVideoCodec: "mpeg4", TargetCodecVideo: "h264"},
 			want: "none",
 		},
+		{
+			name: "nvenc passthrough",
+			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", TargetCodecVideo: "h264"},
+			want: "nvenc",
+		},
 	}
 
 	for _, tt := range tests {
@@ -244,6 +249,38 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 				t.Fatalf("resolveEffectiveTranscodeHWAccel() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:         "/media/movie.mkv",
+		OutputDir:         "/tmp/out",
+		SessionID:         "session-nvenc",
+		SourceVideoCodec:  "h264",
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		SegmentDuration:   2,
+		HWAccel:           "nvenc",
+		TargetResolution:  "720p",
+		TargetBitrateKbps: 2000,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-hwaccel cuda") {
+		t.Fatalf("nvenc args should enable cuda hwaccel: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_nvenc") {
+		t.Fatalf("nvenc args should use h264_nvenc encoder: %s", joined)
+	}
+	if !strings.Contains(joined, "-vf scale_cuda=w=-2:h=720:format=nv12") {
+		t.Fatalf("nvenc args should use scale_cuda, not software scale: %s", joined)
+	}
+	if strings.Contains(joined, "-vf scale=-2:720") {
+		t.Fatalf("nvenc args must not use software scale on cuda frames: %s", joined)
+	}
+	if !strings.Contains(joined, "-b:v 2000k -maxrate 2000k -bufsize 4000k") {
+		t.Fatalf("nvenc args should include bitrate cap controls: %s", joined)
 	}
 }
 

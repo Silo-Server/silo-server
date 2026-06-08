@@ -58,6 +58,7 @@ export default function PlaybackSettings() {
               { value: "auto", label: "Auto" },
               { value: "qsv", label: "Intel Quick Sync (QSV)" },
               { value: "vaapi", label: "VA-API" },
+              { value: "nvenc", label: "NVIDIA NVENC" },
               { value: "none", label: "Software" },
             ]}
             value={form.getValue("playback.hw_accel")}
@@ -202,6 +203,8 @@ function formatResolved(resolved: string): string {
       return "Intel Quick Sync (QSV)";
     case "vaapi":
       return "VA-API";
+    case "nvenc":
+      return "NVIDIA NVENC";
     case "none":
       return "Software";
     default:

@@ -652,7 +652,7 @@ func (s *Service) extractFrameLocal(ctx context.Context, inputPath string, seekS
 
 func (s *Service) resolveHWConfig() (string, string) {
 	s.hwResolveOnce.Do(func() {
-		s.resolvedHWAccel = playback.ResolveHWAccel(s.hwAccel)
+		s.resolvedHWAccel = playback.ResolveHWAccelWithFFmpeg(s.hwAccel, s.ffmpegPath)
 		s.resolvedHWDevice = s.hwDevice
 		if s.resolvedHWDevice == "" && (s.resolvedHWAccel == "qsv" || s.resolvedHWAccel == "vaapi") {
 			s.resolvedHWDevice = playback.PickRenderDevice("")

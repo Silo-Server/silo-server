@@ -112,7 +112,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleHWCapabilities(w http.ResponseWriter, _ *http.Request) {
-	info := playback.DetectHWAccel()
+	ffmpegPath := ""
+	if cfg := s.watcher.Config(); cfg != nil {
+		ffmpegPath = cfg.Playback.FFmpegPath
+	}
+	info := playback.DetectHWAccelWithFFmpeg(ffmpegPath)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }

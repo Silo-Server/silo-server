@@ -2102,10 +2102,12 @@ func NewRouter(deps Dependencies) chi.Router {
 							// System inspection.
 							{
 								sysJWTSecret := ""
+								sysFFmpegPath := ""
 								if deps.Config != nil {
 									sysJWTSecret = deps.Config.Auth.JWTSecret
+									sysFFmpegPath = deps.Config.Playback.FFmpegPath
 								}
-								systemHandler := handlers.NewSystemHandler(deps.TranscodePool, sysJWTSecret)
+								systemHandler := handlers.NewSystemHandler(deps.TranscodePool, sysJWTSecret, sysFFmpegPath)
 								r.Route("/system", func(r chi.Router) {
 									r.Get("/build", systemHandler.HandleBuildInfo)
 									r.Get("/hw-accel", systemHandler.HandleHWAccel)
