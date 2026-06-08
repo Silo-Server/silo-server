@@ -33,6 +33,7 @@ require (
 	github.com/zishang520/socket.io/v2 v2.5.0
 	go.n16f.net/thumbhash v1.1.0
 	golang.org/x/image v0.39.0
+	golang.org/x/net v0.53.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
@@ -71,7 +72,6 @@ require (
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.34.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 )
 

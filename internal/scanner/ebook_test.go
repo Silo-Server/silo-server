@@ -182,6 +182,20 @@ func TestParseEbookEPUBMetadata(t *testing.T) {
 	}
 }
 
+func TestParseEbookEPUBMetadataStripsHTMLDescription(t *testing.T) {
+	path := writeTestEPUBWithDescription(t, `&lt;div&gt;&lt;p&gt;&lt;strong&gt;Shanghai Dreams ...&lt;/strong&gt; Magnus is stationed at Shanghai.&lt;br&gt;Published by The Electronic Book Company&lt;/p&gt;&lt;/div&gt;`)
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	want := "Shanghai Dreams ... Magnus is stationed at Shanghai. Published by The Electronic Book Company"
+	if got.Description != want {
+		t.Fatalf("Description = %q, want %q", got.Description, want)
+	}
+}
+
 func TestParseEbookEPUBSkipsUUIDIdentifierBeforeISBN(t *testing.T) {
 	path := writeTestEPUB(t, []string{
 		"550e8400-e29b-41d4-a716-446655440000",
@@ -614,6 +628,30 @@ func TestResolveEbookExistingRootAppliesParsedMetadata(t *testing.T) {
 	}
 }
 
+func TestResolveEbookExistingRootReplacesHTMLOverview(t *testing.T) {
+	reader := &fakeFilesystemItemReader{items: []*models.MediaItem{{
+		ContentID: "ebook-root-id",
+		Type:      "ebook",
+		Title:     "Old Title",
+		Overview:  "<div><p>Raw overview</p></div>",
+	}}}
+	writer := &fakeFilesystemItemWriter{}
+
+	err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
+		Title:       "New Title",
+		Description: "Clean overview",
+	})
+	if err != nil {
+		t.Fatalf("updateExistingEbookMediaItem: %v", err)
+	}
+	if len(writer.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
+	}
+	if writer.upserts[0].Overview != "Clean overview" {
+		t.Fatalf("Overview = %q, want Clean overview", writer.upserts[0].Overview)
+	}
+}
+
 func TestApplyEbookToMediaItemPreservesExistingYearWhenParsedYearMissing(t *testing.T) {
 	item := &models.MediaItem{
 		Type:  "ebook",
@@ -848,6 +886,14 @@ func writeTestEPUB(t *testing.T, identifiers []string) string {
 }
 
 func writeTestEPUBWithMeta(t *testing.T, identifiers []string, extraMetaXML string) string {
+	return writeTestEPUBWithDescriptionAndMeta(t, identifiers, "Back cover copy", extraMetaXML)
+}
+
+func writeTestEPUBWithDescription(t *testing.T, description string) string {
+	return writeTestEPUBWithDescriptionAndMeta(t, []string{"ISBN: 978-0-306-40615-7"}, description, "")
+}
+
+func writeTestEPUBWithDescriptionAndMeta(t *testing.T, identifiers []string, description string, extraMetaXML string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "book.epub")
@@ -890,7 +936,7 @@ func writeTestEPUBWithMeta(t *testing.T, identifiers []string, extraMetaXML stri
     <dc:language>en</dc:language>
     <dc:subject>Fiction</dc:subject>
     <dc:subject>Adventure</dc:subject>
-    <dc:description>Back cover copy</dc:description>
+    <dc:description>`+description+`</dc:description>
     <meta name="calibre:series" content="Test Series"/>
     <meta name="calibre:series_index" content="2"/>
 `+extraMetaXML+`

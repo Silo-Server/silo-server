@@ -5,12 +5,15 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	xhtml "golang.org/x/net/html"
 )
 
 const maxEPUBMetadataEntrySize = 8 * 1024 * 1024
@@ -130,7 +133,7 @@ func ebookFileFormat(path string) string {
 func (b *parsedEbook) sanitize() {
 	b.Format = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(b.Format)), ".")
 	b.Title = strings.TrimSpace(b.Title)
-	b.Description = strings.TrimSpace(b.Description)
+	b.Description = cleanEbookDescription(b.Description)
 	b.Publisher = strings.TrimSpace(b.Publisher)
 	b.Language = strings.TrimSpace(b.Language)
 	b.ISBN = normalizeEbookISBN(b.ISBN)
@@ -144,6 +147,64 @@ func (b *parsedEbook) sanitize() {
 	if b.Year == 0 && !b.PublishedAt.IsZero() {
 		b.Year = b.PublishedAt.Year()
 	}
+}
+
+func cleanEbookDescription(value string) string {
+	value = strings.TrimSpace(html.UnescapeString(value))
+	if value == "" {
+		return ""
+	}
+	if !strings.Contains(value, "<") || !strings.Contains(value, ">") {
+		return strings.Join(strings.Fields(value), " ")
+	}
+
+	tokenizer := xhtml.NewTokenizer(strings.NewReader(value))
+	var out strings.Builder
+	needsSpace := false
+	writeSpace := func() {
+		if out.Len() > 0 && !needsSpace {
+			needsSpace = true
+		}
+	}
+	for {
+		switch tokenizer.Next() {
+		case xhtml.ErrorToken:
+			return strings.Join(strings.Fields(out.String()), " ")
+		case xhtml.TextToken:
+			text := strings.TrimSpace(html.UnescapeString(string(tokenizer.Text())))
+			if text == "" {
+				continue
+			}
+			if out.Len() > 0 && (needsSpace || !startsWithClosingPunctuation(text)) {
+				out.WriteByte(' ')
+			}
+			out.WriteString(text)
+			needsSpace = false
+		case xhtml.StartTagToken, xhtml.SelfClosingTagToken, xhtml.EndTagToken:
+			name, _ := tokenizer.TagName()
+			switch strings.ToLower(string(name)) {
+			case "br", "p", "div", "section", "article", "li", "ul", "ol", "blockquote", "tr":
+				writeSpace()
+			}
+		}
+	}
+}
+
+func startsWithClosingPunctuation(value string) bool {
+	for _, r := range value {
+		switch r {
+		case '.', ',', ';', ':', '!', '?', ')', ']', '}':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func looksLikeHTML(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.Contains(value, "<") && strings.Contains(value, ">")
 }
 
 func uniqueTrimmedStrings(values []string) []string {

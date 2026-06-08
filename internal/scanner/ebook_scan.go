@@ -399,7 +399,7 @@ func applyEbookToMediaItem(item *models.MediaItem, book *parsedEbook) {
 	if book.Year > 0 {
 		item.Year = book.Year
 	}
-	if book.Description != "" && item.Overview == "" {
+	if book.Description != "" && (item.Overview == "" || looksLikeHTML(item.Overview)) {
 		item.Overview = book.Description
 	}
 	if book.Publisher != "" {
