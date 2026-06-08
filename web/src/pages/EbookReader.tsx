@@ -773,6 +773,24 @@ export default function EbookReader() {
                     onChange={(fontSize) => updateReaderSettings({ fontSize })}
                   />
                   <ReaderRange
+                    label="Brightness"
+                    value={readerSettings.fontBrightness}
+                    min={70}
+                    max={125}
+                    step={1}
+                    suffix="%"
+                    onChange={(fontBrightness) => updateReaderSettings({ fontBrightness })}
+                  />
+                  <ReaderRange
+                    label="Zoom"
+                    value={readerSettings.zoom}
+                    min={75}
+                    max={160}
+                    step={1}
+                    suffix="%"
+                    onChange={(zoom) => updateReaderSettings({ zoom })}
+                  />
+                  <ReaderRange
                     label="Line height"
                     value={readerSettings.lineHeight}
                     min={1.1}
@@ -798,6 +816,45 @@ export default function EbookReader() {
                     suffix="ch"
                     onChange={(maxWidth) => updateReaderSettings({ maxWidth })}
                   />
+                  <div className="border-border space-y-2 border-t pt-3">
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                      <span>Hyphenation</span>
+                      <input
+                        aria-label="Hyphenation"
+                        type="checkbox"
+                        checked={readerSettings.hyphenation}
+                        onChange={(event) =>
+                          updateReaderSettings({ hyphenation: event.target.checked })
+                        }
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                      <span>Right to left</span>
+                      <input
+                        aria-label="Right to left"
+                        type="checkbox"
+                        checked={readerSettings.rtl}
+                        onChange={(event) => updateReaderSettings({ rtl: event.target.checked })}
+                      />
+                    </label>
+                  </div>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground text-xs font-medium">Writing mode</span>
+                    <select
+                      aria-label="Writing mode"
+                      value={readerSettings.writingMode}
+                      onChange={(event) =>
+                        updateReaderSettings({
+                          writingMode: event.target.value as ReaderSettings["writingMode"],
+                        })
+                      }
+                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="horizontal-tb">Horizontal</option>
+                      <option value="vertical-rl">Vertical</option>
+                    </select>
+                  </label>
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground text-xs font-medium">Spread</span>
                     <select

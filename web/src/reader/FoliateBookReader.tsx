@@ -67,6 +67,7 @@ export type FoliateBookReaderHandle = {
 export type ReaderTheme = "light" | "sepia" | "dark";
 export type ReaderFlow = "paginated" | "scrolled";
 export type ReaderSpread = "auto" | "none";
+export type ReaderWritingMode = "auto" | "horizontal-tb" | "vertical-rl";
 
 export type ReaderSettings = {
   theme: ReaderTheme;
@@ -80,6 +81,9 @@ export type ReaderSettings = {
   spread: ReaderSpread;
   flow: ReaderFlow;
   fontBrightness: number;
+  rtl: boolean;
+  writingMode: ReaderWritingMode;
+  zoom: number;
 };
 
 export type ReaderReadyState = {
@@ -155,6 +159,9 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   spread: "auto",
   flow: "paginated",
   fontBrightness: 100,
+  rtl: false,
+  writingMode: "auto",
+  zoom: 100,
 };
 
 export function ebookReadPath(contentID: string, fileID: number): string {
@@ -276,6 +283,10 @@ function isReaderSpread(value: unknown): value is ReaderSpread {
   return value === "auto" || value === "none";
 }
 
+function isReaderWritingMode(value: unknown): value is ReaderWritingMode {
+  return value === "auto" || value === "horizontal-tb" || value === "vertical-rl";
+}
+
 export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): ReaderSettings {
   return {
     theme: isReaderTheme(settings?.theme) ? settings.theme : DEFAULT_READER_SETTINGS.theme,
@@ -300,6 +311,11 @@ export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): Rea
       70,
       125,
     ),
+    rtl: typeof settings?.rtl === "boolean" ? settings.rtl : DEFAULT_READER_SETTINGS.rtl,
+    writingMode: isReaderWritingMode(settings?.writingMode)
+      ? settings.writingMode
+      : DEFAULT_READER_SETTINGS.writingMode,
+    zoom: clampNumber(settings?.zoom, DEFAULT_READER_SETTINGS.zoom, 75, 160),
   };
 }
 
@@ -377,6 +393,8 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
       hyphens: ${settings.hyphenation ? "auto" : "none"} !important;
       line-height: ${settings.lineHeight} !important;
       max-width: ${contentMaxWidth} !important;
+      direction: ${settings.rtl ? "rtl" : "inherit"} !important;
+      writing-mode: ${settings.writingMode === "auto" ? "inherit" : settings.writingMode} !important;
       filter: brightness(${settings.fontBrightness}%) !important;
     }
     body :where(p, span, div, li, blockquote, h1, h2, h3, h4, h5, h6,
@@ -397,6 +415,7 @@ export function readerRendererAttributes(settings: ReaderSettings) {
     margin: `${settings.margin}px`,
     maxInlineSize: scrolled ? "100%" : `${settings.maxWidth}ch`,
     maxColumnCount: scrolled ? "1" : settings.spread === "none" ? "1" : "2",
+    scale: `${settings.zoom}`,
   };
 }
 
@@ -476,6 +495,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       renderer?.setAttribute("margin", attributes.margin);
       renderer?.setAttribute("max-inline-size", attributes.maxInlineSize);
       renderer?.setAttribute("max-column-count", attributes.maxColumnCount);
+      renderer?.setAttribute("scale", attributes.scale);
       if (attributes.flow) {
         renderer?.setAttribute("flow", attributes.flow);
       } else {

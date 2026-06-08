@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bring the core ebook reader up to the personal reader feature set with server-persisted config, annotations/bookmarks, selection tools, reading aids, advanced settings, and diagnostics.
+**Goal:** Bring the core ebook reader up to the personal reader feature set with server-persisted config, annotations/bookmarks, selection tools, reading aids, and advanced settings.
 
 **Architecture:** Keep ebook reading in core, matching audiobooks: core owns the ebook media type and reader behavior; metadata remains plugin-provided. Extend the existing `/ebooks/{content_id}` reader API and `EbookReaderHandler` rather than creating a separate plugin-style reader subsystem. Persist per-user/per-profile/per-book state in Postgres so settings, annotations, and bookmarks roam across devices.
 
@@ -23,7 +23,7 @@
 - `web/src/reader/FoliateBookReader.tsx`
   - Adds selection/annotation/readable-text/content-popup reader handles and applies saved config.
 - `web/src/pages/EbookReader.tsx`
-  - Adds server-backed settings, annotation/bookmark UI, selection tools, TTS controls, wake-lock/e-ink controls, and diagnostics affordances.
+  - Adds server-backed settings, annotation/bookmark UI, selection tools, TTS controls, wake-lock/e-ink controls, and advanced reader controls.
 - `web/src/hooks/useTTS.ts`, `web/src/hooks/useScreenWakeLock.ts`, `web/src/hooks/useEinkMode.ts`
   - Port focused personal-reader hooks into core web.
 - `web/src/reader/ebookReaderApi.ts`
@@ -267,7 +267,7 @@ Run focused web tests and build. Commit:
 git commit -m "feat: add ebook reader tools and aids"
 ```
 
-## Task 4: Advanced Settings And Diagnostics
+## Task 4: Advanced Reader Settings
 
 **Files:**
 - Modify: `web/src/reader/FoliateBookReader.tsx`
@@ -284,25 +284,12 @@ Add server-persisted settings for:
 - hyphenation toggle
 - custom font selection/upload if API support is added in a later task
 
-- [ ] **Step 2: Add diagnostics**
-
-Emit local diagnostics for:
-- file load start/success/failure
-- config load/save
-- progress save
-- annotation create/update/delete
-- TTS state changes
-
-- [ ] **Step 3: Add diagnostics UI**
-
-Add a compact diagnostics panel in the reader side panel. Keep it hidden unless opened.
-
-- [ ] **Step 4: Verify and commit**
+- [ ] **Step 2: Verify and commit**
 
 Run focused tests and build. Commit:
 
 ```bash
-git commit -m "feat: add ebook reader diagnostics"
+git commit -m "feat: add ebook advanced reader settings"
 ```
 
 ## Self-Review

@@ -660,4 +660,69 @@ describe("EbookReader", () => {
     expect(container.querySelector('input[aria-label="Keep screen awake"]')).not.toBeNull();
     expect(container.querySelector('input[aria-label="E-ink mode"]')).not.toBeNull();
   });
+
+  it("shows advanced reader controls without diagnostics UI", async () => {
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    expect(container.querySelector('[aria-label="Diagnostics"]')).toBeNull();
+    expect(container.textContent).not.toContain("Diagnostics");
+
+    const brightness = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Brightness"]',
+    );
+    const zoom = container.querySelector<HTMLInputElement>('input[aria-label="Zoom"]');
+    const hyphenation = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Hyphenation"]',
+    );
+    const rtl = container.querySelector<HTMLInputElement>('input[aria-label="Right to left"]');
+    const writingMode = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Writing mode"]',
+    );
+
+    expect(brightness).not.toBeNull();
+    expect(zoom).not.toBeNull();
+    expect(hyphenation).not.toBeNull();
+    expect(rtl).not.toBeNull();
+    expect(writingMode).not.toBeNull();
+
+    await act(async () => {
+      if (!brightness || !zoom || !hyphenation || !rtl || !writingMode) return;
+      setInputValue(brightness, "112");
+      setInputValue(zoom, "125");
+      hyphenation.click();
+      rtl.click();
+      writingMode.value = "vertical-rl";
+      writingMode.dispatchEvent(new Event("change", { bubbles: true }));
+      vi.advanceTimersByTime(450);
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        fontBrightness: 112,
+        zoom: 125,
+        hyphenation: false,
+        rtl: true,
+        writingMode: "vertical-rl",
+      }),
+    );
+
+    vi.useRealTimers();
+  });
 });

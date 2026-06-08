@@ -157,6 +157,7 @@ describe("FoliateBookReader helpers", () => {
         theme: "sepia",
         flow: "scrolled",
         spread: "none",
+        zoom: 200,
       }),
     ).toMatchObject({
       fontSize: 180,
@@ -166,6 +167,7 @@ describe("FoliateBookReader helpers", () => {
       theme: "sepia",
       flow: "scrolled",
       spread: "none",
+      zoom: 160,
     });
   });
 
@@ -179,6 +181,8 @@ describe("FoliateBookReader helpers", () => {
         lineHeight: 1.8,
         maxWidth: 68,
         hyphenation: false,
+        rtl: true,
+        writingMode: "vertical-rl",
       }),
     );
 
@@ -190,6 +194,8 @@ describe("FoliateBookReader helpers", () => {
     expect(styles).toContain("hyphens: none !important");
     expect(styles).toContain("line-height: 1.8 !important");
     expect(styles).toContain("max-width: 68ch !important");
+    expect(styles).toContain("direction: rtl !important");
+    expect(styles).toContain("writing-mode: vertical-rl !important");
   });
 
   it("uses full available width in scrolled flow", () => {
@@ -218,6 +224,7 @@ describe("FoliateBookReader helpers", () => {
       margin: "20px",
       maxColumnCount: "2",
       maxInlineSize: "68ch",
+      scale: "100",
     });
 
     expect(
@@ -235,6 +242,7 @@ describe("FoliateBookReader helpers", () => {
       margin: "20px",
       maxColumnCount: "1",
       maxInlineSize: "100%",
+      scale: "100",
     });
   });
 });
