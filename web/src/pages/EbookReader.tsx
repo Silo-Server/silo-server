@@ -807,15 +807,17 @@ export default function EbookReader() {
                     suffix="px"
                     onChange={(margin) => updateReaderSettings({ margin })}
                   />
-                  <ReaderRange
-                    label="Width"
-                    value={readerSettings.maxWidth}
-                    min={42}
-                    max={96}
-                    step={1}
-                    suffix="ch"
-                    onChange={(maxWidth) => updateReaderSettings({ maxWidth })}
-                  />
+                  {readerSettings.flow !== "scrolled" && (
+                    <ReaderRange
+                      label="Width"
+                      value={readerSettings.maxWidth}
+                      min={42}
+                      max={96}
+                      step={1}
+                      suffix="ch"
+                      onChange={(maxWidth) => updateReaderSettings({ maxWidth })}
+                    />
+                  )}
                   <div className="border-border space-y-2 border-t pt-3">
                     <label className="flex items-center justify-between gap-3 text-sm">
                       <span>Hyphenation</span>
@@ -908,9 +910,14 @@ type ReaderRangeProps = {
 function ReaderRange({ label, value, min, max, step, suffix = "", onChange }: ReaderRangeProps) {
   return (
     <label className="block space-y-1 text-sm">
-      <span className="text-muted-foreground flex items-center justify-between gap-3 text-xs font-medium">
-        <span>{label}</span>
-        <span className="tabular-nums">
+      <span
+        data-reader-range-header
+        className="text-muted-foreground grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 text-xs font-medium"
+      >
+        <span data-reader-range-name className="min-w-0 break-words leading-4">
+          {label}
+        </span>
+        <span data-reader-range-value className="justify-self-end tabular-nums leading-4">
           {Number.isInteger(step) ? value : value.toFixed(2)}
           {suffix}
         </span>

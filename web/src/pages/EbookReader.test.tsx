@@ -745,4 +745,65 @@ describe("EbookReader", () => {
 
     vi.useRealTimers();
   });
+
+  it("keeps range labels readable in the settings panel", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const brightness = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Brightness"]',
+    );
+    const label = brightness?.closest("label");
+    const header = label?.querySelector("[data-reader-range-header]");
+    const name = label?.querySelector("[data-reader-range-name]");
+    const value = label?.querySelector("[data-reader-range-value]");
+
+    expect(header?.className).toContain("grid");
+    expect(name?.className).toContain("break-words");
+    expect(value?.className).toContain("justify-self-end");
+  });
+
+  it("hides width control in scrolled flow because it fills the viewport", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    expect(container.querySelector('input[aria-label="Width"]')).not.toBeNull();
+
+    const flow = container.querySelector<HTMLSelectElement>('select[aria-label="Flow"]');
+    await act(async () => {
+      if (!flow) return;
+      flow.value = "scrolled";
+      flow.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(container.querySelector('input[aria-label="Width"]')).toBeNull();
+  });
 });
