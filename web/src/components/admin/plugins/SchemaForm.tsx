@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type {
-  PluginAdminForm,
-  PluginAdminFormField,
-  PluginAdminFormSection,
-} from "@/api/types";
+import { Loader2 } from "lucide-react";
+
+import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 
 import {
@@ -30,6 +29,13 @@ type Props = {
   onChange: (next: Record<string, unknown>) => void;
   errors?: Record<string, string>;
   dynamicOptions?: Record<string, SchemaOption[]>;
+  /**
+   * True while the host is probing the connection for dynamic option lists
+   * (root folders, quality profiles, tags). Drives per-field loading skeletons
+   * on dynamic_options controls so the operator sees the form populate instead
+   * of staring at empty selects.
+   */
+  optionsLoading?: boolean;
   idPrefix?: string;
   onValidityChange?: (valid: boolean) => void;
 };
@@ -44,14 +50,50 @@ function optionsFor(
   return field.options ?? [];
 }
 
+// A dynamic control is "pending" only when we're probing AND have nothing to
+// show yet — so a refresh over already-loaded options never flashes a skeleton
+// over the operator's current selection.
+function isPending(
+  field: PluginAdminFormField,
+  options: SchemaOption[],
+  optionsLoading: boolean | undefined,
+): boolean {
+  return Boolean(field.dynamic_options) && Boolean(optionsLoading) && options.length === 0;
+}
+
+// Loading placeholder for a single dynamic SELECT: a select-sized row with a
+// spinner and a shimmer bar, so the field reads as "fetching from the service".
+function SelectSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      className="border-input bg-muted/20 flex h-9 w-full items-center gap-2.5 rounded-md border px-3"
+    >
+      <Loader2 className="text-muted-foreground/70 h-3.5 w-3.5 shrink-0 animate-spin" />
+      <Skeleton className="h-2.5 w-32 rounded-full" />
+    </div>
+  );
+}
+
+// Loading placeholder for a dynamic MULTI_SELECT (tags): a few shimmer chips.
+function ChipsSkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-wrap gap-2">
+      {["w-16", "w-12", "w-20", "w-14"].map((w) => (
+        <Skeleton key={w} className={`h-7 rounded-md ${w}`} />
+      ))}
+    </div>
+  );
+}
+
 function SchemaFormSection({
   section,
   values,
-  renderField,
+  renderFields,
 }: {
   section: PluginAdminFormSection;
   values: Record<string, unknown>;
-  renderField: (key: string) => React.ReactNode;
+  renderFields: (keys: string[]) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(!section.collapsed_default);
 
@@ -62,12 +104,12 @@ function SchemaFormSection({
   const showFields = section.collapsible ? open : true;
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <section className="border-border/70 bg-muted/10 space-y-3 rounded-lg border p-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="space-y-1">
-          <Label>{section.title}</Label>
+        <div className="space-y-0.5">
+          <Label className="text-foreground text-sm font-semibold">{section.title}</Label>
           {section.description ? (
-            <p className="text-muted-foreground text-xs">{section.description}</p>
+            <p className="text-muted-foreground text-xs leading-relaxed">{section.description}</p>
           ) : null}
         </div>
         {section.collapsible ? (
@@ -81,10 +123,8 @@ function SchemaFormSection({
           </Button>
         ) : null}
       </div>
-      {showFields ? (
-        <div className="grid gap-4">{section.field_keys.map((key) => renderField(key))}</div>
-      ) : null}
-    </div>
+      {showFields ? renderFields(section.field_keys) : null}
+    </section>
   );
 }
 
@@ -94,6 +134,7 @@ export function SchemaForm({
   onChange,
   errors,
   dynamicOptions,
+  optionsLoading,
   idPrefix = "schema",
   onValidityChange,
 }: Props) {
@@ -126,27 +167,17 @@ export function SchemaForm({
   function renderControl(field: PluginAdminFormField): React.ReactNode {
     const id = `${idPrefix}-${field.key}`;
 
-    if (field.control === "SWITCH") {
-      return (
-        <div className="flex items-center gap-3 rounded-md border px-3 py-2">
-          <Switch
-            id={id}
-            checked={Boolean(effectiveValue(field, values))}
-            onCheckedChange={(checked) => setField(field.key, checked)}
-          />
-          <span className="text-muted-foreground text-sm">{field.placeholder || ""}</span>
-        </div>
-      );
-    }
-
     if (field.control === "SELECT") {
       const options = optionsFor(field, dynamicOptions);
+      if (isPending(field, options, optionsLoading)) {
+        return <SelectSkeleton />;
+      }
       return (
         <Select
           value={String(effectiveValue(field, values) ?? "")}
           onValueChange={(nextValue) => setField(field.key, nextValue)}
         >
-          <SelectTrigger id={id}>
+          <SelectTrigger id={id} className="w-full">
             <SelectValue placeholder={field.placeholder || "Select"} />
           </SelectTrigger>
           <SelectContent>
@@ -162,8 +193,18 @@ export function SchemaForm({
 
     if (field.control === "MULTI_SELECT") {
       const options = optionsFor(field, dynamicOptions);
+      if (isPending(field, options, optionsLoading)) {
+        return <ChipsSkeleton />;
+      }
       const current = effectiveValue(field, values);
       const selected = Array.isArray(current) ? current.map((v) => String(v)) : [];
+      if (options.length === 0) {
+        return (
+          <p className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs">
+            No options available.
+          </p>
+        );
+      }
       return (
         <div className="flex flex-wrap gap-2">
           {options.map((option) => {
@@ -219,17 +260,15 @@ export function SchemaForm({
     );
   }
 
+  // A non-switch field: label + optional description stacked above the control.
   function renderField(field: PluginAdminFormField): React.ReactNode {
-    if (!evaluateShowWhen(field.show_when, values)) {
-      return null;
-    }
     const err = mergedErrors[field.key];
     return (
       <div key={field.key} className="space-y-2">
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-${field.key}`}>{field.label || field.key}</Label>
           {field.description ? (
-            <p className="text-muted-foreground text-xs">{field.description}</p>
+            <p className="text-muted-foreground text-xs leading-relaxed">{field.description}</p>
           ) : null}
         </div>
         {renderControl(field)}
@@ -238,12 +277,69 @@ export function SchemaForm({
     );
   }
 
-  function renderFieldByKey(key: string): React.ReactNode {
-    const field = byKey.get(key);
-    if (!field) {
-      return null;
+  // A switch field as a single settings row: label + description on the left,
+  // the toggle on the right. No outer border — the group container owns it.
+  function renderSwitchRow(field: PluginAdminFormField): React.ReactNode {
+    const id = `${idPrefix}-${field.key}`;
+    const err = mergedErrors[field.key];
+    return (
+      <div key={field.key} className="px-3.5 py-3 transition-colors">
+        <div className="flex items-start gap-3">
+          <Switch
+            id={id}
+            className="mt-0.5 shrink-0"
+            checked={Boolean(effectiveValue(field, values))}
+            onCheckedChange={(checked) => setField(field.key, checked)}
+          />
+          <div className="min-w-0 space-y-0.5">
+            <Label htmlFor={id} className="cursor-pointer font-medium">
+              {field.label || field.key}
+            </Label>
+            {field.description ? (
+              <p className="text-muted-foreground text-xs leading-relaxed">{field.description}</p>
+            ) : null}
+          </div>
+        </div>
+        {err ? <p className="text-destructive mt-1.5 ml-11 text-xs">{err}</p> : null}
+      </div>
+    );
+  }
+
+  // Render an ordered field list, collapsing consecutive switches into one
+  // bordered, divided container so toggles read as a cohesive group instead of
+  // a column of separate boxes. Honors show_when on each field.
+  function renderFieldList(fields: PluginAdminFormField[]): React.ReactNode {
+    const visible = fields.filter((field) => evaluateShowWhen(field.show_when, values));
+    const nodes: React.ReactNode[] = [];
+    let run: PluginAdminFormField[] = [];
+
+    const flushSwitches = () => {
+      const [first] = run;
+      if (!first) return;
+      const group = run;
+      run = [];
+      nodes.push(
+        <div
+          key={`switches-${first.key}`}
+          className="divide-border/70 bg-card divide-y overflow-hidden rounded-lg border"
+        >
+          {group.map((field) => renderSwitchRow(field))}
+        </div>,
+      );
+    };
+
+    for (const field of visible) {
+      if (field.control === "SWITCH") {
+        run.push(field);
+      } else {
+        flushSwitches();
+        nodes.push(renderField(field));
+      }
     }
-    return renderField(field);
+    flushSwitches();
+
+    if (nodes.length === 0) return null;
+    return <div className="grid gap-4">{nodes}</div>;
   }
 
   const sections = descriptor.sections ?? [];
@@ -255,17 +351,20 @@ export function SchemaForm({
   }
   const ungroupedFields = descriptor.fields.filter((field) => !groupedKeys.has(field.key));
 
+  const resolveKeys = (keys: string[]): PluginAdminFormField[] =>
+    keys
+      .map((key) => byKey.get(key))
+      .filter((field): field is PluginAdminFormField => Boolean(field));
+
   return (
-    <div className="grid gap-4">
-      {ungroupedFields.length > 0 ? (
-        <div className="grid gap-4">{ungroupedFields.map((field) => renderField(field))}</div>
-      ) : null}
+    <div className="grid gap-5">
+      {ungroupedFields.length > 0 ? renderFieldList(ungroupedFields) : null}
       {sections.map((section) => (
         <SchemaFormSection
           key={section.key}
           section={section}
           values={values}
-          renderField={renderFieldByKey}
+          renderFields={(keys) => renderFieldList(resolveKeys(keys))}
         />
       ))}
     </div>

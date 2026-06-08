@@ -1000,7 +1000,10 @@ function IntegrationEditor({
           {form.has_api_key ? <Badge variant="secondary">Key saved</Badge> : null}
           {isNew ? <Badge variant="outline">New</Badge> : null}
         </div>
-        <Switch checked={form.enabled} onCheckedChange={(enabled) => patchForm({ enabled })} />
+        <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
+          <span className="text-muted-foreground">{form.enabled ? "Enabled" : "Disabled"}</span>
+          <Switch checked={form.enabled} onCheckedChange={(enabled) => patchForm({ enabled })} />
+        </label>
       </div>
 
       {formError ? (
@@ -1071,15 +1074,18 @@ function IntegrationEditor({
             values={pluginConfig}
             onChange={patchConfig}
             dynamicOptions={options}
+            optionsLoading={optionsStatus === "loading"}
             errors={fieldErrors}
             onValidityChange={setSchemaValid}
             idPrefix={`conn-${form.id || form.installation_id || "new"}`}
           />
-          {optionsStatus === "loading" ? (
-            <p className="text-muted-foreground text-xs">Loading options…</p>
-          ) : optionsStatus === "error" && form.base_url.trim().length > 0 ? (
-            <p className="text-destructive text-xs">
-              Couldn&apos;t load options for this connection — check the base URL and API key.
+          {optionsStatus === "error" && form.base_url.trim().length > 0 ? (
+            <p className="border-destructive/40 bg-destructive/10 text-destructive flex items-start gap-2 rounded-md border px-3 py-2 text-xs">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Couldn&apos;t load options from the service — check the base URL and API key, then
+                edit a field to retry.
+              </span>
             </p>
           ) : null}
         </div>
