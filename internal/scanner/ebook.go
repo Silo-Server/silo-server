@@ -599,6 +599,10 @@ func parseEPUBOPFMetadata(opf []byte, book *parsedEbook) error {
 			book.Series = value
 		case "calibre:series_index", "group-position":
 			book.SeriesIndex = value
+		case "calibre:isbn", "isbn", "schema:isbn":
+			if book.ISBN == "" {
+				book.ISBN = normalizeEbookISBN(value)
+			}
 		}
 	}
 	return nil

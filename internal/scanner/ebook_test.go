@@ -162,6 +162,18 @@ func TestParseEbookEPUBSkipsUUIDIdentifierBeforeISBN(t *testing.T) {
 	}
 }
 
+func TestParseEbookEPUBMetadataReadsISBNFromMetaTags(t *testing.T) {
+	path := writeTestEPUBWithMeta(t, nil, `    <meta name="calibre:isbn" content="978-0-306-40615-7"/>`)
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.ISBN != "9780306406157" {
+		t.Fatalf("ISBN = %q, want normalized ISBN from calibre meta tag", got.ISBN)
+	}
+}
+
 func TestReadEPUBZipEntryRejectsOversizedEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "large.epub")
 	file, err := os.Create(path)
@@ -723,6 +735,10 @@ func TestScanEbookFolderReturnsCanceledContext(t *testing.T) {
 }
 
 func writeTestEPUB(t *testing.T, identifiers []string) string {
+	return writeTestEPUBWithMeta(t, identifiers, "")
+}
+
+func writeTestEPUBWithMeta(t *testing.T, identifiers []string, extraMetaXML string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "book.epub")
@@ -768,6 +784,7 @@ func writeTestEPUB(t *testing.T, identifiers []string) string {
     <dc:description>Back cover copy</dc:description>
     <meta name="calibre:series" content="Test Series"/>
     <meta name="calibre:series_index" content="2"/>
+`+extraMetaXML+`
   </metadata>
 </package>`)
 	if err := zw.Close(); err != nil {
