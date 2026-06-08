@@ -259,12 +259,13 @@ type Connection struct {
 	APIKey     string
 	Supports4K bool
 
-	Mapped              bool // requester_mode == "mapped"
-	PermRequest         bool
-	PermRequest4K       bool
-	PermAutoApprove     bool
-	PermAutoApprove4K   bool
-	PermManageRequests  bool
+	Mapped             bool // requester_mode == "mapped"
+	RequireMappedUser  bool // mapped + can't map -> fail the request (else admin fallback)
+	PermRequest        bool
+	PermRequest4K      bool
+	PermAutoApprove    bool
+	PermAutoApprove4K  bool
+	PermManageRequests bool
 }
 ```
 and parse in `connectionFromRouter` after the `supports_4k` block:
@@ -277,6 +278,7 @@ and parse in `connectionFromRouter` after the `supports_4k` block:
 		if v, ok := m["requester_mode"].(string); ok {
 			conn.Mapped = v == "mapped"
 		}
+		conn.RequireMappedUser, _ = m["require_mapped_user"].(bool)
 		conn.PermRequest, _ = m["perm_request"].(bool)
 		conn.PermRequest4K, _ = m["perm_request_4k"].(bool)
 		conn.PermAutoApprove, _ = m["perm_auto_approve"].(bool)
@@ -561,46 +563,89 @@ func TestFulfillFallsBackToAdminOnResolveFailure(t *testing.T) {
 		t.Fatalf("admin fallback must omit userId, got %v", reqBody["userId"])
 	}
 }
+
+func TestFulfillRequireMappedUserFailsWhenUnmapped(t *testing.T) {
+	requestCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user" && r.Method == http.MethodGet:
+			w.Write([]byte(`{"results":[]}`)) // no match
+		case r.URL.Path == "/api/v1/user" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusInternalServerError) // create fails
+		case r.URL.Path == "/api/v1/request":
+			requestCalled = true
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	defer srv.Close()
+
+	cfg, _ := structpb.NewStruct(map[string]any{"requester_mode": "mapped", "require_mapped_user": true, "perm_request": true})
+	resp, err := (&Server{}).Fulfill(context.Background(), &pluginv1.FulfillRequest{
+		Request:     &pluginv1.RequestDescriptor{MediaType: "movie", ExternalIds: map[string]string{"tmdb": "42"}, RequesterEmail: "bob@example.com"},
+		Qualities:   []*pluginv1.RequestedQuality{{Id: "1080p"}},
+		Connections: []*pluginv1.RouterConnection{{Id: "c1", BaseUrl: srv.URL, ApiKey: "k", Config: cfg}},
+	})
+	if err != nil {
+		t.Fatalf("Fulfill: %v", err)
+	}
+	if requestCalled {
+		t.Fatalf("require_mapped_user on: must NOT submit the request when the user can't be mapped")
+	}
+	if resp.GetMessage() == "" || len(resp.GetTargets()) != 0 {
+		t.Fatalf("want a request-level failure message and no targets, got msg=%q targets=%d", resp.GetMessage(), len(resp.GetTargets()))
+	}
+}
 ```
 
 - [ ] **Step 2: Verify failure.** `cd /opt/silo-plugin-requests-seerr && PATH=$PATH:/tmp/go/bin go test ./internal/router/ -run TestFulfillMapped` → fails (userId never set; create never happens).
 
 - [ ] **Step 3: Implement the mapping in `server.go`.** Add the resolve helper (it calls the exported `seerr.PermissionBits` from Task 3) and thread `userID` through `fulfillOne`:
 ```go
-// resolveRequesterUserID returns the Seerr user id to attribute the request to,
-// or 0 (admin fallback) for admin mode, missing email, or any lookup/create
-// error. Resolved once per request against the first connection's Seerr.
-func resolveRequesterUserID(ctx context.Context, client *httpclient.Client, conn Connection, email string) int {
-	if !conn.Mapped || strings.TrimSpace(email) == "" {
-		return 0
+// resolveRequesterUserID returns the Seerr user id to attribute the request to.
+// mapFailed is true only in mapped mode when no user could be resolved/created
+// (missing email or a lookup/create error); the caller decides whether that
+// means admin fallback (userID 0) or a hard request failure. Resolved once per
+// request against the first connection's Seerr.
+func resolveRequesterUserID(ctx context.Context, client *httpclient.Client, conn Connection, email string) (userID int, mapFailed bool) {
+	if !conn.Mapped {
+		return 0, false // admin mode: not a failure
+	}
+	if strings.TrimSpace(email) == "" {
+		return 0, true
 	}
 	user, err := seerr.FindUserByEmail(ctx, client, email)
 	if err != nil {
-		log.Printf("seerr: user lookup failed for %q; attributing to admin: %v", email, err)
-		return 0
+		log.Printf("seerr: user lookup failed for %q: %v", email, err)
+		return 0, true
 	}
 	if user != nil {
-		return user.ID
+		return user.ID, false
 	}
 	created, err := seerr.CreateUser(ctx, client, email,
 		seerr.PermissionBits(conn.PermRequest, conn.PermRequest4K, conn.PermAutoApprove, conn.PermAutoApprove4K, conn.PermManageRequests))
 	if err != nil {
-		log.Printf("seerr: user create failed for %q; attributing to admin: %v", email, err)
-		return 0
+		log.Printf("seerr: user create failed for %q: %v", email, err)
+		return 0, true
 	}
-	return created.ID
+	return created.ID, false
 }
 ```
-Add imports `strings` and `log` to `server.go` if not already present (the `seerr` and `httpclient` packages are already imported).
+Add imports `strings`, `log`, and `fmt` to `server.go` if not already present (the `seerr` and `httpclient` packages are already imported; `fmt` likely is).
 
-Then change `Fulfill` to resolve once and pass to `fulfillOne`:
+Then change `Fulfill` to resolve once, honor the `require_mapped_user` toggle, and pass `userID` to `fulfillOne`:
 ```go
 	// resolve the per-request Seerr user once (first connection's client)
 	userID := 0
 	if len(req.GetConnections()) > 0 {
 		first := connectionFromRouter(req.GetConnections()[0])
 		fc := httpclient.New(first.BaseURL, first.APIKey, nil)
-		userID = resolveRequesterUserID(ctx, fc, first, d.GetRequesterEmail())
+		id, mapFailed := resolveRequesterUserID(ctx, fc, first, d.GetRequesterEmail())
+		if mapFailed && first.RequireMappedUser {
+			// One request-level failure (like the missing-tmdb path) — do not
+			// silently submit as admin when the operator requires a mapped user.
+			return &pluginv1.FulfillResponse{Message: fmt.Sprintf("could not map requester %q to a Seerr user", d.GetRequesterEmail())}, nil
+		}
+		userID = id
 	}
 	...
 	targets = append(targets, s.fulfillOne(ctx, client, conn.ID, q.GetId(), mediaType, tmdbID, is4k, userID))
@@ -633,7 +678,8 @@ and in `fulfillOne`, add the `userID int` parameter and set it on the body:
 { "key": "perm_request_4k",      "label": "Created users may request 4K",       "control": "ADMIN_FORM_CONTROL_SWITCH", "default_value": false, "show_when": [{ "field": "requester_mode", "equals": ["mapped"] }] },
 { "key": "perm_auto_approve",    "label": "Auto-approve created users' requests","control": "ADMIN_FORM_CONTROL_SWITCH", "default_value": true,  "show_when": [{ "field": "requester_mode", "equals": ["mapped"] }] },
 { "key": "perm_auto_approve_4k", "label": "Auto-approve their 4K requests",     "control": "ADMIN_FORM_CONTROL_SWITCH", "default_value": false, "show_when": [{ "field": "requester_mode", "equals": ["mapped"] }] },
-{ "key": "perm_manage_requests", "label": "Created users may manage requests",  "control": "ADMIN_FORM_CONTROL_SWITCH", "default_value": false, "show_when": [{ "field": "requester_mode", "equals": ["mapped"] }] }
+{ "key": "perm_manage_requests", "label": "Created users may manage requests",  "control": "ADMIN_FORM_CONTROL_SWITCH", "default_value": false, "show_when": [{ "field": "requester_mode", "equals": ["mapped"] }] },
+{ "key": "require_mapped_user",  "label": "Fail the request if the user can't be mapped", "control": "ADMIN_FORM_CONTROL_SWITCH", "default_value": false, "description": "On: a request whose Silo user can't be matched/created on Seerr fails instead of being submitted under the admin.", "show_when": [{ "field": "requester_mode", "equals": ["mapped"] }] }
 ```
 Keep the JSON valid (commas between field objects).
 
@@ -673,7 +719,7 @@ Expected: `installed: id=6 plugin=silo.requests.seerr …`. Verify the new admin
 ```bash
 docker exec silo-silo-1 sh -c 'cat /var/lib/silo/plugins/silo.requests.seerr/0.1.0/install-*/manifest.json' | python3 -c "import json,sys;f=json.load(sys.stdin)['capabilities'][0]['configSchema'][0]['adminForm']['fields'];print([x['key'] for x in f])"
 ```
-Expected: includes `requester_mode` and the five `perm_*` keys.
+Expected: includes `requester_mode`, the five `perm_*` keys, and `require_mapped_user`.
 
 - [ ] **Step 3: Manual verification.** On a seerr connection set to `mapped` + Auto-Approve on: request as a Silo user whose email matches a Seerr user → Seerr shows that user as requester, approved. Request as a user with no Seerr account → a Seerr local user is created with the configured permissions and the request is attributed to them. Turn Auto-Approve off → a new request sits in Seerr's pending queue under that user.
 

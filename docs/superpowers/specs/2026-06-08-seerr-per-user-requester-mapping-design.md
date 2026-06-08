@@ -36,9 +36,10 @@ A per-connection setup choice:
 - Match key: **email** (case-insensitive).
 - Default permissions for created users: **explicit per-permission toggles** in the
   connection form.
-- Fallback when a requester can't be mapped/created (no email, lookup/create
-  error): **fall back to the admin user** (omit `userId`) so the request still
-  goes through; logged.
+- When a requester can't be mapped/created (no email, lookup/create error): a
+  per-connection toggle `require_mapped_user` — **off (default): fall back to the
+  admin user** (omit `userId`, request still goes through, logged); **on: fail the
+  request** with a clear message rather than silently submitting as admin.
 - Identity transport: **push** into the Fulfill descriptor (keeps the seerr plugin
   a pure HTTP plugin — no runtime-broker dependency).
 
@@ -88,6 +89,8 @@ Regenerate with `buf generate` (protoc not needed). New getters
 - `requester_mode` string — `"admin"` (default / empty) or `"mapped"`.
 - `perm_request`, `perm_request_4k`, `perm_auto_approve`, `perm_auto_approve_4k`,
   `perm_manage_requests` booleans (only meaningful in `mapped` mode).
+- `require_mapped_user` boolean (mapped mode) — `false` (default): fall back to
+  admin when the requester can't be mapped; `true`: fail the request instead.
 
 **Seerr user API (`internal/seerr`):**
 - `FindUserByEmail(ctx, c, email) (*User, error)` — GET `/api/v1/user?take=N&skip=…`
@@ -107,8 +110,10 @@ Regenerate with `buf generate` (protoc not needed). New getters
   is non-empty:
   1. `FindUserByEmail`; if found → use `user.ID`.
   2. else `CreateUser(email, permissionBits(cfg))` → use the new id.
-  3. on any error, or `admin` mode, or empty email → `userId = 0` (admin
-     fallback), logged once.
+  3. on any error or empty email (in `mapped` mode): if `require_mapped_user` is
+     on, **fail the request** (request-level message, no targets); otherwise
+     `userId = 0` (admin fallback), logged once. `admin` mode is always
+     `userId = 0`.
   Resolution uses the FIRST connection's client (all connections of one seerr
   installation share the same Seerr instance); cache the resolved id for the
   request.
@@ -121,6 +126,7 @@ Regenerate with `buf generate` (protoc not needed). New getters
 - `requester_mode` SELECT with options "Admin user" (`admin`) / "Map to Silo users"
   (`mapped`), default `admin`.
 - the five permission SWITCHes, each `show_when: requester_mode == "mapped"`.
+- a `require_mapped_user` SWITCH (default off), `show_when: requester_mode == "mapped"`.
 - (`supports_4k` switch stays.)
 
 ## Data flow (mapped mode)
@@ -136,9 +142,9 @@ Silo user requests → host approves → Fulfill(descriptor{requester_email, …
 
 ## Error handling
 
-- Resolver/lookup/create failure or empty email → `userId` omitted (admin
-  fallback); the request is never blocked by attribution. Log at WARN once per
-  request with the email (or user id) and the cause.
+- Resolver/lookup/create failure or empty email → `require_mapped_user` off:
+  `userId` omitted (admin fallback), request not blocked, WARN-logged once;
+  `require_mapped_user` on: request fails with a clear message.
 - Seerr user-list pagination caps at a sane bound; if the email isn't found within
   the scan, treat as "not found" → create.
 
@@ -154,8 +160,10 @@ Silo user requests → host approves → Fulfill(descriptor{requester_email, …
   - `mapped` + existing user by email → `userId` set, no create call.
   - `mapped` + no match → `CreateUser` called with the expected permission bitfield,
     `userId` set to the created id.
-  - `mapped` + empty email / list error / create error → admin fallback (no
-    `userId`), request still submitted.
+  - `mapped` + empty email / list error / create error, `require_mapped_user` off
+    → admin fallback (no `userId`), request still submitted.
+  - same failure with `require_mapped_user` on → request fails (request-level
+    message), no `/api/v1/request` call.
   - `permissionBits` assembles the correct bitfield from each toggle combination.
 - Gates: SDK `buf generate` + `go build`; host `go test ./internal/requests/ ./internal/plugins/`,
   `go vet`; seerr plugin `go test ./...`.
