@@ -245,18 +245,18 @@ func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
 	}
 }
 
-func TestScanFolderEbookLibraryReturnsNotImplemented(t *testing.T) {
+func TestScanFolderEbookLibraryRoutesToEbookScanner(t *testing.T) {
 	scanner := &Scanner{}
 	result, err := scanner.ScanFolder(context.Background(), &models.MediaFolder{
 		ID:    0,
 		Type:  " ebooks ",
 		Paths: []string{t.TempDir()},
 	})
-	if !errors.Is(err, errEbookScanningNotImplemented) {
-		t.Fatalf("ScanFolder ebook error = %v, want %v", err, errEbookScanningNotImplemented)
+	if err != nil {
+		t.Fatalf("ScanFolder ebook error = %v, want nil", err)
 	}
-	if result != nil {
-		t.Fatalf("ScanFolder ebook result = %+v, want nil", result)
+	if result == nil {
+		t.Fatal("ScanFolder ebook result = nil, want empty result")
 	}
 }
 

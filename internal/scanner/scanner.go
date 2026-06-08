@@ -242,7 +242,10 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 	}
 
 	if isEbookLibraryType(folder.Type) {
-		return nil, errEbookScanningNotImplemented
+		if err := s.ScanEbookFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
 	}
 
 	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)

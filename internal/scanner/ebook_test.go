@@ -2,11 +2,15 @@ package scanner
 
 import (
 	"archive/zip"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestSupportsEbookFile(t *testing.T) {
@@ -156,6 +160,105 @@ func TestParseEbookFB2Metadata(t *testing.T) {
 	}
 	if got.Series != "FB2 Series" || got.SeriesIndex != "3" {
 		t.Fatalf("Series = %q/%q, want FB2 Series/3", got.Series, got.SeriesIndex)
+	}
+}
+
+func TestEbookIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
+	book := &parsedEbook{Title: "Tagged Ebook", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157"}
+	if got := ebookIdentityConfidence(book); got != "high" {
+		t.Fatalf("complete metadata confidence = %q, want high", got)
+	}
+
+	book = &parsedEbook{Title: "Tagged Ebook", Authors: []string{"Author"}, Year: 2024}
+	if got := ebookIdentityConfidence(book); got != "medium" {
+		t.Fatalf("partial metadata confidence = %q, want medium", got)
+	}
+
+	book = &parsedEbook{}
+	if got := ebookIdentityConfidence(book); got != "low" {
+		t.Fatalf("empty metadata confidence = %q, want low", got)
+	}
+}
+
+func TestResolveEbookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
+	finder := &fakeRootContentFinder{}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveEbookMediaItem(context.Background(), finder, writer, 7, "/library/Author/Book.epub", &parsedEbook{
+		Title: "Book", Year: 2024, Authors: []string{"Author"}, Description: "Overview", Publisher: "Publisher", Genres: []string{"Fiction"}, Language: "en",
+	})
+	if err != nil {
+		t.Fatalf("resolveEbookMediaItem: %v", err)
+	}
+	if got == "" || len(writer.upserts) != 1 {
+		t.Fatalf("contentID/upserts = %q/%d, want id and one upsert", got, len(writer.upserts))
+	}
+	item := writer.upserts[0]
+	if item.Type != "ebook" || item.Title != "Book" || item.Year != 2024 || item.Overview != "Overview" || item.OriginalLanguage != "en" {
+		t.Fatalf("upserted ebook item = %+v", item)
+	}
+}
+
+func TestResolveEbookMediaItemReusesRootScopedContentID(t *testing.T) {
+	finder := &fakeRootContentFinder{contentID: "ebook-root-id"}
+	writer := &fakeFilesystemItemWriter{}
+
+	got, err := resolveEbookMediaItem(context.Background(), finder, writer, 7, "/library/Author/Book.epub", &parsedEbook{Title: "Book"})
+	if err != nil {
+		t.Fatalf("resolveEbookMediaItem: %v", err)
+	}
+	if got != "ebook-root-id" {
+		t.Fatalf("contentID = %q, want root-scoped id", got)
+	}
+	if len(writer.upserts) != 0 {
+		t.Fatalf("unexpected item upsert for existing root: %d", len(writer.upserts))
+	}
+}
+
+func TestEbookPeopleCreditsEqualAuthorsOnly(t *testing.T) {
+	existing := []models.ItemPerson{
+		{Person: models.Person{Name: "Ada Writer"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+		{Person: models.Person{Name: "Ben Author"}, Kind: models.PersonKindAuthor, SortOrder: 1},
+	}
+	desired := []ebookCredit{
+		{Name: "Ada Writer", Kind: models.PersonKindAuthor},
+		{Name: "Ben Author", Kind: models.PersonKindAuthor},
+	}
+	if !ebookPeopleCreditsEqual(existing, desired) {
+		t.Fatal("expected matching author credits to compare equal")
+	}
+
+	existing = append(existing, models.ItemPerson{Person: models.Person{Name: "Narrator"}, Kind: models.PersonKindNarrator, SortOrder: 2})
+	if ebookPeopleCreditsEqual(existing, desired) {
+		t.Fatal("expected narrator credit to make ebook author-only set differ")
+	}
+}
+
+func TestScanEbookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.epub"), []byte("not a real epub"), 0o644); err != nil {
+		t.Fatalf("write fake ebook: %v", err)
+	}
+
+	s := &Scanner{}
+	err := s.ScanEbookFolder(context.Background(), &models.MediaFolder{ID: 44, Paths: []string{root}})
+	if err == nil {
+		t.Fatal("ScanEbookFolder returned nil, want aggregate failure")
+	}
+	if !strings.Contains(err.Error(), "folder_id=44") {
+		t.Fatalf("error = %q, want folder id", err)
+	}
+}
+
+func TestScanEbookFolderReturnsCanceledContext(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := &Scanner{}
+	err := s.ScanEbookFolder(ctx, &models.MediaFolder{ID: 44, Paths: []string{root}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScanEbookFolder error = %v, want context.Canceled", err)
 	}
 }
 
