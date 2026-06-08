@@ -141,7 +141,9 @@ export default function ItemCard({
 }) {
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${item.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`;
+  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
+    libraryId ? `?libraryId=${libraryId}` : ""
+  }`;
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 

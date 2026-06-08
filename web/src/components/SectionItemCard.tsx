@@ -23,7 +23,9 @@ interface SectionItemCardProps {
 export default function SectionItemCard({ item, libraryId }: SectionItemCardProps) {
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${item.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`;
+  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
+    libraryId ? `?libraryId=${libraryId}` : ""
+  }`;
   const { prefs: overlayPrefs } = useOverlayPrefs();
   const upcomingEvent = item.upcoming_event;
   const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
