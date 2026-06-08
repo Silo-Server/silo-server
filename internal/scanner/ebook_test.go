@@ -184,6 +184,20 @@ func TestParseEbookFB2Metadata(t *testing.T) {
 	}
 }
 
+func TestEbookSeriesDesiredParsesIndex(t *testing.T) {
+	name, idx := ebookSeriesDesired(&parsedEbook{
+		Series:      " The Expanse ",
+		SeriesIndex: "2 of 9",
+	})
+
+	if name != "The Expanse" {
+		t.Fatalf("series name = %q, want The Expanse", name)
+	}
+	if idx == nil || *idx != 2 {
+		t.Fatalf("series index = %v, want 2", idx)
+	}
+}
+
 func TestEbookIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
 	book := &parsedEbook{Title: "Tagged Ebook", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157"}
 	if got := ebookIdentityConfidence(book); got != "high" {
