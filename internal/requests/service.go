@@ -90,7 +90,10 @@ func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID st
 func (s *Service) allowedQualities(ctx context.Context, req Request, settings Settings) []Quality {
 	out := []Quality{Quality1080p}
 	ceiling := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
-	if settings.ForceDualQuality || access.CompareQuality(ceiling, access.PlaybackQuality4K) >= 0 {
+	// QualityAllowed treats an empty ceiling as "no cap" (the "Any" preset), so a
+	// requester with unlimited playback quality correctly gets 4K. A raw
+	// CompareQuality would rank "" as the LOWEST quality and wrongly drop 4K.
+	if settings.ForceDualQuality || access.QualityAllowed(access.PlaybackQuality4K, ceiling) {
 		out = append(out, Quality2160p)
 	}
 	return out

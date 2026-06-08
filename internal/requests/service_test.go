@@ -1970,10 +1970,24 @@ func autoApproveRouterInst(id, apiKeyRef string) Integration {
 func TestAllowedQualities(t *testing.T) {
 	svc := newTestService(newFakeStore())
 
-	t.Run("hd only without 4k ceiling or force dual", func(t *testing.T) {
-		got := svc.allowedQualities(context.Background(), Request{}, Settings{})
+	t.Run("hd ceiling stays 1080p only", func(t *testing.T) {
+		svcHD := newTestService(newFakeStore())
+		svcHD.SetEntitlementResolver(fixedCeiling{q: "1080p"})
+		got := svcHD.allowedQualities(context.Background(), Request{}, Settings{})
 		if len(got) != 1 || got[0] != Quality1080p {
 			t.Fatalf("qualities = %v, want [1080p]", got)
+		}
+	})
+
+	t.Run("any/no-cap ceiling adds 2160p", func(t *testing.T) {
+		// A requester whose max playback quality is "Any" resolves to an empty
+		// (no-cap) ceiling. Empty means UNLIMITED, so 4K must be requested
+		// alongside 1080p — it must not be read as "below 4K".
+		svcAny := newTestService(newFakeStore())
+		svcAny.SetEntitlementResolver(fixedCeiling{q: ""})
+		got := svcAny.allowedQualities(context.Background(), Request{}, Settings{})
+		if len(got) != 2 || got[1] != Quality2160p {
+			t.Fatalf("qualities = %v, want [1080p 2160p]", got)
 		}
 	})
 
@@ -2071,6 +2085,7 @@ func TestSubmitApprovedIsIdempotentPerQuality(t *testing.T) {
 	router := &fakeRouterProvider{}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"}) // HD ceiling -> only 1080p allowed
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
@@ -2175,6 +2190,9 @@ func TestSubmitApprovedDedupesDuplicateQualityTargets(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
+	// Pin an HD ceiling: this test is about deduping a duplicate quality, not 4K
+	// entitlement, so keep it to a single requested quality (1080p).
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
@@ -2282,6 +2300,9 @@ func TestSubmitApprovedSkipsUnknownQuality(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
+	// Pin an HD ceiling: this test is about skipping an unknown quality, not 4K
+	// entitlement, so keep it to a single requested quality (1080p).
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
@@ -2307,6 +2328,9 @@ func TestSubmitApprovedCoercesUnknownStatusToQueued(t *testing.T) {
 	}}
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
+	// Pin an HD ceiling: this test is about status coercion, not 4K entitlement,
+	// so keep it to a single requested quality (1080p).
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
 	store.requests["r1"] = &req
