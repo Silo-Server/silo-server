@@ -250,7 +250,25 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	cleanSubtree := filepath.Clean(subtreePath)
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
+	if isAudiobookLibraryType(folder.Type) {
+		if err := s.ScanAudiobookFolder(watchCtx, scopedFolderPaths(folder, []string{cleanSubtree})); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
 	return s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
+}
+
+func scopedFolderPaths(folder *models.MediaFolder, paths []string) *models.MediaFolder {
+	if folder == nil {
+		return nil
+	}
+	clone := *folder
+	clone.Paths = paths
+	return &clone
 }
 
 func isMovieLibraryType(libraryType string) bool {
@@ -1454,8 +1472,19 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return err
 	}
 
+	cleanFile := filepath.Clean(filePath)
+	if isAudiobookLibraryType(folder.Type) {
+		if !SupportsAudioFile(cleanFile) {
+			return fmt.Errorf("unrecognized audio extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
+		}
+		if err := s.ScanAudiobookFolder(ctx, scopedFolderPaths(folder, []string{filepath.Dir(cleanFile)})); err != nil {
+			return err
+		}
+		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)
+	}
+
 	// Verify the file extension is recognized.
-	ext := strings.ToLower(filepath.Ext(filePath))
+	ext := strings.ToLower(filepath.Ext(cleanFile))
 	if !videoExtensions[ext] {
 		return fmt.Errorf("unrecognized video extension: %s", ext)
 	}

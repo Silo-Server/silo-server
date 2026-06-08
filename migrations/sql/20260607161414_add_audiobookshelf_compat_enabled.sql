@@ -1,13 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 INSERT INTO server_settings (key, value)
-VALUES (
-    'audiobookshelf_compat.enabled',
-    COALESCE(
-        (SELECT value FROM server_settings WHERE key = 'audiobooks.enabled'),
-        'false'
-    )
-)
+VALUES ('audiobookshelf_compat.enabled', 'true')
 ON CONFLICT (key) DO NOTHING;
 -- +goose StatementEnd
 

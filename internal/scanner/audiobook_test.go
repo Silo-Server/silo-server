@@ -206,6 +206,53 @@ func TestScanAudiobookFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
+	root := t.TempDir()
+	bookDir := filepath.Join(root, "bad-book")
+	if err := os.Mkdir(bookDir, 0o755); err != nil {
+		t.Fatalf("mkdir book dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bookDir, "chapter.mp3"), []byte("not real audio"), 0o644); err != nil {
+		t.Fatalf("write fake audio: %v", err)
+	}
+
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks"}, bookDir)
+	if err == nil {
+		t.Fatal("ScanSubtree returned nil, want audiobook parse failure")
+	}
+	if strings.Contains(err.Error(), "getting existing files") {
+		t.Fatalf("ScanSubtree used generic file pipeline: %v", err)
+	}
+	if !strings.Contains(err.Error(), "folder_id=42") {
+		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
+	}
+}
+
+func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
+	root := t.TempDir()
+	bookDir := filepath.Join(root, "bad-book")
+	if err := os.Mkdir(bookDir, 0o755); err != nil {
+		t.Fatalf("mkdir book dir: %v", err)
+	}
+	filePath := filepath.Join(bookDir, "chapter.mp3")
+	if err := os.WriteFile(filePath, []byte("not real audio"), 0o644); err != nil {
+		t.Fatalf("write fake audio: %v", err)
+	}
+
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks"})
+	if err == nil {
+		t.Fatal("ScanFile returned nil, want audiobook parse failure")
+	}
+	if strings.Contains(err.Error(), "unrecognized video extension") {
+		t.Fatalf("ScanFile used video extension gate: %v", err)
+	}
+	if !strings.Contains(err.Error(), "folder_id=42") {
+		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
+	}
+}
+
 func TestResolveAudiobookMediaItemReusesRootScopedContentID(t *testing.T) {
 	finder := &fakeRootContentFinder{contentID: "book-root-id"}
 	writer := &fakeFilesystemItemWriter{}
