@@ -71,9 +71,11 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 		book, err = parseEbookEPUB(path)
 	case ".fb2":
 		book, err = parseEbookFB2(path)
+	case ".fbz":
+		book, err = parseEbookFBZ(path)
 	case ".pdf":
 		book, err = parseEbookPDF(path)
-	case ".mobi", ".azw", ".azw3", ".cbz", ".cbr", ".fbz", ".txt", ".md":
+	case ".mobi", ".azw", ".azw3", ".cbz", ".cbr", ".txt", ".md":
 		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
@@ -259,13 +261,41 @@ func parseEbookEPUB(path string) (parsedEbook, error) {
 }
 
 func parseEbookFB2(path string) (parsedEbook, error) {
-	book := parsedEbook{Format: "fb2"}
 	file, err := os.Open(path)
+	if err != nil {
+		return parsedEbook{Format: "fb2"}, err
+	}
+	defer file.Close()
+	return parseEbookFB2Reader(file, "fb2")
+}
+
+func parseEbookFBZ(path string) (parsedEbook, error) {
+	book := parsedEbook{Format: "fbz"}
+	reader, err := zip.OpenReader(path)
 	if err != nil {
 		return book, err
 	}
-	defer file.Close()
+	defer reader.Close()
 
+	for _, file := range reader.File {
+		if !strings.HasSuffix(strings.ToLower(file.Name), ".fb2") {
+			continue
+		}
+		if file.UncompressedSize64 > maxEPUBMetadataEntrySize {
+			return book, fmt.Errorf("fbz entry too large: %s", file.Name)
+		}
+		entry, err := file.Open()
+		if err != nil {
+			return book, err
+		}
+		defer entry.Close()
+		return parseEbookFB2Reader(io.LimitReader(entry, maxEPUBMetadataEntrySize+1), "fbz")
+	}
+	return book, fmt.Errorf("fbz archive has no fb2 entry")
+}
+
+func parseEbookFB2Reader(reader io.Reader, format string) (parsedEbook, error) {
+	book := parsedEbook{Format: format}
 	var fb2 struct {
 		Description struct {
 			TitleInfo struct {
@@ -294,7 +324,7 @@ func parseEbookFB2(path string) (parsedEbook, error) {
 			} `xml:"publish-info"`
 		} `xml:"description"`
 	}
-	if err := xml.NewDecoder(file).Decode(&fb2); err != nil {
+	if err := xml.NewDecoder(reader).Decode(&fb2); err != nil {
 		return book, err
 	}
 

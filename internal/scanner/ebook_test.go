@@ -73,8 +73,6 @@ func TestParseEbookFileSupportsReaderFormatsWithoutEmbeddedMetadata(t *testing.T
 		{"book.azw3", "azw3"},
 		{"book.cbz", "cbz"},
 		{"book.cbr", "cbr"},
-		{"book.fbz", "fbz"},
-		{"book.fb2.zip", "fbz"},
 		{"book.txt", "txt"},
 		{"book.md", "md"},
 	} {
@@ -253,6 +251,66 @@ func TestParseEbookFB2Metadata(t *testing.T) {
 	}
 	if got.Series != "FB2 Series" || got.SeriesIndex != "3" {
 		t.Fatalf("Series = %q/%q, want FB2 Series/3", got.Series, got.SeriesIndex)
+	}
+}
+
+func TestParseEbookFBZMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.fb2.zip")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create fbz: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	w, err := zw.Create("nested/book.fb2")
+	if err != nil {
+		t.Fatalf("create fb2 entry: %v", err)
+	}
+	if _, err := w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook>
+  <description>
+    <title-info>
+      <genre>fantasy</genre>
+      <author><first-name>Ada</first-name><last-name>Writer</last-name></author>
+      <book-title>FBZ Test Ebook</book-title>
+      <date value="2021-02-03"/>
+      <lang>en</lang>
+      <sequence name="Archive Series" number="4"/>
+    </title-info>
+    <publish-info>
+      <publisher>Archive Press</publisher>
+      <year>2021</year>
+      <isbn>978-0-306-40615-7</isbn>
+    </publish-info>
+  </description>
+</FictionBook>`)); err != nil {
+		t.Fatalf("write fb2 entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close fbz: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Format != "fbz" || got.Title != "FBZ Test Ebook" {
+		t.Fatalf("Format/Title = %q/%q, want fbz/FBZ Test Ebook", got.Format, got.Title)
+	}
+	if strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("Authors = %v, want Ada Writer", got.Authors)
+	}
+	if got.ISBN != "9780306406157" {
+		t.Fatalf("ISBN = %q, want normalized ISBN", got.ISBN)
+	}
+	if got.Publisher != "Archive Press" || got.Year != 2021 {
+		t.Fatalf("Publisher/Year = %q/%d, want Archive Press/2021", got.Publisher, got.Year)
+	}
+	if got.Series != "Archive Series" || got.SeriesIndex != "4" {
+		t.Fatalf("Series = %q/%q, want Archive Series/4", got.Series, got.SeriesIndex)
 	}
 }
 
