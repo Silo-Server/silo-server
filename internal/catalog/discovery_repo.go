@@ -288,6 +288,14 @@ func appendDiscoveryLibraryScope(
 
 	// buildLibraryScopeJoin uses semi-joins: disabled libraries are an item-level
 	// exclusion, matching the rest of catalog access filtering and avoiding row fanout.
+	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) > 0 {
+		// In deny-only mode, require at least one library membership. Without this,
+		// stale or provisional media_items rows with no membership pass NOT EXISTS.
+		*conditions = append(*conditions,
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
+		)
+	}
+
 	whereSQL, scopeArgs, ok := buildLibraryScopeJoin(
 		filter.AllowedLibraryIDs,
 		filter.DisabledLibraryIDs,
