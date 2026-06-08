@@ -19,6 +19,8 @@ func TestOrphanedProvisionalPredicatePreservesDurableMediaItemReferences(t *test
 		"public.podcast_feeds pf WHERE pf.media_item_id = mi.content_id",
 		"public.seasons s WHERE s.series_id = mi.content_id",
 		"public.user_audio_preferences uap WHERE uap.series_id = mi.content_id",
+		"public.user_home_item_dismissals uhid WHERE uhid.media_item_id = mi.content_id",
+		"public.user_home_item_dismissals uhid_series WHERE uhid_series.series_id = mi.content_id",
 		"public.user_personal_collection_items upci WHERE upci.media_item_id = mi.content_id",
 		"public.user_series_playback_preferences uspp WHERE uspp.series_id = mi.content_id",
 		"public.user_subtitle_preferences usp WHERE usp.series_id = mi.content_id",
