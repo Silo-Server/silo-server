@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -39,4 +41,38 @@ func TestSortAudiobookMediaFilesFallsBackToPath(t *testing.T) {
 			t.Fatalf("sorted IDs = %v, want %v", got, want)
 		}
 	}
+}
+
+func TestPresignAudiobookPosterURLUsesPosterVariant(t *testing.T) {
+	resolver := &recordingCatalogImageResolver{}
+	detail := &DetailService{}
+	detail.SetImageResolver(resolver)
+
+	got := detail.presignAudiobookPosterURL(context.Background(), "local/audiobooks/book/poster/original.webp")
+
+	if !strings.Contains(got, "/w500.webp") {
+		t.Fatalf("resolved URL = %q, want w500 poster variant", got)
+	}
+	if resolver.variant != "featured" {
+		t.Fatalf("resolver variant = %q, want featured", resolver.variant)
+	}
+}
+
+type recordingCatalogImageResolver struct {
+	path    string
+	variant string
+}
+
+func (r *recordingCatalogImageResolver) ResolveImageURL(_ context.Context, path string, variant string) string {
+	r.path = path
+	r.variant = variant
+	return "resolved://" + path
+}
+
+func (r *recordingCatalogImageResolver) ResolveImageURLs(_ context.Context, paths []string, variant string) map[string]string {
+	out := make(map[string]string, len(paths))
+	for _, path := range paths {
+		out[path] = r.ResolveImageURL(context.Background(), path, variant)
+	}
+	return out
 }

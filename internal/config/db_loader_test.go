@@ -35,7 +35,15 @@ func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
 }
 
 func TestLoadFromDBAudiobookshelfCompatFlagGatesCompatListener(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{"audiobookshelf_compat.enabled": "false"})
+	cfg, err := LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if cfg.AudiobookshelfCompat.Listen != ":13378" {
+		t.Fatalf("default audiobooks listener = %q, want default :13378", cfg.AudiobookshelfCompat.Listen)
+	}
+
+	cfg, err = LoadFromDB(map[string]string{"audiobookshelf_compat.enabled": "false"})
 	if err != nil {
 		t.Fatalf("LoadFromDB() returned error: %v", err)
 	}
