@@ -169,8 +169,8 @@ function makeEbookItem(
     tvdb_id: "",
     cast: [],
     crew: [
-      { name: "Becky Chambers", job: "Author" },
-      { name: "A Narrator Should Not Appear", job: "Narrator" },
+      { name: "Becky Chambers", job: "Author", person_id: "author-1" },
+      { name: "A Narrator Should Not Appear", job: "Narrator", person_id: "narrator-1" },
     ],
     studios: ["Tor"],
     networks: [],

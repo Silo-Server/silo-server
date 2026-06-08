@@ -70,10 +70,6 @@ export default function EbookReader() {
     },
     [contentId, libraryIdParam, navigate],
   );
-  const backHref = `/item/${encodeURIComponent(item.content_id)}${
-    libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
-  }`;
-
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
@@ -90,6 +86,10 @@ export default function EbookReader() {
       </div>
     );
   }
+
+  const backHref = `/item/${encodeURIComponent(item.content_id)}${
+    libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
+  }`;
 
   if (!selectedFile) {
     return (

@@ -145,7 +145,7 @@ export function progressFromRelocate(
 }
 
 export function restoreProgressTarget(
-  progress: Pick<EbookReaderProgress, "location" | "progress"> | null | undefined,
+  progress: Pick<EbookReaderProgress, "file_id" | "location" | "progress"> | null | undefined,
 ): RestoreProgressTarget | null {
   if (!progress || typeof progress.location !== "string") return null;
   const location = progress.location.trim();
@@ -324,13 +324,13 @@ function FoliateBookReader(
         renderer?.setAttribute("max-inline-size", "74ch");
         renderer?.setAttribute("max-column-count", "2");
         await renderer?.render?.();
-        const restoreTarget =
-          savedProgress?.file_id === file.file_id ? restoreProgressTarget(savedProgress) : null;
-        if (restoreTarget?.type === "location") {
-          onProgressChange?.(savedProgress.progress);
+        const savedFileProgress = savedProgress?.file_id === file.file_id ? savedProgress : null;
+        const restoreTarget = restoreProgressTarget(savedFileProgress);
+        if (savedFileProgress && restoreTarget?.type === "location") {
+          onProgressChange?.(savedFileProgress.progress);
           await view.init({ lastLocation: restoreTarget.location });
-        } else if (restoreTarget?.type === "fraction") {
-          onProgressChange?.(savedProgress.progress);
+        } else if (savedFileProgress && restoreTarget?.type === "fraction") {
+          onProgressChange?.(savedFileProgress.progress);
           await view.goToFraction(restoreTarget.fraction);
         } else {
           await view.goToFraction(0);

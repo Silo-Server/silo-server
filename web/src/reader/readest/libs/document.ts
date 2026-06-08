@@ -335,7 +335,7 @@ export class DocumentLoader {
     );
   }
 
-  private async makeTextBook(format: BookFormat): Promise<BookDoc> {
+  private async makeTextBook(): Promise<BookDoc> {
     const text = await this.file.text();
     const title = this.file.name.replace(/\.[^.]+$/, "") || "Document";
     const createDocument = async () => {
@@ -436,7 +436,7 @@ export class DocumentLoader {
         format = "FB2";
       } else if (this.isPlainText()) {
         format = "MD";
-        book = await this.makeTextBook(format);
+        book = await this.makeTextBook();
       }
     } catch (e: unknown) {
       console.error("Failed to open document:", e);

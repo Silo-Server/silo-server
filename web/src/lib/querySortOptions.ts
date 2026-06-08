@@ -245,11 +245,10 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
     (option) =>
       (includePersonalized || !option.personalized) &&
       optionMatchesRelevanceScope(option, relevanceScope),
-  ).map((option) =>
-    relevanceScope === "ebook" && EBOOK_SORT_LABELS[option.value]
-      ? { ...option, label: EBOOK_SORT_LABELS[option.value] }
-      : option,
-  );
+  ).map((option) => {
+    const ebookLabel = relevanceScope === "ebook" ? EBOOK_SORT_LABELS[option.value] : undefined;
+    return ebookLabel ? { ...option, label: ebookLabel } : option;
+  });
 }
 
 export function normalizeQuerySortForScope(
