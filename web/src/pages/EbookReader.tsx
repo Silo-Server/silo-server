@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ArrowLeft, Download, Library, Loader2 } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router";
 
-import { apiBlob } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import FoliateBookReader, {
+  readerFileFormat,
+  type ReaderLoadState,
+} from "@/reader/FoliateBookReader";
 
 const READEST_FORMATS = new Set([
   "epub",
@@ -22,27 +25,14 @@ const READEST_FORMATS = new Set([
   "md",
 ]);
 
-function fileFormat(file: FileVersion | undefined): string {
-  if (!file) return "";
-  const container = file.container?.trim().toLowerCase();
-  if (container) return container.replace(/^\./, "");
-  const fileName = file.file_name || file.file_path || "";
-  const match = /\.([a-z0-9]+)$/i.exec(fileName);
-  return match?.[1]?.toLowerCase() ?? "";
-}
-
 function chooseReaderFile(files: FileVersion[], requestedID: number | null): FileVersion | undefined {
   const requested = requestedID ? files.find((file) => file.file_id === requestedID) : undefined;
   if (requested) return requested;
   return (
-    files.find((file) => fileFormat(file) === "epub") ??
-    files.find((file) => READEST_FORMATS.has(fileFormat(file))) ??
+    files.find((file) => readerFileFormat(file) === "epub") ??
+    files.find((file) => READEST_FORMATS.has(readerFileFormat(file))) ??
     files[0]
   );
-}
-
-function readPath(contentID: string, fileID: number): string {
-  return `/ebooks/${encodeURIComponent(contentID)}/files/${fileID}/read`;
 }
 
 export default function EbookReader() {
@@ -54,32 +44,11 @@ export default function EbookReader() {
     () => chooseReaderFile(item?.versions ?? [], Number.isFinite(requestedFileID) ? requestedFileID : null),
     [item?.versions, requestedFileID],
   );
-  const format = fileFormat(selectedFile);
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!contentId || !selectedFile) return;
-    let cancelled = false;
-    let nextUrl: string | null = null;
-    setFileError(null);
-    setObjectUrl(null);
-
-    void apiBlob(readPath(contentId, selectedFile.file_id))
-      .then((blob) => {
-        if (cancelled) return;
-        nextUrl = URL.createObjectURL(blob);
-        setObjectUrl(nextUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setFileError("Unable to open this ebook file.");
-      });
-
-    return () => {
-      cancelled = true;
-      if (nextUrl) URL.revokeObjectURL(nextUrl);
-    };
-  }, [contentId, selectedFile]);
+  const format = readerFileFormat(selectedFile);
+  const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
+  const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
+    setLoadedFile(state);
+  }, []);
 
   if (isLoading) {
     return (
@@ -107,8 +76,6 @@ export default function EbookReader() {
     );
   }
 
-  const canEmbed = objectUrl && (format === "pdf" || format === "txt" || format === "md");
-
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-20 border-b border-border/70 bg-background/95 backdrop-blur">
@@ -122,9 +89,9 @@ export default function EbookReader() {
             <div className="truncate text-sm font-semibold">{item.title}</div>
             <div className="truncate text-xs text-muted-foreground">{format.toUpperCase()}</div>
           </div>
-          {objectUrl && (
+          {loadedFile && (
             <Button asChild variant="outline" size="sm">
-              <a href={objectUrl} download={selectedFile.file_name || `${item.title}.${format || "ebook"}`}>
+              <a href={loadedFile.objectUrl} download={loadedFile.filename}>
                 <Download className="size-4" />
                 File
               </a>
@@ -134,24 +101,19 @@ export default function EbookReader() {
       </header>
 
       <main className="h-[calc(100vh-3.5rem)]">
-        {canEmbed ? (
-          <iframe title={item.title} src={objectUrl} className="h-full w-full border-0 bg-white" />
+        {READEST_FORMATS.has(format) ? (
+          <FoliateBookReader
+            contentID={contentId}
+            file={selectedFile}
+            title={item.title}
+            onFileLoaded={handleFileLoaded}
+          />
         ) : (
           <div className="flex h-full items-center justify-center px-6">
             <div className="max-w-md text-center">
               <Library className="mx-auto mb-4 size-10 text-muted-foreground" />
               <h1 className="text-lg font-semibold">{item.title}</h1>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {fileError ?? `${format.toUpperCase()} is ready for the Readest reader port.`}
-              </p>
-              {objectUrl && (
-                <Button asChild className="mt-5">
-                  <a href={objectUrl} download={selectedFile.file_name || `${item.title}.${format || "ebook"}`}>
-                    <Download className="size-4" />
-                    Open File
-                  </a>
-                </Button>
-              )}
+              <p className="mt-2 text-sm text-muted-foreground">Unsupported ebook format.</p>
             </div>
           </div>
         )}
