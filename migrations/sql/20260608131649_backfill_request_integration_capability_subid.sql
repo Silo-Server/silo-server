@@ -11,12 +11,28 @@
 -- capability. Rows with installation_id NULL (created under the pre-plugin
 -- direct-to-arr system and never re-bound) are left untouched — an admin
 -- re-saves them in Admin -> Requests to bind an installation and set the sub-id.
+--
+-- A deterministic correlated subquery (ORDER BY ... LIMIT 1) is used instead of a
+-- join so that, in the unusual case where one installation exposes more than one
+-- request_router.v1 capability, the same sub-id is chosen for every row rather
+-- than letting Postgres pick arbitrarily from the join cross-product.
 UPDATE public.request_integrations ri
-SET capability_id = pc.capability_id
-FROM public.plugin_capabilities pc
-WHERE ri.installation_id = pc.plugin_installation_id
-  AND pc.capability_type = 'request_router.v1'
-  AND ri.capability_id = 'request_router.v1';
+SET capability_id = (
+    SELECT pc.capability_id
+    FROM public.plugin_capabilities pc
+    WHERE pc.plugin_installation_id = ri.installation_id
+      AND pc.capability_type = 'request_router.v1'
+    ORDER BY pc.capability_id
+    LIMIT 1
+)
+WHERE ri.capability_id = 'request_router.v1'
+  AND ri.installation_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM public.plugin_capabilities pc
+    WHERE pc.plugin_installation_id = ri.installation_id
+      AND pc.capability_type = 'request_router.v1'
+  );
 
 -- Drop the misleading column default (the capability type). The application now
 -- always supplies the sub-id on insert; the default would silently reintroduce

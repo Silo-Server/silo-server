@@ -156,20 +156,14 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 	installationID, capabilityID := 0, ""
 	chosen := false
 	for _, in := range fc.integrations {
-		// capability_id is the capability sub-id ("arr"/"seerr"); every row in
-		// request_integrations is a request_router connection, so the predicate is
-		// enabled + bound + names a capability, not a type-equality check.
-		if !in.Enabled || in.CapabilityID == "" || in.InstallationID == nil {
+		if !eligibleRouterConnection(in, mediaType) {
 			continue
 		}
-		if !integrationSupportsMediaType(in, mediaType) {
-			continue // align with integrationConfigured, which filters by media type
-		}
-		if !chosen {
-			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
-		}
-		if *in.InstallationID != installationID {
-			continue // single-installation containment
+		// Contain to the first chosen (installation, capability): a plugin may
+		// expose more than one request_router capability, and a connection of a
+		// different capability must never be handed to the chosen one.
+		if chosen && (*in.InstallationID != installationID || in.CapabilityID != capabilityID) {
+			continue
 		}
 		apiKey, err := s.resolveAPIKeyCached(ctx, fc, in)
 		if err != nil {
@@ -180,9 +174,24 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 			slog.WarnContext(ctx, "requests: skipping router connection with empty api key", "connection_id", in.ID)
 			continue
 		}
+		// Lock on the first SUCCESSFULLY resolved connection so a skipped
+		// bad-key connection never pins the installation/capability.
+		if !chosen {
+			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
+		}
 		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
 	}
 	return conns, installationID, capabilityID, nil
+}
+
+// eligibleRouterConnection reports whether a connection is a candidate fulfillment
+// backend for the media type: enabled, bound to an installation, and naming a
+// capability sub-id that serves the media type. resolveRouterConnections (which
+// then resolves credentials) and integrationConfigured (the auto-approval gate)
+// share this predicate so the two cannot drift.
+func eligibleRouterConnection(in Integration, mediaType MediaType) bool {
+	return in.Enabled && in.CapabilityID != "" && in.InstallationID != nil &&
+		integrationSupportsMediaType(in, mediaType)
 }
 
 func (s *Service) Search(ctx context.Context, viewer Viewer, query string, mediaType MediaType, page int) (*MediaPage, error) {
@@ -1254,9 +1263,8 @@ func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType
 		return false, err
 	}
 	for _, in := range instances {
-		if in.Enabled && in.CapabilityID != "" && in.InstallationID != nil &&
-			strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.APIKeyRef) != "" &&
-			integrationSupportsMediaType(in, mediaType) {
+		if eligibleRouterConnection(in, mediaType) &&
+			strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.APIKeyRef) != "" {
 			return true, nil
 		}
 	}

@@ -2218,6 +2218,34 @@ func TestSubmitApprovedContainsToSingleInstallation(t *testing.T) {
 	}
 }
 
+// TestSubmitApprovedContainsToChosenCapability guards that when one installation
+// exposes connections for more than one request_router capability sub-id, the
+// host hands the plugin only the connections for the FIRST chosen capability —
+// never a connection belonging to a different capability of the same installation.
+func TestSubmitApprovedContainsToChosenCapability(t *testing.T) {
+	store := newFakeStore()
+	arrConn := routerInstOn("arr-conn", 1) // CapabilityID "arr"
+	seerrConn := routerInstOn("seerr-conn", 1)
+	seerrConn.CapabilityID = "seerr"
+	store.integrations = []Integration{arrConn, seerrConn}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	service.SetEntitlementResolver(fixedCeiling{q: "1080p"}) // single quality, keep it simple
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := service.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(router.gotConns) != 1 {
+		t.Fatalf("fulfill conns = %d, want 1 (contained to the first chosen capability, not mixed across arr+seerr)", len(router.gotConns))
+	}
+	if router.gotConns[0].ID != "arr-conn" {
+		t.Fatalf("fulfilled conn = %q, want arr-conn (first chosen)", router.gotConns[0].ID)
+	}
+}
+
 func TestSubmitApprovedDedupesDuplicateQualityTargets(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")}

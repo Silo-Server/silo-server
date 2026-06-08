@@ -76,6 +76,13 @@ function SelectSkeleton() {
   );
 }
 
+// FieldDescription is the muted helper text shown under a field or section
+// label — shared so the markup can't drift between the field/switch/section
+// renderers.
+function FieldDescription({ text }: { text?: string }) {
+  return text ? <p className="text-muted-foreground text-xs leading-relaxed">{text}</p> : null;
+}
+
 // Loading placeholder for a dynamic MULTI_SELECT (tags): a few shimmer chips.
 function ChipsSkeleton() {
   return (
@@ -114,9 +121,7 @@ function SchemaFormSection({
       <div className="flex items-center justify-between gap-2">
         <div className="space-y-0.5">
           <Label className="text-foreground text-sm font-semibold">{section.title}</Label>
-          {section.description ? (
-            <p className="text-muted-foreground text-xs leading-relaxed">{section.description}</p>
-          ) : null}
+          <FieldDescription text={section.description} />
         </div>
         {section.collapsible ? (
           <Button type="button" size="xs" variant="ghost" onClick={() => setUserOpen(!open)}>
@@ -275,9 +280,7 @@ export function SchemaForm({
       >
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-${field.key}`}>{field.label || field.key}</Label>
-          {field.description ? (
-            <p className="text-muted-foreground text-xs leading-relaxed">{field.description}</p>
-          ) : null}
+          <FieldDescription text={field.description} />
         </div>
         {renderControl(field)}
         {err ? <p className="text-destructive text-xs">{err}</p> : null}
@@ -303,9 +306,7 @@ export function SchemaForm({
             <Label htmlFor={id} className="cursor-pointer font-medium">
               {field.label || field.key}
             </Label>
-            {field.description ? (
-              <p className="text-muted-foreground text-xs leading-relaxed">{field.description}</p>
-            ) : null}
+            <FieldDescription text={field.description} />
           </div>
         </div>
         {err ? <p className="text-destructive mt-1.5 ml-11 text-xs">{err}</p> : null}
@@ -320,15 +321,18 @@ export function SchemaForm({
     const visible = fields.filter((field) => evaluateShowWhen(field.show_when, values));
     const nodes: React.ReactNode[] = [];
     let run: PluginAdminFormField[] = [];
+    // Key switch groups by their position in the list, not by their first
+    // field's key — so revealing/hiding a show_when switch within a run keeps the
+    // container's identity stable (no remount, no focus loss on the toggle).
+    let groupIndex = 0;
 
     const flushSwitches = () => {
-      const [first] = run;
-      if (!first) return;
+      if (run.length === 0) return;
       const group = run;
       run = [];
       nodes.push(
         <div
-          key={`switches-${first.key}`}
+          key={`switch-group-${groupIndex++}`}
           className="divide-border/70 bg-card divide-y overflow-hidden rounded-lg border"
         >
           {group.map((field) => renderSwitchRow(field))}
