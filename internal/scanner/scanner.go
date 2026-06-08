@@ -309,6 +309,15 @@ func isPodcastLibraryType(libraryType string) bool {
 	}
 }
 
+func isEbookLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "ebook", "ebooks":
+		return true
+	default:
+		return false
+	}
+}
+
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
 // to apply.
@@ -319,6 +328,7 @@ const (
 	walkModeMovie                     // movie library: video extensions + sample/extra skipping
 	walkModeAudiobook                 // audiobook library: audio extensions, no skipping
 	walkModePodcast                   // podcast library: audio extensions, no skipping
+	walkModeEbook                     // ebook library: ebook extensions, no skipping
 )
 
 // walkModeFor derives a walkMode from a media_folders.type string.
@@ -332,6 +342,8 @@ func walkModeFor(folderType string) walkMode {
 		return walkModeAudiobook
 	case isPodcastLibraryType(folderType):
 		return walkModePodcast
+	case isEbookLibraryType(folderType):
+		return walkModeEbook
 	default:
 		return walkModeVideo
 	}
@@ -343,6 +355,8 @@ func (m walkMode) acceptsExt(ext string) bool {
 	switch m {
 	case walkModeAudiobook, walkModePodcast:
 		return audioExtensions[ext]
+	case walkModeEbook:
+		return ebookExtensions[ext]
 	default:
 		return videoExtensions[ext]
 	}

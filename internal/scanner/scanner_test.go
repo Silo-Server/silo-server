@@ -200,3 +200,46 @@ func TestIsPodcastLibraryType(t *testing.T) {
 		}
 	}
 }
+
+func TestIsEbookLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"ebooks", true},
+		{"ebook", true},
+		{"Ebook", true},
+		{"  EBOOKS  ", true},
+		{"audiobooks", false},
+		{"movies", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isEbookLibraryType(tc.in); got != tc.want {
+			t.Errorf("isEbookLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWalkModeForEbookLibraryTypes(t *testing.T) {
+	for _, libraryType := range []string{"ebook", "ebooks", " EBOOKS "} {
+		if got := walkModeFor(libraryType); got != walkModeEbook {
+			t.Fatalf("walkModeFor(%q) = %v, want %v", libraryType, got, walkModeEbook)
+		}
+	}
+}
+
+func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
+	if !walkModeEbook.acceptsExt(".epub") {
+		t.Fatal("walkModeEbook should accept .epub")
+	}
+	if !walkModeEbook.acceptsExt(".pdf") {
+		t.Fatal("walkModeEbook should accept .pdf")
+	}
+	if walkModeEbook.acceptsExt(".mp4") {
+		t.Fatal("walkModeEbook should reject video extensions")
+	}
+	if walkModeEbook.acceptsExt(".mp3") {
+		t.Fatal("walkModeEbook should reject audio extensions")
+	}
+}
