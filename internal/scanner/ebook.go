@@ -73,9 +73,11 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 		book, err = parseEbookFB2(path)
 	case ".fbz":
 		book, err = parseEbookFBZ(path)
+	case ".cbz":
+		book, err = parseEbookCBZ(path)
 	case ".pdf":
 		book, err = parseEbookPDF(path)
-	case ".mobi", ".azw", ".azw3", ".cbz", ".cbr", ".txt", ".md":
+	case ".mobi", ".azw", ".azw3", ".cbr", ".txt", ".md":
 		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
@@ -292,6 +294,45 @@ func parseEbookFBZ(path string) (parsedEbook, error) {
 		return parseEbookFB2Reader(io.LimitReader(entry, maxEPUBMetadataEntrySize+1), "fbz")
 	}
 	return book, fmt.Errorf("fbz archive has no fb2 entry")
+}
+
+func parseEbookCBZ(path string) (parsedEbook, error) {
+	book := parsedEbook{Format: "cbz"}
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		return book, err
+	}
+	defer reader.Close()
+
+	for _, file := range reader.File {
+		if isComicArchivePage(file.Name) {
+			book.PageCount++
+		}
+	}
+	return book, nil
+}
+
+func isComicArchivePage(name string) bool {
+	clean := strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+	if clean == "" || strings.HasSuffix(clean, "/") {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(clean))
+	if strings.HasPrefix(base, "._") {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(clean), "/")
+	for _, part := range parts {
+		if part == "__macosx" {
+			return false
+		}
+	}
+	switch filepath.Ext(base) {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseEbookFB2Reader(reader io.Reader, format string) (parsedEbook, error) {

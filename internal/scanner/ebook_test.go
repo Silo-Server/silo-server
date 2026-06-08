@@ -71,7 +71,6 @@ func TestParseEbookFileSupportsReaderFormatsWithoutEmbeddedMetadata(t *testing.T
 		{"book.mobi", "mobi"},
 		{"book.azw", "azw"},
 		{"book.azw3", "azw3"},
-		{"book.cbz", "cbz"},
 		{"book.cbr", "cbr"},
 		{"book.txt", "txt"},
 		{"book.md", "md"},
@@ -353,6 +352,48 @@ trailer
 	}
 }
 
+func TestParseEbookCBZPageCount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "comic.cbz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create cbz: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	for _, name := range []string{
+		"Comic/001.jpg",
+		"Comic/002.PNG",
+		"Comic/003.webp",
+		"Comic/notes.txt",
+		"__MACOSX/._001.jpg",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte("placeholder")); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close cbz: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Format != "cbz" {
+		t.Fatalf("Format = %q, want cbz", got.Format)
+	}
+	if got.PageCount != 3 {
+		t.Fatalf("PageCount = %d, want 3", got.PageCount)
+	}
+}
+
 func TestEbookSeriesDesiredParsesIndex(t *testing.T) {
 	name, idx := ebookSeriesDesired(&parsedEbook{
 		Series:      " The Expanse ",
@@ -609,7 +650,7 @@ func TestEbookPeopleReplacePlanReturnsGetPeopleError(t *testing.T) {
 
 func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
 	modifiedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
-	book := &parsedEbook{Format: "epub", Title: "Book", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157"}
+	book := &parsedEbook{Format: "epub", Title: "Book", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157", PageCount: 321}
 
 	got := buildEbookMediaFile(&models.MediaFolder{ID: 44}, "content-1", "/library/Book.epub", 1234, modifiedAt, book)
 	if got.ContentID != "content-1" || got.MediaFolderID != 44 {
@@ -617,6 +658,9 @@ func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
 	}
 	if got.BaseType != "ebook" || got.BaseTitle != "Book" || got.BaseYear != 2024 || got.Container != "epub" || got.ProbeSource != "local" {
 		t.Fatalf("ebook file metadata = %+v", got)
+	}
+	if got.Duration != 321 {
+		t.Fatalf("Duration = %d, want ebook page count", got.Duration)
 	}
 	if got.CanonicalRootPath != "/library/Book.epub" || got.ObservedRootPath != "/library/Book.epub" || got.FilePath != "/library/Book.epub" {
 		t.Fatalf("ebook paths = canonical %q observed %q file %q", got.CanonicalRootPath, got.ObservedRootPath, got.FilePath)

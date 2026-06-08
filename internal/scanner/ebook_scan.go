@@ -432,6 +432,7 @@ func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath 
 		FileSize:           size,
 		FileModifiedAt:     &modifiedAt,
 		Container:          book.Format,
+		Duration:           book.PageCount,
 		ProbeSource:        "local",
 	}
 }
