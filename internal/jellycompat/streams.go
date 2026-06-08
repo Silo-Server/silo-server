@@ -123,7 +123,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID"))
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
 	if playSessionID == "" {
 		writeError(w, http.StatusBadRequest, "BadRequest", "PlaySessionId is required")
 		return
@@ -1061,7 +1061,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 }
 
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
-	if playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID")); playSessionID != "" {
+	if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" {
 		playSession, ok := h.playbackStore.Get(playSessionID)
 		if !ok || playSession.CompatToken != compatSession.Token {
 			return nil, nil, ErrSessionNotFound
