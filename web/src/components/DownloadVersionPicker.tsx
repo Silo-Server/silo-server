@@ -60,7 +60,7 @@ export default function DownloadVersionPicker({
         <DialogHeader>
           <DialogTitle>Download{title ? `: ${title}` : ""}</DialogTitle>
           <DialogDescription>
-            Choose a version to download. Make sure you have enough disk space.
+            Choose a file to download. Make sure you have enough disk space.
           </DialogDescription>
         </DialogHeader>
 
