@@ -58,6 +58,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         clearSearch: () => void;
         clearSelection: () => void;
         createSelectionAnnotation: () => { cfi: string; selectedText: string } | null;
+        getReadableText: () => string;
       },
       {
         file: FileVersion;
@@ -93,6 +94,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           cfi: "epubcfi(/6/4,/1:0,/1:12)",
           selectedText: "sample text",
         }),
+        getReadableText: () => "Readable text for speech",
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
@@ -634,5 +636,28 @@ describe("EbookReader", () => {
         selected_text: "sample text",
       }),
     );
+  });
+
+  it("shows read aloud and reading aid controls", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    expect(container.querySelector('button[aria-label="Speak text"]')).not.toBeNull();
+    expect(container.querySelector('input[aria-label="Keep screen awake"]')).not.toBeNull();
+    expect(container.querySelector('input[aria-label="E-ink mode"]')).not.toBeNull();
   });
 });

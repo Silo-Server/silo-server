@@ -12,17 +12,24 @@ import {
   Loader2,
   PanelRightClose,
   PanelRightOpen,
+  Pause,
+  Play,
   Search,
   Settings,
   StickyNote,
+  Square,
   Trash2,
   Type,
+  Volume2,
 } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
+import { useEinkMode } from "@/hooks/useEinkMode";
+import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
+import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
@@ -140,6 +147,12 @@ export default function EbookReader() {
   );
   const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
+  const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
+  const [ttsRate, setTtsRate] = useState(1);
+  const [ttsVoiceURI, setTtsVoiceURI] = useState("");
+  const [einkEnabled, setEinkEnabled] = useEinkMode();
+  const tts = useTTS();
+  useScreenWakeLock(wakeLockEnabled);
   const configLoadedRef = useRef(false);
   const saveConfigTimerRef = useRef<number | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -245,6 +258,13 @@ export default function EbookReader() {
     },
     [contentId],
   );
+  const handleSpeak = useCallback(() => {
+    const text = readerRef.current?.getReadableText() ?? "";
+    tts.speak(text, {
+      rate: ttsRate,
+      voiceURI: ttsVoiceURI || undefined,
+    });
+  }, [tts, ttsRate, ttsVoiceURI]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -631,6 +651,83 @@ export default function EbookReader() {
 
               {panel === "settings" && (
                 <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Volume2 className="size-4" />
+                      Read aloud
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        aria-label="Speak text"
+                        onClick={handleSpeak}
+                      >
+                        <Play className="size-4" />
+                        Speak
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={tts.state === "paused" ? "Resume speech" : "Pause speech"}
+                        onClick={tts.state === "paused" ? tts.resume : tts.pause}
+                      >
+                        <Pause className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Stop speech"
+                        onClick={tts.stop}
+                      >
+                        <Square className="size-4" />
+                      </Button>
+                    </div>
+                    <ReaderRange
+                      label="Speech rate"
+                      value={ttsRate}
+                      min={0.5}
+                      max={2}
+                      step={0.1}
+                      onChange={setTtsRate}
+                    />
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs font-medium">Voice</span>
+                      <select
+                        aria-label="Voice"
+                        value={ttsVoiceURI}
+                        onChange={(event) => setTtsVoiceURI(event.target.value)}
+                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      >
+                        <option value="">Default</option>
+                        {tts.voices.map((voice) => (
+                          <option key={voice.voiceURI} value={voice.voiceURI}>
+                            {voice.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="border-border space-y-2 border-t pt-3">
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                      <span>Keep screen awake</span>
+                      <input
+                        aria-label="Keep screen awake"
+                        type="checkbox"
+                        checked={wakeLockEnabled}
+                        onChange={(event) => setWakeLockEnabled(event.target.checked)}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                      <span>E-ink mode</span>
+                      <input
+                        aria-label="E-ink mode"
+                        type="checkbox"
+                        checked={einkEnabled}
+                        onChange={(event) => setEinkEnabled(event.target.checked)}
+                      />
+                    </label>
+                  </div>
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Type className="size-4" />
                     Typography

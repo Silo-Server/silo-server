@@ -112,6 +112,26 @@
   --hero-text-shadow: 0 18px 50px rgb(0 0 0 / 45%);
 }
 
+body.eink *,
+body.eink *::before,
+body.eink *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+}
+
+body.eink .blur-3xl,
+body.eink .blur-2xl,
+body.eink .blur-xl,
+body.eink .blur-lg,
+body.eink .backdrop-blur-sm,
+body.eink .backdrop-blur,
+body.eink .backdrop-blur-md,
+body.eink .backdrop-blur-lg {
+  filter: none !important;
+  backdrop-filter: none !important;
+}
+
 /* ================================================================
    § 2  KEYFRAMES
    ================================================================ */

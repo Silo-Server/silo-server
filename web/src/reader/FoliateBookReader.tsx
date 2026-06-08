@@ -61,6 +61,7 @@ export type FoliateBookReaderHandle = {
   clearSearch: () => void;
   clearSelection: () => void;
   createSelectionAnnotation: () => ReaderSelection | null;
+  getReadableText: () => string;
 };
 
 export type ReaderTheme = "light" | "sepia" | "dark";
@@ -559,6 +560,17 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       }
     }, [emitSelectionChange]);
 
+    const getReadableText = useCallback(() => {
+      const contents = viewRef.current?.renderer?.getContents?.() ?? [];
+      for (const content of contents) {
+        const selectedText = content.doc.getSelection()?.toString().trim();
+        if (selectedText) return selectedText;
+      }
+      const primaryIndex = viewRef.current?.renderer?.primaryIndex;
+      const primary = contents.find((content) => content.index === primaryIndex) ?? contents[0];
+      return (primary?.doc.body?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 5000);
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -584,8 +596,9 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           onSelectionChange?.(null);
         },
         createSelectionAnnotation,
+        getReadableText,
       }),
-      [createSelectionAnnotation, onSelectionChange],
+      [createSelectionAnnotation, getReadableText, onSelectionChange],
     );
 
     useEffect(() => {
