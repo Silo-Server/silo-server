@@ -922,7 +922,7 @@ func TestCreateIntegrationRejectedByPluginValidate(t *testing.T) {
 	install := 1
 	_, err := service.CreateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
 		Name:           "radarr",
-		CapabilityID:   "request_router.v1",
+		CapabilityID:   "arr",
 		BaseURL:        "http://radarr.local",
 		InstallationID: &install,
 	})
@@ -944,6 +944,46 @@ func TestCreateIntegrationRejectedByPluginValidate(t *testing.T) {
 	}
 }
 
+// TestValidateInstanceRequiresCapabilitySubID locks the capability_id contract:
+// the column carries the capability SUB-ID ("arr"/"seerr"), matching the value
+// the host passes to pluginhost.Client.RequestRouter -> requireCapability, which
+// keys on (type, id). The capability TYPE ("request_router.v1") must NOT be
+// accepted or defaulted in, since requireCapability("request_router.v1",
+// "request_router.v1") never matches a plugin whose capability id is "arr".
+func TestValidateInstanceRequiresCapabilitySubID(t *testing.T) {
+	install := 1
+	if err := validateInstance(&Integration{Name: "radarr", CapabilityID: "arr", InstallationID: &install}); err != nil {
+		t.Fatalf("validateInstance(sub-id \"arr\") = %v, want nil", err)
+	}
+	if err := validateInstance(&Integration{Name: "radarr", CapabilityID: "", InstallationID: &install}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("validateInstance(empty capability) = %v, want ErrInvalidInput", err)
+	}
+}
+
+// TestCreateIntegrationPassesCapabilitySubIDToPlugin guards that the sub-id the
+// admin selected reaches the router provider verbatim (it used to be rewritten to
+// the capability type, which the plugin runtime could never resolve).
+func TestCreateIntegrationPassesCapabilitySubIDToPlugin(t *testing.T) {
+	store := newFakeStore()
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	install := 1
+	if _, err := service.CreateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		Name:           "radarr",
+		CapabilityID:   "arr",
+		BaseURL:        "http://radarr.local",
+		APIKeyRef:      "key-radarr",
+		InstallationID: &install,
+	}); err != nil {
+		t.Fatalf("CreateIntegration err = %v, want nil", err)
+	}
+	if router.gotValidateCapability != "arr" {
+		t.Fatalf("plugin Validate capability = %q, want \"arr\"", router.gotValidateCapability)
+	}
+}
+
 // TestUpdateIntegrationRefusesStoredKeyReuseOnChangedBaseURL covers the security
 // hardening: when the caller leaves api_key_ref blank ("keep saved key") but
 // changes the base_url, the service must refuse rather than pair the stored,
@@ -960,7 +1000,7 @@ func TestUpdateIntegrationRefusesStoredKeyReuseOnChangedBaseURL(t *testing.T) {
 	_, err := service.UpdateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
 		ID:             "router-1",
 		Name:           "router-1",
-		CapabilityID:   "request_router.v1",
+		CapabilityID:   "arr",
 		BaseURL:        "http://attacker.example", // changed from the stored base URL
 		APIKeyRef:      "",                         // blank -> "keep saved key"
 		InstallationID: &install,
@@ -996,7 +1036,7 @@ func TestUpdateIntegrationKeepsKeyWhenBaseURLUnchanged(t *testing.T) {
 	updated, err := service.UpdateIntegration(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
 		ID:             "router-1",
 		Name:           "router-1-renamed",
-		CapabilityID:   "request_router.v1",
+		CapabilityID:   "arr",
 		BaseURL:        "http://router-1.local", // unchanged
 		APIKeyRef:      "",                       // blank -> keep saved key
 		InstallationID: &install,
@@ -1835,10 +1875,11 @@ type fakeRouterProvider struct {
 	options map[string][]RouterOption
 
 	// Validate behavior (default empty = valid).
-	validateFieldErrors map[string]string
-	validateFormError   string
-	validateErr         error
-	validateCalls       int
+	validateFieldErrors   map[string]string
+	validateFormError     string
+	validateErr           error
+	validateCalls         int
+	gotValidateCapability string
 }
 
 func (f *fakeRouterProvider) Fulfill(_ context.Context, installationID int, _ string, _ Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
@@ -1889,9 +1930,10 @@ func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, 
 	return true, "", nil
 }
 
-func (f *fakeRouterProvider) Validate(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (map[string]string, string, error) {
+func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, _ ResolvedRouterConnection) (map[string]string, string, error) {
 	f.mu.Lock()
 	f.validateCalls++
+	f.gotValidateCapability = capabilityID
 	f.mu.Unlock()
 	return f.validateFieldErrors, f.validateFormError, f.validateErr
 }
@@ -1911,7 +1953,7 @@ func routerInstOn(id string, installID int) Integration {
 		Enabled:        true,
 		BaseURL:        "http://" + id + ".local",
 		APIKeyRef:      "key-" + id,
-		CapabilityID:   "request_router.v1",
+		CapabilityID:   "arr",
 		InstallationID: &install,
 	}
 }

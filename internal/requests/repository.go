@@ -509,10 +509,10 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 	if err != nil {
 		return nil, fmt.Errorf("marshal plugin config: %w", err)
 	}
+	// capability_id is the capability sub-id ("arr"/"seerr"), validated non-empty
+	// upstream in validateInstance; persist it verbatim (never default it to the
+	// capability type, which the plugin runtime can't resolve).
 	capabilityID := strings.TrimSpace(i.CapabilityID)
-	if capabilityID == "" {
-		capabilityID = "request_router.v1"
-	}
 	supportedMediaTypes := i.SupportedMediaTypes
 	if supportedMediaTypes == nil {
 		supportedMediaTypes = []string{}
@@ -543,10 +543,10 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 	if err != nil {
 		return nil, fmt.Errorf("marshal plugin config: %w", err)
 	}
+	// capability_id is the capability sub-id ("arr"/"seerr"), validated non-empty
+	// upstream in validateInstance; persist it verbatim (never default it to the
+	// capability type, which the plugin runtime can't resolve).
 	capabilityID := strings.TrimSpace(i.CapabilityID)
-	if capabilityID == "" {
-		capabilityID = "request_router.v1"
-	}
 	supportedMediaTypes := i.SupportedMediaTypes
 	if supportedMediaTypes == nil {
 		supportedMediaTypes = []string{}

@@ -153,7 +153,10 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 	installationID, capabilityID := 0, ""
 	chosen := false
 	for _, in := range fc.integrations {
-		if !in.Enabled || in.CapabilityID != "request_router.v1" || in.InstallationID == nil {
+		// capability_id is the capability sub-id ("arr"/"seerr"); every row in
+		// request_integrations is a request_router connection, so the predicate is
+		// enabled + bound + names a capability, not a type-equality check.
+		if !in.Enabled || in.CapabilityID == "" || in.InstallationID == nil {
 			continue
 		}
 		if !integrationSupportsMediaType(in, mediaType) {
@@ -880,12 +883,15 @@ func validateInstance(in *Integration) error {
 	if strings.TrimSpace(in.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidInput)
 	}
+	// capability_id carries the capability SUB-ID ("arr"/"seerr"), not the type:
+	// the host resolves the plugin via requireCapability("request_router.v1", id),
+	// which keys on (type, id), so storing the type "request_router.v1" here
+	// resolves nothing. Matches the scan_source/metadata convention
+	// (autoscan_sources.capability_id = "arr"). The bound plugin's Validate RPC is
+	// the authority on whether the sub-id names a real capability.
 	in.CapabilityID = strings.TrimSpace(in.CapabilityID)
 	if in.CapabilityID == "" {
-		in.CapabilityID = "request_router.v1"
-	}
-	if in.CapabilityID != "request_router.v1" {
-		return fmt.Errorf("%w: unsupported capability %q", ErrInvalidInput, in.CapabilityID)
+		return fmt.Errorf("%w: capability_id is required", ErrInvalidInput)
 	}
 	if in.InstallationID == nil {
 		return fmt.Errorf("%w: installation_id is required", ErrInvalidInput)
@@ -1219,7 +1225,7 @@ func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType
 		return false, err
 	}
 	for _, in := range instances {
-		if in.Enabled && in.CapabilityID == "request_router.v1" && in.InstallationID != nil &&
+		if in.Enabled && in.CapabilityID != "" && in.InstallationID != nil &&
 			strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.APIKeyRef) != "" &&
 			integrationSupportsMediaType(in, mediaType) {
 			return true, nil
@@ -1266,7 +1272,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		// predates the plugin install and was never re-bound).
 		msg := "no fulfillment backend configured"
 		for _, in := range fc.integrations {
-			if in.Enabled && in.CapabilityID == "request_router.v1" && in.InstallationID == nil {
+			if in.Enabled && in.CapabilityID != "" && in.InstallationID == nil {
 				msg = "request backend connection is not bound to a plugin installation; re-save it in admin"
 				break
 			}

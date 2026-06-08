@@ -676,6 +676,7 @@ function useConnectionOptions(
     api_key_ref: string;
     has_api_key: boolean;
     installation_id?: number;
+    capability_id: string;
     plugin_config: Record<string, unknown>;
   },
 ) {
@@ -724,7 +725,7 @@ function useConnectionOptions(
         body: {
           base_url: current.base_url,
           api_key_ref: current.api_key_ref.trim() || undefined,
-          capability_id: REQUEST_ROUTER_CAPABILITY,
+          capability_id: current.capability_id,
           installation_id: current.installation_id,
           plugin_config: current.plugin_config,
         },
@@ -913,6 +914,7 @@ function IntegrationEditor({
     api_key_ref: form.api_key_ref,
     has_api_key: form.has_api_key,
     installation_id: hasInstallation ? selectedInstallationID : undefined,
+    capability_id: selected?.capability.id ?? "",
     plugin_config: pluginConfig,
   });
 
@@ -967,7 +969,7 @@ function IntegrationEditor({
       enabled: form.enabled,
       base_url: form.base_url.trim(),
       api_key_ref: form.api_key_ref.trim() || undefined,
-      capability_id: REQUEST_ROUTER_CAPABILITY,
+      capability_id: selected?.capability.id ?? "",
       installation_id: hasInstallation ? selectedInstallationID : undefined,
       supported_media_types: [],
       plugin_config: descriptor
