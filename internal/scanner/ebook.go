@@ -118,7 +118,56 @@ func normalizeEbookISBN(value string) string {
 			out.WriteRune(r)
 		}
 	}
-	return out.String()
+	candidate := out.String()
+	switch len(candidate) {
+	case 10:
+		if validISBN10(candidate) {
+			return candidate
+		}
+	case 13:
+		if validISBN13(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func validISBN10(candidate string) bool {
+	if len(candidate) != 10 {
+		return false
+	}
+	sum := 0
+	for i, r := range candidate {
+		value := 0
+		switch {
+		case r >= '0' && r <= '9':
+			value = int(r - '0')
+		case r == 'X' && i == 9:
+			value = 10
+		default:
+			return false
+		}
+		sum += value * (10 - i)
+	}
+	return sum%11 == 0
+}
+
+func validISBN13(candidate string) bool {
+	if len(candidate) != 13 {
+		return false
+	}
+	sum := 0
+	for i, r := range candidate {
+		if r < '0' || r > '9' {
+			return false
+		}
+		value := int(r - '0')
+		if i%2 == 1 {
+			value *= 3
+		}
+		sum += value
+	}
+	return sum%10 == 0
 }
 
 func parseEbookEPUB(path string) (parsedEbook, error) {

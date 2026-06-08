@@ -241,8 +241,14 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
+	if isEbookLibraryType(folder.Type) {
+		return nil, errEbookScanningNotImplemented
+	}
+
 	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
 }
+
+var errEbookScanningNotImplemented = errors.New("ebook scanning is not implemented")
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
 // files that live beneath that subtree.

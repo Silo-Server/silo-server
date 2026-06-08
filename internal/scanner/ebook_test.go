@@ -31,7 +31,7 @@ func TestSupportsEbookFile(t *testing.T) {
 }
 
 func TestParseEbookEPUBMetadata(t *testing.T) {
-	path := writeTestEPUB(t)
+	path := writeTestEPUB(t, []string{"ISBN: 978-0-306-40615-7"})
 
 	got, err := parseEbookFile(path)
 	if err != nil {
@@ -68,6 +68,21 @@ func TestParseEbookEPUBMetadata(t *testing.T) {
 	}
 	if got.Series != "Test Series" || got.SeriesIndex != "2" {
 		t.Fatalf("Series = %q/%q, want Test Series/2", got.Series, got.SeriesIndex)
+	}
+}
+
+func TestParseEbookEPUBSkipsUUIDIdentifierBeforeISBN(t *testing.T) {
+	path := writeTestEPUB(t, []string{
+		"550e8400-e29b-41d4-a716-446655440000",
+		"ISBN: 978-0-306-40615-7",
+	})
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.ISBN != "9780306406157" {
+		t.Fatalf("ISBN = %q, want normalized ISBN after skipping UUID", got.ISBN)
 	}
 }
 
@@ -129,7 +144,7 @@ func TestParseEbookFB2Metadata(t *testing.T) {
 	}
 }
 
-func writeTestEPUB(t *testing.T) string {
+func writeTestEPUB(t *testing.T, identifiers []string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "book.epub")
@@ -154,13 +169,19 @@ func writeTestEPUB(t *testing.T) string {
     <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
   </rootfiles>
 </container>`)
+	var identifierXML strings.Builder
+	for _, identifier := range identifiers {
+		identifierXML.WriteString("    <dc:identifier>")
+		identifierXML.WriteString(identifier)
+		identifierXML.WriteString("</dc:identifier>\n")
+	}
 	add("OPS/content.opf", `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
   <metadata>
     <dc:title>The Test Ebook</dc:title>
     <dc:creator>Ada Writer</dc:creator>
     <dc:creator>Ben Author</dc:creator>
-    <dc:identifier>ISBN: 978-0-306-40615-7</dc:identifier>
+`+identifierXML.String()+`
     <dc:publisher>Silo Press</dc:publisher>
     <dc:date>2024-03-10</dc:date>
     <dc:language>en</dc:language>
