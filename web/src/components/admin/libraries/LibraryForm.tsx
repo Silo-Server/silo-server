@@ -59,16 +59,19 @@ export interface LibraryFormProps {
   extraContent?: ReactNode;
 }
 
-function contentLevelsForType(libraryType: string): string[] {
+export function contentLevelsForType(libraryType: string): string[] {
   switch (libraryType) {
     case "series":
       return ["series", "season", "episode"];
     case "movies":
       return ["movie"];
     case "mixed":
-      return ["movie", "series", "season", "episode"];
+      return ["movie", "series", "season", "episode", "audiobook", "ebook"];
     case "audiobooks":
       return ["audiobook"];
+    case "ebooks":
+    case "ebook":
+      return ["ebook"];
     case "podcasts":
       return ["podcast", "podcast_episode"];
     default:
@@ -474,6 +477,7 @@ export function LibraryForm({
               <SelectItem value="series">Series</SelectItem>
               <SelectItem value="mixed">Mixed</SelectItem>
               <SelectItem value="audiobooks">Audiobooks</SelectItem>
+              <SelectItem value="ebooks">Ebooks</SelectItem>
               <SelectItem value="podcasts">Podcasts</SelectItem>
             </SelectContent>
           </Select>
