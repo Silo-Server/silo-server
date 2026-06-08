@@ -21,10 +21,14 @@ var (
 
 // SetSourceAdminToken stores an admin token for the given source.
 func (r *Repository) SetSourceAdminToken(ctx context.Context, sourceID int, token string) error {
+	encryptedToken, err := r.encryptSourceAdminToken(sourceID, token)
+	if err != nil {
+		return fmt.Errorf("encrypt admin token for source %d: %w", sourceID, err)
+	}
 	result, err := r.pool.Exec(ctx, `
 		UPDATE history_import_sources
 		SET admin_token = $2, updated_at = NOW()
-		WHERE id = $1`, sourceID, token)
+		WHERE id = $1`, sourceID, encryptedToken)
 	if err != nil {
 		return fmt.Errorf("setting admin token for source %d: %w", sourceID, err)
 	}
@@ -72,6 +76,10 @@ func (r *Repository) GetSourceWithAdminToken(ctx context.Context, sourceID int) 
 	}
 	if err != nil {
 		return nil, "", fmt.Errorf("getting source %d with admin token: %w", sourceID, err)
+	}
+	adminToken, err = r.cipher.DecryptIfEncrypted(adminToken, sourceAdminTokenAAD(sourceID))
+	if err != nil {
+		return nil, "", fmt.Errorf("decrypt admin token for source %d: %w", sourceID, err)
 	}
 	return &s, adminToken, nil
 }

@@ -9,14 +9,38 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
-type Repository struct{ pool *pgxpool.Pool }
+type Repository struct {
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
+}
 
-func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
+func NewRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *Repository {
+	return &Repository{pool: pool, cipher: cipher}
+}
+
+// connectionAPIKeyAAD binds an autoscan_connections api_key_ref ciphertext to
+// its row id.
+func connectionAPIKeyAAD(id string) string {
+	return secret.RowAAD("autoscan_connections", "api_key_ref", id)
+}
+
+// encryptAPIKey encrypts a non-empty, trimmed key bound to the connection id;
+// an empty key returns "" so NULL/keep-existing semantics are preserved.
+func (r *Repository) encryptAPIKey(id, apiKey string) (string, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return "", nil
+	}
+	return r.cipher.Encrypt(apiKey, connectionAPIKeyAAD(id))
+}
 
 // --- Settings ---
 
@@ -64,7 +88,7 @@ func (r *Repository) UpdateSettings(ctx context.Context, s Settings) (Settings, 
 
 const connectionColumns = `id, name, kind, base_url, api_key_ref, request_integration_id`
 
-func scanConnection(row interface{ Scan(...any) error }) (Connection, error) {
+func (r *Repository) scanConnection(row interface{ Scan(...any) error }) (Connection, error) {
 	var c Connection
 	var baseURL, apiKeyRef, reqIntegrationID *string
 	if err := row.Scan(&c.ID, &c.Name, &c.Kind, &baseURL, &apiKeyRef, &reqIntegrationID); err != nil {
@@ -77,6 +101,13 @@ func scanConnection(row interface{ Scan(...any) error }) (Connection, error) {
 		c.APIKeyRef = *apiKeyRef
 	}
 	c.RequestIntegrationID = reqIntegrationID
+	// Decrypt the stored key (read-path contract): legacy plaintext passes
+	// through, enc:v1: decrypts, corrupt ciphertext errors.
+	apiKey, err := r.cipher.DecryptIfEncrypted(c.APIKeyRef, connectionAPIKeyAAD(c.ID))
+	if err != nil {
+		return Connection{}, fmt.Errorf("decrypt autoscan connection %s api key: %w", c.ID, err)
+	}
+	c.APIKeyRef = apiKey
 	return c, nil
 }
 
@@ -89,12 +120,22 @@ func nullable(s string) any {
 }
 
 func (r *Repository) CreateConnection(ctx context.Context, c Connection) (Connection, error) {
+	// Generate the id in Go (rather than the DB default) so the api_key_ref
+	// ciphertext can be AAD-bound to the row id at insert time.
+	id := strings.TrimSpace(c.ID)
+	if id == "" {
+		id = uuid.NewString()
+	}
+	apiKeyRef, err := r.encryptAPIKey(id, c.APIKeyRef)
+	if err != nil {
+		return Connection{}, fmt.Errorf("encrypt autoscan api key: %w", err)
+	}
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO autoscan_connections (name, kind, base_url, api_key_ref, request_integration_id)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO autoscan_connections (id, name, kind, base_url, api_key_ref, request_integration_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+connectionColumns,
-		c.Name, c.Kind, nullable(c.BaseURL), nullable(c.APIKeyRef), c.RequestIntegrationID)
-	out, err := scanConnection(row)
+		id, c.Name, c.Kind, nullable(c.BaseURL), nullable(apiKeyRef), c.RequestIntegrationID)
+	out, err := r.scanConnection(row)
 	if err != nil {
 		return Connection{}, fmt.Errorf("create autoscan connection: %w", err)
 	}
@@ -108,6 +149,11 @@ func (r *Repository) UpdateConnection(ctx context.Context, c Connection) (Connec
 	// next poll. Mirrors requests.UpdateIntegration's CASE-WHEN keep-semantics.
 	// Pass the raw trimmed string (not nullable()) so the empty-string sentinel
 	// reaches the CASE.
+	// Encrypt the incoming key; an empty result preserves the keep-existing CASE.
+	apiKeyRef, err := r.encryptAPIKey(c.ID, c.APIKeyRef)
+	if err != nil {
+		return Connection{}, fmt.Errorf("encrypt autoscan api key: %w", err)
+	}
 	row := r.pool.QueryRow(ctx, `
 		UPDATE autoscan_connections
 		SET name = $2, kind = $3, base_url = $4,
@@ -115,8 +161,8 @@ func (r *Repository) UpdateConnection(ctx context.Context, c Connection) (Connec
 		    request_integration_id = $6, updated_at = now()
 		WHERE id = $1
 		RETURNING `+connectionColumns,
-		c.ID, c.Name, c.Kind, nullable(c.BaseURL), c.APIKeyRef, c.RequestIntegrationID)
-	out, err := scanConnection(row)
+		c.ID, c.Name, c.Kind, nullable(c.BaseURL), apiKeyRef, c.RequestIntegrationID)
+	out, err := r.scanConnection(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Connection{}, fmt.Errorf("%w: connection %s", ErrNotFound, c.ID)
@@ -151,7 +197,7 @@ func (r *Repository) ListConnections(ctx context.Context) ([]Connection, error) 
 	defer rows.Close()
 	var out []Connection
 	for rows.Next() {
-		c, err := scanConnection(rows)
+		c, err := r.scanConnection(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +209,7 @@ func (r *Repository) ListConnections(ctx context.Context) ([]Connection, error) 
 func (r *Repository) GetConnection(ctx context.Context, id string) (Connection, error) {
 	row := r.pool.QueryRow(ctx, `SELECT `+connectionColumns+`
 		FROM autoscan_connections WHERE id = $1`, id)
-	c, err := scanConnection(row)
+	c, err := r.scanConnection(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Connection{}, fmt.Errorf("%w: connection %s", ErrNotFound, id)

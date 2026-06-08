@@ -9,21 +9,32 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 const jellycompatSessionColumns = `token, username, account_username, profile_id, profile_name, pseudo_user_id, streamapp_user_id, streamapp_access_token, streamapp_refresh_token, streamapp_token_expiry, created_at, expires_at`
 
 // SessionRepository persists compat sessions in PostgreSQL.
 type SessionRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
 }
 
 // NewSessionRepository creates a new compat session repository.
-func NewSessionRepository(pool *pgxpool.Pool) *SessionRepository {
-	return &SessionRepository{pool: pool}
+func NewSessionRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *SessionRepository {
+	return &SessionRepository{pool: pool, cipher: cipher}
 }
 
-func scanCompatSession(row pgx.Row) (*Session, error) {
+// jellycompatTokenAAD binds a streamapp_* token ciphertext to its session row,
+// keyed by the session token (the table's primary key). The session token
+// itself is not encrypted (it is matched by value on lookup), so it is a stable,
+// known identifier on both the read and write paths.
+func jellycompatTokenAAD(column, token string) string {
+	return secret.RowAAD("jellycompat_sessions", column, token)
+}
+
+func (r *SessionRepository) scanCompatSession(row pgx.Row) (*Session, error) {
 	var session Session
 	err := row.Scan(
 		&session.Token,
@@ -45,6 +56,13 @@ func scanCompatSession(row pgx.Row) (*Session, error) {
 		}
 		return nil, fmt.Errorf("scan compat session: %w", err)
 	}
+	// Decrypt the bridged Silo access/refresh tokens (read-path contract).
+	if session.StreamAppAccessToken, err = r.cipher.DecryptIfEncrypted(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token)); err != nil {
+		return nil, fmt.Errorf("decrypt streamapp access token: %w", err)
+	}
+	if session.StreamAppRefreshToken, err = r.cipher.DecryptIfEncrypted(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token)); err != nil {
+		return nil, fmt.Errorf("decrypt streamapp refresh token: %w", err)
+	}
 	return &session, nil
 }
 
@@ -54,7 +72,16 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 		session.Token = uuid.NewString()
 	}
 
-	_, err := r.pool.Exec(ctx, `
+	accessToken, err := r.cipher.Encrypt(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token))
+	if err != nil {
+		return fmt.Errorf("encrypt streamapp access token: %w", err)
+	}
+	refreshToken, err := r.cipher.Encrypt(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token))
+	if err != nil {
+		return fmt.Errorf("encrypt streamapp refresh token: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, `
 		INSERT INTO jellycompat_sessions (
 			token, username, account_username, profile_id, profile_name, pseudo_user_id,
 			streamapp_user_id, streamapp_access_token, streamapp_refresh_token,
@@ -84,8 +111,8 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 		session.ProfileName,
 		session.PseudoUserID,
 		session.StreamAppUserID,
-		session.StreamAppAccessToken,
-		session.StreamAppRefreshToken,
+		accessToken,
+		refreshToken,
 		session.StreamAppTokenExpiry,
 		session.CreatedAt,
 		session.ExpiresAt,
@@ -98,7 +125,7 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 
 // GetByToken loads an active compat session by token.
 func (r *SessionRepository) GetByToken(ctx context.Context, token string, now time.Time) (*Session, error) {
-	return scanCompatSession(r.pool.QueryRow(ctx,
+	return r.scanCompatSession(r.pool.QueryRow(ctx,
 		`SELECT `+jellycompatSessionColumns+`
 		FROM jellycompat_sessions
 		WHERE token = $1 AND expires_at > $2`,

@@ -13,7 +13,7 @@ const SectionsAllowProfileCustomSettingKey = "sections.allow_profile_custom_sect
 
 // SectionSettingsHandler exposes GET/PUT for the sections-related server setting.
 type SectionSettingsHandler struct {
-	Settings *catalog.ServerSettingsRepo
+	Settings catalog.SettingsStore
 }
 
 type sectionsSettingResponse struct {

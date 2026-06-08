@@ -8,16 +8,44 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 // PgRepository implements Repository using PostgreSQL.
 type PgRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
 }
 
 // NewPgRepository creates a new PostgreSQL repository.
-func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
-	return &PgRepository{pool: pool}
+func NewPgRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PgRepository {
+	return &PgRepository{pool: pool, cipher: cipher}
+}
+
+// providerSecretAAD binds a subtitle_provider_config secret column to its row
+// (keyed by provider_name).
+func (r *PgRepository) providerSecretAAD(column, providerName string) string {
+	return secret.RowAAD("subtitle_provider_config", column, providerName)
+}
+
+// decryptProviderConfig applies the read-path contract to the api_key and
+// password columns (username is not a secret) and (re)derives the Has* flags
+// from the decrypted values.
+func (r *PgRepository) decryptProviderConfig(cfg *ProviderConfig) error {
+	apiKey, err := r.cipher.DecryptIfEncrypted(cfg.APIKey, r.providerSecretAAD("api_key", cfg.ProviderName))
+	if err != nil {
+		return fmt.Errorf("decrypt subtitle api key for %s: %w", cfg.ProviderName, err)
+	}
+	cfg.APIKey = apiKey
+	password, err := r.cipher.DecryptIfEncrypted(cfg.Password, r.providerSecretAAD("password", cfg.ProviderName))
+	if err != nil {
+		return fmt.Errorf("decrypt subtitle password for %s: %w", cfg.ProviderName, err)
+	}
+	cfg.Password = password
+	cfg.HasAPIKey = cfg.APIKey != ""
+	cfg.HasCredentials = cfg.Username != "" && cfg.Password != ""
+	return nil
 }
 
 func (r *PgRepository) InsertDownloadedSubtitle(ctx context.Context, sub *DownloadedSubtitle) error {
@@ -146,8 +174,9 @@ func (r *PgRepository) ListProviderConfigs(ctx context.Context) ([]ProviderConfi
 			&cfg.Username, &cfg.Password, &cfg.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan provider config: %w", err)
 		}
-		cfg.HasAPIKey = cfg.APIKey != ""
-		cfg.HasCredentials = cfg.Username != "" && cfg.Password != ""
+		if err := r.decryptProviderConfig(&cfg); err != nil {
+			return nil, err
+		}
 		configs = append(configs, cfg)
 	}
 	return configs, rows.Err()
@@ -166,14 +195,25 @@ func (r *PgRepository) GetProviderConfig(ctx context.Context, providerName strin
 	if err != nil {
 		return nil, fmt.Errorf("get provider config: %w", err)
 	}
-	cfg.HasAPIKey = cfg.APIKey != ""
-	cfg.HasCredentials = cfg.Username != "" && cfg.Password != ""
+	if err := r.decryptProviderConfig(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
 func (r *PgRepository) UpsertProviderConfig(ctx context.Context, cfg *ProviderConfig) error {
+	// Encrypt the secret columns; an empty result preserves the keep-existing
+	// CASE (toggling enabled with blank creds leaves stored creds intact).
+	apiKey, err := r.cipher.Encrypt(cfg.APIKey, r.providerSecretAAD("api_key", cfg.ProviderName))
+	if err != nil {
+		return fmt.Errorf("encrypt subtitle api key: %w", err)
+	}
+	password, err := r.cipher.Encrypt(cfg.Password, r.providerSecretAAD("password", cfg.ProviderName))
+	if err != nil {
+		return fmt.Errorf("encrypt subtitle password: %w", err)
+	}
 	// Only overwrite credentials when non-empty, so toggling enabled doesn't wipe them.
-	_, err := r.pool.Exec(ctx,
+	_, err = r.pool.Exec(ctx,
 		`INSERT INTO subtitle_provider_config (provider_name, enabled, api_key, username, password, updated_at)
 		VALUES ($1, $2, $3, $4, $5, NOW())
 		ON CONFLICT (provider_name) DO UPDATE SET
@@ -182,7 +222,7 @@ func (r *PgRepository) UpsertProviderConfig(ctx context.Context, cfg *ProviderCo
 			username = CASE WHEN EXCLUDED.username = '' THEN subtitle_provider_config.username ELSE EXCLUDED.username END,
 			password = CASE WHEN EXCLUDED.password = '' THEN subtitle_provider_config.password ELSE EXCLUDED.password END,
 			updated_at = NOW()`,
-		cfg.ProviderName, cfg.Enabled, cfg.APIKey, cfg.Username, cfg.Password)
+		cfg.ProviderName, cfg.Enabled, apiKey, cfg.Username, password)
 	if err != nil {
 		return fmt.Errorf("upsert provider config: %w", err)
 	}

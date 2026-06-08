@@ -53,6 +53,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
+	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -76,6 +77,7 @@ type Dependencies struct {
 	BootstrapSensitiveValues     map[string]string
 	AppContext                   context.Context
 	DB                           *pgxpool.Pool
+	SecretCipher                 *secret.Cipher // at-rest credential cipher (required when DB is set)
 	FrontendFS                   fs.FS
 	S3Public                     *s3client.Client                 // public assets bucket client (may be nil)
 	S3Private                    *s3client.Client                 // private internal bucket client (may be nil)
@@ -223,9 +225,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	healthHandler := handlers.NewHealthHandler(healthServerName, healthServerID)
 
 	// Build server settings repo if DB is available (needed by auth and admin).
-	var settingsRepo *catalog.ServerSettingsRepo
+	// Wrap it in the encrypting decorator so sensitive keys rest as ciphertext
+	// and every consumer transparently reads plaintext.
+	var settingsRepo catalog.SettingsStore
 	if deps.DB != nil {
-		settingsRepo = catalog.NewServerSettingsRepo(deps.DB)
+		settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(deps.DB), deps.SecretCipher)
 	}
 
 	// Build auth handler and auth middleware if DB and config are available.
@@ -431,27 +435,25 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Config != nil {
 			tmdbAPIKey = deps.Config.TMDBAPIKey
 		}
-		requestsRepo := mediarequests.NewRepository(deps.DB)
+		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
 		requestSvc := mediarequests.NewService(
 			requestsRepo,
 			tmdb.NewClient(tmdbAPIKey, 40),
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
-		requestSvc.SetSecretResolver(settingsRepo)
 		requestSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
-		autoscanRepo := autoscan.NewRepository(deps.DB)
+		autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
 			autoscanSvc := BuildAutoscanService(
 				autoscanRepo,
 				deps.PluginService,
 				plugins.NewInstallationStore(deps.DB),
 				requestsRepo,
-				settingsRepo,
 				deps.FolderRepo,
 				deps.LibraryScanQueue,
 				deps.RedisClient,
@@ -566,7 +568,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Create subtitleRepo early — only needs DB, shared with playback handler and subtitle search handler.
 	var subtitleRepo *subtitles.PgRepository
 	if deps.DB != nil {
-		subtitleRepo = subtitles.NewPgRepository(deps.DB)
+		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 
 	// Notifier that pushes "subtitle ready" events to active sessions when an AI
@@ -1000,6 +1002,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
 				pool:     deps.DB,
 				settings: settingsRepo,
+				cipher:   deps.SecretCipher,
 				provider: watchtrakt.NewProvider(nil, ""),
 			}
 		}
@@ -1159,7 +1162,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var historyImportHandler *handlers.HistoryImportHandler
 	var historyImportSvc *historyimport.Service
 	if deps.DB != nil {
-		historyRepo := historyimport.NewRepository(deps.DB)
+		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyImportSvc = historyimport.NewService(deps.AppContext, historyRepo, deps.UserStoreProvider)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		historyImportSvc.SetStableIdentityResolver(historyIdentity)
@@ -1168,7 +1171,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		historyImportHandler = handlers.NewHistoryImportHandler(historyImportSvc)
 		if deps.UserStoreProvider != nil {
-			webhookSyncSvc := webhooksync.NewService(webhooksync.NewRepository(deps.DB), historyRepo, deps.UserStoreProvider)
+			webhookSyncSvc := webhooksync.NewService(webhooksync.NewRepository(deps.DB, deps.SecretCipher), historyRepo, deps.UserStoreProvider)
 			webhookSyncSvc.SetStableIdentityResolver(historyIdentity)
 			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc)
 		}

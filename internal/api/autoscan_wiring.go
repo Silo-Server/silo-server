@@ -20,12 +20,13 @@ type autoscanQueuer = autoscan.Queuer
 
 // RequestIntegrationLookup adapts the Requests repository to the autoscan
 // connection resolver's RequestIntegrationLookup: it resolves a soft-linked
-// Requests integration to its base URL and (write-only) api-key ref.
+// Requests integration to its base URL and api key (the repo decrypts the key
+// on read, so this returns plaintext).
 type RequestIntegrationLookup struct {
 	Repo *mediarequests.Repository
 }
 
-func (l RequestIntegrationLookup) Get(ctx context.Context, integrationID string) (baseURL, apiKeyRef string, err error) {
+func (l RequestIntegrationLookup) Get(ctx context.Context, integrationID string) (baseURL, apiKey string, err error) {
 	integration, err := l.Repo.GetIntegration(ctx, integrationID)
 	if err != nil {
 		return "", "", err
@@ -125,27 +126,22 @@ func scanSourceDisplayName(pluginID string, c *plugins.Capability) string {
 	}
 }
 
-// AutoscanSecretResolver resolves an encrypted api-key reference to plaintext.
-// It is satisfied by the server settings repo (Get(ctx, key) (string, error)).
-type AutoscanSecretResolver interface {
-	Get(ctx context.Context, ref string) (string, error)
-}
-
 // BuildAutoscanService wires the v2 autoscan engine from its concrete
 // dependencies. Both the HTTP router (manual trigger) and the background poll
 // task share this constructor so the adapter wiring lives in exactly one place.
+// Credentials are now decrypted inline by the autoscan/requests repos, so there
+// is no separate secret resolver to thread.
 func BuildAutoscanService(
 	repo *autoscan.Repository,
 	pluginService *plugins.Service,
 	installationStore *plugins.InstallationStore,
 	requestsRepo *mediarequests.Repository,
-	secrets AutoscanSecretResolver,
 	folderRepo *catalog.FolderRepository,
 	queue autoscanQueuer,
 	redisClient *redis.Client,
 ) *autoscan.Service {
 	provider := autoscan.NewPluginProvider(PluginScanSourceAdapter{pluginService})
-	connRes := autoscan.NewConnectionResolver(RequestIntegrationLookup{requestsRepo}, secrets)
+	connRes := autoscan.NewConnectionResolver(RequestIntegrationLookup{requestsRepo})
 	svc := autoscan.NewService(
 		repo,
 		provider,
