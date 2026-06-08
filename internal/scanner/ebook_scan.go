@@ -17,7 +17,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+type ebookSQLExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
 
 func ebookScanWorkers() int {
 	if v := os.Getenv("SILO_EBOOK_SCAN_WORKERS"); v != "" {
@@ -196,19 +201,11 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	if err := s.upsertEbookPeople(ctx, contentID, &parsed); err != nil {
 		return fmt.Errorf("upsert ebook people: %w", err)
 	}
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (content_id, media_folder_id) DO NOTHING
-	`, contentID, folder.ID); err != nil {
+	if err := insertEbookLibraryMembership(ctx, s.fileRepo.Pool(), contentID, folder.ID); err != nil {
 		return fmt.Errorf("upsert ebook library membership: %w", err)
 	}
 	if parsed.ISBN != "" {
-		if _, err := s.fileRepo.Pool().Exec(ctx, `
-			INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
-			VALUES ($1, 'isbn', $2, 'ebook')
-			ON CONFLICT DO NOTHING
-		`, contentID, parsed.ISBN); err != nil {
+		if err := insertEbookISBNProviderID(ctx, s.fileRepo.Pool(), contentID, parsed.ISBN); err != nil {
 			return fmt.Errorf("upsert ebook ISBN provider id: %w", err)
 		}
 	}
@@ -374,7 +371,15 @@ func (s *Scanner) findEbookByFilePath(ctx context.Context, filePath string) *mod
 }
 
 func (s *Scanner) upsertEbookMediaFile(ctx context.Context, folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook) error {
-	mf := models.MediaFile{
+	mf := buildEbookMediaFile(folder, contentID, filePath, size, modifiedAt, book)
+	if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
+		return fmt.Errorf("upsert media file %s: %w", filePath, err)
+	}
+	return nil
+}
+
+func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook) models.MediaFile {
+	return models.MediaFile{
 		ContentID:          contentID,
 		MediaFolderID:      folder.ID,
 		CanonicalRootPath:  filePath,
@@ -391,10 +396,24 @@ func (s *Scanner) upsertEbookMediaFile(ctx context.Context, folder *models.Media
 		Container:          book.Format,
 		ProbeSource:        "local",
 	}
-	if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
-		return fmt.Errorf("upsert media file %s: %w", filePath, err)
-	}
-	return nil
+}
+
+func insertEbookLibraryMembership(ctx context.Context, exec ebookSQLExecutor, contentID string, folderID int) error {
+	_, err := exec.Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (content_id, media_folder_id) DO NOTHING
+	`, contentID, folderID)
+	return err
+}
+
+func insertEbookISBNProviderID(ctx context.Context, exec ebookSQLExecutor, contentID string, isbn string) error {
+	_, err := exec.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
+		VALUES ($1, 'isbn', $2, 'ebook')
+		ON CONFLICT DO NOTHING
+	`, contentID, isbn)
+	return err
 }
 
 type ebookCredit struct {
@@ -403,15 +422,21 @@ type ebookCredit struct {
 }
 
 func ebookPeopleCreditsEqual(existing []models.ItemPerson, desired []ebookCredit) bool {
-	if len(existing) != len(desired) {
+	existingAuthors := make([]models.ItemPerson, 0, len(existing))
+	for _, p := range existing {
+		if p.Kind == models.PersonKindAuthor {
+			existingAuthors = append(existingAuthors, p)
+		}
+	}
+	if len(existingAuthors) != len(desired) {
 		return false
 	}
 	type key struct {
 		name string
 		kind models.PersonKind
 	}
-	have := make(map[key]struct{}, len(existing))
-	for _, p := range existing {
+	have := make(map[key]struct{}, len(existingAuthors))
+	for _, p := range existingAuthors {
 		have[key{strings.ToLower(strings.TrimSpace(p.Person.Name)), p.Kind}] = struct{}{}
 	}
 	for _, d := range desired {
@@ -421,6 +446,30 @@ func ebookPeopleCreditsEqual(existing []models.ItemPerson, desired []ebookCredit
 		}
 	}
 	return true
+}
+
+type ebookResolvedAuthor struct {
+	ID   int64
+	Name string
+}
+
+func mergeEbookPeople(existing []models.ItemPerson, authors []ebookResolvedAuthor) []models.ItemPerson {
+	people := make([]models.ItemPerson, 0, len(existing)+len(authors))
+	for _, p := range existing {
+		if p.Kind == models.PersonKindAuthor {
+			continue
+		}
+		p.SortOrder = len(people)
+		people = append(people, p)
+	}
+	for _, author := range authors {
+		people = append(people, models.ItemPerson{
+			Person:    models.Person{ID: author.ID, Name: author.Name},
+			Kind:      models.PersonKindAuthor,
+			SortOrder: len(people),
+		})
+	}
+	return people
 }
 
 func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book *parsedEbook) error {
@@ -446,19 +495,15 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 		return nil
 	}
 
-	people := make([]models.ItemPerson, 0, len(desired))
-	for i, c := range desired {
+	authors := make([]ebookResolvedAuthor, 0, len(desired))
+	for _, c := range desired {
 		personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.Name})
 		if err != nil {
 			return fmt.Errorf("find-or-create person %q: %w", c.Name, err)
 		}
-		people = append(people, models.ItemPerson{
-			Person:    models.Person{ID: personID},
-			Kind:      models.PersonKindAuthor,
-			SortOrder: i,
-		})
+		authors = append(authors, ebookResolvedAuthor{ID: personID, Name: c.Name})
 	}
-	return s.itemRepo.ReplacePeople(ctx, contentID, people)
+	return s.itemRepo.ReplacePeople(ctx, contentID, mergeEbookPeople(existing, authors))
 }
 
 func (s *Scanner) upsertEbookSeries(ctx context.Context, contentID string, book *parsedEbook) error {
