@@ -89,18 +89,23 @@ function ChipsSkeleton() {
 function SchemaFormSection({
   section,
   values,
+  forceOpen,
   renderFields,
 }: {
   section: PluginAdminFormSection;
   values: Record<string, unknown>;
+  forceOpen: boolean;
   renderFields: (keys: string[]) => React.ReactNode;
 }) {
-  const [open, setOpen] = useState(!section.collapsed_default);
+  // null = operator hasn't toggled; fall back to collapsed_default. forceOpen
+  // (the section has unresolved errors) always wins so setup can't be hidden.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
   if (!evaluateShowWhen(section.show_when, values)) {
     return null;
   }
 
+  const open = forceOpen || (userOpen ?? !section.collapsed_default);
   const showFields = section.collapsible ? open : true;
 
   return (
@@ -113,12 +118,7 @@ function SchemaFormSection({
           ) : null}
         </div>
         {section.collapsible ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            onClick={() => setOpen((current) => !current)}
-          >
+          <Button type="button" size="xs" variant="ghost" onClick={() => setUserOpen(!open)}>
             {open ? "Hide" : "Show"}
           </Button>
         ) : null}
@@ -364,6 +364,7 @@ export function SchemaForm({
           key={section.key}
           section={section}
           values={values}
+          forceOpen={section.field_keys.some((key) => mergedErrors[key] != null)}
           renderFields={(keys) => renderFieldList(resolveKeys(keys))}
         />
       ))}

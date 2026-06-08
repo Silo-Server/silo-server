@@ -5,16 +5,52 @@ import { SchemaForm } from "./SchemaForm";
 
 const descriptor: PluginAdminForm = {
   fields: [
-    { key: "service_kind", label: "Service", control: "SELECT", required: true, secret: false, multiline: false,
-      options: [{ value: "radarr", label: "Radarr" }, { value: "sonarr", label: "Sonarr" }] },
-    { key: "season_folder", label: "Season folder", control: "SWITCH", required: false, secret: false, multiline: false,
-      show_when: [{ field: "service_kind", equals: ["sonarr"] }] },
-    { key: "root_folder", label: "Root folder", control: "SELECT", required: false, secret: false, multiline: false, dynamic_options: true },
+    {
+      key: "service_kind",
+      label: "Service",
+      control: "SELECT",
+      required: true,
+      secret: false,
+      multiline: false,
+      options: [
+        { value: "radarr", label: "Radarr" },
+        { value: "sonarr", label: "Sonarr" },
+      ],
+    },
+    {
+      key: "season_folder",
+      label: "Season folder",
+      control: "SWITCH",
+      required: false,
+      secret: false,
+      multiline: false,
+      show_when: [{ field: "service_kind", equals: ["sonarr"] }],
+    },
+    {
+      key: "root_folder",
+      label: "Root folder",
+      control: "SELECT",
+      required: false,
+      secret: false,
+      multiline: false,
+      dynamic_options: true,
+    },
   ],
-  sections: [{ key: "main", title: "Library", collapsible: false, collapsed_default: false, field_keys: ["service_kind", "season_folder", "root_folder"] }],
+  sections: [
+    {
+      key: "main",
+      title: "Library",
+      collapsible: false,
+      collapsed_default: false,
+      field_keys: ["service_kind", "season_folder", "root_folder"],
+    },
+  ],
 };
 
-function renderForm(values: Record<string, unknown>, extra: Partial<React.ComponentProps<typeof SchemaForm>> = {}) {
+function renderForm(
+  values: Record<string, unknown>,
+  extra: Partial<React.ComponentProps<typeof SchemaForm>> = {},
+) {
   const onChange = vi.fn();
   render(<SchemaForm descriptor={descriptor} values={values} onChange={onChange} {...extra} />);
   return { onChange };
@@ -45,27 +81,116 @@ describe("SchemaForm", () => {
   it("renders a declared default_value when the field is absent from values (#6)", () => {
     const d: PluginAdminForm = {
       fields: [
-        { key: "season_folder", label: "Season folder", control: "SWITCH", required: false, secret: false, multiline: false, default_value: true },
+        {
+          key: "season_folder",
+          label: "Season folder",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
       ],
     };
     const onChange = vi.fn();
     render(<SchemaForm descriptor={d} values={{}} onChange={onChange} />);
-    expect((screen.getByRole("switch") as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByRole("switch") as HTMLButtonElement).getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
   it("reports validity through onValidityChange (#14)", () => {
     const onValidityChange = vi.fn();
     const d: PluginAdminForm = {
       fields: [
-        { key: "name", label: "Name", control: "TEXT", required: true, secret: false, multiline: false },
+        {
+          key: "name",
+          label: "Name",
+          control: "TEXT",
+          required: true,
+          secret: false,
+          multiline: false,
+        },
       ],
     };
     const { rerender } = render(
-      <SchemaForm descriptor={d} values={{}} onChange={vi.fn()} onValidityChange={onValidityChange} />,
+      <SchemaForm
+        descriptor={d}
+        values={{}}
+        onChange={vi.fn()}
+        onValidityChange={onValidityChange}
+      />,
     );
     expect(onValidityChange).toHaveBeenLastCalledWith(false);
     rerender(
-      <SchemaForm descriptor={d} values={{ name: "ok" }} onChange={vi.fn()} onValidityChange={onValidityChange} />,
+      <SchemaForm
+        descriptor={d}
+        values={{ name: "ok" }}
+        onChange={vi.fn()}
+        onValidityChange={onValidityChange}
+      />,
     );
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
+  });
+});
+
+const collapsibleDescriptor: PluginAdminForm = {
+  fields: [
+    {
+      key: "api_path",
+      label: "API path",
+      control: "TEXT",
+      required: true,
+      secret: false,
+      multiline: false,
+    },
+    {
+      key: "verbose",
+      label: "Verbose",
+      control: "SWITCH",
+      required: false,
+      secret: false,
+      multiline: false,
+    },
+  ],
+  sections: [
+    {
+      key: "lib",
+      title: "Library",
+      collapsible: true,
+      collapsed_default: true,
+      field_keys: ["api_path", "verbose"],
+    },
+  ],
+};
+
+describe("SchemaForm collapsible sections", () => {
+  it("honors collapsed_default when the section has no field errors", () => {
+    render(
+      <SchemaForm
+        descriptor={collapsibleDescriptor}
+        values={{ api_path: "/v3" }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Verbose")).toBeNull(); // collapsed -> field hidden
+    expect(screen.getByText("Show")).toBeTruthy();
+  });
+
+  it("auto-expands a collapsed section that has a validation error (empty required field)", () => {
+    render(<SchemaForm descriptor={collapsibleDescriptor} values={{}} onChange={vi.fn()} />);
+    // api_path is required + empty -> validateSchemaValues flags it -> section force-expands
+    expect(screen.getByText("Verbose")).toBeTruthy();
+  });
+
+  it("expands a clean collapsed section when Show is clicked", () => {
+    render(
+      <SchemaForm
+        descriptor={collapsibleDescriptor}
+        values={{ api_path: "/v3" }}
+        onChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("Show"));
+    expect(screen.getByText("Verbose")).toBeTruthy();
   });
 });
