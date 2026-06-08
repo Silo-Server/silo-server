@@ -107,6 +107,31 @@ func TestFilterSupersededEpisodeProgressEntriesDropsOlderPartialsAfterLaterCompl
 	}
 }
 
+func TestMatchesContinueWatchingFilterIncludesAudiobooks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		filterType string
+		itemType   string
+		want       bool
+	}{
+		{name: "movie keeps movie", filterType: "movie", itemType: "movie", want: true},
+		{name: "series keeps episode", filterType: "series", itemType: "episode", want: true},
+		{name: "audiobook keeps audiobook", filterType: "audiobook", itemType: "audiobook", want: true},
+		{name: "audiobook rejects movie", filterType: "audiobook", itemType: "movie", want: false},
+		{name: "unknown rejects audiobook", filterType: "unknown", itemType: "audiobook", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesContinueWatchingFilter(tt.filterType, tt.itemType); got != tt.want {
+				t.Fatalf("matchesContinueWatchingFilter(%q, %q) = %v, want %v", tt.filterType, tt.itemType, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
 	t.Parallel()
 

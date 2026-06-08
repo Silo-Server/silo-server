@@ -157,8 +157,8 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 	}
 
 	cfg := sections.ParseConfigFilters(config)
-	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" {
-		return "filter_type must be 'movie' or 'series'", false
+	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" && cfg.FilterType != "audiobook" {
+		return "filter_type must be 'movie', 'series', or 'audiobook'", false
 	}
 
 	var rawLibraryConfig struct {

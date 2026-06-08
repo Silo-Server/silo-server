@@ -644,6 +644,9 @@ export interface BrowseItemSortMetrics {
   progress_ratio?: number;
   viewed_at?: string;
   play_count?: number;
+  author?: string;
+  narrator?: string;
+  series_name?: string;
 }
 
 export interface BrowseItem {

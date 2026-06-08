@@ -452,8 +452,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	if cfgFilters.FilterType != "" {
 		filtered := make([]*models.MediaItem, 0, len(orderedItems))
 		for _, item := range orderedItems {
-			if (cfgFilters.FilterType == "movie" && item.Type == "movie") ||
-				(cfgFilters.FilterType == "series" && item.Type == "episode") {
+			if matchesContinueWatchingFilter(cfgFilters.FilterType, item.Type) {
 				filtered = append(filtered, item)
 			}
 		}
@@ -2801,6 +2800,19 @@ func applyConfigTypeFilter(alias string, filterType string, conditions *[]string
 	*conditions = append(*conditions, fmt.Sprintf("%s.type = $%d", alias, *argIdx))
 	*args = append(*args, filterType)
 	*argIdx++
+}
+
+func matchesContinueWatchingFilter(filterType string, itemType string) bool {
+	switch filterType {
+	case "movie":
+		return itemType == "movie"
+	case "series":
+		return itemType == "episode"
+	case "audiobook":
+		return itemType == "audiobook"
+	default:
+		return false
+	}
 }
 
 // fetchSeasonalThemed returns items for a seasonal_themed section.

@@ -1,8 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { useAudiobookPlayback } from "./useAudiobookPlayback";
 import { MiniBar } from "./MiniBar";
 import { NowListening } from "./NowListening";
+
+export interface AudiobookPlayerStatus {
+  contentId: string;
+  playing: boolean;
+  currentTime: number;
+  duration: number;
+  hasFile: boolean;
+}
+
+export interface AudiobookPlayerControls {
+  togglePlay: () => void;
+}
 
 export interface AudiobookPlayerProps {
   contentId: string;
@@ -14,6 +26,8 @@ export interface AudiobookPlayerProps {
   initialPositionSeconds?: number;
   autoPlay?: boolean;
   onClose?: () => void;
+  onPlaybackStateChange?: (status: AudiobookPlayerStatus) => void;
+  onControlsChange?: (controls: AudiobookPlayerControls | null) => void;
 }
 
 export default function AudiobookPlayer({
@@ -26,6 +40,8 @@ export default function AudiobookPlayer({
   initialPositionSeconds = 0,
   autoPlay = true,
   onClose,
+  onPlaybackStateChange,
+  onControlsChange,
 }: AudiobookPlayerProps) {
   const playback = useAudiobookPlayback({
     contentId,
@@ -34,6 +50,28 @@ export default function AudiobookPlayer({
     autoPlay,
   });
   const [mode, setMode] = useState<"mini" | "now-listening">("mini");
+
+  useEffect(() => {
+    onControlsChange?.({ togglePlay: playback.togglePlay });
+    return () => onControlsChange?.(null);
+  }, [onControlsChange, playback.togglePlay]);
+
+  useEffect(() => {
+    onPlaybackStateChange?.({
+      contentId,
+      playing: playback.playing,
+      currentTime: playback.currentTime,
+      duration: playback.duration,
+      hasFile: playback.hasFile,
+    });
+  }, [
+    contentId,
+    onPlaybackStateChange,
+    playback.currentTime,
+    playback.duration,
+    playback.hasFile,
+    playback.playing,
+  ]);
 
   return (
     <>
