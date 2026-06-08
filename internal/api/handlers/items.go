@@ -1189,6 +1189,9 @@ func (h *ItemsHandler) getEbookLeafUserData(r *http.Request, contentID string) *
 	}
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
+	if profileID == "" {
+		profileID = r.Header.Get("X-Profile-Id")
+	}
 	if userID <= 0 || profileID == "" || contentID == "" {
 		return nil
 	}
