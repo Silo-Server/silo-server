@@ -453,9 +453,30 @@ func TestBuild_EbookUserStateRulesUseReaderProgress(t *testing.T) {
 			unexpectSQL: []string{"FROM user_watch_progress uwp", "FROM user_watch_history uwh"},
 		},
 		{
+			name: "unread",
+			rule: QueryRule{Field: "watched", Op: "is", Value: false},
+			expectSQL: []string{
+				"NOT (EXISTS",
+				"FROM ebook_reader_progress erp",
+				"erp.progress >= 0.9",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp", "FROM user_watch_history uwh"},
+		},
+		{
 			name: "in progress",
 			rule: QueryRule{Field: "in_progress", Op: "is", Value: true},
 			expectSQL: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress > 0",
+				"erp.progress < 0.9",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp"},
+		},
+		{
+			name: "not in progress",
+			rule: QueryRule{Field: "in_progress", Op: "is", Value: false},
+			expectSQL: []string{
+				"NOT (EXISTS",
 				"FROM ebook_reader_progress erp",
 				"erp.progress > 0",
 				"erp.progress < 0.9",
