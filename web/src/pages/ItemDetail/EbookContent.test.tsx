@@ -26,15 +26,20 @@ vi.mock("@/components/MediaLocations", () => ({
     title,
     versions,
     emptyMessage,
+    summaryBuilder,
   }: {
     title: string;
     versions: FileVersion[];
     emptyMessage: string;
+    summaryBuilder?: (version: FileVersion) => string;
   }) => (
     <div>
       <span>{title}</span>
       <span>{versions.length}</span>
       <span>{emptyMessage}</span>
+      {versions.map((version) => (
+        <span key={version.file_id}>{summaryBuilder?.(version)}</span>
+      ))}
     </div>
   ),
 }));
@@ -281,5 +286,31 @@ describe("EbookContent", () => {
     expect(markup).toContain("The Long Way");
     expect(markup).toContain("You might also like");
     expect(markup).toContain("All Systems Red");
+  });
+
+  it("shows ebook file format, size, and page count without video quality labels", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent
+          item={makeEbookItem({
+            versions: [
+              makeVersion({
+                container: "cbz",
+                file_name: "Comic.cbz",
+                file_path: "/books/Comic.cbz",
+                file_size: 25 * 1024 ** 2,
+                duration: 48,
+                resolution: "",
+                codec_video: "",
+                codec_audio: "",
+              }),
+            ],
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("CBZ · 25.0 MB · 48 pages");
+    expect(markup).not.toContain("1080p");
   });
 });

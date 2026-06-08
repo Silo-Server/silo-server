@@ -12,6 +12,7 @@ import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
+import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
 
 function authorNames(item: ItemDetail): string[] {
   const extensionAuthors = (item.ebook?.authors ?? [])
@@ -24,6 +25,14 @@ function authorNames(item: ItemDetail): string[] {
     .filter((credit) => credit.job === "Author")
     .map((credit) => credit.name)
     .filter((name) => name.trim() !== "");
+}
+
+function ebookVersionSummary(version: ItemDetail["versions"][number]): string {
+  return metadataLine([
+    version.container ? version.container.toUpperCase() : undefined,
+    formatFileSize(version.file_size),
+    formatPageCount(version.duration),
+  ]);
 }
 
 export default function EbookContent({ item }: { item: ItemDetail & { type: "ebook" } }) {
@@ -147,6 +156,7 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
           title="Files"
           versions={item.versions}
           emptyMessage="No ebook files found."
+          summaryBuilder={ebookVersionSummary}
         />
       </div>
 
