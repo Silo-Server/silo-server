@@ -12,7 +12,6 @@ export type BookFormat =
   | "CBR"
   | "FB2"
   | "FBZ"
-  | "TXT"
   | "MD";
 
 export type LanguageMap = Record<string, string>;
@@ -120,7 +119,6 @@ export const EXTS: Record<BookFormat, string> = {
   CBR: "cbr",
   FB2: "fb2",
   FBZ: "fbz",
-  TXT: "txt",
   MD: "md",
 };
 
@@ -143,7 +141,6 @@ export const MIMETYPES: Record<BookFormat, string[]> = {
   ],
   FB2: ["application/x-fictionbook+xml", "text/xml", "application/xml"],
   FBZ: ["application/x-zip-compressed-fb2", "application/zip"],
-  TXT: ["text/plain"],
   MD: ["text/markdown", "text/x-markdown"],
 };
 
@@ -332,10 +329,8 @@ export class DocumentLoader {
   private isPlainText(): boolean {
     const name = this.file.name.toLowerCase();
     return (
-      this.file.type === "text/plain" ||
       this.file.type === "text/markdown" ||
       this.file.type === "text/x-markdown" ||
-      name.endsWith(`.${EXTS.TXT}`) ||
       name.endsWith(`.${EXTS.MD}`)
     );
   }
@@ -440,8 +435,7 @@ export class DocumentLoader {
         book = (await makeFB2(this.file)) as BookDoc;
         format = "FB2";
       } else if (this.isPlainText()) {
-        const ext = this.file.name.split(".").pop()?.toLowerCase();
-        format = ext === EXTS.MD ? "MD" : "TXT";
+        format = "MD";
         book = await this.makeTextBook(format);
       }
     } catch (e: unknown) {

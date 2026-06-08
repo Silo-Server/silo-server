@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 
 import type { FileVersion } from "@/api/types";
+import { DocumentLoader } from "@/reader/readest/libs/document";
 import {
   cacheEbookReaderProgress,
   ebookProgressPath,
@@ -67,6 +68,12 @@ describe("FoliateBookReader helpers", () => {
 
   it("does not support plain text files in the reader", () => {
     expect(isReaderSupportedFile(version({ file_name: "notes.txt" }))).toBe(false);
+  });
+
+  it("rejects plain text when the document loader is called directly", async () => {
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+    await expect(new DocumentLoader(file).open()).rejects.toThrow("Unsupported book format");
   });
 
   it("maps readest formats to MIME types", () => {
