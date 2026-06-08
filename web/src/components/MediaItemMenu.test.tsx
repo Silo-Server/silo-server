@@ -157,4 +157,22 @@ describe("buildMediaItemMenuModel", () => {
       model.some((item) => item.kind === "action" && item.label === "Play from Beginning"),
     ).toBe(false);
   });
+
+  it("omits watched toggles for ebooks while keeping collection actions", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "ebook",
+      userState: {
+        played: false,
+        is_favorite: false,
+        in_watchlist: false,
+      },
+      isAdmin: false,
+    });
+    const labels = model
+      .filter((item) => item.kind === "action")
+      .map((item) => item.label);
+
+    expect(labels).toEqual(["Add to Favorites", "Add to Watchlist"]);
+    expect(labels).not.toContain("Mark Watched");
+  });
 });

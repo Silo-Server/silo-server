@@ -75,13 +75,15 @@ export function buildMediaItemMenuModel({
     });
   }
 
-  if (userState) {
+  if (userState && mediaType !== "ebook") {
     entries.push({
       kind: "action",
       key: "toggleWatched",
       label: userState.played ? "Mark Unwatched" : "Mark Watched",
     });
+  }
 
+  if (userState) {
     if (showCollectionActions) {
       entries.push(
         {
