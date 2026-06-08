@@ -148,7 +148,7 @@ describe("ContinueWatchingCard", () => {
     );
 
     expect(markup).toContain('href="/reader/ebook/ebook%20001?libraryId=12"');
-    expect(markup).toContain('href="/item/ebook 001?libraryId=12"');
+    expect(markup).toContain('href="/item/ebook%20001?libraryId=12"');
     expect(markup).toContain("42% read");
     expect(markup).not.toContain('href="/watch/ebook');
     expect(markup).not.toContain("0 min left");

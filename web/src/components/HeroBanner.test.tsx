@@ -70,6 +70,7 @@ describe("HeroBanner", () => {
     );
 
     expect(markup).toContain('href="/reader/ebook/ebook%201?libraryId=7"');
+    expect(markup).toContain('href="/item/ebook%201?libraryId=7"');
     expect(markup).not.toContain('href="/watch/ebook');
     expect(markup).toContain("Read");
   });

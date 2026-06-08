@@ -232,7 +232,9 @@ export default function HeroBanner({
                 {primaryActionLabel}
               </Link>
               <Link
-                to={`/item/${current.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`}
+                to={`/item/${encodeURIComponent(current.content_id)}${
+                  libraryId ? `?libraryId=${libraryId}` : ""
+                }`}
                 className="pill pill-glass transition-colors duration-[--duration-fast]"
               >
                 <Info className="h-4 w-4" />

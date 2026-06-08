@@ -39,7 +39,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             props.sectionItem.type === "ebook"
               ? `/reader/ebook/${encodeURIComponent(props.sectionItem.content_id)}${libraryQuery}`
               : `/watch/${props.sectionItem.content_id}${libraryQuery}`,
-          itemHref: `/item/${props.sectionItem.content_id}${libraryQuery}`,
+          itemHref: `/item/${encodeURIComponent(props.sectionItem.content_id)}${libraryQuery}`,
           title: props.sectionItem.title,
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
@@ -55,7 +55,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             props.detail.type === "ebook"
               ? `/reader/ebook/${encodeURIComponent(props.detail.content_id)}${libraryQuery}`
               : `/watch/${props.detail.content_id}${libraryQuery}`,
-          itemHref: `/item/${props.detail.content_id}${libraryQuery}`,
+          itemHref: `/item/${encodeURIComponent(props.detail.content_id)}${libraryQuery}`,
           title: props.detail.title,
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
