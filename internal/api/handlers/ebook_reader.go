@@ -37,10 +37,25 @@ type EbookReaderProgressStore interface {
 	Upsert(ctx context.Context, progress EbookReaderProgress) error
 }
 
+// EbookReaderConfig is persisted reader configuration for one profile and ebook.
+type EbookReaderConfig struct {
+	UserID    int             `json:"-"`
+	ProfileID string          `json:"-"`
+	ContentID string          `json:"content_id"`
+	Config    json.RawMessage `json:"config"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type EbookReaderConfigStore interface {
+	Get(ctx context.Context, userID int, profileID string, contentID string) (*EbookReaderConfig, error)
+	Upsert(ctx context.Context, config EbookReaderConfig) error
+}
+
 // EbookReaderHandler serves ebook files for the in-app reader.
 type EbookReaderHandler struct {
 	FileAuthorizer *MediaFileAuthorizer
 	ProgressStore  EbookReaderProgressStore
+	ConfigStore    EbookReaderConfigStore
 }
 
 func NewEbookReaderHandler(authorizer *MediaFileAuthorizer) *EbookReaderHandler {
@@ -88,6 +103,10 @@ type ebookReaderProgressRequest struct {
 	FileID   int     `json:"file_id"`
 	Location string  `json:"location"`
 	Progress float64 `json:"progress"`
+}
+
+type ebookReaderConfigRequest struct {
+	Config json.RawMessage `json:"config"`
 }
 
 func (h *EbookReaderHandler) HandleGetProgress(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +196,94 @@ func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, progress)
+}
+
+func (h *EbookReaderHandler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h == nil || h.ConfigStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader config is not configured")
+		return
+	}
+
+	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
+		return
+	}
+	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
+		h.writeReadError(w, err)
+		return
+	}
+
+	config, err := h.ConfigStore.Get(r.Context(), userID, profileID, contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load ebook reader config")
+		return
+	}
+	if config == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"config": map[string]any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
+}
+
+func (h *EbookReaderHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Request) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h == nil || h.ConfigStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader config is not configured")
+		return
+	}
+
+	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
+		return
+	}
+
+	var req ebookReaderConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if !jsonObject(req.Config) {
+		writeError(w, http.StatusBadRequest, "bad_request", "config must be a JSON object")
+		return
+	}
+	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
+		h.writeReadError(w, err)
+		return
+	}
+
+	config := EbookReaderConfig{
+		UserID:    userID,
+		ProfileID: profileID,
+		ContentID: contentID,
+		Config:    req.Config,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := h.ConfigStore.Upsert(r.Context(), config); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save ebook reader config")
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
+}
+
+func jsonObject(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var value map[string]any
+	return json.Unmarshal(raw, &value) == nil && value != nil
 }
 
 func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
@@ -283,6 +390,62 @@ type PGEbookReaderProgressStore struct {
 
 func NewPGEbookReaderProgressStore(pool *pgxpool.Pool) *PGEbookReaderProgressStore {
 	return &PGEbookReaderProgressStore{pool: pool}
+}
+
+type PGEbookReaderConfigStore struct {
+	pool *pgxpool.Pool
+}
+
+func NewPGEbookReaderConfigStore(pool *pgxpool.Pool) *PGEbookReaderConfigStore {
+	return &PGEbookReaderConfigStore{pool: pool}
+}
+
+func (s *PGEbookReaderConfigStore) Get(ctx context.Context, userID int, profileID string, contentID string) (*EbookReaderConfig, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("ebook reader config store is not configured")
+	}
+	var config EbookReaderConfig
+	err := s.pool.QueryRow(ctx, `
+		SELECT user_id, profile_id, content_id, config, updated_at
+		FROM ebook_reader_config
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3`,
+		userID, profileID, contentID,
+	).Scan(
+		&config.UserID,
+		&config.ProfileID,
+		&config.ContentID,
+		&config.Config,
+		&config.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get ebook reader config: %w", err)
+	}
+	return &config, nil
+}
+
+func (s *PGEbookReaderConfigStore) Upsert(ctx context.Context, config EbookReaderConfig) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("ebook reader config store is not configured")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO ebook_reader_config
+			(user_id, profile_id, content_id, config, updated_at)
+		VALUES ($1, $2, $3, $4::jsonb, $5)
+		ON CONFLICT (user_id, profile_id, content_id) DO UPDATE SET
+			config = EXCLUDED.config,
+			updated_at = EXCLUDED.updated_at`,
+		config.UserID,
+		config.ProfileID,
+		config.ContentID,
+		config.Config,
+		config.UpdatedAt,
+	); err != nil {
+		return fmt.Errorf("upsert ebook reader config: %w", err)
+	}
+	return nil
 }
 
 func (s *PGEbookReaderProgressStore) Get(ctx context.Context, userID int, profileID string, contentID string) (*EbookReaderProgress, error) {

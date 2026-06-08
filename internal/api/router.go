@@ -374,8 +374,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	var autoscanHandler *handlers.AutoscanHandler
 	var ebookReaderHandler *handlers.EbookReaderHandler
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
+	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
+		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
@@ -437,6 +439,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 			if ebookProgressStore != nil {
 				ebookReaderHandler.ProgressStore = ebookProgressStore
+			}
+			if ebookConfigStore != nil {
+				ebookReaderHandler.ConfigStore = ebookConfigStore
 			}
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
@@ -1738,6 +1743,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
 						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
 						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
+						r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
+						r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
 					})
 				}
 

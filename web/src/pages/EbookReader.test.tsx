@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   readerGoToFraction: vi.fn(),
   readerSearch: vi.fn(),
   captureReaderSettings: vi.fn(),
+  fetchEbookReaderConfig: vi.fn(),
+  saveEbookReaderConfig: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -24,6 +26,11 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
 
 vi.mock("@/components/PageBack", () => ({
   default: () => <div />,
+}));
+
+vi.mock("@/reader/ebookReaderApi", () => ({
+  fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
+  saveEbookReaderConfig: mocks.saveEbookReaderConfig,
 }));
 
 vi.mock("@/reader/FoliateBookReader", async () => {
@@ -208,9 +215,13 @@ describe("EbookReader", () => {
     mocks.readerGoToFraction.mockReset();
     mocks.readerSearch.mockReset();
     mocks.captureReaderSettings.mockReset();
+    mocks.fetchEbookReaderConfig.mockReset();
+    mocks.saveEbookReaderConfig.mockReset();
     mocks.readerSearch.mockResolvedValue([
       { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
     ]);
+    mocks.fetchEbookReaderConfig.mockResolvedValue({});
+    mocks.saveEbookReaderConfig.mockResolvedValue({});
     localStorage.clear();
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem(),
@@ -220,6 +231,7 @@ describe("EbookReader", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await act(async () => {
       root.unmount();
     });
@@ -427,7 +439,34 @@ describe("EbookReader", () => {
     expect(mocks.readerGoTo).toHaveBeenCalledWith("epubcfi(/6/8)");
   });
 
-  it("persists reader settings and passes them to the reader", async () => {
+  it("loads server reader settings and passes them to the reader", async () => {
+    mocks.fetchEbookReaderConfig.mockResolvedValue({
+      settings: { theme: "sepia", fontSize: 130 },
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1");
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ theme: "sepia", fontSize: 130 }),
+    );
+  });
+
+  it("persists reader settings to the server and local fallback", async () => {
+    vi.useFakeTimers();
+
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
@@ -452,10 +491,22 @@ describe("EbookReader", () => {
       theme.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+    });
+
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ theme: "dark" }),
     );
     expect(localStorage.getItem("silo.ebook.reader.settings")).toContain('"theme":"dark"');
+    expect(mocks.saveEbookReaderConfig).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ theme: "dark" }),
+      }),
+    );
+
+    vi.useRealTimers();
   });
 
   it("scrubs reader progress and supports keyboard page navigation", async () => {

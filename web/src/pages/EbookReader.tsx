@@ -33,6 +33,7 @@ import FoliateBookReader, {
   type ReaderSearchResult,
   type ReaderSettings,
 } from "@/reader/FoliateBookReader";
+import { fetchEbookReaderConfig, saveEbookReaderConfig } from "@/reader/ebookReaderApi";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -125,6 +126,8 @@ export default function EbookReader() {
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(() =>
     loadStoredReaderSettings(),
   );
+  const configLoadedRef = useRef(false);
+  const saveConfigTimerRef = useRef<number | null>(null);
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<ReaderSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -153,13 +156,25 @@ export default function EbookReader() {
     },
     [contentId, libraryIdParam, navigate],
   );
-  const updateReaderSettings = useCallback((next: Partial<ReaderSettings>) => {
-    setReaderSettings((current) => {
-      const merged = normalizeReaderSettings({ ...current, ...next });
-      saveReaderSettings(merged);
-      return merged;
-    });
-  }, []);
+  const updateReaderSettings = useCallback(
+    (next: Partial<ReaderSettings>) => {
+      setReaderSettings((current) => {
+        const merged = normalizeReaderSettings({ ...current, ...next });
+        saveReaderSettings(merged);
+        if (contentId && configLoadedRef.current) {
+          if (saveConfigTimerRef.current !== null) {
+            window.clearTimeout(saveConfigTimerRef.current);
+          }
+          saveConfigTimerRef.current = window.setTimeout(() => {
+            saveConfigTimerRef.current = null;
+            void saveEbookReaderConfig(contentId, { settings: merged });
+          }, 400);
+        }
+        return merged;
+      });
+    },
+    [contentId],
+  );
   const handleSearchSubmit = useCallback(async () => {
     const query = searchText.trim();
     if (!query) {
@@ -193,6 +208,35 @@ export default function EbookReader() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!contentId) return;
+    let cancelled = false;
+    configLoadedRef.current = false;
+    void fetchEbookReaderConfig(contentId)
+      .then((config) => {
+        if (cancelled) return;
+        const settings =
+          config.settings && typeof config.settings === "object" && !Array.isArray(config.settings)
+            ? normalizeReaderSettings(config.settings as Partial<ReaderSettings>)
+            : loadStoredReaderSettings();
+        configLoadedRef.current = true;
+        saveReaderSettings(settings);
+        setReaderSettings(settings);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          configLoadedRef.current = true;
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (saveConfigTimerRef.current !== null) {
+        window.clearTimeout(saveConfigTimerRef.current);
+        saveConfigTimerRef.current = null;
+      }
+    };
+  }, [contentId]);
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">

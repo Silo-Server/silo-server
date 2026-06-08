@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,30 @@ func (s *fakeEbookProgressStore) Upsert(_ context.Context, progress EbookReaderP
 		return s.err
 	}
 	s.upserted = &progress
+	return nil
+}
+
+type fakeEbookReaderConfigStore struct {
+	config  *EbookReaderConfig
+	saved   *EbookReaderConfig
+	getErr  error
+	saveErr error
+}
+
+func (s *fakeEbookReaderConfigStore) Get(
+	context.Context,
+	int,
+	string,
+	string,
+) (*EbookReaderConfig, error) {
+	return s.config, s.getErr
+}
+
+func (s *fakeEbookReaderConfigStore) Upsert(_ context.Context, config EbookReaderConfig) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.saved = &config
 	return nil
 }
 
@@ -324,5 +349,110 @@ func TestEbookReaderReturnsSavedProgress(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("response %s missing %s", body, want)
 		}
+	}
+}
+
+func TestEbookReaderReturnsEmptyConfigWhenNoneSaved(t *testing.T) {
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.ConfigStore = &fakeEbookReaderConfigStore{}
+
+	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/reader-config")
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleGetConfig(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := strings.TrimSpace(rr.Body.String()); got != `{"config":{}}` {
+		t.Fatalf("body = %s", got)
+	}
+}
+
+func TestEbookReaderSavesConfigForAccessibleEbook(t *testing.T) {
+	store := &fakeEbookReaderConfigStore{}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.ConfigStore = store
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/ebooks/ebook-1/reader-config",
+		strings.NewReader(`{"config":{"theme":"dark","flow":"scrolled","fontSize":120}}`),
+	)
+	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
+		UserID:    1,
+		Role:      "user",
+		TokenType: auth.TokenTypeAccess,
+	})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-9"))
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleSaveConfig(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.saved == nil {
+		t.Fatal("expected config to be saved")
+	}
+	if store.saved.UserID != 1 || store.saved.ProfileID != "profile-9" || store.saved.ContentID != "ebook-1" {
+		t.Fatalf("scope = %+v", store.saved)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(store.saved.Config, &config); err != nil {
+		t.Fatalf("config json: %v", err)
+	}
+	if config["theme"] != "dark" || config["flow"] != "scrolled" || config["fontSize"].(float64) != 120 {
+		t.Fatalf("config = %#v", config)
+	}
+}
+
+func TestEbookReaderRejectsNonObjectConfig(t *testing.T) {
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.ConfigStore = &fakeEbookReaderConfigStore{}
+
+	req := newEbookReaderAuthRequest(http.MethodPut, "/ebooks/ebook-1/reader-config")
+	req.Body = http.NoBody
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/ebooks/ebook-1/reader-config",
+		strings.NewReader(`{"config":["bad"]}`),
+	).WithContext(req.Context())
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleSaveConfig(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEbookReaderConfigRequiresAccessibleContent(t *testing.T) {
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{err: catalog.ErrItemNotFound},
+	})
+	handler.ConfigStore = &fakeEbookReaderConfigStore{}
+
+	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/reader-config")
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleGetConfig(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
