@@ -56,16 +56,13 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
 
   const startPlayback = useCallback((input: AudiobookPlaybackStartInput) => {
     setControls(null);
-    setActive({
-      contentId: input.contentId,
-      playing: false,
-      currentTime: input.initialPositionSeconds ?? 0,
-      duration: 0,
-      hasFile: input.files.length > 0,
-    });
+    setActive(null);
     setActiveRequest((previous) => ({
       ...input,
-      requestKey: (previous?.requestKey ?? 0) + 1,
+      requestKey:
+        previous?.contentId === input.contentId
+          ? previous.requestKey
+          : (previous?.requestKey ?? 0) + 1,
     }));
   }, []);
 

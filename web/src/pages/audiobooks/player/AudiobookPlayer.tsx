@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { useAudiobookPlayback } from "./useAudiobookPlayback";
 import { MiniBar } from "./MiniBar";
@@ -51,6 +51,13 @@ export default function AudiobookPlayer({
     onStopRequested: onClose,
   });
   const [mode, setMode] = useState<"mini" | "now-listening">("mini");
+  const lastPlaybackStateEmitRef = useRef<{
+    emittedAt: number;
+    duration: number;
+    hasFile: boolean;
+    playing: boolean;
+  } | null>(null);
+  const playbackStateTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     onControlsChange?.({ togglePlay: playback.togglePlay });
@@ -58,13 +65,61 @@ export default function AudiobookPlayer({
   }, [onControlsChange, playback.togglePlay]);
 
   useEffect(() => {
-    onPlaybackStateChange?.({
+    return () => {
+      if (playbackStateTimerRef.current != null) {
+        window.clearTimeout(playbackStateTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!onPlaybackStateChange) {
+      return;
+    }
+
+    const status: AudiobookPlayerStatus = {
       contentId,
       playing: playback.playing,
       currentTime: playback.currentTime,
       duration: playback.duration,
       hasFile: playback.hasFile,
-    });
+    };
+    const last = lastPlaybackStateEmitRef.current;
+    const statusChanged =
+      !last ||
+      last.playing !== status.playing ||
+      last.duration !== status.duration ||
+      last.hasFile !== status.hasFile;
+    const now = Date.now();
+
+    const emit = () => {
+      lastPlaybackStateEmitRef.current = {
+        emittedAt: Date.now(),
+        duration: status.duration,
+        hasFile: status.hasFile,
+        playing: status.playing,
+      };
+      onPlaybackStateChange(status);
+    };
+
+    if (!last || statusChanged || now - last.emittedAt >= 1000) {
+      if (playbackStateTimerRef.current != null) {
+        window.clearTimeout(playbackStateTimerRef.current);
+        playbackStateTimerRef.current = null;
+      }
+      emit();
+      return;
+    }
+
+    if (playbackStateTimerRef.current == null) {
+      playbackStateTimerRef.current = window.setTimeout(
+        () => {
+          playbackStateTimerRef.current = null;
+          emit();
+        },
+        Math.max(0, 1000 - (now - last.emittedAt)),
+      );
+    }
   }, [
     contentId,
     onPlaybackStateChange,

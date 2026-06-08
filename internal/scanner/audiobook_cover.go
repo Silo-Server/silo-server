@@ -129,7 +129,7 @@ func findSidecarAudiobookCover(dir string) ([]byte, string, error) {
 	}
 	byName := make(map[string]string, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !isRegularDirEntry(entry) {
 			continue
 		}
 		byName[strings.ToLower(entry.Name())] = filepath.Join(dir, entry.Name())
@@ -148,6 +148,17 @@ func findSidecarAudiobookCover(dir string) ([]byte, string, error) {
 		}
 	}
 	return nil, "", nil
+}
+
+func isRegularDirEntry(entry os.DirEntry) bool {
+	if entry == nil || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+		return false
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
 }
 
 func readSidecarAudiobookCover(path string) ([]byte, error) {

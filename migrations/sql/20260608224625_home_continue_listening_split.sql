@@ -15,8 +15,7 @@ WHERE ps.scope = 'library'
   AND ps.library_id = mf.id
   AND lower(mf.type) IN ('audiobook', 'audiobooks')
   AND ps.section_type = 'continue_watching'
-  AND NOT (ps.config ? 'continue_type')
-  AND ps.title = 'Continue Listening';
+  AND NOT (ps.config ? 'continue_type');
 
 UPDATE page_sections
 SET config = config || '{"continue_type":"watching"}'::jsonb,

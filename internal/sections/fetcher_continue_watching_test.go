@@ -122,7 +122,7 @@ func TestMatchesContinueWatchingFilterIncludesAudiobooks(t *testing.T) {
 		{name: "audiobook keeps audiobook", filterType: "audiobook", itemType: "audiobook", want: true},
 		{name: "audiobook rejects movie", filterType: "audiobook", itemType: "movie", want: false},
 		{name: "ebook keeps ebook", filterType: "ebook", itemType: "ebook", want: true},
-		{name: "unknown rejects audiobook", filterType: "unknown", itemType: "audiobook", want: false},
+		{name: "unknown passes through audiobook", filterType: "unknown", itemType: "audiobook", want: true},
 	}
 
 	for _, tt := range tests {

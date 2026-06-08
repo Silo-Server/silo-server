@@ -509,7 +509,8 @@ func (f *Fetcher) fetchContinueProgressItems(ctx context.Context, store userstor
 		duration := entry.DurationSeconds
 		meta.PositionSeconds = &position
 		meta.DurationSeconds = &duration
-		meta.ProgressUpdatedAt = &entry.UpdatedAt
+		progressUpdatedAt := entry.UpdatedAt
+		meta.ProgressUpdatedAt = &progressUpdatedAt
 		meta.ItemSource = "in_progress"
 		if updatedAt, parseErr := time.Parse(time.RFC3339, entry.UpdatedAt); parseErr == nil {
 			meta.SortTimestamp = updatedAt
@@ -2848,7 +2849,7 @@ func matchesContinueWatchingFilter(filterType string, itemType string) bool {
 	case "ebook":
 		return ContinueTypeMatchesItem(ContinueTypeReading, itemType)
 	default:
-		return false
+		return true
 	}
 }
 

@@ -465,6 +465,7 @@ func (r *Repository) EnsureHomeContinueListeningSection(ctx context.Context) (*P
 		  AND (
 		    config->>'continue_type' = $2
 		    OR config->>'filter_type' = 'audiobook'
+		    OR config->>'media_scope' = 'audiobook'
 		  )
 		ORDER BY position ASC
 		LIMIT 1

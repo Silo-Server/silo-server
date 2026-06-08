@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import type { ItemDetail, LeafItemUserData } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -144,21 +144,22 @@ export default function AudiobookContent({
   const isPlayerOpen = audiobookPlayback?.activeRequest?.contentId === item.content_id;
   const activePlayback = isPlayerOpen ? audiobookPlayback?.active : null;
   const currentPlayerSeconds =
-    activePlayback?.currentTime != null
-      ? activePlayback.currentTime
-      : null;
+    activePlayback?.currentTime != null ? activePlayback.currentTime : null;
 
-  function openPlayer(atSeconds: number) {
-    audiobookPlayback?.startPlayback({
-      contentId: item.content_id,
-      title: item.title,
-      author,
-      narrator,
-      posterUrl: item.poster_url,
-      files,
-      initialPositionSeconds: atSeconds,
-    });
-  }
+  const openPlayer = useCallback(
+    (atSeconds: number) => {
+      audiobookPlayback?.startPlayback({
+        contentId: item.content_id,
+        title: item.title,
+        author,
+        narrator,
+        posterUrl: item.poster_url,
+        files,
+        initialPositionSeconds: atSeconds,
+      });
+    },
+    [audiobookPlayback, author, files, item.content_id, item.poster_url, item.title, narrator],
+  );
 
   function handlePlayResume() {
     if (activePlayback) {
@@ -188,7 +189,7 @@ export default function AudiobookContent({
     }
     handledPlayParamRef.current = true;
     openPlayer(searchParams.get("restart") === "1" ? 0 : hasProgress ? resumeSeconds : 0);
-  }, [files.length, hasProgress, resumeSeconds, searchParams]);
+  }, [files.length, hasProgress, openPlayer, resumeSeconds, searchParams]);
 
   return (
     <div>
