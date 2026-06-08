@@ -7,6 +7,7 @@ import EbookContent from "./EbookContent";
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
+  useEbookReaderProgress: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -15,6 +16,10 @@ vi.mock("@/hooks/useAuth", () => ({
 
 vi.mock("@/hooks/useAmbientColor", () => ({
   useAmbientColor: vi.fn(),
+}));
+
+vi.mock("@/hooks/queries/ebookReaderProgress", () => ({
+  useEbookReaderProgress: mocks.useEbookReaderProgress,
 }));
 
 vi.mock("@/components/PageBack", () => ({
@@ -186,6 +191,8 @@ describe("EbookContent", () => {
   beforeEach(() => {
     mocks.useAuth.mockReset();
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
+    mocks.useEbookReaderProgress.mockReset();
+    mocks.useEbookReaderProgress.mockReturnValue({ data: null });
   });
 
   it("renders ebook authors without audiobook narrator credits", () => {
@@ -244,6 +251,54 @@ describe("EbookContent", () => {
       </MemoryRouter>,
     );
     expect(markup).not.toContain("Read");
+  });
+
+  it("shows continue action and saved progress when ebook progress exists", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+    mocks.useEbookReaderProgress.mockReturnValue({
+      data: {
+        file_id: 1,
+        location: "epubcfi(/6/4)",
+        progress: 0.42,
+      },
+    });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={makeEbookItem()} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Continue");
+    expect(markup).toContain("42%");
+    expect(markup).not.toContain(">Read<");
+  });
+
+  it("continues from the saved reader file when progress points at another format", () => {
+    mocks.useAuth.mockReturnValue({ user: { download_allowed: false } });
+    mocks.useEbookReaderProgress.mockReturnValue({
+      data: {
+        file_id: 1,
+        location: "pdf-location",
+        progress: 0.2,
+      },
+    });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent
+          item={makeEbookItem({
+            versions: [
+              makeVersion({ file_id: 1, container: "pdf", file_name: "Book.pdf" }),
+              makeVersion({ file_id: 2, container: "epub", file_name: "Book.epub" }),
+            ],
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Continue");
+    expect(markup).toContain("/reader/ebook/ebook-1?file_id=1");
   });
 
   it("prefers EPUB for the read action when multiple ebook files exist", () => {

@@ -8,7 +8,9 @@ import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { useEbookReaderProgress } from "@/hooks/queries/ebookReaderProgress";
 import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
+import { formatReaderProgress } from "@/reader/FoliateBookReader";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
@@ -47,16 +49,29 @@ function preferredReadVersion(versions: FileVersion[]): FileVersion | undefined 
   return versions.find((version) => ebookFileFormat(version) === "epub") ?? versions[0];
 }
 
+function progressReadVersion(
+  versions: FileVersion[],
+  fileID: number | undefined,
+): FileVersion | undefined {
+  if (typeof fileID !== "number") return undefined;
+  return versions.find((version) => version.file_id === fileID);
+}
+
 export default function EbookContent({ item }: { item: ItemDetail & { type: "ebook" } }) {
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
+  const { data: readerProgress } = useEbookReaderProgress(item.content_id);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const authors = authorNames(item);
   const publisher = item.ebook?.publisher || (item.studios ?? [])[0];
   const year = item.year ? String(item.year) : "";
   const canRead = item.versions.length > 0;
   const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
-  const readVersion = preferredReadVersion(item.versions);
+  const progressLabel = formatReaderProgress(readerProgress?.progress);
+  const hasSavedProgress = Boolean(readerProgress && progressLabel);
+  const readVersion =
+    (hasSavedProgress ? progressReadVersion(item.versions, readerProgress?.file_id) : undefined) ??
+    preferredReadVersion(item.versions);
   const readerHref = readVersion
     ? `/reader/ebook/${encodeURIComponent(item.content_id)}?file_id=${readVersion.file_id}`
     : `/reader/ebook/${encodeURIComponent(item.content_id)}`;
@@ -105,7 +120,12 @@ export default function EbookContent({ item }: { item: ItemDetail & { type: "ebo
                 >
                   <Link to={readerHref}>
                     <BookOpen className="size-[18px]" />
-                    Read
+                    {hasSavedProgress ? "Continue" : "Read"}
+                    {progressLabel && (
+                      <span className="text-primary-foreground/75 text-xs font-semibold tabular-nums">
+                        {progressLabel}
+                      </span>
+                    )}
                   </Link>
                 </Button>
               )}
