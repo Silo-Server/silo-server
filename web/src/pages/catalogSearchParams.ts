@@ -135,7 +135,11 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
   baseState.query_definition = normalizeQueryDefinition({
     library_ids: baseState.library_id ? [baseState.library_id] : [],
     media_scope:
-      type === "movie" || type === "series" || type === "episode" || type === "audiobook"
+      type === "movie" ||
+      type === "series" ||
+      type === "episode" ||
+      type === "audiobook" ||
+      type === "ebook"
         ? type
         : undefined,
     match: searchParams.get("match") === "any" ? "any" : "all",

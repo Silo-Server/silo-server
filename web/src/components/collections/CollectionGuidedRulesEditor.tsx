@@ -40,7 +40,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook";
+  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook" | "ebook";
   libraryIds: number[];
   genres: string[];
   decade: string;
@@ -486,6 +486,8 @@ export default function CollectionGuidedRulesEditor({
                   <SelectItem value="movie">Movies</SelectItem>
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>
+                  <SelectItem value="audiobook">Audiobooks</SelectItem>
+                  <SelectItem value="ebook">Ebooks</SelectItem>
                 </SelectContent>
               </Select>
             </div>

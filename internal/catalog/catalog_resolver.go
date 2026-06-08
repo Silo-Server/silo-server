@@ -39,10 +39,9 @@ type CatalogFiltersResult struct {
 	Resolutions       []string
 	AudioLanguages    []string
 	SubtitleLanguages []string
-	// Authors, Narrators and Series are audiobook-native facets. Populated
-	// whenever the scope contains audiobook items; empty for video-only
-	// scopes. They share the item_people / audiobook_series tables so
-	// callers don't need to switch on media type.
+	// Authors, Narrators and Series are book-native facets. Authors and
+	// Narrators use item_people; Series uses the active book series table.
+	// Video-only scopes return these empty.
 	Authors   []string
 	Narrators []string
 	Series    []string
@@ -64,8 +63,8 @@ type facetFetcher interface {
 	// PeopleByKind returns distinct people names for the given PersonKind
 	// across the scoped result set. Used for Authors / Narrators facets.
 	PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
-	// AudiobookSeries returns distinct series_name values from
-	// audiobook_series joined onto the scoped result set.
+	// AudiobookSeries returns distinct series_name values from the active
+	// book series table joined onto the scoped result set.
 	AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	// SearchDistinctArrayColumn prefix-searches an array-column facet
 	// (genres, studios, networks, countries). Returns up to limit
@@ -1090,8 +1089,9 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 		def.MediaScope != "movie" &&
 		def.MediaScope != "series" &&
 		def.MediaScope != "episode" &&
-		def.MediaScope != "audiobook" {
-		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', or 'audiobook'", ErrInvalidCatalogRequest)
+		def.MediaScope != "audiobook" &&
+		def.MediaScope != "ebook" {
+		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', or 'ebook'", ErrInvalidCatalogRequest)
 	}
 	if def.Match != "" && def.Match != "all" && def.Match != "any" {
 		return fmt.Errorf("%w: match must be 'all' or 'any'", ErrInvalidCatalogRequest)

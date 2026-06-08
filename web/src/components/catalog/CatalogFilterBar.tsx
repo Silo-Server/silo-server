@@ -30,6 +30,15 @@ interface CatalogFilterBarProps {
   resultCountLoading?: boolean;
 }
 
+export const CATALOG_MEDIA_SCOPE_OPTIONS = [
+  { value: "all", label: "All Media" },
+  { value: "movie", label: "Movies" },
+  { value: "series", label: "Series" },
+  { value: "episode", label: "Episodes" },
+  { value: "audiobook", label: "Audiobooks" },
+  { value: "ebook", label: "Ebooks" },
+] as const;
+
 export default function CatalogFilterBar({
   state,
   onUpdate,
@@ -72,11 +81,11 @@ export default function CatalogFilterBar({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Media</SelectItem>
-            <SelectItem value="movie">Movies</SelectItem>
-            <SelectItem value="series">Series</SelectItem>
-            <SelectItem value="episode">Episodes</SelectItem>
-            <SelectItem value="audiobook">Audiobooks</SelectItem>
+            {CATALOG_MEDIA_SCOPE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       ) : null}

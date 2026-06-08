@@ -298,7 +298,8 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (QuerySortPlan, erro
 		return plan, nil
 	case "series":
 		plan.Joins = []string{fmt.Sprintf(
-			"LEFT JOIN audiobook_series sort_series ON sort_series.content_id = %s.content_id",
+			"LEFT JOIN %s sort_series ON sort_series.content_id = %s.content_id",
+			qb.bookSeriesTable(),
 			qb.alias,
 		)}
 		// Sort by series name primarily, then by series_index so books
@@ -385,7 +386,7 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	case "narrator":
 		return qb.buildPersonClause(models.PersonKindNarrator, rule)
 	case "series":
-		return qb.buildAudiobookSeriesClause(rule)
+		return qb.buildBookSeriesClause(rule)
 	case "watched":
 		return qb.buildWatchedClause(rule)
 	case "favorited":
@@ -502,14 +503,21 @@ func (qb *QueryBuilder) personKindSortJoin(kind models.PersonKind, alias string)
 	)
 }
 
-func (qb *QueryBuilder) buildAudiobookSeriesClause(rule QueryRule) (string, error) {
+func (qb *QueryBuilder) bookSeriesTable() string {
+	if qb.mediaScope == "ebook" {
+		return "ebook_series"
+	}
+	return "audiobook_series"
+}
+
+func (qb *QueryBuilder) buildBookSeriesClause(rule QueryRule) (string, error) {
 	qb.args = append(qb.args, rule.Value)
 	clause := fmt.Sprintf(`EXISTS (
 		SELECT 1
-		FROM audiobook_series s
+		FROM %s s
 		WHERE s.content_id = %s.content_id
 		  AND LOWER(BTRIM(s.series_name)) = LOWER(BTRIM($%d))
-	)`, qb.alias, qb.argIdx)
+)`, qb.bookSeriesTable(), qb.alias, qb.argIdx)
 	qb.argIdx++
 	if rule.Op == "is_not" {
 		return "NOT (" + clause + ")", nil
