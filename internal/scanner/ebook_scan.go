@@ -42,9 +42,15 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 	if s == nil || folder == nil {
 		return fmt.Errorf("ScanEbookFolder: nil scanner or folder")
 	}
+	return s.scanEbookPaths(ctx, folder, folder.Paths)
+}
 
+func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder, roots []string) error {
+	if s == nil || folder == nil {
+		return fmt.Errorf("scanEbookPaths: nil scanner or folder")
+	}
 	var candidates []string
-	for _, root := range folder.Paths {
+	for _, root := range roots {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -260,12 +259,8 @@ func TestScanFolderEbookLibraryRoutesToEbookScanner(t *testing.T) {
 	}
 }
 
-func TestScanSubtreeEbookLibraryReturnsNotImplemented(t *testing.T) {
+func TestScanSubtreeEbookLibraryRoutesToEbookScanner(t *testing.T) {
 	subtree := t.TempDir()
-	ebookPath := filepath.Join(subtree, "Book.epub")
-	if err := os.WriteFile(ebookPath, []byte("not a real epub"), 0o644); err != nil {
-		t.Fatalf("write ebook fixture: %v", err)
-	}
 
 	scanner := &Scanner{}
 	result, err := scanner.ScanSubtree(context.Background(), &models.MediaFolder{
@@ -273,10 +268,10 @@ func TestScanSubtreeEbookLibraryReturnsNotImplemented(t *testing.T) {
 		Type:  "ebook",
 		Paths: []string{subtree},
 	}, subtree)
-	if !errors.Is(err, errEbookScanningNotImplemented) {
-		t.Fatalf("ScanSubtree ebook error = %v, want %v", err, errEbookScanningNotImplemented)
+	if err != nil {
+		t.Fatalf("ScanSubtree ebook error = %v, want nil", err)
 	}
-	if result != nil {
-		t.Fatalf("ScanSubtree ebook result = %+v, want nil", result)
+	if result == nil {
+		t.Fatal("ScanSubtree ebook result = nil, want empty result")
 	}
 }
