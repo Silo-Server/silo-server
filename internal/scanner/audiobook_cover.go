@@ -17,6 +17,10 @@ type audiobookCoverCacher interface {
 	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
 }
 
+type ebookCoverCacher interface {
+	CacheEbookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
+}
+
 // FFmpegPathFromFFprobe derives the ffmpeg binary path from a configured
 // ffprobe path. They live side by side in every silo deployment.
 func FFmpegPathFromFFprobe(ffprobePath string) string {

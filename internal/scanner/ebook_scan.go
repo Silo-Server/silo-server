@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
@@ -228,6 +229,14 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	}
 	if err := s.upsertEbookMediaFile(ctx, folder, contentID, filePath, size, modifiedAt, &parsed); err != nil {
 		return fmt.Errorf("upsert ebook file: %w", err)
+	}
+	if err := applyEbookEmbeddedCover(ctx, s.itemRepo, s.imageCacher, contentID, &parsed); err != nil {
+		slog.Warn("ebook scan: embedded cover upload failed",
+			"folder_id", folder.ID,
+			"content_id", contentID,
+			"path", filePath,
+			"error", err,
+		)
 	}
 	if err := s.upsertEbookPeople(ctx, contentID, &parsed); err != nil {
 		return fmt.Errorf("upsert ebook people: %w", err)
@@ -458,6 +467,34 @@ func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath 
 		Duration:           book.PageCount,
 		ProbeSource:        "local",
 	}
+}
+
+type ebookCoverMetadataStore interface {
+	GetByIDs(ctx context.Context, ids []string) ([]*models.MediaItem, error)
+	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error
+}
+
+func applyEbookEmbeddedCover(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, book *parsedEbook) error {
+	if store == nil || cacher == nil || contentID == "" || book == nil || book.Cover == nil || len(book.Cover.Bytes) == 0 {
+		return nil
+	}
+	items, err := store.GetByIDs(ctx, []string{contentID})
+	if err != nil {
+		return fmt.Errorf("get ebook media item for cover: %w", err)
+	}
+	if len(items) > 0 && items[0] != nil && strings.TrimSpace(items[0].PosterPath) != "" {
+		return nil
+	}
+	basePath, ext, thumbhash, err := cacher.CacheEbookCover(ctx, book.Cover.Bytes, contentID)
+	if err != nil {
+		return err
+	}
+	posterPath := strings.TrimRight(basePath, "/") + "/original" + ext
+	update := &catalog.MetadataUpdate{PosterPath: &posterPath}
+	if thumbhash != "" {
+		update.PosterThumbhash = &thumbhash
+	}
+	return store.UpdateMetadata(ctx, contentID, update)
 }
 
 func insertEbookLibraryMembership(ctx context.Context, exec ebookSQLExecutor, contentID string, folderID int) error {

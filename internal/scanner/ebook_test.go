@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,6 +34,41 @@ type fakeFilesystemItemReader struct {
 
 func (f *fakeFilesystemItemReader) GetByIDs(_ context.Context, _ []string) ([]*models.MediaItem, error) {
 	return f.items, f.err
+}
+
+type fakeEbookCoverCacher struct {
+	calls     int
+	data      []byte
+	contentID string
+	err       error
+}
+
+func (f *fakeEbookCoverCacher) CacheEbookCover(_ context.Context, data []byte, contentID string) (string, string, string, error) {
+	f.calls++
+	f.data = append([]byte(nil), data...)
+	f.contentID = contentID
+	if f.err != nil {
+		return "", "", "", f.err
+	}
+	return "local/ebooks/" + contentID + "/poster", ".webp", "thumb", nil
+}
+
+type fakeEbookMetadataUpdater struct {
+	items     []*models.MediaItem
+	getErr    error
+	contentID string
+	update    *catalog.MetadataUpdate
+	err       error
+}
+
+func (f *fakeEbookMetadataUpdater) GetByIDs(_ context.Context, _ []string) ([]*models.MediaItem, error) {
+	return f.items, f.getErr
+}
+
+func (f *fakeEbookMetadataUpdater) UpdateMetadata(_ context.Context, contentID string, update *catalog.MetadataUpdate) error {
+	f.contentID = contentID
+	f.update = update
+	return f.err
 }
 
 func TestSupportsEbookFile(t *testing.T) {
@@ -679,6 +715,53 @@ func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
 	}
 	if got.FileSize != 1234 || got.FileModifiedAt == nil || !got.FileModifiedAt.Equal(modifiedAt) {
 		t.Fatalf("file facts = size %d modified %v", got.FileSize, got.FileModifiedAt)
+	}
+}
+
+func TestApplyEbookEmbeddedCoverCachesAndUpdatesPoster(t *testing.T) {
+	cacher := &fakeEbookCoverCacher{}
+	updater := &fakeEbookMetadataUpdater{}
+
+	err := applyEbookEmbeddedCover(context.Background(), updater, cacher, "content-1", &parsedEbook{
+		Cover: &parsedEbookCover{
+			ContentType: "image/jpeg",
+			Bytes:       []byte("cover-bytes"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("applyEbookEmbeddedCover: %v", err)
+	}
+
+	if cacher.calls != 1 || cacher.contentID != "content-1" || string(cacher.data) != "cover-bytes" {
+		t.Fatalf("cache call = calls %d content %q data %q", cacher.calls, cacher.contentID, string(cacher.data))
+	}
+	if updater.contentID != "content-1" || updater.update == nil {
+		t.Fatalf("update call = content %q update %#v", updater.contentID, updater.update)
+	}
+	if updater.update.PosterPath == nil || *updater.update.PosterPath != "local/ebooks/content-1/poster/original.webp" {
+		t.Fatalf("poster path = %#v", updater.update.PosterPath)
+	}
+	if updater.update.PosterThumbhash == nil || *updater.update.PosterThumbhash != "thumb" {
+		t.Fatalf("poster thumbhash = %#v", updater.update.PosterThumbhash)
+	}
+}
+
+func TestApplyEbookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
+	cacher := &fakeEbookCoverCacher{}
+	updater := &fakeEbookMetadataUpdater{items: []*models.MediaItem{{ContentID: "content-1", PosterPath: "provider/poster.webp"}}}
+
+	err := applyEbookEmbeddedCover(context.Background(), updater, cacher, "content-1", &parsedEbook{
+		Cover: &parsedEbookCover{Bytes: []byte("cover-bytes")},
+	})
+	if err != nil {
+		t.Fatalf("applyEbookEmbeddedCover: %v", err)
+	}
+
+	if cacher.calls != 0 {
+		t.Fatalf("cache calls = %d, want 0", cacher.calls)
+	}
+	if updater.update != nil {
+		t.Fatalf("unexpected update = %#v", updater.update)
 	}
 }
 

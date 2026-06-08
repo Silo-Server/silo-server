@@ -97,9 +97,12 @@ func shouldSkipMovieSupplementalFile(path string) bool {
 }
 
 // Scanner discovers and indexes media files in media folders.
-// scannerImageCacher is the slice of imagecache.Cacher the audiobook
-// branch uses. Wired via SetImageCacher; nil-safe when absent.
-type scannerImageCacher = audiobookCoverCacher
+// scannerImageCacher is the slice of imagecache.Cacher the book scanners use.
+// Wired via SetImageCacher; nil-safe when absent.
+type scannerImageCacher interface {
+	audiobookCoverCacher
+	ebookCoverCacher
+}
 
 type Scanner struct {
 	fileRepo            *FileRepository
@@ -126,9 +129,9 @@ type Scanner struct {
 	seriesQueueSyncer   SeriesQueueSyncer
 }
 
-// SetImageCacher installs the imagecache.Cacher used by the audiobook
-// branch to push embedded M4B cover art into the public assets bucket.
-// Optional; if unset, audiobook covers are not extracted.
+// SetImageCacher installs the imagecache.Cacher used by book scanners to push
+// embedded cover art into the public assets bucket. Optional; if unset, local
+// covers are not extracted.
 func (s *Scanner) SetImageCacher(cacher scannerImageCacher) {
 	if s == nil {
 		return
