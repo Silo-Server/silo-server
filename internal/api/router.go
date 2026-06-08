@@ -582,6 +582,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var playbackCommandDispatcher *playback.CommandDispatcher
 	var streamHandler *handlers.StreamHandler
 	var watchTogetherHandler *handlers.WatchTogetherHandler
+	var audioHandler *handlers.AudioHandler
 	if deps.SessionMgr != nil {
 		var playbackAdminStore handlers.PlaybackAdminStore
 		if deps.DB != nil {
@@ -690,6 +691,14 @@ func NewRouter(deps Dependencies) chi.Router {
 				roomTokenService,
 			)
 		}
+	}
+	if detailSvc != nil && deps.FileRepo != nil && deps.UserStoreProvider != nil {
+		audioHandler = handlers.NewAudioHandler(
+			detailSvc,
+			deps.FileRepo,
+			deps.UserStoreProvider,
+			handlers.NewPGAudioBookmarkStore(deps.DB),
+		)
 	}
 
 	// Wire subtitle repo and S3 client onto streamHandler for S3-stored subtitle serving.
@@ -1767,6 +1776,22 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)
 							r.Post("/transcode/start", playbackHandler.HandleStartTranscode)
 						})
+					})
+				}
+
+				if audioHandler != nil {
+					r.Route("/audio", func(r chi.Router) {
+						r.Group(func(r chi.Router) {
+							r.Use(apimw.RequireProfile)
+							r.Post("/playback/start", audioHandler.HandleStartPlayback)
+							r.Patch("/playback/{session_id}/sync", audioHandler.HandleSyncPlayback)
+							r.Post("/playback/{session_id}/close", audioHandler.HandleClosePlayback)
+							r.Get("/items/{content_id}/bookmarks", audioHandler.HandleListBookmarks)
+							r.Post("/items/{content_id}/bookmarks", audioHandler.HandleCreateBookmark)
+							r.Delete("/items/{content_id}/bookmarks/{time_seconds}", audioHandler.HandleDeleteBookmark)
+						})
+						r.Get("/playback/{session_id}/tracks/{track_index}", audioHandler.HandleStreamTrack)
+						r.Head("/playback/{session_id}/tracks/{track_index}", audioHandler.HandleStreamTrack)
 					})
 				}
 
