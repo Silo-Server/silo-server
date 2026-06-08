@@ -716,12 +716,12 @@ const collectOrphanedProvisionalIDsByContentIDSQL = `
 	SELECT mi.content_id
 	FROM public.media_items mi
 	WHERE mi.content_id = ANY($1)
-	  AND ` + orphanedMediaItemSafetyConditions
+	  AND ` + orphanedProvisionalMediaItemConditions
 
 const deleteOrphanedProvisionalIDsByContentIDSQL = `
 	DELETE FROM public.media_items mi
 	WHERE mi.content_id = ANY($1)
-	  AND ` + orphanedMediaItemSafetyConditions
+	  AND ` + orphanedProvisionalMediaItemConditions
 
 func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, contentIDs []string) (int, []string, error) {
 	if len(contentIDs) == 0 {
