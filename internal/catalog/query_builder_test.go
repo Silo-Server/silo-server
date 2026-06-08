@@ -436,6 +436,65 @@ func TestBuildSortClause_EbookPersonalizedComputedSortsUseReaderProgress(t *test
 	}
 }
 
+func TestBuild_EbookUserStateRulesUseReaderProgress(t *testing.T) {
+	tests := []struct {
+		name        string
+		rule        QueryRule
+		expectSQL   []string
+		unexpectSQL []string
+	}{
+		{
+			name: "watched",
+			rule: QueryRule{Field: "watched", Op: "is", Value: true},
+			expectSQL: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress >= 0.9",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp", "FROM user_watch_history uwh"},
+		},
+		{
+			name: "in progress",
+			rule: QueryRule{Field: "in_progress", Op: "is", Value: true},
+			expectSQL: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress > 0",
+				"erp.progress < 0.9",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp"},
+		},
+	}
+
+	for _, tt := range tests {
+		clause, args, err := NewQueryBuilder("mi").
+			WithMediaScope("ebook").
+			WithUserScope(42, "profile-1").
+			Build(QueryDefinition{
+				MediaScope: "ebook",
+				Match:      "all",
+				Groups: []QueryGroup{{
+					Match: "all",
+					Rules: []QueryRule{tt.rule},
+				}},
+			})
+		if err != nil {
+			t.Fatalf("%s: Build returned error: %v", tt.name, err)
+		}
+		if len(args) != 2 || args[0] != 42 || args[1] != "profile-1" {
+			t.Fatalf("%s: expected user scope args, got %v", tt.name, args)
+		}
+		for _, fragment := range tt.expectSQL {
+			if !strings.Contains(clause, fragment) {
+				t.Fatalf("%s: expected clause to contain %q, got %q", tt.name, fragment, clause)
+			}
+		}
+		for _, fragment := range tt.unexpectSQL {
+			if strings.Contains(clause, fragment) {
+				t.Fatalf("%s: did not expect clause to contain %q, got %q", tt.name, fragment, clause)
+			}
+		}
+	}
+}
+
 func TestBuild_ResolutionNormalizes4KAndScopesMediaFiles(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").
 		WithLibraryScope([]int{3}).

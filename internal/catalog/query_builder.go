@@ -955,6 +955,9 @@ func (qb *QueryBuilder) buildInProgressClause(rule QueryRule) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("in_progress requires a boolean value")
 	}
+	if qb.mediaScope == "ebook" {
+		return qb.buildEbookInProgressClause(value), nil
+	}
 	qb.args = append(qb.args, qb.userID, qb.profileID)
 	clause := fmt.Sprintf(`EXISTS (
 		SELECT 1
@@ -978,6 +981,24 @@ func (qb *QueryBuilder) buildInProgressClause(rule QueryRule) (string, error) {
 		return "NOT (" + clause + ")", nil
 	}
 	return clause, nil
+}
+
+func (qb *QueryBuilder) buildEbookInProgressClause(value bool) string {
+	qb.args = append(qb.args, qb.userID, qb.profileID)
+	clause := fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $%d
+		  AND erp.profile_id = $%d
+		  AND erp.content_id = %s.content_id
+		  AND erp.progress > 0
+		  AND erp.progress < 0.9
+	)`, qb.argIdx, qb.argIdx+1, qb.alias)
+	qb.argIdx += 2
+	if !value {
+		return "NOT (" + clause + ")"
+	}
+	return clause
 }
 
 func (qb *QueryBuilder) buildLastWatchedClause(rule QueryRule) (string, error) {
@@ -1078,6 +1099,9 @@ func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
 }
 
 func (qb *QueryBuilder) userStateCompletionClause() string {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookUserStateCompletionClause()
+	}
 	qb.args = append(qb.args, qb.userID, qb.profileID)
 	clause := fmt.Sprintf(`(
 		EXISTS (
@@ -1124,6 +1148,20 @@ func (qb *QueryBuilder) userStateCompletionClause() string {
 		qb.argIdx,
 		qb.argIdx+1,
 	)
+	qb.argIdx += 2
+	return clause
+}
+
+func (qb *QueryBuilder) ebookUserStateCompletionClause() string {
+	qb.args = append(qb.args, qb.userID, qb.profileID)
+	clause := fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $%d
+		  AND erp.profile_id = $%d
+		  AND erp.content_id = %s.content_id
+		  AND erp.progress >= 0.9
+	)`, qb.argIdx, qb.argIdx+1, qb.alias)
 	qb.argIdx += 2
 	return clause
 }
