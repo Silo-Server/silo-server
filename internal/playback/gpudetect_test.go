@@ -172,6 +172,24 @@ func TestFFmpegSupportsNVENCCachesByFFmpegPath(t *testing.T) {
 	}
 }
 
+func TestFFmpegSupportsNVENCSmokeProbeUsesSafeFrameDimensions(t *testing.T) {
+	setupHWAccelTest(t)
+	ffmpeg := writeFakeFFmpeg(t, successfulNVENCProbe())
+
+	if ok, reason := ffmpegSupportsNVENC(ffmpeg.path); !ok {
+		t.Fatalf("ffmpegSupportsNVENC() = false, want true (reason=%q)", reason)
+	}
+
+	logData, err := os.ReadFile(ffmpeg.logPath)
+	if err != nil {
+		t.Fatalf("read ffmpeg probe log: %v", err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, "testsrc2=size=640x360:rate=1") {
+		t.Fatalf("smoke probe should use 640x360 input; log:\n%s", logText)
+	}
+}
+
 func successfulNVENCProbe() fakeFFmpegProbe {
 	return fakeFFmpegProbe{
 		cuda:       true,

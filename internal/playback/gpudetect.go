@@ -201,7 +201,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 		"-hide_banner",
 		"-loglevel", "error",
 		"-f", "lavfi",
-		"-i", "testsrc2=size=64x64:rate=1",
+		"-i", "testsrc2=size=640x360:rate=1",
 		"-frames:v", "1",
 		"-an",
 		"-c:v", "h264_nvenc",
