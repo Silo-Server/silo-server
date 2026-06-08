@@ -9,8 +9,7 @@ import (
 
 const defaultOrphanedProvisionalCleanupBatchSize = 1000
 
-const orphanedProvisionalMediaItemConditions = `mi.status IN ('pending', 'unmatched', 'ambiguous')
-  AND NOT EXISTS (
+const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	SELECT 1 FROM public.media_item_libraries mil
 	WHERE mil.content_id = mi.content_id
   )
@@ -138,6 +137,9 @@ const orphanedProvisionalMediaItemConditions = `mi.status IN ('pending', 'unmatc
 	SELECT 1 FROM public.webhook_sync_item_state wsis
 	WHERE wsis.media_item_id = mi.content_id
   )`
+
+const orphanedProvisionalMediaItemConditions = `mi.status IN ('pending', 'unmatched', 'ambiguous')
+  AND ` + orphanedMediaItemSafetyConditions
 
 const orphanedProvisionalMediaItemPredicate = `
 WHERE ` + orphanedProvisionalMediaItemConditions
