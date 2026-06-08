@@ -1,0 +1,495 @@
+package scanner
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/idgen"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/titleutil"
+)
+
+func ebookScanWorkers() int {
+	if v := os.Getenv("SILO_EBOOK_SCAN_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return audiobookScanWorkers()
+}
+
+func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolder) error {
+	if s == nil || folder == nil {
+		return fmt.Errorf("ScanEbookFolder: nil scanner or folder")
+	}
+
+	var candidates []string
+	for _, root := range folder.Paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if walkErr != nil {
+				slog.Warn("ebook scan: walk error", "path", path, "error", walkErr)
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if SupportsEbookFile(path) {
+				candidates = append(candidates, path)
+			}
+			return nil
+		})
+		if walkErr != nil {
+			slog.Warn("ebook scan: walk root failed", "root", root, "error", walkErr)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	workers := ebookScanWorkers()
+	slog.Info("ebook scan: starting",
+		"folder_id", folder.ID,
+		"candidates", len(candidates),
+		"workers", workers,
+	)
+
+	ch := make(chan string, workers*2)
+	var (
+		wg        sync.WaitGroup
+		processed int64
+		failed    int64
+		skipped   int64
+		failMu    sync.Mutex
+		failures  []error
+		cancelErr error
+	)
+	start := time.Now()
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range ch {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := s.reconcileEbookFile(ctx, folder, path, &skipped); err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						failMu.Lock()
+						if cancelErr == nil {
+							cancelErr = err
+						}
+						failMu.Unlock()
+						return
+					}
+					atomic.AddInt64(&failed, 1)
+					failMu.Lock()
+					failures = append(failures, fmt.Errorf("%s: %w", path, err))
+					failMu.Unlock()
+					slog.Warn("ebook scan: file failed",
+						"folder_id", folder.ID,
+						"path", path,
+						"error", err,
+					)
+				}
+				n := atomic.AddInt64(&processed, 1)
+				if n%500 == 0 {
+					slog.Info("ebook scan: progress",
+						"folder_id", folder.ID,
+						"processed", n,
+						"failed", atomic.LoadInt64(&failed),
+						"skipped", atomic.LoadInt64(&skipped),
+						"total", len(candidates),
+						"elapsed_sec", int(time.Since(start).Seconds()),
+					)
+				}
+			}
+		}()
+	}
+
+	for _, p := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
+		ch <- p
+	}
+	close(ch)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cancelErr != nil {
+		return cancelErr
+	}
+
+	slog.Info("ebook scan: completed",
+		"folder_id", folder.ID,
+		"processed", atomic.LoadInt64(&processed),
+		"failed", atomic.LoadInt64(&failed),
+		"skipped", atomic.LoadInt64(&skipped),
+		"elapsed_sec", int(time.Since(start).Seconds()),
+	)
+	if processedCount := atomic.LoadInt64(&processed); processedCount > 0 {
+		failedCount := atomic.LoadInt64(&failed)
+		skippedCount := atomic.LoadInt64(&skipped)
+		if failedCount > 0 && skippedCount == 0 && failedCount == processedCount {
+			return fmt.Errorf("ebook scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
+		}
+	}
+	return nil
+}
+
+func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFolder, filePath string, skipped *int64) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat ebook file %s: %w", filePath, err)
+	}
+	size := info.Size()
+	modifiedAt := normalizeFileModifiedAt(info.ModTime())
+
+	isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
+	if skipErr != nil {
+		slog.Warn("ebook scan: skip-check failed, falling through",
+			"folder_id", folder.ID,
+			"path", filePath,
+			"error", skipErr,
+		)
+	} else if isUnchanged {
+		atomic.AddInt64(skipped, 1)
+		return nil
+	}
+
+	parsed, err := parseEbookFile(filePath)
+	if err != nil {
+		return fmt.Errorf("parse ebook file %s: %w", filePath, err)
+	}
+	if parsed.Title == "" {
+		parsed.Title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	}
+
+	contentID, err := s.upsertEbookMediaItem(ctx, folder.ID, filePath, &parsed)
+	if err != nil {
+		return fmt.Errorf("upsert ebook item: %w", err)
+	}
+	if err := s.upsertEbookMediaFile(ctx, folder, contentID, filePath, size, modifiedAt, &parsed); err != nil {
+		return fmt.Errorf("upsert ebook file: %w", err)
+	}
+	if err := s.upsertEbookPeople(ctx, contentID, &parsed); err != nil {
+		return fmt.Errorf("upsert ebook people: %w", err)
+	}
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (content_id, media_folder_id) DO NOTHING
+	`, contentID, folder.ID); err != nil {
+		return fmt.Errorf("upsert ebook library membership: %w", err)
+	}
+	if parsed.ISBN != "" {
+		if _, err := s.fileRepo.Pool().Exec(ctx, `
+			INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
+			VALUES ($1, 'isbn', $2, 'ebook')
+			ON CONFLICT DO NOTHING
+		`, contentID, parsed.ISBN); err != nil {
+			return fmt.Errorf("upsert ebook ISBN provider id: %w", err)
+		}
+	}
+	slog.Info("ebook scan: indexed",
+		"folder_id", folder.ID,
+		"content_id", contentID,
+		"title", parsed.Title,
+		"authors", parsed.Authors,
+		"path", filePath,
+	)
+	return nil
+}
+
+func (s *Scanner) ebookFileShouldSkip(ctx context.Context, folder *models.MediaFolder, filePath string, size int64, modifiedAt time.Time) (bool, error) {
+	if s.fileRepo == nil || s.itemRepo == nil {
+		return false, nil
+	}
+	existing, err := s.fileRepo.ListByObservedRootPath(ctx, folder.ID, filePath)
+	if err != nil {
+		return false, fmt.Errorf("list existing files: %w", err)
+	}
+	if len(existing) != 1 {
+		return false, nil
+	}
+	mf := existing[0]
+	if mf.FilePath != filePath || mf.FileSize != size || mf.FileModifiedAt == nil || !sameFileModifiedAt(mf.FileModifiedAt, modifiedAt) {
+		return false, nil
+	}
+	if mf.ContentID == "" {
+		return false, nil
+	}
+	statuses, err := s.itemRepo.GetStatusByIDs(ctx, []string{mf.ContentID})
+	if err != nil {
+		return false, fmt.Errorf("get item status: %w", err)
+	}
+	return !strings.EqualFold(strings.TrimSpace(statuses[mf.ContentID]), "unmatched"), nil
+}
+
+func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePath string, book *parsedEbook) (string, error) {
+	if s.itemRepo == nil {
+		return "", fmt.Errorf("itemRepo not configured on Scanner")
+	}
+	if s.fileRepo == nil {
+		return "", fmt.Errorf("fileRepo not configured on Scanner")
+	}
+
+	existingID, err := s.fileRepo.FindContentIDByRootPath(ctx, folderID, filePath, "ebook")
+	if err != nil {
+		return "", fmt.Errorf("find ebook by root path: %w", err)
+	}
+	if existingID != "" {
+		return existingID, nil
+	}
+	if existing := s.findEbookByFilePath(ctx, filePath); existing != nil {
+		applyEbookToMediaItem(existing, book)
+		if existing.SortTitle == "" {
+			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
+		}
+		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
+			return "", err
+		}
+		return existing.ContentID, nil
+	}
+	return resolveEbookMediaItem(ctx, s.fileRepo, s.itemRepo, folderID, filePath, book)
+}
+
+func resolveEbookMediaItem(
+	ctx context.Context,
+	rootFinder filesystemRootContentFinder,
+	itemWriter filesystemMediaItemWriter,
+	folderID int,
+	filePath string,
+	book *parsedEbook,
+) (string, error) {
+	if rootFinder == nil {
+		return "", fmt.Errorf("root content finder not configured")
+	}
+	if itemWriter == nil {
+		return "", fmt.Errorf("media item writer not configured")
+	}
+	existingID, err := rootFinder.FindContentIDByRootPath(ctx, folderID, filePath, "ebook")
+	if err != nil {
+		return "", fmt.Errorf("find ebook by root path: %w", err)
+	}
+	if existingID != "" {
+		return existingID, nil
+	}
+
+	cleanTitle := strings.TrimSpace(book.Title)
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	}
+	return createEbookMediaItem(ctx, itemWriter, book, cleanTitle)
+}
+
+func createEbookMediaItem(ctx context.Context, itemWriter filesystemMediaItemWriter, book *parsedEbook, cleanTitle string) (string, error) {
+	id, err := idgen.NextID()
+	if err != nil {
+		return "", fmt.Errorf("generate content_id: %w", err)
+	}
+	item := &models.MediaItem{
+		ContentID: id,
+		Type:      "ebook",
+		Title:     cleanTitle,
+		SortTitle: titleutil.DeriveDefaultSortTitle(cleanTitle),
+		Year:      book.Year,
+	}
+	applyEbookToMediaItem(item, book)
+	if item.SortTitle == "" {
+		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
+	}
+	if err := itemWriter.Upsert(ctx, item); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func applyEbookToMediaItem(item *models.MediaItem, book *parsedEbook) {
+	item.Type = "ebook"
+	if title := strings.TrimSpace(book.Title); title != "" {
+		item.Title = title
+	}
+	item.Year = book.Year
+	if book.Description != "" && item.Overview == "" {
+		item.Overview = book.Description
+	}
+	if book.Publisher != "" {
+		item.Studios = mergeUniqueStrings(item.Studios, []string{book.Publisher})
+	}
+	if len(book.Genres) > 0 {
+		item.Genres = mergeUniqueStrings(item.Genres, book.Genres)
+	}
+	if !book.PublishedAt.IsZero() && item.ReleaseDate == nil {
+		rd := book.PublishedAt.UTC().Format("2006-01-02")
+		item.ReleaseDate = &rd
+	}
+	if book.Language != "" && item.OriginalLanguage == "" {
+		item.OriginalLanguage = book.Language
+	}
+}
+
+func (s *Scanner) findEbookByFilePath(ctx context.Context, filePath string) *models.MediaItem {
+	if s.fileRepo == nil {
+		return nil
+	}
+	var existingID string
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT mf.content_id
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.file_path = $1
+		  AND mi.type = 'ebook'
+		LIMIT 1
+	`, filePath).Scan(&existingID)
+	if err != nil || existingID == "" {
+		return nil
+	}
+	items, err := s.itemRepo.GetByIDs(ctx, []string{existingID})
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	return items[0]
+}
+
+func (s *Scanner) upsertEbookMediaFile(ctx context.Context, folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook) error {
+	mf := models.MediaFile{
+		ContentID:          contentID,
+		MediaFolderID:      folder.ID,
+		CanonicalRootPath:  filePath,
+		ObservedRootPath:   filePath,
+		ContentGroupKey:    contentID,
+		GroupKeyVersion:    1,
+		BaseTitle:          book.Title,
+		BaseYear:           book.Year,
+		BaseType:           "ebook",
+		IdentityConfidence: ebookIdentityConfidence(book),
+		FilePath:           filePath,
+		FileSize:           size,
+		FileModifiedAt:     &modifiedAt,
+		Container:          book.Format,
+		ProbeSource:        "local",
+	}
+	if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
+		return fmt.Errorf("upsert media file %s: %w", filePath, err)
+	}
+	return nil
+}
+
+type ebookCredit struct {
+	Name string
+	Kind models.PersonKind
+}
+
+func ebookPeopleCreditsEqual(existing []models.ItemPerson, desired []ebookCredit) bool {
+	if len(existing) != len(desired) {
+		return false
+	}
+	type key struct {
+		name string
+		kind models.PersonKind
+	}
+	have := make(map[key]struct{}, len(existing))
+	for _, p := range existing {
+		have[key{strings.ToLower(strings.TrimSpace(p.Person.Name)), p.Kind}] = struct{}{}
+	}
+	for _, d := range desired {
+		k := key{strings.ToLower(strings.TrimSpace(d.Name)), d.Kind}
+		if _, ok := have[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book *parsedEbook) error {
+	if s.personRepo == nil {
+		return fmt.Errorf("personRepo not configured on Scanner")
+	}
+	if s.itemRepo == nil {
+		return fmt.Errorf("itemRepo not configured on Scanner")
+	}
+
+	var desired []ebookCredit
+	for _, author := range book.Authors {
+		if name := strings.TrimSpace(author); name != "" {
+			desired = append(desired, ebookCredit{Name: name, Kind: models.PersonKindAuthor})
+		}
+	}
+	if len(desired) == 0 {
+		return nil
+	}
+
+	existing, err := s.itemRepo.GetPeople(ctx, contentID)
+	if err == nil && ebookPeopleCreditsEqual(existing, desired) {
+		return nil
+	}
+
+	people := make([]models.ItemPerson, 0, len(desired))
+	for i, c := range desired {
+		personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.Name})
+		if err != nil {
+			return fmt.Errorf("find-or-create person %q: %w", c.Name, err)
+		}
+		people = append(people, models.ItemPerson{
+			Person:    models.Person{ID: personID},
+			Kind:      models.PersonKindAuthor,
+			SortOrder: i,
+		})
+	}
+	return s.itemRepo.ReplacePeople(ctx, contentID, people)
+}
+
+func (s *Scanner) upsertEbookSeries(ctx context.Context, contentID string, book *parsedEbook) error {
+	return nil
+}
+
+func ebookIdentityConfidence(book *parsedEbook) string {
+	if book == nil {
+		return "low"
+	}
+
+	score := 0
+	if book.Title != "" {
+		score++
+	}
+	if len(book.Authors) > 0 {
+		score++
+	}
+	if book.Year > 0 {
+		score++
+	}
+	if book.ISBN != "" {
+		score++
+	}
+
+	switch {
+	case score >= 4:
+		return "high"
+	case score > 0:
+		return "medium"
+	default:
+		return "low"
+	}
+}
