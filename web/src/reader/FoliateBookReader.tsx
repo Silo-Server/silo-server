@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { apiBlob } from "@/api/client";
+import { api, apiBlob } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import { DocumentLoader, type BookDoc } from "@/reader/readest/libs/document";
 
@@ -22,8 +22,31 @@ export type ReaderLoadState = {
   filename: string;
 };
 
+export type EbookReaderProgressPayload = {
+  file_id: number;
+  location: string;
+  progress: number;
+};
+
+export type EbookReaderProgress = EbookReaderProgressPayload & {
+  content_id?: string;
+  updated_at?: string;
+};
+
+type RelocateDetail = {
+  cfi?: string;
+  location?: {
+    current?: number;
+    total?: number;
+  };
+};
+
 export function ebookReadPath(contentID: string, fileID: number): string {
   return `/ebooks/${encodeURIComponent(contentID)}/files/${fileID}/read`;
+}
+
+export function ebookProgressPath(contentID: string): string {
+  return `/ebooks/${encodeURIComponent(contentID)}/progress`;
 }
 
 export function readerFileFormat(file: FileVersion | undefined): string {
@@ -63,6 +86,50 @@ export function readerMimeType(format: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+export function progressFromRelocate(
+  detail: RelocateDetail,
+  fileID: number,
+): EbookReaderProgressPayload | null {
+  const location = typeof detail.cfi === "string" ? detail.cfi.trim() : "";
+  const current = detail.location?.current ?? 0;
+  const total = detail.location?.total ?? 0;
+  if (!location || total <= 0 || current < 0) return null;
+  return {
+    file_id: fileID,
+    location,
+    progress: Math.min(1, Math.max(0, (current + 1) / total)),
+  };
+}
+
+export async function fetchEbookReaderProgress(
+  contentID: string,
+): Promise<EbookReaderProgress | null> {
+  const progress = await api<Partial<EbookReaderProgress>>(ebookProgressPath(contentID));
+  if (!progress || typeof progress.location !== "string" || progress.location.trim() === "") {
+    return null;
+  }
+  if (typeof progress.file_id !== "number" || typeof progress.progress !== "number") {
+    return null;
+  }
+  return {
+    file_id: progress.file_id,
+    location: progress.location,
+    progress: progress.progress,
+    content_id: progress.content_id,
+    updated_at: progress.updated_at,
+  };
+}
+
+export async function saveEbookReaderProgress(
+  contentID: string,
+  progress: EbookReaderProgressPayload,
+): Promise<EbookReaderProgress> {
+  return api<EbookReaderProgress>(ebookProgressPath(contentID), {
+    method: "PUT",
+    body: JSON.stringify(progress),
+  });
 }
 
 function readerStyles() {
@@ -105,6 +172,9 @@ export default function FoliateBookReader({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<FoliateViewElement | null>(null);
+  const initializedRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
+  const pendingProgressRef = useRef<EbookReaderProgressPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -115,10 +185,31 @@ export default function FoliateBookReader({
     setError("");
     onFileLoaded?.(null);
 
+    const flushProgress = () => {
+      const pending = pendingProgressRef.current;
+      if (!pending) return;
+      pendingProgressRef.current = null;
+      void saveEbookReaderProgress(contentID, pending);
+    };
+
+    const scheduleProgressSave = (progress: EbookReaderProgressPayload) => {
+      pendingProgressRef.current = progress;
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        flushProgress();
+      }, 800);
+    };
+
     async function open() {
       try {
         const format = readerFileFormat(file);
-        const blob = await apiBlob(ebookReadPath(contentID, file.file_id));
+        const [blob, savedProgress] = await Promise.all([
+          apiBlob(ebookReadPath(contentID, file.file_id)),
+          fetchEbookReaderProgress(contentID),
+        ]);
         if (cancelled) return;
 
         objectUrl = URL.createObjectURL(blob);
@@ -134,6 +225,14 @@ export default function FoliateBookReader({
         const view = document.createElement("foliate-view") as FoliateViewElement;
         viewRef.current = view;
         containerRef.current?.replaceChildren(view);
+        view.addEventListener("relocate", (event: Event) => {
+          if (!initializedRef.current) return;
+          const progress = progressFromRelocate(
+            (event as CustomEvent<RelocateDetail>).detail,
+            file.file_id,
+          );
+          if (progress) scheduleProgressSave(progress);
+        });
         await view.open(book);
 
         const renderer = view.renderer;
@@ -143,7 +242,12 @@ export default function FoliateBookReader({
         renderer?.setAttribute("max-inline-size", "74ch");
         renderer?.setAttribute("max-column-count", "2");
         await renderer?.render?.();
-        await view.goToFraction(0);
+        if (savedProgress?.location && savedProgress.file_id === file.file_id) {
+          await view.init({ lastLocation: savedProgress.location });
+        } else {
+          await view.goToFraction(0);
+        }
+        initializedRef.current = true;
         setLoading(false);
       } catch (err) {
         if (!cancelled) {
@@ -156,6 +260,12 @@ export default function FoliateBookReader({
     void open();
     return () => {
       cancelled = true;
+      initializedRef.current = false;
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      flushProgress();
       viewRef.current?.close?.();
       viewRef.current?.remove();
       viewRef.current = null;

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -23,6 +25,7 @@ func newEbookReaderAuthRequest(method, path string) *http.Request {
 		Role:      "user",
 		TokenType: auth.TokenTypeAccess,
 	})
+	ctx = apimw.SetProfileID(ctx, "profile-1")
 	return req.WithContext(ctx)
 }
 
@@ -31,6 +34,35 @@ func withEbookReaderRouteParams(req *http.Request, contentID, fileID string) *ht
 	routeCtx.URLParams.Add("content_id", contentID)
 	routeCtx.URLParams.Add("file_id", fileID)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+func withEbookReaderContentRouteParam(req *http.Request, contentID string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("content_id", contentID)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+type fakeEbookProgressStore struct {
+	progress *EbookReaderProgress
+	upserted *EbookReaderProgress
+	err      error
+}
+
+func (s *fakeEbookProgressStore) Get(
+	context.Context,
+	int,
+	string,
+	string,
+) (*EbookReaderProgress, error) {
+	return s.progress, s.err
+}
+
+func (s *fakeEbookProgressStore) Upsert(_ context.Context, progress EbookReaderProgress) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.upserted = &progress
+	return nil
 }
 
 func TestEbookReaderServesEbookInlineWithRangeSupport(t *testing.T) {
@@ -173,5 +205,95 @@ func TestEbookReaderReturnsInternalErrorForUnexpectedAuthorizeFailure(t *testing
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEbookReaderSavesProgressForAuthorizedEbookFile(t *testing.T) {
+	store := &fakeEbookProgressStore{}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{
+			file: &models.MediaFile{
+				ID:        42,
+				ContentID: "ebook-1",
+				FilePath:  "/tmp/book.epub",
+				Container: "epub",
+				BaseType:  "ebook",
+			},
+		},
+		ItemAccess: stubItemAccessChecker{},
+	})
+	handler.ProgressStore = store
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/ebooks/ebook-1/progress",
+		strings.NewReader(`{"file_id":42,"location":"epubcfi(/6/4)","progress":0.42}`),
+	)
+	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
+		UserID:    1,
+		Role:      "user",
+		TokenType: auth.TokenTypeAccess,
+	})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-9"))
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleSaveProgress(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.upserted == nil {
+		t.Fatal("expected progress to be saved")
+	}
+	if store.upserted.UserID != 1 || store.upserted.ProfileID != "profile-9" {
+		t.Fatalf("scope = user %d profile %q", store.upserted.UserID, store.upserted.ProfileID)
+	}
+	if store.upserted.ContentID != "ebook-1" || store.upserted.FileID != 42 {
+		t.Fatalf("target = content %q file %d", store.upserted.ContentID, store.upserted.FileID)
+	}
+	if store.upserted.Location != "epubcfi(/6/4)" || store.upserted.Progress != 0.42 {
+		t.Fatalf("progress = %+v", store.upserted)
+	}
+}
+
+func TestEbookReaderReturnsSavedProgress(t *testing.T) {
+	updatedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.ProgressStore = &fakeEbookProgressStore{
+		progress: &EbookReaderProgress{
+			UserID:    1,
+			ProfileID: "profile-1",
+			ContentID: "ebook-1",
+			FileID:    42,
+			Location:  "epubcfi(/6/8)",
+			Progress:  0.75,
+			UpdatedAt: updatedAt,
+		},
+	}
+
+	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/progress")
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleGetProgress(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`"content_id":"ebook-1"`,
+		`"file_id":42`,
+		`"location":"epubcfi(/6/8)"`,
+		`"progress":0.75`,
+		`"updated_at":"2026-06-08T12:00:00Z"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("response %s missing %s", body, want)
+		}
 	}
 }

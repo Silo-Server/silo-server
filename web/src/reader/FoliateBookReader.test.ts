@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { FileVersion } from "@/api/types";
-import { ebookReadPath, readerFileFormat, readerMimeType } from "./FoliateBookReader";
+import {
+  ebookProgressPath,
+  ebookReadPath,
+  progressFromRelocate,
+  readerFileFormat,
+  readerMimeType,
+} from "./FoliateBookReader";
 
 function version(overrides: Partial<FileVersion>): FileVersion {
   return {
@@ -24,6 +30,10 @@ describe("FoliateBookReader helpers", () => {
     expect(ebookReadPath("ebook 1", 42)).toBe("/ebooks/ebook%201/files/42/read");
   });
 
+  it("builds the protected ebook progress endpoint", () => {
+    expect(ebookProgressPath("ebook 1")).toBe("/ebooks/ebook%201/progress");
+  });
+
   it("detects reader file formats from container or filename", () => {
     expect(readerFileFormat(version({ container: ".AZW3", file_name: "ignored.epub" }))).toBe(
       "azw3",
@@ -37,5 +47,26 @@ describe("FoliateBookReader helpers", () => {
     expect(readerMimeType("azw3")).toBe("application/vnd.amazon.mobi8-ebook");
     expect(readerMimeType("fbz")).toBe("application/x-zip-compressed-fb2");
     expect(readerMimeType("md")).toBe("text/markdown");
+  });
+
+  it("converts relocate events into saveable progress", () => {
+    expect(
+      progressFromRelocate(
+        {
+          cfi: "epubcfi(/6/4)",
+          location: { current: 2, total: 10 },
+        },
+        42,
+      ),
+    ).toEqual({
+      file_id: 42,
+      location: "epubcfi(/6/4)",
+      progress: 0.3,
+    });
+  });
+
+  it("ignores relocate events without a usable location", () => {
+    expect(progressFromRelocate({ location: { current: 2, total: 10 } }, 42)).toBeNull();
+    expect(progressFromRelocate({ cfi: "epubcfi(/6/4)", location: { total: 0 } }, 42)).toBeNull();
   });
 });

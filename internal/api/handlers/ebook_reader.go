@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,17 +10,37 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// EbookReaderProgress is the persisted reader position for one profile and ebook.
+type EbookReaderProgress struct {
+	UserID    int       `json:"-"`
+	ProfileID string    `json:"-"`
+	ContentID string    `json:"content_id"`
+	FileID    int       `json:"file_id"`
+	Location  string    `json:"location"`
+	Progress  float64   `json:"progress"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type EbookReaderProgressStore interface {
+	Get(ctx context.Context, userID int, profileID string, contentID string) (*EbookReaderProgress, error)
+	Upsert(ctx context.Context, progress EbookReaderProgress) error
+}
+
 // EbookReaderHandler serves ebook files for the in-app reader.
 type EbookReaderHandler struct {
 	FileAuthorizer *MediaFileAuthorizer
+	ProgressStore  EbookReaderProgressStore
 }
 
 func NewEbookReaderHandler(authorizer *MediaFileAuthorizer) *EbookReaderHandler {
@@ -60,6 +82,101 @@ func (h *EbookReaderHandler) HandleReadFile(w http.ResponseWriter, r *http.Reque
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve ebook file")
 	}
+}
+
+type ebookReaderProgressRequest struct {
+	FileID   int     `json:"file_id"`
+	Location string  `json:"location"`
+	Progress float64 `json:"progress"`
+}
+
+func (h *EbookReaderHandler) HandleGetProgress(w http.ResponseWriter, r *http.Request) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h == nil || h.ProgressStore == nil || h.FileAuthorizer == nil || h.FileAuthorizer.ItemAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader progress is not configured")
+		return
+	}
+
+	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
+		return
+	}
+	if err := h.FileAuthorizer.ItemAccess.EnsureAccessible(r.Context(), contentID, requestAccessFilter(r)); err != nil {
+		h.writeReadError(w, err)
+		return
+	}
+
+	progress, err := h.ProgressStore.Get(r.Context(), userID, profileID, contentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load ebook progress")
+		return
+	}
+	if progress == nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	writeJSON(w, http.StatusOK, progress)
+}
+
+func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.Request) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h == nil || h.ProgressStore == nil || h.FileAuthorizer == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Ebook reader progress is not configured")
+		return
+	}
+
+	contentID := strings.TrimSpace(chi.URLParam(r, "content_id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "content_id is required")
+		return
+	}
+
+	var req ebookReaderProgressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	req.Location = strings.TrimSpace(req.Location)
+	if req.FileID <= 0 || req.Location == "" || req.Progress < 0 || req.Progress > 1 {
+		writeError(w, http.StatusBadRequest, "bad_request", "file_id, location, and progress are required")
+		return
+	}
+
+	file, err := h.FileAuthorizer.Authorize(r, req.FileID)
+	if err != nil {
+		h.writeReadError(w, err)
+		return
+	}
+	if file == nil || file.ContentID != contentID || !isEbookFile(file) {
+		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
+		return
+	}
+
+	progress := EbookReaderProgress{
+		UserID:    userID,
+		ProfileID: profileID,
+		ContentID: contentID,
+		FileID:    req.FileID,
+		Location:  req.Location,
+		Progress:  req.Progress,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := h.ProgressStore.Upsert(r.Context(), progress); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save ebook progress")
+		return
+	}
+	writeJSON(w, http.StatusOK, progress)
 }
 
 func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
@@ -155,4 +272,66 @@ func sanitizeInlineFilename(name string) string {
 	name = strings.ReplaceAll(name, "\n", " ")
 	name = strings.ReplaceAll(name, "\r", " ")
 	return name
+}
+
+type PGEbookReaderProgressStore struct {
+	pool *pgxpool.Pool
+}
+
+func NewPGEbookReaderProgressStore(pool *pgxpool.Pool) *PGEbookReaderProgressStore {
+	return &PGEbookReaderProgressStore{pool: pool}
+}
+
+func (s *PGEbookReaderProgressStore) Get(ctx context.Context, userID int, profileID string, contentID string) (*EbookReaderProgress, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("ebook reader progress store is not configured")
+	}
+	var progress EbookReaderProgress
+	err := s.pool.QueryRow(ctx, `
+		SELECT user_id, profile_id, content_id, file_id, location, progress, updated_at
+		FROM ebook_reader_progress
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3`,
+		userID, profileID, contentID,
+	).Scan(
+		&progress.UserID,
+		&progress.ProfileID,
+		&progress.ContentID,
+		&progress.FileID,
+		&progress.Location,
+		&progress.Progress,
+		&progress.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get ebook reader progress: %w", err)
+	}
+	return &progress, nil
+}
+
+func (s *PGEbookReaderProgressStore) Upsert(ctx context.Context, progress EbookReaderProgress) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("ebook reader progress store is not configured")
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO ebook_reader_progress
+			(user_id, profile_id, content_id, file_id, location, progress, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (user_id, profile_id, content_id) DO UPDATE SET
+			file_id = EXCLUDED.file_id,
+			location = EXCLUDED.location,
+			progress = EXCLUDED.progress,
+			updated_at = EXCLUDED.updated_at`,
+		progress.UserID,
+		progress.ProfileID,
+		progress.ContentID,
+		progress.FileID,
+		progress.Location,
+		progress.Progress,
+		progress.UpdatedAt,
+	); err != nil {
+		return fmt.Errorf("upsert ebook reader progress: %w", err)
+	}
+	return nil
 }

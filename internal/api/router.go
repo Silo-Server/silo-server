@@ -430,6 +430,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				ItemAccess:    itemRepo,
 				EpisodeLookup: episodeRepo,
 			})
+			ebookReaderHandler.ProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogHandler = handlers.NewCatalogHandler(
@@ -1719,6 +1720,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Use(apimw.RequireProfile)
 						r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
 						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
+						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
 					})
 				}
 
