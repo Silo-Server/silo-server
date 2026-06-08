@@ -11,13 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	watchtrakt "github.com/Silo-Server/silo-server/internal/watchsync/providers/trakt"
 )
 
 type traktCollectionTokenResolver struct {
 	pool     *pgxpool.Pool
-	settings *catalog.ServerSettingsRepo
+	settings catalog.SettingsStore // encrypting decorator: decrypts trakt client_secret
+	cipher   *secret.Cipher        // decrypts watch_provider_connections tokens read via raw SQL
 	provider *watchtrakt.Provider
 }
 
@@ -97,7 +99,7 @@ func (r *traktCollectionTokenResolver) loadConnection(ctx context.Context, profi
 		LIMIT 1
 	`, profileID)
 	var conn watchsync.Connection
-	if err := row.Scan(
+	err := row.Scan(
 		&conn.ID,
 		&conn.Provider,
 		&conn.UserID,
@@ -107,24 +109,45 @@ func (r *traktCollectionTokenResolver) loadConnection(ctx context.Context, profi
 		&conn.AccessToken,
 		&conn.RefreshToken,
 		&conn.TokenExpiresAt,
-	); err != nil {
+	)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return watchsync.Connection{}, errors.New("trakt connection not found for profile")
 		}
 		return watchsync.Connection{}, fmt.Errorf("load trakt connection: %w", err)
 	}
+	// This resolver reads watch_provider_connections directly (bypassing the
+	// watchsync repo), so it must apply the same at-rest decryption the repo
+	// does, bound to the same connection identity (watchsync.TokenAAD).
+	if conn.AccessToken, err = r.cipher.DecryptIfEncrypted(conn.AccessToken, watchsync.TokenAAD("access_token", conn.Provider, conn.UserID, conn.ProfileID)); err != nil {
+		return watchsync.Connection{}, fmt.Errorf("decrypt trakt access token: %w", err)
+	}
+	if conn.RefreshToken, err = r.cipher.DecryptIfEncrypted(conn.RefreshToken, watchsync.TokenAAD("refresh_token", conn.Provider, conn.UserID, conn.ProfileID)); err != nil {
+		return watchsync.Connection{}, fmt.Errorf("decrypt trakt refresh token: %w", err)
+	}
 	return conn, nil
 }
 
 func (r *traktCollectionTokenResolver) updateTokens(ctx context.Context, conn watchsync.Connection) error {
-	_, err := r.pool.Exec(ctx, `
+	// Encrypt the refreshed tokens inline, bound to the connection identity, so
+	// the raw-SQL write matches what the watchsync repo (and this resolver's read
+	// path) store.
+	accessToken, err := r.cipher.Encrypt(conn.AccessToken, watchsync.TokenAAD("access_token", conn.Provider, conn.UserID, conn.ProfileID))
+	if err != nil {
+		return fmt.Errorf("encrypt trakt access token: %w", err)
+	}
+	refreshToken, err := r.cipher.Encrypt(conn.RefreshToken, watchsync.TokenAAD("refresh_token", conn.Provider, conn.UserID, conn.ProfileID))
+	if err != nil {
+		return fmt.Errorf("encrypt trakt refresh token: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `
 		UPDATE watch_provider_connections
 		SET access_token = $2,
 		    refresh_token = $3,
 		    token_expires_at = $4,
 		    updated_at = now()
 		WHERE id = $1::uuid
-	`, conn.ID, conn.AccessToken, conn.RefreshToken, conn.TokenExpiresAt)
+	`, conn.ID, accessToken, refreshToken, conn.TokenExpiresAt)
 	if err != nil {
 		return fmt.Errorf("update refreshed trakt connection tokens: %w", err)
 	}

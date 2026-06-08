@@ -13,31 +13,27 @@ type ResolvedConnection struct {
 }
 
 // RequestIntegrationLookup resolves a soft-linked Requests integration to its
-// base URL and encrypted api-key reference.
+// base URL and (already-decrypted) api key.
 type RequestIntegrationLookup interface {
-	Get(ctx context.Context, integrationID string) (baseURL, apiKeyRef string, err error)
-}
-
-// SecretResolver resolves an encrypted api-key reference to its plaintext value.
-type SecretResolver interface {
-	Get(ctx context.Context, ref string) (string, error)
+	Get(ctx context.Context, integrationID string) (baseURL, apiKey string, err error)
 }
 
 type ConnectionResolver struct {
 	requests RequestIntegrationLookup
-	secrets  SecretResolver
 }
 
-func NewConnectionResolver(r RequestIntegrationLookup, s SecretResolver) *ConnectionResolver {
-	return &ConnectionResolver{requests: r, secrets: s}
+func NewConnectionResolver(r RequestIntegrationLookup) *ConnectionResolver {
+	return &ConnectionResolver{requests: r}
 }
 
 // Resolve turns a stored Connection into concrete credentials. When the
-// connection is linked to a Requests integration the live base URL + key ref are
-// read from there; otherwise the connection's own fields are used. The api-key
-// ref is then resolved to plaintext via the secrets resolver.
+// connection is linked to a Requests integration the live base URL + key are
+// read from there (the Requests repo decrypts it); otherwise the connection's
+// own fields are used (the autoscan repo already decrypted api_key_ref on read).
+// Either way the returned key is plaintext — there is no longer a separate
+// secret-resolution step.
 func (cr *ConnectionResolver) Resolve(ctx context.Context, c Connection) (ResolvedConnection, error) {
-	baseURL, apiKeyRef := c.BaseURL, c.APIKeyRef
+	baseURL, apiKey := c.BaseURL, c.APIKeyRef
 	// A pointer-to-empty-string request_integration_id is NOT a live link (it can
 	// arise from a both-NULL orphan or a stripped link). Treat empty/whitespace as
 	// "no link" so we don't call requests.Get("") and use the connection's own
@@ -46,21 +42,11 @@ func (cr *ConnectionResolver) Resolve(ctx context.Context, c Connection) (Resolv
 		if cr.requests == nil {
 			return ResolvedConnection{}, fmt.Errorf("autoscan: linked requests integration %q: no lookup configured", *c.RequestIntegrationID)
 		}
-		u, ref, err := cr.requests.Get(ctx, *c.RequestIntegrationID)
+		u, key, err := cr.requests.Get(ctx, *c.RequestIntegrationID)
 		if err != nil {
 			return ResolvedConnection{}, fmt.Errorf("autoscan: linked requests integration %q: %w", *c.RequestIntegrationID, err)
 		}
-		baseURL, apiKeyRef = u, ref
+		baseURL, apiKey = u, key
 	}
-	apiKey := strings.TrimSpace(apiKeyRef)
-	if cr.secrets != nil && apiKey != "" {
-		resolved, err := cr.secrets.Get(ctx, apiKey)
-		if err != nil {
-			return ResolvedConnection{}, fmt.Errorf("autoscan: resolve api key: %w", err)
-		}
-		if resolved = strings.TrimSpace(resolved); resolved != "" {
-			apiKey = resolved
-		}
-	}
-	return ResolvedConnection{BaseURL: baseURL, APIKey: apiKey}, nil
+	return ResolvedConnection{BaseURL: baseURL, APIKey: strings.TrimSpace(apiKey)}, nil
 }

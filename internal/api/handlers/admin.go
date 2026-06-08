@@ -1137,29 +1137,10 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 
 // --- Server Settings endpoints ---
 
-var sensitiveSettingKeys = map[string]bool{
-	"auth.jwt_secret":                      true,
-	"s3.public_access_key":                 true,
-	"s3.public_secret_key":                 true,
-	"s3.public_token_secret":               true,
-	"s3.private_access_key":                true,
-	"s3.private_secret_key":                true,
-	"s3.user_db_access_key":                true,
-	"s3.user_db_secret_key":                true,
-	"redis.url":                            true,
-	"recommendations.openai_api_key":       true,
-	"recommendations.embedding_auth_token": true,
-	"tmdb.api_key":                         true,
-	"introdb.api_key":                      true,
-	"mdblist.api_key":                      true,
-	"requests.radarr.api_key":              true,
-	"requests.sonarr.api_key":              true,
-	"subtitle_ai.api_key":                  true,
-	"watchsync.trakt.client_id":            true,
-	"watchsync.trakt.client_secret":        true,
-	"watchsync.simkl.client_id":            true,
-	"watchsync.simkl.client_secret":        true,
-}
+// sensitiveSettingKeys is the audited allowlist of secret-bearing settings
+// keys, shared with the at-rest encryption decorator so redaction and
+// encryption can never drift apart. See catalog.SensitiveSettingKeys.
+var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 
 // HandleGetSettings handles GET /admin/settings.
 func (h *AdminHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {

@@ -27,10 +27,6 @@ type TMDBExternalIDClient interface {
 
 const externalIDHydrationConcurrency = 4
 
-type SecretResolver interface {
-	Get(ctx context.Context, key string) (string, error)
-}
-
 type MovieFulfillmentAdapter interface {
 	SubmitMovie(ctx context.Context, req Request, integration Integration) (FulfillmentResult, error)
 }
@@ -66,7 +62,6 @@ type Service struct {
 	store         Store
 	tmdb          TMDBClient
 	presence      PresenceResolver
-	secrets       SecretResolver
 	movieAdapter  MovieFulfillmentAdapter
 	seriesAdapter SeriesFulfillmentAdapter
 	entitlements  EntitlementResolver
@@ -89,10 +84,6 @@ func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *
 		presence: presence,
 		Now:      func() time.Time { return time.Now().UTC() },
 	}
-}
-
-func (s *Service) SetSecretResolver(resolver SecretResolver) {
-	s.secrets = resolver
 }
 
 func (s *Service) SetFulfillmentAdapters(movie MovieFulfillmentAdapter, series SeriesFulfillmentAdapter) {
@@ -858,12 +849,9 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 	if strings.TrimSpace(normalized.APIKeyRef) == "" {
 		return nil, fmt.Errorf("%w: api_key_ref is required", ErrInvalidInput)
 	}
+	// APIKeyRef is already the literal key: a saved instance was decrypted by
+	// GetIntegration above; a new instance carries the key the admin just typed.
 	resolved := normalized
-	apiKey, err := s.resolveAPIKey(ctx, resolved)
-	if err != nil {
-		return nil, err
-	}
-	resolved.APIKeyRef = apiKey
 
 	switch resolved.Kind {
 	case "radarr":
@@ -1200,15 +1188,10 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 // the request aggregate). Returns the latest request snapshot.
 func (s *Service) submitPlannedTarget(ctx context.Context, req Request, pt plannedTarget, actor Viewer) (*Request, error) {
 	resolved := resolveInstance(pt)
-	apiKey, err := s.resolveAPIKey(ctx, resolved)
-	if err != nil || apiKey == "" {
-		msg := "missing api key"
-		if err != nil {
-			msg = err.Error()
-		}
-		return s.createFailedTarget(ctx, req, pt, resolved, msg, actor)
+	// The repo already decrypted the stored key; a blank one means unconfigured.
+	if strings.TrimSpace(resolved.APIKeyRef) == "" {
+		return s.createFailedTarget(ctx, req, pt, resolved, "missing api key", actor)
 	}
-	resolved.APIKeyRef = apiKey
 
 	target, err := s.store.CreateTarget(ctx, Target{
 		RequestID: req.ID, IntegrationID: resolved.ID, IntegrationKind: resolved.Kind,
@@ -1338,11 +1321,10 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 		if !ok {
 			continue
 		}
-		apiKey, err := s.resolveAPIKey(ctx, in)
-		if err != nil || apiKey == "" {
+		// in.APIKeyRef was decrypted by ListIntegrations; skip if unconfigured.
+		if strings.TrimSpace(in.APIKeyRef) == "" {
 			continue
 		}
-		in.APIKeyRef = apiKey
 		probe := req
 		probe.ExternalID = t.ExternalID
 		st, err := s.checkFulfillmentStatus(ctx, probe, in)
@@ -1429,22 +1411,6 @@ func (s *Service) checkFulfillmentStatus(ctx context.Context, req Request, resol
 	default:
 		return FulfillmentStatus{}, nil
 	}
-}
-
-func (s *Service) resolveAPIKey(ctx context.Context, integration Integration) (string, error) {
-	value := strings.TrimSpace(integration.APIKeyRef)
-	if value == "" || s.secrets == nil {
-		return value, nil
-	}
-	resolved, err := s.secrets.Get(ctx, value)
-	if err != nil {
-		return "", err
-	}
-	resolved = strings.TrimSpace(resolved)
-	if resolved == "" {
-		return value, nil
-	}
-	return resolved, nil
 }
 
 func integrationIsConfigured(integration Integration) bool {

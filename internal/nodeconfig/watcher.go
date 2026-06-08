@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 // BootstrapOverrides holds values from env/CLI that must survive config
@@ -29,16 +30,21 @@ type Watcher struct {
 	mu        sync.RWMutex
 	cfg       *config.Config
 	pool      *pgxpool.Pool
+	cipher    *secret.Cipher
 	eventBus  cache.EventBus
 	bootstrap BootstrapOverrides
 	onChange  []func(old, updated *config.Config)
 	reloadCh  chan struct{} // buffered(1), event bus writes here
 }
 
-// NewWatcher creates a new config watcher. Call Start to begin watching.
-func NewWatcher(pool *pgxpool.Pool, eventBus cache.EventBus, bootstrap BootstrapOverrides) *Watcher {
+// NewWatcher creates a new config watcher. Call Start to begin watching. The
+// cipher decrypts sensitive server_settings values (read here via raw SQL)
+// before they reach config.LoadFromDB, so a hot reload never feeds ciphertext
+// into the live config (which would, e.g., break JWT validation).
+func NewWatcher(pool *pgxpool.Pool, cipher *secret.Cipher, eventBus cache.EventBus, bootstrap BootstrapOverrides) *Watcher {
 	return &Watcher{
 		pool:      pool,
+		cipher:    cipher,
 		eventBus:  eventBus,
 		bootstrap: bootstrap,
 		reloadCh:  make(chan struct{}, 1),
@@ -114,7 +120,14 @@ func (w *Watcher) reload(ctx context.Context) error {
 		if err := rows.Scan(&k, &v); err != nil {
 			return fmt.Errorf("scan server_settings row: %w", err)
 		}
-		m[k] = v
+		// Decrypt sensitive keys (read-path contract: legacy plaintext passes
+		// through, enc:v1: values decrypt, corrupt ciphertext errors) so
+		// LoadFromDB always sees plaintext.
+		decrypted, derr := w.cipher.DecryptIfEncrypted(v, secret.SettingsAAD(k))
+		if derr != nil {
+			return fmt.Errorf("decrypt server_settings %q: %w", k, derr)
+		}
+		m[k] = decrypted
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate server_settings: %w", err)

@@ -32,7 +32,7 @@ type SectionHandler struct {
 	StoreProvider  userstore.UserStoreProvider
 	UserRepo       *auth.UserRepository
 	DetailSvc      *catalog.DetailService
-	Settings       *catalog.ServerSettingsRepo
+	Settings       catalog.SettingsStore
 	CollectionRepo *catalog.LibraryCollectionRepository
 }
 

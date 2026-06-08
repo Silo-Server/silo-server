@@ -7,16 +7,28 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 var ErrConnectionNotFound = errors.New("webhook sync connection not found")
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secret.Cipher
 }
 
-func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func NewRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *Repository {
+	return &Repository{pool: pool, cipher: cipher}
+}
+
+// webhookTokenAAD binds a webhook_sync_connections access_token ciphertext to
+// its row. Defined at package scope so the secret package reference is isolated
+// from GetConnectionBySecret, whose parameter shadows the import name.
+// (webhook_secret is NOT encrypted — it is matched by exact value in
+// GetConnectionBySecret and is carved out for a separate hashing follow-up.)
+func webhookTokenAAD(id string) string {
+	return secret.RowAAD("webhook_sync_connections", "access_token", id)
 }
 
 func (r *Repository) ProfileExistsForUser(ctx context.Context, userID int, profileID string) (bool, error) {
@@ -31,6 +43,10 @@ func (r *Repository) ProfileExistsForUser(ctx context.Context, userID int, profi
 }
 
 func (r *Repository) CreateConnection(ctx context.Context, conn Connection) (*Connection, error) {
+	accessToken, err := r.cipher.Encrypt(conn.AccessToken, webhookTokenAAD(conn.ID))
+	if err != nil {
+		return nil, fmt.Errorf("encrypt webhook access token: %w", err)
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO webhook_sync_connections (
 			id, user_id, provider, server_id, server_name, base_url, access_token, default_profile_id, webhook_secret
@@ -39,9 +55,9 @@ func (r *Repository) CreateConnection(ctx context.Context, conn Connection) (*Co
 		          webhook_secret, account_discovery_available,
 		          last_webhook_received_at, last_webhook_error_at, COALESCE(last_webhook_error_message, ''),
 		          created_at, updated_at`,
-		conn.ID, conn.UserID, conn.Provider, conn.ServerID, conn.ServerName, conn.BaseURL, conn.AccessToken, conn.DefaultProfileID, conn.WebhookSecret,
+		conn.ID, conn.UserID, conn.Provider, conn.ServerID, conn.ServerName, conn.BaseURL, accessToken, conn.DefaultProfileID, conn.WebhookSecret,
 	)
-	return scanConnection(row)
+	return r.scanConnection(row)
 }
 
 func (r *Repository) ListConnections(ctx context.Context, userID int) ([]Connection, error) {
@@ -72,6 +88,9 @@ func (r *Repository) ListConnections(ctx context.Context, userID int) ([]Connect
 		); err != nil {
 			return nil, fmt.Errorf("scanning webhook sync connection: %w", err)
 		}
+		if c.AccessToken, err = r.cipher.DecryptIfEncrypted(c.AccessToken, webhookTokenAAD(c.ID)); err != nil {
+			return nil, fmt.Errorf("decrypt webhook access token: %w", err)
+		}
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -88,7 +107,7 @@ func (r *Repository) GetConnection(ctx context.Context, userID int, id string) (
 		       created_at, updated_at
 		FROM webhook_sync_connections
 		WHERE id = $1 AND user_id = $2`, id, userID)
-	return scanConnection(row)
+	return r.scanConnection(row)
 }
 
 func (r *Repository) GetConnectionBySecret(ctx context.Context, secret string) (*Connection, error) {
@@ -99,10 +118,10 @@ func (r *Repository) GetConnectionBySecret(ctx context.Context, secret string) (
 		       created_at, updated_at
 		FROM webhook_sync_connections
 		WHERE webhook_secret = $1`, secret)
-	return scanConnection(row)
+	return r.scanConnection(row)
 }
 
-func scanConnection(row pgx.Row) (*Connection, error) {
+func (r *Repository) scanConnection(row pgx.Row) (*Connection, error) {
 	var c Connection
 	if err := row.Scan(
 		&c.ID, &c.UserID, &c.Provider, &c.ServerID, &c.ServerName, &c.BaseURL, &c.AccessToken, &c.DefaultProfileID,
@@ -115,6 +134,13 @@ func scanConnection(row pgx.Row) (*Connection, error) {
 		}
 		return nil, fmt.Errorf("scanning webhook sync connection: %w", err)
 	}
+	// Decrypt the access token (read-path). webhook_secret is intentionally left
+	// as-is (equality-looked-up; carved out for the hashing follow-up).
+	token, err := r.cipher.DecryptIfEncrypted(c.AccessToken, webhookTokenAAD(c.ID))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt webhook access token: %w", err)
+	}
+	c.AccessToken = token
 	return &c, nil
 }
 
@@ -131,7 +157,7 @@ func (r *Repository) UpdateConnection(ctx context.Context, userID int, id string
 		          created_at, updated_at`,
 		id, userID, input.ServerName, input.DefaultProfileID,
 	)
-	return scanConnection(row)
+	return r.scanConnection(row)
 }
 
 func (r *Repository) DeleteConnection(ctx context.Context, userID int, id string) error {
