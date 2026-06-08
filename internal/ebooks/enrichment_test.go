@@ -281,6 +281,24 @@ func TestBuildEbookSearchQueryUsesFilteredScannerISBN(t *testing.T) {
 	}
 }
 
+func TestFilterEbookProviderIDsDropsAsinAliases(t *testing.T) {
+	got := filterEbookProviderIDs(map[string]string{
+		"ASIN":           "B00TEST",
+		"audibleASIN":    "B00AUDIO",
+		"audible-asin":   "B00AUDIO2",
+		"audible_asin":   "B00AUDIO3",
+		" ISBN ":         " 9780306406157 ",
+		" OpenLibraryID": " OL1M ",
+	})
+
+	if got["asin"] != "" || got["audibleasin"] != "" || got["audible-asin"] != "" || got["audible_asin"] != "" {
+		t.Fatalf("ASIN aliases should be filtered, got %+v", got)
+	}
+	if got["isbn"] != "9780306406157" || got["openlibraryid"] != "OL1M" {
+		t.Fatalf("filtered IDs = %+v, want ISBN and OpenLibraryID only", got)
+	}
+}
+
 func TestBuildEbookMetadataRequestCarriesAccumulatedISBN(t *testing.T) {
 	req := buildEbookMetadataRequest(map[string]string{
 		" ISBN ":      " 9780306406157 ",

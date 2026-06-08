@@ -608,17 +608,20 @@ func filterEbookProviderIDs(providerIDs map[string]string) map[string]string {
 			continue
 		}
 		provider = strings.ToLower(provider)
-		switch provider {
-		case "asin", "audible_asin":
+		if isEbookASINProvider(provider) {
 			continue
-		default:
-			filtered[provider] = providerID
 		}
+		filtered[provider] = providerID
 	}
 	if len(filtered) == 0 {
 		return nil
 	}
 	return filtered
+}
+
+func isEbookASINProvider(provider string) bool {
+	normalized := strings.ReplaceAll(strings.ReplaceAll(provider, "_", ""), "-", "")
+	return normalized == "asin" || normalized == "audibleasin"
 }
 
 func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string {
