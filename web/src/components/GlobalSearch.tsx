@@ -172,7 +172,7 @@ export function GlobalSearch({
 
   const handlePickItem = useCallback(
     (contentId: string) => {
-      navigate(`/item/${contentId}`);
+      navigate(`/item/${encodeURIComponent(contentId)}`);
       setOpen(false);
       setQuery("");
     },
