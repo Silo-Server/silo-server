@@ -39,6 +39,21 @@ func TestValidateCatalogQueryRequest_AllowsEpisodeMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidateCatalogQueryRequest_AllowsEbookMediaScope(t *testing.T) {
+	req := CatalogRequest{
+		Source: CatalogSourceQuery,
+		Query: QueryDefinition{
+			MediaScope: "ebook",
+			Match:      "all",
+			Sort:       QuerySort{Field: "title", Order: "asc"},
+		},
+	}
+
+	if err := validateCatalogQueryRequest(req, true); err != nil {
+		t.Fatalf("expected ebook media scope to be accepted, got %v", err)
+	}
+}
+
 func TestValidateCatalogQueryRequest_AllowsAddedAtFilter(t *testing.T) {
 	req := CatalogRequest{
 		Source: CatalogSourceQuery,
