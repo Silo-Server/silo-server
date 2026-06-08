@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 )
 
 const maxEPUBMetadataEntrySize = 8 * 1024 * 1024
+const maxPDFMetadataScanSize = 2 * 1024 * 1024
 
 var ebookExtensions = map[string]bool{
 	".epub": true,
@@ -69,13 +71,50 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 		book, err = parseEbookEPUB(path)
 	case ".fb2":
 		book, err = parseEbookFB2(path)
-	case ".pdf", ".mobi", ".azw", ".azw3", ".cbz", ".cbr", ".fbz", ".txt", ".md":
+	case ".pdf":
+		book, err = parseEbookPDF(path)
+	case ".mobi", ".azw", ".azw3", ".cbz", ".cbr", ".fbz", ".txt", ".md":
 		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
 	}
 	book.sanitize()
 	return book, err
+}
+
+func parseEbookPDF(path string) (parsedEbook, error) {
+	book := parsedEbook{Format: "pdf"}
+	file, err := os.Open(path)
+	if err != nil {
+		return book, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxPDFMetadataScanSize))
+	if err != nil {
+		return book, err
+	}
+	info := parsePDFInfoFields(data)
+	book.Title = info["Title"]
+	book.Authors = splitEbookAuthors(info["Author"])
+	book.Description = info["Subject"]
+	book.Genres = splitPDFKeywords(info["Keywords"])
+	for _, value := range []string{
+		info["ISBN"],
+		info["Subject"],
+		info["Keywords"],
+		info["Title"],
+	} {
+		if isbn := normalizeEbookISBN(value); isbn != "" {
+			book.ISBN = isbn
+			break
+		}
+	}
+	if t, ok := parsePDFDate(info["CreationDate"]); ok {
+		book.PublishedAt = t
+		book.Year = t.Year()
+	}
+	return book, nil
 }
 
 func ebookFileFormat(path string) string {
@@ -286,6 +325,118 @@ func parseEbookFB2(path string) (parsedEbook, error) {
 		book.Year = year
 	}
 	return book, nil
+}
+
+func parsePDFInfoFields(data []byte) map[string]string {
+	fields := map[string]string{}
+	for _, key := range []string{"Title", "Author", "Subject", "Keywords", "CreationDate", "ISBN"} {
+		token := []byte("/" + key)
+		idx := bytes.Index(data, token)
+		if idx < 0 {
+			continue
+		}
+		rest := bytes.TrimLeft(data[idx+len(token):], " \t\r\n")
+		if len(rest) == 0 || rest[0] != '(' {
+			continue
+		}
+		value, ok := readPDFLiteralString(rest)
+		if ok {
+			fields[key] = value
+		}
+	}
+	return fields
+}
+
+func readPDFLiteralString(data []byte) (string, bool) {
+	if len(data) == 0 || data[0] != '(' {
+		return "", false
+	}
+	var out strings.Builder
+	depth := 1
+	escaped := false
+	for _, b := range data[1:] {
+		if escaped {
+			switch b {
+			case 'n':
+				out.WriteByte('\n')
+			case 'r':
+				out.WriteByte('\r')
+			case 't':
+				out.WriteByte('\t')
+			case 'b':
+				out.WriteByte('\b')
+			case 'f':
+				out.WriteByte('\f')
+			default:
+				out.WriteByte(b)
+			}
+			escaped = false
+			continue
+		}
+		switch b {
+		case '\\':
+			escaped = true
+		case '(':
+			depth++
+			out.WriteByte(b)
+		case ')':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(out.String()), true
+			}
+			out.WriteByte(b)
+		default:
+			out.WriteByte(b)
+		}
+	}
+	return "", false
+}
+
+func splitEbookAuthors(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ';' || r == '|'
+	})
+	if len(parts) == 1 {
+		parts = strings.Split(value, " and ")
+	}
+	return uniqueTrimmedStrings(parts)
+}
+
+func splitPDFKeywords(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return uniqueTrimmedStrings(strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';'
+	}))
+}
+
+func parsePDFDate(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "D:") {
+		value = strings.TrimPrefix(value, "D:")
+	}
+	value = strings.TrimSuffix(value, "Z")
+	if len(value) >= 14 {
+		if t, err := time.Parse("20060102150405", value[:14]); err == nil {
+			return t, true
+		}
+	}
+	if len(value) >= 8 {
+		if t, err := time.Parse("20060102", value[:8]); err == nil {
+			return t, true
+		}
+	}
+	if len(value) >= 4 {
+		if t, err := time.Parse("2006", value[:4]); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func readEPUBZipEntry(reader *zip.Reader, name string) ([]byte, error) {

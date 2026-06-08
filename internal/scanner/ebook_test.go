@@ -256,6 +256,45 @@ func TestParseEbookFB2Metadata(t *testing.T) {
 	}
 }
 
+func TestParseEbookPDFInfoMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte(`%PDF-1.7
+1 0 obj
+<< /Title (PDF Test Ebook)
+   /Author (Ada Writer; Ben Author)
+   /Subject (ISBN 978-0-306-40615-7)
+   /Keywords (science fiction, adventure)
+   /CreationDate (D:20240102030405Z)
+>>
+endobj
+trailer
+<< /Info 1 0 R >>
+%%EOF`), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Format != "pdf" || got.Title != "PDF Test Ebook" {
+		t.Fatalf("Format/Title = %q/%q, want pdf/PDF Test Ebook", got.Format, got.Title)
+	}
+	if strings.Join(got.Authors, ", ") != "Ada Writer, Ben Author" {
+		t.Fatalf("Authors = %v, want Ada Writer and Ben Author", got.Authors)
+	}
+	if got.ISBN != "9780306406157" {
+		t.Fatalf("ISBN = %q, want normalized ISBN", got.ISBN)
+	}
+	if got.Year != 2024 {
+		t.Fatalf("Year = %d, want 2024", got.Year)
+	}
+	if strings.Join(got.Genres, ", ") != "science fiction, adventure" {
+		t.Fatalf("Genres = %v, want science fiction and adventure", got.Genres)
+	}
+}
+
 func TestEbookSeriesDesiredParsesIndex(t *testing.T) {
 	name, idx := ebookSeriesDesired(&parsedEbook{
 		Series:      " The Expanse ",
