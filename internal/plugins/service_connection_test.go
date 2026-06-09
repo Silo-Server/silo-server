@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type fakeServiceConfigStore struct {
@@ -146,6 +147,35 @@ func TestServiceTestGlobalConfigUsesMergedDraftAndStopsTemporaryInstance(t *test
 	}
 	if got := valuesByKey["secondary"]["enabled"]; got != true {
 		t.Fatalf("secondary enabled = %#v, want true", got)
+	}
+}
+
+func TestRunPluginConnectionCheckSkipsMovieProbeForAudiobookOnlyProvider(t *testing.T) {
+	metadata, err := structpb.NewStruct(map[string]any{
+		"default_priority": map[string]any{
+			"audiobook": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewStruct() error = %v", err)
+	}
+
+	manifest := connectionTestManifest(t, "silo.audiobook-metadata", "0.1.2")
+	manifest.Capabilities = []*pluginv1.CapabilityDescriptor{
+		{
+			Type:        "metadata_provider.v1",
+			Id:          "audiobook-metadata",
+			DisplayName: "Audiobook Metadata",
+			Metadata:    metadata,
+		},
+	}
+	client := &fakePluginClient{manifest: manifest}
+
+	if err := runPluginConnectionCheck(context.Background(), client, manifest); err != nil {
+		t.Fatalf("runPluginConnectionCheck() error = %v", err)
+	}
+	if client.metadataProviderCalls != 0 {
+		t.Fatalf("metadata provider calls = %d, want 0", client.metadataProviderCalls)
 	}
 }
 
