@@ -7,7 +7,13 @@ import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   controller: null as null | {
-    active: null | { contentId: string; playing: boolean; currentTime: number; duration: number; hasFile: boolean };
+    active: null | {
+      contentId: string;
+      playing: boolean;
+      currentTime: number;
+      duration: number;
+      hasFile: boolean;
+    };
     activeRequest: null | { contentId: string };
     isBackgroundBarVisible: boolean;
     startPlayback: ReturnType<typeof vi.fn>;

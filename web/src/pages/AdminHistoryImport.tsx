@@ -1030,9 +1030,7 @@ function MappingsSection({
                     <ArrowRight className="h-3.5 w-3.5" />
                   </TableCell>
                   <TableCell>
-                    <p className="text-sm">
-                      {m.silo_username || `User ${m.silo_user_id}`}
-                    </p>
+                    <p className="text-sm">{m.silo_username || `User ${m.silo_user_id}`}</p>
                     {m.silo_profile_name && (
                       <p className="text-muted-foreground text-xs">{m.silo_profile_name}</p>
                     )}

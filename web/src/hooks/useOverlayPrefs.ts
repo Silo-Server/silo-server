@@ -3,11 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useSetting, useSetSetting } from "@/hooks/queries/settings";
 import { settingsKeys } from "@/hooks/queries/keys";
-import {
-  parseOverlayPrefs,
-  serializeOverlayPrefs,
-  type CardOverlayPrefs,
-} from "@/lib/overlays";
+import { parseOverlayPrefs, serializeOverlayPrefs, type CardOverlayPrefs } from "@/lib/overlays";
 
 const SETTING_KEY = "card_overlays";
 

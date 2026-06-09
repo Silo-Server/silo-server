@@ -42,6 +42,10 @@ vi.mock("@/components/MediaItemMenu", () => ({
   default: () => <div>More actions</div>,
 }));
 
+vi.mock("@/playback/watchPlaybackContext", () => ({
+  useWatchPlaybackController: () => ({ startPlayback: () => {} }),
+}));
+
 vi.mock("@/hooks/queries/sidebarPins", () => ({
   useToggleSidebarPin: () => ({
     togglePin: mockTogglePin,

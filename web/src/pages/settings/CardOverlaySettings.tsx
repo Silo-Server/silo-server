@@ -29,11 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface SettingRowProps {
@@ -84,7 +80,7 @@ function AccentSwatch({ value, defaultValue, disabled, onChange }: AccentSwatchP
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[200px] p-3">
         <div className="space-y-2">
-          <div className="text-xs font-medium uppercase tracking-wide">Accent color</div>
+          <div className="text-xs font-medium tracking-wide uppercase">Accent color</div>
           <div className="grid grid-cols-6 gap-1.5">
             {ACCENT_PALETTE.map((color) => (
               <button
@@ -256,9 +252,7 @@ function PresetPicker({ value, onChange }: PresetPickerProps) {
             </div>
             <div>
               <div className="text-sm font-medium">{preset.label}</div>
-              <div className="text-muted-foreground text-xs leading-snug">
-                {preset.description}
-              </div>
+              <div className="text-muted-foreground text-xs leading-snug">{preset.description}</div>
             </div>
           </button>
         );
@@ -284,8 +278,8 @@ export default function CardOverlaySettings() {
       <div className="space-y-3">
         <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Card Overlays</h2>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Choose which badges appear on poster cards, where they sit, and how they look. Inspired
-          by Kometa.
+          Choose which badges appear on poster cards, where they sit, and how they look. Inspired by
+          Kometa.
         </p>
       </div>
 
@@ -356,26 +350,23 @@ export default function CardOverlaySettings() {
                 onChange={(next) => handleUpdate({ ...displayPrefs, preset: next })}
               />
             </SettingsGroup>
-            <SettingsGroup
-              title="How styling works"
-              description="Where to find what."
-            >
+            <SettingsGroup title="How styling works" description="Where to find what.">
               <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
                 <li>
                   <strong className="text-foreground">Preset</strong> sets the badge shape,
                   background, font, and whether icons show by default.
                 </li>
                 <li>
-                  <strong className="text-foreground">Accent color</strong> (per overlay) tints
-                  that badge — gold for IMDb, red for RT, etc.
+                  <strong className="text-foreground">Accent color</strong> (per overlay) tints that
+                  badge — gold for IMDb, red for RT, etc.
                 </li>
                 <li>
                   <strong className="text-foreground">Icon toggle</strong> (per overlay) overrides
                   the preset's icon default for a single overlay.
                 </li>
                 <li>
-                  <strong className="text-foreground">Position</strong> picks which corner the
-                  badge sits in. Multiple badges in the same corner stack vertically.
+                  <strong className="text-foreground">Position</strong> picks which corner the badge
+                  sits in. Multiple badges in the same corner stack vertically.
                 </li>
               </ul>
             </SettingsGroup>
