@@ -626,6 +626,57 @@ func TestEbookIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
 	}
 }
 
+func TestEbookContentGroupKeyGroupsMultipleSiblingFormatsByTitleAuthor(t *testing.T) {
+	want := ebookContentGroupKey(&parsedEbook{
+		Format:  "epub",
+		Title:   " The Test Ebook ",
+		Authors: []string{"Ada Writer", "Ben Author"},
+	}, "/library/Ada Writer/The Test Ebook.epub")
+	if want == "" {
+		t.Fatal("ebookContentGroupKey returned blank")
+	}
+	for _, tc := range []struct {
+		format string
+		path   string
+	}{
+		{format: "mobi", path: "/library/Ada Writer/The Test Ebook.mobi"},
+		{format: "azw3", path: "/library/Ada Writer/The Test Ebook.azw3"},
+		{format: "pdf", path: "/library/Ada Writer/The Test Ebook.pdf"},
+		{format: "fb2", path: "/library/Ada Writer/The Test Ebook.fb2"},
+	} {
+		got := ebookContentGroupKey(&parsedEbook{
+			Format:  tc.format,
+			Title:   "The Test Ebook",
+			Authors: []string{"ben author", "ada writer"},
+		}, tc.path)
+		if got != want {
+			t.Fatalf("%s content group key = %q, want %q", tc.format, got, want)
+		}
+		if strings.Contains(got, tc.format) {
+			t.Fatalf("content group key should not include file format %q: %q", tc.format, got)
+		}
+	}
+}
+
+func TestEbookContentGroupKeyPrefersISBNAcrossTitleVariants(t *testing.T) {
+	first := ebookContentGroupKey(&parsedEbook{
+		Format:  "epub",
+		Title:   "The Test Ebook",
+		Authors: []string{"Ada Writer"},
+		ISBN:    "9780306406157",
+	}, "/library/Ada Writer/The Test Ebook.epub")
+	second := ebookContentGroupKey(&parsedEbook{
+		Format:  "pdf",
+		Title:   "The Test Ebook: Revised Edition",
+		Authors: []string{"Someone Else"},
+		ISBN:    "9780306406157",
+	}, "/library/Other Name.pdf")
+
+	if first != second {
+		t.Fatalf("ISBN-backed content group keys differ: %q != %q", first, second)
+	}
+}
+
 func TestResolveEbookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
 	finder := &fakeRootContentFinder{}
 	writer := &fakeFilesystemItemWriter{}
@@ -814,6 +865,9 @@ func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
 	}
 	if got.CanonicalRootPath != "/library/Book.epub" || got.ObservedRootPath != "/library/Book.epub" || got.FilePath != "/library/Book.epub" {
 		t.Fatalf("ebook paths = canonical %q observed %q file %q", got.CanonicalRootPath, got.ObservedRootPath, got.FilePath)
+	}
+	if got.ContentGroupKey != "ebook:isbn:9780306406157" {
+		t.Fatalf("ContentGroupKey = %q, want ISBN-backed ebook group", got.ContentGroupKey)
 	}
 	if got.FileSize != 1234 || got.FileModifiedAt == nil || !got.FileModifiedAt.Equal(modifiedAt) {
 		t.Fatalf("file facts = size %d modified %v", got.FileSize, got.FileModifiedAt)

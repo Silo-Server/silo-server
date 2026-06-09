@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -90,6 +92,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	reportEbookScanProgress(ctx, folder.ID, len(candidates), 0, 0, 0)
 
 	ch := make(chan string, workers*2)
+	groupLocks := newEbookGroupLocks()
 	var (
 		wg        sync.WaitGroup
 		processed int64
@@ -108,7 +111,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 				if ctx.Err() != nil {
 					return
 				}
-				if err := s.reconcileEbookFile(ctx, folder, path, &skipped); err != nil {
+				if err := s.reconcileEbookFile(ctx, folder, path, &skipped, groupLocks); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 						failMu.Lock()
 						if cancelErr == nil {
@@ -193,7 +196,7 @@ func reportEbookScanProgress(ctx context.Context, folderID int, total, processed
 	})
 }
 
-func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFolder, filePath string, skipped *int64) error {
+func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFolder, filePath string, skipped *int64, groupLocks *ebookGroupLocks) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -223,6 +226,9 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	if parsed.Title == "" {
 		parsed.Title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 	}
+
+	unlock := groupLocks.lock(ebookContentGroupKey(&parsed, filePath))
+	defer unlock()
 
 	contentID, err := s.upsertEbookMediaItem(ctx, folder.ID, filePath, &parsed)
 	if err != nil {
@@ -315,6 +321,16 @@ func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePa
 		return existingID, nil
 	}
 	if existing := s.findEbookByFilePath(ctx, filePath); existing != nil {
+		applyEbookToMediaItem(existing, book)
+		if existing.SortTitle == "" {
+			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
+		}
+		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
+			return "", err
+		}
+		return existing.ContentID, nil
+	}
+	if existing := s.findEbookByContentGroupKey(ctx, folderID, ebookContentGroupKey(book, filePath)); existing != nil {
 		applyEbookToMediaItem(existing, book)
 		if existing.SortTitle == "" {
 			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
@@ -449,6 +465,34 @@ func (s *Scanner) findEbookByFilePath(ctx context.Context, filePath string) *mod
 	return items[0]
 }
 
+func (s *Scanner) findEbookByContentGroupKey(ctx context.Context, folderID int, groupKey string) *models.MediaItem {
+	if s.fileRepo == nil || s.itemRepo == nil || strings.TrimSpace(groupKey) == "" {
+		return nil
+	}
+	var existingID string
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT mf.content_id
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE mf.media_folder_id = $1
+		  AND mf.group_key_version = 1
+		  AND mf.content_group_key = $2
+		  AND mf.missing_since IS NULL
+		  AND mi.type = 'ebook'
+		ORDER BY CASE WHEN lower(trim(mi.status)) = 'matched' THEN 0 ELSE 1 END,
+		         mf.id ASC
+		LIMIT 1
+	`, folderID, groupKey).Scan(&existingID)
+	if err != nil || existingID == "" {
+		return nil
+	}
+	items, err := s.itemRepo.GetByIDs(ctx, []string{existingID})
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	return items[0]
+}
+
 func (s *Scanner) upsertEbookMediaFile(ctx context.Context, folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook) error {
 	mf := buildEbookMediaFile(folder, contentID, filePath, size, modifiedAt, book)
 	if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
@@ -463,7 +507,7 @@ func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath 
 		MediaFolderID:      folder.ID,
 		CanonicalRootPath:  filePath,
 		ObservedRootPath:   filePath,
-		ContentGroupKey:    contentID,
+		ContentGroupKey:    ebookContentGroupKey(book, filePath),
 		GroupKeyVersion:    1,
 		BaseTitle:          book.Title,
 		BaseYear:           book.Year,
@@ -476,6 +520,112 @@ func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath 
 		Duration:           book.PageCount,
 		ProbeSource:        "local",
 	}
+}
+
+func ebookContentGroupKey(book *parsedEbook, filePath string) string {
+	if book != nil {
+		if isbn := normalizeEbookISBN(book.ISBN); isbn != "" {
+			return "ebook:isbn:" + isbn
+		}
+	}
+
+	title := ""
+	authors := []string(nil)
+	if book != nil {
+		title = strings.TrimSpace(book.Title)
+		authors = book.Authors
+	}
+	if title == "" {
+		title = ebookTitleFromPath(filePath)
+	}
+	normalizedTitle := normalizeEbookIdentityPart(title)
+	if normalizedTitle == "" {
+		cleanPath := strings.TrimSpace(filepath.Clean(filePath))
+		if cleanPath == "." {
+			return ""
+		}
+		return "ebook:path:" + cleanPath
+	}
+
+	normalizedAuthors := make([]string, 0, len(authors))
+	seenAuthors := make(map[string]struct{}, len(authors))
+	for _, author := range authors {
+		normalized := normalizeEbookIdentityPart(author)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seenAuthors[normalized]; ok {
+			continue
+		}
+		seenAuthors[normalized] = struct{}{}
+		normalizedAuthors = append(normalizedAuthors, normalized)
+	}
+	sort.Strings(normalizedAuthors)
+	if len(normalizedAuthors) > 0 {
+		return "ebook:title_author:" + normalizedTitle + "|" + strings.Join(normalizedAuthors, ",")
+	}
+
+	dir := strings.TrimSpace(filepath.Clean(filepath.Dir(filePath)))
+	if dir == "." {
+		dir = ""
+	}
+	return "ebook:title:" + normalizedTitle + "|dir:" + normalizeEbookIdentityPart(dir)
+}
+
+func ebookTitleFromPath(filePath string) string {
+	base := filepath.Base(filePath)
+	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	if format := ebookFileFormat(base); format != "" {
+		return strings.TrimSuffix(base, format)
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+func normalizeEbookIdentityPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	previousSpace := false
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			previousSpace = false
+			continue
+		}
+		if unicode.IsSpace(r) || r == '&' || r == '-' || r == '_' || r == ':' || r == '/' || r == '\\' || r == ',' || r == '.' {
+			if b.Len() > 0 && !previousSpace {
+				b.WriteByte(' ')
+				previousSpace = true
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+type ebookGroupLocks struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newEbookGroupLocks() *ebookGroupLocks {
+	return &ebookGroupLocks{locks: make(map[string]*sync.Mutex)}
+}
+
+func (l *ebookGroupLocks) lock(key string) func() {
+	if l == nil || strings.TrimSpace(key) == "" {
+		return func() {}
+	}
+	l.mu.Lock()
+	groupLock := l.locks[key]
+	if groupLock == nil {
+		groupLock = &sync.Mutex{}
+		l.locks[key] = groupLock
+	}
+	l.mu.Unlock()
+
+	groupLock.Lock()
+	return groupLock.Unlock
 }
 
 type ebookCoverMetadataStore interface {
