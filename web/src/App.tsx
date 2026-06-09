@@ -565,6 +565,7 @@ function AdminRealtimeEventChannels() {
   useEventChannel("sessions");
   useEventChannel("tasks");
   useEventChannel("scans");
+  useEventChannel("settings");
   return null;
 }
 

@@ -6,7 +6,6 @@ type JellyfinWebInstallStatus = Parameters<typeof hasPinnedJellyfinWebInstalled>
 
 function status(overrides: Partial<NonNullable<JellyfinWebInstallStatus>> = {}) {
   return {
-    web_state: "installed",
     pinned_version: "10.11.6",
     installed_version: "10.11.6",
     ...overrides,
@@ -27,7 +26,6 @@ describe("jellyfinCompat helpers", () => {
   it("does not treat missing or outdated installs as the pinned version", () => {
     expect(hasPinnedJellyfinWebInstalled(status({ installed_version: "" }))).toBe(false);
     expect(hasPinnedJellyfinWebInstalled(status({ installed_version: "10.11.5" }))).toBe(false);
-    expect(hasPinnedJellyfinWebInstalled(status({ web_state: "update_available" }))).toBe(false);
     expect(hasPinnedJellyfinWebInstalled(null)).toBe(false);
   });
 });

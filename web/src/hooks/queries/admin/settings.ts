@@ -78,14 +78,6 @@ export function useJellyfinCompatStatus() {
     queryKey: adminKeys.jellyfinCompatStatus(),
     queryFn: () => api<JellyfinCompatStatus>("/admin/jellyfin-compat/status"),
     staleTime: 15_000,
-    refetchInterval: (query) => {
-      const status = query.state.data;
-      return status?.operation?.state === "running" ||
-        status?.web_state === "installing" ||
-        status?.web_state === "removing"
-        ? 2_000
-        : false;
-    },
   });
 }
 

@@ -50,6 +50,7 @@ func TestRouterCompressesJSONResponses(t *testing.T) {
 func TestRouterServesCompatWebAssetsCreatedAfterStartup(t *testing.T) {
 	root := t.TempDir()
 	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":         "true",
 		"jellyfin_compat.web_install_dir": root,
 		"jellyfin_compat.web_version":     "10.11.6",
 	})
@@ -85,6 +86,68 @@ func TestRouterServesCompatWebAssetsCreatedAfterStartup(t *testing.T) {
 	}
 }
 
+func TestRouterReportsDisabledCompatWebAssets(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		settings map[string]string
+		wantBody string
+	}{
+		{
+			name: "proxy disabled",
+			settings: map[string]string{
+				"jellyfin_compat.enabled":     "false",
+				"jellyfin_compat.web_enabled": "true",
+			},
+			wantBody: "Jellyfin Web UI is disabled because the Jellyfin compatibility proxy is disabled",
+		},
+		{
+			name: "web disabled",
+			settings: map[string]string{
+				"jellyfin_compat.enabled":     "true",
+				"jellyfin_compat.web_enabled": "false",
+			},
+			wantBody: "Jellyfin Web UI is disabled in Silo settings",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			release := filepath.Join(root, "10.11.6")
+			writeValidWebRelease(t, release, "10.11.6")
+			if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>ready"), 0o644); err != nil {
+				t.Fatalf("write ready index: %v", err)
+			}
+			if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
+				t.Fatalf("symlink current: %v", err)
+			}
+			settings := map[string]string{
+				"jellyfin_compat.web_install_dir": root,
+				"jellyfin_compat.web_version":     "10.11.6",
+			}
+			for key, value := range tt.settings {
+				settings[key] = value
+			}
+			cfg, err := config.LoadFromDB(settings)
+			if err != nil {
+				t.Fatalf("LoadFromDB: %v", err)
+			}
+			router := NewRouter(Dependencies{Config: cfg})
+
+			req := httptest.NewRequest(http.MethodGet, "/web/", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+			}
+			if !strings.Contains(rec.Body.String(), tt.wantBody) {
+				t.Fatalf("response body = %q, want %q", rec.Body.String(), tt.wantBody)
+			}
+			if strings.Contains(rec.Body.String(), "assets are not installed") {
+				t.Fatalf("response body = %q, should not report installed assets as missing", rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestRouterRejectsArbitraryCompatWebDirectory(t *testing.T) {
 	root := t.TempDir()
 	arbitrary := t.TempDir()
@@ -92,6 +155,7 @@ func TestRouterRejectsArbitraryCompatWebDirectory(t *testing.T) {
 		t.Fatalf("write arbitrary index: %v", err)
 	}
 	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":         "true",
 		"jellyfin_compat.web_install_dir": root,
 		"jellyfin_compat.web_dir":         arbitrary,
 		"jellyfin_compat.web_version":     "10.11.6",

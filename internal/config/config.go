@@ -210,6 +210,7 @@ type JellyfinCompatConfig struct {
 	EmulatedServerVersion string        `yaml:"emulated_server_version"`
 	ServerID              string        `yaml:"server_id"`
 	ServerName            string        `yaml:"server_name"`
+	WebEnabled            bool          `yaml:"web_enabled"`
 	WebVersion            string        `yaml:"web_version"`
 	WebDir                string        `yaml:"web_dir"`
 	WebInstallDir         string        `yaml:"web_install_dir"`
@@ -225,6 +226,7 @@ type jellyfinCompatConfigRaw struct {
 	EmulatedServerVersion string `yaml:"emulated_server_version"`
 	ServerID              string `yaml:"server_id"`
 	ServerName            string `yaml:"server_name"`
+	WebEnabled            bool   `yaml:"web_enabled"`
 	WebVersion            string `yaml:"web_version"`
 	WebDir                string `yaml:"web_dir"`
 	WebInstallDir         string `yaml:"web_install_dir"`
@@ -448,6 +450,7 @@ func setDefaults() *configRaw {
 			EmulatedServerVersion: "10.12.0",
 			ServerID:              defaultJellyfinCompatServerID,
 			ServerName:            "Silo",
+			WebEnabled:            true,
 			WebVersion:            DefaultJellyfinWebVersion,
 			WebDir:                DefaultJellyfinWebDir,
 			WebInstallDir:         DefaultJellyfinWebInstallDir,

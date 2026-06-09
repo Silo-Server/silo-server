@@ -1,13 +1,24 @@
 import { useId, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, Loader2, Settings2, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  Loader2,
+  Power,
+  PowerOff,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   useInstallJellyfinCompatWeb,
   useJellyfinCompatStatus,
   useRemoveJellyfinCompatWeb,
+  useUpdateJellyfinCompatSettings,
 } from "@/hooks/queries/admin/settings";
 import { hasPinnedJellyfinWebInstalled } from "@/lib/jellyfinCompat";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -48,6 +59,16 @@ function formatTimestamp(value?: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function formatOperationPhase(value?: string): string {
+  if (!value) return "Working";
+  return statusLabel(value);
+}
+
+function clampProgressPercent(value?: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(100, Math.max(0, Math.round(value)));
 }
 
 function StatusLine({
@@ -140,6 +161,7 @@ export default function CompatibilityProxiesSettings() {
   const statusQuery = useJellyfinCompatStatus();
   const installWeb = useInstallJellyfinCompatWeb();
   const removeWeb = useRemoveJellyfinCompatWeb();
+  const updateCompatSettings = useUpdateJellyfinCompatSettings();
   const status = statusQuery.data;
   const [jellyfinExpanded, setJellyfinExpanded] = useState(false);
 
@@ -173,6 +195,9 @@ export default function CompatibilityProxiesSettings() {
   const jellyfinEnabledChecked =
     jellyfinEnabledValue === "" ? Boolean(status?.enabled) : jellyfinEnabledValue === "true";
   const jellyfinEnabledDirty = form.dirtyKeys.includes("jellyfin_compat.enabled");
+  const jellyfinProxyRunning = Boolean(status?.enabled);
+  const jellyfinWebServing = jellyfinProxyRunning && status?.web_enabled !== false;
+  const installedWebAssetsPresent = Boolean(status?.installed_version);
   const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(status);
 
   return (
@@ -203,6 +228,9 @@ export default function CompatibilityProxiesSettings() {
                 <Badge variant={status?.enabled ? "default" : "outline"}>
                   {status?.enabled ? "API enabled" : "API disabled"}
                 </Badge>
+                <Badge variant={jellyfinWebServing ? "secondary" : "outline"}>
+                  {jellyfinWebServing ? "Web UI enabled" : "Web UI disabled"}
+                </Badge>
                 <Badge
                   variant={
                     status?.web_state === "installed" || status?.web_state === "update_available"
@@ -212,12 +240,14 @@ export default function CompatibilityProxiesSettings() {
                         : "outline"
                   }
                 >
-                  Web UI {status ? statusLabel(status.web_state) : "Unknown"}
+                  Assets {status ? statusLabel(status.web_state) : "Unknown"}
                 </Badge>
                 {status?.operation?.state === "running" && (
                   <Badge variant="secondary">{statusLabel(status.operation.kind)} running</Badge>
                 )}
-                {jellyfinEnabledDirty && <Badge variant="outline">Enablement pending save</Badge>}
+                {jellyfinEnabledDirty && (
+                  <Badge variant="outline">API enablement pending save</Badge>
+                )}
                 {status?.restart_required && <Badge variant="outline">Restart required</Badge>}
               </div>
             </div>
@@ -253,8 +283,8 @@ export default function CompatibilityProxiesSettings() {
           <div className="space-y-4 py-3">
             <h3 className="text-sm font-medium">Web Component</h3>
             <p className="text-muted-foreground text-sm leading-relaxed">
-              The Web Component is separate from the API layer. Leave the pinned version and install
-              directory blank to use Silo's managed defaults.
+              The Web Component is separate from the API layer. Disabling the Web UI stops Silo from
+              serving the route while keeping installed assets available for later reactivation.
             </p>
 
             <div className="grid gap-x-8 md:grid-cols-2">
@@ -280,25 +310,42 @@ export default function CompatibilityProxiesSettings() {
               <StatusLine label="Provenance present" value={status?.provenance_present} />
             </div>
 
-            {status?.operation?.state === "running" && (
-              <div className="border-border/70 bg-muted/30 flex items-start gap-3 rounded-lg border px-3 py-3 text-sm">
-                <Loader2 className="text-muted-foreground mt-0.5 h-4 w-4 flex-shrink-0 animate-spin" />
-                <div className="space-y-1">
-                  <p className="font-medium">{operationTitle(status.operation.kind)}</p>
-                  <p className="text-muted-foreground leading-relaxed">
-                    Silo is{" "}
-                    {status.operation.kind === "remove"
-                      ? "removing managed Jellyfin Web assets"
-                      : "downloading Jellyfin Web, installing dependencies, and building production assets"}
-                    . This can take several minutes; status refreshes automatically while the
-                    operation is running.
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    Started {formatTimestamp(status.operation.started_at)}
-                  </p>
-                </div>
-              </div>
-            )}
+            {status?.operation?.state === "running" &&
+              (() => {
+                const progress = clampProgressPercent(status.operation.progress_percent);
+                const phase = formatOperationPhase(status.operation.phase);
+                const message =
+                  status.operation.message ||
+                  (status.operation.kind === "remove"
+                    ? "Removing managed Jellyfin Web assets"
+                    : "Downloading Jellyfin Web, installing dependencies, and building production assets");
+
+                return (
+                  <div className="border-border/70 bg-muted/30 flex items-start gap-3 rounded-lg border px-3 py-3 text-sm">
+                    <Loader2 className="text-muted-foreground mt-0.5 h-4 w-4 flex-shrink-0 animate-spin" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-medium">{operationTitle(status.operation.kind)}</p>
+                        {progress !== null && (
+                          <span className="text-muted-foreground text-xs font-medium">
+                            {progress}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-muted-foreground leading-relaxed">{message}</p>
+                        <p className="text-muted-foreground text-xs">{phase}</p>
+                      </div>
+                      {progress !== null && (
+                        <Progress value={progress} aria-label="Jellyfin Web install progress" />
+                      )}
+                      <p className="text-muted-foreground text-xs">
+                        Started {formatTimestamp(status.operation.started_at)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
             <div className="flex flex-wrap items-center gap-2">
               {!pinnedJellyfinWebInstalled && (
@@ -321,6 +368,24 @@ export default function CompatibilityProxiesSettings() {
                     : operationRunning
                       ? "Web UI Busy"
                       : "Install Web UI"}
+                </Button>
+              )}
+              {installedWebAssetsPresent && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={jellyfinWebServing ? "outline" : "default"}
+                  onClick={() => updateCompatSettings.mutate({ web_enabled: !jellyfinWebServing })}
+                  disabled={
+                    !jellyfinProxyRunning || updateCompatSettings.isPending || operationRunning
+                  }
+                >
+                  {jellyfinWebServing ? (
+                    <PowerOff className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Power className="mr-2 h-4 w-4" />
+                  )}
+                  {jellyfinWebServing ? "Disable Web UI" : "Enable Web UI"}
                 </Button>
               )}
               <Button

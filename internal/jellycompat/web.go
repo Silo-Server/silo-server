@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -95,8 +96,13 @@ func newCompatWebHandler(webFS fs.FS, version string) http.Handler {
 
 func newDynamicCompatWebHandler(deps Dependencies) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		webFS, version, err := resolveCompatWebFS(r.Context(), deps)
+		ctx := r.Context()
+		webFS, version, err := resolveCompatWebFS(ctx, deps)
 		if err != nil || webFS == nil {
+			if err == nil && !compatWebEnabled(ctx, deps) && compatWebAssetsInstalled(ctx, deps) {
+				http.Error(w, compatWebDisabledMessage(ctx, deps), http.StatusNotFound)
+				return
+			}
 			http.Error(w, "Jellyfin Web UI assets are not installed", http.StatusNotFound)
 			return
 		}
@@ -120,6 +126,9 @@ func fileExists(fsys fs.FS, name string) bool {
 }
 
 func resolveCompatWebFS(ctx context.Context, deps Dependencies) (fs.FS, string, error) {
+	if !compatWebEnabled(ctx, deps) {
+		return nil, "", nil
+	}
 	if deps.WebFS != nil {
 		if _, err := fs.Stat(deps.WebFS, "index.html"); err != nil {
 			return nil, "", err
@@ -139,6 +148,60 @@ func resolveCompatWebFS(ctx context.Context, deps Dependencies) (fs.FS, string, 
 		return nil, "", err
 	}
 	return webFS, compatWebVersion(ctx, deps), nil
+}
+
+func compatWebEnabled(ctx context.Context, deps Dependencies) bool {
+	proxyEnabled, webEnabled := compatWebEnablement(ctx, deps)
+	return proxyEnabled && webEnabled
+}
+
+func compatWebDisabledMessage(ctx context.Context, deps Dependencies) string {
+	proxyEnabled, webEnabled := compatWebEnablement(ctx, deps)
+	switch {
+	case !proxyEnabled:
+		return "Jellyfin Web UI is disabled because the Jellyfin compatibility proxy is disabled"
+	case !webEnabled:
+		return "Jellyfin Web UI is disabled in Silo settings"
+	default:
+		return "Jellyfin Web UI is disabled"
+	}
+}
+
+func compatWebEnablement(ctx context.Context, deps Dependencies) (bool, bool) {
+	proxyEnabled := deps.Config == nil || deps.Config.JellyfinCompat.Enabled
+	webEnabled := true
+	if deps.Config != nil {
+		webEnabled = deps.Config.JellyfinCompat.WebEnabled
+	}
+	if deps.SettingsRepo != nil {
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.enabled"); strings.TrimSpace(value) != "" {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+				proxyEnabled = parsed
+			}
+		}
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.web_enabled"); strings.TrimSpace(value) != "" {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+				webEnabled = parsed
+			}
+		}
+	}
+	return proxyEnabled, webEnabled
+}
+
+func compatWebAssetsInstalled(ctx context.Context, deps Dependencies) bool {
+	if deps.WebFS != nil {
+		_, err := fs.Stat(deps.WebFS, "index.html")
+		return err == nil
+	}
+	if deps.Config == nil {
+		return false
+	}
+	root := compatWebDir(ctx, deps)
+	if root == "" {
+		return false
+	}
+	_, err := validateWebComponentDirectory(root)
+	return err == nil
 }
 
 func compatWebDir(ctx context.Context, deps Dependencies) string {

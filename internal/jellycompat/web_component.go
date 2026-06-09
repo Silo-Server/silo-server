@@ -72,6 +72,19 @@ const (
 	WebComponentOperationFailed    WebComponentOperationState = "failed"
 )
 
+type WebComponentOperationPhase string
+
+const (
+	WebComponentOperationPreparing   WebComponentOperationPhase = "preparing"
+	WebComponentOperationDownloading WebComponentOperationPhase = "downloading"
+	WebComponentOperationInstalling  WebComponentOperationPhase = "installing_dependencies"
+	WebComponentOperationBuilding    WebComponentOperationPhase = "building"
+	WebComponentOperationStaging     WebComponentOperationPhase = "staging"
+	WebComponentOperationActivating  WebComponentOperationPhase = "activating"
+	WebComponentOperationPersisting  WebComponentOperationPhase = "persisting_settings"
+	WebComponentOperationRemoving    WebComponentOperationPhase = "removing"
+)
+
 type WebComponentMetadata struct {
 	Component    string `json:"component"`
 	SourceURL    string `json:"source_url"`
@@ -94,17 +107,20 @@ type WebInstallerPrerequisite struct {
 }
 
 type WebComponentOperationStatus struct {
-	ID          string                     `json:"id"`
-	Kind        WebComponentOperationKind  `json:"kind"`
-	State       WebComponentOperationState `json:"state"`
-	PID         int                        `json:"pid,omitempty"`
-	Process     string                     `json:"process,omitempty"`
-	Host        string                     `json:"host,omitempty"`
-	StartedAt   string                     `json:"started_at"`
-	CompletedAt string                     `json:"completed_at,omitempty"`
-	Error       string                     `json:"error,omitempty"`
-	lockMTime   time.Time                  `json:"-"`
-	malformed   bool                       `json:"-"`
+	ID              string                     `json:"id"`
+	Kind            WebComponentOperationKind  `json:"kind"`
+	State           WebComponentOperationState `json:"state"`
+	PID             int                        `json:"pid,omitempty"`
+	Process         string                     `json:"process,omitempty"`
+	Host            string                     `json:"host,omitempty"`
+	StartedAt       string                     `json:"started_at"`
+	CompletedAt     string                     `json:"completed_at,omitempty"`
+	Phase           WebComponentOperationPhase `json:"phase,omitempty"`
+	ProgressPercent int                        `json:"progress_percent,omitempty"`
+	Message         string                     `json:"message,omitempty"`
+	Error           string                     `json:"error,omitempty"`
+	lockMTime       time.Time                  `json:"-"`
+	malformed       bool                       `json:"-"`
 }
 
 type WebComponentStatus struct {
@@ -114,6 +130,7 @@ type WebComponentStatus struct {
 	PublicURL         string                       `json:"public_url"`
 	EmulatedVersion   string                       `json:"emulated_server_version"`
 	ServerName        string                       `json:"server_name"`
+	WebEnabled        bool                         `json:"web_enabled"`
 	WebState          WebComponentState            `json:"web_state"`
 	PinnedVersion     string                       `json:"pinned_version"`
 	InstalledVersion  string                       `json:"installed_version,omitempty"`
@@ -139,6 +156,7 @@ type WebComponentInstallOptions struct {
 	Version     string
 	Now         func() time.Time
 	RunCommand  func(context.Context, string, []string, string) error
+	OnProgress  func(WebComponentOperationStatus)
 }
 
 type WebComponentInstallCompleteFunc func(context.Context, WebComponentStatus) error
@@ -178,6 +196,21 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 		enabled = strings.EqualFold(raw, "true") || raw == "1" || strings.EqualFold(raw, "yes")
 	}
 
+	configuredWebEnabled := true
+	if cfg != nil {
+		configuredWebEnabled = cfg.JellyfinCompat.WebEnabled
+	}
+	var webEnabledError string
+	if raw := strings.TrimSpace(settings["jellyfin_compat.web_enabled"]); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			webEnabledError = fmt.Sprintf("invalid Jellyfin Web UI enabled setting %q", raw)
+		} else {
+			configuredWebEnabled = parsed
+		}
+	}
+	webEnabled := enabled && configuredWebEnabled
+
 	root := stringSetting(settings, "jellyfin_compat.web_install_dir", DefaultWebInstallRoot(cfg))
 	webDir := stringSetting(settings, "jellyfin_compat.web_dir", DefaultWebInstallPath(cfg))
 	pinned := stringSetting(settings, "jellyfin_compat.web_version", DefaultWebVersion(cfg))
@@ -185,6 +218,10 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 
 	status := webComponentStatus(root, webDir, pinned, sourceURL)
 	status.Enabled = enabled
+	status.WebEnabled = webEnabled
+	if webEnabledError != "" {
+		status.LastError = appendStatusError(status.LastError, webEnabledError)
+	}
 	if cfg != nil {
 		status.Listen = cfg.JellyfinCompat.Listen
 		status.PublicURL = cfg.JellyfinCompat.PublicURL
@@ -235,19 +272,24 @@ func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebCom
 	}
 	status.Operation = op
 	status.WebState = WebComponentInstalling
+	notifyWebOperationProgress(opts.OnProgress, op)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 		defer cancel()
 
-		installStatus, installErr := installWebComponentLocked(ctx, opts)
+		installStatus, installErr := installWebComponentLocked(ctx, opts, op.ID)
 		if installErr == nil && onComplete != nil {
+			notifyWebOperationProgress(
+				opts.OnProgress,
+				updateWebOperationProgress(opts.InstallRoot, op.ID, WebComponentOperationPersisting, 98, "Persisting Jellyfin Web settings"),
+			)
 			installErr = onComplete(context.Background(), installStatus)
 			if installErr != nil {
 				writeWebInstallError(opts.InstallRoot, installErr)
 			}
 		}
-		finishWebOperation(opts.InstallRoot, op.ID, installErr)
+		notifyWebOperationProgress(opts.OnProgress, finishWebOperation(opts.InstallRoot, op.ID, installErr))
 	}()
 
 	return status, nil
@@ -300,12 +342,13 @@ func InstallWebComponent(ctx context.Context, opts WebComponentInstallOptions) (
 		return status, err
 	}
 
-	installStatus, err := installWebComponentLocked(ctx, opts)
-	finishWebOperation(opts.InstallRoot, op.ID, err)
+	notifyWebOperationProgress(opts.OnProgress, op)
+	installStatus, err := installWebComponentLocked(ctx, opts, op.ID)
+	notifyWebOperationProgress(opts.OnProgress, finishWebOperation(opts.InstallRoot, op.ID, err))
 	return installStatus, err
 }
 
-func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOptions) (WebComponentStatus, error) {
+func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOptions, opID string) (WebComponentStatus, error) {
 	root := opts.InstallRoot
 	sourceURL := opts.SourceURL
 	version := opts.Version
@@ -317,11 +360,19 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 	if run == nil {
 		run = runWebInstallCommand
 	}
+	reportProgress := func(phase WebComponentOperationPhase, progressPercent int, message string) {
+		notifyWebOperationProgress(
+			opts.OnProgress,
+			updateWebOperationProgress(root, opID, phase, progressPercent, message),
+		)
+	}
 
+	reportProgress(WebComponentOperationPreparing, 2, "Preparing Jellyfin Web install directory")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 
+	reportProgress(WebComponentOperationPreparing, 5, "Creating temporary install workspace")
 	tmpRoot, err := os.MkdirTemp(root, ".install-*")
 	if err != nil {
 		writeWebInstallError(root, err)
@@ -335,27 +386,32 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 
 	srcDir := filepath.Join(tmpRoot, "src")
 	tag := "v" + version
+	reportProgress(WebComponentOperationDownloading, 10, fmt.Sprintf("Downloading Jellyfin Web %s", tag))
 	if err := run(ctx, "", []string{"git", "clone", "--depth", "1", "--branch", tag, sourceURL, srcDir}, ""); err != nil {
 		err = fmt.Errorf("clone jellyfin-web %s: %w", tag, err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationDownloading, 25, "Download complete; resolving Jellyfin Web revision")
 	commitSHA, err := commandOutput(ctx, srcDir, "git", "rev-parse", "HEAD")
 	if err != nil {
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationInstalling, 35, "Installing Jellyfin Web dependencies")
 	if err := run(ctx, srcDir, []string{"npm", "ci"}, ""); err != nil {
 		err = fmt.Errorf("install jellyfin-web dependencies: %w", err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationBuilding, 60, "Building Jellyfin Web production assets")
 	if err := run(ctx, srcDir, []string{"npm", "run", "build:production"}, ""); err != nil {
 		err = fmt.Errorf("build jellyfin-web production bundle: %w", err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 
+	reportProgress(WebComponentOperationStaging, 75, "Staging built Jellyfin Web assets")
 	releaseDir := filepath.Join(root, version)
 	stagedDir := filepath.Join(tmpRoot, version)
 	if err := copyDir(filepath.Join(srcDir, "dist"), stagedDir); err != nil {
@@ -367,6 +423,7 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationStaging, 85, "Calculating Jellyfin Web asset checksum")
 	checksum, err := directoryChecksum(stagedDir)
 	if err != nil {
 		writeWebInstallError(root, err)
@@ -392,11 +449,13 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationStaging, 90, "Validating staged Jellyfin Web assets")
 	if _, err := validateWebComponentDirectory(stagedDir); err != nil {
 		err = fmt.Errorf("validate staged jellyfin-web assets: %w", err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationActivating, 94, "Preparing Jellyfin Web activation")
 	if err := ensureCanReplaceWebRelease(releaseDir); err != nil {
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
@@ -409,6 +468,7 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	reportProgress(WebComponentOperationActivating, 96, fmt.Sprintf("Activating Jellyfin Web %s", version))
 	if err := activateWebComponent(root, version); err != nil {
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
@@ -711,6 +771,61 @@ func ensureWebInstallerPrerequisites() error {
 	return nil
 }
 
+func setInitialWebOperationProgress(op *WebComponentOperationStatus) {
+	if op == nil {
+		return
+	}
+	switch op.Kind {
+	case WebComponentOperationRemove:
+		op.Phase = WebComponentOperationRemoving
+		op.ProgressPercent = 5
+		op.Message = "Removing managed Jellyfin Web assets"
+	default:
+		op.Phase = WebComponentOperationPreparing
+		op.ProgressPercent = 1
+		op.Message = "Preparing Jellyfin Web install"
+	}
+}
+
+func notifyWebOperationProgress(onProgress func(WebComponentOperationStatus), op *WebComponentOperationStatus) {
+	if onProgress == nil || op == nil {
+		return
+	}
+	onProgress(*op)
+}
+
+func updateWebOperationProgress(root, id string, phase WebComponentOperationPhase, progressPercent int, message string) *WebComponentOperationStatus {
+	if id == "" {
+		return nil
+	}
+	progressPercent = clampWebOperationProgress(progressPercent)
+
+	webOperationsMu.Lock()
+	op := webOperations[root]
+	if op == nil || op.ID != id || op.State != WebComponentOperationRunning {
+		webOperationsMu.Unlock()
+		return nil
+	}
+	op.Phase = phase
+	op.ProgressPercent = progressPercent
+	op.Message = message
+	copied := copyWebOperation(op)
+	webOperationsMu.Unlock()
+
+	_ = replaceWebOperationState(root, copied)
+	return copied
+}
+
+func clampWebOperationProgress(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
 func beginWebOperation(root string, kind WebComponentOperationKind) (*WebComponentOperationStatus, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
@@ -727,6 +842,7 @@ func beginWebOperation(root string, kind WebComponentOperationKind) (*WebCompone
 		Host:      host,
 		StartedAt: now.Format(time.RFC3339),
 	}
+	setInitialWebOperationProgress(op)
 
 	webOperationsMu.Lock()
 	defer webOperationsMu.Unlock()
@@ -854,20 +970,29 @@ func processToken(pid int) string {
 	return fields[19]
 }
 
-func finishWebOperation(root, id string, err error) {
+func finishWebOperation(root, id string, err error) *WebComponentOperationStatus {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	webOperationsMu.Lock()
 	op := webOperations[root]
+	var copied *WebComponentOperationStatus
 	if op != nil && op.ID == id {
 		op.CompletedAt = now
 		if err != nil {
 			op.State = WebComponentOperationFailed
 			op.Error = err.Error()
+			op.Message = "Jellyfin Web operation failed"
 		} else {
 			op.State = WebComponentOperationSucceeded
 			op.Error = ""
+			op.ProgressPercent = 100
+			if op.Kind == WebComponentOperationRemove {
+				op.Message = "Jellyfin Web assets removed"
+			} else {
+				op.Message = "Jellyfin Web install complete"
+			}
 		}
+		copied = copyWebOperation(op)
 	}
 	webOperationsMu.Unlock()
 
@@ -878,6 +1003,7 @@ func finishWebOperation(root, id string, err error) {
 			clearWebInstallError(root)
 		}
 	}
+	return copied
 }
 
 func currentWebOperation(root string) *WebComponentOperationStatus {
@@ -1002,6 +1128,7 @@ func webComponentStatus(root, webDir, pinnedVersion, sourceURL string) WebCompon
 		}
 	}
 	status := WebComponentStatus{
+		WebEnabled:     true,
 		WebState:       WebComponentMissing,
 		PinnedVersion:  pinnedVersion,
 		SourceURL:      sourceURL,
@@ -1280,6 +1407,33 @@ func writeWebOperationState(root string, op *WebComponentOperationStatus) error 
 		return err
 	}
 	return nil
+}
+
+func replaceWebOperationState(root string, op *WebComponentOperationStatus) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(op)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	tmp, err := os.CreateTemp(root, ".install-lock-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, filepath.Join(root, webInstallLock))
 }
 
 func clearWebInstallState(root string) {

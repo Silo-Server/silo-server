@@ -128,12 +128,25 @@ export interface JellyfinCompatInstallerPrerequisite {
   message?: string;
 }
 
+export type JellyfinCompatOperationPhase =
+  | "preparing"
+  | "downloading"
+  | "installing_dependencies"
+  | "building"
+  | "staging"
+  | "activating"
+  | "persisting_settings"
+  | "removing";
+
 export interface JellyfinCompatOperationStatus {
   id: string;
   kind: "install" | "remove";
   state: "running" | "succeeded" | "failed";
   started_at: string;
   completed_at?: string;
+  phase?: JellyfinCompatOperationPhase;
+  progress_percent?: number;
+  message?: string;
   error?: string;
 }
 
@@ -144,6 +157,7 @@ export interface JellyfinCompatStatus {
   public_url: string;
   emulated_server_version: string;
   server_name: string;
+  web_enabled: boolean;
   web_state: JellyfinCompatWebState;
   pinned_version: string;
   installed_version?: string;
@@ -177,6 +191,7 @@ export interface JellyfinCompatSettingsPatch {
   public_url?: string;
   server_name?: string;
   emulated_server_version?: string;
+  web_enabled?: boolean;
   web_version?: string;
   web_dir?: string;
   web_install_dir?: string;
@@ -2296,7 +2311,8 @@ export type EventChannel =
   | "tasks"
   | "scans"
   | "history_import"
-  | "user_state";
+  | "user_state"
+  | "settings";
 
 export interface EventsHelloMessage {
   type: "hello";

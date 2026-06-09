@@ -205,6 +205,7 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 	setIfNonEmpty(m, "jellyfin_compat.emulated_server_version", raw.JellyfinCompat.EmulatedServerVersion)
 	setIfNonEmpty(m, "jellyfin_compat.server_id", raw.JellyfinCompat.ServerID)
 	setIfNonEmpty(m, "jellyfin_compat.server_name", raw.JellyfinCompat.ServerName)
+	setIfNonEmpty(m, "jellyfin_compat.web_enabled", strconv.FormatBool(raw.JellyfinCompat.WebEnabled))
 	setIfNonEmpty(m, "jellyfin_compat.web_version", raw.JellyfinCompat.WebVersion)
 	setIfNonEmpty(m, "jellyfin_compat.web_dir", raw.JellyfinCompat.WebDir)
 	setIfNonEmpty(m, "jellyfin_compat.web_install_dir", raw.JellyfinCompat.WebInstallDir)

@@ -34,6 +34,24 @@ func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadFromDBJellyfinWebEnabledDefaultsToTrue(t *testing.T) {
+	cfg, err := LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if !cfg.JellyfinCompat.WebEnabled {
+		t.Fatal("JellyfinCompat.WebEnabled = false, want default true")
+	}
+
+	cfg, err = LoadFromDB(map[string]string{"jellyfin_compat.web_enabled": "false"})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if cfg.JellyfinCompat.WebEnabled {
+		t.Fatal("JellyfinCompat.WebEnabled = true, want configured false")
+	}
+}
+
 func TestLoadFromDBAudiobookshelfCompatFlagGatesCompatListener(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{})
 	if err != nil {

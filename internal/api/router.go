@@ -776,6 +776,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.SessionsLoader = playbackSessionsLoader
 		adminHandler.DetailSvc = detailSvc
 		adminHandler.EventBus = deps.EventBus
+		adminHandler.EventsHub = deps.EventsHub
 		adminHandler.ImpersonationService = authService
 		adminHandler.StatsSource = deps.AdminStatsProvider
 		adminHandler.RealtimeHub = deps.RealtimeHub

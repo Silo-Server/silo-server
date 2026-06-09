@@ -7,18 +7,23 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
 )
+
+const jellyfinCompatWebOperationUpdatedEvent = "jellyfin_compat.web_operation.updated"
 
 type jellyfinCompatSettingsRequest struct {
 	Enabled               *bool   `json:"enabled,omitempty"`
 	PublicURL             *string `json:"public_url,omitempty"`
 	ServerName            *string `json:"server_name,omitempty"`
 	EmulatedServerVersion *string `json:"emulated_server_version,omitempty"`
+	WebEnabled            *bool   `json:"web_enabled,omitempty"`
 	WebVersion            *string `json:"web_version,omitempty"`
 	WebDir                *string `json:"web_dir,omitempty"`
 	WebInstallDir         *string `json:"web_install_dir,omitempty"`
@@ -60,6 +65,9 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 	setOptionalString(updates, "jellyfin_compat.public_url", req.PublicURL)
 	setOptionalString(updates, "jellyfin_compat.server_name", req.ServerName)
 	setOptionalString(updates, "jellyfin_compat.emulated_server_version", req.EmulatedServerVersion)
+	if req.WebEnabled != nil {
+		updates["jellyfin_compat.web_enabled"] = strconv.FormatBool(*req.WebEnabled)
+	}
 	setOptionalString(updates, "jellyfin_compat.web_version", req.WebVersion)
 	setOptionalString(updates, "jellyfin_compat.web_install_dir", req.WebInstallDir)
 	if req.WebDir != nil {
@@ -92,12 +100,23 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 		}
 		h.publishSettingChanged(r, key, value)
 	}
-	h.markServerRestartRequired("jellyfin_compat")
+	if jellyfinCompatSettingsRequireRestart(updates) {
+		h.markServerRestartRequired("jellyfin_compat")
+	}
 	settings, ok := h.jellyfinCompatSettings(w, r)
 	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, jellycompat.WebComponentStatusForConfig(h.Config, settings))
+}
+
+func jellyfinCompatSettingsRequireRestart(updates map[string]string) bool {
+	for key := range updates {
+		if key != "jellyfin_compat.web_enabled" {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleInstallJellyfinCompatWeb handles POST /admin/jellyfin-compat/web/install.
@@ -155,10 +174,11 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 	if sourceURL == "" {
 		sourceURL = strings.TrimSpace(settings["jellyfin_compat.web_source_url"])
 	}
-	_, err := jellycompat.StartWebComponentInstall(jellycompat.WebComponentInstallOptions{
+	status, err := jellycompat.StartWebComponentInstall(jellycompat.WebComponentInstallOptions{
 		InstallRoot: root,
 		SourceURL:   sourceURL,
 		Version:     version,
+		OnProgress:  h.publishJellyfinCompatWebOperationProgress,
 	}, func(ctx context.Context, status jellycompat.WebComponentStatus) error {
 		if h.SettingsRepo == nil {
 			return nil
@@ -183,7 +203,20 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 		writeJellyfinCompatOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, jellycompat.WebComponentStatusForConfig(h.Config, settings))
+	writeJSON(w, http.StatusAccepted, status)
+}
+
+func (h *AdminHandler) publishJellyfinCompatWebOperationProgress(op jellycompat.WebComponentOperationStatus) {
+	if h == nil || h.EventsHub == nil {
+		return
+	}
+	_ = h.EventsHub.PublishJSON(
+		context.Background(),
+		evt.ChannelSettings,
+		jellyfinCompatWebOperationUpdatedEvent,
+		op,
+		evt.PublishOptions{AdminOnly: true},
+	)
 }
 
 func (h *AdminHandler) jellyfinCompatSettings(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {

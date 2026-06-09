@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -87,6 +88,7 @@ type AdminHandler struct {
 	StatsSource                  AdminStatsSource
 	Config                       *config.Config
 	EventBus                     cache.EventBus
+	EventsHub                    *evt.Hub
 	SettingsRepo                 ServerSettingsStore
 	JobRepo                      AdminJobCreator
 	ItemRefreshResolver          ItemRefreshScopeResolver

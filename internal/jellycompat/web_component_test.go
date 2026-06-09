@@ -136,6 +136,55 @@ func TestWebComponentStatusUsesPersistedSettingsForDisplay(t *testing.T) {
 	}
 }
 
+func TestWebComponentStatusDisablesWebUIWhenProxyDisabled(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":         "false",
+		"jellyfin_compat.web_enabled":     "true",
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+
+	status := WebComponentStatusForConfig(cfg, map[string]string{
+		"jellyfin_compat.enabled":         "false",
+		"jellyfin_compat.web_enabled":     "true",
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
+	})
+
+	if status.WebEnabled {
+		t.Fatal("WebEnabled = true, want false when Jellyfin proxy is disabled")
+	}
+}
+
+func TestWebComponentStatusReportsWebEnabledSetting(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":         "true",
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+
+	status := WebComponentStatusForConfig(cfg, map[string]string{
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
+		"jellyfin_compat.web_enabled":     "false",
+	})
+
+	if status.WebEnabled {
+		t.Fatal("WebEnabled = true, want false from persisted setting")
+	}
+	if status.RestartRequired {
+		t.Fatal("RestartRequired = true, want false when only persisted web_enabled differs from running config")
+	}
+}
+
 func TestInstallWebComponentRejectsUnsafeVersion(t *testing.T) {
 	root := t.TempDir()
 	_, err := InstallWebComponent(context.Background(), WebComponentInstallOptions{
@@ -237,6 +286,53 @@ func TestWebComponentStatusRecoversLegacyStaleOperationLock(t *testing.T) {
 	}
 	if !strings.Contains(status.LastError, "recovered stale Jellyfin Web") {
 		t.Fatalf("LastError = %q, want recovered stale lock message", status.LastError)
+	}
+}
+
+func TestWebComponentOperationProgressPersistsToStatus(t *testing.T) {
+	root := t.TempDir()
+	op, err := beginWebOperation(root, WebComponentOperationInstall)
+	if err != nil {
+		t.Fatalf("beginWebOperation: %v", err)
+	}
+	t.Cleanup(func() {
+		webOperationsMu.Lock()
+		delete(webOperations, root)
+		webOperationsMu.Unlock()
+		clearWebInstallState(root)
+	})
+
+	if op.Phase != WebComponentOperationPreparing || op.ProgressPercent != 1 {
+		t.Fatalf("initial progress = %q/%d, want preparing/1", op.Phase, op.ProgressPercent)
+	}
+	updated := updateWebOperationProgress(root, op.ID, WebComponentOperationBuilding, 110, "Building Jellyfin Web assets")
+	if updated == nil {
+		t.Fatal("updateWebOperationProgress returned nil")
+	}
+	if updated.Phase != WebComponentOperationBuilding || updated.ProgressPercent != 100 {
+		t.Fatalf("updated progress = %q/%d, want building/100", updated.Phase, updated.ProgressPercent)
+	}
+	if updated.Message != "Building Jellyfin Web assets" {
+		t.Fatalf("updated message = %q", updated.Message)
+	}
+
+	status := webComponentStatus(root, filepath.Join(root, "current"), "10.11.6", DefaultWebSourceURL)
+	if status.Operation == nil {
+		t.Fatal("status.Operation = nil, want progress operation")
+	}
+	if status.Operation.Phase != WebComponentOperationBuilding || status.Operation.ProgressPercent != 100 {
+		t.Fatalf("status progress = %q/%d, want building/100", status.Operation.Phase, status.Operation.ProgressPercent)
+	}
+
+	finished := finishWebOperation(root, op.ID, nil)
+	if finished == nil {
+		t.Fatal("finishWebOperation returned nil")
+	}
+	if finished.State != WebComponentOperationSucceeded || finished.ProgressPercent != 100 {
+		t.Fatalf("finished state/progress = %q/%d, want succeeded/100", finished.State, finished.ProgressPercent)
+	}
+	if finished.Message != "Jellyfin Web install complete" {
+		t.Fatalf("finished message = %q", finished.Message)
 	}
 }
 
@@ -371,6 +467,62 @@ func TestFinishWebOperationDoesNotClearDifferentLock(t *testing.T) {
 	clearWebInstallState(root)
 }
 
+func TestResolveCompatWebFSHonorsWebEnabledSetting(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "10.11.6")
+	writeValidWebRelease(t, release, "10.11.6")
+	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
+		t.Fatalf("symlink current: %v", err)
+	}
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":         "true",
+		"jellyfin_compat.web_install_dir": root,
+		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
+		"jellyfin_compat.web_version":     "10.11.6",
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+
+	webFS, _, err := resolveCompatWebFS(context.Background(), Dependencies{Config: cfg})
+	if err != nil {
+		t.Fatalf("resolve enabled WebFS: %v", err)
+	}
+	if webFS == nil {
+		t.Fatal("resolve enabled WebFS = nil, want installed assets")
+	}
+
+	webFS, _, err = resolveCompatWebFS(context.Background(), Dependencies{
+		Config: cfg,
+		SettingsRepo: webComponentTestSettings{
+			"jellyfin_compat.web_enabled": "false",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve disabled WebFS: %v", err)
+	}
+	if webFS != nil {
+		t.Fatal("resolve disabled WebFS returned assets, want nil")
+	}
+
+	webFS, _, err = resolveCompatWebFS(context.Background(), Dependencies{
+		Config: cfg,
+		SettingsRepo: webComponentTestSettings{
+			"jellyfin_compat.enabled":     "false",
+			"jellyfin_compat.web_enabled": "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve proxy-disabled WebFS: %v", err)
+	}
+	if webFS != nil {
+		t.Fatal("resolve proxy-disabled WebFS returned assets, want nil")
+	}
+	if _, err := os.Stat(release); err != nil {
+		t.Fatalf("disabled Web UI should not remove release: %v", err)
+	}
+}
+
 func TestResolveCompatWebFSDoesNotFallbackToVendoredDirectory(t *testing.T) {
 	cfg := &config.Config{}
 
@@ -378,6 +530,12 @@ func TestResolveCompatWebFSDoesNotFallbackToVendoredDirectory(t *testing.T) {
 	if webFS != nil {
 		t.Fatalf("resolveCompatWebFS returned a web filesystem without configured assets (err=%v)", err)
 	}
+}
+
+type webComponentTestSettings map[string]string
+
+func (s webComponentTestSettings) Get(_ context.Context, key string) (string, error) {
+	return s[key], nil
 }
 
 func writeWebOperationLock(root string, op WebComponentOperationStatus) error {
