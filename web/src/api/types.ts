@@ -3350,6 +3350,15 @@ export interface RateLimitConfig {
   ip_requests_per_minute: number;
   ip_burst: number;
   auth_endpoints: Record<string, RateLimitAuthEndpointConfig>;
+  /** Whether a limiter is running in this process (GET responses only). */
+  active?: boolean;
+  /** Backend the running limiter uses; may differ from `backend` until restart. */
+  active_backend?: string;
+}
+
+export interface RateLimitUpdateResponse {
+  status: string;
+  restart_required?: boolean;
 }
 
 // IP visibility
