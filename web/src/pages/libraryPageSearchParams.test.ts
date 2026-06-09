@@ -340,7 +340,7 @@ describe("updateLibraryPageSearchParams", () => {
       params("foo=bar"),
       {
         activeTab: "library",
-        browseType: "series",
+        browseType: "books",
         queryDefinition: {
           library_ids: [],
           media_scope: "audiobook",
@@ -358,6 +358,36 @@ describe("updateLibraryPageSearchParams", () => {
       sort: "author",
       order: "asc",
     });
+  });
+
+  it("round-trips audiobook browse axes through the type param", () => {
+    for (const axis of ["series", "authors", "narrators"] as const) {
+      const next = updateLibraryPageSearchParams(
+        params(""),
+        {
+          activeTab: "library",
+          browseType: axis,
+          queryDefinition: {
+            library_ids: [],
+            media_scope: "audiobook",
+            match: "all",
+            groups: [],
+            sort: { field: "title", order: "asc" },
+          },
+        },
+        "audiobooks",
+      );
+
+      expect(next.get("type")).toBe(axis);
+      expect(parseLibraryPageState(next, "audiobooks").browseType).toBe(axis);
+    }
+  });
+
+  it("defaults audiobook libraries to the books axis for unknown type values", () => {
+    const state = parseLibraryPageState(params("tab=library&type=episode"), "audiobooks");
+
+    expect(state.browseType).toBe("books");
+    expect(state.queryDefinition.media_scope).toBe("audiobook");
   });
 });
 

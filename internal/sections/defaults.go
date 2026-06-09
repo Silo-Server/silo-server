@@ -189,12 +189,15 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 			{ID: "default-random-tv", Scope: "library", LibraryID: libraryID, Position: 5, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("series"), Enabled: true},
 		}
 	case "audiobooks", "audiobook":
+		// Continue Listening is featured: the library Home tab renders it as
+		// the "Now Listening" resume hero instead of a backdrop carousel.
 		return []*PageSection{
-			{ID: "default-continue-listening", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Listening", ItemLimit: 20, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true},
-			{ID: "default-recently-added-audiobooks", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Audiobooks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
-			{ID: "default-recently-released-audiobooks", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Audiobooks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
-			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
-			{ID: "default-random-audiobooks", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
+			{ID: "default-continue-listening", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Listening", Featured: true, ItemLimit: 20, Config: ContinueTypeConfig(ContinueTypeListening), Enabled: true},
+			{ID: "default-next-in-series", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionNextInSeries, Title: "Next in Your Series", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-recently-added-audiobooks", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyAdded, Title: "Recently Added Audiobooks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
+			{ID: "default-recently-released-audiobooks", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecentlyReleased, Title: "Recently Released Audiobooks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
+			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-audiobooks", Scope: "library", LibraryID: libraryID, Position: 5, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("audiobook"), Enabled: true},
 		}
 	default:
 		return DefaultLibrarySections(libraryID)

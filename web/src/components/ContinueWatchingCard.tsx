@@ -7,6 +7,7 @@ import type { ProgressEntry } from "@/api/types";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
+import { formatListeningTimeLeft } from "@/lib/audiobooks/duration";
 import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPresentation";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
@@ -132,7 +133,9 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
       ? null
       : "Next Episode"
     : card.durationSeconds > 0
-      ? `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
+      ? card.type === "audiobook"
+        ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
+        : `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
       : "\u00A0";
   const handleWatchClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {

@@ -131,10 +131,16 @@ export function createCatalogSearchState(
 
 export function useCatalogWindow(
   state: CatalogSearchState,
-  options: { limit?: number; visibleRange?: [number, number]; includeTotal?: boolean } = {},
+  options: {
+    limit?: number;
+    visibleRange?: [number, number];
+    includeTotal?: boolean;
+    enabled?: boolean;
+  } = {},
 ) {
   const limit = options.limit ?? 60;
   const includeTotal = options.includeTotal ?? true;
+  const enabled = options.enabled ?? true;
   const page0Params = catalogParamsForKey(state, limit, includeTotal);
   const remainingPageParams = catalogParamsForKey(state, limit, false);
   const visibleRange = options.visibleRange ?? [0, limit - 1];
@@ -150,10 +156,11 @@ export function useCatalogWindow(
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       fetchCatalogPage(state, limit, 0, { signal }, includeTotal),
     staleTime: 10 * 60 * 1000,
+    enabled,
   });
 
   const snapshot = page0Result.data?.snapshot;
-  const canFetchRemainingPages = page0Result.data !== undefined;
+  const canFetchRemainingPages = enabled && page0Result.data !== undefined;
 
   const remainingPageIndices = useMemo(() => {
     const indices = new Set<number>();

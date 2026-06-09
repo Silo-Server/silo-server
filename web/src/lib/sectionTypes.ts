@@ -10,6 +10,7 @@ export const SECTION_TYPES = [
   { value: "similar_users_liked", label: "Profiles Like You Enjoyed" },
   { value: "taste_match", label: "Top Picks Today" },
   { value: "next_up", label: "On Deck" },
+  { value: "next_in_series", label: "Next in Series" },
   { value: "watchlist", label: "Watchlist" },
   { value: "favorites", label: "Favorites" },
   { value: "collection", label: "Collection" },
