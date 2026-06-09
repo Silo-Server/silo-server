@@ -22,6 +22,7 @@ const (
 	EncodedIDStudio      EncodedIDType = 7
 	EncodedIDPerson      EncodedIDType = 8
 	EncodedIDImageProxy  EncodedIDType = 9
+	EncodedIDCollection  EncodedIDType = 10
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 		EncodedIDGenre:       uuid.MustParse("c0cbb8ea-8331-52c0-b160-15e7cf899fb0"),
 		EncodedIDStudio:      uuid.MustParse("23712982-b769-592d-9360-b4d3f39654db"),
 		EncodedIDPerson:      uuid.MustParse("a4e7c1d6-3b8f-5a2e-9c01-7d6f4e8b2a13"),
+		EncodedIDCollection:  uuid.MustParse("7f3c2a91-5b64-5c1d-8e07-9a2f4d6b1c35"),
 	}
 )
 

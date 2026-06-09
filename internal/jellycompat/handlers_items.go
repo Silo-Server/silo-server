@@ -41,6 +41,11 @@ type ItemsHandler struct {
 	accessFilter AccessFilterResolver
 	subtitleRepo subtitles.Repository
 	recommender  recommendations.Recommender
+	// collections is optional; when set, library collections are exposed as
+	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
+	collections     collectionSource
+	posterPresigner LibraryPosterPresigner
+	presignTTL      time.Duration
 	// FileResolver is optional; when set, /MediaSegments returns real intro/
 	// credits/recap/preview segments for any file that has them.
 	FileResolver FilePathResolver
@@ -132,6 +137,11 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(query.specificIDs) > 0:
 		h.handleSpecificItems(w, r, session, query)
+	case query.parentCollectionID != "":
+		h.handleBoxSetChildren(w, r, session, query)
+	case query.wantsBoxSets && len(query.itemTypes) == 0:
+		// IncludeItemTypes=BoxSet (alone): list library collections.
+		h.handleBoxSetsList(w, r, session, query)
 	case query.isResumable:
 		h.handleResumeResponse(w, r, session, query)
 	case query.isPlayed != nil && *query.isPlayed:
@@ -142,6 +152,15 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleFavoriteItems(w, r, session, query)
 	case isSeasonChildItemsQuery(query):
 		h.handleSeasonChildItems(w, r, session, query)
+	case query.hasItemTypeFilter && len(query.itemTypes) == 0:
+		// Client requested only types compat doesn't expose (e.g. Playlist,
+		// MusicAlbum): return empty rather than falling through to a views or
+		// browse response of the wrong type.
+		writeJSON(w, http.StatusOK, queryResultDTO{
+			Items:            []baseItemDTO{},
+			TotalRecordCount: 0,
+			StartIndex:       query.startIndex,
+		})
 	case query.parentLibraryID == 0 && len(query.itemTypes) == 0:
 		// No ParentId and no type filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
@@ -181,6 +200,11 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	// CollectionFolder items using the library UUID from /UserViews.
 	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, rawID); err == nil {
 		h.handleLibraryItem(w, r, session, int(libraryID))
+		return
+	}
+
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, rawID); err == nil {
+		h.handleBoxSetItem(w, r, session, collectionID)
 		return
 	}
 
@@ -900,6 +924,46 @@ func (h *ItemsHandler) HandleGenres(w http.ResponseWriter, r *http.Request) {
 		TotalRecordCount: len(items),
 		StartIndex:       0,
 	})
+}
+
+// HandleGenreByName serves GET /Genres/{name}. Jellyfin addresses genres by
+// (URL-escaped) display name; clients use the returned Id for GenreIds= item
+// queries.
+func (h *ItemsHandler) HandleGenreByName(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	if decoded, err := url.PathUnescape(name); err == nil {
+		name = strings.TrimSpace(decoded)
+	}
+	if name == "" {
+		writeError(w, http.StatusNotFound, "NotFound", "Genre not found")
+		return
+	}
+
+	// Confirm the genre exists within the caller's visible scope so the
+	// response carries the canonical casing.
+	filters, err := h.content.ListItemFilters(r.Context(), session, urlValuesFromItemsQuery(parseItemsQuery(r, h.codec)))
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	for _, genre := range filters.Genres {
+		if strings.EqualFold(strings.TrimSpace(genre), name) {
+			writeJSON(w, http.StatusOK, baseItemDTO{
+				ID:       h.codec.EncodeStringID(EncodedIDGenre, genre),
+				Type:     "Genre",
+				Name:     genre,
+				ServerID: h.mapper.serverID,
+			})
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "NotFound", "Genre not found")
 }
 
 // HandleSeasons serves GET /Shows/{id}/Seasons.

@@ -75,6 +75,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.recommender = deps.Recommender
+	if deps.DB != nil {
+		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+	}
+	itemsHandler.posterPresigner = deps.PosterPresigner
+	itemsHandler.presignTTL = deps.PresignTTL
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
@@ -156,6 +161,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Genres", itemsHandler.HandleGenres)
+			r.Get("/Genres/{name}", itemsHandler.HandleGenreByName)
 			r.Get("/Shows/{id}/Seasons", itemsHandler.HandleSeasons)
 			r.Get("/Shows/{id}/Episodes", itemsHandler.HandleEpisodes)
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
