@@ -1174,7 +1174,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode" | "audiobook";
+  media_scope?: "movie" | "series" | "episode" | "audiobook" | "video";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -3129,7 +3129,8 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
       value?.media_scope === "episode" ||
-      value?.media_scope === "audiobook"
+      value?.media_scope === "audiobook" ||
+      value?.media_scope === "video"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
