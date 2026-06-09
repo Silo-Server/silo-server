@@ -106,8 +106,3 @@ require (
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 )
-
-// Machine-local replace: the published SDK version pinned above does not yet
-// expose the request_router capability types. Points the host build at the
-// local SDK checkout (branch feat/request-router-capability). MUST be removed
-// and replaced with a published SDK version before any PR/publish.
