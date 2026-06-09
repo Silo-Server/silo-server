@@ -30,6 +30,27 @@ func TestInferGroupIdentity_StructuredIDsResolveMovieTitleConflict(t *testing.T)
 	}
 }
 
+// An unbracketed trailing IMDb id anchors identity the same way a structured
+// tag does — the tt prefix is unambiguous. Mirrors the dev-library case
+// "Eggs Run (2021) tt8049994" whose file carries a different release title.
+func TestInferGroupIdentity_TrailingImdbIDResolvesMovieTitleConflict(t *testing.T) {
+	group := InferGroupIdentity(
+		"/movies-int/es/Eggs Run (2021) tt8049994/Huevitos Congelados (2022) [WEBDL-1080p]-GRP.mkv",
+		"movies",
+		RootAssignment{
+			RootPath:     "/movies-int/es/Eggs Run (2021) tt8049994",
+			InferredType: "movie",
+		},
+	)
+
+	if got, want := group.State, "resolved"; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+	if got, want := group.ImdbID, "tt8049994"; got != want {
+		t.Fatalf("ImdbID = %q, want %q", got, want)
+	}
+}
+
 // Without provider IDs the same folder/file title conflict must still be
 // flagged ambiguous — there is nothing to anchor the identity.
 func TestInferGroupIdentity_TitleConflictWithoutIDsStaysAmbiguous(t *testing.T) {

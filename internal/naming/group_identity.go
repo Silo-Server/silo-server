@@ -249,15 +249,16 @@ func populateSeriesGroupIdentity(filePath string, libraryType string, assignment
 }
 
 // hasStructuredIDAnchor reports whether the observed root folder or the file
-// name carries explicit structured provider IDs (e.g. {tmdb-694938},
-// [tvdbid-81189]). Bare trailing numerics are deliberately excluded — only an
-// explicit tag is strong enough to anchor identity over a title conflict.
+// name carries explicit provider IDs — structured tags (e.g. {tmdb-694938},
+// [tvdbid-81189]) or an unambiguous tt-prefixed IMDb id ("Eggs Run (2021)
+// tt8049994"). ParseFolderIDs returns only such explicit evidence, which is
+// strong enough to anchor identity over a title conflict.
 func hasStructuredIDAnchor(filePath, observedRootPath string) bool {
-	if ParseStructuredFolderIDs(filepath.Base(observedRootPath)) != nil {
+	if ParseFolderIDs(filepath.Base(observedRootPath)) != nil {
 		return true
 	}
 	baseNoExt := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-	return ParseStructuredFolderIDs(baseNoExt) != nil
+	return ParseFolderIDs(baseNoExt) != nil
 }
 
 func deriveObservedRootPath(filePath, candidateRoot string) string {
