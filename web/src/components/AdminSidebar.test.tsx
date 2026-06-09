@@ -54,32 +54,40 @@ function renderSidebar() {
 }
 
 describe("AdminSidebar", () => {
-  it("includes a Sections link in the manage navigation", () => {
+  it("renders the grouped navigation sections", () => {
+    const markup = renderSidebar();
+
+    for (const section of ["Overview", "Content", "Automation", "Users", "System"]) {
+      expect(markup).toContain(`>${section}<`);
+    }
+  });
+
+  it("includes a Sections link in the content navigation", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain('href="/admin/sections"');
     expect(markup).toContain(">Sections<");
   });
 
-  it("includes a Maintenance link in the server navigation", () => {
+  it("includes a Maintenance link in the system navigation", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain('href="/admin/maintenance"');
     expect(markup).toContain(">Maintenance<");
   });
 
-  it("includes a Recommendations link in the server navigation", () => {
+  it("includes a Recommendations link in the automation navigation", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain('href="/admin/recommendations"');
     expect(markup).toContain(">Recommendations<");
   });
 
-  it("includes a Marker History link in the users navigation", () => {
+  it("includes a Markers link in the automation navigation", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain('href="/admin/marker-history"');
-    expect(markup).toContain(">Marker History<");
+    expect(markup).toContain(">Markers<");
   });
 
   it("renders the build identifier in the footer", () => {
