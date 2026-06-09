@@ -533,7 +533,7 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	dto := &itemUserDataDTO{IsFavorite: isFavorite, ItemID: itemID, Key: itemID}
 
 	if data != nil {
-		dto.PlaybackPositionTicks = resumePositionTicks(data.PositionSeconds, data.DurationSeconds, data.Played)
+		dto.PlaybackPositionTicks = resumePositionTicks(data.PositionSeconds, data.DurationSeconds)
 		if data.DurationSeconds > 0 {
 			dto.PlayedPercentage = (data.PositionSeconds / data.DurationSeconds) * 100
 		}
@@ -545,7 +545,7 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	}
 
 	if progress != nil {
-		dto.PlaybackPositionTicks = resumePositionTicks(progress.PositionSeconds, progress.DurationSeconds, progress.Completed)
+		dto.PlaybackPositionTicks = resumePositionTicks(progress.PositionSeconds, progress.DurationSeconds)
 		if progress.DurationSeconds > 0 {
 			dto.PlayedPercentage = (progress.PositionSeconds / progress.DurationSeconds) * 100
 		}
@@ -694,14 +694,13 @@ func secondsToTicks(seconds float64) int64 {
 }
 
 // resumePositionTicks returns the PlaybackPositionTicks value for a UserData
-// DTO. When the item is fully watched the position is reported as 0 so clients
-// start fresh on the next play; otherwise the position is clamped to the item
-// duration so a stale/overflowed stored position cannot drive the player past
-// end-of-file (which stalls the HLS transcoder on resume).
-func resumePositionTicks(position, duration float64, played bool) int64 {
-	if played {
-		return 0
-	}
+// DTO. Completed rows store position 0, so fully watched items report 0 ticks
+// (clients start fresh) while a rewatch in flight reports its live resume
+// point alongside Played=true — matching real Jellyfin. The position is
+// clamped to the item duration so a stale/overflowed stored position cannot
+// drive the player past end-of-file (which stalls the HLS transcoder on
+// resume).
+func resumePositionTicks(position, duration float64) int64 {
 	if duration > 0 && position > duration {
 		position = duration
 	}

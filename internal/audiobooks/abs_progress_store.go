@@ -38,9 +38,13 @@ func (s *ABSProgressStore) GetProgress(ctx context.Context, userID, profileID, c
 	var completed bool
 	var progressPct *float64
 
+	// Completed rows store position_seconds = 0 (no resume point), so the
+	// percentage must come from the completed flag, not the position.
 	dbRow := s.Pool.QueryRow(ctx, `
 		SELECT media_item_id, position_seconds, duration_seconds, completed,
-		       CASE WHEN duration_seconds > 0 THEN position_seconds / duration_seconds ELSE 0 END AS progress_pct,
+		       CASE WHEN completed THEN 1.0
+		            WHEN duration_seconds > 0 THEN position_seconds / duration_seconds
+		            ELSE 0 END AS progress_pct,
 		       updated_at
 		FROM user_watch_progress
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
@@ -85,7 +89,9 @@ func (s *ABSProgressStore) ListProgressForAudiobooks(ctx context.Context, userID
 		       wp.position_seconds,
 		       wp.duration_seconds,
 		       wp.completed,
-		       CASE WHEN wp.duration_seconds > 0 THEN wp.position_seconds / wp.duration_seconds ELSE 0 END,
+		       CASE WHEN wp.completed THEN 1.0
+		            WHEN wp.duration_seconds > 0 THEN wp.position_seconds / wp.duration_seconds
+		            ELSE 0 END,
 		       wp.updated_at
 		FROM user_watch_progress wp
 		JOIN media_items mi ON mi.content_id = wp.media_item_id

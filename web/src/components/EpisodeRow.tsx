@@ -16,7 +16,9 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
     (() => {
       const position = episode.user_data?.position_seconds ?? 0;
       const duration = episode.user_data?.duration_seconds ?? 0;
-      if (duration <= 0 || position <= 0 || watchedState) {
+      // Watched episodes store position 0; a nonzero position on a watched
+      // episode is a rewatch in flight and should show its bar.
+      if (duration <= 0 || position <= 0) {
         return undefined;
       }
       return Math.max(0, Math.min(100, (position / duration) * 100));

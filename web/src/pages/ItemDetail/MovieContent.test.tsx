@@ -218,8 +218,9 @@ describe("MovieContent", () => {
         <MovieContent
           item={makeMovieItem({
             user_data: {
+              // Completed rows store position 0 (no resume point).
               played: true,
-              position_seconds: 3600,
+              position_seconds: 0,
               duration_seconds: 3600,
             },
           })}
@@ -230,6 +231,28 @@ describe("MovieContent", () => {
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       playLabel: "Play",
       restartHref: undefined,
+    });
+  });
+
+  it("offers resume and restart during a rewatch of a completed movie", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent
+          item={makeMovieItem({
+            user_data: {
+              // Rewatch in flight: watched latch stays, live resume point.
+              played: true,
+              position_seconds: 600,
+              duration_seconds: 3600,
+            },
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      playLabel: "Resume",
+      restartHref: "/watch/movie-1?restart=1",
     });
   });
 

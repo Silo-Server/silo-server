@@ -20,14 +20,15 @@ function mergeLeafProgress(
 ): LeafItemUserData {
   const positionSeconds = Math.max(0, snapshot.positionSeconds);
   const durationSeconds = snapshot.durationSeconds ?? existing?.duration_seconds;
+  // Mirror the server model: played is a one-way latch (a rewatch keeps the
+  // watched badge), and any nonzero position is an active resume point.
   const played =
-    durationSeconds != null && durationSeconds > 0
-      ? positionSeconds >= durationSeconds
-      : existing?.played === true && positionSeconds === 0;
+    existing?.played === true ||
+    (durationSeconds != null && durationSeconds > 0 && positionSeconds >= durationSeconds);
 
   return {
     played,
-    is_in_progress: positionSeconds > 0 && !played,
+    is_in_progress: positionSeconds > 0,
     position_seconds: positionSeconds,
     duration_seconds: durationSeconds,
     last_file_id: snapshot.lastFileId ?? existing?.last_file_id,
@@ -98,9 +99,10 @@ export function applyPlaybackProgressToCache(
             position_seconds: Math.max(0, snapshot.positionSeconds),
             duration_seconds: snapshot.durationSeconds ?? entry.duration_seconds,
             completed:
-              (snapshot.durationSeconds ?? entry.duration_seconds) > 0 &&
-              Math.max(0, snapshot.positionSeconds) >=
-                (snapshot.durationSeconds ?? entry.duration_seconds),
+              entry.completed ||
+              ((snapshot.durationSeconds ?? entry.duration_seconds) > 0 &&
+                Math.max(0, snapshot.positionSeconds) >=
+                  (snapshot.durationSeconds ?? entry.duration_seconds)),
             updated_at: updatedAt,
           }
         : entry,
