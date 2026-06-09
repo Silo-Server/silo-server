@@ -45,7 +45,7 @@ func (l *PgUserIdentityLookup) LookupIdentity(ctx context.Context, userID int, p
 	}
 
 	err := l.pool.QueryRow(ctx,
-		"SELECT username, email FROM users WHERE id = $1", userID,
+		"SELECT username, COALESCE(email, '') FROM users WHERE id = $1", userID,
 	).Scan(&out.Username, &out.Email)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err

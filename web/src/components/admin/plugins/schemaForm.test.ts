@@ -72,6 +72,20 @@ describe("evaluateShowWhen", () => {
   it("empty conditions => always visible", () => {
     expect(evaluateShowWhen(undefined, {})).toBe(true);
   });
+  it("falls back to the controlling field default", () => {
+    const fields: PluginAdminFormField[] = [
+      {
+        key: "anime_enabled",
+        label: "Anime",
+        control: "SWITCH",
+        required: false,
+        secret: false,
+        multiline: false,
+        default_value: true,
+      },
+    ];
+    expect(evaluateShowWhen([{ field: "anime_enabled", equals: ["true"] }], {}, fields)).toBe(true);
+  });
 });
 
 describe("validateSchemaValues", () => {
@@ -254,6 +268,57 @@ describe("buildSchemaValues default_value (#6)", () => {
       ],
     };
     expect(validateSchemaValues(d, {})).toEqual({});
+  });
+  it("uses a controller default when validating a conditional required field", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "anime_enabled",
+          label: "Anime",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
+        {
+          key: "anime_root_folder",
+          label: "Anime root folder",
+          control: "TEXT",
+          required: true,
+          secret: false,
+          multiline: false,
+          show_when: [{ field: "anime_enabled", equals: ["true"] }],
+        },
+      ],
+    };
+    expect(validateSchemaValues(d, {}).anime_root_folder).toMatch(/required/i);
+  });
+  it("uses a controller default before dropping hidden fields", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "season_folder",
+          label: "Season folder",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
+        {
+          key: "series_root_folder",
+          label: "Series root folder",
+          control: "TEXT",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: "/tv",
+          show_when: [{ field: "season_folder", equals: ["true"] }],
+        },
+      ],
+    };
+    expect(buildSchemaValues(d, {}).series_root_folder).toBe("/tv");
   });
   it("does not persist a default for a hidden field", () => {
     const d: PluginAdminForm = {

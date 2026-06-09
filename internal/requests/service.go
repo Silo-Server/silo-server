@@ -949,10 +949,12 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 			return nil, err
 		}
 		if stored != nil {
+			submittedBaseURL := strings.TrimSpace(integration.BaseURL)
+			storedBaseURL := strings.TrimSpace(stored.BaseURL)
 			if strings.TrimSpace(integration.BaseURL) == "" {
 				integration.BaseURL = stored.BaseURL
 			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" {
+			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || submittedBaseURL == storedBaseURL) {
 				integration.APIKeyRef = stored.APIKeyRef
 			}
 			if strings.TrimSpace(integration.CapabilityID) == "" {
@@ -1367,6 +1369,12 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		if returned[rt.Quality] || healthy[rt.Quality] {
 			continue // dup-in-batch, or a healthy target already exists for this quality
 		}
+		if rt.ConnectionID != "" {
+			if _, ok := connKind[rt.ConnectionID]; !ok {
+				slog.WarnContext(ctx, "requests: plugin returned unknown connection id; skipping target", "request_id", req.ID, "connection_id", rt.ConnectionID)
+				continue
+			}
+		}
 		returned[rt.Quality] = true
 		created, err := s.store.CreateTarget(ctx, Target{
 			RequestID: req.ID, IntegrationID: rt.ConnectionID, IntegrationKind: connKind[rt.ConnectionID],
@@ -1418,6 +1426,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 func connectionKindByID(conns []ResolvedRouterConnection) map[string]string {
 	out := make(map[string]string, len(conns))
 	for _, c := range conns {
+		out[c.ID] = ""
 		if c.Config != nil {
 			if kind, ok := c.Config["service_kind"].(string); ok {
 				out[c.ID] = kind
@@ -1535,7 +1544,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		if newStatus == "" || newStatus == target.Status {
 			continue
 		}
-		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, "", Viewer{}); err != nil {
+		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
 			return reconcileUnchanged, err
 		}
 		switch newStatus {

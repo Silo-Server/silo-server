@@ -849,6 +849,46 @@ func TestReconcileRequestsMarksDownloadingFromProvider(t *testing.T) {
 	}
 }
 
+func TestReconcileRequestsPreservesProviderFailureMessage(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.candidates = []*Request{{
+		ID:        "req-1",
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Status:    StatusQueued,
+		Outcome:   OutcomeActive,
+	}}
+	store.requests["req-1"] = &Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1",
+		Quality: Quality1080p, Status: StatusQueued, ExternalID: "123",
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	router := &fakeRouterProvider{statuses: []RouterTargetStatus{{
+		Quality:        Quality1080p,
+		ConnectionID:   "router-1",
+		Status:         StatusFailed,
+		ExternalStatus: "failed",
+		Message:        "indexer rejected the request",
+	}}}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("result = %+v, want one failed target update", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if len(targets) != 1 || targets[0].LastError != "indexer rejected the request" {
+		t.Fatalf("targets = %+v, want provider failure message preserved", targets)
+	}
+}
+
 func TestReconcileRequestsResolvesGlobalInputsOncePerCycle(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")} // APIKeyRef "key-router-1"
@@ -1051,6 +1091,45 @@ func TestUpdateIntegrationKeepsKeyWhenBaseURLUnchanged(t *testing.T) {
 	}
 	if updated == nil || updated.Name != "router-1-renamed" {
 		t.Fatalf("updated = %+v, want persisted name router-1-renamed", updated)
+	}
+}
+
+func TestLoadIntegrationOptionsDoesNotBackfillStoredKeyForChangedBaseURL(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	if _, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		ID:      "router-1",
+		BaseURL: "http://attacker.example",
+	}); err != nil {
+		t.Fatalf("LoadIntegrationOptions: %v", err)
+	}
+	if router.gotOptionsConn.APIKey != "" {
+		t.Fatalf("probe API key = %q, want empty for changed base URL", router.gotOptionsConn.APIKey)
+	}
+	if router.gotOptionsConn.BaseURL != "http://attacker.example" {
+		t.Fatalf("probe base URL = %q, want submitted URL", router.gotOptionsConn.BaseURL)
+	}
+}
+
+func TestLoadIntegrationOptionsBackfillsStoredKeyForSameBaseURL(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+
+	if _, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
+		ID:      "router-1",
+		BaseURL: "http://router-1.local",
+	}); err != nil {
+		t.Fatalf("LoadIntegrationOptions: %v", err)
+	}
+	if router.gotOptionsConn.APIKey != "key-router-1" {
+		t.Fatalf("probe API key = %q, want stored key for unchanged base URL", router.gotOptionsConn.APIKey)
 	}
 }
 
@@ -1877,7 +1956,8 @@ type fakeRouterProvider struct {
 	statusCalls int
 
 	// ListConfigOptions behavior.
-	options map[string][]RouterOption
+	options        map[string][]RouterOption
+	gotOptionsConn ResolvedRouterConnection
 
 	// Validate behavior (default empty = valid).
 	validateFieldErrors   map[string]string
@@ -1930,7 +2010,10 @@ func (f *fakeRouterProvider) CheckStatus(_ context.Context, _ int, _ string, _ R
 	return f.statuses, f.statusErr
 }
 
-func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (map[string][]RouterOption, error) {
+func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ string, conn ResolvedRouterConnection) (map[string][]RouterOption, error) {
+	f.mu.Lock()
+	f.gotOptionsConn = conn
+	f.mu.Unlock()
 	return f.options, nil
 }
 
@@ -2387,6 +2470,31 @@ func TestSubmitApprovedSkipsUnknownQuality(t *testing.T) {
 		if tg.Quality == Quality("720p") {
 			t.Fatalf("a 720p target was persisted: %+v", tg)
 		}
+	}
+}
+
+func TestSubmitApprovedSkipsUnknownConnectionTarget(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	router := &fakeRouterProvider{targetsOverride: []RouterTarget{
+		{Quality: Quality1080p, ConnectionID: "missing-router", ExternalID: "ext-hd", Status: StatusQueued},
+	}}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
+	if err != nil {
+		t.Fatalf("submit must not abort on an unknown plugin connection: %v", err)
+	}
+	if got.Outcome != OutcomeFailed {
+		t.Fatalf("outcome = %q, want failed missing-quality target", got.Outcome)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 1 || targets[0].IntegrationID != "" || targets[0].Status != StatusFailed {
+		t.Fatalf("targets = %+v, want one failed target without unknown integration id", targets)
 	}
 }
 

@@ -90,6 +90,7 @@ import {
   REQUEST_STATUSES,
 } from "@/lib/mediaRequests";
 import { applyExclusivity } from "./requestExclusivity";
+import { supportedMediaTypesForConfig } from "./requestIntegrationMediaTypes";
 
 type StatusFilter = MediaRequestStatus | "all";
 type OutcomeFilter = MediaRequestOutcome | "all";
@@ -867,6 +868,7 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
               pluginConfig={card.pluginConfig}
               installations={routerInstallations}
               installationsLoading={installationsQuery.isLoading}
+              source={card.source}
               onChange={(patch) => updateCard(card.key, patch)}
               onConfigChange={(config) => updateCardConfig(card.key, config)}
               onRemove={() => removeCard(card.key)}
@@ -883,6 +885,7 @@ function IntegrationEditor({
   pluginConfig,
   installations,
   installationsLoading,
+  source,
   onChange,
   onConfigChange,
   onRemove,
@@ -891,6 +894,7 @@ function IntegrationEditor({
   pluginConfig: Record<string, unknown>;
   installations: RequestRouterInstallation[];
   installationsLoading: boolean;
+  source: RequestIntegration | null;
   onChange: (patch: Partial<IntegrationFormState>) => void;
   onConfigChange: (config: Record<string, unknown>) => void;
   onRemove: () => void;
@@ -1024,6 +1028,9 @@ function IntegrationEditor({
     // Coercion is driven by the plugin's declared json_schema types so e.g. a
     // numeric string isn't sent where a string is declared (and vice versa).
     const fieldTypes = parseFieldTypes(selectedConfigSchema?.json_schema);
+    const nextPluginConfig = descriptor
+      ? buildSchemaValues(descriptor, pluginConfig, fieldTypes)
+      : pluginConfig;
     // plugin_config is the sole source of truth for fulfillment; the host owns
     // only the generic connection chrome (name, base_url, api_key, installation).
     const payload = {
@@ -1034,10 +1041,8 @@ function IntegrationEditor({
       api_key_ref: form.api_key_ref.trim() || undefined,
       capability_id: selected?.capability.id ?? "",
       installation_id: hasInstallation ? selectedInstallationID : undefined,
-      supported_media_types: [],
-      plugin_config: descriptor
-        ? buildSchemaValues(descriptor, pluginConfig, fieldTypes)
-        : pluginConfig,
+      supported_media_types: supportedMediaTypesForConfig(nextPluginConfig, source),
+      plugin_config: nextPluginConfig,
     } as RequestIntegration;
 
     setFieldErrors({});

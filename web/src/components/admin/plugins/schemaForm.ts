@@ -11,9 +11,21 @@ function stringify(value: unknown): string {
 export function evaluateShowWhen(
   conditions: PluginAdminFormCondition[] | undefined,
   values: Record<string, unknown>,
+  fields?: PluginAdminFormField[],
 ): boolean {
   if (!conditions || conditions.length === 0) return true;
-  return conditions.every((c) => c.equals.includes(stringify(values[c.field])));
+  return conditions.every((c) =>
+    c.equals.includes(stringify(conditionValue(c.field, values, fields))),
+  );
+}
+
+function conditionValue(
+  key: string,
+  values: Record<string, unknown>,
+  fields?: PluginAdminFormField[],
+): unknown {
+  if (values[key] !== undefined) return values[key];
+  return fields?.find((field) => field.key === key)?.default_value;
 }
 
 function isNumberControl(field: PluginAdminFormField): boolean {
@@ -33,7 +45,7 @@ export function validateSchemaValues(
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of descriptor.fields) {
-    if (!evaluateShowWhen(field.show_when, values)) continue;
+    if (!evaluateShowWhen(field.show_when, values, descriptor.fields)) continue;
     const raw = effectiveValue(field, values);
     if (field.required && isEmpty(raw)) {
       errors[field.key] = `${field.label || field.key} is required`;
@@ -232,7 +244,7 @@ export function buildSchemaValues(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const field of descriptor.fields) {
-    if (!evaluateShowWhen(field.show_when, draft)) continue; // don't persist hidden fields' stale values
+    if (!evaluateShowWhen(field.show_when, draft, descriptor.fields)) continue; // don't persist hidden fields' stale values
     // Fall back to the declared default for untouched fields so an unmodified
     // default persists exactly as it is displayed.
     const rawSource = draft[field.key] !== undefined ? draft[field.key] : field.default_value;
