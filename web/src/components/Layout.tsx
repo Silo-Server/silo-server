@@ -12,6 +12,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { buildQueryCatalogHref, parseCatalogSearchParams } from "@/pages/catalogSearchParams";
 import type { ReactNode } from "react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
+import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 interface LayoutProps {
   children: ReactNode;
@@ -28,6 +29,8 @@ export default function Layout({ children }: LayoutProps) {
   const { profile } = useCurrentProfile();
   const isAdmin = user?.role === "admin";
   const { isBackgroundBarVisible } = useWatchPlaybackController();
+  const audiobookPlayback = useAudiobookPlaybackController();
+  const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
 
   const isHomePath = location.pathname === "/";
   const isLibraryRoute = location.pathname.startsWith("/library/");
@@ -186,7 +189,7 @@ export default function Layout({ children }: LayoutProps) {
         id="main-content"
         className={`main-transition relative min-h-screen ${
           isDetailImmersion ? "lg:ml-16" : "lg:ml-[260px]"
-        } ${isBackgroundBarVisible ? "pb-32 sm:pb-36" : ""}`}
+        } ${hasBackgroundBar ? "pb-32 sm:pb-36" : ""}`}
         style={{ viewTransitionName: "main-content" }}
       >
         {needsNoPadding ? (

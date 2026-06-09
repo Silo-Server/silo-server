@@ -92,6 +92,7 @@ import {
   WatchPlaybackHost,
   WatchPlaybackProvider,
 } from "@/playback/WatchPlaybackChrome";
+import { AudiobookPlaybackProvider } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 import type { ReactNode } from "react";
 import {
   buildLegacyBrowseCatalogHref,
@@ -567,17 +568,19 @@ export default function App() {
             <ThemeProvider>
               <CustomThemeProvider>
                 <WatchPlaybackProvider>
-                  <RealtimeEventsProvider>
-                    <RealtimeEventChannels />
-                    <ScrollRestorationManager />
-                    <RouteAnnouncer />
-                    <QueryCacheManager />
-                    <AppChrome />
-                    <AppRoutes />
-                    <WatchPlaybackHost />
-                    <WatchPlaybackBar />
-                    <Toaster />
-                  </RealtimeEventsProvider>
+                  <AudiobookPlaybackProvider>
+                    <RealtimeEventsProvider>
+                      <RealtimeEventChannels />
+                      <ScrollRestorationManager />
+                      <RouteAnnouncer />
+                      <QueryCacheManager />
+                      <AppChrome />
+                      <AppRoutes />
+                      <WatchPlaybackHost />
+                      <WatchPlaybackBar />
+                      <Toaster />
+                    </RealtimeEventsProvider>
+                  </AudiobookPlaybackProvider>
                 </WatchPlaybackProvider>
               </CustomThemeProvider>
             </ThemeProvider>

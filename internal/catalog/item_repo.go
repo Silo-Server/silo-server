@@ -35,6 +35,26 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 	return &ItemRepository{pool: pool}
 }
 
+// GetPosterPath returns the current poster path for a media item. Missing or
+// NULL poster values are returned as an empty string.
+func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (string, error) {
+	if r == nil || r.pool == nil {
+		return "", ErrItemNotFound
+	}
+	var posterPath string
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(poster_path, '')
+		FROM media_items
+		WHERE content_id = $1
+	`, contentID).Scan(&posterPath); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrItemNotFound
+		}
+		return "", fmt.Errorf("getting media item poster path: %w", err)
+	}
+	return posterPath, nil
+}
+
 // overviewMatchFloor is the minimum ts_rank_cd score an overview-only match
 // must achieve to be returned when no title FTS match exists in the candidate
 // set. The overview tsvector is built without setweight(), so PostgreSQL's
@@ -50,12 +70,21 @@ const itemColumns = `content_id, type, title, sort_title, default_metadata_langu
 	content_rating, runtime, overview, tagline,
 	rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
 	imdb_id, tmdb_id, tvdb_id,
-	poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
-	metadata_s3_path, metadata_etag, season_count,
+	COALESCE(poster_path, ''), COALESCE(poster_thumbhash, ''), COALESCE(backdrop_path, ''), COALESCE(backdrop_thumbhash, ''), COALESCE(logo_path, ''),
+	COALESCE(metadata_s3_path, ''), COALESCE(metadata_etag, ''), season_count,
 	studios, networks, countries, keywords, original_language, release_date::text, first_air_date, last_air_date, air_time, air_timezone,
 	show_status,
 	matched_at, last_refreshed, refresh_failures,
 	episode_metadata_incomplete, episode_metadata_last_checked_at, locked_fields, status, created_at, updated_at`
+
+func qualifiedNullableStringColumn(alias, col string) string {
+	switch col {
+	case "poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path", "metadata_s3_path", "metadata_etag":
+		return fmt.Sprintf("COALESCE(%s.%s, '')", alias, col)
+	default:
+		return alias + "." + col
+	}
+}
 
 func qualifiedItemColumns(alias string) string {
 	cols := []string{
@@ -72,7 +101,7 @@ func qualifiedItemColumns(alias string) string {
 	}
 	prefixed := make([]string, len(cols))
 	for i, col := range cols {
-		prefixed[i] = alias + "." + col
+		prefixed[i] = qualifiedNullableStringColumn(alias, col)
 	}
 	return strings.Join(prefixed, ", ")
 }
@@ -96,7 +125,7 @@ func qualifiedListItemColumns(alias string) string {
 			prefixed[i] = effectiveLastAirDateExpr(alias)
 			continue
 		}
-		prefixed[i] = alias + "." + col
+		prefixed[i] = qualifiedNullableStringColumn(alias, col)
 	}
 	return strings.Join(prefixed, ", ")
 }

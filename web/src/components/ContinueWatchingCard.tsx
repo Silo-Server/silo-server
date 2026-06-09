@@ -10,6 +10,7 @@ import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlay
 import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPresentation";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
+import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
 
 type ContinueWatchingCardProps = (
   | {
@@ -31,12 +32,18 @@ type ContinueWatchingCardProps = (
 export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
-  const libraryQuery = props.libraryId ? `?libraryId=${props.libraryId}` : "";
   const card =
     "sectionItem" in props && props.sectionItem
       ? {
-          watchHref: `/watch/${props.sectionItem.content_id}${libraryQuery}`,
-          itemHref: `/item/${props.sectionItem.content_id}${libraryQuery}`,
+          watchHref: buildMediaPlayHref({
+            contentId: props.sectionItem.content_id,
+            type: props.sectionItem.type,
+            libraryId: props.libraryId,
+          }),
+          itemHref: buildItemHref({
+            contentId: props.sectionItem.content_id,
+            libraryId: props.libraryId,
+          }),
           title: props.sectionItem.title,
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
@@ -48,8 +55,15 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           type: props.sectionItem.type,
         }
       : {
-          watchHref: `/watch/${props.detail.content_id}${libraryQuery}`,
-          itemHref: `/item/${props.detail.content_id}${libraryQuery}`,
+          watchHref: buildMediaPlayHref({
+            contentId: props.detail.content_id,
+            type: props.detail.type,
+            libraryId: props.libraryId,
+          }),
+          itemHref: buildItemHref({
+            contentId: props.detail.content_id,
+            libraryId: props.libraryId,
+          }),
           title: props.detail.title,
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
@@ -69,6 +83,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           ? {
               itemId: props.sectionItem.content_id,
               surface: "next_up" as const,
+              mediaType: props.sectionItem.type,
               seriesId: props.sectionItem.series_id,
             }
           : undefined
@@ -76,12 +91,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           ? {
               itemId: props.sectionItem.content_id,
               surface: "continue_watching" as const,
+              mediaType: props.sectionItem.type,
               progressUpdatedAt: props.sectionItem.progress_updated_at,
             }
           : undefined
       : {
           itemId: props.detail.content_id,
           surface: "continue_watching" as const,
+          mediaType: props.detail.type,
           progressUpdatedAt: props.progress.updated_at,
         };
   const progressPercent =
@@ -118,6 +135,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         event.ctrlKey ||
         event.shiftKey
       ) {
+        return;
+      }
+
+      if (!isVideoWatchHref(card.watchHref)) {
         return;
       }
 
@@ -232,6 +253,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           mediaType={
             "sectionItem" in props && props.sectionItem ? props.sectionItem.type : props.detail.type
           }
+          libraryId={props.libraryId}
           userState={
             "sectionItem" in props && props.sectionItem ? props.sectionItem.user_state : undefined
           }

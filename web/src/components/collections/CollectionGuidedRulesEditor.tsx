@@ -780,7 +780,7 @@ export default function CollectionGuidedRulesEditor({
 
         {allowPersonalizedFilters ? (
           <div className="space-y-2">
-            <Label>Watch Status</Label>
+            <Label>{isAudiobookLibrary ? "Listening Status" : "Watch Status"}</Label>
             <Select
               value={state.watchStatus || "__any__"}
               onValueChange={(value) =>
@@ -795,8 +795,12 @@ export default function CollectionGuidedRulesEditor({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__any__">Any</SelectItem>
-                <SelectItem value="watched">Watched</SelectItem>
-                <SelectItem value="unwatched">Unwatched</SelectItem>
+                <SelectItem value="watched">
+                  {isAudiobookLibrary ? "Listened" : "Watched"}
+                </SelectItem>
+                <SelectItem value="unwatched">
+                  {isAudiobookLibrary ? "Unlistened" : "Unwatched"}
+                </SelectItem>
                 <SelectItem value="in_progress">In Progress</SelectItem>
               </SelectContent>
             </Select>

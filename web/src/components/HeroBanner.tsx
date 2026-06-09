@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
 import { Link } from "react-router";
 import { Info, ChevronLeft, ChevronRight, Play, Pause } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -6,6 +6,8 @@ import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
+import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
+import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 interface HeroBannerProps {
   items: SectionItem[];
@@ -33,20 +35,6 @@ interface HeroBannerProps {
   libraryId?: number;
 }
 
-/**
- * Build the target href for the hero's Play CTA. Directly-playable types
- * (movies, episodes) go to /watch; container types (series, season) have no
- * single video, so Play falls back to the detail page where the existing
- * in-context Play button handles next-episode / resume logic.
- */
-function buildPlayHref(item: SectionItem, libraryId?: number): string {
-  const q = libraryId ? `?libraryId=${libraryId}` : "";
-  if (item.type === "movie" || item.type === "episode") {
-    return `/watch/${item.content_id}${q}`;
-  }
-  return `/item/${item.content_id}${q}`;
-}
-
 function formatRuntime(seconds: number | undefined | null): string | null {
   if (!seconds || seconds <= 0) return null;
   const minutes = Math.round(seconds / 60);
@@ -54,6 +42,27 @@ function formatRuntime(seconds: number | undefined | null): string | null {
   const hours = Math.floor(minutes / 60);
   const remaining = minutes % 60;
   return remaining === 0 ? `${hours}h` : `${hours}h ${remaining}m`;
+}
+
+function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
+  if (item.type !== "audiobook") {
+    return "Play";
+  }
+  if (activeAudiobookPlaying === true) {
+    return "Pause";
+  }
+  if (activeAudiobookPlaying === false) {
+    return "Resume";
+  }
+  if (item.user_state?.played) {
+    return "Listen Again";
+  }
+  const position = item.position_seconds ?? 0;
+  const duration = item.duration_seconds ?? 0;
+  if (position > 0 && (duration <= 0 || position < duration)) {
+    return "Resume";
+  }
+  return "Listen";
 }
 
 export default function HeroBanner({
@@ -68,6 +77,7 @@ export default function HeroBanner({
   const [activeIndex, setActiveIndex] = useState(0);
   const [loaded, setLoaded] = useState<Record<number, boolean>>({});
   const [paused, setPaused] = useState(false);
+  const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
   // changes, or after the user unpauses. Used as part of the progress-rail key
   // so the CSS animation restarts in lockstep with the setInterval timer
@@ -126,6 +136,24 @@ export default function HeroBanner({
 
   const slideCount = slides.length;
   const padded = (n: number) => String(n).padStart(2, "0");
+  const activeAudiobookPlaying =
+    current.type === "audiobook" && audiobookPlayback?.active?.contentId === current.content_id
+      ? audiobookPlayback.active.playing
+      : null;
+  const playLabel = heroPlayLabel(current, activeAudiobookPlaying);
+  const playHref = buildMediaPlayHref({
+    contentId: current.content_id,
+    type: current.type,
+    libraryId,
+  });
+
+  const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (activeAudiobookPlaying == null) {
+      return;
+    }
+    event.preventDefault();
+    audiobookPlayback?.toggleActivePlayback();
+  };
 
   return (
     <section
@@ -220,14 +248,19 @@ export default function HeroBanner({
             )}
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                to={buildPlayHref(current, libraryId)}
+                to={playHref}
+                onClick={handlePlayClick}
                 className="pill pill-primary transition-colors duration-[--duration-fast]"
               >
-                <Play className="h-4 w-4 fill-current" />
-                Play
+                {activeAudiobookPlaying ? (
+                  <Pause className="h-4 w-4 fill-current" />
+                ) : (
+                  <Play className="h-4 w-4 fill-current" />
+                )}
+                {playLabel}
               </Link>
               <Link
-                to={`/item/${current.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`}
+                to={buildItemHref({ contentId: current.content_id, libraryId })}
                 className="pill pill-glass transition-colors duration-[--duration-fast]"
               >
                 <Info className="h-4 w-4" />

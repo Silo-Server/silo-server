@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type RefObject } from "react";
-import { buildDirectDownloadUrl } from "@/hooks/queries/downloads";
+import { toast } from "sonner";
 import { useReportMediaProgress } from "@/hooks/queries/progress";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
-import type { PlayerChapter } from "@/player/types";
+import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
+import { playerFetch } from "@/player/player-fetch";
+import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
+import { buildPlayerStreamUrl } from "@/player/stream-url";
+import type { PlaybackSessionResponse, PlayerChapter } from "@/player/types";
+import { usePlaybackRealtime } from "@/player/hooks/usePlaybackRealtime";
 import type { SleepSetting } from "@/player/components/SleepTimerMenu";
 
 const REPORT_INTERVAL_MS = 10_000;
@@ -12,6 +17,7 @@ export interface UseAudiobookPlaybackOptions {
   files: AudiobookFile[];
   initialPositionSeconds: number;
   autoPlay?: boolean;
+  onStopRequested?: () => void;
 }
 
 export interface AudiobookPlayback {
@@ -31,6 +37,11 @@ export interface AudiobookPlayback {
   setRate: (r: number) => void;
   sleep: { setting: SleepSetting; remainingMs: number | null };
   setSleep: (next: SleepSetting) => void;
+}
+
+interface AudiobookSessionState {
+  sessionId: string | null;
+  streamUrl: string;
 }
 
 interface AudiobookPart {
@@ -144,33 +155,69 @@ function buildPlayerChapters(files: AudiobookFile[]): PlayerChapter[] {
   return out;
 }
 
+function readNumericPayload(
+  payload: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | null {
+  if (!payload) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function readStringPayload(
+  payload: Record<string, unknown> | undefined,
+  key: string,
+): string | null {
+  const value = payload?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 export function useAudiobookPlayback({
   contentId,
   files,
   initialPositionSeconds,
   autoPlay = true,
+  onStopRequested,
 }: UseAudiobookPlaybackOptions): AudiobookPlayback {
+  const config = usePlayerConfig();
   const audioRef = useRef<HTMLAudioElement>(null);
   const parts = useMemo(() => buildParts(files), [files]);
   const duration = useMemo(() => totalDuration(parts), [parts]);
   const chapters = useMemo(() => buildPlayerChapters(files), [files]);
-  const [activeFileIndex, setActiveFileIndex] = useState(() =>
-    findPartIndex(parts, initialPositionSeconds),
-  );
+  const [activeFileIndex, setActiveFileIndex] = useState(() => {
+    return findPartIndex(parts, initialPositionSeconds);
+  });
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(() =>
     clampedBookTime(initialPositionSeconds, duration),
   );
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
   const [rate, setRateState] = useState(1);
+  const [sessionState, setSessionState] = useState<AudiobookSessionState>({
+    sessionId: null,
+    streamUrl: "",
+  });
 
   const { mutate: reportProgress } = useReportMediaProgress();
   const activePart = activeFileIndex >= 0 ? parts[activeFileIndex] : undefined;
   const fileId = activePart?.file.id;
-  const streamUrl = fileId ? buildDirectDownloadUrl(fileId) : "";
   const currentTimeRef = useRef(currentTime);
+  const activePartRef = useRef<AudiobookPart | undefined>(activePart);
+  const sessionIdRef = useRef<string | null>(null);
   const reportRef = useRef<(pos: number) => void>(() => {});
-  const pendingLocalSeekRef = useRef<number | null>(null);
+  const reportSessionRef = useRef<(pos: number, isPaused: boolean, keepalive?: boolean) => void>(
+    () => {},
+  );
+  const pendingLocalSeekRef = useRef<number | null>(
+    localTimeForPart(activePart, clampedBookTime(initialPositionSeconds, duration)),
+  );
   const playAfterSourceSwitchRef = useRef(false);
   const autoPlayPendingRef = useRef(autoPlay);
 
@@ -184,14 +231,75 @@ export function useAudiobookPlayback({
   );
 
   useEffect(() => {
+    activePartRef.current = activePart;
+  }, [activePart]);
+
+  const buildKeepaliveHeaders = useCallback(() => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const token = config.getAccessToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const profileId = config.getProfileId();
+    if (profileId) headers["X-Profile-Id"] = profileId;
+    const profileToken = config.getProfileToken?.();
+    if (profileToken) headers["X-Profile-Token"] = profileToken;
+    return headers;
+  }, [config]);
+
+  const stopSession = useCallback(
+    (sessionId: string, keepalive = false) => {
+      const request = fetch(`${config.apiBaseUrl}/playback/${sessionId}`, {
+        method: "DELETE",
+        headers: buildKeepaliveHeaders(),
+        keepalive,
+      });
+      request.catch(() => {
+        // Best effort: stale sessions are retired server-side.
+      });
+    },
+    [buildKeepaliveHeaders, config.apiBaseUrl],
+  );
+
+  useEffect(() => {
     reportRef.current = (posSeconds: number) => {
       reportProgress({
         contentId,
         positionSeconds: Math.floor(safeNumber(posSeconds)),
         durationSeconds: Math.floor(safeNumber(duration)),
       });
+      reportSessionRef.current(posSeconds, audioRef.current?.paused ?? true);
     };
   }, [contentId, duration, reportProgress]);
+
+  useEffect(() => {
+    reportSessionRef.current = (posSeconds: number, isPaused: boolean, keepalive = false) => {
+      const sessionId = sessionIdRef.current;
+      const part = activePartRef.current;
+      if (!sessionId || !part) {
+        return;
+      }
+      const body = JSON.stringify({
+        position: localTimeForPart(part, posSeconds),
+        is_paused: isPaused,
+      });
+      if (keepalive) {
+        fetch(`${config.apiBaseUrl}/playback/${sessionId}/progress`, {
+          method: "POST",
+          headers: buildKeepaliveHeaders(),
+          body,
+          keepalive: true,
+        }).catch(() => {});
+        return;
+      }
+      playerFetch(config, `/playback/${sessionId}/progress`, {
+        method: "POST",
+        body,
+      }).catch(() => {
+        // Progress is best effort and should not interrupt playback.
+      });
+    };
+  }, [buildKeepaliveHeaders, config]);
 
   useEffect(() => {
     const target = clampedBookTime(initialPositionSeconds, duration);
@@ -203,6 +311,78 @@ export function useAudiobookPlayback({
     currentTimeRef.current = target;
     setCurrentTime(target);
   }, [autoPlay, contentId, duration, initialPositionSeconds, parts]);
+
+  useEffect(() => {
+    if (!fileId || !activePart) {
+      setSessionState({ sessionId: null, streamUrl: "" });
+      sessionIdRef.current = null;
+      return;
+    }
+
+    let canceled = false;
+    let startedSessionId: string | null = null;
+    const localStart =
+      pendingLocalSeekRef.current ?? localTimeForPart(activePart, currentTimeRef.current);
+
+    setSessionState({ sessionId: null, streamUrl: "" });
+
+    (async () => {
+      const profileId = config.getProfileId();
+      if (!profileId) {
+        throw new Error("Missing active profile");
+      }
+
+      const session = await playerFetch<PlaybackSessionResponse>(config, "/playback/start", {
+        method: "POST",
+        body: JSON.stringify({
+          file_id: fileId,
+          profile_id: profileId,
+          play_method: "direct",
+          start_position: localStart,
+          disable_progress_persistence: true,
+          codecs_video: [],
+          codecs_audio: [],
+          containers: [],
+          max_resolution: "",
+          hdr: false,
+        }),
+      });
+
+      if (canceled) {
+        stopSession(session.session_id, true);
+        return;
+      }
+
+      startedSessionId = session.session_id;
+      sessionIdRef.current = session.session_id;
+      setSessionState({
+        sessionId: session.session_id,
+        streamUrl: buildPlayerStreamUrl(
+          config.apiBaseUrl,
+          session.stream_url,
+          config.getAccessToken(),
+          session.play_method,
+          localStart,
+        ),
+      });
+    })().catch((err) => {
+      if (!canceled) {
+        console.error("audiobook playback session failed", err);
+        toast.error(err instanceof Error ? err.message : "Failed to start audiobook playback");
+      }
+    });
+
+    return () => {
+      canceled = true;
+      if (startedSessionId) {
+        reportSessionRef.current(currentTimeRef.current, true, true);
+        stopSession(startedSessionId, true);
+        if (sessionIdRef.current === startedSessionId) {
+          sessionIdRef.current = null;
+        }
+      }
+    };
+  }, [activePart, config, fileId, stopSession]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -233,7 +413,10 @@ export function useAudiobookPlayback({
         });
       }
     };
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => {
+      setPlaying(true);
+      reportSessionRef.current(absoluteFromAudio(), false);
+    };
     const onPause = () => {
       setPlaying(false);
       reportRef.current(absoluteFromAudio());
@@ -360,6 +543,85 @@ export function useAudiobookPlayback({
     if (audioRef.current) audioRef.current.playbackRate = nextRate;
   }, []);
 
+  const executeRealtimeCommand = useCallback(
+    async (command: PlaybackRealtimeCommandEnvelope) => {
+      const audio = audioRef.current;
+
+      switch (command.name) {
+        case "pause":
+          audio?.pause();
+          return;
+        case "unpause":
+          if (!audio) return;
+          await audio.play();
+          return;
+        case "play_pause":
+          if (!audio) return;
+          if (audio.paused) {
+            await audio.play();
+          } else {
+            audio.pause();
+          }
+          return;
+        case "seek": {
+          const position = readNumericPayload(
+            command.payload,
+            "position",
+            "position_seconds",
+            "seconds",
+          );
+          if (position === null) {
+            throw new Error("missing_seek_position");
+          }
+          seekTo(position);
+          return;
+        }
+        case "set_volume": {
+          const volume = readNumericPayload(command.payload, "volume", "level");
+          if (volume === null || !audio) {
+            throw new Error("missing_volume");
+          }
+          audio.volume = Math.min(1, Math.max(0, volume));
+          if (audio.volume > 0 && audio.muted) {
+            audio.muted = false;
+          }
+          return;
+        }
+        case "display_message":
+          toast.info(
+            readStringPayload(command.payload, "message") ?? "A server message was received.",
+          );
+          return;
+        case "server_restarting":
+        case "server_shutting_down":
+          toast.warning(
+            readStringPayload(command.payload, "message") ??
+              (command.name === "server_restarting"
+                ? "Playback may end shortly while the server restarts."
+                : "Playback may end shortly while the server shuts down."),
+          );
+          return;
+        case "stop":
+        case "terminate":
+          audio?.pause();
+          if (audio) {
+            audio.removeAttribute("src");
+            audio.load();
+          }
+          window.setTimeout(() => onStopRequested?.(), 0);
+          return;
+        default:
+          throw new Error("unsupported");
+      }
+    },
+    [onStopRequested, seekTo],
+  );
+
+  usePlaybackRealtime({
+    sessionId: sessionState.sessionId,
+    onCommand: executeRealtimeCommand,
+  });
+
   const currentChapter = useMemo(() => {
     if (chapters.length === 0) return null;
     for (let i = chapters.length - 1; i >= 0; i--) {
@@ -426,7 +688,7 @@ export function useAudiobookPlayback({
 
   return {
     audioRef,
-    streamUrl,
+    streamUrl: sessionState.streamUrl,
     hasFile: Boolean(activePart),
     playing,
     currentTime,

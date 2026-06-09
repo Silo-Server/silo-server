@@ -182,4 +182,39 @@ describe("ContinueWatchingCard", () => {
     expect(markup).toContain("58 min left");
     expect(markup).toContain("More actions");
   });
+
+  it("routes audiobook continue cards to the audiobook detail player", () => {
+    const queryClient = new QueryClient();
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ContinueWatchingCard
+            sectionItem={{
+              content_id: "book-001",
+              type: "audiobook",
+              title: "The Way of Kings",
+              year: 2010,
+              genres: [],
+              status: "matched",
+              rating_imdb: null,
+              overview: "",
+              item_source: "continue_watching",
+              position_seconds: 3600,
+              duration_seconds: 14400,
+              progress_updated_at: "2026-03-07T00:00:00Z",
+              poster_url: "/book-cover.jpg",
+              poster_thumbhash: "",
+              backdrop_url: "",
+              backdrop_thumbhash: "",
+              logo_url: "",
+            }}
+            libraryId={7}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain('href="/item/book-001?libraryId=7&amp;play=1"');
+    expect(markup).not.toContain('href="/watch/book-001');
+  });
 });
