@@ -65,69 +65,87 @@ func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (s
 // incidental one-mention hits that flooded results before.
 const overviewMatchFloor = 0.15
 
-// itemColumns is the list of columns returned by all SELECT queries on media_items.
-const itemColumns = `content_id, type, title, sort_title, default_metadata_language, original_title, year, genres,
-	content_rating, runtime, overview, tagline,
-	rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
-	imdb_id, tmdb_id, tvdb_id,
-	COALESCE(poster_path, ''), COALESCE(poster_thumbhash, ''), COALESCE(backdrop_path, ''), COALESCE(backdrop_thumbhash, ''), COALESCE(logo_path, ''),
-	COALESCE(metadata_s3_path, ''), COALESCE(metadata_etag, ''), season_count,
-	studios, networks, countries, keywords, original_language, release_date::text, first_air_date, last_air_date, air_time, air_timezone,
-	show_status,
-	matched_at, last_refreshed, refresh_failures,
-	episode_metadata_incomplete, episode_metadata_last_checked_at, locked_fields, status, created_at, updated_at`
-
-func qualifiedNullableStringColumn(alias, col string) string {
-	switch col {
-	case "poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path", "metadata_s3_path", "metadata_etag":
-		return fmt.Sprintf("COALESCE(%s.%s, '')", alias, col)
-	default:
-		return alias + "." + col
-	}
+// itemColumnNames lists, in scan order, every column selected by media_items
+// item queries. Shared by itemColumns, qualifiedItemColumns,
+// qualifiedListItemColumns, and qualifiedItemColumnRefs so the select lists
+// can never drift from each other or from scanItem.
+var itemColumnNames = []string{
+	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
+	"content_rating", "runtime", "overview", "tagline",
+	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
+	"imdb_id", "tmdb_id", "tvdb_id",
+	"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
+	"metadata_s3_path", "metadata_etag", "season_count",
+	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
+	"show_status",
+	"matched_at", "last_refreshed", "refresh_failures",
+	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
 }
 
+// nullableStringItemColumns are media_items columns that may hold NULL but
+// scan into plain (non-pointer) string fields on models.MediaItem, so select
+// lists coalesce them to ”.
+var nullableStringItemColumns = map[string]bool{
+	"poster_path":        true,
+	"poster_thumbhash":   true,
+	"backdrop_path":      true,
+	"backdrop_thumbhash": true,
+	"logo_path":          true,
+	"metadata_s3_path":   true,
+	"metadata_etag":      true,
+}
+
+// itemColumnExpr renders one select-list entry for col, qualified with alias
+// when non-empty. Nullable string columns are coalesced to ” and aliased
+// back to their own name so queries that wrap the select list in a CTE or
+// subquery can still reference the column by name.
+func itemColumnExpr(alias, col string) string {
+	qualified := col
+	if alias != "" {
+		qualified = alias + "." + col
+	}
+	if nullableStringItemColumns[col] {
+		return fmt.Sprintf("COALESCE(%s, '') AS %s", qualified, col)
+	}
+	return qualified
+}
+
+func joinItemColumns(alias string) string {
+	exprs := make([]string, len(itemColumnNames))
+	for i, col := range itemColumnNames {
+		exprs[i] = itemColumnExpr(alias, col)
+	}
+	return strings.Join(exprs, ", ")
+}
+
+// itemColumns is the list of columns returned by all SELECT queries on media_items.
+var itemColumns = joinItemColumns("")
+
 func qualifiedItemColumns(alias string) string {
-	cols := []string{
-		"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
-		"content_rating", "runtime", "overview", "tagline",
-		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
-		"imdb_id", "tmdb_id", "tvdb_id",
-		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
-		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
-		"show_status",
-		"matched_at", "last_refreshed", "refresh_failures",
-		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
+	return joinItemColumns(alias)
+}
+
+// qualifiedItemColumnRefs renders plain alias-qualified column references
+// without COALESCE or AS aliases, for contexts like GROUP BY where output
+// aliases are invalid.
+func qualifiedItemColumnRefs(alias string) string {
+	refs := make([]string, len(itemColumnNames))
+	for i, col := range itemColumnNames {
+		refs[i] = alias + "." + col
 	}
-	prefixed := make([]string, len(cols))
-	for i, col := range cols {
-		prefixed[i] = qualifiedNullableStringColumn(alias, col)
-	}
-	return strings.Join(prefixed, ", ")
+	return strings.Join(refs, ", ")
 }
 
 func qualifiedListItemColumns(alias string) string {
-	cols := []string{
-		"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
-		"content_rating", "runtime", "overview", "tagline",
-		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
-		"imdb_id", "tmdb_id", "tvdb_id",
-		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
-		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
-		"show_status",
-		"matched_at", "last_refreshed", "refresh_failures",
-		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
-	}
-	prefixed := make([]string, len(cols))
-	for i, col := range cols {
+	exprs := make([]string, len(itemColumnNames))
+	for i, col := range itemColumnNames {
 		if col == "last_air_date" {
-			prefixed[i] = effectiveLastAirDateExpr(alias)
+			exprs[i] = effectiveLastAirDateExpr(alias) + " AS last_air_date"
 			continue
 		}
-		prefixed[i] = qualifiedNullableStringColumn(alias, col)
+		exprs[i] = itemColumnExpr(alias, col)
 	}
-	return strings.Join(prefixed, ", ")
+	return strings.Join(exprs, ", ")
 }
 
 // scanItem scans a single row into a *models.MediaItem.
@@ -985,8 +1003,12 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	)
 
 	// Use qualified column names inside the CTE to avoid ambiguity when
-	// the FROM clause includes a JOIN to media_item_libraries.
+	// the FROM clause includes a JOIN to media_item_libraries. The select
+	// list aliases coalesced columns back to their own names (poster_path
+	// etc.) so the outer query can re-reference them; GROUP BY needs the
+	// raw references because output aliases are invalid there.
 	qualifiedCols := qualifiedItemColumns("mi")
+	groupByCols := qualifiedItemColumnRefs("mi")
 	scoredCTE := fmt.Sprintf(`
 		WITH scored AS (
 			SELECT
@@ -1013,7 +1035,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 			%s
 			GROUP BY %s
 		)
-	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, qualifiedCols)
+	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
 
 	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
 	// duplicates from the library JOIN, so the window count preserves the

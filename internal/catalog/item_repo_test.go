@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -365,5 +366,61 @@ func TestItemRepo_Search_NormalizesTsqueryInput(t *testing.T) {
 	// Overview deliberately not wrapped — 'english' config strips "and".
 	if !strings.Contains(sql, "websearch_to_tsquery('english', $1)") {
 		t.Fatalf("overview arm should NOT wrap $1 in normalize_search_text; got:\n%s", sql)
+	}
+}
+
+// TestItemRepo_Search_ScoredCTEExposesItemColumnNames guards the contract
+// between the scored CTE and the outer SELECT in buildSearchSQL. The CTE
+// projects qualifiedItemColumns("mi") and the outer query re-selects those
+// columns by name via itemColumns, so every entry must expose its own column
+// name as the output name. Postgres names an unaliased expression like
+// COALESCE(mi.poster_path, ”) "coalesce", which breaks the outer reference
+// with SQLSTATE 42703 (column "poster_path" does not exist) — exactly how
+// search returned 500s when the nullable-string COALESCE wrappers first
+// landed without AS aliases.
+func TestItemRepo_Search_ScoredCTEExposesItemColumnNames(t *testing.T) {
+	exposed := map[string]bool{}
+	for _, part := range splitTopLevelSQLCommas(qualifiedItemColumns("mi")) {
+		exposed[sqlOutputColumnName(part)] = true
+	}
+
+	var missing []string
+	for _, col := range itemColumnNames {
+		name := trailingSQLIdent(col)
+		if !exposed[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("qualifiedItemColumns(\"mi\") does not expose output columns %v; "+
+			"alias each expression back to its column name (e.g. COALESCE(mi.x, '') AS x) "+
+			"or the search CTE's outer SELECT fails with SQLSTATE 42703", missing)
+	}
+}
+
+// TestItemRepo_Search_GroupByHasNoOutputAliases asserts the scored CTE's
+// GROUP BY uses raw column references: AS aliases are valid in a select list
+// but are a syntax error inside GROUP BY, so the CTE must not reuse the
+// aliased projection there.
+func TestItemRepo_Search_GroupByHasNoOutputAliases(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, AccessFilter{})
+
+	for _, sql := range []string{dataSQL, countSQL} {
+		idx := strings.Index(sql, "GROUP BY")
+		if idx < 0 {
+			t.Fatalf("expected GROUP BY in scored CTE; got:\n%s", sql)
+		}
+		clause := sql[idx:]
+		if end := strings.Index(clause, ")"); end >= 0 {
+			clause = clause[:end]
+		}
+		if strings.Contains(clause, " AS ") {
+			t.Fatalf("GROUP BY must not contain output aliases; got:\n%s", clause)
+		}
+		if strings.Contains(clause, "COALESCE") {
+			t.Fatalf("GROUP BY should group by raw columns, not COALESCE expressions; got:\n%s", clause)
+		}
 	}
 }
