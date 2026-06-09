@@ -1320,8 +1320,12 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			healthy[t.Quality] = true
 		}
 	}
+	allowed := s.allowedQualities(ctx, req, fc.settings)
+	if !fc.settings.ForceDualQuality {
+		allowed = filterUnconfiguredOptionalQualities(allowed, conns)
+	}
 	var want []Quality
-	for _, q := range s.allowedQualities(ctx, req, fc.settings) {
+	for _, q := range allowed {
 		if !healthy[q] {
 			want = append(want, q)
 		}
@@ -1434,6 +1438,54 @@ func connectionKindByID(conns []ResolvedRouterConnection) map[string]string {
 		}
 	}
 	return out
+}
+
+func filterUnconfiguredOptionalQualities(qualities []Quality, conns []ResolvedRouterConnection) []Quality {
+	out := make([]Quality, 0, len(qualities))
+	for _, q := range qualities {
+		if q == Quality2160p && !routerQualityConfigured(q, conns) {
+			continue
+		}
+		out = append(out, q)
+	}
+	return out
+}
+
+func routerQualityConfigured(q Quality, conns []ResolvedRouterConnection) bool {
+	usesTieredDefaults := false
+	for _, conn := range conns {
+		if conn.Config == nil {
+			continue
+		}
+		if hasRouterQualityKey(conn.Config) {
+			usesTieredDefaults = true
+		}
+		if q == Quality2160p && boolConfig(conn.Config, "is_default_4k") {
+			return true
+		}
+	}
+	// Generic request_router implementations may not expose arr-style HD/4K
+	// default flags. In that case, preserve the host's requested qualities and
+	// let the plugin decide what it can fulfill.
+	return !usesTieredDefaults
+}
+
+func hasRouterQualityKey(config map[string]any) bool {
+	for _, key := range []string{"is_default", "is_default_4k", "is_4k"} {
+		if _, ok := config[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func boolConfig(config map[string]any, key string) bool {
+	v, ok := config[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
 
 func (s *Service) markSubmissionFailed(ctx context.Context, requestID string, actor Viewer, submitErr error) (*Request, error) {

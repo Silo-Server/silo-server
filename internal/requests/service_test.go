@@ -2158,6 +2158,64 @@ func TestSubmitApprovedFansOutDualQuality(t *testing.T) {
 	}
 }
 
+func TestSubmitApprovedSkipsUnconfiguredOptional4KTarget(t *testing.T) {
+	store := newFakeStore()
+	hd := routerInst("router-1")
+	hd.PluginConfig = map[string]any{
+		"service_kind": "radarr",
+		"is_default":   true,
+		"is_4k":        false,
+	}
+	store.integrations = []Integration{hd}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: ""})
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(router.gotQualities) != 1 || router.gotQualities[0] != Quality1080p {
+		t.Fatalf("qualities = %v, want only [1080p] when no 4K default is configured", router.gotQualities)
+	}
+	targets, _ := store.ListTargets(context.Background(), "r1")
+	if len(targets) != 1 || targets[0].Quality != Quality1080p || targets[0].Status == StatusFailed {
+		t.Fatalf("targets = %+v, want one healthy 1080p target", targets)
+	}
+}
+
+func TestSubmitApprovedUsesConfiguredOptional4KDefault(t *testing.T) {
+	store := newFakeStore()
+	hd := routerInst("router-hd")
+	hd.PluginConfig = map[string]any{
+		"service_kind": "radarr",
+		"is_default":   true,
+		"is_4k":        false,
+	}
+	uhd := routerInst("router-uhd")
+	uhd.PluginConfig = map[string]any{
+		"service_kind":  "radarr",
+		"is_4k":         true,
+		"is_default_4k": true,
+	}
+	store.integrations = []Integration{hd, uhd}
+	router := &fakeRouterProvider{}
+	svc := newTestService(store)
+	svc.SetRouterProvider(router)
+	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
+	store.requests["r1"] = &req
+	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(router.gotQualities) != 2 || router.gotQualities[0] != Quality1080p || router.gotQualities[1] != Quality2160p {
+		t.Fatalf("qualities = %v, want [1080p 2160p]", router.gotQualities)
+	}
+}
+
 func TestSubmitApprovedNoRouterFails(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")}
