@@ -48,4 +48,17 @@ func TestParseFolderIDs_StructuredTagsStillParse(t *testing.T) {
 	if got == nil || got.ImdbID != "tt1375666" {
 		t.Errorf(`ParseFolderIDs("Some Movie (2010) tt1375666") = %+v, want ImdbID="tt1375666"`, got)
 	}
+
+	// A structured tag for one provider must not swallow a trailing bare IMDb
+	// id for another — both merge.
+	got = ParseFolderIDs("Some Show (2010) [tvdbid-81189] tt1375666")
+	if got == nil || got.TvdbID != "81189" || got.ImdbID != "tt1375666" {
+		t.Errorf(`ParseFolderIDs("Some Show (2010) [tvdbid-81189] tt1375666") = %+v, want TvdbID="81189" and ImdbID="tt1375666"`, got)
+	}
+
+	// An explicit structured imdb tag still wins over a trailing bare id.
+	got = ParseFolderIDs("Some Movie [imdb-tt1111111] tt2222222")
+	if got == nil || got.ImdbID != "tt1111111" {
+		t.Errorf(`ParseFolderIDs("Some Movie [imdb-tt1111111] tt2222222") = %+v, want ImdbID="tt1111111"`, got)
+	}
 }

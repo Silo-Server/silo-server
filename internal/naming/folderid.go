@@ -56,14 +56,20 @@ func ParseStructuredFolderIDs(name string) *FolderIDHints {
 // tags, and a misparsed ID becomes a trusted match hint downstream where it
 // silently produces a wrong match or blocks matching entirely.
 func ParseFolderIDs(folderName string) *FolderIDHints {
-	if hints := ParseStructuredFolderIDs(folderName); hints != nil {
-		return hints
-	}
+	hints := ParseStructuredFolderIDs(folderName)
 
+	// A trailing bare IMDb id complements structured tags for other providers
+	// ("Show [tvdbid-81189] tt1375666"); an explicit structured imdb tag still
+	// wins when both are present.
 	trimmed := strings.TrimSpace(folderName)
 	if m := trailingImdbIDPattern.FindStringSubmatch(trimmed); m != nil {
-		return &FolderIDHints{ImdbID: strings.ToLower(m[1])}
+		if hints == nil {
+			return &FolderIDHints{ImdbID: strings.ToLower(m[1])}
+		}
+		if hints.ImdbID == "" {
+			hints.ImdbID = strings.ToLower(m[1])
+		}
 	}
 
-	return nil
+	return hints
 }
