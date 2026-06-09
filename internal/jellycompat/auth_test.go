@@ -119,6 +119,60 @@ func TestRequireSession_NoAuthService_PassesThroughExpiredStreamAppToken(t *test
 	}
 }
 
+func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
+	now := fixedNow()
+	clock := func() time.Time { return now }
+	sessions := NewSessionStore(30*24*time.Hour, clock)
+	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
+	playbackStore := NewPlaybackSessionStore(time.Hour, clock)
+	playbackStore.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok"})
+
+	mw := PlaybackSessionAuth(sessions, playbackStore, nil)
+
+	cases := []struct {
+		name      string
+		rawQuery  string
+		wantCode  int
+	}{
+		// Wholphin's jellyfin-sdk-kotlin direct-play URL: lowercase playSessionId,
+		// no api_key and no auth header. Previously 401'd (case-sensitive lookup).
+		{"lowercase playSessionId (Wholphin)", "static=true&mediaSourceId=x&playSessionId=ps-abc", http.StatusOK},
+		{"canonical PlaySessionId", "PlaySessionId=ps-abc", http.StatusOK},
+		{"legacy PlaySessionID", "PlaySessionID=ps-abc", http.StatusOK},
+		{"unknown play session", "playSessionId=does-not-exist", http.StatusUnauthorized},
+		{"no auth at all", "static=true", http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/Videos/itm/stream?"+tc.rawQuery, nil)
+			rec := httptest.NewRecorder()
+			gotSession := false
+			mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if SessionFromContext(r.Context()) != nil {
+					gotSession = true
+				}
+				w.WriteHeader(http.StatusOK)
+			})).ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if tc.wantCode == http.StatusOK && !gotSession {
+				t.Fatal("expected authenticated session in context")
+			}
+		})
+	}
+}
+
+func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
+	for _, key := range []string{"api_key", "Api_Key", "API_KEY"} {
+		req := httptest.NewRequest("GET", "/Videos/itm/stream?"+key+"=tok123", nil)
+		if got, ok := ExtractToken(req); !ok || got != "tok123" {
+			t.Fatalf("%s: ExtractToken = (%q, %v), want (tok123, true)", key, got, ok)
+		}
+	}
+}
+
 func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
 	authn := newAdminAPIKeyAuthForTest(
 		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},

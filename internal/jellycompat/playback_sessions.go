@@ -140,7 +140,7 @@ func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*Playba
 			return &cp, nil, true
 		}
 		for _, source := range session.MediaSources {
-			if source.ID == routeID {
+			if mediaSourceIDsEqual(source.ID, routeID) {
 				cp := session
 				sourceCopy := source
 				return &cp, &sourceCopy, true

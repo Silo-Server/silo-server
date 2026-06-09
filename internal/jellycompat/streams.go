@@ -123,7 +123,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID"))
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
 	if playSessionID == "" {
 		writeError(w, http.StatusBadRequest, "BadRequest", "PlaySessionId is required")
 		return
@@ -906,7 +906,7 @@ func audioSelectionChanged(session *PlaybackSession, mediaSourceID string, incom
 		return true
 	}
 	for _, source := range session.MediaSources {
-		if mediaSourceID != "" && source.ID != mediaSourceID {
+		if mediaSourceID != "" && !mediaSourceIDsEqual(source.ID, mediaSourceID) {
 			continue
 		}
 		if source.SelectedAudioStreamIndex == nil {
@@ -925,7 +925,7 @@ func (h *PlaybackHandler) setSelectedAudioStream(playSessionID, mediaSourceID st
 		if mediaSourceID != "" {
 			sourceIndex = -1
 			for index := range current.MediaSources {
-				if current.MediaSources[index].ID == mediaSourceID {
+				if mediaSourceIDsEqual(current.MediaSources[index].ID, mediaSourceID) {
 					sourceIndex = index
 					break
 				}
@@ -1061,7 +1061,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 }
 
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
-	if playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID")); playSessionID != "" {
+	if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" {
 		playSession, ok := h.playbackStore.Get(playSessionID)
 		if !ok || playSession.CompatToken != compatSession.Token {
 			return nil, nil, ErrSessionNotFound
@@ -1099,7 +1099,7 @@ func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMe
 		return nil
 	}
 	for _, source := range session.MediaSources {
-		if source.ID == mediaSourceID {
+		if mediaSourceIDsEqual(source.ID, mediaSourceID) {
 			copy := source
 			return &copy
 		}
