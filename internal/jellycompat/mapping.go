@@ -408,6 +408,16 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if wantField("chapters") {
 			dto.Chapters = compatChapters(firstVersion.Chapters, firstVersion.AddedAt)
 		}
+	} else if isPlayableItemType(item.Type) {
+		// Playable item with no underlying media file: a provider-metadata-only
+		// (unaired/missing) episode pulled from TVDB/TMDB. itemFromList stamped
+		// LocationType="FileSystem", but Jellyfin's contract is that such items
+		// report LocationType="Virtual" with no MediaSources. Without this,
+		// clients (Wholphin, Infuse, Findroid, ...) queue these phantom episodes
+		// for playback and fail with "no media sources" — Wholphin specifically
+		// filters LocationType=Virtual out of its auto-advance playlist, so this
+		// makes skip-outro / next-episode jump cleanly to the next real episode.
+		dto.LocationType = "Virtual"
 	}
 	slog.Info("jellycompat item detail mapped",
 		"content_id", item.ContentID,
