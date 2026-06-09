@@ -89,7 +89,7 @@ func InferRootAssignments(
 					Year:              assignment.Year,
 				},
 			}
-			if ids := ParseFolderIDs(filepath.Base(assignment.RootPath), assignment.InferredType); ids != nil {
+			if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil {
 				agg.hasFolderIDs = true
 				agg.root.TmdbID = ids.TmdbID
 				agg.root.ImdbID = ids.ImdbID
@@ -254,7 +254,7 @@ func inferFileRootAssignment(
 		}
 	}
 
-	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath), assignment.InferredType); ids != nil {
+	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil {
 		assignment.HasFolderIDs = true
 	}
 
@@ -369,7 +369,7 @@ func detectInferMovieFolderEvidence(parentBase string, nameNoExt string, hasSeas
 	if hasSeasonStructure {
 		return false
 	}
-	if ParseFolderIDs(parentBase, "movie") != nil || ParseFolderIDs(parentBase, "series") != nil {
+	if ParseFolderIDs(parentBase) != nil {
 		return true
 	}
 	parentTitle, parentYear, trusted := parseInferFolderTitleYear(parentBase)
@@ -457,7 +457,7 @@ func promoteCandidateRoot(filePath, currentRoot, title string, year int) (string
 
 		parentBase := filepath.Base(parent)
 		currentBase := filepath.Base(cleanRoot)
-		parentIDs := ParseFolderIDs(parentBase, "movie") != nil || ParseFolderIDs(parentBase, "series") != nil
+		parentIDs := ParseFolderIDs(parentBase) != nil
 		childTitle, childYear := parseInferTitleYear(currentBase)
 		parentTitle, parentYear := parseInferTitleYear(parentBase)
 

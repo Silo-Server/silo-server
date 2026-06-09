@@ -18,7 +18,31 @@ const (
 	movieQueueRetryDelay       = 15 * time.Second
 	seriesRootQueueQuietWindow = 10 * time.Second
 	seriesRootQueueRetryDelay  = 30 * time.Second
+
+	// matchQueueRetryMaxDelay caps the exponential retry backoff shared by both
+	// match queues. Terminal outcomes like "no metadata found from any
+	// provider" stay in the queue but decay to at most one attempt per day
+	// instead of hot-looping at the base delay forever. A row self-heals by
+	// being deleted on the first successful attempt.
+	matchQueueRetryMaxDelay = 24 * time.Hour
+	// matchQueueBackoffMaxExponent clamps the 2^attempt_count factor so the
+	// float math stays finite for rows that accumulated very large attempt
+	// counts before backoff existed.
+	matchQueueBackoffMaxExponent = 16
 )
+
+// matchQueueBackoffExpr returns the SQL expression both match queues use to
+// schedule the next retry after a failure: base_delay * 2^attempt_count,
+// capped at matchQueueRetryMaxDelay. attempt_count is incremented when a row
+// is claimed, so the first failure backs off to twice the base delay.
+// basePlaceholder and maxPlaceholder name the interval bind parameters (e.g.
+// "$3", "$4") in the caller's statement.
+func matchQueueBackoffExpr(basePlaceholder, maxPlaceholder string) string {
+	return fmt.Sprintf(
+		"NOW() + LEAST(%s::interval * power(2::float8, LEAST(attempt_count, %d)), %s::interval)",
+		basePlaceholder, matchQueueBackoffMaxExponent, maxPlaceholder,
+	)
+}
 
 type MovieMatchQueueRepository struct {
 	pool     *pgxpool.Pool
@@ -477,10 +501,10 @@ func (r *MovieMatchQueueRepository) UpdateError(ctx context.Context, mediaFileID
 	if _, err := r.pool.Exec(ctx, `
 		UPDATE movie_match_queue
 		SET last_error = $2,
-			available_at = NOW() + $3::interval,
+			available_at = `+matchQueueBackoffExpr("$3", "$4")+`,
 			updated_at = NOW()
 		WHERE media_file_id = $1
-	`, mediaFileID, errText, intervalLiteral(movieQueueRetryDelay)); err != nil {
+	`, mediaFileID, errText, intervalLiteral(movieQueueRetryDelay), intervalLiteral(matchQueueRetryMaxDelay)); err != nil {
 		return fmt.Errorf("updating movie queue error: %w", err)
 	}
 	return nil
