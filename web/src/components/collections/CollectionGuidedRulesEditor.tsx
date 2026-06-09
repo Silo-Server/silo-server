@@ -40,7 +40,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook";
+  mediaScope: "all" | "video" | "movie" | "series" | "episode" | "audiobook";
   libraryIds: number[];
   genres: string[];
   decade: string;
@@ -462,7 +462,8 @@ export default function CollectionGuidedRulesEditor({
               <Select
                 value={state.mediaScope}
                 onValueChange={(v) => {
-                  const nextRelevanceScope = v === "all" ? "all" : (v as QuerySortRelevanceScope);
+                  const nextRelevanceScope =
+                    v === "all" || v === "video" ? "all" : (v as QuerySortRelevanceScope);
                   const nextSort = normalizeQuerySortForScope(
                     { field: state.sortField, order: state.sortOrder },
                     {
@@ -483,6 +484,7 @@ export default function CollectionGuidedRulesEditor({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Media</SelectItem>
+                  <SelectItem value="video">Movies & Series</SelectItem>
                   <SelectItem value="movie">Movies</SelectItem>
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>

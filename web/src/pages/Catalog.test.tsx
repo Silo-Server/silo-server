@@ -557,4 +557,51 @@ describe("Catalog page", () => {
     expect(markup).toContain('data-loading="false"');
     expect(markup).toContain('data-total="0"');
   });
+
+  it("applies the preferred media scope (default: video) when the URL has no type param", () => {
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(mockUseCatalogWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "query",
+        q: "heat",
+        query_definition: expect.objectContaining({ media_scope: "video" }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("respects an explicit type=all scope instead of the preferred default", () => {
+    appInitialEntries = ["/catalog?source=query&q=heat&type=all"];
+
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(mockUseCatalogWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "query",
+        q: "heat",
+        query_definition: expect.objectContaining({ media_scope: undefined }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("renders the search scope chips on query results", () => {
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain('aria-label="Search scope"');
+    expect(markup).toContain("Audiobooks");
+  });
 });

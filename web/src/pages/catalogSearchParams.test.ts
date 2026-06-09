@@ -39,6 +39,14 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it("parses the video group scope and treats type=all as unscoped", () => {
+    const video = parseCatalogSearchParams(params("source=query&q=heat&type=video"));
+    expect(video.query_definition.media_scope).toBe("video");
+
+    const all = parseCatalogSearchParams(params("source=query&q=heat&type=all"));
+    expect(all.query_definition.media_scope).toBeUndefined();
+  });
+
   it("parses person catalog sources with overlays", () => {
     const state = parseCatalogSearchParams(
       params(

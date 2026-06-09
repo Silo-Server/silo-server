@@ -7,7 +7,9 @@ import ItemGrid from "@/components/ItemGrid";
 import { RequestToAddSection } from "@/components/RequestToAddSection";
 import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
+import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
+import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRemoveHistory } from "@/hooks/queries/history";
 import { useRequestSearch } from "@/hooks/queries/useRequests";
 import { useCanRequest } from "@/hooks/useCanRequest";
@@ -106,14 +108,42 @@ function CatalogResults({
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
+  const isQuerySource = state.source === "query" && Boolean(state.q);
+  const { scope: preferredScope, setScope: setPreferredScope } = useSearchMediaScope();
+  // The URL `type` param is the explicit search scope ("all" included as a
+  // sentinel). When it's absent — fresh navigation, bookmark, global search —
+  // the user's preferred scope applies as the default.
+  const hasExplicitScope = !isQuerySource || searchParams.has("type");
+  const effectiveState = useMemo(() => {
+    if (hasExplicitScope || preferredScope === "all") {
+      return state;
+    }
+    return {
+      ...state,
+      query_definition: { ...state.query_definition, media_scope: preferredScope },
+    };
+  }, [hasExplicitScope, preferredScope, state]);
+
+  const mediaScope = effectiveState.query_definition.media_scope;
+  const activeChipScope: SearchMediaScope =
+    mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";
+  const handleChipScopeChange = useCallback(
+    (scope: SearchMediaScope) => {
+      setPreferredScope(scope);
+      const next = new URLSearchParams(searchParams);
+      next.set("type", scope);
+      setSearchParams(next);
+    },
+    [searchParams, setPreferredScope, setSearchParams],
+  );
+
   const showExactResultCount = state.source !== "section";
-  const catalogQuery = useCatalogWindow(state, {
+  const catalogQuery = useCatalogWindow(effectiveState, {
     limit,
     visibleRange,
     includeTotal: showExactResultCount,
   });
   const canRequest = useCanRequest();
-  const isQuerySource = state.source === "query" && Boolean(state.q);
   // Add a 200ms TMDB debounce on top of SearchBar's 200ms input debounce so the
   // TMDB plugin isn't hit at the same cadence as the local library query.
   const tmdbDebouncedQ = useDebounce(state.q ?? "", 200);
@@ -217,13 +247,14 @@ function CatalogResults({
       </header>
 
       {state.source === "query" ? (
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center gap-3">
           <SearchBar prominent initialQuery={state.q ?? ""} autoFocus />
+          <SearchScopeChips activeScope={activeChipScope} onScopeChange={handleChipScopeChange} />
         </div>
       ) : null}
 
       <CatalogFiltersPanel
-        state={state}
+        state={effectiveState}
         onStateChange={(nextState) => {
           const nextSearchParams = buildCatalogApiSearchParams(nextState);
           if (nextSearchParams.toString() !== searchParams.toString()) {
