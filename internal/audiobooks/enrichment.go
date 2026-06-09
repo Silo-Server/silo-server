@@ -100,9 +100,14 @@ type Enricher struct {
 	personRepo  *catalog.PersonRepository
 	providerIDs *catalog.ProviderIDRepository
 	imageCacher audiobookCoverCacher
+	workLinker  literaryWorkLinker
 	ffmpegPath  string
 	batchSize   int
 	workers     int
+}
+
+type literaryWorkLinker interface {
+	AutoLinkContent(ctx context.Context, contentID string) (workID string, linked bool, err error)
 }
 
 // NewEnricher constructs an Enricher.  All fields are required; a nil pool or
@@ -137,6 +142,13 @@ func (e *Enricher) SetImageCacher(cacher audiobookCoverCacher) {
 		return
 	}
 	e.imageCacher = cacher
+}
+
+func (e *Enricher) SetLiteraryWorkLinker(linker literaryWorkLinker) {
+	if e == nil {
+		return
+	}
+	e.workLinker = linker
 }
 
 // SetFFmpegPath installs the ffmpeg binary path used by the deferred
@@ -462,6 +474,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
 	}
+	e.autoLinkLiteraryWork(ctx, item.ContentID)
 
 	slog.Info("audiobook enrichment: enriched",
 		"content_id", item.ContentID,
@@ -472,6 +485,20 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	)
 
 	return nil
+}
+
+func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
+	if e == nil || e.workLinker == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	workID, linked, err := e.workLinker.AutoLinkContent(ctx, contentID)
+	if err != nil {
+		slog.Warn("audiobook enrichment: literary work auto-link failed", "content_id", contentID, "error", err)
+		return
+	}
+	if linked {
+		slog.Info("audiobook enrichment: literary work auto-linked", "content_id", contentID, "work_id", workID)
+	}
 }
 
 // maybeApplyCoverFallback wraps applyLocalCoverFallback with the nil-guards

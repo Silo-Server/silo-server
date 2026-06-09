@@ -486,6 +486,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 			return fmt.Errorf("upsert ebook ISBN provider id: %w", err)
 		}
 	}
+	s.autoLinkLiteraryWork(ctx, contentID)
 	slog.Info("ebook scan: indexed",
 		"folder_id", folder.ID,
 		"content_id", contentID,
@@ -494,6 +495,20 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		"path", filePath,
 	)
 	return nil
+}
+
+func (s *Scanner) autoLinkLiteraryWork(ctx context.Context, contentID string) {
+	if s == nil || s.literaryWorkLinker == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	workID, linked, err := s.literaryWorkLinker.AutoLinkContent(ctx, contentID)
+	if err != nil {
+		slog.Warn("literary work auto-link failed", "content_id", contentID, "error", err)
+		return
+	}
+	if linked {
+		slog.Info("literary work auto-linked", "content_id", contentID, "work_id", workID)
+	}
 }
 
 func (s *Scanner) ebookFileShouldSkip(ctx context.Context, folder *models.MediaFolder, filePath string, size int64, modifiedAt time.Time) (bool, error) {

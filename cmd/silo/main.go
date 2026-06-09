@@ -57,6 +57,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
+	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/mail"
@@ -802,6 +803,11 @@ func main() {
 		configureS3Clients(cfg, &deps)
 	}
 
+	var literaryWorkService *literaryworks.Service
+	if deps.DB != nil {
+		literaryWorkService = literaryworks.NewService(literaryworks.NewRepository(deps.DB))
+	}
+
 	// Step 4: Create scanner (if needed).
 	if needsScanner && deps.DB != nil {
 		folderRepo := catalog.NewFolderRepository(deps.DB)
@@ -814,6 +820,7 @@ func main() {
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			s.SetWorkers(updated.Scanner.Workers)
 		})
+		s.SetLiteraryWorkLinker(literaryWorkService)
 		deps.Scanner = s
 		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, 10*time.Second)
 		slog.Info("scanner initialized")
@@ -1140,6 +1147,8 @@ func main() {
 			personRepo,
 			providerIDRepo,
 		)
+		audiobookEnricher.SetLiteraryWorkLinker(literaryWorkService)
+		ebookEnricher.SetLiteraryWorkLinker(literaryWorkService)
 
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.

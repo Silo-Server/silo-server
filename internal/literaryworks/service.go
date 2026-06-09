@@ -135,6 +135,67 @@ func (s *Service) LinkItems(ctx context.Context, workID string, contentIDs []str
 	return workID, nil
 }
 
+func (s *Service) AutoLinkContent(ctx context.Context, contentID string) (string, bool, error) {
+	if s == nil || s.repo == nil {
+		return "", false, ErrWorkNotFound
+	}
+	source, err := s.repo.GetMatchItem(ctx, contentID)
+	if err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(source.WorkID) != "" {
+		return source.WorkID, false, nil
+	}
+	targets, err := s.repo.ListMatchCandidates(ctx, source.MatchItem, 100)
+	if err != nil {
+		return "", false, err
+	}
+	var best Candidate
+	var bestTarget MatchItemWithWork
+	for _, target := range targets {
+		candidate := ScoreCandidate(source.MatchItem, target.MatchItem)
+		if candidate.Score > best.Score {
+			best = candidate
+			bestTarget = target
+		}
+	}
+	if best.Score < AutoLinkThreshold || best.TargetContentID == "" {
+		return "", false, nil
+	}
+	workID := strings.TrimSpace(bestTarget.WorkID)
+	if workID == "" {
+		workID = generatedWorkID(source.MatchItem)
+		if _, err := s.repo.CreateWork(ctx, CreateWorkParams{
+			WorkID:           workID,
+			CanonicalTitle:   source.Title,
+			SortTitle:        source.Title,
+			NormalizedTitle:  normalizeKey(source.Title),
+			PrimaryAuthorKey: personKey(source.Authors),
+			Publisher:        source.Publisher,
+		}); err != nil {
+			return "", false, err
+		}
+	}
+	items := []LinkItemParams{{
+		ContentID:  source.ContentID,
+		FormatType: source.Type,
+		LinkSource: best.LinkSource,
+		Confidence: best.Score,
+	}}
+	if bestTarget.WorkID == "" {
+		items = append(items, LinkItemParams{
+			ContentID:  bestTarget.ContentID,
+			FormatType: bestTarget.Type,
+			LinkSource: best.LinkSource,
+			Confidence: best.Score,
+		})
+	}
+	if err := s.repo.LinkItems(ctx, workID, items); err != nil {
+		return "", false, err
+	}
+	return workID, true, nil
+}
+
 func (s *Service) UnlinkItem(ctx context.Context, workID, contentID string) error {
 	if s == nil || s.repo == nil {
 		return ErrWorkNotFound

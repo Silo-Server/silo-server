@@ -399,6 +399,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 			return fmt.Errorf("upsert audiobook ASIN provider id: %w", err)
 		}
 	}
+	s.autoLinkLiteraryWork(ctx, contentID)
 	slog.Info("audiobook scan: indexed",
 		"folder_id", folder.ID,
 		"content_id", contentID,
