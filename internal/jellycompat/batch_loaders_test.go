@@ -78,6 +78,7 @@ func (r *countingItemRepo) GetItemsInLibrary(_ context.Context, contentIDs []str
 // countingEpisodeRepo is an in-memory episodeRepoForBatchLoader fake.
 type countingEpisodeRepo struct {
 	episodesByID  map[string]*models.Episode
+	hasFilesByID  map[string]bool
 	getByIDsCalls int
 }
 
@@ -87,6 +88,16 @@ func (r *countingEpisodeRepo) GetByIDs(_ context.Context, contentIDs []string) (
 	for _, id := range contentIDs {
 		if ep, ok := r.episodesByID[id]; ok {
 			out = append(out, ep)
+		}
+	}
+	return out, nil
+}
+
+func (r *countingEpisodeRepo) HasFilesByIDs(_ context.Context, contentIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(contentIDs))
+	for _, id := range contentIDs {
+		if r.hasFilesByID[id] {
+			out[id] = true
 		}
 	}
 	return out, nil

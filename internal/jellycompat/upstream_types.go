@@ -55,6 +55,10 @@ type upstreamListItem struct {
 	Tagline           string                  `json:"tagline,omitempty"`
 	RatingTMDB        *float64                `json:"rating_tmdb,omitempty"`
 	UserData          *catalog.SeasonUserData `json:"user_data,omitempty"`
+	// HasMediaFiles reports whether at least one live media file backs this
+	// item. nil means unknown (the producing query did not check); the mapper
+	// then keeps the historical LocationType=FileSystem default.
+	HasMediaFiles *bool `json:"-"`
 }
 
 type upstreamBrowseResponse struct {
@@ -144,6 +148,10 @@ type upstreamEpisode struct {
 	SeriesID       string                  `json:"series_id,omitempty"`
 	SeriesTitle    string                  `json:"series_title,omitempty"`
 	SeasonID       string                  `json:"season_id,omitempty"`
+	// HasMediaFiles reports whether at least one live media file backs this
+	// episode. nil means unknown; the mapper then keeps the historical
+	// LocationType=FileSystem default.
+	HasMediaFiles *bool `json:"-"`
 }
 
 type upstreamProgress struct {
