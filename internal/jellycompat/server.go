@@ -27,7 +27,6 @@ type Dependencies struct {
 	DB               *pgxpool.Pool
 	SecretCipher     *secret.Cipher // at-rest credential cipher (required when DB is set)
 	ClientIPResolver *clientip.Resolver
-	HTTPClient       *http.Client
 	Now              func() time.Time
 	TokenGenerator   func() string
 	SessionStore     *SessionStore
@@ -145,6 +144,5 @@ func NewDependencies(cfg *config.Config) Dependencies {
 		Config:         cfg,
 		Now:            time.Now,
 		TokenGenerator: uuid.NewString,
-		HTTPClient:     &http.Client{Timeout: 30 * time.Second},
 	}
 }

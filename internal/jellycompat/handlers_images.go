@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 type ImagesHandler struct {
 	content      ContentService
 	codec        *ResourceIDCodec
-	httpClient   *http.Client
 	sessions     *SessionStore
 	images       *ImageCache
 	personRepo   *catalog.PersonRepository
@@ -48,15 +48,11 @@ type imageFolderRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 }
 
-// NewImagesHandler creates an image proxy handler.
-func NewImagesHandler(content ContentService, codec *ResourceIDCodec, httpClient *http.Client, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, folderRepo *catalog.FolderRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, posterSigner LibraryPosterPresigner, presignTTL time.Duration, imageTagSecret string) *ImagesHandler {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
+// NewImagesHandler creates a Jellyfin-compatible image route handler.
+func NewImagesHandler(content ContentService, codec *ResourceIDCodec, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, folderRepo *catalog.FolderRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, posterSigner LibraryPosterPresigner, presignTTL time.Duration, imageTagSecret string) *ImagesHandler {
 	return &ImagesHandler{
 		content:      content,
 		codec:        codec,
-		httpClient:   httpClient,
 		sessions:     sessions,
 		images:       images,
 		personRepo:   personRepo,
@@ -88,15 +84,15 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		}
 		if ok {
 			h.images.RememberSizedUntil(routeID, imageType, imageURL.URL, imageSize, imageURL.ExpiresAt)
-			h.proxyImageURL(w, r, imageURL.URL)
+			h.redirectImageURL(w, r, imageURL.URL)
 			return
 		}
 		if imageURL, ok := h.images.LookupTag(tag); ok {
-			h.proxyImageURL(w, r, imageURL)
+			h.redirectImageURL(w, r, imageURL)
 			return
 		}
 	} else if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
-		h.proxyImageURL(w, r, imageURL)
+		h.redirectImageURL(w, r, imageURL)
 		return
 	}
 
@@ -133,7 +129,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.images.RememberSizedUntil(routeID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
-	h.proxyImageURL(w, r, imageURL)
+	h.redirectImageURL(w, r, imageURL)
 }
 
 // handlePersonImage serves person photo images.
@@ -159,7 +155,7 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.images.RememberSizedUntil(routeID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
-	h.proxyImageURL(w, r, imageURL)
+	h.redirectImageURL(w, r, imageURL)
 }
 
 func (h *ImagesHandler) resolveItemImageURL(ctx context.Context, session *Session, contentID, imageType string, r *http.Request) (catalog.ResolvedImageURL, error) {
@@ -414,23 +410,18 @@ func firstResolvedImageURL(values ...catalog.ResolvedImageURL) catalog.ResolvedI
 	return catalog.ResolvedImageURL{}
 }
 
-func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imageURL, nil)
-	if err != nil {
+func (h *ImagesHandler) redirectImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
+	target, err := url.Parse(imageURL)
+	if err != nil || target.Scheme == "" || target.Host == "" ||
+		(target.Scheme != "http" && target.Scheme != "https") {
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
 		return
 	}
-	for _, header := range []string{"If-None-Match", "If-Modified-Since"} {
-		if value := r.Header.Get(header); value != "" {
-			req.Header.Set(header, value)
-		}
-	}
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
-		return
-	}
-	proxyImage(w, resp)
+
+	// Do not let clients cache the temporary redirect itself. The object-store
+	// response can still carry its own cache headers after the client follows it.
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, imageURL, http.StatusFound)
 }
 
 // HandleUserImage returns a deterministic placeholder avatar.

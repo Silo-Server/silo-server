@@ -99,7 +99,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Client = deps.S3Client
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
-	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.HTTPClient, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret)
+	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret)
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -260,9 +260,6 @@ func withDefaults(deps Dependencies) Dependencies {
 	playbackTTL := 6 * time.Hour
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
-	}
-	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	if deps.DeviceProfiles == nil {
 		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now)

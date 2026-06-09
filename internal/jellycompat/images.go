@@ -6,45 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"io"
-	"net/http"
 )
-
-const defaultImageProxyCacheControl = "public, max-age=300, must-revalidate"
-
-func proxyImage(w http.ResponseWriter, resp *http.Response) {
-	defer resp.Body.Close()
-	copyImageProxyHeaders(w.Header(), resp.Header)
-	if resp.StatusCode == http.StatusNotModified {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, resp.Body)
-}
-
-func copyImageProxyHeaders(dst, src http.Header) {
-	for _, name := range []string{"Content-Type", "Cache-Control", "ETag", "Last-Modified", "Expires"} {
-		values := src.Values(name)
-		if len(values) == 0 {
-			values = src[name]
-		}
-		if len(values) == 0 {
-			continue
-		}
-		dst.Del(name)
-		for _, value := range values {
-			dst.Add(name, value)
-		}
-	}
-	if dst.Get("Cache-Control") == "" {
-		dst.Set("Cache-Control", defaultImageProxyCacheControl)
-	}
-}
 
 func placeholderAvatarPNG(seed string) ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, 128, 128))
