@@ -79,6 +79,24 @@ function coerceNumericString(value: unknown): unknown {
   return typeof value === "string" && /^-?\d+$/.test(value) ? Number(value) : value;
 }
 
+// coerceNumberString converts integer OR decimal numeric strings to numbers,
+// leaving non-numeric strings (and non-strings) untouched. Used for array:num.
+function coerceNumberString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed === "" || !/^-?\d+(\.\d+)?$/.test(trimmed)) return value;
+  const n = Number(trimmed);
+  return Number.isNaN(n) ? value : n;
+}
+
+// coerceBoolean parses booleans without the Boolean() pitfall where any
+// non-empty string (including "false") becomes true.
+function coerceBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.trim().toLowerCase() === "true";
+  return Boolean(value);
+}
+
 /**
  * A declared field type, derived from the plugin's json_schema. For arrays the
  * suffix `:int` / `:num` records the item type so MULTI_SELECT elements coerce
@@ -142,7 +160,7 @@ export function coerceFieldValue(
   if (fieldType !== undefined) {
     switch (fieldType) {
       case "boolean":
-        return Boolean(raw);
+        return coerceBoolean(raw);
       case "integer":
       case "number": {
         if (typeof raw === "number") return raw;
@@ -165,13 +183,14 @@ export function coerceFieldValue(
       case "array:num": {
         const arr = Array.isArray(raw) ? raw : [];
         if (fieldType === "array") return arr;
-        return arr.map((v) => coerceNumericString(v));
+        if (fieldType === "array:int") return arr.map((v) => coerceNumericString(v));
+        return arr.map((v) => coerceNumberString(v));
       }
     }
   }
 
   // Legacy control-based heuristic (no declared type for this field).
-  if (field.control === "SWITCH") return Boolean(raw);
+  if (field.control === "SWITCH") return coerceBoolean(raw);
   if (field.control === "MULTI_SELECT") {
     const arr = Array.isArray(raw) ? raw : [];
     return arr.map((v) => coerceNumericString(v));

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { PluginAdminForm } from "@/api/types";
+import type { PluginAdminForm, PluginAdminFormField } from "@/api/types";
 import {
   evaluateShowWhen,
   validateSchemaValues,
   buildSchemaValues,
   parseFieldTypes,
+  coerceFieldValue,
 } from "./schemaForm";
 
 const descriptor: PluginAdminForm = {
@@ -333,5 +334,47 @@ describe("buildSchemaValues hidden fields", () => {
     };
     const out = buildSchemaValues(d, { is_4k: true, is_default_4k: true });
     expect(out.is_default_4k).toBe(true);
+  });
+});
+
+const boolField: PluginAdminFormField = {
+  key: "is_4k",
+  label: "4K",
+  control: "SWITCH",
+  required: false,
+  secret: false,
+  multiline: false,
+};
+
+const numArrayField: PluginAdminFormField = {
+  key: "weights",
+  label: "Weights",
+  control: "MULTI_SELECT",
+  required: false,
+  secret: false,
+  multiline: false,
+  dynamic_options: true,
+};
+
+describe("coerceFieldValue boolean coercion (CodeRabbit #4)", () => {
+  it('does not turn the string "false" into true', () => {
+    expect(coerceFieldValue(boolField, "false", "boolean")).toBe(false);
+    expect(coerceFieldValue(boolField, "true", "boolean")).toBe(true);
+    expect(coerceFieldValue(boolField, false, "boolean")).toBe(false);
+    expect(coerceFieldValue(boolField, true, "boolean")).toBe(true);
+  });
+  it('does not turn the string "false" into true via the legacy SWITCH path', () => {
+    expect(coerceFieldValue(boolField, "false")).toBe(false);
+    expect(coerceFieldValue(boolField, "true")).toBe(true);
+  });
+});
+
+describe("coerceFieldValue array:num coercion (CodeRabbit #5)", () => {
+  it("coerces decimal numeric strings, not just integers", () => {
+    expect(coerceFieldValue(numArrayField, ["1.5", "2"], "array:num")).toEqual([1.5, 2]);
+  });
+  it("leaves array:int as integer-only and non-numeric strings untouched", () => {
+    expect(coerceFieldValue(numArrayField, ["1.5", "2"], "array:int")).toEqual(["1.5", 2]);
+    expect(coerceFieldValue(numArrayField, ["abc"], "array:num")).toEqual(["abc"]);
   });
 });

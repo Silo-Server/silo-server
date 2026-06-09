@@ -577,6 +577,10 @@ type IntegrationFormState = {
   // Selected installed plugin (which request-router plugin fulfills this connection).
   // Empty string means "none selected"; the backend requires a non-empty value.
   installation_id: string;
+  // The specific request_router.v1 capability sub-id on that installation. Tracked
+  // alongside installation_id because one installation can expose more than one
+  // capability, so installation_id alone can't identify the chosen backend.
+  capability_id: string;
 };
 
 // All request integrations are fulfilled by a plugin exposing this capability.
@@ -614,6 +618,13 @@ function requestRouterInstallations(
 function installationOptionLabel(entry: RequestRouterInstallation): string {
   const name = entry.capability.display_name || entry.pluginID;
   return `${name} (${entry.capability.id})`;
+}
+
+// installationOptionValue is the <Select> option value: it encodes both the
+// installation and the capability sub-id so multiple capabilities on one
+// installation stay distinct (installation_id alone would collide).
+function installationOptionValue(entry: RequestRouterInstallation): string {
+  return `${entry.installationID}:${entry.capability.id}`;
 }
 
 function RequestIntegrationsTab() {
@@ -658,6 +669,7 @@ function integrationToForm(integration?: RequestIntegration): IntegrationFormSta
     api_key_ref: "",
     has_api_key: integration?.has_api_key ?? false,
     installation_id: integration?.installation_id ? String(integration.installation_id) : "",
+    capability_id: integration?.capability_id ?? "",
   };
 }
 
@@ -756,8 +768,13 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
   );
   // When exactly one request-router plugin is installed, default new/unseeded
   // connections to it so the admin doesn't have to pick.
-  const defaultInstallationID =
-    routerInstallations.length === 1 ? String(routerInstallations[0]?.installationID ?? "") : "";
+  const defaultSelection: Pick<IntegrationFormState, "installation_id" | "capability_id"> =
+    routerInstallations.length === 1
+      ? {
+          installation_id: String(routerInstallations[0]?.installationID ?? ""),
+          capability_id: routerInstallations[0]?.capability.id ?? "",
+        }
+      : { installation_id: "", capability_id: "" };
 
   const [cards, setCards] = useState<IntegrationCard[]>(() =>
     integrations.map((integration) => ({
@@ -800,7 +817,7 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
       ...current,
       {
         key: nextCardKey(),
-        form: { ...integrationToForm(), installation_id: defaultInstallationID },
+        form: { ...integrationToForm(), ...defaultSelection },
         pluginConfig: {},
         source: null,
       },
@@ -911,14 +928,43 @@ function IntegrationEditor({
     installations.length === 1 ? String(installations[0]?.installationID) : undefined;
   useEffect(() => {
     if (form.installation_id || soleInstallationID === undefined) return;
-    onChange({ installation_id: soleInstallationID });
+    const sole = installations[0];
+    onChange({ installation_id: String(sole.installationID), capability_id: sole.capability.id });
     // onChange identity is stable per card; intentionally depend on the data only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.installation_id, soleInstallationID]);
 
   const selectedInstallationID = Number(form.installation_id);
   const hasInstallation = Number.isInteger(selectedInstallationID) && selectedInstallationID > 0;
-  const selected = installations.find((entry) => entry.installationID === selectedInstallationID);
+  // Match on both installation and capability sub-id so a multi-capability
+  // installation resolves the exact backend; fall back to installation-only for
+  // connections whose capability_id isn't set yet (adopts that installation's
+  // capability).
+  const selected =
+    installations.find(
+      (entry) =>
+        entry.installationID === selectedInstallationID &&
+        entry.capability.id === form.capability_id,
+    ) ?? installations.find((entry) => entry.installationID === selectedInstallationID);
+
+  // Switching the selected plugin must drop the previous plugin's config (so its
+  // keys never reach the new plugin's schema in the options probe or save) and
+  // clear stale save errors (handled by patchForm -> clearSaveErrors).
+  function handlePluginChange(value: string) {
+    const entry = installations.find((e) => installationOptionValue(e) === value);
+    if (!entry) return;
+    if (
+      entry.installationID === selectedInstallationID &&
+      entry.capability.id === form.capability_id
+    ) {
+      return; // no actual change; keep existing config
+    }
+    patchForm({
+      installation_id: String(entry.installationID),
+      capability_id: entry.capability.id,
+    });
+    onConfigChange({});
+  }
   const selectedConfigSchema = selected?.capability.config_schema?.[0];
   const descriptor = selectedConfigSchema?.admin_form;
   const title = selected?.capability.display_name || selected?.pluginID || "Connection";
@@ -1061,15 +1107,18 @@ function IntegrationEditor({
           </p>
         ) : (
           <Select
-            value={form.installation_id}
-            onValueChange={(installation_id) => patchForm({ installation_id })}
+            value={selected ? installationOptionValue(selected) : ""}
+            onValueChange={handlePluginChange}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select plugin" />
             </SelectTrigger>
             <SelectContent>
               {installations.map((entry) => (
-                <SelectItem key={entry.installationID} value={String(entry.installationID)}>
+                <SelectItem
+                  key={installationOptionValue(entry)}
+                  value={installationOptionValue(entry)}
+                >
                   {installationOptionLabel(entry)}
                 </SelectItem>
               ))}
