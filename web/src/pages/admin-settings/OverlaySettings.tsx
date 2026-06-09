@@ -73,7 +73,7 @@ function DefaultsEditor({ value, onChange }: DefaultsEditorProps) {
         if (overlays.length === 0) return null;
         return (
           <div key={category} className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
               {CATEGORY_META[category].title}
             </div>
             <div className="space-y-2">
