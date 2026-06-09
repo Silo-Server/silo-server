@@ -2,48 +2,226 @@ package jellycompat
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/png"
 	"io"
 	"net/http"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
-const defaultImageProxyCacheControl = "public, max-age=300, must-revalidate"
+var compatImageProxyUserAgentSubstrings = []string{
+	"infuse",
+}
+
+const compatImageRouteCacheControl = "private, no-store, no-cache, max-age=0, s-maxage=0, must-revalidate"
+const compatImageProxyTagSuffix = "-p"
+const compatImageProxyRoutePrefix = "__jellycompat_image_proxy__:"
+
+type compatImageProxyRouteContextKey struct{}
+
+var compatImageProxyHeaders = []string{
+	"Accept-Ranges",
+	"Content-Length",
+	"Content-Type",
+	"ETag",
+	"Last-Modified",
+}
+
+func shouldProxyCompatImageRequest(r *http.Request) bool {
+	return isCompatImageProxyClientRequest(r) ||
+		isCompatImageProxyRouteRequest(r) ||
+		isCompatImageProxyTag(r.URL.Query().Get("tag"))
+}
+
+func isCompatImageProxyClientRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	clientText := strings.ToLower(strings.Join([]string{
+		r.UserAgent(),
+		r.Header.Get("X-Emby-Authorization"),
+	}, " "))
+	for _, substring := range compatImageProxyUserAgentSubstrings {
+		if strings.Contains(clientText, substring) {
+			return true
+		}
+	}
+	return false
+}
+
+func compatImageProxyTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" || isCompatImageProxyTag(tag) {
+		return tag
+	}
+	return tag + compatImageProxyTagSuffix
+}
+
+func isCompatImageProxyTag(tag string) bool {
+	return strings.HasSuffix(strings.TrimSpace(tag), compatImageProxyTagSuffix)
+}
+
+func canonicalCompatImageTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	return strings.TrimSuffix(tag, compatImageProxyTagSuffix)
+}
+
+func compatImageProxyRouteID(codec *ResourceIDCodec, routeID string) string {
+	routeID = strings.TrimSpace(routeID)
+	if codec == nil || routeID == "" {
+		return routeID
+	}
+	if canonical, ok := canonicalCompatImageRouteID(codec, routeID); ok {
+		return compatImageProxyRouteID(codec, canonical)
+	}
+	if decoded, ok := decodePackedCompatRouteID(routeID); ok {
+		return encodeNumericCompatImageProxyRouteID(decoded)
+	}
+	return codec.EncodeStringID(EncodedIDItem, compatImageProxyRoutePrefix+routeID)
+}
+
+func canonicalCompatImageRouteID(codec *ResourceIDCodec, routeID string) (string, bool) {
+	if canonical, ok := decodeNumericCompatImageProxyRouteID(routeID); ok {
+		return canonical, true
+	}
+	if codec == nil {
+		return routeID, false
+	}
+	value, err := codec.DecodeStringID(EncodedIDItem, strings.TrimSpace(routeID))
+	if err != nil || !strings.HasPrefix(value, compatImageProxyRoutePrefix) {
+		return routeID, false
+	}
+	canonical := strings.TrimSpace(strings.TrimPrefix(value, compatImageProxyRoutePrefix))
+	if canonical == "" {
+		return routeID, false
+	}
+	return canonical, true
+}
+
+func encodeNumericCompatImageProxyRouteID(decoded DecodedID) string {
+	var raw [16]byte
+	raw[0] = byte(EncodedIDImageProxy)
+	raw[1] = byte(decoded.Type)
+	binary.BigEndian.PutUint64(raw[8:], decoded.Value)
+	return uuid.UUID(raw).String()
+}
+
+func decodeNumericCompatImageProxyRouteID(routeID string) (string, bool) {
+	parsed, err := uuid.Parse(strings.TrimSpace(routeID))
+	if err != nil || EncodedIDType(parsed[0]) != EncodedIDImageProxy {
+		return "", false
+	}
+	kind := EncodedIDType(parsed[1])
+	if !isPackedCompatRouteIDType(kind) || !zeroUUIDBytes(parsed[2:8]) {
+		return "", false
+	}
+	return EncodeNumericID(kind, binary.BigEndian.Uint64(parsed[8:])).String(), true
+}
+
+func decodePackedCompatRouteID(routeID string) (DecodedID, bool) {
+	parsed, err := uuid.Parse(strings.TrimSpace(routeID))
+	if err != nil {
+		return DecodedID{}, false
+	}
+	kind := EncodedIDType(parsed[0])
+	if !isPackedCompatRouteIDType(kind) || !zeroUUIDBytes(parsed[1:8]) {
+		return DecodedID{}, false
+	}
+	return DecodedID{Type: kind, Value: binary.BigEndian.Uint64(parsed[8:])}, true
+}
+
+func isPackedCompatRouteIDType(kind EncodedIDType) bool {
+	switch kind {
+	case EncodedIDLibrary,
+		EncodedIDItem,
+		EncodedIDMediaSource,
+		EncodedIDSeason,
+		EncodedIDPlaySession,
+		EncodedIDGenre,
+		EncodedIDStudio,
+		EncodedIDPerson:
+		return true
+	default:
+		return false
+	}
+}
+
+func zeroUUIDBytes(values []byte) bool {
+	for _, value := range values {
+		if value != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func withCompatImageProxyRouteRequest(r *http.Request) *http.Request {
+	if r == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), compatImageProxyRouteContextKey{}, true))
+}
+
+func isCompatImageProxyRouteRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	forceProxy, _ := r.Context().Value(compatImageProxyRouteContextKey{}).(bool)
+	return forceProxy
+}
+
+func copyConditionalImageRequestHeaders(dst, src http.Header) {
+	for _, key := range []string{"If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since"} {
+		if value := src.Values(key); len(value) > 0 {
+			dst[key] = append([]string(nil), value...)
+		}
+	}
+}
 
 func proxyImage(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
-	copyImageProxyHeaders(w.Header(), resp.Header)
+
 	if resp.StatusCode == http.StatusNotModified {
+		copyImageProxyHeaders(w.Header(), resp.Header)
+		setCompatImageRouteNoStore(w.Header())
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		setCompatImageRouteNoStore(w.Header())
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+
+	copyImageProxyHeaders(w.Header(), resp.Header)
+	setCompatImageRouteNoStore(w.Header())
+	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
 
 func copyImageProxyHeaders(dst, src http.Header) {
-	for _, name := range []string{"Content-Type", "Cache-Control", "ETag", "Last-Modified", "Expires"} {
-		values := src.Values(name)
-		if len(values) == 0 {
-			values = src[name]
-		}
-		if len(values) == 0 {
-			continue
-		}
-		dst.Del(name)
-		for _, value := range values {
-			dst.Add(name, value)
+	for _, key := range compatImageProxyHeaders {
+		if value := src.Values(key); len(value) > 0 {
+			dst[key] = append([]string(nil), value...)
 		}
 	}
-	if dst.Get("Cache-Control") == "" {
-		dst.Set("Cache-Control", defaultImageProxyCacheControl)
-	}
+}
+
+func setCompatImageRouteNoStore(header http.Header) {
+	header.Set("Cache-Control", compatImageRouteCacheControl)
+	header.Set("CDN-Cache-Control", "private, no-store, no-cache, max-age=0")
+	header.Set("Expires", "Thu, 01 Jan 1970 00:00:00 GMT")
+	header.Set("Pragma", "no-cache")
+	header.Set("Surrogate-Control", "no-store")
+	header.Set("X-Accel-Expires", "0")
+	header.Add("Vary", "User-Agent")
 }
 
 func placeholderAvatarPNG(seed string) ([]byte, error) {

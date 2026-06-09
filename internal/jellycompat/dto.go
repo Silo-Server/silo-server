@@ -48,6 +48,7 @@ type baseItemDTO struct {
 	ProviderIDs              map[string]string            `json:"ProviderIds,omitempty"`
 	ProductionLocations      []string                     `json:"ProductionLocations,omitempty"`
 	ImageTags                map[string]string            `json:"ImageTags"`
+	PrimaryImageItemID       string                       `json:"PrimaryImageItemId,omitempty"`
 	BackdropImageTags        []string                     `json:"BackdropImageTags,omitempty"`
 	PrimaryImageAspectRatio  *float64                     `json:"PrimaryImageAspectRatio,omitempty"`
 	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes,omitempty"`
