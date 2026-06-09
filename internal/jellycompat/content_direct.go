@@ -509,7 +509,7 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 					PositionSeconds: progress.PositionSeconds,
 					DurationSeconds: progress.DurationSeconds,
 					Played:          progress.Completed,
-					IsInProgress:    progress.PositionSeconds > 0 && !progress.Completed,
+					IsInProgress:    progress.PositionSeconds > 0,
 				}
 			}
 
@@ -941,7 +941,7 @@ func seasonUserDataFromProgress(progress userstore.WatchProgress) *catalog.Seaso
 		PositionSeconds: progress.PositionSeconds,
 		DurationSeconds: progress.DurationSeconds,
 		Played:          progress.Completed,
-		IsInProgress:    progress.PositionSeconds > 0 && !progress.Completed,
+		IsInProgress:    progress.PositionSeconds > 0,
 	}
 }
 

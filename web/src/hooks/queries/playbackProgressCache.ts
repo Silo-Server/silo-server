@@ -18,16 +18,19 @@ function mergeLeafProgress(
   existing: LeafItemUserData | undefined,
   snapshot: PlaybackProgressSnapshot,
 ): LeafItemUserData {
-  const positionSeconds = Math.max(0, snapshot.positionSeconds);
+  const rawPosition = Math.max(0, snapshot.positionSeconds);
   const durationSeconds = snapshot.durationSeconds ?? existing?.duration_seconds;
-  const played =
-    durationSeconds != null && durationSeconds > 0
-      ? positionSeconds >= durationSeconds
-      : existing?.played === true && positionSeconds === 0;
+  // Mirror the server model: played is a one-way latch (a rewatch keeps the
+  // watched badge), completion clears the resume point, and any nonzero
+  // position is an active resume point.
+  const completedNow =
+    durationSeconds != null && durationSeconds > 0 && rawPosition >= durationSeconds;
+  const played = existing?.played === true || completedNow;
+  const positionSeconds = completedNow ? 0 : rawPosition;
 
   return {
     played,
-    is_in_progress: positionSeconds > 0 && !played,
+    is_in_progress: positionSeconds > 0,
     position_seconds: positionSeconds,
     duration_seconds: durationSeconds,
     last_file_id: snapshot.lastFileId ?? existing?.last_file_id,
@@ -91,20 +94,20 @@ export function applyPlaybackProgressToCache(
   })) {
     if (!existing) continue;
 
-    const nextProgress = existing.progress.map((entry) =>
-      entry.media_item_id === snapshot.contentId
-        ? {
-            ...entry,
-            position_seconds: Math.max(0, snapshot.positionSeconds),
-            duration_seconds: snapshot.durationSeconds ?? entry.duration_seconds,
-            completed:
-              (snapshot.durationSeconds ?? entry.duration_seconds) > 0 &&
-              Math.max(0, snapshot.positionSeconds) >=
-                (snapshot.durationSeconds ?? entry.duration_seconds),
-            updated_at: updatedAt,
-          }
-        : entry,
-    );
+    const nextProgress = existing.progress.map((entry) => {
+      if (entry.media_item_id !== snapshot.contentId) return entry;
+      const rawPosition = Math.max(0, snapshot.positionSeconds);
+      const duration = snapshot.durationSeconds ?? entry.duration_seconds;
+      // Mirror the server model: completion latches and clears the resume point.
+      const completedNow = duration > 0 && rawPosition >= duration;
+      return {
+        ...entry,
+        position_seconds: completedNow ? 0 : rawPosition,
+        duration_seconds: duration,
+        completed: entry.completed || completedNow,
+        updated_at: updatedAt,
+      };
+    });
 
     queryClient.setQueryData<ProgressListResponse>(queryKey, {
       ...existing,

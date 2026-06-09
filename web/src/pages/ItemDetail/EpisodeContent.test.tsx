@@ -354,8 +354,9 @@ describe("EpisodeContent", () => {
         <EpisodeContent
           item={makeEpisodeItem({
             user_data: {
+              // Completed rows store position 0 (no resume point).
               played: true,
-              position_seconds: 1800,
+              position_seconds: 0,
               duration_seconds: 1800,
             },
           })}

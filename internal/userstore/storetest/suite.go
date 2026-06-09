@@ -247,13 +247,16 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 		t.Errorf("PositionSeconds after SetProgress backward = %v, want 500", wp.PositionSeconds)
 	}
 
-	// Completion flag: >90%
+	// Completion flag: >90%. Completed rows hold no resume point.
 	if err := store.SetProgress(ctx, "p1", "movie-2", 6500, 7200, noThreshold); err != nil {
 		t.Fatalf("SetProgress(near end): %v", err)
 	}
 	wp, _ = store.GetProgress(ctx, "p1", "movie-2")
 	if !wp.Completed {
 		t.Error("Expected Completed=true for >90% progress")
+	}
+	if wp.PositionSeconds != 0 {
+		t.Errorf("PositionSeconds after completion = %v, want 0", wp.PositionSeconds)
 	}
 
 	// Min-resume threshold: below 5% should be silently discarded
@@ -486,8 +489,8 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	if !wp.Completed {
 		t.Error("MarkWatched should create a completed progress row")
 	}
-	if wp.PositionSeconds != 5400 || wp.DurationSeconds != 5400 {
-		t.Errorf("MarkWatched stored position=%v duration=%v, want 5400/5400", wp.PositionSeconds, wp.DurationSeconds)
+	if wp.PositionSeconds != 0 || wp.DurationSeconds != 5400 {
+		t.Errorf("MarkWatched stored position=%v duration=%v, want 0/5400", wp.PositionSeconds, wp.DurationSeconds)
 	}
 
 	if err := store.ClearProgress(ctx, "p1", "movie-3"); err != nil {

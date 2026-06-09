@@ -533,10 +533,9 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	dto := &itemUserDataDTO{IsFavorite: isFavorite, ItemID: itemID, Key: itemID}
 
 	if data != nil {
-		dto.PlaybackPositionTicks = resumePositionTicks(data.PositionSeconds, data.DurationSeconds, data.Played)
-		if data.DurationSeconds > 0 {
-			dto.PlayedPercentage = (data.PositionSeconds / data.DurationSeconds) * 100
-		}
+		pos := clampResumeSeconds(data.PositionSeconds, data.DurationSeconds)
+		dto.PlaybackPositionTicks = secondsToTicks(pos)
+		dto.PlayedPercentage = playedPercentage(pos, data.DurationSeconds, data.Played)
 		dto.Played = data.Played
 		dto.UnplayedItemCount = data.UnplayedCount
 		if data.Played {
@@ -545,10 +544,9 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	}
 
 	if progress != nil {
-		dto.PlaybackPositionTicks = resumePositionTicks(progress.PositionSeconds, progress.DurationSeconds, progress.Completed)
-		if progress.DurationSeconds > 0 {
-			dto.PlayedPercentage = (progress.PositionSeconds / progress.DurationSeconds) * 100
-		}
+		pos := clampResumeSeconds(progress.PositionSeconds, progress.DurationSeconds)
+		dto.PlaybackPositionTicks = secondsToTicks(pos)
+		dto.PlayedPercentage = playedPercentage(pos, progress.DurationSeconds, progress.Completed)
 		dto.Played = progress.Completed
 		if progress.Completed {
 			dto.PlayCount = 1
@@ -557,6 +555,21 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	}
 
 	return dto
+}
+
+// playedPercentage derives PlayedPercentage from the same clamped position
+// used for PlaybackPositionTicks so the two fields can never disagree. A
+// played item at rest (position 0, no resume point) reports 100 so clients
+// rendering progress from the DTO show it fully watched; a rewatch in flight
+// reports its live fraction.
+func playedPercentage(clampedPos, duration float64, played bool) float64 {
+	if played && clampedPos == 0 {
+		return 100
+	}
+	if duration <= 0 {
+		return 0
+	}
+	return (clampedPos / duration) * 100
 }
 
 func jellyfinItemType(native string) string {
@@ -693,22 +706,21 @@ func secondsToTicks(seconds float64) int64 {
 	return int64(seconds * 10_000_000)
 }
 
-// resumePositionTicks returns the PlaybackPositionTicks value for a UserData
-// DTO. When the item is fully watched the position is reported as 0 so clients
-// start fresh on the next play; otherwise the position is clamped to the item
-// duration so a stale/overflowed stored position cannot drive the player past
-// end-of-file (which stalls the HLS transcoder on resume).
-func resumePositionTicks(position, duration float64, played bool) int64 {
-	if played {
-		return 0
-	}
+// clampResumeSeconds normalizes a stored resume position for client-facing
+// user data. Completed rows store position 0, so fully watched items report 0
+// (clients start fresh) while a rewatch in flight reports its live resume
+// point alongside Played=true — matching real Jellyfin. The position is
+// clamped to the item duration so a stale/overflowed stored position cannot
+// drive the player past end-of-file (which stalls the HLS transcoder on
+// resume).
+func clampResumeSeconds(position, duration float64) float64 {
 	if duration > 0 && position > duration {
 		position = duration
 	}
 	if position < 0 {
 		position = 0
 	}
-	return secondsToTicks(position)
+	return position
 }
 
 func imageTagsWithSeed(signer *imageTagSigner, seed, imageURL string) map[string]string {

@@ -47,9 +47,12 @@ export function resolveLeafPrimaryAction(
   const positionSeconds = userData.position_seconds ?? 0;
   const durationSeconds = userData.duration_seconds ?? 0;
   const progress =
-    durationSeconds > 0 ? clampProgress((positionSeconds / durationSeconds) * 100) : undefined;
-  const isInProgress =
-    userData.played !== true && ((userData.is_in_progress ?? false) || positionSeconds > 0);
+    positionSeconds > 0 && durationSeconds > 0
+      ? clampProgress((positionSeconds / durationSeconds) * 100)
+      : undefined;
+  // Watched items store position 0, so any nonzero position is a live resume
+  // point — including a rewatch in flight (played stays true).
+  const isInProgress = (userData.is_in_progress ?? false) || positionSeconds > 0;
 
   if (isInProgress) {
     return {
