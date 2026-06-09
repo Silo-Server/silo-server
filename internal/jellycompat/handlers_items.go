@@ -140,6 +140,8 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleSearchItems(w, r, session, query)
 	case query.isFavorite:
 		h.handleFavoriteItems(w, r, session, query)
+	case isSeasonChildItemsQuery(query):
+		h.handleSeasonChildItems(w, r, session, query)
 	case query.parentLibraryID == 0 && len(query.itemTypes) == 0:
 		// No ParentId and no type filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
@@ -148,6 +150,18 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.handleBrowseItems(w, r, session, query)
 	}
+}
+
+func isSeasonChildItemsQuery(query itemsQuery) bool {
+	if query.parentItemID == "" {
+		return false
+	}
+	for _, itemType := range query.itemTypes {
+		if itemType == "season" {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleItem serves GET /Items/{id}.
@@ -209,6 +223,7 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 			browsableSeasons := filterBrowsableSeasons(seasons)
 			dto.ChildCount = len(browsableSeasons)
 			dto.RecursiveItemCount = len(browsableSeasons)
+			dto.SeasonCount = len(browsableSeasons)
 		}
 	}
 	if strings.EqualFold(detail.Type, "episode") && detail.SeriesID != "" {
@@ -919,8 +934,34 @@ func (h *ItemsHandler) HandleSeasons(w http.ResponseWriter, r *http.Request) {
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	h.writeSeasonItemsResponse(w, r, session, seriesID, seasons, query, false)
+}
+
+func (h *ItemsHandler) handleSeasonChildItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	seasons, err := h.content.ListSeasons(r.Context(), session, query.parentItemID, nil)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.writeSeasonItemsResponse(w, r, session, query.parentItemID, seasons, query, true)
+}
+
+func (h *ItemsHandler) writeSeasonItemsResponse(w http.ResponseWriter, r *http.Request, session *Session, seriesID string, seasons []upstreamSeason, query itemsQuery, page bool) {
 	seasons = filterBrowsableSeasons(seasons)
 	h.rememberSeasonImages(seasons, seriesID)
+
+	total := len(seasons)
+	if page {
+		start := query.startIndex
+		if start > total {
+			start = total
+		}
+		end := total
+		if query.limit > 0 && start+query.limit < end {
+			end = start + query.limit
+		}
+		seasons = seasons[start:end]
+	}
 
 	favorites, err := resolveFavoritesForContentIDs(r.Context(), session, h.userData, seasonContentIDs(seasons))
 	if err != nil {
@@ -944,10 +985,16 @@ func (h *ItemsHandler) HandleSeasons(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, h.mapper.seasonFromUpstream(season, seriesID, favorites[season.ContentID]))
 	}
+	applyImageTypeLimit(items, query.imageTypeLimit)
+
+	startIndex := 0
+	if page {
+		startIndex = query.startIndex
+	}
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
-		TotalRecordCount: len(items),
-		StartIndex:       0,
+		TotalRecordCount: total,
+		StartIndex:       startIndex,
 	})
 }
 

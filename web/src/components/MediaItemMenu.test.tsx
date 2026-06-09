@@ -142,6 +142,25 @@ describe("buildMediaItemMenuModel", () => {
     ).toBe(true);
   });
 
+  it("uses listening labels for audiobook state actions", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "audiobook",
+      hasPartialProgress: true,
+      userState: {
+        played: false,
+        is_favorite: false,
+        in_watchlist: false,
+      },
+      isAdmin: false,
+      dismissLabel: "Remove from Continue Listening",
+    });
+    const actions = model.filter((item) => item.kind === "action");
+
+    expect(actions[0]?.label).toBe("Listen from Beginning");
+    expect(actions[1]?.label).toBe("Mark Listened");
+    expect(actions.some((item) => item.label === "Remove from Continue Listening")).toBe(true);
+  });
+
   it("does not show play from beginning for non-leaf items", () => {
     const model = buildMediaItemMenuModel({
       mediaType: "series",

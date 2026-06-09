@@ -38,6 +38,13 @@ func (t *SyncAudiobookMetadataTask) DefaultTriggers() []taskmanager.TriggerConfi
 	}
 }
 
+func (t *SyncAudiobookMetadataTask) ShouldRun(ctx context.Context) (bool, error) {
+	if t == nil || t.enricher == nil {
+		return false, nil
+	}
+	return t.enricher.HasPendingItems(ctx)
+}
+
 func (t *SyncAudiobookMetadataTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Scanning for unenriched audiobooks")
 

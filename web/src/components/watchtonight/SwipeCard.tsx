@@ -308,10 +308,17 @@ interface CardActionsProps {
   onReject: () => void;
   onAccept: () => void;
   onPlay: () => void;
+  playLabel?: string;
   disabled?: boolean;
 }
 
-export function CardActions({ onReject, onAccept, onPlay, disabled }: CardActionsProps) {
+export function CardActions({
+  onReject,
+  onAccept,
+  onPlay,
+  playLabel = "Play now",
+  disabled,
+}: CardActionsProps) {
   return (
     <div className="flex items-center justify-center gap-4 pt-4">
       <button
@@ -338,7 +345,7 @@ export function CardActions({ onReject, onAccept, onPlay, disabled }: CardAction
           "border-primary/40 text-primary hover:border-primary hover:bg-primary/10",
           "disabled:pointer-events-none disabled:opacity-40",
         )}
-        aria-label="Play now"
+        aria-label={playLabel}
       >
         <Play className="ml-0.5 h-7 w-7" fill="currentColor" />
       </button>

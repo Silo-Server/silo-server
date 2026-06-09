@@ -41,6 +41,13 @@ type Task interface {
 	Execute(ctx context.Context, progress ProgressReporter) error
 }
 
+// ScheduledConditionalTask lets a task suppress automatic trigger executions
+// when there is no work to do. Manual RunTask calls still execute normally so
+// admins can force a check and see a result.
+type ScheduledConditionalTask interface {
+	ShouldRun(ctx context.Context) (bool, error)
+}
+
 // ProgressReporter allows tasks to report progress and result data during execution.
 type ProgressReporter interface {
 	Report(percent float64, message string)

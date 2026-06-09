@@ -162,7 +162,7 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 			if deps.Detail == nil {
 				return ""
 			}
-			return deps.Detail.PresignURL(ctx, path, variant)
+			return deps.Detail.PresignImageURL(ctx, path, "poster", variant)
 		},
 	})
 	s.ABSHandler = h

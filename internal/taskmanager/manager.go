@@ -146,6 +146,16 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			continue
 		}
 
+		shouldRun, shouldRunErr := m.shouldRunScheduledTask(ctx, w)
+		if shouldRunErr != nil {
+			m.logger.Warn("scheduled task preflight failed; running task",
+				"task", w.task.Key(), "error", shouldRunErr)
+		}
+		if shouldRunErr == nil && !shouldRun {
+			m.rearmTriggersFromNow(w)
+			continue
+		}
+
 		result, err := w.run(ctx)
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
@@ -168,12 +178,34 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 	}
 }
 
+func (m *TaskManager) shouldRunScheduledTask(ctx context.Context, w *taskWorker) (bool, error) {
+	task, ok := w.task.(ScheduledConditionalTask)
+	if !ok {
+		return true, nil
+	}
+	return task.ShouldRun(ctx)
+}
+
 // rearmTriggers stops and restarts all triggers for a worker.
 func (m *TaskManager) rearmTriggers(w *taskWorker) {
 	w.mu.Lock()
+	lastResult := w.lastResult
 	for _, tr := range w.triggers {
 		tr.Stop()
-		tr.Start(w.lastResult)
+		tr.Start(lastResult)
+	}
+	w.mu.Unlock()
+	w.notify()
+}
+
+// rearmTriggersFromNow restarts triggers after a skipped conditional task. This
+// intentionally ignores lastResult; otherwise an old completed_at can make an
+// interval trigger fire immediately in a loop while there is no work.
+func (m *TaskManager) rearmTriggersFromNow(w *taskWorker) {
+	w.mu.Lock()
+	for _, tr := range w.triggers {
+		tr.Stop()
+		tr.Start(nil)
 	}
 	w.mu.Unlock()
 	w.notify()

@@ -49,6 +49,8 @@ type SessionManagerInterface interface {
 	SetEffectiveMediaFileID(sessionID string, fileID int) error
 	SetTranscodeNodeURL(sessionID, url string) error
 	SetWebSocket(sessionID string, connected bool) error
+	SetRealtimeConnection(sessionID string, connected bool) error
+	SetProgressPersistenceDisabled(sessionID string, disabled bool) error
 	StopSession(sessionID string) error
 	GetSession(sessionID string) (*playback.Session, error)
 }
@@ -257,6 +259,7 @@ type startPlaybackRequest struct {
 	StartPosition                *float64                      `json:"start_position,omitempty"`
 	AudioTrackIndex              *int                          `json:"audio_track_index,omitempty"`
 	PreserveDirectAudioSelection bool                          `json:"preserve_direct_audio_selection,omitempty"`
+	DisableProgressPersistence   bool                          `json:"disable_progress_persistence,omitempty"`
 	CodecsVideo                  []string                      `json:"codecs_video"`
 	CodecsAudio                  []string                      `json:"codecs_audio"`
 	Containers                   []string                      `json:"containers"`
@@ -761,6 +764,9 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	if h.StoreProvider == nil || h.fileResolver == nil {
 		return
 	}
+	if session == nil || session.DisableProgressPersistence {
+		return
+	}
 
 	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
 	targetID := playbackProgressTarget(file)
@@ -799,7 +805,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	if h.StoreProvider == nil || h.fileResolver == nil {
 		return watchstate.PlaybackStopResult{}
 	}
-	if session == nil || session.Position <= 0 {
+	if session == nil || session.DisableProgressPersistence || session.Position <= 0 {
 		return watchstate.PlaybackStopResult{}
 	}
 
@@ -1281,6 +1287,13 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		return
 	}
 	setPlaybackSessionLogContext(r, session.ID)
+	if req.DisableProgressPersistence {
+		if err := h.sessionMgr.SetProgressPersistenceDisabled(session.ID, true); err != nil {
+			slog.Error("failed to disable progress persistence", "session", session.ID, "error", err)
+		} else {
+			session.DisableProgressPersistence = true
+		}
+	}
 
 	if err := h.sessionMgr.UpdateAudioTrack(session.ID, audioTrackIndex, session.PlayMethod); err != nil {
 		slog.Error("failed to set audio track", "session", session.ID, "error", err)
@@ -1320,7 +1333,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	} else {
 		h.restoreSessionProgress(r.Context(), session, file)
 	}
-	if h.WatchScrobbler != nil && effectiveFile != nil {
+	if !session.DisableProgressPersistence && h.WatchScrobbler != nil && effectiveFile != nil {
 		targetID := playbackProgressTarget(effectiveFile)
 		if targetID != "" {
 			event := h.scrobbleEventForSession(r.Context(), session, targetID, float64(effectiveFile.Duration), session.Position)
@@ -1549,7 +1562,7 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 	// Persist progress to UserStore (best-effort).
 	if sess, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil {
 		h.persistProgress(r.Context(), sess)
-		if h.WatchScrobbler != nil && wasPaused != sess.IsPaused {
+		if !sess.DisableProgressPersistence && h.WatchScrobbler != nil && wasPaused != sess.IsPaused {
 			if file, loadErr := h.loadFileByPreferredID(r.Context(), requestedMediaFileID(sess), sess.MediaFileID); loadErr == nil && file != nil {
 				targetID := playbackProgressTarget(file)
 				if targetID != "" {

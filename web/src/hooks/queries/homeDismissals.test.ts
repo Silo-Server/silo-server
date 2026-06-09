@@ -116,6 +116,7 @@ describe("home dismissal query hooks", () => {
     const variables: DismissHomeItemVariables = {
       itemId: "ep-1",
       surface: "continue_watching",
+      mediaType: "episode",
       progressUpdatedAt: "2026-03-22T18:10:00Z",
     };
 
@@ -131,6 +132,29 @@ describe("home dismissal query hooks", () => {
     });
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       "Removed from Continue Watching",
+      expect.objectContaining({
+        action: expect.objectContaining({
+          label: "Undo",
+        }),
+      }),
+    );
+  });
+
+  it("uses continue listening toast copy for audiobook dismissals", async () => {
+    useDismissHomeItem();
+    const mutation = latestMutationOptions();
+
+    const variables: DismissHomeItemVariables = {
+      itemId: "book-1",
+      surface: "continue_watching",
+      mediaType: "audiobook",
+      progressUpdatedAt: "2026-03-22T18:10:00Z",
+    };
+
+    await mutation.onSuccess?.(undefined, variables);
+
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Removed from Continue Listening",
       expect.objectContaining({
         action: expect.objectContaining({
           label: "Undo",

@@ -7,11 +7,14 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { resolveAdminDocumentTitle } from "@/lib/documentTitle";
 import { Menu } from "lucide-react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
+import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const { isBackgroundBarVisible } = useWatchPlaybackController();
+  const audiobookPlayback = useAudiobookPlaybackController();
+  const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
 
   useDocumentTitle(resolveAdminDocumentTitle(location.pathname));
 
@@ -67,7 +70,7 @@ export default function AdminLayout() {
       <main
         id="main-content"
         className={`relative z-10 min-h-screen px-4 py-4 sm:px-6 lg:ml-[240px] lg:px-8 lg:py-8 xl:px-10 ${
-          isBackgroundBarVisible ? "pb-32 sm:pb-36" : ""
+          hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >
         <div className="admin-shell">
