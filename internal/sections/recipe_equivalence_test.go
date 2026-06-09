@@ -22,8 +22,8 @@ func TestRecipeDispatchEquivalence(t *testing.T) {
 	}
 
 	// Each type that has a no-DB-required short-circuit in FetchOne (continue_watching with no
-	// store, next_up with no repo) should resolve without error.
-	for _, typ := range []string{"continue_watching", "next_up"} {
+	// store, next_up / next_in_series with no repo) should resolve without error.
+	for _, typ := range []string{"continue_watching", "next_up", "next_in_series"} {
 		rec, ok := recipes.Get(typ)
 		if !ok {
 			t.Fatalf("recipe %q missing", typ)

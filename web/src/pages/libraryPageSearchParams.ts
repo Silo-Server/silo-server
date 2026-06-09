@@ -12,7 +12,21 @@ import {
 } from "@/lib/querySortOptions";
 
 export type LibraryPageTab = "recommended" | "library" | "collections";
-export type LibraryBrowseType = "series" | "episode";
+// "series" | "episode" are the series-library browse modes; "books" |
+// "series" | "authors" | "narrators" are the audiobook-library browse axes
+// ("series" is shared — its meaning follows the library type).
+export type LibraryBrowseType = "series" | "episode" | "books" | "authors" | "narrators";
+
+export const AUDIOBOOK_BROWSE_AXES = ["books", "series", "authors", "narrators"] as const;
+export type AudiobookBrowseAxis = (typeof AUDIOBOOK_BROWSE_AXES)[number];
+
+export function audiobookBrowseAxisFromBrowseType(
+  browseType: LibraryBrowseType,
+): AudiobookBrowseAxis {
+  return browseType === "series" || browseType === "authors" || browseType === "narrators"
+    ? browseType
+    : "books";
+}
 
 export interface LibraryPageState {
   activeTab: LibraryPageTab;
@@ -59,6 +73,10 @@ function parseSeriesLibraryBrowseType(value: string | undefined): LibraryBrowseT
   return value === "episode" ? "episode" : "series";
 }
 
+function parseAudiobookLibraryBrowseType(value: string | undefined): LibraryBrowseType {
+  return value === "series" || value === "authors" || value === "narrators" ? value : "books";
+}
+
 function getLibrarySortRelevanceScope(
   libraryType: string,
   mediaScope?: QueryDefinition["media_scope"],
@@ -82,7 +100,7 @@ function getLibrarySortRelevanceScope(
   return "all";
 }
 
-function isAudiobookLibraryType(libraryType: string): boolean {
+export function isAudiobookLibraryType(libraryType: string): boolean {
   return libraryType === "audiobook" || libraryType === "audiobooks";
 }
 
@@ -257,7 +275,9 @@ export function parseLibraryPageState(
   const browseType =
     libraryType === "series"
       ? parseSeriesLibraryBrowseType(readString(searchParams.get("type")))
-      : "series";
+      : isAudiobookLibraryType(libraryType)
+        ? parseAudiobookLibraryBrowseType(readString(searchParams.get("type")))
+        : "series";
   const defaultQueryDefinition = createDefaultLibraryQueryDefinition();
   if (activeTab !== "library") {
     return {
@@ -395,6 +415,14 @@ export function updateLibraryPageSearchParams(
   if (libraryType === "series") {
     if (state.browseType === "episode") {
       nextSearchParams.set("type", "episode");
+    }
+  } else if (isAudiobookLibraryType(libraryType)) {
+    if (
+      state.browseType === "series" ||
+      state.browseType === "authors" ||
+      state.browseType === "narrators"
+    ) {
+      nextSearchParams.set("type", state.browseType);
     }
   } else if (libraryType === "mixed" && queryDefinition.media_scope) {
     nextSearchParams.set("type", queryDefinition.media_scope);

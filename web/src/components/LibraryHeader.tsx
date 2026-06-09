@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { isAudiobookLibraryType } from "@/pages/libraryPageSearchParams";
 
 type LibraryTab = "recommended" | "library" | "collections";
 
 interface LibraryHeaderProps {
   libraryName: string;
+  /** Library type ("movies", "series", "audiobooks", ...); drives tab labels. */
+  libraryType?: string;
   /**
    * When true, the header renders transparently to sit over a hero backdrop,
    * and switches to a glass surface once the user scrolls past a threshold.
@@ -22,14 +25,23 @@ const TAB_LABELS: Record<LibraryTab, string> = {
   collections: "Collections",
 };
 
+// Audiobook libraries open on a resume-first deck rather than a discovery
+// feed, so "Recommended" would mislabel what the tab actually shows.
+const AUDIOBOOK_TAB_LABELS: Record<LibraryTab, string> = {
+  ...TAB_LABELS,
+  recommended: "Home",
+};
+
 /** Scroll distance (in px) at which an overlay header switches to glass. */
 const GLASS_THRESHOLD_PX = 160;
 
 export default function LibraryHeader({
   libraryName,
+  libraryType = "",
   overlay = false,
   availableTabs = DEFAULT_TABS,
 }: LibraryHeaderProps) {
+  const tabLabels = isAudiobookLibraryType(libraryType) ? AUDIOBOOK_TAB_LABELS : TAB_LABELS;
   const [pastThreshold, setPastThreshold] = useState(false);
 
   useEffect(() => {
@@ -62,7 +74,7 @@ export default function LibraryHeader({
       <TabsPrimitive.List className="marquee-tab-bar" aria-label="Library view">
         {availableTabs.map((tab) => (
           <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
-            {TAB_LABELS[tab]}
+            {tabLabels[tab]}
           </TabsPrimitive.Trigger>
         ))}
       </TabsPrimitive.List>

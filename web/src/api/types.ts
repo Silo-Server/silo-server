@@ -726,6 +726,23 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   series?: string[];
 }
 
+// Grouped audiobook browse (Library tab Authors / Narrators / Series axes).
+// `name` round-trips into the matching catalog filter field (author /
+// narrator / series), which match case-insensitively.
+export interface AudiobookGroup {
+  name: string;
+  item_count: number;
+  total_duration_seconds: number;
+  in_progress_count: number;
+  finished_count: number;
+  poster_urls: string[];
+}
+
+export interface AudiobookGroupsResponse {
+  total: number;
+  groups: AudiobookGroup[];
+}
+
 // Item Detail
 export interface FileVersion {
   file_id: number;
