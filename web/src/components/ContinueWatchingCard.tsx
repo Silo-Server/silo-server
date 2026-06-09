@@ -229,7 +229,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             )}
 
             {/* Hover dim behind the play button */}
-            <div className="absolute inset-0 bg-black/0 transition-colors duration-150 md:group-hover/media:bg-black/30" />
+            <div className="absolute inset-0 bg-black/0 transition-colors duration-150 pointer-fine:group-hover/media:bg-black/30" />
 
             {/* Progress bar */}
             {!isNextUp && progressPercent > 0 && (
@@ -249,7 +249,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           to={card.watchHref}
           onClick={handleWatchClick}
           aria-label={`Play ${heading}`}
-          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 md:opacity-0 md:group-hover/media:opacity-100 md:focus-visible:opacity-100"
+          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
         >
           <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
         </ViewTransitionLink>
