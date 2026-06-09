@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/jellycompat"
 )
 
 func TestUpdateJellyfinCompatSettingsRejectsArbitraryWebDir(t *testing.T) {
@@ -110,5 +112,38 @@ func TestUpdateJellyfinCompatSettingsMarksRestartForProxyChanges(t *testing.T) {
 	}
 	if snapshot.RestartRequiredReason != "jellyfin_compat" {
 		t.Fatalf("RestartRequiredReason = %q, want jellyfin_compat", snapshot.RestartRequiredReason)
+	}
+}
+
+func TestPersistJellyfinCompatWebInstallSettingsEnablesWebUI(t *testing.T) {
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		"jellyfin_compat.web_enabled": "false",
+	}}
+	handler := &AdminHandler{SettingsRepo: settings}
+
+	err := handler.persistJellyfinCompatWebInstallSettings(context.Background(), jellycompat.WebComponentStatus{
+		InstallRoot:      "/var/lib/silo/compat/jellyfin-web",
+		PinnedVersion:    "10.11.6",
+		InstalledVersion: "10.11.6",
+		SourceURL:        jellycompat.DefaultWebSourceURL,
+	})
+	if err != nil {
+		t.Fatalf("persistJellyfinCompatWebInstallSettings: %v", err)
+	}
+
+	if got := settings.values["jellyfin_compat.web_enabled"]; got != "true" {
+		t.Fatalf("jellyfin_compat.web_enabled = %q, want true", got)
+	}
+	if got := settings.values["jellyfin_compat.web_install_dir"]; got != "/var/lib/silo/compat/jellyfin-web" {
+		t.Fatalf("jellyfin_compat.web_install_dir = %q", got)
+	}
+	if got := settings.values["jellyfin_compat.web_dir"]; got != jellycompat.ManagedWebInstallPath("/var/lib/silo/compat/jellyfin-web") {
+		t.Fatalf("jellyfin_compat.web_dir = %q", got)
+	}
+	if got := settings.values["jellyfin_compat.web_version"]; got != "10.11.6" {
+		t.Fatalf("jellyfin_compat.web_version = %q, want 10.11.6", got)
+	}
+	if got := settings.values["jellyfin_compat.web_source_url"]; got != jellycompat.DefaultWebSourceURL {
+		t.Fatalf("jellyfin_compat.web_source_url = %q", got)
 	}
 }

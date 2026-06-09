@@ -183,30 +183,35 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 		Version:     version,
 		OnProgress:  h.publishJellyfinCompatWebOperationProgress,
 	}, func(ctx context.Context, status jellycompat.WebComponentStatus) error {
-		if h.SettingsRepo == nil {
-			return nil
-		}
-		updates := map[string]string{
-			"jellyfin_compat.web_install_dir": status.InstallRoot,
-			"jellyfin_compat.web_dir":         jellycompat.ManagedWebInstallPath(status.InstallRoot),
-			"jellyfin_compat.web_version":     status.PinnedVersion,
-		}
-		if status.SourceURL != "" {
-			updates["jellyfin_compat.web_source_url"] = status.SourceURL
-		}
-		for key, value := range updates {
-			if err := h.SettingsRepo.Set(ctx, key, value); err != nil {
-				return fmt.Errorf("persist Jellyfin Web setting %s: %w", key, err)
-			}
-			h.publishSettingChangedContext(ctx, key, value)
-		}
-		return nil
+		return h.persistJellyfinCompatWebInstallSettings(ctx, status)
 	})
 	if err != nil {
 		writeJellyfinCompatOperationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, status)
+}
+
+func (h *AdminHandler) persistJellyfinCompatWebInstallSettings(ctx context.Context, status jellycompat.WebComponentStatus) error {
+	if h.SettingsRepo == nil {
+		return nil
+	}
+	updates := map[string]string{
+		"jellyfin_compat.web_enabled":     "true",
+		"jellyfin_compat.web_install_dir": status.InstallRoot,
+		"jellyfin_compat.web_dir":         jellycompat.ManagedWebInstallPath(status.InstallRoot),
+		"jellyfin_compat.web_version":     status.PinnedVersion,
+	}
+	if status.SourceURL != "" {
+		updates["jellyfin_compat.web_source_url"] = status.SourceURL
+	}
+	for key, value := range updates {
+		if err := h.SettingsRepo.Set(ctx, key, value); err != nil {
+			return fmt.Errorf("persist Jellyfin Web setting %s: %w", key, err)
+		}
+		h.publishSettingChangedContext(ctx, key, value)
+	}
+	return nil
 }
 
 func (h *AdminHandler) publishJellyfinCompatWebOperationProgress(op jellycompat.WebComponentOperationStatus) {
