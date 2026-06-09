@@ -49,7 +49,9 @@ function applyItemPatch(
 // buildItems is the single registry pass shared by both migration paths and
 // the default-prefs builder. It produces a complete items map: every overlay
 // id gets either a patched entry (when source has it) or a fresh default.
-function buildItems(source: Record<string, unknown> | undefined): Record<OverlayId, OverlayItemConfig> {
+function buildItems(
+  source: Record<string, unknown> | undefined,
+): Record<OverlayId, OverlayItemConfig> {
   const items = {} as Record<OverlayId, OverlayItemConfig>;
   for (const def of OVERLAY_REGISTRY) {
     const base: OverlayItemConfig = { enabled: def.defaultEnabled, position: def.defaultPosition };
@@ -68,7 +70,8 @@ function migrateFromV1(parsed: Record<string, unknown>): CardOverlayPrefs {
 
 function parseV2(parsed: Record<string, unknown>): CardOverlayPrefs {
   const items = parsed.items;
-  const sourceItems = items && typeof items === "object" ? (items as Record<string, unknown>) : undefined;
+  const sourceItems =
+    items && typeof items === "object" ? (items as Record<string, unknown>) : undefined;
   return {
     version: 2,
     preset: isValidPreset(parsed.preset) ? parsed.preset : "classic",
@@ -114,10 +117,7 @@ export function isOverlaySuppressed(id: OverlayId, prefs: CardOverlayPrefs): boo
 
 // Returns enabled overlays for a position, in the user's chosen order
 // (falling back to registry order for any unranked ids).
-export function orderedOverlaysForPosition(
-  prefs: CardOverlayPrefs,
-  position: OverlayPosition,
-) {
+export function orderedOverlaysForPosition(prefs: CardOverlayPrefs, position: OverlayPosition) {
   const enabled = OVERLAY_REGISTRY.filter(
     (def) =>
       prefs.items[def.id]?.enabled &&
@@ -126,7 +126,5 @@ export function orderedOverlaysForPosition(
   );
   if (prefs.order.length === 0) return enabled;
   const orderIndex = new Map<OverlayId, number>(prefs.order.map((id, i) => [id, i]));
-  return [...enabled].sort(
-    (a, b) => (orderIndex.get(a.id) ?? 999) - (orderIndex.get(b.id) ?? 999),
-  );
+  return [...enabled].sort((a, b) => (orderIndex.get(a.id) ?? 999) - (orderIndex.get(b.id) ?? 999));
 }

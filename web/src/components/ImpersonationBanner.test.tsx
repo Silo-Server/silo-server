@@ -10,17 +10,17 @@ describe("ImpersonationBanner", () => {
       <ImpersonationBanner userName="target-user" impersonatorName="admin-user" onEnd={onEnd} />,
     );
 
-    expect(markup).toContain("Impersonating");
+    expect(markup).toContain("Viewing as");
     expect(markup).toContain("target-user");
     expect(markup).toContain("admin-user");
-    expect(markup).toContain("End impersonation");
+    expect(markup).toContain("End impersonation session");
   });
 
-  it("offsets banner content on desktop so the app sidebar does not cover it", () => {
+  it("stays pinned above the page content while scrolling", () => {
     const markup = renderToStaticMarkup(
       <ImpersonationBanner userName="target-user" impersonatorName="admin-user" onEnd={() => {}} />,
     );
 
-    expect(markup).toContain("lg:pl-[292px]");
+    expect(markup).toContain("sticky top-0");
   });
 });

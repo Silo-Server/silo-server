@@ -25,16 +25,8 @@ export {
   orderedOverlaysForPosition,
   isOverlaySuppressed,
 } from "./schema";
-export {
-  OVERLAY_PRESETS,
-  PRESET_IDS,
-  getPreset,
-  ACCENT_PALETTE,
-} from "./presets";
+export { OVERLAY_PRESETS, PRESET_IDS, getPreset, ACCENT_PALETTE } from "./presets";
 export { POSITION_OPTIONS, CATEGORY_GROUPS, CATEGORY_META } from "./ui-constants";
 export { OverlayIcon } from "./icons";
-export {
-  overlayDataFromBrowseItem,
-  overlayDataFromSectionItem,
-} from "./extractors";
+export { overlayDataFromBrowseItem, overlayDataFromSectionItem } from "./extractors";
 export { SAMPLE_MOVIE_DATA, SAMPLE_SHOW_DATA } from "./sample-data";
