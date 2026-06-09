@@ -41,6 +41,7 @@ go.work.sum
 
 # Frontend
 web/node_modules/
+.pnpm-store/
 web/dist/
 plugins/metadb/dist/
 web/*.tsbuildinfo
@@ -58,6 +59,5 @@ node_modules/
 logs/
 .playwright-mcp/
 demo/
-docker-compose.dev.yml
 .playwright-cli/
 output/
