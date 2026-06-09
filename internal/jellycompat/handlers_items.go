@@ -1819,7 +1819,12 @@ type progressHydratedItem struct {
 const maxDetailUpgrades = 100
 
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
-	if len(typeSet) == 0 && libraryID == nil && !query.enableTotalRecordCount {
+	// Resume views hide dismissed and superseded entries, so the visible list
+	// is sparser than the raw store list. The raw-offset fast path below is
+	// only safe for the first page; deeper StartIndex values must go through
+	// the scan-from-zero branch, which paginates over visible entries.
+	resumeFiltered := status == "in_progress"
+	if len(typeSet) == 0 && libraryID == nil && !query.enableTotalRecordCount && (!resumeFiltered || query.startIndex == 0) {
 		batchSize := min(max(query.limit*2, 48), 200)
 		if batchSize <= 0 {
 			batchSize = 48
@@ -1835,6 +1840,13 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			if len(progressEntries) == 0 {
 				break
 			}
+			rawCount := len(progressEntries)
+			if resumeFiltered {
+				progressEntries, err = h.userData.FilterResumeProgress(ctx, session, progressEntries)
+				if err != nil {
+					return nil, 0, err
+				}
+			}
 
 			items, err := h.hydrateProgressItems(ctx, session, progressEntries, query.requestedFields, libraryID)
 			if err != nil {
@@ -1846,10 +1858,10 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 				}
 				result = append(result, item)
 			}
-			if len(result) >= query.limit || len(progressEntries) < batchSize {
+			if len(result) >= query.limit || rawCount < batchSize {
 				break
 			}
-			offset += len(progressEntries)
+			offset += rawCount
 		}
 		return h.finishProgressPage(ctx, session, result, query, libraryID), 0, nil
 	}
@@ -1871,6 +1883,13 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		if len(progressEntries) == 0 {
 			break
 		}
+		rawCount := len(progressEntries)
+		if resumeFiltered {
+			progressEntries, err = h.userData.FilterResumeProgress(ctx, session, progressEntries)
+			if err != nil {
+				return nil, 0, err
+			}
+		}
 
 		hydrated, err := h.hydrateProgressItems(ctx, session, progressEntries, query.requestedFields, libraryID)
 		if err != nil {
@@ -1886,8 +1905,8 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			matchedCount++
 		}
 
-		offset += len(progressEntries)
-		if len(progressEntries) < batchSize {
+		offset += rawCount
+		if rawCount < batchSize {
 			break
 		}
 		if !query.enableTotalRecordCount && len(items) >= query.limit {
