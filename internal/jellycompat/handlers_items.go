@@ -1121,6 +1121,7 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 		if target, ok := episodeTargets[episode.ContentID]; ok {
 			upstreamEpisode.StillURL = firstNonEmpty(target.Item.StillURL, target.Item.PosterURL, upstreamEpisode.StillURL)
 			upstreamEpisode.SeriesTitle = firstNonEmpty(target.Item.SeriesTitle, upstreamEpisode.SeriesTitle)
+			upstreamEpisode.HasMediaFiles = target.Item.HasMediaFiles
 		}
 		dto := h.mapper.episodeFromUpstream(upstreamEpisode, favorites[episode.ContentID], progress[episode.ContentID])
 		dto.SeasonName = firstNonEmpty(seasonTitleByID[episode.SeasonID], seasonTitleByNumber[episode.SeasonNumber])

@@ -38,6 +38,7 @@ type itemRepoForBatchLoader interface {
 // gated through the parent series item via GetByIDsWithAccess on media_items.
 type episodeRepoForBatchLoader interface {
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.Episode, error)
+	HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error)
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
 }
@@ -217,7 +218,11 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			COALESCE(si.backdrop_thumbhash, ''),
 			si.logo_path,
 			si.status,
-			si.updated_at
+			si.updated_at,
+			EXISTS (
+				SELECT 1 FROM media_files mf
+				WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL
+			)
 		FROM %s
 		WHERE %s
 		ORDER BY e.content_id
@@ -255,6 +260,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			seriesLogoPath   string
 			status           string
 			seriesUpdatedAt  time.Time
+			hasMediaFiles    bool
 		)
 		if err := rows.Scan(
 			&contentID,
@@ -280,6 +286,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&seriesLogoPath,
 			&status,
 			&seriesUpdatedAt,
+			&hasMediaFiles,
 		); err != nil {
 			return nil, fmt.Errorf("scanning compat episode target: %w", err)
 		}
@@ -310,6 +317,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			SeasonNumber:      intPtr(seasonNumber),
 			EpisodeNumber:     intPtr(episodeNumber),
 			Runtime:           runtime,
+			HasMediaFiles:     &hasMediaFiles,
 		}
 		if airDate != nil {
 			listItem.AirDate = airDate.Format(time.DateOnly)
@@ -354,6 +362,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 	}
 
 	episodes, err := h.episodeRepo.GetByIDs(ctx, filteredContentIDs)
+	if err != nil {
+		return nil, err
+	}
+	hasFiles, err := h.episodeRepo.HasFilesByIDs(ctx, filteredContentIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -417,6 +429,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			SeasonNumber:      intPtr(episode.SeasonNumber),
 			EpisodeNumber:     intPtr(episode.EpisodeNumber),
 			Runtime:           episode.Runtime,
+			HasMediaFiles:     boolPtr(hasFiles[episode.ContentID]),
 		}
 		if episode.AirDate != nil {
 			listItem.AirDate = episode.AirDate.Format(time.DateOnly)

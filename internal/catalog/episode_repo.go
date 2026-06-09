@@ -638,6 +638,32 @@ func (r *EpisodeRepository) GetByIDs(ctx context.Context, contentIDs []string) (
 	return scanEpisodes(rows)
 }
 
+// HasFilesByIDs reports which of the given episodes are backed by at least one
+// live (non-missing) media file. Episodes absent from the result map have no
+// file — e.g. provider-metadata-only entries for unaired episodes.
+func (r *EpisodeRepository) HasFilesByIDs(ctx context.Context, contentIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+	query := `SELECT episode_id FROM media_files
+		WHERE episode_id = ANY($1) AND missing_since IS NULL
+		GROUP BY episode_id`
+	rows, err := r.pool.Query(ctx, query, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("checking episode file presence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var episodeID string
+		if err := rows.Scan(&episodeID); err != nil {
+			return nil, fmt.Errorf("scanning episode file presence: %w", err)
+		}
+		result[episodeID] = true
+	}
+	return result, rows.Err()
+}
+
 // ListBySeries returns all episodes for a given series, ordered by season and
 // episode number.
 func (r *EpisodeRepository) ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error) {
