@@ -3,6 +3,7 @@ package scanner
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"html"
@@ -517,10 +518,10 @@ func parsePDFInfoFields(data []byte) map[string]string {
 			continue
 		}
 		rest := bytes.TrimLeft(data[idx+len(token):], " \t\r\n")
-		if len(rest) == 0 || rest[0] != '(' {
+		if len(rest) == 0 {
 			continue
 		}
-		value, ok := readPDFLiteralString(rest)
+		value, ok := readPDFString(rest)
 		if ok {
 			fields[key] = value
 		}
@@ -570,6 +571,20 @@ func ebookXMLCharsetReader(charset string, input io.Reader) (io.Reader, error) {
 	return enc.NewDecoder().Reader(input), nil
 }
 
+func readPDFString(data []byte) (string, bool) {
+	switch data[0] {
+	case '(':
+		return readPDFLiteralString(data)
+	case '<':
+		if len(data) > 1 && data[1] == '<' {
+			return "", false
+		}
+		return readPDFHexString(data)
+	default:
+		return "", false
+	}
+}
+
 func readPDFLiteralString(data []byte) (string, bool) {
 	if len(data) == 0 || data[0] != '(' {
 		return "", false
@@ -613,6 +628,36 @@ func readPDFLiteralString(data []byte) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func readPDFHexString(data []byte) (string, bool) {
+	if len(data) == 0 || data[0] != '<' {
+		return "", false
+	}
+	end := bytes.IndexByte(data[1:], '>')
+	if end < 0 {
+		return "", false
+	}
+	raw := data[1 : end+1]
+	var cleaned []byte
+	for _, b := range raw {
+		switch {
+		case b == ' ' || b == '\t' || b == '\r' || b == '\n':
+			continue
+		case (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F'):
+			cleaned = append(cleaned, b)
+		default:
+			return "", false
+		}
+	}
+	if len(cleaned)%2 == 1 {
+		cleaned = append(cleaned, '0')
+	}
+	decoded := make([]byte, hex.DecodedLen(len(cleaned)))
+	if _, err := hex.Decode(decoded, cleaned); err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(decodePDFLiteralBytes(decoded)), true
 }
 
 func decodePDFLiteralBytes(data []byte) string {
@@ -665,17 +710,17 @@ func parsePDFDate(value string) (time.Time, bool) {
 	}
 	value = strings.TrimSuffix(value, "Z")
 	if len(value) >= 14 {
-		if t, err := time.Parse("20060102150405", value[:14]); err == nil {
+		if t, err := time.Parse("20060102150405", value[:14]); err == nil && t.Year() > 0 {
 			return t, true
 		}
 	}
 	if len(value) >= 8 {
-		if t, err := time.Parse("20060102", value[:8]); err == nil {
+		if t, err := time.Parse("20060102", value[:8]); err == nil && t.Year() > 0 {
 			return t, true
 		}
 	}
 	if len(value) >= 4 {
-		if t, err := time.Parse("2006", value[:4]); err == nil {
+		if t, err := time.Parse("2006", value[:4]); err == nil && t.Year() > 0 {
 			return t, true
 		}
 	}

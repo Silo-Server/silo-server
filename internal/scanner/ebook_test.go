@@ -487,6 +487,32 @@ func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
 	}
 }
 
+func TestParseEbookPDFInfoMetadataDecodesHexStrings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte(`%PDF-1.7
+1 0 obj
+<< /Title <FEFF00480065007800200042006F006F006B>
+   /Author <41646120577269746572>
+   /CreationDate (0000-01-01)
+>>
+endobj
+%%EOF`), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Hex Book" || strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("PDF hex metadata = title %q authors %v", got.Title, got.Authors)
+	}
+	if got.Year != 0 || !got.PublishedAt.IsZero() {
+		t.Fatalf("bad PDF date produced year/date = %d/%v, want ignored", got.Year, got.PublishedAt)
+	}
+}
+
 func TestParseEbookCBZPageCount(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "comic.cbz")
 	file, err := os.Create(path)
