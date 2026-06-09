@@ -135,13 +135,25 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 
 	query := parseItemsQuery(r, h.codec)
 	switch {
-	case len(query.specificIDs) > 0:
+	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0:
 		h.handleSpecificItems(w, r, session, query)
 	case query.parentCollectionID != "":
 		h.handleBoxSetChildren(w, r, session, query)
-	case query.wantsBoxSets && len(query.itemTypes) == 0:
-		// IncludeItemTypes=BoxSet (alone): list library collections.
-		h.handleBoxSetsList(w, r, session, query)
+	case query.hasItemTypeFilter && len(query.itemTypes) == 0:
+		// Every requested type is one catalog browse cannot serve. BoxSet has
+		// its own listing (unless a user-state filter applies — collections
+		// carry no favorite/played state, so those return empty, matching the
+		// pre-existing favorites guard); CollectionFolder means the library
+		// views; anything else (Playlist, MusicAlbum, ...) is empty.
+		hasUserStateFilter := query.isFavorite || query.isResumable || query.isPlayed != nil
+		switch {
+		case query.wantsBoxSets && !hasUserStateFilter:
+			h.handleBoxSetsList(w, r, session, query)
+		case query.wantsViews && !hasUserStateFilter && query.searchTerm == "":
+			h.handleViewsResponse(w, r, session)
+		default:
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		}
 	case query.isResumable:
 		h.handleResumeResponse(w, r, session, query)
 	case query.isPlayed != nil && *query.isPlayed:
@@ -152,15 +164,6 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleFavoriteItems(w, r, session, query)
 	case isSeasonChildItemsQuery(query):
 		h.handleSeasonChildItems(w, r, session, query)
-	case query.hasItemTypeFilter && len(query.itemTypes) == 0:
-		// Client requested only types compat doesn't expose (e.g. Playlist,
-		// MusicAlbum): return empty rather than falling through to a views or
-		// browse response of the wrong type.
-		writeJSON(w, http.StatusOK, queryResultDTO{
-			Items:            []baseItemDTO{},
-			TotalRecordCount: 0,
-			StartIndex:       query.startIndex,
-		})
 	case query.parentLibraryID == 0 && len(query.itemTypes) == 0:
 		// No ParentId and no type filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
@@ -168,6 +171,15 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleViewsResponse(w, r, session)
 	default:
 		h.handleBrowseItems(w, r, session, query)
+	}
+}
+
+// emptyQueryResult is the canonical empty /Items page.
+func emptyQueryResult(startIndex int) queryResultDTO {
+	return queryResultDTO{
+		Items:            []baseItemDTO{},
+		TotalRecordCount: 0,
+		StartIndex:       startIndex,
 	}
 }
 
@@ -1579,6 +1591,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 			AllowedLibraryIDs:  access.AllowedLibraryIDs,
 			DisabledLibraryIDs: access.DisabledLibraryIDs,
 			MaxContentRating:   clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating),
+			ExcludedMediaTypes: access.ExcludedMediaTypes,
 			SortField:          query.sort,
 			SortOrder:          query.order,
 			Limit:              query.limit,
@@ -1782,6 +1795,16 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
 		items = append(items, dto)
 	}
+
+	// Ids= may also reference collections (BoxSet route IDs handed out by the
+	// collections listing); append their DTOs so clients can re-hydrate them.
+	boxSets, err := h.boxSetsByIDs(r.Context(), session, query.specificCollectionIDs)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	items = append(items, boxSets...)
+
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: len(items),
@@ -2069,9 +2092,9 @@ func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Sessio
 
 func (h *ItemsHandler) resolveAccessFilter(ctx context.Context, session *Session) catalog.AccessFilter {
 	if h.accessFilter != nil {
-		return h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID)
+		return withCompatAccessExclusions(h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID))
 	}
-	return catalog.AccessFilter{}
+	return withCompatAccessExclusions(catalog.AccessFilter{})
 }
 
 func (h *ItemsHandler) presignCompatListItem(ctx context.Context, item *upstreamListItem) {

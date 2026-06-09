@@ -22,12 +22,14 @@ type itemsQuery struct {
 	parentItemID           string
 	parentCollectionID     string
 	specificIDs            []string
+	specificCollectionIDs  []string
 	itemTypes              []string
 	genreName              string
 	isFavorite             bool
 	isResumable            bool
 	hasItemTypeFilter      bool // true when IncludeItemTypes was present in the request
 	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
+	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
 	sortExplicit           bool // true when SortBy was present in the request
 	needsDetailFields      bool // true when requested Fields include detail-level data (e.g. MediaSources)
 	itemType               string
@@ -70,8 +72,11 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	if ids := strings.TrimSpace(q.Get("Ids")); ids != "" {
 		parts := strings.SplitSeq(ids, ",")
 		for part := range parts {
-			if decoded, err := decodeItemID(codec, strings.TrimSpace(part)); err == nil && decoded != "" {
+			raw := strings.TrimSpace(part)
+			if decoded, err := decodeItemID(codec, raw); err == nil && decoded != "" {
 				result.specificIDs = append(result.specificIDs, decoded)
+			} else if collectionID, collErr := codec.DecodeStringID(EncodedIDCollection, raw); collErr == nil && collectionID != "" {
+				result.specificCollectionIDs = append(result.specificCollectionIDs, collectionID)
 			}
 		}
 	}
@@ -102,6 +107,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.hasItemTypeFilter = len(rawItemTypes) > 0 && strings.TrimSpace(strings.Join(rawItemTypes, "")) != ""
 	result.itemTypes = mapIncludeItemTypes(rawItemTypes)
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
+	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
 	if len(result.itemTypes) > 0 {
 		result.itemType = result.itemTypes[0]

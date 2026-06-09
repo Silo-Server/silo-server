@@ -24,8 +24,9 @@ type BrowseFavoritesFilters struct {
 	AllowedLibraryIDs  []int  // nil = no allowlist, []int{} = empty result
 	DisabledLibraryIDs []int  // user-disabled libraries to exclude
 	MaxContentRating   string
-	SortField          string // "added_at" (default), "title"/"sort_title", "year", "release_date"
-	SortOrder          string // "asc" or "desc" (default desc)
+	ExcludedMediaTypes []string // media types the caller's surface never exposes
+	SortField          string   // "added_at" (default), "title"/"sort_title", "year", "release_date"
+	SortOrder          string   // "asc" or "desc" (default desc)
 	Limit              int
 	Offset             int
 }
@@ -230,7 +231,7 @@ func buildBrowseFavoritesPlan(f BrowseFavoritesFilters) (browseFavoritesPlan, er
 		argIdx++
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating, ExcludedMediaTypes: f.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	orderBy := buildBrowseFavoritesOrderBy(f.SortField, f.SortOrder)
 

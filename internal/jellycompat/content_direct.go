@@ -38,23 +38,62 @@ const (
 
 // compatVideoTypes is the media_items type scope the Jellyfin compat surface
 // exposes when a request carries no explicit type filter. Silo serves
-// audiobooks through the audiobookshelf-compat API instead, so audiobook rows
-// must never leak into jellycompat responses.
+// audiobooks and podcasts through the audiobookshelf-compat API instead, so
+// those rows must never leak into jellycompat responses.
 const compatVideoTypes = "movie,series,episode"
 
 // compatVideoTypeList is compatVideoTypes as a slice for APIs that take
 // []string (e.g. ItemRepository.Search).
-var compatVideoTypeList = []string{"movie", "series", "episode"}
+var compatVideoTypeList = strings.Split(compatVideoTypes, ",")
 
-// isAudiobookLibraryType reports whether a media folder type marks an
-// audiobook library ('audiobooks' is canonical, 'audiobook' is legacy —
-// mirrors internal/audiobooks/media_store.go).
-func isAudiobookLibraryType(folderType string) bool {
+// compatExcludedMediaTypes lists the media_items.type values the Jellyfin
+// compat surface never exposes. Injected into every catalog.AccessFilter the
+// compat layer resolves (see withCompatAccessExclusions) so access-filtered
+// queries — search, favorites, recommendations, detail, batch hydration —
+// inherit the exclusion without per-call-site guards.
+var compatExcludedMediaTypes = []string{"audiobook", "podcast"}
+
+func isCompatExcludedMediaType(mediaType string) bool {
+	for _, excluded := range compatExcludedMediaTypes {
+		if strings.EqualFold(strings.TrimSpace(mediaType), excluded) {
+			return true
+		}
+	}
+	return false
+}
+
+// isCompatHiddenLibraryType reports whether a media folder type marks a
+// library the Jellyfin compat surface hides. Audiobook ('audiobooks'
+// canonical, 'audiobook' legacy — mirrors internal/audiobooks/media_store.go)
+// and podcast libraries are served by the ABS-compat API instead.
+func isCompatHiddenLibraryType(folderType string) bool {
 	switch strings.ToLower(strings.TrimSpace(folderType)) {
-	case "audiobooks", "audiobook":
+	case "audiobooks", "audiobook", "podcasts", "podcast":
 		return true
 	}
 	return false
+}
+
+// withCompatAccessExclusions stamps the compat surface's media-type
+// exclusions onto a resolved access filter. Centralizing the exclusion here
+// lets catalog query builders enforce it everywhere an AccessFilter flows.
+func withCompatAccessExclusions(filter catalog.AccessFilter) catalog.AccessFilter {
+	if len(filter.ExcludedMediaTypes) == 0 {
+		filter.ExcludedMediaTypes = compatExcludedMediaTypes
+	}
+	return filter
+}
+
+// compatAccessFilterResolver wraps an AccessFilterResolver so every filter it
+// returns carries the compat media-type exclusions. A nil base resolver still
+// yields exclusion-only filters.
+func compatAccessFilterResolver(base AccessFilterResolver) AccessFilterResolver {
+	return func(ctx context.Context, userID int, profileID string) catalog.AccessFilter {
+		if base == nil {
+			return withCompatAccessExclusions(catalog.AccessFilter{})
+		}
+		return withCompatAccessExclusions(base(ctx, userID, profileID))
+	}
 }
 
 // compatNoMatchType is a sentinel media type that matches no media_items row.
@@ -62,36 +101,18 @@ func isAudiobookLibraryType(folderType string) bool {
 // the query returns empty instead of silently broadening to all video types.
 const compatNoMatchType = "__compat_none__"
 
-// compatScopedTypes clamps a catalog type filter to the video types the
-// Jellyfin compat surface exposes. An empty filter defaults to all video
-// types; explicit filters keep their entries minus "audiobook".
-func compatScopedTypes(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return compatVideoTypes
-	}
-	kept := make([]string, 0, 4)
-	for part := range strings.SplitSeq(raw, ",") {
-		t := strings.ToLower(strings.TrimSpace(part))
-		if t == "" || t == "audiobook" {
-			continue
-		}
-		kept = append(kept, t)
-	}
-	if len(kept) == 0 {
-		return compatNoMatchType
-	}
-	return strings.Join(kept, ",")
-}
-
-// compatScopedSearchTypes is compatScopedTypes for []string item-type filters.
+// compatScopedSearchTypes clamps an item-type filter to the types the compat
+// surface exposes: empty defaults to all video types, explicit filters keep
+// their entries minus excluded ones, and a filter that reduces to nothing
+// returns the no-match sentinel.
 func compatScopedSearchTypes(itemTypes []string) []string {
 	if len(itemTypes) == 0 {
 		return compatVideoTypeList
 	}
 	kept := make([]string, 0, len(itemTypes))
 	for _, t := range itemTypes {
-		if strings.EqualFold(strings.TrimSpace(t), "audiobook") {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" || isCompatExcludedMediaType(t) {
 			continue
 		}
 		kept = append(kept, t)
@@ -100,6 +121,15 @@ func compatScopedSearchTypes(itemTypes []string) []string {
 		return []string{compatNoMatchType}
 	}
 	return kept
+}
+
+// compatScopedTypes is compatScopedSearchTypes for comma-separated filters.
+func compatScopedTypes(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return compatVideoTypes
+	}
+	return strings.Join(compatScopedSearchTypes(strings.Split(raw, ",")), ",")
 }
 
 // itemAccessSource is the subset of *catalog.ItemRepository that
@@ -176,9 +206,9 @@ func newDirectContentService(
 
 func (s *directContentService) resolveFilter(ctx context.Context, session *Session) catalog.AccessFilter {
 	if s.accessFilter != nil {
-		return s.accessFilter(ctx, session.StreamAppUserID, session.ProfileID)
+		return withCompatAccessExclusions(s.accessFilter(ctx, session.StreamAppUserID, session.ProfileID))
 	}
-	return catalog.AccessFilter{}
+	return withCompatAccessExclusions(catalog.AccessFilter{})
 }
 
 func applyCompatPresentationLibrary(filter catalog.AccessFilter, libraryID *int) catalog.AccessFilter {
@@ -234,8 +264,9 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 		if _, ok := disabled[f.ID]; ok {
 			continue
 		}
-		// Audiobook libraries are served by the ABS-compat API, never here.
-		if isAudiobookLibraryType(f.Type) {
+		// Audiobook and podcast libraries are served by the ABS-compat API,
+		// never here.
+		if isCompatHiddenLibraryType(f.Type) {
 			continue
 		}
 		lib := upstreamUserLibrary{
@@ -436,9 +467,10 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 	if err != nil {
 		return nil, wrapCatalogError(err)
 	}
-	// Audiobooks are not exposed on the Jellyfin compat surface (this guard
-	// also blocks PlaybackInfo, which resolves items through GetItemDetail).
-	if strings.EqualFold(detail.Type, "audiobook") {
+	// ABS-surface media types are not exposed on the Jellyfin compat surface
+	// (this guard also blocks PlaybackInfo, which resolves items through
+	// GetItemDetail).
+	if isCompatExcludedMediaType(detail.Type) {
 		return nil, &HTTPError{StatusCode: 404, Message: "item not found"}
 	}
 

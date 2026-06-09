@@ -20,7 +20,8 @@ type collectionSource interface {
 }
 
 // visibleLibraryIDs returns the set of library IDs the session may see on the
-// compat surface (access-filtered and audiobook-excluded by ListUserLibraries).
+// compat surface (access-filtered and ABS-library-excluded by
+// ListUserLibraries).
 func (h *ItemsHandler) visibleLibraryIDs(ctx context.Context, session *Session) (map[int]struct{}, error) {
 	libraries, err := h.content.ListUserLibraries(ctx, session)
 	if err != nil {
@@ -34,7 +35,7 @@ func (h *ItemsHandler) visibleLibraryIDs(ctx context.Context, session *Session) 
 }
 
 // collectionVisible reports whether any of the collection's libraries is
-// visible to the session. Collections scoped only to hidden or audiobook
+// visible to the session. Collections scoped only to hidden or ABS-surface
 // libraries stay off the compat surface.
 func collectionVisible(c *models.LibraryCollection, visible map[int]struct{}) bool {
 	if len(c.LibraryIDs) == 0 {
@@ -49,8 +50,34 @@ func collectionVisible(c *models.LibraryCollection, visible map[int]struct{}) bo
 	return false
 }
 
-// boxSetFromCollection maps a library collection to a Jellyfin BoxSet DTO and
-// seeds the image cache so /Items/{id}/Images/Primary can serve the poster.
+// loadVisibleCollection fetches a collection and applies the compat
+// visibility rules. Returns (nil, nil) when the collection does not exist or
+// the session may not see it.
+func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Session, collectionID string) (*models.LibraryCollection, error) {
+	if h.collections == nil {
+		return nil, nil
+	}
+	collection, err := h.collections.GetByID(ctx, collectionID)
+	if err != nil || collection == nil {
+		return nil, nil
+	}
+	if !strings.EqualFold(collection.Visibility, "visible") {
+		return nil, nil
+	}
+	visible, err := h.visibleLibraryIDs(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	if !collectionVisible(collection, visible) {
+		return nil, nil
+	}
+	return collection, nil
+}
+
+// boxSetFromCollection maps a library collection to a Jellyfin BoxSet DTO.
+// Image tags are signed from the stable artwork key (like library views) so
+// they survive restarts and presign rotation; the in-memory image cache is
+// seeded as the warm path.
 func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.LibraryCollection) baseItemDTO {
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, c.ID)
 	imgTags := map[string]string{}
@@ -58,7 +85,10 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		if h.images != nil {
 			h.images.RememberSized(routeID, "Primary", posterURL, compatCardImageSize)
 		}
-		imgTags["Primary"] = tagValue(posterURL)
+		imgTags["Primary"] = h.mapper.imageTagSigner.Tag(
+			imageTagSeed(routeID, "Primary", compatCardImageSize, c.PosterURL, "", time.Time{}),
+			posterURL,
+		)
 	}
 	dto := baseItemDTO{
 		ID:                 routeID,
@@ -80,7 +110,10 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		if h.images != nil {
 			h.images.RememberSized(routeID, "Backdrop", backdropURL, compatCardImageSize)
 		}
-		dto.BackdropImageTags = []string{tagValue(backdropURL)}
+		dto.BackdropImageTags = []string{h.mapper.imageTagSigner.Tag(
+			imageTagSeed(routeID, "Backdrop", compatCardImageSize, c.BackdropURL, "", time.Time{}),
+			backdropURL,
+		)}
 	}
 	return dto
 }
@@ -88,16 +121,17 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 // presignCollectionPoster resolves a collection artwork reference to a
 // fetchable URL. Collection posters are stored as S3 keys in the
 // general-purpose bucket (same bucket as library posters); absolute and
-// app-relative references pass through untouched.
+// app-relative references pass through untouched (matching the main API's
+// presignGPURL semantics).
 func (h *ItemsHandler) presignCollectionPoster(ctx context.Context, path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
 		return path
 	}
-	if h.posterPresigner == nil || strings.HasPrefix(path, "/") {
+	if h.posterPresigner == nil {
 		return ""
 	}
 	ttl := h.presignTTL
@@ -111,12 +145,33 @@ func (h *ItemsHandler) presignCollectionPoster(ctx context.Context, path string)
 	return url
 }
 
+// boxSetsByIDs maps the given collection IDs to BoxSet DTOs, skipping any the
+// session may not see. Used by /Items?Ids= re-hydration.
+func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, collectionIDs []string) ([]baseItemDTO, error) {
+	if len(collectionIDs) == 0 || h.collections == nil {
+		return nil, nil
+	}
+	items := make([]baseItemDTO, 0, len(collectionIDs))
+	for _, id := range collectionIDs {
+		collection, err := h.loadVisibleCollection(ctx, session, id)
+		if err != nil {
+			return nil, err
+		}
+		if collection == nil {
+			continue
+		}
+		items = append(items, h.boxSetFromCollection(ctx, collection))
+	}
+	return items, nil
+}
+
 // handleBoxSetsList serves GET /Items with IncludeItemTypes=BoxSet by listing
 // visible library collections, optionally scoped to one library via ParentId.
+// Filtering, sorting, and paging happen on the lightweight collection rows;
+// DTOs (with artwork presigning) are built only for the returned page.
 func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	empty := queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0, StartIndex: query.startIndex}
 	if h.collections == nil {
-		writeJSON(w, http.StatusOK, empty)
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
 
@@ -129,7 +184,7 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 	var libFilter *int
 	if query.parentLibraryID > 0 {
 		if _, ok := visible[query.parentLibraryID]; !ok {
-			writeJSON(w, http.StatusOK, empty)
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 			return
 		}
 		libFilter = &query.parentLibraryID
@@ -142,60 +197,69 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 	}
 
 	searchTerm := strings.ToLower(strings.TrimSpace(query.searchTerm))
-	items := make([]baseItemDTO, 0, len(collections))
+	namePrefix := strings.ToLower(query.namePrefix)
+	matched := make([]*models.LibraryCollection, 0, len(collections))
 	for _, c := range collections {
 		if !collectionVisible(c, visible) {
 			continue
 		}
-		if searchTerm != "" && !strings.Contains(strings.ToLower(c.Title), searchTerm) {
+		title := strings.ToLower(c.Title)
+		if searchTerm != "" && !strings.Contains(title, searchTerm) {
 			continue
 		}
-		if query.namePrefix != "" && !strings.HasPrefix(strings.ToLower(c.Title), strings.ToLower(query.namePrefix)) {
+		if namePrefix != "" && !strings.HasPrefix(title, namePrefix) {
 			continue
 		}
-		items = append(items, h.boxSetFromCollection(r.Context(), c))
+		matched = append(matched, c)
 	}
 
 	if query.sort == "sort_title" {
 		ascending := query.order != "desc"
-		sortBaseItemsByName(items, ascending)
+		sort.SliceStable(matched, func(i, j int) bool {
+			a, b := strings.ToLower(matched[i].Title), strings.ToLower(matched[j].Title)
+			if ascending {
+				return a < b
+			}
+			return a > b
+		})
 	}
 
-	total := len(items)
+	page := slicePage(matched, query.startIndex, query.limit)
+	items := make([]baseItemDTO, 0, len(page))
+	for _, c := range page {
+		items = append(items, h.boxSetFromCollection(r.Context(), c))
+	}
 	writeJSON(w, http.StatusOK, queryResultDTO{
-		Items:            sliceBaseItems(items, query.startIndex, query.limit),
-		TotalRecordCount: total,
+		Items:            items,
+		TotalRecordCount: len(matched),
 		StartIndex:       query.startIndex,
 	})
 }
 
-func sortBaseItemsByName(items []baseItemDTO, ascending bool) {
-	sort.SliceStable(items, func(i, j int) bool {
-		a, b := strings.ToLower(items[i].Name), strings.ToLower(items[j].Name)
-		if ascending {
-			return a < b
-		}
-		return a > b
-	})
+// slicePage returns the [startIndex, startIndex+limit) window of items;
+// limit <= 0 means no cap.
+func slicePage[T any](items []T, startIndex, limit int) []T {
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	if startIndex >= len(items) {
+		return nil
+	}
+	if limit <= 0 {
+		limit = len(items)
+	}
+	end := min(startIndex+limit, len(items))
+	return items[startIndex:end]
 }
 
 // handleBoxSetItem serves GET /Items/{id} when the ID decodes as a collection.
 func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, session *Session, collectionID string) {
-	if h.collections == nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
-		return
-	}
-	collection, err := h.collections.GetByID(r.Context(), collectionID)
-	if err != nil || collection == nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
-		return
-	}
-	visible, err := h.visibleLibraryIDs(r.Context(), session)
+	collection, err := h.loadVisibleCollection(r.Context(), session, collectionID)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	if !collectionVisible(collection, visible) || !strings.EqualFold(collection.Visibility, "visible") {
+	if collection == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
@@ -207,24 +271,13 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 // position order is preserved; an explicit SortBy delegates ordering and
 // paging to the catalog browse path.
 func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	empty := queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0, StartIndex: query.startIndex}
-	if h.collections == nil {
-		writeJSON(w, http.StatusOK, empty)
-		return
-	}
-
-	collection, err := h.collections.GetByID(r.Context(), query.parentCollectionID)
-	if err != nil || collection == nil {
-		writeJSON(w, http.StatusOK, empty)
-		return
-	}
-	visible, err := h.visibleLibraryIDs(r.Context(), session)
+	collection, err := h.loadVisibleCollection(r.Context(), session, query.parentCollectionID)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	if !collectionVisible(collection, visible) || !strings.EqualFold(collection.Visibility, "visible") {
-		writeJSON(w, http.StatusOK, empty)
+	if collection == nil {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
 
@@ -238,7 +291,7 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		contentIDs = append(contentIDs, member.MediaItemID)
 	}
 	if len(contentIDs) == 0 {
-		writeJSON(w, http.StatusOK, empty)
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
 
@@ -254,29 +307,13 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 			writeCompatUpstreamError(w, browseErr)
 			return
 		}
-		h.rememberListImages(result.Items)
-		favorites, progress, stateErr := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(result.Items))
-		if stateErr != nil {
-			writeCompatUpstreamError(w, stateErr)
-			return
-		}
-		items := make([]baseItemDTO, 0, len(result.Items))
-		for _, item := range result.Items {
-			dto := h.mapper.itemFromList(item, favorites[item.ContentID], progress[item.ContentID], query.requestedFields)
-			dto.ParentID = routeID
-			items = append(items, dto)
-		}
-		applyImageTypeLimit(items, query.imageTypeLimit)
-		writeJSON(w, http.StatusOK, queryResultDTO{
-			Items:            items,
-			TotalRecordCount: result.Total,
-			StartIndex:       query.startIndex,
-		})
+		h.writeCollectionItemsPage(w, r, session, query, routeID, result.Items, result.Total)
 		return
 	}
 
-	// Position order: hydrate every member (collections are capped well below
-	// the browse limit), rebuild curated order, then page locally.
+	// Position order: hydrate the surviving members (collections are capped
+	// well below the browse limit), rebuild curated order, then page locally
+	// before building DTOs.
 	itemsByID, err := h.fetchCompatItemsByContentIDs(r.Context(), session, contentIDs, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -288,22 +325,29 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 			ordered = append(ordered, item)
 		}
 	}
-	h.rememberListImages(ordered)
-	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(ordered))
+	page := slicePage(ordered, query.startIndex, query.limit)
+	h.writeCollectionItemsPage(w, r, session, query, routeID, page, len(ordered))
+}
+
+// writeCollectionItemsPage hydrates user state for one page of collection
+// members and writes the /Items result with ParentId stamped on each child.
+func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, listItems []upstreamListItem, total int) {
+	h.rememberListImages(listItems)
+	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(listItems))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	items := make([]baseItemDTO, 0, len(ordered))
-	for _, item := range ordered {
+	items := make([]baseItemDTO, 0, len(listItems))
+	for _, item := range listItems {
 		dto := h.mapper.itemFromList(item, favorites[item.ContentID], progress[item.ContentID], query.requestedFields)
 		dto.ParentID = routeID
 		items = append(items, dto)
 	}
 	applyImageTypeLimit(items, query.imageTypeLimit)
 	writeJSON(w, http.StatusOK, queryResultDTO{
-		Items:            sliceBaseItems(items, query.startIndex, query.limit),
-		TotalRecordCount: len(items),
+		Items:            items,
+		TotalRecordCount: total,
 		StartIndex:       query.startIndex,
 	})
 }

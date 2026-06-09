@@ -20,6 +20,8 @@ func TestCompatScopedTypes(t *testing.T) {
 		{"audiobook", compatNoMatchType},
 		{"movie,audiobook", "movie"},
 		{" Audiobook ", compatNoMatchType},
+		{"podcast", compatNoMatchType},
+		{"movie,podcast", "movie"},
 	}
 	for _, tc := range cases {
 		if got := compatScopedTypes(tc.in); got != tc.want {
@@ -42,15 +44,41 @@ func TestCompatScopedSearchTypes(t *testing.T) {
 	}
 }
 
-func TestIsAudiobookLibraryType(t *testing.T) {
-	for _, val := range []string{"audiobooks", "audiobook", " Audiobooks "} {
-		if !isAudiobookLibraryType(val) {
-			t.Errorf("expected %q to be an audiobook library type", val)
+func TestIsCompatHiddenLibraryType(t *testing.T) {
+	for _, val := range []string{"audiobooks", "audiobook", " Audiobooks ", "podcast", "podcasts"} {
+		if !isCompatHiddenLibraryType(val) {
+			t.Errorf("expected %q to be hidden from the compat surface", val)
 		}
 	}
 	for _, val := range []string{"movies", "series", "mixed", ""} {
-		if isAudiobookLibraryType(val) {
-			t.Errorf("expected %q to not be an audiobook library type", val)
+		if isCompatHiddenLibraryType(val) {
+			t.Errorf("expected %q to be visible on the compat surface", val)
+		}
+	}
+}
+
+func TestCompatAccessFilterResolverStampsExclusions(t *testing.T) {
+	resolved := compatAccessFilterResolver(nil)(context.Background(), 1, "p1")
+	if len(resolved.ExcludedMediaTypes) == 0 {
+		t.Fatalf("expected exclusions on nil base resolver, got %+v", resolved)
+	}
+
+	base := func(context.Context, int, string) catalog.AccessFilter {
+		return catalog.AccessFilter{MaxContentRating: "PG-13"}
+	}
+	resolved = compatAccessFilterResolver(base)(context.Background(), 1, "p1")
+	if resolved.MaxContentRating != "PG-13" {
+		t.Fatalf("expected base filter fields preserved, got %+v", resolved)
+	}
+	for _, want := range []string{"audiobook", "podcast"} {
+		found := false
+		for _, got := range resolved.ExcludedMediaTypes {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q in ExcludedMediaTypes, got %v", want, resolved.ExcludedMediaTypes)
 		}
 	}
 }
@@ -76,13 +104,14 @@ func (f *scopeFakeFolderRepo) ListByIDs(_ context.Context, ids []int) ([]*models
 	return out, nil
 }
 
-func TestListUserLibrariesExcludesAudiobookFolders(t *testing.T) {
+func TestListUserLibrariesExcludesABSFolders(t *testing.T) {
 	svc := &directContentService{
 		folderRepo: &scopeFakeFolderRepo{folders: []*models.MediaFolder{
 			{ID: 1, Name: "Movies", Type: "movies", Enabled: true},
 			{ID: 2, Name: "Audiobooks", Type: "audiobooks", Enabled: true},
 			{ID: 3, Name: "Shows", Type: "series", Enabled: true},
 			{ID: 4, Name: "Legacy Books", Type: "audiobook", Enabled: true},
+			{ID: 5, Name: "Podcasts", Type: "podcasts", Enabled: true},
 		}},
 	}
 
@@ -94,8 +123,8 @@ func TestListUserLibrariesExcludesAudiobookFolders(t *testing.T) {
 		t.Fatalf("expected 2 libraries, got %d: %+v", len(libraries), libraries)
 	}
 	for _, lib := range libraries {
-		if lib.Name == "Audiobooks" || lib.Name == "Legacy Books" {
-			t.Fatalf("audiobook library %q leaked into compat views", lib.Name)
+		if lib.Name != "Movies" && lib.Name != "Shows" {
+			t.Fatalf("ABS-surface library %q leaked into compat views", lib.Name)
 		}
 	}
 }

@@ -106,6 +106,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
+	imagesHandler.collections = itemsHandler.collections
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -237,6 +238,10 @@ func withDefaults(deps Dependencies) Dependencies {
 	if deps.Now == nil {
 		deps.Now = timeNow
 	}
+	// Stamp the compat surface's media-type exclusions onto every resolved
+	// access filter so all consumers (content service, items/images handlers,
+	// recommendations) inherit them without per-call-site guards.
+	deps.AccessFilterFn = compatAccessFilterResolver(deps.AccessFilterFn)
 	if deps.JWTSecret == "" && deps.Config != nil {
 		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}

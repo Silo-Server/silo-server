@@ -295,6 +295,60 @@ func TestHandleItems_UnmappedTypeFilterReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleItems_BoxSetWithUserStateFilterReturnsEmpty(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible"},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	// Collections carry no favorite/played state; user-state-filtered BoxSet
+	// queries must stay empty (jellyfin-web Favorites tab relies on this).
+	for _, target := range []string{
+		"/Items?IncludeItemTypes=BoxSet&Filters=IsFavorite",
+		"/Items?IncludeItemTypes=BoxSet&Filters=IsResumable",
+		"/Items?IncludeItemTypes=BoxSet&IsPlayed=true",
+	} {
+		result := performItemsRequest(t, h, target)
+		if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+			t.Fatalf("%s: expected empty result, got %+v", target, result.Items)
+		}
+	}
+}
+
+func TestHandleItems_CollectionFolderTypeReturnsViews(t *testing.T) {
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{
+		{ID: 1, Name: "Movies", Type: "movies"},
+		{ID: 3, Name: "Shows", Type: "series"},
+	}, nil)
+
+	result := performItemsRequest(t, h, "/Items?IncludeItemTypes=CollectionFolder")
+	if len(result.Items) != 2 {
+		t.Fatalf("expected 2 library views, got %+v", result.Items)
+	}
+	for _, item := range result.Items {
+		if item.Type != "CollectionFolder" {
+			t.Fatalf("expected CollectionFolder items, got %+v", item)
+		}
+	}
+}
+
+func TestHandleItems_SpecificIdsIncludeBoxSets(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible", ItemCount: 2},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	boxSetID := h.codec.EncodeStringID(EncodedIDCollection, "101")
+	result := performItemsRequest(t, h, "/Items?Ids="+url.QueryEscape(boxSetID))
+	if len(result.Items) != 1 || result.Items[0].Type != "BoxSet" || result.Items[0].Name != "Marvel" {
+		t.Fatalf("expected the BoxSet DTO for Ids= re-hydration, got %+v", result.Items)
+	}
+}
+
 func TestParseItemsQuery_BoxSetFlags(t *testing.T) {
 	codec := NewResourceIDCodec()
 

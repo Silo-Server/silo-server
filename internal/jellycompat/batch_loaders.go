@@ -56,8 +56,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 
 	access := h.resolveAccessFilter(ctx, session)
 	fromClause := "media_items mi"
-	// Audiobooks are never exposed on the Jellyfin compat surface.
-	conditions := []string{"mi.content_id = ANY($1)", "mi.type <> 'audiobook'"}
+	conditions := []string{"mi.content_id = ANY($1)"}
 	args := []any{normalized}
 	argIdx := 2
 
@@ -127,10 +126,6 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context,
 		return nil, err
 	}
 	for _, item := range items {
-		// Audiobooks are never exposed on the Jellyfin compat surface.
-		if strings.EqualFold(item.Type, "audiobook") {
-			continue
-		}
 		listItem := mediaItemToListItem(item)
 		h.presignCompatListItem(ctx, &listItem)
 		result[item.ContentID] = listItem

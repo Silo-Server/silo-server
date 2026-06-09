@@ -69,6 +69,11 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	// Build a map for ordering by the original favorites list order
 	itemMap := make(map[string]*upstreamListItem, len(items))
 	for _, mi := range items {
+		// Favorites are shared with the ABS surface; its media types are
+		// never exposed here (they would 404 on detail/PlaybackInfo).
+		if isCompatExcludedMediaType(mi.Type) {
+			continue
+		}
 		li := mediaItemToListItem(mi)
 		li.PosterURL = compatPresignImage(s.detailSvc, ctx, li.PosterURL, "poster", compatCardImageSize)
 		li.BackdropURL = compatPresignImage(s.detailSvc, ctx, li.BackdropURL, "backdrop", compatCardImageSize)
