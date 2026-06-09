@@ -106,8 +106,10 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.RecursiveItemCount = *item.EpisodeCount
 	}
 	if item.SeasonCount != nil {
-		dto.ChildCount = *item.SeasonCount
-		dto.RecursiveItemCount = *item.SeasonCount
+		seasonCount := *item.SeasonCount
+		dto.ChildCount = seasonCount
+		dto.RecursiveItemCount = seasonCount
+		dto.SeasonCount = seasonCount
 	}
 	primaryPath, primaryThumbhash := listItemPrimaryImageSeedParts(item)
 	if tags := imageTagsWithSeed(m.imageTagSigner,

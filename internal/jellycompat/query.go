@@ -19,6 +19,7 @@ type itemsQuery struct {
 	namePrefix             string
 	maxOfficialRating      string
 	parentLibraryID        int
+	parentItemID           string
 	specificIDs            []string
 	itemTypes              []string
 	genreName              string
@@ -56,6 +57,8 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
 		if libraryID, err := codec.DecodeIntID(EncodedIDLibrary, parentID); err == nil {
 			result.parentLibraryID = int(libraryID)
+		} else if contentID, itemErr := decodeItemID(codec, parentID); itemErr == nil && contentID != "" {
+			result.parentItemID = contentID
 		}
 	}
 

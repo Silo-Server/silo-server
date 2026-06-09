@@ -73,6 +73,7 @@ type baseItemDTO struct {
 	SpecialFeatureCount      int                          `json:"SpecialFeatureCount,omitempty"`
 	MovieCount               int                          `json:"MovieCount,omitempty"`
 	SeriesCount              int                          `json:"SeriesCount,omitempty"`
+	SeasonCount              int                          `json:"SeasonCount,omitempty"`
 	EpisodeCount             int                          `json:"EpisodeCount,omitempty"`
 	LockedFields             []string                     `json:"LockedFields,omitempty"`
 	LockData                 bool                         `json:"LockData,omitempty"`
