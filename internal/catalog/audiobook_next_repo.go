@@ -13,6 +13,13 @@ type NextInSeriesQuery struct {
 	UserID    int
 	ProfileID string
 	Limit     int
+	// LibraryID / LibraryIDs / DisabledLibraryIDs scope the candidate books in
+	// SQL. Without this, a profile whose recently finished series live in a
+	// different library would consume the LIMIT with candidates the caller
+	// then filters out, starving a library-scoped section.
+	LibraryID          *int
+	LibraryIDs         []int
+	DisabledLibraryIDs []int
 }
 
 // NextInSeriesResult is one row from the next-in-series query: the next
@@ -40,8 +47,9 @@ func NewAudiobookNextRepository(pool *pgxpool.Pool) *AudiobookNextRepository {
 // started yet. Series surface in most-recently-finished order. Books already
 // in progress are excluded — they belong to Continue Listening, not here.
 //
-// Library scoping and access filtering are applied by the caller when
-// resolving content IDs to items (mirrors NextUpRepository.ListNextUp).
+// Candidate books are library-scoped in SQL (see NextInSeriesQuery); remaining
+// access filtering (content rating) is applied by the caller when resolving
+// content IDs to items.
 func (r *AudiobookNextRepository) ListNextInSeries(ctx context.Context, q NextInSeriesQuery) ([]NextInSeriesResult, error) {
 	if r == nil || r.pool == nil || q.UserID <= 0 || q.ProfileID == "" {
 		return nil, nil
@@ -52,7 +60,41 @@ func (r *AudiobookNextRepository) ListNextInSeries(ctx context.Context, q NextIn
 		limit = 20
 	}
 
-	const query = `
+	args := []any{q.UserID, q.ProfileID}
+	argIdx := 3
+	candidateScope := ""
+	if q.LibraryID != nil {
+		candidateScope += fmt.Sprintf(`
+			  AND EXISTS (
+				  SELECT 1 FROM media_item_libraries mil
+				  WHERE mil.content_id = m.content_id AND mil.media_folder_id = $%d
+			  )`, argIdx)
+		args = append(args, *q.LibraryID)
+		argIdx++
+	} else if q.LibraryIDs != nil {
+		if len(q.LibraryIDs) == 0 {
+			return nil, nil
+		}
+		candidateScope += fmt.Sprintf(`
+			  AND EXISTS (
+				  SELECT 1 FROM media_item_libraries mil
+				  WHERE mil.content_id = m.content_id AND mil.media_folder_id = ANY($%d)
+			  )`, argIdx)
+		args = append(args, q.LibraryIDs)
+		argIdx++
+	}
+	if len(q.DisabledLibraryIDs) > 0 {
+		candidateScope += fmt.Sprintf(`
+			  AND NOT EXISTS (
+				  SELECT 1 FROM media_item_libraries mil_disabled
+				  WHERE mil_disabled.content_id = m.content_id
+				    AND mil_disabled.media_folder_id = ANY($%d)
+			  )`, argIdx)
+		args = append(args, q.DisabledLibraryIDs)
+		argIdx++
+	}
+
+	query := fmt.Sprintf(`
 		WITH finished_series AS (
 			SELECT
 				LOWER(BTRIM(s.series_name)) AS series_key,
@@ -92,14 +134,15 @@ func (r *AudiobookNextRepository) ListNextInSeries(ctx context.Context, q NextIn
 				  WHERE uwp2.user_id = $1
 				    AND uwp2.profile_id = $2
 				    AND uwp2.media_item_id = m.content_id
-			  )
+			  )%s
 			ORDER BY s2.series_index, LOWER(m.sort_title)
 			LIMIT 1
 		) next_book ON true
 		ORDER BY fs.last_finished_at DESC
-		LIMIT $3`
+		LIMIT $%d`, candidateScope, argIdx)
+	args = append(args, limit)
 
-	rows, err := r.pool.Query(ctx, query, q.UserID, q.ProfileID, limit)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying next-in-series audiobooks: %w", err)
 	}

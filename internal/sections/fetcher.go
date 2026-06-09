@@ -644,10 +644,12 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 }
 
 // fetchNextInSeriesSection surfaces the next unstarted audiobook per series
-// the profile has finished a book of. Candidates come from AudiobookNextRepo;
-// library scoping and access filtering happen while resolving candidate IDs to
-// items, so candidates outside the section's libraries simply drop out. The
-// candidate query over-fetches to compensate for that post-resolution trim.
+// the profile has finished a book of. Candidates come from AudiobookNextRepo
+// with library scoping pushed into the SQL — otherwise finished series whose
+// next book lives in another library would consume the candidate limit and
+// starve a library-scoped section. Content-rating access filtering happens
+// while resolving candidate IDs to items, so the candidate query still
+// over-fetches to compensate for that post-resolution trim.
 func (f *Fetcher) fetchNextInSeriesSection(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
 	emptyResult := SectionWithItems{
 		ResolvedSection: resolved,
@@ -670,9 +672,12 @@ func (f *Fetcher) fetchNextInSeriesSection(ctx context.Context, resolved Resolve
 	}
 
 	results, err := f.AudiobookNextRepo.ListNextInSeries(ctx, catalog.NextInSeriesQuery{
-		UserID:    userID,
-		ProfileID: profileID,
-		Limit:     candidateLimit,
+		UserID:             userID,
+		ProfileID:          profileID,
+		Limit:              candidateLimit,
+		LibraryID:          libraryID,
+		LibraryIDs:         effectiveFetchLibraryIDs(libraryIDs, filter),
+		DisabledLibraryIDs: filter.DisabledLibraryIDs,
 	})
 	if err != nil {
 		return SectionWithItems{}, err

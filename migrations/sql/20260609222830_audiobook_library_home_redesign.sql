@@ -4,6 +4,9 @@
 -- featured "Now Listening" resume hero, and a next_in_series row surfaces the
 -- next unstarted book in series the profile has finished.
 --
+-- Rows touched here carry a marker key in config so the Down migration can
+-- revert exactly what this migration changed and nothing else.
+--
 -- Mark the first continue-listening section of each audiobook library as
 -- featured, but only when the admin has not already featured something else in
 -- that library's layout.
@@ -15,6 +18,7 @@ WITH target AS (
       AND lower(mf.type) IN ('audiobook', 'audiobooks')
       AND ps.section_type = 'continue_watching'
       AND ps.config->>'continue_type' = 'listening'
+      AND NOT ps.featured
       AND NOT EXISTS (
           SELECT 1 FROM page_sections f
           WHERE f.scope = 'library'
@@ -25,6 +29,7 @@ WITH target AS (
 )
 UPDATE page_sections ps
 SET featured = TRUE,
+    config = ps.config || '{"featured_by_migration":"20260609222830"}'::jsonb,
     updated_at = NOW()
 FROM target t
 WHERE ps.id = t.id;
@@ -90,7 +95,7 @@ SELECT
     'Next in Your Series',
     false,
     20,
-    '{}'::jsonb,
+    '{"seeded_by_migration":"20260609222830"}'::jsonb,
     true,
     NOW(),
     NOW()
@@ -99,21 +104,19 @@ FROM targets t;
 
 -- +goose Down
 -- +goose StatementBegin
-DELETE FROM page_sections ps
-USING media_folders mf
-WHERE ps.scope = 'library'
-  AND ps.library_id = mf.id
-  AND lower(mf.type) IN ('audiobook', 'audiobooks')
-  AND ps.section_type = 'next_in_series';
+-- Revert only the rows the Up migration touched, identified by the marker
+-- keys it wrote. Admin-created next_in_series sections and sections featured
+-- before (or after) the upgrade are left alone.
+DELETE FROM page_sections
+WHERE scope = 'library'
+  AND section_type = 'next_in_series'
+  AND config->>'seeded_by_migration' = '20260609222830';
 
-UPDATE page_sections ps
+UPDATE page_sections
 SET featured = FALSE,
+    config = config - 'featured_by_migration',
     updated_at = NOW()
-FROM media_folders mf
-WHERE ps.scope = 'library'
-  AND ps.library_id = mf.id
-  AND lower(mf.type) IN ('audiobook', 'audiobooks')
-  AND ps.section_type = 'continue_watching'
-  AND ps.config->>'continue_type' = 'listening'
-  AND ps.featured;
+WHERE scope = 'library'
+  AND section_type = 'continue_watching'
+  AND config->>'featured_by_migration' = '20260609222830';
 -- +goose StatementEnd

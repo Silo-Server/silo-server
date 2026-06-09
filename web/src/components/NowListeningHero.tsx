@@ -42,11 +42,19 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
   const audiobookPlayback = useAudiobookPlaybackController();
   // The section payload has no chapters or credits; the item detail fills in
   // author/narrator, chapter marks, and the files needed for one-click resume.
-  const { data: detail } = useCatalogItemDetail(deck?.content_id, libraryId);
+  const { data: fetchedDetail } = useCatalogItemDetail(deck?.content_id, libraryId);
   useAmbientColor(deck?.poster_thumbhash);
 
+  // The detail query keeps previous data while a new deck item loads, so a
+  // Resume click in that window could start the new book with the previous
+  // book's files. Only trust a detail payload that matches the deck item.
+  const detail =
+    fetchedDetail?.type === "audiobook" && fetchedDetail.content_id === deck?.content_id
+      ? fetchedDetail
+      : undefined;
+
   const files = useMemo(
-    () => (detail?.type === "audiobook" ? audiobookFilesFromVersions(detail.versions) : []),
+    () => (detail ? audiobookFilesFromVersions(detail.versions) : []),
     [detail],
   );
   const chapters = useMemo(() => buildChapterList(files), [files]);

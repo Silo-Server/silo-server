@@ -7,7 +7,11 @@ import { catalogKeys } from "./keys";
 export type AudiobookGroupBy = "author" | "narrator" | "series";
 export type AudiobookGroupSort = "name" | "count" | "duration";
 
-const GROUPS_FETCH_LIMIT = 500;
+// The server caps a single page at 500 groups; page until the reported total
+// is reached so client-side filtering sees the complete list. The page cap
+// bounds the worst case (pathological libraries) at 20 requests / 10k groups.
+const GROUPS_PAGE_SIZE = 500;
+const GROUPS_MAX_PAGES = 20;
 
 export async function fetchAudiobookGroups(
   libraryId: number,
@@ -15,13 +19,29 @@ export async function fetchAudiobookGroups(
   sort: AudiobookGroupSort,
   options?: RequestInit,
 ): Promise<AudiobookGroupsResponse> {
-  const params = new URLSearchParams({
-    library_id: String(libraryId),
-    group_by: groupBy,
-    sort,
-    limit: String(GROUPS_FETCH_LIMIT),
-  });
-  return api<AudiobookGroupsResponse>(`/catalog/audiobook-groups?${params.toString()}`, options);
+  const groups: AudiobookGroupsResponse["groups"] = [];
+  let total = 0;
+
+  for (let page = 0; page < GROUPS_MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      library_id: String(libraryId),
+      group_by: groupBy,
+      sort,
+      limit: String(GROUPS_PAGE_SIZE),
+      offset: String(page * GROUPS_PAGE_SIZE),
+    });
+    const response = await api<AudiobookGroupsResponse>(
+      `/catalog/audiobook-groups?${params.toString()}`,
+      options,
+    );
+    groups.push(...response.groups);
+    total = response.total;
+    if (response.groups.length === 0 || groups.length >= total) {
+      break;
+    }
+  }
+
+  return { total, groups };
 }
 
 export function useAudiobookGroups(
