@@ -74,13 +74,26 @@ func isCompatHiddenLibraryType(folderType string) bool {
 	return false
 }
 
-// withCompatAccessExclusions stamps the compat surface's media-type
-// exclusions onto a resolved access filter. Centralizing the exclusion here
-// lets catalog query builders enforce it everywhere an AccessFilter flows.
+// withCompatAccessExclusions merges the compat surface's media-type
+// exclusions into a resolved access filter, preserving any exclusions the
+// base resolver already supplied. Centralizing the exclusion here lets
+// catalog query builders enforce it everywhere an AccessFilter flows.
 func withCompatAccessExclusions(filter catalog.AccessFilter) catalog.AccessFilter {
-	if len(filter.ExcludedMediaTypes) == 0 {
-		filter.ExcludedMediaTypes = compatExcludedMediaTypes
+	merged := make([]string, 0, len(filter.ExcludedMediaTypes)+len(compatExcludedMediaTypes))
+	merged = append(merged, filter.ExcludedMediaTypes...)
+	for _, excluded := range compatExcludedMediaTypes {
+		present := false
+		for _, existing := range merged {
+			if strings.EqualFold(existing, excluded) {
+				present = true
+				break
+			}
+		}
+		if !present {
+			merged = append(merged, excluded)
+		}
 	}
+	filter.ExcludedMediaTypes = merged
 	return filter
 }
 
@@ -101,10 +114,20 @@ func compatAccessFilterResolver(base AccessFilterResolver) AccessFilterResolver 
 // the query returns empty instead of silently broadening to all video types.
 const compatNoMatchType = "__compat_none__"
 
+// compatAllowedTypeSet is the closed set of catalog types an explicit compat
+// type filter may pass through ("season" matches no media_items row but is
+// kept so season-typed filters keep their empty-result semantics).
+var compatAllowedTypeSet = map[string]struct{}{
+	"movie":   {},
+	"series":  {},
+	"episode": {},
+	"season":  {},
+}
+
 // compatScopedSearchTypes clamps an item-type filter to the types the compat
 // surface exposes: empty defaults to all video types, explicit filters keep
-// their entries minus excluded ones, and a filter that reduces to nothing
-// returns the no-match sentinel.
+// only allowlisted entries, and a filter that reduces to nothing returns the
+// no-match sentinel.
 func compatScopedSearchTypes(itemTypes []string) []string {
 	if len(itemTypes) == 0 {
 		return compatVideoTypeList
@@ -112,7 +135,7 @@ func compatScopedSearchTypes(itemTypes []string) []string {
 	kept := make([]string, 0, len(itemTypes))
 	for _, t := range itemTypes {
 		t = strings.ToLower(strings.TrimSpace(t))
-		if t == "" || isCompatExcludedMediaType(t) {
+		if _, ok := compatAllowedTypeSet[t]; !ok {
 			continue
 		}
 		kept = append(kept, t)

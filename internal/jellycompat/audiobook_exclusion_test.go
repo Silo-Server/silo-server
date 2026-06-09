@@ -22,6 +22,9 @@ func TestCompatScopedTypes(t *testing.T) {
 		{" Audiobook ", compatNoMatchType},
 		{"podcast", compatNoMatchType},
 		{"movie,podcast", "movie"},
+		// Non-video types outside the allowlist are dropped, not passed through.
+		{"musicalbum", compatNoMatchType},
+		{"movie,musicalbum", "movie"},
 	}
 	for _, tc := range cases {
 		if got := compatScopedTypes(tc.in); got != tc.want {
@@ -79,6 +82,24 @@ func TestCompatAccessFilterResolverStampsExclusions(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("expected %q in ExcludedMediaTypes, got %v", want, resolved.ExcludedMediaTypes)
+		}
+	}
+
+	// Pre-existing exclusions from the base resolver are preserved AND the
+	// compat exclusions are merged in (not conditionally skipped).
+	withExisting := func(context.Context, int, string) catalog.AccessFilter {
+		return catalog.AccessFilter{ExcludedMediaTypes: []string{"livetv"}}
+	}
+	resolved = compatAccessFilterResolver(withExisting)(context.Background(), 1, "p1")
+	for _, want := range []string{"livetv", "audiobook", "podcast"} {
+		found := false
+		for _, got := range resolved.ExcludedMediaTypes {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q in merged ExcludedMediaTypes, got %v", want, resolved.ExcludedMediaTypes)
 		}
 	}
 }

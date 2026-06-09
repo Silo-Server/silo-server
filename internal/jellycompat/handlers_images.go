@@ -125,7 +125,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
-		h.handleCollectionImage(w, r, routeID, imageType, imageSize, collectionID)
+		h.handleCollectionImage(w, r, session, routeID, imageType, imageSize, collectionID)
 		return
 	}
 
@@ -327,14 +327,32 @@ func (h *ImagesHandler) resolveCollectionImageURLFromTag(ctx context.Context, ro
 	return catalog.ResolvedImageURL{URL: imageURL}, true, nil
 }
 
-// handleCollectionImage serves session-authenticated BoxSet artwork.
-func (h *ImagesHandler) handleCollectionImage(w http.ResponseWriter, r *http.Request, routeID, imageType, imageSize, collectionID string) {
+// handleCollectionImage serves session-authenticated BoxSet artwork, applying
+// the same visibility rules as the BoxSet item endpoints.
+func (h *ImagesHandler) handleCollectionImage(w http.ResponseWriter, r *http.Request, session *Session, routeID, imageType, imageSize, collectionID string) {
 	if h.collections == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
 	collection, err := h.collections.GetByID(r.Context(), collectionID)
-	if err != nil || collection == nil {
+	if err != nil {
+		if errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+			return
+		}
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if collection == nil || !strings.EqualFold(collection.Visibility, "visible") {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if !collectionVisible(collection, visible) {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}

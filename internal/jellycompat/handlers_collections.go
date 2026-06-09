@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -19,11 +20,11 @@ type collectionSource interface {
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
 }
 
-// visibleLibraryIDs returns the set of library IDs the session may see on the
-// compat surface (access-filtered and ABS-library-excluded by
+// visibleLibraryIDSet returns the set of library IDs the session may see on
+// the compat surface (access-filtered and ABS-library-excluded by
 // ListUserLibraries).
-func (h *ItemsHandler) visibleLibraryIDs(ctx context.Context, session *Session) (map[int]struct{}, error) {
-	libraries, err := h.content.ListUserLibraries(ctx, session)
+func visibleLibraryIDSet(ctx context.Context, content ContentService, session *Session) (map[int]struct{}, error) {
+	libraries, err := content.ListUserLibraries(ctx, session)
 	if err != nil {
 		return nil, err
 	}
@@ -32,6 +33,10 @@ func (h *ItemsHandler) visibleLibraryIDs(ctx context.Context, session *Session) 
 		visible[lib.ID] = struct{}{}
 	}
 	return visible, nil
+}
+
+func (h *ItemsHandler) visibleLibraryIDs(ctx context.Context, session *Session) (map[int]struct{}, error) {
+	return visibleLibraryIDSet(ctx, h.content, session)
 }
 
 // collectionVisible reports whether any of the collection's libraries is
@@ -52,16 +57,20 @@ func collectionVisible(c *models.LibraryCollection, visible map[int]struct{}) bo
 
 // loadVisibleCollection fetches a collection and applies the compat
 // visibility rules. Returns (nil, nil) when the collection does not exist or
-// the session may not see it.
+// the session may not see it; infrastructure errors propagate so transient
+// failures don't masquerade as 404s.
 func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Session, collectionID string) (*models.LibraryCollection, error) {
 	if h.collections == nil {
 		return nil, nil
 	}
 	collection, err := h.collections.GetByID(ctx, collectionID)
-	if err != nil || collection == nil {
-		return nil, nil
+	if err != nil {
+		if errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	if !strings.EqualFold(collection.Visibility, "visible") {
+	if collection == nil || !strings.EqualFold(collection.Visibility, "visible") {
 		return nil, nil
 	}
 	visible, err := h.visibleLibraryIDs(ctx, session)
