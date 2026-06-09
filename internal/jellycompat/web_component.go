@@ -192,6 +192,149 @@ func DefaultWebVersion(cfg *config.Config) string {
 	return config.DefaultJellyfinWebVersion
 }
 
+func defaultWebVersionTarget(cfg *config.Config, settings map[string]string) string {
+	emulatedVersion := ""
+	if settings != nil {
+		emulatedVersion = strings.TrimSpace(settings["jellyfin_compat.emulated_server_version"])
+	}
+	if emulatedVersion == "" && cfg != nil {
+		emulatedVersion = strings.TrimSpace(cfg.JellyfinCompat.EmulatedServerVersion)
+	}
+	if normalized := normalizeWebVersion(emulatedVersion); normalized != "" {
+		return normalized
+	}
+	return DefaultWebVersion(cfg)
+}
+
+func ResolveCompatibleWebVersion(ctx context.Context, sourceURL, apiVersion string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	sourceURL, err := normalizeWebSourceURL(sourceURL)
+	if err != nil {
+		return "", err
+	}
+	versions, err := listRemoteWebVersions(ctx, sourceURL)
+	if err != nil {
+		return "", fmt.Errorf("list Jellyfin Web versions: %w", err)
+	}
+	version, err := SelectCompatibleWebVersion(apiVersion, versions)
+	if err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+func SelectCompatibleWebVersion(apiVersion string, available []string) (string, error) {
+	target, ok := parseStableWebVersion(apiVersion)
+	if !ok {
+		return "", fmt.Errorf("invalid Jellyfin API version %q", strings.TrimSpace(apiVersion))
+	}
+
+	byVersion := map[string]webStableVersion{}
+	for _, raw := range available {
+		version, ok := parseStableWebVersion(raw)
+		if !ok {
+			continue
+		}
+		byVersion[version.String()] = version
+	}
+	if len(byVersion) == 0 {
+		return "", errors.New("no stable Jellyfin Web versions found")
+	}
+
+	versions := make([]webStableVersion, 0, len(byVersion))
+	for _, version := range byVersion {
+		versions = append(versions, version)
+	}
+	sort.Slice(versions, func(i, j int) bool {
+		return compareStableWebVersions(versions[i], versions[j]) > 0
+	})
+
+	for _, version := range versions {
+		if version.major == target.major && version.minor == target.minor {
+			return version.String(), nil
+		}
+	}
+	for _, version := range versions {
+		if compareStableWebVersionMinor(version, target) < 0 {
+			return version.String(), nil
+		}
+	}
+
+	return versions[len(versions)-1].String(), nil
+}
+
+func listRemoteWebVersions(ctx context.Context, sourceURL string) ([]string, error) {
+	out, err := commandOutput(ctx, "", "git", "ls-remote", "--tags", "--refs", sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	return parseRemoteWebVersions(out), nil
+}
+
+func parseRemoteWebVersions(out string) []string {
+	versions := []string{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		ref := strings.TrimPrefix(fields[1], "refs/tags/")
+		version := normalizeWebVersion(ref)
+		if version == "" {
+			continue
+		}
+		versions = append(versions, version)
+	}
+	return versions
+}
+
+type webStableVersion struct {
+	major int
+	minor int
+	patch int
+}
+
+func parseStableWebVersion(raw string) (webStableVersion, bool) {
+	version := normalizeWebVersion(raw)
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return webStableVersion{}, false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return webStableVersion{}, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return webStableVersion{}, false
+	}
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return webStableVersion{}, false
+	}
+	return webStableVersion{major: major, minor: minor, patch: patch}, true
+}
+
+func (v webStableVersion) String() string {
+	return fmt.Sprintf("%d.%d.%d", v.major, v.minor, v.patch)
+}
+
+func compareStableWebVersionMinor(left, right webStableVersion) int {
+	if left.major != right.major {
+		return left.major - right.major
+	}
+	return left.minor - right.minor
+}
+
+func compareStableWebVersions(left, right webStableVersion) int {
+	if diff := compareStableWebVersionMinor(left, right); diff != 0 {
+		return diff
+	}
+	return left.patch - right.patch
+}
+
 func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string) WebComponentStatus {
 	enabled := false
 	if cfg != nil {
@@ -218,7 +361,7 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 
 	root := stringSetting(settings, "jellyfin_compat.web_install_dir", DefaultWebInstallRoot(cfg))
 	webDir := stringSetting(settings, "jellyfin_compat.web_dir", DefaultWebInstallPath(cfg))
-	pinned := stringSetting(settings, "jellyfin_compat.web_version", DefaultWebVersion(cfg))
+	pinned := stringSetting(settings, "jellyfin_compat.web_version", defaultWebVersionTarget(cfg, settings))
 	sourceURL := stringSetting(settings, "jellyfin_compat.web_source_url", DefaultWebSourceURL)
 
 	status := webComponentStatus(root, webDir, pinned, sourceURL)

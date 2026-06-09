@@ -136,6 +136,28 @@ func TestWebComponentStatusUsesPersistedSettingsForDisplay(t *testing.T) {
 	}
 }
 
+func TestWebComponentStatusDefaultsPinnedVersionToEmulatedVersion(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.emulated_server_version": "10.12.0",
+		"jellyfin_compat.web_install_dir":         root,
+		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+
+	status := WebComponentStatusForConfig(cfg, map[string]string{
+		"jellyfin_compat.emulated_server_version": "10.12.0",
+		"jellyfin_compat.web_install_dir":         root,
+		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
+	})
+
+	if status.PinnedVersion != "10.12.0" {
+		t.Fatalf("PinnedVersion = %q, want emulated API version", status.PinnedVersion)
+	}
+}
+
 func TestWebComponentStatusDisablesWebUIWhenProxyDisabled(t *testing.T) {
 	root := t.TempDir()
 	cfg, err := config.LoadFromDB(map[string]string{
@@ -182,6 +204,79 @@ func TestWebComponentStatusReportsWebEnabledSetting(t *testing.T) {
 	}
 	if status.RestartRequired {
 		t.Fatal("RestartRequired = true, want false when only persisted web_enabled differs from running config")
+	}
+}
+
+func TestSelectCompatibleWebVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		api       string
+		available []string
+		want      string
+	}{
+		{
+			name:      "latest patch from same emulated minor",
+			api:       "10.12.0",
+			available: []string{"10.12.0", "10.12.2", "10.12.1", "10.11.9"},
+			want:      "10.12.2",
+		},
+		{
+			name:      "newest lower minor when emulated minor is unavailable",
+			api:       "10.12.0",
+			available: []string{"10.10.9", "10.11.6", "10.11.8", "10.13.0"},
+			want:      "10.11.8",
+		},
+		{
+			name:      "ignores prerelease tags",
+			api:       "10.11.0",
+			available: []string{"10.11.7-alpha", "10.11.6", "10.10.10"},
+			want:      "10.11.6",
+		},
+		{
+			name:      "uses oldest available when all versions are newer",
+			api:       "9.9.0",
+			available: []string{"10.10.1", "10.9.9", "10.11.0"},
+			want:      "10.9.9",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SelectCompatibleWebVersion(tt.api, tt.available)
+			if err != nil {
+				t.Fatalf("SelectCompatibleWebVersion: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("SelectCompatibleWebVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectCompatibleWebVersionRejectsInvalidInputs(t *testing.T) {
+	if _, err := SelectCompatibleWebVersion("not-a-version", []string{"10.11.6"}); err == nil {
+		t.Fatal("SelectCompatibleWebVersion returned nil error for invalid API version")
+	}
+	if _, err := SelectCompatibleWebVersion("10.12.0", []string{"main", "10.11.6-alpha"}); err == nil {
+		t.Fatal("SelectCompatibleWebVersion returned nil error with no stable Web versions")
+	}
+}
+
+func TestParseRemoteWebVersions(t *testing.T) {
+	versions := parseRemoteWebVersions(strings.Join([]string{
+		"abc123\trefs/tags/v10.11.6",
+		"def456\trefs/tags/10.12.0",
+		"ghi789\trefs/heads/main",
+		"jkl012\trefs/tags/not-a-version",
+	}, "\n"))
+	want := []string{"10.11.6", "10.12.0"}
+	if len(versions) != len(want) {
+		t.Fatalf("versions = %#v, want %#v", versions, want)
+	}
+	for i := range want {
+		if versions[i] != want[i] {
+			t.Fatalf("versions[%d] = %q, want %q", i, versions[i], want[i])
+		}
 	}
 }
 

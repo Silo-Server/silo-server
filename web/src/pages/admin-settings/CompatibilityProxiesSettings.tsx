@@ -199,6 +199,10 @@ export default function CompatibilityProxiesSettings() {
   const jellyfinWebServing = jellyfinProxyRunning && status?.web_enabled !== false;
   const installedWebAssetsPresent = Boolean(status?.installed_version);
   const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(status);
+  const installJellyfinWeb = () => {
+    const version = form.getValue("jellyfin_compat.web_version").trim();
+    installWeb.mutate(version ? { version } : {});
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -352,9 +356,7 @@ export default function CompatibilityProxiesSettings() {
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() =>
-                    installWeb.mutate({ version: form.getValue("jellyfin_compat.web_version") })
-                  }
+                  onClick={installJellyfinWeb}
                   disabled={
                     hasDirtyWebConfig ||
                     installWeb.isPending ||
@@ -432,7 +434,7 @@ export default function CompatibilityProxiesSettings() {
             <div className="divide-border divide-y">
               <SettingField
                 label="Pinned Web Version (Optional)"
-                hint="Optional. Defaults to Silo's pinned Jellyfin Web version."
+                hint="Optional. Leave blank to auto-select the latest compatible patch for the emulated API version."
                 value={form.getValue("jellyfin_compat.web_version")}
                 onChange={(v) => form.setValue("jellyfin_compat.web_version", v)}
               />

@@ -166,6 +166,10 @@ export function ServerStorageStep() {
     useState<ConnectionCheckResponse | null>(null);
   const [privateS3ConnectionResult, setPrivateS3ConnectionResult] =
     useState<ConnectionCheckResponse | null>(null);
+  const installJellyfinWebAssets = () => {
+    const version = form.getValue("jellyfin_compat.web_version").trim();
+    installJellyfinWeb.mutate(version ? { version } : {});
+  };
 
   const redisQuery = useQuery({
     queryKey: ["setup-wizard", "setting", "redis.url"],
@@ -425,13 +429,7 @@ export function ServerStorageStep() {
                   jellyfinOperationRunning ||
                   jellyfinStatus?.installer_ready === false
                 }
-                onClick={() =>
-                  installJellyfinWeb.mutate({
-                    version:
-                      form.getValue("jellyfin_compat.web_version") ||
-                      jellyfinStatus?.pinned_version,
-                  })
-                }
+                onClick={installJellyfinWebAssets}
               >
                 <Download className="mr-2 h-4 w-4" />
                 {jellyfinStatus?.web_state === "update_available"

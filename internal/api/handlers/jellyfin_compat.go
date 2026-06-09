@@ -166,16 +166,28 @@ func (h *AdminHandler) installJellyfinCompatWeb(w http.ResponseWriter, r *http.R
 	if root == "" {
 		root = config.DefaultJellyfinWebInstallDir
 	}
+	sourceURL := strings.TrimSpace(req.SourceURL)
+	if sourceURL == "" {
+		sourceURL = strings.TrimSpace(settings["jellyfin_compat.web_source_url"])
+	}
 	version := strings.TrimSpace(req.Version)
 	if version == "" {
 		version = strings.TrimSpace(settings["jellyfin_compat.web_version"])
 	}
 	if version == "" {
-		version = config.DefaultJellyfinWebVersion
-	}
-	sourceURL := strings.TrimSpace(req.SourceURL)
-	if sourceURL == "" {
-		sourceURL = strings.TrimSpace(settings["jellyfin_compat.web_source_url"])
+		emulatedVersion := strings.TrimSpace(settings["jellyfin_compat.emulated_server_version"])
+		if emulatedVersion == "" && h.Config != nil {
+			emulatedVersion = h.Config.JellyfinCompat.EmulatedServerVersion
+		}
+		if emulatedVersion == "" {
+			emulatedVersion = config.DefaultJellyfinCompatEmulatedServerVersion
+		}
+		resolvedVersion, err := jellycompat.ResolveCompatibleWebVersion(r.Context(), sourceURL, emulatedVersion)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "web_version_unavailable", err.Error())
+			return
+		}
+		version = resolvedVersion
 	}
 	status, err := jellycompat.StartWebComponentInstall(jellycompat.WebComponentInstallOptions{
 		InstallRoot: root,

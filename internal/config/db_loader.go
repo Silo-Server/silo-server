@@ -356,7 +356,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.JellyfinCompat.Enabled = compatEnabled
 	cfg.JellyfinCompat.Listen = stringOr(m, "jellyfin_compat.listen", ":8096")
 	cfg.JellyfinCompat.PublicURL = stringOr(m, "jellyfin_compat.public_url", "http://127.0.0.1:8096")
-	cfg.JellyfinCompat.EmulatedServerVersion = stringOr(m, "jellyfin_compat.emulated_server_version", "10.12.0")
+	cfg.JellyfinCompat.EmulatedServerVersion = stringOr(m, "jellyfin_compat.emulated_server_version", DefaultJellyfinCompatEmulatedServerVersion)
 	cfg.JellyfinCompat.ServerID = stringOr(m, "jellyfin_compat.server_id", defaultJellyfinCompatServerIDFromDB)
 	cfg.JellyfinCompat.ServerName = stringOr(m, "jellyfin_compat.server_name", "Silo")
 	webEnabled, err := boolOr(m, "jellyfin_compat.web_enabled", true)

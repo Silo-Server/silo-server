@@ -362,6 +362,7 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 	[]byte("https://silo.local/jellycompat"),
 ).String()
 
+const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
 const DefaultJellyfinWebVersion = "10.11.6"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
@@ -447,7 +448,7 @@ func setDefaults() *configRaw {
 			Enabled:               false,
 			Listen:                ":8097",
 			PublicURL:             "http://127.0.0.1:8097",
-			EmulatedServerVersion: "10.12.0",
+			EmulatedServerVersion: DefaultJellyfinCompatEmulatedServerVersion,
 			ServerID:              defaultJellyfinCompatServerID,
 			ServerName:            "Silo",
 			WebEnabled:            true,
