@@ -223,6 +223,41 @@ func TestParseEbookEPUBMetadataReadsISBNFromMetaTags(t *testing.T) {
 	}
 }
 
+func TestParseEbookEPUBMetadataHandlesLatin1OPF(t *testing.T) {
+	path := writeTestEPUBWithOPFBytes(t, []byte("<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>\n"+
+		"<package xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><metadata>"+
+		"<dc:title>Caf\xe9 Society</dc:title>"+
+		"<dc:creator>Fran\xe7ois Author</dc:creator>"+
+		"<dc:publisher>Cr\xe8me Press</dc:publisher>"+
+		"</metadata></package>"))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Café Society" || strings.Join(got.Authors, ", ") != "François Author" || got.Publisher != "Crème Press" {
+		t.Fatalf("parsed latin1 metadata = title %q authors %v publisher %q", got.Title, got.Authors, got.Publisher)
+	}
+}
+
+func TestParseEbookEPUBMetadataAllowsXMLVersion11(t *testing.T) {
+	path := writeTestEPUBWithOPFBytes(t, []byte(`<?xml version="1.1" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>
+  <dc:title>Versioned Ebook</dc:title>
+  <dc:creator>Ada Writer</dc:creator>
+</metadata></package>`))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Versioned Ebook" || strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("parsed XML 1.1 metadata = title %q authors %v", got.Title, got.Authors)
+	}
+}
+
 func TestParseEbookEPUBExtractsManifestCover(t *testing.T) {
 	path := writeTestEPUBWithCover(t, "Images/cover.jpg", "image/jpeg", []byte("epub-cover-bytes"))
 
@@ -429,6 +464,26 @@ trailer
 	}
 	if strings.Join(got.Genres, ", ") != "science fiction, adventure" {
 		t.Fatalf("Genres = %v, want science fiction and adventure", got.Genres)
+	}
+}
+
+func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+		"1 0 obj\n"+
+		"<< /Title (\xfe\xff\x00C\x00a\x00f\x00e)\n"+
+		"   /Author (\xfe\xff\x00T\x00h\x00o\x00m\x00a\x00s\x00 \x00D\x00 \x00S\x00e\x00e\x00l\x00e\x00y)\n"+
+		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Cafe" || strings.Join(got.Authors, ", ") != "Thomas D Seeley" {
+		t.Fatalf("PDF metadata = title %q authors %v, want decoded UTF-16BE", got.Title, got.Authors)
 	}
 }
 
@@ -1085,6 +1140,41 @@ func writeTestEPUBWithDescriptionAndMeta(t *testing.T, identifiers []string, des
 `+extraMetaXML+`
   </metadata>
 </package>`)
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
+	return path
+}
+
+func writeTestEPUBWithOPFBytes(t *testing.T, opf []byte) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "book.epub")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	add := func(name string, body []byte) {
+		t.Helper()
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write(body); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	add("META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	add("OPS/content.opf", opf)
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip: %v", err)
 	}

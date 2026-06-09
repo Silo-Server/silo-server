@@ -16,6 +16,9 @@ import (
 	"time"
 
 	xhtml "golang.org/x/net/html"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	textunicode "golang.org/x/text/encoding/unicode"
 )
 
 const maxEPUBMetadataEntrySize = 8 * 1024 * 1024
@@ -525,28 +528,70 @@ func parsePDFInfoFields(data []byte) map[string]string {
 	return fields
 }
 
+func decodeEbookXML(data []byte, v any) error {
+	data = normalizeEbookXMLVersion(data)
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.CharsetReader = ebookXMLCharsetReader
+	return decoder.Decode(v)
+}
+
+func normalizeEbookXMLVersion(data []byte) []byte {
+	for _, needle := range []string{`version="1.1"`, `version='1.1'`} {
+		idx := bytes.Index(data, []byte(needle))
+		if idx < 0 || idx > 128 {
+			continue
+		}
+		out := append([]byte(nil), data...)
+		copy(out[idx:], strings.Replace(needle, "1.1", "1.0", 1))
+		return out
+	}
+	return data
+}
+
+func ebookXMLCharsetReader(charset string, input io.Reader) (io.Reader, error) {
+	name := strings.ToLower(strings.TrimSpace(charset))
+	var enc encoding.Encoding
+	switch name {
+	case "", "utf-8", "utf8":
+		return input, nil
+	case "iso-8859-1", "latin1", "latin-1":
+		enc = charmap.ISO8859_1
+	case "windows-1252", "cp1252":
+		enc = charmap.Windows1252
+	case "utf-16", "utf16":
+		enc = textunicode.UTF16(textunicode.BigEndian, textunicode.ExpectBOM)
+	case "utf-16be", "utf16be":
+		enc = textunicode.UTF16(textunicode.BigEndian, textunicode.IgnoreBOM)
+	case "utf-16le", "utf16le":
+		enc = textunicode.UTF16(textunicode.LittleEndian, textunicode.IgnoreBOM)
+	default:
+		return nil, fmt.Errorf("unsupported ebook XML encoding %q", charset)
+	}
+	return enc.NewDecoder().Reader(input), nil
+}
+
 func readPDFLiteralString(data []byte) (string, bool) {
 	if len(data) == 0 || data[0] != '(' {
 		return "", false
 	}
-	var out strings.Builder
+	var out []byte
 	depth := 1
 	escaped := false
 	for _, b := range data[1:] {
 		if escaped {
 			switch b {
 			case 'n':
-				out.WriteByte('\n')
+				out = append(out, '\n')
 			case 'r':
-				out.WriteByte('\r')
+				out = append(out, '\r')
 			case 't':
-				out.WriteByte('\t')
+				out = append(out, '\t')
 			case 'b':
-				out.WriteByte('\b')
+				out = append(out, '\b')
 			case 'f':
-				out.WriteByte('\f')
+				out = append(out, '\f')
 			default:
-				out.WriteByte(b)
+				out = append(out, b)
 			}
 			escaped = false
 			continue
@@ -556,18 +601,38 @@ func readPDFLiteralString(data []byte) (string, bool) {
 			escaped = true
 		case '(':
 			depth++
-			out.WriteByte(b)
+			out = append(out, b)
 		case ')':
 			depth--
 			if depth == 0 {
-				return strings.TrimSpace(out.String()), true
+				return strings.TrimSpace(decodePDFLiteralBytes(out)), true
 			}
-			out.WriteByte(b)
+			out = append(out, b)
 		default:
-			out.WriteByte(b)
+			out = append(out, b)
 		}
 	}
 	return "", false
+}
+
+func decodePDFLiteralBytes(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	switch {
+	case bytes.HasPrefix(data, []byte{0xfe, 0xff}):
+		if decoded, err := textunicode.UTF16(textunicode.BigEndian, textunicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
+			return string(decoded)
+		}
+	case bytes.HasPrefix(data, []byte{0xff, 0xfe}):
+		if decoded, err := textunicode.UTF16(textunicode.LittleEndian, textunicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
+			return string(decoded)
+		}
+	}
+	if decoded, err := charmap.Windows1252.NewDecoder().Bytes(data); err == nil {
+		return string(decoded)
+	}
+	return strings.ToValidUTF8(string(data), "")
 }
 
 func splitEbookAuthors(value string) []string {
@@ -646,7 +711,7 @@ func epubOPFPath(container []byte) (string, error) {
 			FullPath string `xml:"full-path,attr"`
 		} `xml:"rootfiles>rootfile"`
 	}
-	if err := xml.Unmarshal(container, &parsed); err != nil {
+	if err := decodeEbookXML(container, &parsed); err != nil {
 		return "", err
 	}
 	for _, rootfile := range parsed.Rootfiles {
@@ -676,7 +741,7 @@ func parseEPUBOPFMetadata(opf []byte, book *parsedEbook) error {
 			} `xml:"meta"`
 		} `xml:"metadata"`
 	}
-	if err := xml.Unmarshal(opf, &parsed); err != nil {
+	if err := decodeEbookXML(opf, &parsed); err != nil {
 		return err
 	}
 	book.Title = firstNonEmpty(parsed.Metadata.Titles...)
@@ -732,7 +797,7 @@ func extractEPUBCover(reader *zip.Reader, opfPath string, opf []byte) (*parsedEb
 			} `xml:"item"`
 		} `xml:"manifest"`
 	}
-	if err := xml.Unmarshal(opf, &parsed); err != nil {
+	if err := decodeEbookXML(opf, &parsed); err != nil {
 		return nil, err
 	}
 
