@@ -159,6 +159,11 @@ type WebComponentInstallOptions struct {
 	OnProgress  func(WebComponentOperationStatus)
 }
 
+type WebComponentRemoveOptions struct {
+	InstallRoot string
+	OnProgress  func(WebComponentOperationStatus)
+}
+
 type WebComponentInstallCompleteFunc func(context.Context, WebComponentStatus) error
 
 func DefaultWebInstallRoot(cfg *config.Config) string {
@@ -295,8 +300,8 @@ func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebCom
 	return status, nil
 }
 
-func StartWebComponentRemove(root string) (WebComponentStatus, error) {
-	root, err := normalizeWebInstallRoot(root)
+func StartWebComponentRemove(opts WebComponentRemoveOptions) (WebComponentStatus, error) {
+	root, err := normalizeWebInstallRoot(opts.InstallRoot)
 	status := webComponentStatus(root, ManagedWebInstallPath(root), "", "")
 	if err != nil {
 		status.LastError = err.Error()
@@ -312,10 +317,15 @@ func StartWebComponentRemove(root string) (WebComponentStatus, error) {
 	}
 	status.Operation = op
 	status.WebState = WebComponentRemoving
+	notifyWebOperationProgress(opts.OnProgress, op)
 
 	go func() {
+		notifyWebOperationProgress(
+			opts.OnProgress,
+			updateWebOperationProgress(root, op.ID, WebComponentOperationRemoving, 50, "Removing managed Jellyfin Web assets"),
+		)
 		err := removeWebComponentLocked(root)
-		finishWebOperation(root, op.ID, err)
+		notifyWebOperationProgress(opts.OnProgress, finishWebOperation(root, op.ID, err))
 	}()
 
 	return status, nil

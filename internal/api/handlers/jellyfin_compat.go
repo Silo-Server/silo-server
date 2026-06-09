@@ -139,7 +139,10 @@ func (h *AdminHandler) HandleRemoveJellyfinCompatWeb(w http.ResponseWriter, r *h
 	if root == "" {
 		root = config.DefaultJellyfinWebInstallDir
 	}
-	_, err := jellycompat.StartWebComponentRemove(root)
+	_, err := jellycompat.StartWebComponentRemove(jellycompat.WebComponentRemoveOptions{
+		InstallRoot: root,
+		OnProgress:  h.publishJellyfinCompatWebOperationProgress,
+	})
 	if err != nil {
 		writeJellyfinCompatOperationError(w, err)
 		return

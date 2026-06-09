@@ -263,6 +263,68 @@ func TestRemoveWebComponentOnlyRemovesGeneratedAssets(t *testing.T) {
 	}
 }
 
+func TestStartWebComponentRemovePublishesProgress(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "10.11.6")
+	writeValidWebRelease(t, release, "10.11.6")
+	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
+		t.Fatalf("symlink current: %v", err)
+	}
+
+	progress := make(chan WebComponentOperationStatus, 4)
+	status, err := StartWebComponentRemove(WebComponentRemoveOptions{
+		InstallRoot: root,
+		OnProgress: func(op WebComponentOperationStatus) {
+			progress <- op
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartWebComponentRemove: %v", err)
+	}
+	if status.WebState != WebComponentRemoving {
+		t.Fatalf("WebState = %q, want removing", status.WebState)
+	}
+	if status.Operation == nil || status.Operation.Kind != WebComponentOperationRemove {
+		t.Fatalf("Operation = %+v, want remove operation", status.Operation)
+	}
+
+	seenRunning := false
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case op := <-progress:
+			if op.Kind != WebComponentOperationRemove {
+				t.Fatalf("operation kind = %q, want remove", op.Kind)
+			}
+			if op.State == WebComponentOperationRunning {
+				seenRunning = true
+				continue
+			}
+			if op.State != WebComponentOperationSucceeded {
+				t.Fatalf("terminal state = %q, want succeeded: %s", op.State, op.Error)
+			}
+			if !seenRunning {
+				t.Fatal("did not receive a running progress update before terminal completion")
+			}
+			if op.ProgressPercent != 100 {
+				t.Fatalf("terminal progress = %d, want 100", op.ProgressPercent)
+			}
+			if op.Message != "Jellyfin Web assets removed" {
+				t.Fatalf("terminal message = %q, want Jellyfin Web assets removed", op.Message)
+			}
+			if _, err := os.Stat(release); !os.IsNotExist(err) {
+				t.Fatalf("release dir still exists or stat failed unexpectedly: %v", err)
+			}
+			if _, err := os.Lstat(filepath.Join(root, "current")); !os.IsNotExist(err) {
+				t.Fatalf("current link still exists or stat failed unexpectedly: %v", err)
+			}
+			return
+		case <-timeout:
+			t.Fatal("timed out waiting for remove operation completion progress")
+		}
+	}
+}
+
 func TestWebComponentStatusRecoversLegacyStaleOperationLock(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, webInstallLock), []byte("installing"), 0o644); err != nil {
