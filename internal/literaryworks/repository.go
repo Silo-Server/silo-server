@@ -2,6 +2,7 @@ package literaryworks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,6 +56,11 @@ type WorkFile struct {
 	DurationSeconds float64
 }
 
+type MatchItemWithWork struct {
+	MatchItem
+	WorkID string
+}
+
 func (r *Repository) CreateWork(ctx context.Context, p CreateWorkParams) (*Work, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
@@ -102,6 +108,127 @@ func (r *Repository) GetWork(ctx context.Context, workID string) (*Work, error) 
 		return nil, ErrWorkNotFound
 	}
 	return work, err
+}
+
+func (r *Repository) GetFirstWorkIDForContentIDs(ctx context.Context, contentIDs []string) (string, error) {
+	if r == nil || r.pool == nil {
+		return "", fmt.Errorf("literary works repository requires a database pool")
+	}
+	if len(contentIDs) == 0 {
+		return "", nil
+	}
+	var workID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT work_id
+		FROM literary_work_items
+		WHERE content_id = ANY($1)
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`, contentIDs).Scan(&workID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return workID, err
+}
+
+func (r *Repository) GetMatchItem(ctx context.Context, contentID string) (MatchItemWithWork, error) {
+	rows, err := r.queryMatchItems(ctx, `
+		WHERE mi.content_id = $1
+		  AND mi.type IN ('ebook', 'audiobook')
+	`, contentID)
+	if err != nil {
+		return MatchItemWithWork{}, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		item, err := scanMatchItem(rows)
+		if err != nil {
+			return MatchItemWithWork{}, err
+		}
+		return item, rows.Err()
+	}
+	if err := rows.Err(); err != nil {
+		return MatchItemWithWork{}, err
+	}
+	return MatchItemWithWork{}, ErrWorkNotFound
+}
+
+func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, limit int) ([]MatchItemWithWork, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.queryMatchItems(ctx, `
+		WHERE mi.content_id <> $1
+		  AND mi.type IN ('ebook', 'audiobook')
+		  AND mi.type <> $2
+		  AND NOT EXISTS (
+			SELECT 1 FROM literary_work_match_decisions d
+			WHERE d.decision = 'ignored'
+			  AND (
+				(d.source_content_id = $1 AND d.target_content_id = mi.content_id)
+				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
+			  )
+		  )
+		ORDER BY mi.title ASC, mi.content_id ASC
+		LIMIT $3
+	`, source.ContentID, source.Type, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MatchItemWithWork
+	for rows.Next() {
+		item, err := scanMatchItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) queryMatchItems(ctx context.Context, suffix string, args ...any) (pgx.Rows, error) {
+	if r == nil || r.pool == nil {
+		return nil, fmt.Errorf("literary works repository requires a database pool")
+	}
+	return r.pool.Query(ctx, `
+		SELECT mi.content_id,
+		       mi.type,
+		       mi.title,
+		       COALESCE(mi.year, 0),
+		       COALESCE(mi.studios[1], '') AS publisher,
+		       COALESCE(people.authors, '{}'::text[]) AS authors,
+		       COALESCE(people.narrators, '{}'::text[]) AS narrators,
+		       COALESCE(book_series.series_name, '') AS series_name,
+		       book_series.series_index,
+		       COALESCE(provider_ids.external_ids, '{}'::jsonb) AS external_ids,
+		       COALESCE(lwi.work_id, '') AS work_id
+		FROM media_items mi
+		LEFT JOIN literary_work_items lwi ON lwi.content_id = mi.content_id
+		LEFT JOIN LATERAL (
+			SELECT
+				array_agg(p.name ORDER BY ip.sort_order, p.name) FILTER (WHERE ip.kind = 7) AS authors,
+				array_agg(p.name ORDER BY ip.sort_order, p.name) FILTER (WHERE ip.kind = 8) AS narrators
+			FROM item_people ip
+			JOIN people p ON p.id = ip.person_id
+			WHERE ip.content_id = mi.content_id
+		) people ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT s.series_name, s.series_index
+			FROM (
+				SELECT content_id, series_name, series_index FROM ebook_series WHERE mi.type = 'ebook'
+				UNION ALL
+				SELECT content_id, series_name, series_index FROM audiobook_series WHERE mi.type = 'audiobook'
+			) s
+			WHERE s.content_id = mi.content_id
+			LIMIT 1
+		) book_series ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT jsonb_object_agg(provider, provider_id) AS external_ids
+			FROM media_item_provider_ids mip
+			WHERE mip.content_id = mi.content_id
+		) provider_ids ON TRUE
+		`+suffix, args...)
 }
 
 func (r *Repository) GetWorkWithItems(ctx context.Context, workID string, filter catalog.AccessFilter) (*Work, []WorkItemDetail, error) {
@@ -388,4 +515,31 @@ func scanWork(row pgx.Row) (*Work, error) {
 		return nil, err
 	}
 	return &w, nil
+}
+
+func scanMatchItem(row pgx.Row) (MatchItemWithWork, error) {
+	var item MatchItemWithWork
+	var providerIDs []byte
+	if err := row.Scan(
+		&item.ContentID,
+		&item.Type,
+		&item.Title,
+		&item.Year,
+		&item.Publisher,
+		&item.Authors,
+		&item.Narrators,
+		&item.SeriesName,
+		&item.SeriesIndex,
+		&providerIDs,
+		&item.WorkID,
+	); err != nil {
+		return MatchItemWithWork{}, err
+	}
+	item.ExternalIDs = map[string]string{}
+	if len(providerIDs) > 0 {
+		if err := json.Unmarshal(providerIDs, &item.ExternalIDs); err != nil {
+			return MatchItemWithWork{}, err
+		}
+	}
+	return item, nil
 }

@@ -2,8 +2,11 @@ package literaryworks
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"mime"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -49,6 +52,110 @@ func (s *Service) GetWork(ctx context.Context, workID string, filter catalog.Acc
 	return resp, nil
 }
 
+func (s *Service) ListCandidates(ctx context.Context, contentID string, limit int) ([]Candidate, error) {
+	if s == nil || s.repo == nil {
+		return nil, ErrWorkNotFound
+	}
+	source, err := s.repo.GetMatchItem(ctx, contentID)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := s.repo.ListMatchCandidates(ctx, source.MatchItem, limit*5)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]Candidate, 0, len(targets))
+	for _, target := range targets {
+		candidate := ScoreCandidate(source.MatchItem, target.MatchItem)
+		candidate.TargetWorkID = target.WorkID
+		if candidate.Score >= 0.75 {
+			candidates = append(candidates, candidate)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Score == candidates[j].Score {
+			return candidates[i].TargetContentID < candidates[j].TargetContentID
+		}
+		return candidates[i].Score > candidates[j].Score
+	})
+	if limit > 0 && len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates, nil
+}
+
+func (s *Service) LinkItems(ctx context.Context, workID string, contentIDs []string) (string, error) {
+	if s == nil || s.repo == nil {
+		return "", ErrWorkNotFound
+	}
+	contentIDs = compactContentIDs(contentIDs)
+	if len(contentIDs) == 0 {
+		return "", ErrWorkNotFound
+	}
+	items := make([]MatchItemWithWork, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		item, err := s.repo.GetMatchItem(ctx, contentID)
+		if err != nil {
+			return "", err
+		}
+		items = append(items, item)
+	}
+	if strings.TrimSpace(workID) == "" {
+		existing, err := s.repo.GetFirstWorkIDForContentIDs(ctx, contentIDs)
+		if err != nil {
+			return "", err
+		}
+		workID = existing
+	}
+	if strings.TrimSpace(workID) == "" {
+		workID = generatedWorkID(items[0].MatchItem)
+		if _, err := s.repo.CreateWork(ctx, CreateWorkParams{
+			WorkID:           workID,
+			CanonicalTitle:   items[0].Title,
+			SortTitle:        items[0].Title,
+			NormalizedTitle:  normalizeKey(items[0].Title),
+			PrimaryAuthorKey: personKey(items[0].Authors),
+			Publisher:        items[0].Publisher,
+		}); err != nil {
+			return "", err
+		}
+	}
+	linkItems := make([]LinkItemParams, 0, len(items))
+	for _, item := range items {
+		linkItems = append(linkItems, LinkItemParams{
+			ContentID:  item.ContentID,
+			FormatType: item.Type,
+			LinkSource: LinkManual,
+			Confidence: 1,
+		})
+	}
+	if err := s.repo.LinkItems(ctx, workID, linkItems); err != nil {
+		return "", err
+	}
+	return workID, nil
+}
+
+func (s *Service) UnlinkItem(ctx context.Context, workID, contentID string) error {
+	if s == nil || s.repo == nil {
+		return ErrWorkNotFound
+	}
+	return s.repo.UnlinkItem(ctx, workID, contentID)
+}
+
+func (s *Service) ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {
+	if s == nil || s.repo == nil {
+		return ErrWorkNotFound
+	}
+	return s.repo.RecordDecision(ctx, sourceContentID, targetContentID, DecisionConfirmed, userID)
+}
+
+func (s *Service) IgnoreMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {
+	if s == nil || s.repo == nil {
+		return ErrWorkNotFound
+	}
+	return s.repo.RecordDecision(ctx, sourceContentID, targetContentID, DecisionIgnored, userID)
+}
+
 func filesToResponse(files []WorkFile) []FileResponse {
 	out := make([]FileResponse, 0, len(files))
 	for _, f := range files {
@@ -63,4 +170,28 @@ func filesToResponse(files []WorkFile) []FileResponse {
 		})
 	}
 	return out
+}
+
+func compactContentIDs(contentIDs []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		contentID = strings.TrimSpace(contentID)
+		if contentID == "" {
+			continue
+		}
+		if _, ok := seen[contentID]; ok {
+			continue
+		}
+		seen[contentID] = struct{}{}
+		out = append(out, contentID)
+	}
+	return out
+}
+
+func generatedWorkID(item MatchItem) string {
+	title := normalizeKey(item.Title)
+	author := personKey(item.Authors)
+	sum := sha256.Sum256([]byte(title + "|" + author))
+	return "work-" + hex.EncodeToString(sum[:])[:16]
 }

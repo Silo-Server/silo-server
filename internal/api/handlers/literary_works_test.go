@@ -22,6 +22,29 @@ func (f fakeLiteraryWorkService) GetWork(ctx context.Context, workID string, fil
 	return f.work, f.err
 }
 
+func (f fakeLiteraryWorkService) ListCandidates(ctx context.Context, contentID string, limit int) ([]literaryworks.Candidate, error) {
+	return []literaryworks.Candidate{{SourceContentID: contentID, TargetContentID: "audio-1", Score: 0.9}}, f.err
+}
+
+func (f fakeLiteraryWorkService) LinkItems(ctx context.Context, workID string, contentIDs []string) (string, error) {
+	if workID != "" {
+		return workID, f.err
+	}
+	return "work-1", f.err
+}
+
+func (f fakeLiteraryWorkService) UnlinkItem(ctx context.Context, workID, contentID string) error {
+	return f.err
+}
+
+func (f fakeLiteraryWorkService) ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {
+	return f.err
+}
+
+func (f fakeLiteraryWorkService) IgnoreMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {
+	return f.err
+}
+
 func TestLiteraryWorkHandlerGetWork(t *testing.T) {
 	handler := &LiteraryWorkHandler{Service: fakeLiteraryWorkService{
 		work: &literaryworks.DetailResponse{

@@ -2229,6 +2229,13 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
 							r.Get("/server/status", adminHandler.HandleGetServerStatus)
+							if literaryWorkHandler != nil {
+								r.Get("/literary-works/items/{content_id}/candidates", literaryWorkHandler.HandleListCandidates)
+								r.Post("/literary-works/link", literaryWorkHandler.HandleLinkItems)
+								r.Delete("/literary-works/{work_id}/items/{content_id}", literaryWorkHandler.HandleUnlinkItem)
+								r.Post("/literary-works/matches/confirm", literaryWorkHandler.HandleConfirmMatch)
+								r.Post("/literary-works/matches/ignore", literaryWorkHandler.HandleIgnoreMatch)
+							}
 							r.Post("/server/restart", serverControlHandler.HandleRestart)
 							r.Get("/jellyfin-compat/status", adminHandler.HandleGetJellyfinCompatStatus)
 							r.Patch("/jellyfin-compat/settings", adminHandler.HandleUpdateJellyfinCompatSettings)
