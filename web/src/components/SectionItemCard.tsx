@@ -122,6 +122,12 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
               {episodeLabels.episodeCode}
             </div>
           </>
+        ) : item.item_source === "next_in_series" && item.series_title ? (
+          <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+            {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
         ) : (
           <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
             {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}

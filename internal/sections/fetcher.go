@@ -74,6 +74,7 @@ type Fetcher struct {
 	RecommendationRepo   *recommendations.Repo // retained for non-reader call sites
 	RecommendationReader recommendationReader
 	NextUpRepo           *catalog.NextUpRepository
+	AudiobookNextRepo    *catalog.AudiobookNextRepository
 
 	// TrendingSnapshots reads the persisted external-trending snapshots that
 	// back the trending_discover section. Nil renders that section empty.
@@ -253,6 +254,10 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 	}
 	if resolved.SectionType == SectionNextUp {
 		result, err = f.fetchNextUpSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+		return result, err
+	}
+	if resolved.SectionType == SectionNextInSeries {
+		result, err = f.fetchNextInSeriesSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		return result, err
 	}
 	if resolved.SectionType == SectionEditorialSpotlight {
@@ -636,6 +641,96 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 	}
 
 	return orderedItems, meta, nil
+}
+
+// fetchNextInSeriesSection surfaces the next unstarted audiobook per series
+// the profile has finished a book of. Candidates come from AudiobookNextRepo
+// with library scoping pushed into the SQL — otherwise finished series whose
+// next book lives in another library would consume the candidate limit and
+// starve a library-scoped section. Content-rating access filtering happens
+// while resolving candidate IDs to items, so the candidate query still
+// over-fetches to compensate for that post-resolution trim.
+func (f *Fetcher) fetchNextInSeriesSection(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
+	emptyResult := SectionWithItems{
+		ResolvedSection: resolved,
+		Items:           []*models.MediaItem{},
+		TotalCount:      0,
+		ItemMeta:        map[string]SectionItemMeta{},
+	}
+
+	if f.AudiobookNextRepo == nil || userID <= 0 || profileID == "" {
+		return emptyResult, nil
+	}
+
+	limit := resolved.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+	candidateLimit := limit * 3
+	if candidateLimit > 100 {
+		candidateLimit = 100
+	}
+
+	results, err := f.AudiobookNextRepo.ListNextInSeries(ctx, catalog.NextInSeriesQuery{
+		UserID:             userID,
+		ProfileID:          profileID,
+		Limit:              candidateLimit,
+		LibraryID:          libraryID,
+		LibraryIDs:         effectiveFetchLibraryIDs(libraryIDs, filter),
+		DisabledLibraryIDs: filter.DisabledLibraryIDs,
+	})
+	if err != nil {
+		return SectionWithItems{}, err
+	}
+	if len(results) == 0 {
+		return emptyResult, nil
+	}
+
+	contentIDs := make([]string, len(results))
+	for i, res := range results {
+		contentIDs[i] = res.ContentID
+	}
+
+	items, err := f.fetchItemsByContentIDs(ctx, contentIDs, libraryID, libraryIDs, filter)
+	if err != nil {
+		return SectionWithItems{}, fmt.Errorf("fetching next-in-series items: %w", err)
+	}
+
+	itemByID := make(map[string]*models.MediaItem, len(items))
+	for _, item := range items {
+		itemByID[item.ContentID] = item
+	}
+
+	meta := make(map[string]SectionItemMeta, len(results))
+	ordered := make([]*models.MediaItem, 0, limit)
+	for _, res := range results {
+		if len(ordered) >= limit {
+			break
+		}
+		item, ok := itemByID[res.ContentID]
+		if !ok {
+			continue
+		}
+		m := SectionItemMeta{
+			SeriesTitle:   res.SeriesName,
+			ItemSource:    "next_in_series",
+			SortTimestamp: res.LastFinishedAt,
+		}
+		if res.SeriesIndex != nil {
+			if n := int(*res.SeriesIndex); float64(n) == *res.SeriesIndex {
+				m.Badges = append(m.Badges, fmt.Sprintf("Book %d", n))
+			}
+		}
+		meta[res.ContentID] = m
+		ordered = append(ordered, item)
+	}
+
+	return SectionWithItems{
+		ResolvedSection: resolved,
+		Items:           ordered,
+		TotalCount:      len(ordered),
+		ItemMeta:        meta,
+	}, nil
 }
 
 func collapseContinueWatchingSeriesCandidates(items []*models.MediaItem, meta map[string]SectionItemMeta) []*models.MediaItem {

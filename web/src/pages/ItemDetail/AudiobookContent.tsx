@@ -10,7 +10,9 @@ import { NarratorPicker } from "@/pages/audiobooks/components/NarratorPicker";
 import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
-import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
+import type { AudiobookFile } from "@/lib/audiobooks/types";
+import { buildChapterList, findChapterAt, totalAudiobookDuration } from "@/lib/audiobooks/chapters";
+import { audiobookFilesFromVersions } from "@/lib/audiobooks/files";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 function formatSeconds(totalSeconds: number): string {
@@ -25,50 +27,6 @@ function formatSeconds(totalSeconds: number): string {
     return `${m}m ${String(s).padStart(2, "0")}s`;
   }
   return `${s}s`;
-}
-
-function totalDuration(files: AudiobookFile[]): number {
-  return files.reduce((acc, file) => acc + (file.duration_seconds ?? 0), 0);
-}
-
-function findChapterAt(
-  chapters: ReturnType<typeof buildChapterList>,
-  seconds: number,
-): { label: string; index: number } | null {
-  for (let i = chapters.length - 1; i >= 0; i--) {
-    const chapter = chapters[i];
-    if (chapter && seconds >= chapter.absoluteStart) {
-      return { label: chapter.label, index: i + 1 };
-    }
-  }
-  return chapters[0] ? { label: chapters[0].label, index: 1 } : null;
-}
-
-function buildChapterList(files: AudiobookFile[]): Array<{
-  chapter: AudiobookChapter;
-  absoluteStart: number;
-  fileId: number;
-  label: string;
-}> {
-  const result: Array<{
-    chapter: AudiobookChapter;
-    absoluteStart: number;
-    fileId: number;
-    label: string;
-  }> = [];
-  let offset = 0;
-  for (const file of files) {
-    for (const chapter of file.chapters ?? []) {
-      result.push({
-        chapter,
-        absoluteStart: offset + chapter.start_seconds,
-        fileId: file.id,
-        label: chapter.title || `Chapter ${chapter.index + 1}`,
-      });
-    }
-    offset += file.duration_seconds ?? 0;
-  }
-  return result;
 }
 
 function leafUserData(userData: ItemDetail["user_data"]): LeafItemUserData | undefined {
@@ -116,13 +74,7 @@ export default function AudiobookContent({
   const audiobookPlayback = useAudiobookPlaybackController();
 
   const files = useMemo<AudiobookFile[]>(
-    () =>
-      (item.versions ?? []).map((version) => ({
-        id: version.file_id,
-        path: version.file_path ?? version.file_name ?? "",
-        duration_seconds: version.duration ?? 0,
-        chapters: version.chapters ?? [],
-      })),
+    () => audiobookFilesFromVersions(item.versions),
     [item.versions],
   );
 
@@ -133,7 +85,9 @@ export default function AudiobookContent({
   const progress = leafUserData(item.user_data);
   const resumeSeconds = progress?.position_seconds ?? 0;
   const durationTotal =
-    item.audiobook?.total_duration_seconds || progress?.duration_seconds || totalDuration(files);
+    item.audiobook?.total_duration_seconds ||
+    progress?.duration_seconds ||
+    totalAudiobookDuration(files);
   const hasProgress = Boolean(
     progress &&
     resumeSeconds > 0 &&

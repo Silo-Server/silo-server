@@ -95,6 +95,7 @@ func init() {
 		},
 	})
 	Register(&libStaple{typ: "next_up", displayName: "On Deck", icon: "📺", descShort: "Next episodes ready to watch.", cacheTTL: time.Minute})
+	Register(&libStaple{typ: "next_in_series", displayName: "Next in Series", icon: "📚", descShort: "The next audiobook in series you've finished.", cacheTTL: time.Minute})
 	Register(&libStaple{typ: "watchlist", displayName: "Watchlist", icon: "🔖", descShort: "Items you've saved to watch.", cacheTTL: time.Minute})
 	Register(&libStaple{typ: "favorites", displayName: "Favorites", icon: "⭐", descShort: "Your favorites.", cacheTTL: time.Minute})
 	Register(&libStaple{typ: "random", displayName: "Surprise Me", icon: "🎲", descShort: "A random selection from your library.", cacheTTL: 5 * time.Minute})

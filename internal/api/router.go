@@ -923,6 +923,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
 		sectionFetcher.CollectionRepo = catalog.NewLibraryCollectionRepository(deps.DB)
 		sectionFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
+		sectionFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 		if deps.DB != nil {
 			sectionFetcher.RecommendationRepo = recommendations.NewRepo(deps.DB)
 			if ratingsRepo != nil {
@@ -1111,6 +1112,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
 			recsFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
+			recsFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 			recsHandler.Fetcher = recsFetcher
 			recsHandler.WatchTonightFetcher = recsFetcher
 		}
@@ -1419,6 +1421,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/catalog", catalogHandler.HandleGetCatalog)
 					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
 					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
+					r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
 					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
