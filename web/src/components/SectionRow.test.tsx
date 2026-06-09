@@ -57,6 +57,10 @@ vi.mock("@/hooks/useViewTransition", () => ({
   useViewTransitionNavigate: () => mockNavigate,
 }));
 
+vi.mock("@/playback/watchPlaybackContext", () => ({
+  useWatchPlaybackController: () => ({ startPlayback: () => {} }),
+}));
+
 describe("SectionRow", () => {
   beforeEach(() => {
     latestCarouselProps = undefined;
