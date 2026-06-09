@@ -1,13 +1,10 @@
 package sections
 
 import (
-	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestCollapseContinueWatchingSeriesCandidatesPrefersNewestInProgressEpisode(t *testing.T) {
@@ -87,26 +84,6 @@ func TestCollapseContinueWatchingSeriesCandidatesKeepsNextUpWhenNoInProgress(t *
 	}
 }
 
-func TestFilterSupersededEpisodeProgressEntriesDropsOlderPartialsAfterLaterCompletedEpisode(t *testing.T) {
-	t.Parallel()
-
-	entries := []userstore.WatchProgress{
-		{MediaItemID: "boys-s1e1"},
-		{MediaItemID: "boys-s5e3"},
-		{MediaItemID: "movie-1"},
-	}
-	superseded := map[string]struct{}{
-		"boys-s1e1": {},
-		"boys-s5e3": {},
-	}
-
-	filtered := filterSupersededEpisodeProgressEntries(entries, superseded)
-
-	if len(filtered) != 1 || filtered[0].MediaItemID != "movie-1" {
-		t.Fatalf("filtered entries = %+v, want only movie-1", filtered)
-	}
-}
-
 func TestMatchesContinueWatchingFilterIncludesAudiobooks(t *testing.T) {
 	t.Parallel()
 
@@ -171,62 +148,6 @@ func TestParseContinueTypeRejectsUnknownExplicitType(t *testing.T) {
 	}
 }
 
-func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
-	t.Parallel()
-
-	entries := make([]userstore.WatchProgress, supersededProgressPageSize+1)
-	for i := range entries {
-		entries[i] = userstore.WatchProgress{
-			MediaItemID: "done-" + time.Unix(int64(i), 0).Format("150405"),
-			UpdatedAt:   time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC).Format(time.RFC3339),
-		}
-	}
-	store := &stubProgressLister{entries: entries}
-
-	snapshots, err := completedProgressSnapshots(context.Background(), store, "p1")
-	if err != nil {
-		t.Fatalf("completedProgressSnapshots: %v", err)
-	}
-	if len(snapshots) != len(entries) {
-		t.Fatalf("completed snapshots count = %d, want %d", len(snapshots), len(entries))
-	}
-	if len(store.calls) != 2 {
-		t.Fatalf("ListProgress calls = %+v, want 2 paged calls", store.calls)
-	}
-	if store.calls[0] != (progressListCall{profileID: "p1", status: "completed", limit: supersededProgressPageSize, offset: 0}) {
-		t.Fatalf("first ListProgress call = %+v", store.calls[0])
-	}
-	if store.calls[1] != (progressListCall{profileID: "p1", status: "completed", limit: supersededProgressPageSize, offset: supersededProgressPageSize}) {
-		t.Fatalf("second ListProgress call = %+v", store.calls[1])
-	}
-}
-
-func TestBuildSupersededEpisodeProgressQueryUsesStoreSnapshotsWithFreshnessGate(t *testing.T) {
-	t.Parallel()
-
-	query := buildSupersededEpisodeProgressQuery()
-	expectedFragments := []string{
-		"unnest($1::text[], $2::timestamptz[])",
-		"unnest($3::text[], $4::timestamptz[])",
-		"FROM in_progress ip_progress",
-		"done_progress.updated_at > ip_progress.updated_at",
-	}
-	for _, fragment := range expectedFragments {
-		if !strings.Contains(query, fragment) {
-			t.Fatalf("expected superseded progress query to contain %q, got:\n%s", fragment, query)
-		}
-	}
-	unexpectedFragments := []string{
-		"user_watch_progress",
-		"user_history_hidden_items",
-	}
-	for _, fragment := range unexpectedFragments {
-		if strings.Contains(query, fragment) {
-			t.Fatalf("superseded progress query contains %q, got:\n%s", fragment, query)
-		}
-	}
-}
-
 func contentIDs(items []*models.MediaItem) []string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
@@ -237,33 +158,4 @@ func contentIDs(items []*models.MediaItem) []string {
 
 func intPtr(v int) *int {
 	return &v
-}
-
-type progressListCall struct {
-	profileID string
-	status    string
-	limit     int
-	offset    int
-}
-
-type stubProgressLister struct {
-	entries []userstore.WatchProgress
-	calls   []progressListCall
-}
-
-func (s *stubProgressLister) ListProgress(_ context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
-	s.calls = append(s.calls, progressListCall{
-		profileID: profileID,
-		status:    status,
-		limit:     limit,
-		offset:    offset,
-	})
-	if offset >= len(s.entries) {
-		return nil, nil
-	}
-	end := offset + limit
-	if end > len(s.entries) {
-		end = len(s.entries)
-	}
-	return s.entries[offset:end], nil
 }

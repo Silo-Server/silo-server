@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -16,6 +17,7 @@ type directUserDataService struct {
 	itemRepo                *catalog.ItemRepository
 	detailSvc               *catalog.DetailService
 	watchState              *watchstate.Service
+	resumeFilter            *catalog.ContinueWatchingProgressFilter
 	profileStaler           profileStaler
 	profileRefreshRequester profileRefreshRequester
 }
@@ -26,6 +28,7 @@ func newDirectUserDataService(
 	episodeRepo *catalog.EpisodeRepository,
 	providerIDRepo *catalog.ProviderIDRepository,
 	detailSvc *catalog.DetailService,
+	resumeFilter *catalog.ContinueWatchingProgressFilter,
 	staler profileStaler,
 	requester profileRefreshRequester,
 ) *directUserDataService {
@@ -36,6 +39,7 @@ func newDirectUserDataService(
 		watchState: watchstate.NewService(storeProvider).WithStableIdentityResolver(
 			watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo),
 		),
+		resumeFilter:            resumeFilter,
 		profileStaler:           staler,
 		profileRefreshRequester: requester,
 	}
@@ -156,6 +160,44 @@ func (s *directUserDataService) ListProgress(ctx context.Context, session *Sessi
 	return result, nil
 }
 
+// FilterResumeProgress applies the same hiding rules as the first-party
+// Continue Watching fetcher: dismissed entries and episodes superseded by a
+// later-completed episode in the same series.
+func (s *directUserDataService) FilterResumeProgress(ctx context.Context, session *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
+	if len(entries) == 0 {
+		return entries, nil
+	}
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+
+	progress := make([]userstore.WatchProgress, 0, len(entries))
+	for _, entry := range entries {
+		progress = append(progress, fromUpstreamProgress(entry))
+	}
+
+	// Dismissal lookup failures degrade to showing the entries, matching the
+	// first-party fetcher.
+	if dismissals, err := store.ListHomeDismissals(ctx, session.ProfileID, userstore.HomeSurfaceContinueWatching); err != nil {
+		slog.Error("listing continue watching dismissals", "profile_id", session.ProfileID, "error", err)
+	} else {
+		progress = catalog.NewHomeDismissalIndex(dismissals).FilterProgress(progress)
+	}
+
+	superseded, err := s.resumeFilter.SupersededEpisodeProgressIDs(ctx, store, session.ProfileID, progress)
+	if err != nil {
+		return nil, fmt.Errorf("filter superseded progress: %w", err)
+	}
+	progress = catalog.FilterSupersededProgress(progress, superseded)
+
+	result := make([]upstreamProgress, 0, len(progress))
+	for _, entry := range progress {
+		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
 func (s *directUserDataService) ListProgressByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]*upstreamProgress, error) {
 	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
 	if err != nil {
@@ -245,6 +287,16 @@ func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *
 
 func toUpstreamProgress(entry userstore.WatchProgress) upstreamProgress {
 	return upstreamProgress{
+		MediaItemID:     entry.MediaItemID,
+		PositionSeconds: entry.PositionSeconds,
+		DurationSeconds: entry.DurationSeconds,
+		Completed:       entry.Completed,
+		UpdatedAt:       entry.UpdatedAt,
+	}
+}
+
+func fromUpstreamProgress(entry upstreamProgress) userstore.WatchProgress {
+	return userstore.WatchProgress{
 		MediaItemID:     entry.MediaItemID,
 		PositionSeconds: entry.PositionSeconds,
 		DurationSeconds: entry.DurationSeconds,
