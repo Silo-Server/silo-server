@@ -2156,8 +2156,11 @@ func NewRouter(deps Dependencies) chi.Router {
 								})
 							}
 
-							// Rate limit admin routes
-							if deps.RateLimitMW != nil && settingsRepo != nil {
+							// Rate limit admin routes. Mounted even when the limiter is not
+							// running (deps.RateLimitMW == nil) so admins can always reach the
+							// config — otherwise disabling rate limiting and restarting would
+							// permanently lock the settings page out of re-enabling it.
+							if settingsRepo != nil {
 								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus)
 								r.Route("/rate-limits", func(r chi.Router) {
 									r.Get("/config", rateLimitHandler.HandleGetConfig)
