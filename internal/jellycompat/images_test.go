@@ -64,6 +64,147 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	}
 }
 
+func TestHandleItemImageProxiesInfuseSignedTagWithoutSessionOrCache(t *testing.T) {
+	upstreamCalled := false
+	var gotIfNoneMatch string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		gotIfNoneMatch = r.Header.Get("If-None-Match")
+		w.Header().Set("Cache-Control", "public, max-age=14400")
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("ETag", `"poster-v1"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      upstream.URL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:      codec,
+		images:     NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+		itemRepo:   fakeImageItemRepo{item: item},
+		imageTags:  newImageTagSigner(cfg.Auth.JWTSecret),
+		httpClient: upstream.Client(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+compatImageProxyTag(tag), nil)
+	req.Header.Set("If-None-Match", `"poster-v1"`)
+	req.Header.Set("User-Agent", "Infuse-Direct/8.4.6")
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "image-bytes" {
+		t.Fatalf("body = %q, want image-bytes", got)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want image/jpeg", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != compatImageRouteCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, compatImageRouteCacheControl)
+	}
+	if got := rec.Header().Get("CDN-Cache-Control"); got != "private, no-store, no-cache, max-age=0" {
+		t.Fatalf("CDN-Cache-Control = %q, want private, no-store, no-cache, max-age=0", got)
+	}
+	if got := rec.Header().Get("X-Accel-Expires"); got != "0" {
+		t.Fatalf("X-Accel-Expires = %q, want 0", got)
+	}
+	if got := gotIfNoneMatch; got != `"poster-v1"` {
+		t.Fatalf("forwarded If-None-Match = %q, want poster-v1", got)
+	}
+	if !upstreamCalled {
+		t.Fatal("Infuse compat image route did not proxy the upstream image")
+	}
+}
+
+func TestHandleItemImageProxyRouteIDUsesCanonicalItemAndProxy(t *testing.T) {
+	upstreamCalled := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.Header().Set("Content-Type", "image/webp")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("proxy-route-image"))
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	proxyRouteID := compatImageProxyRouteID(codec, routeID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      upstream.URL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:      codec,
+		images:     NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+		itemRepo:   fakeImageItemRepo{item: item},
+		imageTags:  newImageTagSigner(cfg.Auth.JWTSecret),
+		httpClient: upstream.Client(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+proxyRouteID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+compatImageProxyTag(tag), nil)
+	req = withImageRouteParams(req, proxyRouteID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "proxy-route-image" {
+		t.Fatalf("body = %q, want proxy-route-image", got)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
+	}
+	if cached, ok := h.images.LookupSized(routeID, "Primary", "", compatRequestImageSize(req, "Primary")); !ok || cached == "" {
+		t.Fatal("proxy route image URL was not cached under the canonical route ID")
+	}
+	if !upstreamCalled {
+		t.Fatal("proxy route did not fetch the upstream image")
+	}
+}
+
 func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
 	codec := NewResourceIDCodec()
 	contentID := "movie-1"
@@ -281,8 +422,8 @@ func assertImageRedirect(t *testing.T, rec *httptest.ResponseRecorder, wantLocat
 	if got := rec.Header().Get("Location"); got != wantLocation {
 		t.Fatalf("Location = %q, want %q", got, wantLocation)
 	}
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Fatalf("Cache-Control = %q, want no-store", got)
+	if got := rec.Header().Get("Cache-Control"); got != compatImageRouteCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, compatImageRouteCacheControl)
 	}
 }
 

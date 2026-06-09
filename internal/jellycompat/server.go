@@ -37,6 +37,7 @@ type Dependencies struct {
 	LoginResolver    loginResolver
 	Authenticator    *Authenticator
 	WebFS            fs.FS
+	HTTPClient       *http.Client
 
 	// Direct service dependencies (replaces Client)
 	ContentService  ContentService

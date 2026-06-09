@@ -21,6 +21,7 @@ const (
 	EncodedIDGenre       EncodedIDType = 6
 	EncodedIDStudio      EncodedIDType = 7
 	EncodedIDPerson      EncodedIDType = 8
+	EncodedIDImageProxy  EncodedIDType = 9
 )
 
 var (
