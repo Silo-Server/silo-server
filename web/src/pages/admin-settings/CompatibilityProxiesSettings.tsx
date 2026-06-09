@@ -1,11 +1,9 @@
 import { useId, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, ChevronRight, Download, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Loader2, Settings2, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import {
   useInstallJellyfinCompatWeb,
   useJellyfinCompatStatus,
@@ -84,11 +82,13 @@ function CollapsibleFieldGroup({
   label,
   expanded,
   onToggle,
+  summary,
   children,
 }: {
   label: string;
   expanded: boolean;
   onToggle: () => void;
+  summary?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const labelId = useId();
@@ -100,23 +100,34 @@ function CollapsibleFieldGroup({
       aria-labelledby={labelId}
       className="surface-panel rounded-2xl border-0 p-4 sm:p-5"
     >
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={contentId}
-        onClick={onToggle}
-        className={`text-muted-foreground hover:text-foreground flex w-full items-center gap-2 text-left transition-colors ${expanded ? "mb-3" : ""}`}
-      >
-        <ChevronRight
-          className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
-        />
-        <span id={labelId} className="text-xs font-semibold tracking-[0.22em] uppercase">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          id={labelId}
+          className="text-muted-foreground text-xs font-semibold tracking-[0.22em] uppercase"
+        >
           {label}
-        </span>
-      </button>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={onToggle}
+          className="w-fit shrink-0"
+        >
+          <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+          {expanded ? "Hide settings" : "Show settings"}
+        </Button>
+      </div>
+
+      {summary && <div>{summary}</div>}
 
       {expanded && (
-        <div id={contentId} className="divide-border divide-y">
+        <div
+          id={contentId}
+          className={`divide-border divide-y ${summary ? "mt-3 border-t pt-3" : ""}`}
+        >
           {children}
         </div>
       )}
@@ -178,27 +189,41 @@ export default function CompatibilityProxiesSettings() {
           label="Jellyfin"
           expanded={jellyfinExpanded}
           onToggle={() => setJellyfinExpanded((current) => !current)}
+          summary={
+            <div className="space-y-3">
+              <SettingField
+                label="Enable Jellyfin Proxy"
+                type="toggle"
+                hint="Starts the Jellyfin-compatible API listener for external Jellyfin clients."
+                value={jellyfinEnabledChecked ? "true" : "false"}
+                onChange={(value) => form.setValue("jellyfin_compat.enabled", value)}
+                disabled={form.isSaving}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={status?.enabled ? "default" : "outline"}>
+                  {status?.enabled ? "API enabled" : "API disabled"}
+                </Badge>
+                <Badge
+                  variant={
+                    status?.web_state === "installed" || status?.web_state === "update_available"
+                      ? "secondary"
+                      : status?.web_state === "failed"
+                        ? "destructive"
+                        : "outline"
+                  }
+                >
+                  Web UI {status ? statusLabel(status.web_state) : "Unknown"}
+                </Badge>
+                {status?.operation?.state === "running" && (
+                  <Badge variant="secondary">{statusLabel(status.operation.kind)} running</Badge>
+                )}
+                {jellyfinEnabledDirty && <Badge variant="outline">Enablement pending save</Badge>}
+                {status?.restart_required && <Badge variant="outline">Restart required</Badge>}
+              </div>
+            </div>
+          }
         >
           <div className="space-y-4 py-3">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div className="space-y-0.5">
-                <Label htmlFor="jellyfin-compat-enabled" className="text-sm font-medium">
-                  Enable Jellyfin Proxy
-                </Label>
-                <p className="text-muted-foreground text-xs">
-                  Starts the Jellyfin-compatible API listener for external Jellyfin clients.
-                </p>
-              </div>
-              <Switch
-                id="jellyfin-compat-enabled"
-                checked={jellyfinEnabledChecked}
-                disabled={form.isSaving}
-                onCheckedChange={(enabled) =>
-                  form.setValue("jellyfin_compat.enabled", enabled ? "true" : "false")
-                }
-              />
-            </div>
-
             <div className="grid gap-3 md:grid-cols-2">
               <LayerDescription title="API Layer">
                 Provides the Jellyfin-compatible API surface used by most third-party apps for
@@ -208,28 +233,6 @@ export default function CompatibilityProxiesSettings() {
                 Provides the Jellyfin Web UI assets required by Jellyfin native apps and some other
                 clients that expect Jellyfin Web to exist at the server's web route.
               </LayerDescription>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={status?.enabled ? "default" : "outline"}>
-                {status?.enabled ? "API enabled" : "API disabled"}
-              </Badge>
-              <Badge
-                variant={
-                  status?.web_state === "installed" || status?.web_state === "update_available"
-                    ? "secondary"
-                    : status?.web_state === "failed"
-                      ? "destructive"
-                      : "outline"
-                }
-              >
-                Web UI {status ? statusLabel(status.web_state) : "Unknown"}
-              </Badge>
-              {status?.operation?.state === "running" && (
-                <Badge variant="secondary">{statusLabel(status.operation.kind)} running</Badge>
-              )}
-              {jellyfinEnabledDirty && <Badge variant="outline">Enablement pending save</Badge>}
-              {status?.restart_required && <Badge variant="outline">Restart required</Badge>}
             </div>
 
             {status?.last_error && (
