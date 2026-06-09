@@ -56,16 +56,20 @@ export function validateSchemaValues(
       if (patternFailed) {
         errors[field.key] = `${field.label || field.key} is invalid`;
       } else if (v?.min_length && raw.length < v.min_length) {
-        errors[field.key] = `${field.label || field.key} must be at least ${v.min_length} characters`;
+        errors[field.key] =
+          `${field.label || field.key} must be at least ${v.min_length} characters`;
       } else if (v?.max_length && raw.length > v.max_length) {
-        errors[field.key] = `${field.label || field.key} must be at most ${v.max_length} characters`;
+        errors[field.key] =
+          `${field.label || field.key} must be at most ${v.max_length} characters`;
       }
     }
     if (isNumberControl(field) && typeof raw === "string" && raw.trim() !== "") {
       const n = Number(raw);
       if (Number.isNaN(n)) errors[field.key] = `${field.label || field.key} must be a number`;
-      else if (v?.has_min && n < (v.min ?? 0)) errors[field.key] = `${field.label || field.key} must be ≥ ${v.min}`;
-      else if (v?.has_max && n > (v.max ?? 0)) errors[field.key] = `${field.label || field.key} must be ≤ ${v.max}`;
+      else if (v?.has_min && n < (v.min ?? 0))
+        errors[field.key] = `${field.label || field.key} must be ≥ ${v.min}`;
+      else if (v?.has_max && n > (v.max ?? 0))
+        errors[field.key] = `${field.label || field.key} must be ≤ ${v.max}`;
     }
   }
   return errors;
@@ -117,12 +121,7 @@ export function parseFieldTypes(jsonSchema: string | undefined | null): Record<s
       if (itemType === "integer") out[key] = "array:int";
       else if (itemType === "number") out[key] = "array:num";
       else out[key] = "array";
-    } else if (
-      type === "string" ||
-      type === "integer" ||
-      type === "number" ||
-      type === "boolean"
-    ) {
+    } else if (type === "string" || type === "integer" || type === "number" || type === "boolean") {
       out[key] = type;
     }
   }
@@ -217,8 +216,7 @@ export function buildSchemaValues(
     if (!evaluateShowWhen(field.show_when, draft)) continue; // don't persist hidden fields' stale values
     // Fall back to the declared default for untouched fields so an unmodified
     // default persists exactly as it is displayed.
-    const rawSource =
-      draft[field.key] !== undefined ? draft[field.key] : field.default_value;
+    const rawSource = draft[field.key] !== undefined ? draft[field.key] : field.default_value;
     const coerced = coerceFieldValue(field, rawSource, fieldTypes?.[field.key]);
     if (coerced === undefined) continue;
     out[field.key] = coerced;
