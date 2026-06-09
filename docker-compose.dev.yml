@@ -42,6 +42,8 @@ services:
     build:
       context: .
       dockerfile_inline: |
+        FROM node:22-slim AS node_runtime
+
         FROM golang:1.26
 
         ENV CGO_ENABLED=1
@@ -57,6 +59,11 @@ services:
             libvips-dev \
             pkg-config \
           && rm -rf /var/lib/apt/lists/*
+
+        COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+        COPY --from=node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+        RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+            ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
         RUN go install github.com/air-verse/air@latest
 
