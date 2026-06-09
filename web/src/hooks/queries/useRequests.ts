@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api } from "@/api/client";
+import { api, ApiClientError } from "@/api/client";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import type {
   CreateMediaRequestInput,
@@ -49,6 +49,16 @@ function buildListQuery(params: RequestListParams = {}) {
   if (params.offset != null && params.offset > 0) query.set("offset", String(params.offset));
   const encoded = query.toString();
   return encoded ? `?${encoded}` : "";
+}
+
+// A plugin connection save can fail with a structured validation_failed 400 that
+// the editor surfaces inline (per-field / form errors). In that case the generic
+// mutation toast is redundant noise, so callers skip it.
+function isValidationFailure(err: unknown): boolean {
+  return (
+    err instanceof ApiClientError &&
+    (err.body as { error?: string } | undefined)?.error === "validation_failed"
+  );
 }
 
 function invalidateRequestSurfaces(queryClient: ReturnType<typeof useQueryClient>) {
@@ -340,6 +350,7 @@ export function useCreateRequestIntegration() {
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
+      if (isValidationFailure(err)) return;
       toast.error(err instanceof Error ? err.message : "Failed to create integration");
     },
   });
@@ -359,6 +370,7 @@ export function useUpdateRequestIntegration() {
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
+      if (isValidationFailure(err)) return;
       toast.error(err instanceof Error ? err.message : "Failed to save integration");
     },
   });
@@ -392,12 +404,7 @@ export function useLoadRequestIntegrationOptions() {
           body: JSON.stringify(body),
         },
       ),
-    onSuccess: () => {
-      toast.success("Connection successful");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to load integration settings");
-    },
+    // Silent background probe: callers surface load failures inline (no toast).
   });
 }
 

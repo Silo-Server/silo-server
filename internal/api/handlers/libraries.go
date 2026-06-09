@@ -2060,7 +2060,7 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 		var candidates []candidate
 
 		for _, c := range caps {
-			defaultPriority := metadata.LookupDefaultPriority(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, level)
+			defaultPriority := metadata.LookupDefaultPriority(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
 			if defaultPriority > 0 {
 				candidates = append(candidates, candidate{
 					installationID: c.PluginInstallationID,

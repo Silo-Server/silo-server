@@ -1,4 +1,5 @@
 import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySortOptions";
+import type { SchemaOption } from "@/components/admin/plugins/schemaFormUtils";
 
 // Auth
 export interface LoginRequest {
@@ -1719,56 +1720,43 @@ export interface RequestUserLimit {
 export interface RequestIntegration {
   id: string;
   name: string;
-  kind: string;
   enabled: boolean;
-  is_4k: boolean;
-  is_default: boolean;
-  is_default_4k: boolean;
   base_url: string;
   api_key_ref?: string;
   has_api_key?: boolean;
-  root_folder: string;
-  quality_profile_id?: number | null;
-  tags: number[];
-  anime_enabled: boolean;
-  anime_quality_profile_id?: number | null;
-  anime_root_folder?: string;
-  anime_tags: number[];
-  options: Record<string, unknown>;
+  // Two-tier plugin-driven connection model. Generic fields above are owned by
+  // the host; the arr-specific config now lives in plugin_config. Optional for
+  // backward-compatible reads of legacy rows that predate the refactor.
+  capability_id?: string;
+  installation_id?: number;
+  supported_media_types?: string[];
+  plugin_config?: Record<string, unknown>;
   last_check_at?: string | null;
   last_check_status?: string;
   last_check_error?: string;
   updated_at?: string;
 }
 
-export interface RequestIntegrationRootFolder {
-  path: string;
-  free_space?: number;
-  total_space?: number;
-  accessible: boolean;
-}
+export type RequestIntegrationOptions = Record<string, SchemaOption[]>;
 
-export interface RequestIntegrationQualityProfile {
-  id: number;
-  name: string;
-}
-
-export interface RequestIntegrationTag {
-  id: number;
-  label: string;
-}
-
-export interface RequestIntegrationOptions {
-  kind: string;
-  root_folders: RequestIntegrationRootFolder[];
-  quality_profiles: RequestIntegrationQualityProfile[];
-  tags: RequestIntegrationTag[];
+export interface RequestIntegrationValidationError {
+  error: "validation_failed";
+  field_errors?: Record<string, string>;
+  form_error?: string;
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
-  kind: "radarr" | "sonarr";
+  // Vestigial: the backend resolves the plugin via installation_id +
+  // plugin_config and ignores this. Optional and no longer sent by the client.
+  kind?: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
+  // For unsaved connections the host cannot backfill from a stored row, so the
+  // body must carry enough to resolve the plugin (installation + capability +
+  // arr-specific config) when testing the connection.
+  capability_id?: string;
+  installation_id?: number;
+  plugin_config?: Record<string, unknown>;
 }
 
 export interface RequestIntegrationsResponse {
@@ -2687,6 +2675,7 @@ export interface AdminSettingsConnectionCheckRequest {
 export interface PluginAdminForm {
   fields: PluginAdminFormField[];
   submit_label?: string;
+  sections?: PluginAdminFormSection[];
 }
 
 export interface PluginAdminFormFieldOption {
@@ -2695,11 +2684,36 @@ export interface PluginAdminFormFieldOption {
   description?: string;
 }
 
+export interface PluginAdminFormCondition {
+  field: string;
+  equals: string[];
+}
+
+export interface PluginAdminFormValidation {
+  has_min?: boolean;
+  min?: number;
+  has_max?: boolean;
+  max?: number;
+  pattern?: string;
+  min_length?: number;
+  max_length?: number;
+}
+
+export interface PluginAdminFormSection {
+  key: string;
+  title: string;
+  description?: string;
+  collapsible: boolean;
+  collapsed_default: boolean;
+  field_keys: string[];
+  show_when?: PluginAdminFormCondition[];
+}
+
 export interface PluginAdminFormField {
   key: string;
   label: string;
   description?: string;
-  control: "TEXT" | "TEXTAREA" | "PASSWORD" | "NUMBER" | "SWITCH" | "SELECT";
+  control: "TEXT" | "TEXTAREA" | "PASSWORD" | "NUMBER" | "SWITCH" | "SELECT" | "MULTI_SELECT";
   placeholder?: string;
   required: boolean;
   secret: boolean;
@@ -2707,6 +2721,10 @@ export interface PluginAdminFormField {
   default_value?: unknown;
   options?: PluginAdminFormFieldOption[];
   rows?: number;
+  dynamic_options?: boolean;
+  show_when?: PluginAdminFormCondition[];
+  validation?: PluginAdminFormValidation;
+  exclusive_group_field?: string;
 }
 
 export interface PluginCapability {
