@@ -51,6 +51,27 @@ func TestInferGroupIdentity_TrailingImdbIDResolvesMovieTitleConflict(t *testing.
 	}
 }
 
+// A trailing IMDb id on the file stem (folder carries none) must both anchor
+// the identity and be persisted into the group, so downstream matching sees
+// the provider ID that justified the resolution.
+func TestInferGroupIdentity_FileLevelTrailingImdbIDAnchorsAndPersists(t *testing.T) {
+	group := InferGroupIdentity(
+		"/movies/On Fire (2024)/Soul on Fire tt28078628.mkv",
+		"movies",
+		RootAssignment{
+			RootPath:     "/movies/On Fire (2024)",
+			InferredType: "movie",
+		},
+	)
+
+	if got, want := group.State, "resolved"; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+	if got, want := group.ImdbID, "tt28078628"; got != want {
+		t.Fatalf("ImdbID = %q, want %q", got, want)
+	}
+}
+
 // Without provider IDs the same folder/file title conflict must still be
 // flagged ambiguous — there is nothing to anchor the identity.
 func TestInferGroupIdentity_TitleConflictWithoutIDsStaysAmbiguous(t *testing.T) {

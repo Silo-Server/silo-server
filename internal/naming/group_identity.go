@@ -60,13 +60,15 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 		populateMovieGroupIdentity(cleanFilePath, assignment, idAnchored, &group)
 	}
 
+	// ID persistence must mirror hasStructuredIDAnchor: any evidence strong
+	// enough to anchor identity must also reach downstream matching.
 	if ids := ParseFolderIDs(filepath.Base(group.ObservedRootPath)); ids != nil {
 		group.TmdbID = ids.TmdbID
 		group.ImdbID = ids.ImdbID
 		group.TvdbID = ids.TvdbID
 	}
 	if group.TmdbID == "" || group.ImdbID == "" || group.TvdbID == "" {
-		if ids := ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath))); ids != nil {
+		if ids := ParseFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath))); ids != nil {
 			if group.TmdbID == "" {
 				group.TmdbID = ids.TmdbID
 			}
