@@ -462,38 +462,51 @@ func (r *Repository) RecordDecision(ctx context.Context, sourceContentID, target
 	return err
 }
 
-func (r *Repository) GetSummaryForContentID(ctx context.Context, contentID string) (*catalog.WorkSummary, error) {
+func (r *Repository) GetSummaryForContentID(ctx context.Context, contentID string, filter catalog.AccessFilter) (*catalog.WorkSummary, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT lw.work_id, lw.canonical_title, lwi.format_type, lwi.content_id,
-		       COALESCE(MIN(mil.media_folder_id), 0)::int
+	var summary catalog.WorkSummary
+	err := r.pool.QueryRow(ctx, `
+		SELECT lw.work_id, lw.canonical_title
 		FROM literary_work_items anchor
 		JOIN literary_works lw ON lw.work_id = anchor.work_id
-		JOIN literary_work_items lwi ON lwi.work_id = lw.work_id
-		LEFT JOIN media_item_libraries mil ON mil.content_id = lwi.content_id
 		WHERE anchor.content_id = $1
-		GROUP BY lw.work_id, lw.canonical_title, lwi.format_type, lwi.content_id
+	`, contentID).Scan(&summary.WorkID, &summary.Title)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	where, args := workItemsAccessWhere(summary.WorkID, filter)
+	rows, err := r.pool.Query(ctx, `
+		SELECT lwi.format_type, lwi.content_id, COALESCE(MIN(mil.media_folder_id), 0)::int
+		FROM literary_work_items lwi
+		JOIN media_items mi ON mi.content_id = lwi.content_id
+		LEFT JOIN media_item_libraries mil ON mil.content_id = lwi.content_id
+		WHERE `+where+`
+		GROUP BY lwi.format_type, lwi.content_id
 		ORDER BY lwi.format_type, lwi.content_id
-	`, contentID)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var summary *catalog.WorkSummary
 	for rows.Next() {
 		var format catalog.WorkFormatSummary
-		var workID, title string
-		if err := rows.Scan(&workID, &title, &format.Type, &format.ContentID, &format.LibraryID); err != nil {
+		if err := rows.Scan(&format.Type, &format.ContentID, &format.LibraryID); err != nil {
 			return nil, err
-		}
-		if summary == nil {
-			summary = &catalog.WorkSummary{WorkID: workID, Title: title}
 		}
 		summary.Formats = append(summary.Formats, format)
 	}
-	return summary, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(summary.Formats) == 0 {
+		return nil, nil
+	}
+	return &summary, nil
 }
 
 func scanWork(row pgx.Row) (*Work, error) {

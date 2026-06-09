@@ -17,8 +17,9 @@ import (
 )
 
 type CatalogHandler struct {
-	resolver *catalog.CatalogResolver
-	itemsH   *ItemsHandler
+	resolver    *catalog.CatalogResolver
+	itemsH      *ItemsHandler
+	workSummary catalog.WorkSummaryProvider
 }
 
 func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) *CatalogHandler {
@@ -26,6 +27,10 @@ func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) 
 		resolver: resolver,
 		itemsH:   itemsH,
 	}
+}
+
+func (h *CatalogHandler) SetWorkSummaryProvider(provider catalog.WorkSummaryProvider) {
+	h.workSummary = provider
 }
 
 type catalogResponse struct {
@@ -109,6 +114,10 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
 	}
+	groupedByWork := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("group")), "work")
+	if groupedByWork {
+		items = h.groupCatalogItemsByWork(r, items)
+	}
 
 	var snapshot string
 	if !result.SnapshotAt.IsZero() {
@@ -117,11 +126,44 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, catalogResponse{
 		Total:      result.Total,
-		TotalExact: result.TotalExact,
+		TotalExact: result.TotalExact && !groupedByWork,
 		HasMore:    result.HasMore,
 		Items:      items,
 		Snapshot:   snapshot,
 	})
+}
+
+func (h *CatalogHandler) groupCatalogItemsByWork(r *http.Request, items []itemListResponse) []itemListResponse {
+	if h == nil || h.workSummary == nil || len(items) == 0 {
+		return items
+	}
+	filter := h.itemsH.accessFilter(r)
+	grouped := make([]itemListResponse, 0, len(items))
+	seenWorks := map[string]struct{}{}
+	for _, item := range items {
+		if item.Type != "ebook" && item.Type != "audiobook" {
+			grouped = append(grouped, item)
+			continue
+		}
+		summary, err := h.workSummary.GetSummaryForContentID(r.Context(), item.ContentID, filter)
+		if err != nil || summary == nil || summary.WorkID == "" {
+			grouped = append(grouped, item)
+			continue
+		}
+		if _, seen := seenWorks[summary.WorkID]; seen {
+			continue
+		}
+		seenWorks[summary.WorkID] = struct{}{}
+		item.Type = "work"
+		item.WorkID = summary.WorkID
+		item.WorkTitle = summary.Title
+		item.WorkFormats = summary.Formats
+		if summary.Title != "" {
+			item.Title = summary.Title
+		}
+		grouped = append(grouped, item)
+	}
+	return grouped
 }
 
 func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.Request) {

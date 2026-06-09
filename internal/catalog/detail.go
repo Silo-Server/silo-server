@@ -62,7 +62,7 @@ type expiringImageResolver interface {
 }
 
 type WorkSummaryProvider interface {
-	GetSummaryForContentID(ctx context.Context, contentID string) (*WorkSummary, error)
+	GetSummaryForContentID(ctx context.Context, contentID string, filter AccessFilter) (*WorkSummary, error)
 }
 
 type WorkSummary struct {
@@ -1027,15 +1027,15 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 	}
 
-	applyWorkSummary(ctx, detail, s.workSummary)
+	applyWorkSummary(ctx, detail, s.workSummary, filter)
 	return detail, nil
 }
 
-func applyWorkSummary(ctx context.Context, detail *ItemDetail, provider WorkSummaryProvider) {
+func applyWorkSummary(ctx context.Context, detail *ItemDetail, provider WorkSummaryProvider, filter AccessFilter) {
 	if detail == nil || provider == nil || detail.ContentID == "" {
 		return
 	}
-	summary, err := provider.GetSummaryForContentID(ctx, detail.ContentID)
+	summary, err := provider.GetSummaryForContentID(ctx, detail.ContentID, filter)
 	if err != nil || summary == nil {
 		return
 	}

@@ -7,7 +7,7 @@ import (
 
 type fakeWorkSummaryProvider struct{}
 
-func (fakeWorkSummaryProvider) GetSummaryForContentID(ctx context.Context, contentID string) (*WorkSummary, error) {
+func (fakeWorkSummaryProvider) GetSummaryForContentID(ctx context.Context, contentID string, filter AccessFilter) (*WorkSummary, error) {
 	return &WorkSummary{
 		WorkID: "work-1",
 		Title:  "Project Hail Mary",
@@ -20,7 +20,7 @@ func (fakeWorkSummaryProvider) GetSummaryForContentID(ctx context.Context, conte
 
 func TestItemDetailIncludesWorkSummaryWhenProviderConfigured(t *testing.T) {
 	detail := &ItemDetail{ContentID: "ebook-1", Type: "ebook", Title: "Project Hail Mary"}
-	applyWorkSummary(context.Background(), detail, fakeWorkSummaryProvider{})
+	applyWorkSummary(context.Background(), detail, fakeWorkSummaryProvider{}, AccessFilter{})
 	if detail.WorkID != "work-1" || len(detail.WorkFormats) != 2 {
 		t.Fatalf("detail work fields = %#v", detail)
 	}

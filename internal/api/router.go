@@ -523,6 +523,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				WithUserStoreProvider(deps.UserStoreProvider),
 			itemsHandler,
 		)
+		catalogHandler.SetWorkSummaryProvider(literaryRepo)
 
 		tmdbAPIKey := ""
 		if deps.Config != nil {

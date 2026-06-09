@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 func TestRepositoryLinkAndFetchSummary(t *testing.T) {
@@ -46,7 +48,7 @@ func TestRepositoryLinkAndFetchSummary(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := repo.GetSummaryForContentID(ctx, ebookID)
+	summary, err := repo.GetSummaryForContentID(ctx, ebookID, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
