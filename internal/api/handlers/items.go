@@ -1207,7 +1207,7 @@ func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string) *catal
 	return &catalog.SeasonUserData{
 		PositionSeconds: progress.PositionSeconds,
 		DurationSeconds: progress.DurationSeconds,
-		IsInProgress:    !progress.Completed && progress.PositionSeconds > 0,
+		IsInProgress:    progress.PositionSeconds > 0,
 		Played:          progress.Completed,
 		LastFileID:      progress.LastFileID,
 		LastResolution:  progress.LastResolution,

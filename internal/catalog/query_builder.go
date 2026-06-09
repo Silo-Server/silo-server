@@ -954,7 +954,6 @@ func (qb *QueryBuilder) buildInProgressClause(rule QueryRule) (string, error) {
 		WHERE uwp.user_id = $%d
 		  AND uwp.profile_id = $%d
 		  AND uwp.media_item_id = %s.content_id
-		  AND uwp.completed = FALSE
 		  AND uwp.position_seconds > 0
 		  AND NOT EXISTS (
 			SELECT 1
@@ -1347,8 +1346,7 @@ func (qb *QueryBuilder) progressSortPlan() (string, []string, []any) {
 		`LEFT JOIN (
 			SELECT uwp.media_item_id AS content_id,
 				CASE
-					WHEN uwp.completed = FALSE
-					  AND uwp.position_seconds > 0
+					WHEN uwp.position_seconds > 0
 					  AND COALESCE(uwp.duration_seconds, 0) > 0
 					  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
 					THEN uwp.position_seconds::double precision / NULLIF(uwp.duration_seconds, 0)

@@ -153,7 +153,7 @@ describe("applyPlaybackProgressToCache", () => {
     ]);
   });
 
-  it("turns a previously played item back into resume state when exit progress is partial", () => {
+  it("keeps the watched badge while a rewatch is in progress", () => {
     const queryClient = new QueryClient();
 
     queryClient.setQueryData<ItemDetail>(itemKeys.detail("movie-1"), {
@@ -172,10 +172,12 @@ describe("applyPlaybackProgressToCache", () => {
       durationSeconds: 3600,
     });
 
+    // played is a one-way latch mirroring the server model: the rewatch gets
+    // a live resume point without clearing watched state.
     expect(
       queryClient.getQueryData<ItemDetail>(itemKeys.detail("movie-1"))?.user_data,
     ).toMatchObject({
-      played: false,
+      played: true,
       is_in_progress: true,
       position_seconds: 300,
       duration_seconds: 3600,

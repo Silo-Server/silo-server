@@ -54,13 +54,13 @@ function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | nul
   if (activeAudiobookPlaying === false) {
     return "Resume";
   }
-  if (item.user_state?.played) {
-    return "Listen Again";
-  }
   const position = item.position_seconds ?? 0;
   const duration = item.duration_seconds ?? 0;
   if (position > 0 && (duration <= 0 || position < duration)) {
     return "Resume";
+  }
+  if (item.user_state?.played) {
+    return "Listen Again";
   }
   return "Listen";
 }

@@ -58,13 +58,19 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 	completed := false
 	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
 		completed = true
-		position = duration // match MarkWatched() — reset so no stale resume point
+		position = 0 // match MarkWatched() — completed rows hold no resume point
 	}
+	// `completed` is a one-way watched latch; position resets to 0 on
+	// completion so `position_seconds > 0` means "has a resume point". A
+	// rewatch heartbeat on a completed row therefore re-enters Continue
+	// Watching through plain GREATEST (stored position is 0) while the
+	// watched flag survives.
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
-			position_seconds = GREATEST(excluded.position_seconds, user_watch_progress.position_seconds),
+			position_seconds = CASE WHEN excluded.completed THEN 0
+				ELSE GREATEST(excluded.position_seconds, user_watch_progress.position_seconds) END,
 			duration_seconds = excluded.duration_seconds,
 			completed = CASE WHEN excluded.completed
 				THEN TRUE ELSE user_watch_progress.completed END,
@@ -85,7 +91,7 @@ func (s *PostgresUserStore) SetProgress(ctx context.Context, profileID, mediaIte
 	completed := false
 	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
 		completed = true
-		position = duration // match MarkWatched() — reset so no stale resume point
+		position = 0 // match MarkWatched() — completed rows hold no resume point
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
@@ -93,7 +99,7 @@ func (s *PostgresUserStore) SetProgress(ctx context.Context, profileID, mediaIte
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = user_watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, now,
 	)
@@ -110,8 +116,8 @@ func (s *PostgresUserStore) SetProgressAt(ctx context.Context, profileID, mediaI
 	if duration < 0 {
 		duration = 0
 	}
-	if completed && duration > 0 {
-		position = duration
+	if completed {
+		position = 0
 	}
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
@@ -130,7 +136,7 @@ func (s *PostgresUserStore) SetProgressAt(ctx context.Context, profileID, mediaI
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = user_watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, updatedAt.UTC(),
 	)
@@ -147,8 +153,8 @@ func (s *PostgresUserStore) SetProgressIfNewer(ctx context.Context, profileID, m
 	if duration < 0 {
 		duration = 0
 	}
-	if completed && duration > 0 {
-		position = duration
+	if completed {
+		position = 0
 	}
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
@@ -186,13 +192,13 @@ func (s *PostgresUserStore) MarkWatched(ctx context.Context, profileID, mediaIte
 	now := nowUTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
-		VALUES ($1, $2, $3, $4, $5, TRUE, $6)
+		VALUES ($1, $2, $3, 0, $4, TRUE, $5)
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
-			position_seconds = excluded.position_seconds,
+			position_seconds = 0,
 			duration_seconds = excluded.duration_seconds,
 			completed = TRUE,
 			updated_at = excluded.updated_at`,
-		s.userID, profileID, mediaItemID, duration, duration, now,
+		s.userID, profileID, mediaItemID, duration, now,
 	)
 	if err != nil {
 		return fmt.Errorf("marking watched: %w", err)
@@ -230,6 +236,7 @@ func (s *PostgresUserStore) MarkProgressBatch(ctx context.Context, profileID str
 		FROM unnest($3::text[]) AS mid
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 		SET completed = TRUE,
+		    position_seconds = 0,
 		    updated_at = EXCLUDED.updated_at
 		WHERE user_watch_progress.completed IS DISTINCT FROM TRUE
 		   OR user_watch_progress.updated_at < EXCLUDED.updated_at`,
@@ -304,11 +311,14 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 
 	switch status {
 	case "in_progress":
+		// position_seconds > 0 (not completed = FALSE): completed rows hold
+		// position 0, so a rewatch of a watched item has completed = TRUE with
+		// a live resume point and belongs in Continue Watching.
 		query = `
 			SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
 			       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
 			FROM user_watch_progress
-			WHERE user_id = $1 AND profile_id = $2 AND completed = FALSE
+			WHERE user_id = $1 AND profile_id = $2 AND position_seconds > 0
 			  AND NOT EXISTS (
 				SELECT 1
 				FROM user_history_hidden_items hhi

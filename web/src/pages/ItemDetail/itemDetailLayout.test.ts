@@ -253,7 +253,26 @@ describe("resolveLeafPrimaryAction", () => {
       ),
     ).toEqual({
       label: "Play Episode",
-      progress: 0,
+      progress: undefined,
+    });
+  });
+
+  it("offers resume for a rewatch of a played item", () => {
+    expect(
+      resolveLeafPrimaryAction(
+        makeEpisodeItem({
+          user_data: {
+            played: true,
+            is_in_progress: true,
+            position_seconds: 600,
+            duration_seconds: 2400,
+          },
+        }),
+        "Play Episode",
+      ),
+    ).toEqual({
+      label: "Resume",
+      progress: 25,
     });
   });
 });
