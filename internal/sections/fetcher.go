@@ -68,6 +68,7 @@ type trendingSnapshotGetter interface {
 // Fetcher runs section queries against the database.
 type Fetcher struct {
 	pool                 *pgxpool.Pool
+	progressFilter       *catalog.ContinueWatchingProgressFilter
 	StoreProvider        userstore.UserStoreProvider
 	CollectionRepo       *catalog.LibraryCollectionRepository
 	RecommendationRepo   *recommendations.Repo // retained for non-reader call sites
@@ -91,7 +92,11 @@ type Fetcher struct {
 
 // NewFetcher creates a new section Fetcher.
 func NewFetcher(pool *pgxpool.Pool) *Fetcher {
-	return &Fetcher{pool: pool, Clock: recipes.RealClock{}}
+	return &Fetcher{
+		pool:           pool,
+		progressFilter: catalog.NewContinueWatchingProgressFilter(pool),
+		Clock:          recipes.RealClock{},
+	}
 }
 
 type editorialCandidateLoader func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error)
@@ -385,7 +390,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 			break
 		}
 		rawProgressCount := len(progressEntries)
-		progressEntries = filterContinueWatchingDismissals(progressEntries, dismissals)
+		progressEntries = dismissals.FilterProgress(progressEntries)
 
 		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, effectiveLibID, effectiveLibraryIDs, filter)
 		if err != nil {
@@ -490,11 +495,11 @@ func (f *Fetcher) fetchContinueProgressItems(ctx context.Context, store userstor
 		matchingEntries = append(matchingEntries, entry)
 	}
 	if ContinueTypeAllowsNextUp(continueType) && hasEpisodeEntries {
-		supersededEpisodeProgress, err := f.fetchSupersededEpisodeProgressIDs(ctx, store, profileID, matchingEntries)
+		supersededEpisodeProgress, err := f.progressFilter.SupersededEpisodeProgressIDs(ctx, store, profileID, matchingEntries)
 		if err != nil {
 			return nil, nil, err
 		}
-		matchingEntries = filterSupersededEpisodeProgressEntries(matchingEntries, supersededEpisodeProgress)
+		matchingEntries = catalog.FilterSupersededProgress(matchingEntries, supersededEpisodeProgress)
 	}
 
 	itemMeta := make(map[string]SectionItemMeta, len(matchingEntries))
@@ -633,142 +638,6 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 	return orderedItems, meta, nil
 }
 
-type progressLister interface {
-	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error)
-}
-
-const supersededProgressPageSize = 500
-
-type progressSnapshot struct {
-	ContentID string
-	UpdatedAt time.Time
-}
-
-func (f *Fetcher) fetchSupersededEpisodeProgressIDs(ctx context.Context, store progressLister, profileID string, entries []userstore.WatchProgress) (map[string]struct{}, error) {
-	inProgress := progressSnapshots(entries)
-	if len(inProgress) == 0 {
-		return map[string]struct{}{}, nil
-	}
-
-	completed, err := completedProgressSnapshots(ctx, store, profileID)
-	if err != nil {
-		return nil, err
-	}
-	if len(completed) == 0 {
-		return map[string]struct{}{}, nil
-	}
-
-	inProgressIDs, inProgressUpdatedAts := splitProgressSnapshots(inProgress)
-	completedIDs, completedUpdatedAts := splitProgressSnapshots(completed)
-	query := buildSupersededEpisodeProgressQuery()
-	rows, err := f.pool.Query(ctx, query, inProgressIDs, inProgressUpdatedAts, completedIDs, completedUpdatedAts)
-	if err != nil {
-		return nil, fmt.Errorf("querying superseded episode progress: %w", err)
-	}
-	defer rows.Close()
-
-	superseded := make(map[string]struct{})
-	for rows.Next() {
-		var mediaItemID string
-		if err := rows.Scan(&mediaItemID); err != nil {
-			return nil, fmt.Errorf("scanning superseded episode progress: %w", err)
-		}
-		superseded[mediaItemID] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating superseded episode progress: %w", err)
-	}
-	return superseded, nil
-}
-
-func completedProgressSnapshots(ctx context.Context, store progressLister, profileID string) ([]progressSnapshot, error) {
-	seen := make(map[string]struct{})
-	snapshots := make([]progressSnapshot, 0)
-
-	for offset := 0; ; offset += supersededProgressPageSize {
-		entries, err := store.ListProgress(ctx, profileID, "completed", supersededProgressPageSize, offset)
-		if err != nil {
-			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
-		}
-
-		for _, snapshot := range progressSnapshots(entries) {
-			contentID := snapshot.ContentID
-			if _, ok := seen[contentID]; ok {
-				continue
-			}
-			seen[contentID] = struct{}{}
-			snapshots = append(snapshots, snapshot)
-		}
-
-		if len(entries) < supersededProgressPageSize {
-			return snapshots, nil
-		}
-	}
-}
-
-func progressSnapshots(entries []userstore.WatchProgress) []progressSnapshot {
-	snapshots := make([]progressSnapshot, 0, len(entries))
-	for _, entry := range entries {
-		contentID := strings.TrimSpace(entry.MediaItemID)
-		if contentID == "" {
-			continue
-		}
-		updatedAt, err := time.Parse(time.RFC3339, entry.UpdatedAt)
-		if err != nil || updatedAt.IsZero() {
-			continue
-		}
-		snapshots = append(snapshots, progressSnapshot{
-			ContentID: contentID,
-			UpdatedAt: updatedAt.UTC(),
-		})
-	}
-	return snapshots
-}
-
-func splitProgressSnapshots(snapshots []progressSnapshot) ([]string, []time.Time) {
-	contentIDs := make([]string, len(snapshots))
-	updatedAts := make([]time.Time, len(snapshots))
-	for i, snapshot := range snapshots {
-		contentIDs[i] = snapshot.ContentID
-		updatedAts[i] = snapshot.UpdatedAt
-	}
-	return contentIDs, updatedAts
-}
-
-func buildSupersededEpisodeProgressQuery() string {
-	return `
-		WITH in_progress(content_id, updated_at) AS (
-			SELECT * FROM unnest($1::text[], $2::timestamptz[])
-		),
-		completed(content_id, updated_at) AS (
-			SELECT * FROM unnest($3::text[], $4::timestamptz[])
-		)
-		SELECT DISTINCT ip.content_id
-		FROM in_progress ip_progress
-		JOIN episodes ip ON ip.content_id = ip_progress.content_id
-		JOIN episodes done
-		  ON done.series_id = ip.series_id
-		 AND (done.season_number, done.episode_number) > (ip.season_number, ip.episode_number)
-		JOIN completed done_progress
-		  ON done_progress.content_id = done.content_id
-		WHERE done_progress.updated_at > ip_progress.updated_at`
-}
-
-func filterSupersededEpisodeProgressEntries(entries []userstore.WatchProgress, superseded map[string]struct{}) []userstore.WatchProgress {
-	if len(entries) == 0 || len(superseded) == 0 {
-		return entries
-	}
-
-	filtered := make([]userstore.WatchProgress, 0, len(entries))
-	for _, entry := range entries {
-		if _, ok := superseded[entry.MediaItemID]; ok {
-			continue
-		}
-		filtered = append(filtered, entry)
-	}
-	return filtered
-}
-
 func collapseContinueWatchingSeriesCandidates(items []*models.MediaItem, meta map[string]SectionItemMeta) []*models.MediaItem {
 	selectedBySeries := make(map[string]int)
 	result := make([]*models.MediaItem, 0, len(items))
@@ -830,32 +699,13 @@ func episodeOrdinal(meta SectionItemMeta) int {
 	return season*100000 + episode
 }
 
-func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store userstore.UserStore, profileID string) map[string]userstore.HomeItemDismissal {
+func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store userstore.UserStore, profileID string) catalog.HomeDismissalIndex {
 	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceContinueWatching)
 	if err != nil {
 		slog.Error("listing continue watching dismissals", "profile_id", profileID, "error", err)
-		return map[string]userstore.HomeItemDismissal{}
+		return catalog.HomeDismissalIndex{}
 	}
-	dismissalByItemID := make(map[string]userstore.HomeItemDismissal, len(dismissals))
-	for _, dismissal := range dismissals {
-		dismissalByItemID[dismissal.MediaItemID] = dismissal
-	}
-	return dismissalByItemID
-}
-
-func filterContinueWatchingDismissals(entries []userstore.WatchProgress, dismissalByItemID map[string]userstore.HomeItemDismissal) []userstore.WatchProgress {
-	if len(entries) == 0 || len(dismissalByItemID) == 0 {
-		return entries
-	}
-
-	filtered := make([]userstore.WatchProgress, 0, len(entries))
-	for _, entry := range entries {
-		dismissal, ok := dismissalByItemID[entry.MediaItemID]
-		if !ok || dismissal.ProgressUpdatedAt == nil || *dismissal.ProgressUpdatedAt != entry.UpdatedAt {
-			filtered = append(filtered, entry)
-		}
-	}
-	return filtered
+	return catalog.NewHomeDismissalIndex(dismissals)
 }
 
 func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {

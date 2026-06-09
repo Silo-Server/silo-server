@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -297,12 +298,17 @@ func withDefaults(deps Dependencies) Dependencies {
 		if deps.DB != nil {
 			staler = recommendations.NewRepo(deps.DB)
 		}
+		var pool *pgxpool.Pool
+		if deps.BrowseRepo != nil {
+			pool = deps.BrowseRepo.Pool()
+		}
 		deps.UserDataService = newDirectUserDataService(
 			deps.UserStoreProvider,
 			deps.ItemRepo,
 			deps.EpisodeRepo,
 			deps.ProviderIDRepo,
 			deps.DetailSvc,
+			catalog.NewContinueWatchingProgressFilter(pool),
 			staler,
 			deps.RecWorker,
 		)
