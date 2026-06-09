@@ -550,10 +550,10 @@ func (r *SeriesRootMatchQueueRepository) UpdateError(ctx context.Context, folder
 	_, err := r.pool.Exec(ctx, `
 		UPDATE series_root_match_queue
 		SET last_error = $3,
-			available_at = NOW() + $4::interval,
+			available_at = `+matchQueueBackoffExpr("$4", "$5")+`,
 			updated_at = NOW()
 		WHERE media_folder_id = $1 AND observed_root_path = $2
-	`, folderID, filepath.Clean(observedRootPath), errText, intervalLiteral(seriesRootQueueRetryDelay))
+	`, folderID, filepath.Clean(observedRootPath), errText, intervalLiteral(seriesRootQueueRetryDelay), intervalLiteral(matchQueueRetryMaxDelay))
 	if err != nil {
 		return fmt.Errorf("updating series root queue error: %w", err)
 	}
