@@ -30,7 +30,7 @@ import type {
   RequestUserLimit,
 } from "@/api/types";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
-import { buildSchemaValues, parseFieldTypes } from "@/components/admin/plugins/schemaForm";
+import { buildSchemaValues, parseFieldTypes } from "@/components/admin/plugins/schemaFormUtils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -931,12 +931,15 @@ function IntegrationEditor({
   // have loaded, when this connection has no installation set yet. Depend on a
   // stable scalar (not the array identity) so a refetch returning the same single
   // plugin does not re-fire and re-select after a deliberate clear.
+  const soleInstallation = installations.length === 1 ? installations[0] : undefined;
   const soleInstallationID =
-    installations.length === 1 ? String(installations[0]?.installationID) : undefined;
+    soleInstallation !== undefined ? String(soleInstallation.installationID) : undefined;
   useEffect(() => {
-    if (form.installation_id || soleInstallationID === undefined) return;
-    const sole = installations[0];
-    onChange({ installation_id: String(sole.installationID), capability_id: sole.capability.id });
+    if (form.installation_id || soleInstallation === undefined) return;
+    onChange({
+      installation_id: String(soleInstallation.installationID),
+      capability_id: soleInstallation.capability.id,
+    });
     // onChange identity is stable per card; intentionally depend on the data only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.installation_id, soleInstallationID]);

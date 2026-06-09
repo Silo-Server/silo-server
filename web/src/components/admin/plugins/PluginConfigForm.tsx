@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
 import { SchemaForm } from "./SchemaForm";
-import { buildSchemaValues } from "./schemaForm";
+import { buildSchemaValues } from "./schemaFormUtils";
 
 type PluginConfigValue = Record<string, unknown>;
 

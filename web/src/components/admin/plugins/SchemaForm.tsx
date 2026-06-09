@@ -22,7 +22,7 @@ import {
   evaluateShowWhen,
   validateSchemaValues,
   type SchemaOption,
-} from "./schemaForm";
+} from "./schemaFormUtils";
 
 type Props = {
   descriptor: PluginAdminForm;

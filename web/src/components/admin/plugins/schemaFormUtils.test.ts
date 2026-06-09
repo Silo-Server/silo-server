@@ -6,7 +6,7 @@ import {
   buildSchemaValues,
   parseFieldTypes,
   coerceFieldValue,
-} from "./schemaForm";
+} from "./schemaFormUtils";
 
 const descriptor: PluginAdminForm = {
   fields: [

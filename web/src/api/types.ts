@@ -1,5 +1,5 @@
 import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySortOptions";
-import type { SchemaOption } from "@/components/admin/plugins/schemaForm";
+import type { SchemaOption } from "@/components/admin/plugins/schemaFormUtils";
 
 // Auth
 export interface LoginRequest {
