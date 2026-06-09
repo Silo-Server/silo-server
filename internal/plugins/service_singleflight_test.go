@@ -135,6 +135,113 @@ func TestEnsureClientDistinctInstallationsLaunchIndependently(t *testing.T) {
 	}
 }
 
+// ctxCaptureHost blocks inside Start until released, and records whether the
+// launch context was canceled. It lets a test cancel the singleflight leader's
+// ctx while a launch is in flight.
+type ctxCaptureHost struct {
+	mu          sync.Mutex
+	current     map[int]pluginClient
+	startResult pluginClient
+	entered     chan struct{}
+	proceed     chan struct{}
+	sawCancel   bool
+}
+
+func (h *ctxCaptureHost) Client(id int) (pluginClient, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c, ok := h.current[id]; ok {
+		return c, nil
+	}
+	return nil, pluginhost.ErrClientNotFound
+}
+
+func (h *ctxCaptureHost) Start(ctx context.Context, req pluginhost.StartRequest) (pluginClient, error) {
+	close(h.entered)
+	select {
+	case <-ctx.Done():
+		h.mu.Lock()
+		h.sawCancel = true
+		h.mu.Unlock()
+		return nil, ctx.Err()
+	case <-h.proceed:
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.current == nil {
+		h.current = map[int]pluginClient{}
+	}
+	h.current[req.InstallationID] = h.startResult
+	return h.startResult, nil
+}
+
+func (h *ctxCaptureHost) Stop(id int) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.current, id)
+	return nil
+}
+
+func (h *ctxCaptureHost) Shutdown(context.Context) error { return nil }
+
+func (h *ctxCaptureHost) canceledDuringLaunch() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sawCancel
+}
+
+// TestEnsureClientLaunchIsolatedFromLeaderCancellation pins that a deduped
+// launch is not coupled to the cancellation of whichever caller happened to be
+// the singleflight leader: if that caller's request is canceled mid-launch, the
+// shared launch (which other waiters depend on) must continue.
+func TestEnsureClientLaunchIsolatedFromLeaderCancellation(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	installPath := writeInstalledPluginManifest(t, manifest)
+	store := newFakeServiceInstallationStore(&Installation{
+		ID: 7, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+		InstallPath: installPath, Enabled: true,
+	})
+	host := &ctxCaptureHost{
+		startResult: &fakePluginClient{manifest: manifest},
+		entered:     make(chan struct{}),
+		proceed:     make(chan struct{}),
+	}
+	service := &Service{installations: store, host: host}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type result struct {
+		c   pluginClient
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		c, err := service.ensureClient(ctx, 7)
+		done <- result{c, err}
+	}()
+
+	<-host.entered // launch is in flight inside Start
+	cancel()       // cancel the leader's ctx mid-launch
+
+	select {
+	case r := <-done:
+		t.Fatalf("ensureClient returned early after leader cancel (err=%v); launch was coupled to leader ctx", r.err)
+	case <-time.After(100 * time.Millisecond):
+		// still launching — isolated from the leader's cancellation, as required
+	}
+
+	close(host.proceed)
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("ensureClient err = %v, want nil", r.err)
+	}
+	if r.c != host.startResult {
+		t.Fatalf("got %#v, want launched client", r.c)
+	}
+	if host.canceledDuringLaunch() {
+		t.Fatalf("launch ctx was canceled by the leader; expected isolation")
+	}
+}
+
 func TestEnsureClientFailedLaunchPropagatesToAllCallers(t *testing.T) {
 	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
 	installPath := writeInstalledPluginManifest(t, manifest)

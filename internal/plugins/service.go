@@ -628,7 +628,10 @@ func (s *Service) ManifestForInstallation(
 // is freed, so subsequent callers re-run and hit the now-warm cache.
 func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginClient, error) {
 	v, err, _ := s.launchGroup.Do(strconv.Itoa(installationID), func() (any, error) {
-		return s.doEnsureClient(ctx, installationID)
+		// Isolate the shared launch from the leader caller's cancellation: other
+		// waiters depend on this in-flight launch, so a single caller's canceled
+		// request must not tear it down. Values (tracing, auth) are preserved.
+		return s.doEnsureClient(context.WithoutCancel(ctx), installationID)
 	})
 	if err != nil {
 		return nil, err
