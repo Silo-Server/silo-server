@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,6 +38,21 @@ type LinkItemParams struct {
 	FormatType string
 	LinkSource string
 	Confidence float64
+}
+
+type WorkItemDetail struct {
+	ContentID  string
+	FormatType string
+	LibraryID  int
+	Files      []WorkFile
+	Progress   *ProgressResponse
+}
+
+type WorkFile struct {
+	FileID          int
+	FilePath        string
+	Size            int64
+	DurationSeconds float64
 }
 
 func (r *Repository) CreateWork(ctx context.Context, p CreateWorkParams) (*Work, error) {
@@ -84,6 +102,179 @@ func (r *Repository) GetWork(ctx context.Context, workID string) (*Work, error) 
 		return nil, ErrWorkNotFound
 	}
 	return work, err
+}
+
+func (r *Repository) GetWorkWithItems(ctx context.Context, workID string, filter catalog.AccessFilter) (*Work, []WorkItemDetail, error) {
+	work, err := r.GetWork(ctx, workID)
+	if err != nil {
+		return nil, nil, err
+	}
+	where, args := workItemsAccessWhere(workID, filter)
+	rows, err := r.pool.Query(ctx, `
+		SELECT lwi.content_id, lwi.format_type, COALESCE(MIN(mil.media_folder_id), 0)::int
+		FROM literary_work_items lwi
+		JOIN media_items mi ON mi.content_id = lwi.content_id
+		LEFT JOIN media_item_libraries mil ON mil.content_id = lwi.content_id
+		WHERE `+where+`
+		GROUP BY lwi.content_id, lwi.format_type
+		ORDER BY lwi.format_type, lwi.content_id
+	`, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var items []WorkItemDetail
+	for rows.Next() {
+		var item WorkItemDetail
+		if err := rows.Scan(&item.ContentID, &item.FormatType, &item.LibraryID); err != nil {
+			return nil, nil, err
+		}
+		item.Files, err = r.ListFiles(ctx, item.ContentID)
+		if err != nil {
+			return nil, nil, err
+		}
+		item.Progress, err = r.GetProgress(ctx, item.ContentID, item.FormatType, filter)
+		if err != nil {
+			return nil, nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil, ErrWorkNotFound
+	}
+	return work, items, nil
+}
+
+func workItemsAccessWhere(workID string, filter catalog.AccessFilter) (string, []any) {
+	conditions := []string{"lwi.work_id = $1"}
+	args := []any{workID}
+	argIdx := 2
+	if filter.AllowedContentIDs != nil {
+		if len(filter.AllowedContentIDs) == 0 {
+			conditions = append(conditions, "FALSE")
+		} else {
+			conditions = append(conditions, fmt.Sprintf("lwi.content_id = ANY($%d)", argIdx))
+			args = append(args, filter.AllowedContentIDs)
+			argIdx++
+		}
+	}
+	if filter.AllowedLibraryIDs != nil {
+		if len(filter.AllowedLibraryIDs) == 0 {
+			conditions = append(conditions, "FALSE")
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`
+				EXISTS (
+					SELECT 1 FROM media_item_libraries mil_allowed
+					WHERE mil_allowed.content_id = lwi.content_id
+					  AND mil_allowed.media_folder_id = ANY($%d)
+				)`, argIdx))
+			args = append(args, filter.AllowedLibraryIDs)
+			argIdx++
+		}
+	} else if len(filter.DisabledLibraryIDs) > 0 {
+		conditions = append(conditions, `
+			EXISTS (
+				SELECT 1 FROM media_item_libraries mil_visible
+				WHERE mil_visible.content_id = lwi.content_id
+			)`)
+		conditions = append(conditions, fmt.Sprintf(`
+			NOT EXISTS (
+				SELECT 1 FROM media_item_libraries mil_disabled
+				WHERE mil_disabled.content_id = lwi.content_id
+				  AND mil_disabled.media_folder_id = ANY($%d)
+			)`, argIdx))
+		args = append(args, filter.DisabledLibraryIDs)
+	}
+	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: filter.MaxContentRating}, &conditions, &args, &argIdx)
+	return strings.Join(conditions, " AND "), args
+}
+
+func (r *Repository) ListFiles(ctx context.Context, contentID string) ([]WorkFile, error) {
+	if r == nil || r.pool == nil {
+		return nil, fmt.Errorf("literary works repository requires a database pool")
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, file_path, COALESCE(file_size, 0), COALESCE(duration, 0)::double precision
+		FROM media_files
+		WHERE content_id = $1 AND missing_since IS NULL
+		ORDER BY file_path ASC
+	`, contentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var files []WorkFile
+	for rows.Next() {
+		var file WorkFile
+		if err := rows.Scan(&file.FileID, &file.FilePath, &file.Size, &file.DurationSeconds); err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	return files, rows.Err()
+}
+
+func (r *Repository) GetProgress(ctx context.Context, contentID, formatType string, filter catalog.AccessFilter) (*ProgressResponse, error) {
+	if r == nil || r.pool == nil {
+		return nil, fmt.Errorf("literary works repository requires a database pool")
+	}
+	if filter.UserID == 0 || strings.TrimSpace(filter.ProfileID) == "" {
+		return nil, nil
+	}
+	switch formatType {
+	case FormatEbook:
+		return r.getEbookProgress(ctx, contentID, filter)
+	case FormatAudiobook:
+		return r.getAudiobookProgress(ctx, contentID, filter)
+	default:
+		return nil, nil
+	}
+}
+
+func (r *Repository) getEbookProgress(ctx context.Context, contentID string, filter catalog.AccessFilter) (*ProgressResponse, error) {
+	var progress float64
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT progress, updated_at
+		FROM ebook_reader_progress
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3
+	`, filter.UserID, filter.ProfileID, contentID).Scan(&progress, &updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ProgressResponse{
+		Kind:      "reading",
+		Progress:  &progress,
+		UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func (r *Repository) getAudiobookProgress(ctx context.Context, contentID string, filter catalog.AccessFilter) (*ProgressResponse, error) {
+	var positionSeconds, durationSeconds float64
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT position_seconds, duration_seconds, updated_at
+		FROM user_watch_progress
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
+	`, filter.UserID, filter.ProfileID, contentID).Scan(&positionSeconds, &durationSeconds, &updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ProgressResponse{
+		Kind:            "listening",
+		PositionSeconds: &positionSeconds,
+		DurationSeconds: &durationSeconds,
+		UpdatedAt:       updatedAt.UTC().Format(time.RFC3339),
+	}, nil
 }
 
 func (r *Repository) LinkItems(ctx context.Context, workID string, items []LinkItemParams) error {
@@ -144,7 +335,7 @@ func (r *Repository) RecordDecision(ctx context.Context, sourceContentID, target
 	return err
 }
 
-func (r *Repository) GetSummaryForContentID(ctx context.Context, contentID string) (*WorkSummary, error) {
+func (r *Repository) GetSummaryForContentID(ctx context.Context, contentID string) (*catalog.WorkSummary, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
 	}
@@ -163,15 +354,15 @@ func (r *Repository) GetSummaryForContentID(ctx context.Context, contentID strin
 		return nil, err
 	}
 	defer rows.Close()
-	var summary *WorkSummary
+	var summary *catalog.WorkSummary
 	for rows.Next() {
-		var format WorkFormatSummary
+		var format catalog.WorkFormatSummary
 		var workID, title string
 		if err := rows.Scan(&workID, &title, &format.Type, &format.ContentID, &format.LibraryID); err != nil {
 			return nil, err
 		}
 		if summary == nil {
-			summary = &WorkSummary{WorkID: workID, Title: title}
+			summary = &catalog.WorkSummary{WorkID: workID, Title: title}
 		}
 		summary.Formats = append(summary.Formats, format)
 	}

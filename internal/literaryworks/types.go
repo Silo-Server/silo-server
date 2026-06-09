@@ -54,18 +54,6 @@ type Candidate struct {
 	Evidence        map[string]string `json:"evidence"`
 }
 
-type WorkSummary struct {
-	WorkID  string              `json:"work_id,omitempty"`
-	Title   string              `json:"work_title,omitempty"`
-	Formats []WorkFormatSummary `json:"work_formats,omitempty"`
-}
-
-type WorkFormatSummary struct {
-	Type      string `json:"type"`
-	ContentID string `json:"content_id"`
-	LibraryID int    `json:"library_id,omitempty"`
-}
-
 type DetailResponse struct {
 	WorkID          string           `json:"work_id"`
 	WorkTitle       string           `json:"work_title"`

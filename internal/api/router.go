@@ -471,6 +471,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		detailSvc.SetFolderRepository(folderRepo)
 		detailSvc.SetRootClaimRepository(rootClaimRepo)
 		detailSvc.SetGroupClaimRepository(groupClaimRepo)
+		detailSvc.SetWorkSummaryProvider(literaryRepo)
 		detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
 		detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
 		if deps.ImageResolver != nil {
