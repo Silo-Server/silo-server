@@ -287,42 +287,7 @@ func InitSchema(db *sql.DB) error {
 	if err := migratePlaybackSettingsToDeviceScope(db); err != nil {
 		return err
 	}
-	if err := migrateCompletedProgressPositionReset(db); err != nil {
-		return err
-	}
 	return backfillUserDevices(db)
-}
-
-// userSchemaVersionCompletedPositionReset is the PRAGMA user_version value
-// recording the one-time reset of completed watch_progress rows to
-// position_seconds = 0 (the row-level invariant behind the position-based
-// Continue Watching predicate). One-time data fixes can't be made idempotent
-// by predicate alone — re-running this UPDATE on every boot would wipe the
-// resume point of any rewatch in flight — so the version gate is required.
-const userSchemaVersionCompletedPositionReset = 1
-
-func migrateCompletedProgressPositionReset(db *sql.DB) error {
-	var version int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("reading user_version: %w", err)
-	}
-	if version >= userSchemaVersionCompletedPositionReset {
-		return nil
-	}
-	if _, err := db.Exec(`
-		UPDATE watch_progress
-		SET position_seconds = 0
-		WHERE completed = 1
-		  AND position_seconds <> 0
-	`); err != nil {
-		return fmt.Errorf("resetting completed progress positions: %w", err)
-	}
-	if _, err := db.Exec(
-		fmt.Sprintf("PRAGMA user_version = %d", userSchemaVersionCompletedPositionReset),
-	); err != nil {
-		return fmt.Errorf("updating user_version: %w", err)
-	}
-	return nil
 }
 
 func ensureAutoSkipRecapPreviewColumns(db *sql.DB) error {

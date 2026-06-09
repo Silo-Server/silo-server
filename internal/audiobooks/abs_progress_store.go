@@ -144,17 +144,27 @@ func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressR
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
+	// Completed rows hold no resume point (position_seconds = 0) — the same
+	// invariant as the userstore write paths — so finished books can't leak
+	// into position-based continue-watching/listening queries. A later
+	// non-finished report (re-listen) moves position forward from 0 while
+	// the completed latch stays.
+	position := row.CurrentSeconds
+	if row.IsFinished {
+		position = 0
+	}
 	_, err = s.Pool.Exec(ctx, `
 		INSERT INTO user_watch_progress
 		  (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
-		  position_seconds = GREATEST(user_watch_progress.position_seconds, EXCLUDED.position_seconds),
+		  position_seconds = CASE WHEN EXCLUDED.completed THEN 0
+		      ELSE GREATEST(user_watch_progress.position_seconds, EXCLUDED.position_seconds) END,
 		  duration_seconds = GREATEST(user_watch_progress.duration_seconds, EXCLUDED.duration_seconds),
 		  completed        = user_watch_progress.completed OR EXCLUDED.completed,
 		  updated_at       = GREATEST(user_watch_progress.updated_at, EXCLUDED.updated_at)`,
 		uid, row.ProfileID, row.ContentID,
-		row.CurrentSeconds, row.DurationSeconds, row.IsFinished, updatedAt,
+		position, row.DurationSeconds, row.IsFinished, updatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("abs_progress_store: upsert progress: %w", err)

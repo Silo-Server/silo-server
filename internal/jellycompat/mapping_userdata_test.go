@@ -20,6 +20,9 @@ func TestUserDataDTOPlayedReportsZeroPosition(t *testing.T) {
 	if !dto.Played {
 		t.Fatalf("Played = false, want true")
 	}
+	if dto.PlayedPercentage != 100 {
+		t.Fatalf("PlayedPercentage = %v, want 100 for played item at rest", dto.PlayedPercentage)
+	}
 }
 
 func TestUserDataDTOPlayedRewatchReportsResumePosition(t *testing.T) {
@@ -51,6 +54,9 @@ func TestUserDataDTOClampsPositionPastDuration(t *testing.T) {
 	if dto.PlaybackPositionTicks != want {
 		t.Fatalf("PlaybackPositionTicks = %d, want %d (clamped to duration)", dto.PlaybackPositionTicks, want)
 	}
+	if dto.PlayedPercentage > 100 {
+		t.Fatalf("PlayedPercentage = %v, want <= 100 (derived from the clamped position)", dto.PlayedPercentage)
+	}
 }
 
 func TestUserDataDTOPreservesValidPosition(t *testing.T) {
@@ -81,6 +87,9 @@ func TestUserDataDTOProgressCompletedZeros(t *testing.T) {
 	if !dto.Played {
 		t.Fatalf("Played = false, want true")
 	}
+	if dto.PlayedPercentage != 100 {
+		t.Fatalf("PlayedPercentage = %v, want 100 for completed item at rest", dto.PlayedPercentage)
+	}
 }
 
 func TestUserDataDTOProgressRewatchKeepsPlayedAndPosition(t *testing.T) {
@@ -100,6 +109,10 @@ func TestUserDataDTOProgressRewatchKeepsPlayedAndPosition(t *testing.T) {
 	}
 	if dto.PlayCount != 1 {
 		t.Fatalf("PlayCount = %d, want 1 (watched state survives rewatch)", dto.PlayCount)
+	}
+	wantPct := (600.0 / 1290.0) * 100
+	if dto.PlayedPercentage != wantPct {
+		t.Fatalf("PlayedPercentage = %v, want %v (live rewatch fraction)", dto.PlayedPercentage, wantPct)
 	}
 }
 

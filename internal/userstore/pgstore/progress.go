@@ -99,7 +99,7 @@ func (s *PostgresUserStore) SetProgress(ctx context.Context, profileID, mediaIte
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = user_watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, now,
 	)
@@ -136,7 +136,7 @@ func (s *PostgresUserStore) SetProgressAt(ctx context.Context, profileID, mediaI
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = user_watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, updatedAt.UTC(),
 	)
@@ -239,7 +239,6 @@ func (s *PostgresUserStore) MarkProgressBatch(ctx context.Context, profileID str
 		    position_seconds = 0,
 		    updated_at = EXCLUDED.updated_at
 		WHERE user_watch_progress.completed IS DISTINCT FROM TRUE
-		   OR user_watch_progress.position_seconds <> 0
 		   OR user_watch_progress.updated_at < EXCLUDED.updated_at`,
 		s.userID, profileID, mediaItemIDs, updatedAt.UTC(),
 	)

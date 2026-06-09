@@ -175,6 +175,59 @@ func TestProgressRewatchGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("playback stop mid-rewatch keeps the watched latch", func(t *testing.T) {
+		db := newRewatchTestDB(t)
+		if err := MarkWatched(db, "p", "m", 7200); err != nil {
+			t.Fatalf("MarkWatched: %v", err)
+		}
+		// RecordPlaybackStop persists the final position via SetProgress with
+		// completed=false (below the watched threshold). The latch must hold.
+		if err := SetProgress(db, "p", "m", 2880, 7200, th); err != nil {
+			t.Fatalf("SetProgress: %v", err)
+		}
+		wp := rewatchGetProgress(t, db, "p", "m")
+		if !wp.Completed || wp.PositionSeconds != 2880 {
+			t.Fatalf("got completed=%v pos=%v, want true/2880 (latch + resume point)", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("set progress if newer keeps the watched latch", func(t *testing.T) {
+		db := newRewatchTestDB(t)
+		if err := MarkWatched(db, "p", "m", 7200); err != nil {
+			t.Fatalf("MarkWatched: %v", err)
+		}
+		wrote, err := SetProgressIfNewer(db, "p", "m", 1800, 7200, false, time.Now().UTC().Add(time.Hour))
+		if err != nil {
+			t.Fatalf("SetProgressIfNewer: %v", err)
+		}
+		if !wrote {
+			t.Fatalf("SetProgressIfNewer wrote = false, want true")
+		}
+		wp := rewatchGetProgress(t, db, "p", "m")
+		if !wp.Completed || wp.PositionSeconds != 1800 {
+			t.Fatalf("got completed=%v pos=%v, want true/1800 (latch + resume point)", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("stale mark batch does not zero a newer rewatch", func(t *testing.T) {
+		db := newRewatchTestDB(t)
+		if err := MarkWatched(db, "p", "ep", 7200); err != nil {
+			t.Fatalf("MarkWatched: %v", err)
+		}
+		if err := UpdateProgress(db, "p", "ep", 900, 7200, th); err != nil {
+			t.Fatalf("UpdateProgress(rewatch): %v", err)
+		}
+		// A delayed batch mark carrying an old timestamp must not clobber the
+		// live rewatch resume point.
+		if err := MarkProgressBatch(db, "p", []string{"ep"}, time.Now().UTC().Add(-time.Hour)); err != nil {
+			t.Fatalf("MarkProgressBatch(stale): %v", err)
+		}
+		wp := rewatchGetProgress(t, db, "p", "ep")
+		if !wp.Completed || wp.PositionSeconds != 900 {
+			t.Fatalf("got completed=%v pos=%v, want true/900 (stale batch ignored)", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
 	t.Run("set progress at completed normalizes position to zero", func(t *testing.T) {
 		db := newRewatchTestDB(t)
 		// Import path (trakt/jellyfin) reporting a completed watch with a
@@ -189,10 +242,11 @@ func TestProgressRewatchGuards(t *testing.T) {
 	})
 }
 
-// TestMigrateCompletedProgressPositionReset verifies the one-time userdb data
-// migration: legacy completed rows (position pinned to duration) reset to 0,
-// and the user_version gate prevents re-runs from wiping rewatch state.
-func TestMigrateCompletedProgressPositionReset(t *testing.T) {
+// TestMigrateToV11ResetsCompletedPositions verifies the v11 userdb migration:
+// an existing DB (user_version 10) gets its legacy completed rows (position
+// pinned to duration) reset to 0, and the version gate prevents re-runs from
+// wiping rewatch state.
+func TestMigrateToV11ResetsCompletedPositions(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -202,35 +256,43 @@ func TestMigrateCompletedProgressPositionReset(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 
-	// Simulate a legacy row written before the model change.
+	// Simulate an existing pre-v11 database: schema already at v10 with a
+	// legacy completed row written under the old model.
+	if _, err := db.Exec("PRAGMA user_version = 10"); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
 	if _, err := db.Exec(`
 		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES ('p', 'legacy', 7200, 7200, 1, '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("seed legacy row: %v", err)
 	}
-	// Reset the version gate so the migration runs again over the seed.
-	if _, err := db.Exec("PRAGMA user_version = 0"); err != nil {
-		t.Fatalf("reset user_version: %v", err)
-	}
-	if err := migrateCompletedProgressPositionReset(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("runMigrations: %v", err)
 	}
 	wp := rewatchGetProgress(t, db, "p", "legacy")
 	if !wp.Completed || wp.PositionSeconds != 0 {
 		t.Fatalf("after migration: completed=%v pos=%v, want true/0", wp.Completed, wp.PositionSeconds)
 	}
+	version, err := userVersion(db)
+	if err != nil {
+		t.Fatalf("userVersion: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, schemaVersion)
+	}
 
-	// A rewatch in flight must survive subsequent InitSchema calls (the
-	// version gate blocks re-runs).
+	// A rewatch in flight must survive subsequent runs (the version gate
+	// blocks re-runs).
 	th := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
 	if err := UpdateProgress(db, "p", "legacy", 900, 7200, th); err != nil {
 		t.Fatalf("UpdateProgress(rewatch): %v", err)
 	}
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema(again): %v", err)
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("runMigrations(again): %v", err)
 	}
 	wp = rewatchGetProgress(t, db, "p", "legacy")
 	if !wp.Completed || wp.PositionSeconds != 900 {
-		t.Fatalf("after re-init: completed=%v pos=%v, want true/900 (rewatch preserved)", wp.Completed, wp.PositionSeconds)
+		t.Fatalf("after re-run: completed=%v pos=%v, want true/900 (rewatch preserved)", wp.Completed, wp.PositionSeconds)
 	}
 }

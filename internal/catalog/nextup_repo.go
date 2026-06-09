@@ -142,7 +142,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 				JOIN episodes e_ip ON e_ip.content_id = uwp_ip.media_item_id
 				WHERE uwp_ip.user_id = $1
 				  AND uwp_ip.profile_id = $2
-				  AND uwp_ip.completed = FALSE
+				  AND uwp_ip.position_seconds > 0
 				  AND e_ip.series_id = ce.series_id
 				  AND uwp_ip.updated_at > ce.updated_at
 			)
@@ -257,7 +257,7 @@ func buildListResumableFirstEpisodesQuery(q NextUpQuery, inProgressIDs []string)
 		JOIN media_items si ON si.content_id = e.series_id
 		WHERE uwp.user_id = $1
 		  AND uwp.profile_id = $2
-		  AND uwp.completed = FALSE
+		  AND uwp.position_seconds > 0
 		  AND uwp.media_item_id = ANY($3)%s%s
 		ORDER BY e.series_id, uwp.updated_at DESC`, seriesFilter, completedSeriesGate)
 

@@ -869,8 +869,11 @@ func (r *Repository) UpsertImportedProgress(
 	if positionSeconds < 0 {
 		positionSeconds = 0
 	}
-	if completed && durationSeconds > 0 {
-		positionSeconds = durationSeconds
+	// Completed rows hold no resume point and `completed` is a one-way watched
+	// latch — mirrors the userstore write paths so imported rows can't surface
+	// as phantom Continue Watching entries.
+	if completed {
+		positionSeconds = 0
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO user_watch_progress (
@@ -879,7 +882,7 @@ func (r *Repository) UpsertImportedProgress(
 		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = user_watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at`,
 		userID, profileID, mediaItemID, positionSeconds, durationSeconds, completed, updatedAt,
 	)

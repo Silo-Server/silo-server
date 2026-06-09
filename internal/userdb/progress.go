@@ -52,7 +52,9 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 }
 
 // SetProgress bypasses the forward-only guard (for rewatches/explicit seek).
-// It unconditionally sets the position to the given value.
+// It unconditionally sets the position to the given value. The completed flag
+// stays a one-way watched latch: only ClearProgress/ClearProgressBatch (mark
+// unwatched) release it.
 func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	now := nowUTC()
 	completed := false
@@ -66,7 +68,7 @@ func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration f
 		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now)
@@ -104,7 +106,7 @@ func SetProgressAt(db *sql.DB, profileID, mediaItemID string, position, duration
 		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at
 	`
 	_, err = db.Exec(query, profileID, mediaItemID, position, duration, completed, updatedAtText)
@@ -141,7 +143,7 @@ func SetProgressIfNewer(db *sql.DB, profileID, mediaItemID string, position, dur
 		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
-			completed = excluded.completed,
+			completed = watch_progress.completed OR excluded.completed,
 			updated_at = excluded.updated_at
 		WHERE excluded.updated_at > watch_progress.updated_at
 	`, profileID, mediaItemID, position, duration, completed, updatedAtText)
@@ -218,7 +220,6 @@ func MarkProgressBatch(db *sql.DB, profileID string, mediaItemIDs []string, upda
 				position_seconds = 0,
 				updated_at = excluded.updated_at
 			WHERE watch_progress.completed != 1
-			   OR watch_progress.position_seconds <> 0
 			   OR watch_progress.updated_at < excluded.updated_at
 		`, profileID, mediaItemID, updatedAtText); err != nil {
 			return fmt.Errorf("mark progress batch row: %w", err)

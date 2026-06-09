@@ -344,7 +344,7 @@ func TestBuildSortClause_PersonalizedComputedSorts(t *testing.T) {
 	}{
 		{
 			field:      "progress",
-			expectJoin: []string{"FROM user_watch_progress uwp", "uwp.completed = FALSE", "uwp.position_seconds::double precision / NULLIF(uwp.duration_seconds, 0)"},
+			expectJoin: []string{"FROM user_watch_progress uwp", "uwp.position_seconds > 0", "uwp.position_seconds::double precision / NULLIF(uwp.duration_seconds, 0)"},
 			expectExpr: []string{"sort_progress.progress_ratio"},
 			expectArgN: 2,
 		},
