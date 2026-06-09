@@ -65,6 +65,21 @@ func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 	}
 }
 
+// applyPlayableLocation stamps location fields for a movie/episode based on
+// whether any media file backs it. Fileless (provider-metadata-only) items are
+// Jellyfin "Virtual" and carry no VideoType, so clients exclude them from
+// playback queues. Items whose file went missing are currently also reported
+// as Virtual rather than Jellyfin's "Offline".
+func applyPlayableLocation(dto *baseItemDTO, hasFile bool) {
+	if hasFile {
+		dto.LocationType = "FileSystem"
+		dto.VideoType = "VideoFile"
+	} else {
+		dto.LocationType = "Virtual"
+		dto.VideoType = ""
+	}
+}
+
 func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *upstreamProgress, fields map[string]bool) baseItemDTO {
 	_, allFields := fields["*"] // detail views pass allDetailFields sentinel
 
@@ -88,8 +103,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.RunTimeTicks = minutesToTicks(item.Runtime)
 	}
 	if item.Type == "movie" || item.Type == "episode" {
-		dto.LocationType = "FileSystem"
-		dto.VideoType = "VideoFile"
+		applyPlayableLocation(&dto, item.HasMediaFiles == nil || *item.HasMediaFiles)
 	}
 	if item.SeriesID != "" {
 		dto.SeriesID = m.codec.EncodeStringID(EncodedIDItem, item.SeriesID)
@@ -372,8 +386,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		dto.HasSubtitles = versionsHaveSubtitles(item.Versions)
 		dto.SupportsSync = false
 		dto.Container = strings.ToLower(firstVersion.Container)
-		dto.LocationType = "FileSystem"
-		dto.VideoType = "VideoFile"
+		applyPlayableLocation(&dto, true)
 		dto.Path = compatMediaPath(firstVersion)
 		if len(firstVersion.VideoTracks) > 0 {
 			dto.Width = firstVersion.VideoTracks[0].Width
@@ -408,6 +421,11 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if wantField("chapters") {
 			dto.Chapters = compatChapters(firstVersion.Chapters, firstVersion.AddedAt)
 		}
+	} else if isPlayableItemType(item.Type) {
+		// Provider-metadata-only (unaired/missing) item: version data is
+		// authoritative here, so override the FileSystem default set by
+		// itemFromList with Jellyfin's Virtual contract.
+		applyPlayableLocation(&dto, false)
 	}
 	slog.Info("jellycompat item detail mapped",
 		"content_id", item.ContentID,
@@ -452,13 +470,12 @@ func (m *mapper) episodeFromUpstream(ep upstreamEpisode, isFavorite bool, progre
 		Name:         ep.Title,
 		ServerID:     m.serverID,
 		Overview:     ep.Overview,
-		LocationType: "FileSystem",
-		VideoType:    "VideoFile",
 		RunTimeTicks: minutesToTicks(ep.Runtime),
 		ImageTags:    map[string]string{},
 		SeriesName:   ep.SeriesTitle,
 		UserData:     userDataDTO(m.codec.EncodeStringID(EncodedIDItem, ep.ContentID), ep.UserData, isFavorite, progress),
 	}
+	applyPlayableLocation(&dto, ep.HasMediaFiles == nil || *ep.HasMediaFiles)
 	dto.IndexNumber = &ep.EpisodeNumber
 	dto.ParentIndexNumber = &ep.SeasonNumber
 	if ep.SeriesID != "" {
