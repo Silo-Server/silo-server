@@ -574,6 +574,11 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 		if seedErr := h.SectionRepo.SeedDefaults(r.Context(), "library", &folder.ID, sections.DefaultLibrarySectionsForType(&folder.ID, folder.Type)); seedErr != nil {
 			slog.Warn("seed default sections for new library", "library_id", folder.ID, "error", seedErr)
 		}
+		if sections.IsAudiobookLibraryType(folder.Type) {
+			if _, seedErr := h.SectionRepo.EnsureHomeContinueListeningSection(r.Context()); seedErr != nil {
+				slog.Warn("ensure home continue listening section", "library_id", folder.ID, "error", seedErr)
+			}
+		}
 		if _, seedErr := h.SectionRepo.CreateGeneratedHomeLibraryRecentSections(r.Context(), folder.ID, folder.Name, folder.Type); seedErr != nil {
 			slog.Warn("seed generated home sections for new library", "library_id", folder.ID, "error", seedErr)
 		}

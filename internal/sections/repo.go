@@ -448,6 +448,120 @@ func (r *Repository) CreateGeneratedHomeLibraryRecentSections(ctx context.Contex
 	return created, nil
 }
 
+func (r *Repository) EnsureHomeContinueListeningSection(ctx context.Context) (*PageSection, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning continue listening transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var existingID string
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM page_sections
+		WHERE scope = 'home'
+		  AND library_id IS NULL
+		  AND section_type = $1
+		  AND (
+		    config->>'continue_type' = $2
+		    OR config->>'filter_type' = 'audiobook'
+		    OR config->>'media_scope' = 'audiobook'
+		  )
+		ORDER BY position ASC
+		LIMIT 1
+	`, SectionContinueWatching, ContinueTypeListening).Scan(&existingID)
+	if err == nil {
+		return nil, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("checking home continue listening section: %w", err)
+	}
+
+	insertPosition, err := continueListeningInsertPosition(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE page_sections
+		SET position = position + 1, updated_at = NOW()
+		WHERE scope = 'home'
+		  AND library_id IS NULL
+		  AND position >= $1
+	`, insertPosition); err != nil {
+		return nil, fmt.Errorf("shifting home sections: %w", err)
+	}
+
+	id, err := idgen.NextID()
+	if err != nil {
+		return nil, fmt.Errorf("generate section id: %w", err)
+	}
+	query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,'home',NULL,$2,$3,$4,false,20,$5,true,NOW(),NOW())
+		RETURNING %s`, sectionColumns, sectionColumns)
+	created, err := scanSection(tx.QueryRow(ctx, query,
+		id,
+		insertPosition,
+		SectionContinueWatching,
+		"Continue Listening",
+		ContinueTypeConfig(ContinueTypeListening),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("creating home continue listening section: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing continue listening transaction: %w", err)
+	}
+	return created, nil
+}
+
+type homeSectionPositionRow struct {
+	Position    int
+	SectionType SectionType
+	Config      json.RawMessage
+}
+
+type queryer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func continueListeningInsertPosition(ctx context.Context, q queryer) (int, error) {
+	rows, err := q.Query(ctx, `
+		SELECT position, section_type, config
+		FROM page_sections
+		WHERE scope = 'home'
+		  AND library_id IS NULL
+		ORDER BY position ASC
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("listing home section positions: %w", err)
+	}
+	defer rows.Close()
+
+	insertPosition := 0
+	foundWatching := false
+	for rows.Next() {
+		var row homeSectionPositionRow
+		if err := rows.Scan(&row.Position, &row.SectionType, &row.Config); err != nil {
+			return 0, fmt.Errorf("scanning home section position: %w", err)
+		}
+		if foundWatching {
+			if row.SectionType != SectionContinueWatching {
+				break
+			}
+			insertPosition = row.Position + 1
+			continue
+		}
+		insertPosition = row.Position + 1
+		if row.SectionType == SectionContinueWatching && ContinueTypeFromConfig(row.Config) == ContinueTypeWatching {
+			foundWatching = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterating home section positions: %w", err)
+	}
+	return insertPosition, nil
+}
+
 func (r *Repository) SyncGeneratedHomeLibraryRecentTitles(ctx context.Context, libraryID int, oldLibraryName, newLibraryName string) error {
 	sections, err := r.listGeneratedHomeLibraryRecentSections(ctx, libraryID)
 	if err != nil {

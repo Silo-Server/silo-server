@@ -90,6 +90,7 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
         <MediaItemMenu
           contentId={item.content_id}
           mediaType={item.type}
+          libraryId={libraryId}
           userState={item.user_state}
           variant="poster"
         />

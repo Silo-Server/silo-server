@@ -115,7 +115,7 @@ export default function WatchTonightDialog({ open, onOpenChange }: WatchTonightD
                 <div>
                   <p className="font-semibold">Pick Up Where I Left Off</p>
                   <p className="text-muted-foreground mt-1 text-xs">
-                    Continue watching or start next episodes
+                    Continue in-progress titles or start what is next
                   </p>
                 </div>
               </button>

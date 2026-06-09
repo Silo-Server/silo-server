@@ -12,6 +12,9 @@ export default function RecipeParamFields({ def, params, onChange }: RecipeParam
   if (def.type === "collection") {
     return <CollectionParamField params={params} onChange={onChange} />;
   }
+  if (def.type === "continue_watching") {
+    return <ContinueTypeParamField params={params} onChange={onChange} />;
+  }
   if (def.type === "seasonal_themed") {
     return <SeasonalParamField params={params} onChange={onChange} />;
   }
@@ -107,6 +110,24 @@ export default function RecipeParamFields({ def, params, onChange }: RecipeParam
 interface ParamFieldProps {
   params: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+}
+
+function ContinueTypeParamField({ params, onChange }: ParamFieldProps) {
+  const continueType = params.continue_type === "listening" ? "listening" : "watching";
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs text-white/70">Continue type</span>
+      <select
+        value={continueType}
+        onChange={(event) => onChange({ ...params, continue_type: event.target.value })}
+        className="w-full rounded border border-white/15 bg-white/5 px-3 py-2 text-sm"
+      >
+        <option value="watching">Watching</option>
+        <option value="listening">Listening</option>
+      </select>
+    </label>
+  );
 }
 
 // Order matches SeasonalThemeOrder in the backend. Higher entries take

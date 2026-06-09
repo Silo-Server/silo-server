@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { RefreshCw, Tv } from "lucide-react";
 import type { SwipeCard as SwipeCardType } from "@/hooks/queries/recommendations";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import SwipeCard, { CardActions } from "./SwipeCard";
+import { buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
 
 // Stack positioning for each depth level (0 = top, 1 = behind, 2 = further).
 const stackVariants = {
@@ -25,6 +26,14 @@ interface CardStackProps {
   onReset: () => void;
 }
 
+export function playTargetForSwipeCard(card: SwipeCardType) {
+  const href = buildMediaPlayHref({ contentId: card.content_id, type: card.type });
+  return {
+    href,
+    isVideo: isVideoWatchHref(href),
+  };
+}
+
 export default function CardStack({
   cards,
   hasMore,
@@ -36,6 +45,7 @@ export default function CardStack({
   const [topIndex, setTopIndex] = useState(0);
   const prefetchTriggered = useRef(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const playbackController = useWatchPlaybackController();
 
   const visibleCards = cards.slice(topIndex, topIndex + 3);
@@ -61,11 +71,16 @@ export default function CardStack({
     const card = cards[topIndex];
     if (!card) return;
     onClose();
+    const target = playTargetForSwipeCard(card);
+    if (!target.isVideo) {
+      navigate(target.href);
+      return;
+    }
     playbackController.startPlayback({
       contentId: card.content_id,
       returnHref: `${location.pathname}${location.search}`,
     });
-  }, [cards, topIndex, onClose, playbackController, location.pathname, location.search]);
+  }, [cards, topIndex, onClose, playbackController, location.pathname, location.search, navigate]);
 
   // Keyboard navigation.
   useEffect(() => {
@@ -163,7 +178,12 @@ export default function CardStack({
 
       {/* Action buttons */}
       {visibleCards.length > 0 && (
-        <CardActions onReject={advance} onAccept={handlePlay} onPlay={handlePlay} />
+        <CardActions
+          onReject={advance}
+          onAccept={handlePlay}
+          onPlay={handlePlay}
+          playLabel={visibleCards[0]?.type === "audiobook" ? "Listen now" : "Play now"}
+        />
       )}
 
       {/* Counter */}
