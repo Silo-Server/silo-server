@@ -11,19 +11,19 @@ func TestParseFolderIDs_BracketedBareImdb(t *testing.T) {
 		{"8-digit tt", "Movie (2024) [tt12345678]", "tt12345678"},
 	}
 	for _, c := range cases {
-		got := ParseFolderIDs(c.folder, "movie")
+		got := ParseFolderIDs(c.folder)
 		if got == nil || got.ImdbID != c.wantImdb {
 			t.Errorf("%s: ParseFolderIDs(%q) = %+v, want ImdbID=%q", c.name, c.folder, got, c.wantImdb)
 		}
 	}
 	// must NOT change existing behavior:
-	if got := ParseFolderIDs("Movie [imdb-tt1375666]", "movie"); got == nil || got.ImdbID != "tt1375666" {
+	if got := ParseFolderIDs("Movie [imdb-tt1375666]"); got == nil || got.ImdbID != "tt1375666" {
 		t.Errorf("structured imdb regressed: %+v", got)
 	}
-	if got := ParseFolderIDs("Some Movie (2020) [BB]", "movie"); got != nil {
+	if got := ParseFolderIDs("Some Movie (2020) [BB]"); got != nil {
 		t.Errorf("non-tt bracket tag must not parse as id, got %+v", got)
 	}
-	if got := ParseFolderIDs("17 Blocks (2021)", "movie"); got != nil {
+	if got := ParseFolderIDs("17 Blocks (2021)"); got != nil {
 		t.Errorf("no-id folder must return nil, got %+v", got)
 	}
 }

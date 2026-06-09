@@ -3,7 +3,6 @@ package naming
 import (
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 // folderIDPattern matches patterns like [tmdbid-27205], {tmdb-27205},
@@ -11,7 +10,6 @@ import (
 // The regex captures the provider prefix and the ID value.
 var folderIDPattern = regexp.MustCompile(`[{\[](tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-([\w]+)[}\]]`)
 var trailingImdbIDPattern = regexp.MustCompile(`(?i)(?:^|\s)(tt\d{7,8})$`)
-var trailingNumericIDPattern = regexp.MustCompile(`(?:^|\s)(\d+)$`)
 
 // bracketedBareImdbPattern matches a bare IMDb id wrapped in brackets without a
 // provider prefix, e.g. [tt10011226] or {tt0095016} (Plex/Kodi-style tags). A
@@ -48,11 +46,16 @@ func ParseStructuredFolderIDs(name string) *FolderIDHints {
 	return hints
 }
 
-// ParseFolderIDs extracts external provider IDs from a folder name.
-// It supports bracket styles [] and {} with provider prefixes tmdb/tmdbid,
-// imdb/imdbid, tvdb/tvdbid, plus bare trailing IDs. Bare numeric IDs are
-// interpreted using folderType: series -> TVDB, everything else -> TMDB.
-func ParseFolderIDs(folderName string, folderType string) *FolderIDHints {
+// ParseFolderIDs extracts external provider IDs from a folder name. Mirroring
+// Jellyfin's path-attribute model, only explicit evidence is honored: bracket
+// tags with provider prefixes ({tmdb-27205}, [tvdbid-81189], [imdbid-tt1375666]),
+// bracketed bare IMDb ids ([tt1375666]), and a trailing bare IMDb id — the
+// "tt" prefix makes IMDb ids unambiguous without brackets. Bare trailing
+// numbers are never treated as IDs: titles legitimately end in numbers
+// ("District 9", "Beverly Hills 90210"), no mainstream tool emits bare-number
+// tags, and a misparsed ID becomes a trusted match hint downstream where it
+// silently produces a wrong match or blocks matching entirely.
+func ParseFolderIDs(folderName string) *FolderIDHints {
 	if hints := ParseStructuredFolderIDs(folderName); hints != nil {
 		return hints
 	}
@@ -62,40 +65,5 @@ func ParseFolderIDs(folderName string, folderType string) *FolderIDHints {
 		return &FolderIDHints{ImdbID: strings.ToLower(m[1])}
 	}
 
-	m := trailingNumericIDPattern.FindStringSubmatch(trimmed)
-	if m == nil {
-		return nil
-	}
-
-	id := m[1]
-	if looksLikeYear(id) {
-		return nil
-	}
-
-	// A bare trailing number is only an ID when appended to a real title. If the
-	// name has no letters (e.g. "86", "22 7"), it's a numeric title, not an ID.
-	// Trade-off: a folder named ONLY a bare provider id (e.g. "81189") with no
-	// title text now returns nil rather than that id — acceptable because
-	// Sonarr/Radarr never produce bare-number folders.
-	if !containsLetter(trimmed) {
-		return nil
-	}
-
-	if strings.EqualFold(strings.TrimSpace(folderType), "series") {
-		return &FolderIDHints{TvdbID: id}
-	}
-	return &FolderIDHints{TmdbID: id}
-}
-
-func containsLetter(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) {
-			return true
-		}
-	}
-	return false
-}
-
-func looksLikeYear(value string) bool {
-	return len(value) == 4 && value >= "1800" && value <= "2100"
+	return nil
 }

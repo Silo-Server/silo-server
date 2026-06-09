@@ -3856,10 +3856,6 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if res.Type == "" {
 		res.Type = "movie"
 	}
-	folderType := res.Type
-	if folderType == "" {
-		folderType = "movie"
-	}
 
 	// Explicit structured IDs from the file or folder are treated as trusted.
 	// When present, they override scanner ambiguity and become the authoritative
@@ -3874,9 +3870,9 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// Parse observed location names for external IDs before falling back to the
 	// legacy canonical root path. This preserves existing heuristic behavior for
 	// roots without explicit structured tags.
-	folderIDs := naming.ParseFolderIDs(filepath.Base(observedRootPath), folderType)
+	folderIDs := naming.ParseFolderIDs(filepath.Base(observedRootPath))
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
-		folderIDs = naming.ParseFolderIDs(filepath.Base(contentRootPath), folderType)
+		folderIDs = naming.ParseFolderIDs(filepath.Base(contentRootPath))
 	}
 
 	effectiveExternalIDs := folderIDs

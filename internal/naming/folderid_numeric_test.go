@@ -2,36 +2,50 @@ package naming
 
 import "testing"
 
-func TestParseFolderIDs_NumericTitleIsNotAnID(t *testing.T) {
-	// Numeric-only anime titles must NOT be parsed as a bare trailing tvdb/tmdb id.
-	if got := ParseFolderIDs("86", "series"); got != nil {
-		t.Errorf(`ParseFolderIDs("86","series") = %+v, want nil`, got)
+// Bare numbers in folder names are never provider IDs. This mirrors
+// Jellyfin's path-attribute model: only explicit bracket tags (and
+// unambiguous tt-prefixed IMDb ids) carry identity. Titles legitimately end
+// in numbers, and a misparsed bare ID becomes a trusted match hint that
+// silently mismatches or blocks matching.
+func TestParseFolderIDs_BareNumbersAreNeverIDs(t *testing.T) {
+	for _, c := range []string{
+		// Numeric-only titles (anime and otherwise).
+		"86",
+		"22 7",
+		// Titles ending in a short number.
+		"District 9",
+		"Apollo 13",
+		"Ocean's 11",
+		"THX 1138",
+		"Stranger Things 4",
+		// Season-style directory names.
+		"Season 01",
+		// Titles ending in a long number that looks like a plausible ID.
+		"Beverly Hills 90210",
+		// Bare trailing numbers that previously parsed as IDs.
+		"Some Show 81189",
+		"進撃の巨人 73743",
+	} {
+		if got := ParseFolderIDs(c); got != nil {
+			t.Errorf(`ParseFolderIDs(%q) = %+v, want nil`, c, got)
+		}
 	}
-	if got := ParseFolderIDs("22 7", "series"); got != nil {
-		t.Errorf(`ParseFolderIDs("22 7","series") = %+v, want nil`, got)
-	}
+}
 
-	// A real bare trailing id with title text must still be parsed.
-	got := ParseFolderIDs("Some Show 81189", "series")
-	if got == nil || got.TvdbID != "81189" {
-		t.Errorf(`ParseFolderIDs("Some Show 81189","series") = %+v, want TvdbID="81189"`, got)
-	}
-
-	// Structured tags must still win regardless of letters.
-	got = ParseFolderIDs("{tmdb-27205}", "movies")
+func TestParseFolderIDs_StructuredTagsStillParse(t *testing.T) {
+	got := ParseFolderIDs("{tmdb-27205}")
 	if got == nil || got.TmdbID != "27205" {
-		t.Errorf(`ParseFolderIDs("{tmdb-27205}","movies") = %+v, want TmdbID="27205"`, got)
+		t.Errorf(`ParseFolderIDs("{tmdb-27205}") = %+v, want TmdbID="27205"`, got)
 	}
 
-	// Non-Latin (CJK) title with a trailing real id must still parse —
-	// unicode.IsLetter covers kana/kanji, so this is treated as title + id.
-	got = ParseFolderIDs("進撃の巨人 73743", "series")
-	if got == nil || got.TvdbID != "73743" {
-		t.Errorf(`ParseFolderIDs("進撃の巨人 73743","series") = %+v, want TvdbID="73743"`, got)
+	got = ParseFolderIDs("Some Show (2010) [tvdbid-81189]")
+	if got == nil || got.TvdbID != "81189" {
+		t.Errorf(`ParseFolderIDs("Some Show (2010) [tvdbid-81189]") = %+v, want TvdbID="81189"`, got)
 	}
 
-	// Numeric-only title for a movies library is also not an id.
-	if got := ParseFolderIDs("86", "movies"); got != nil {
-		t.Errorf(`ParseFolderIDs("86","movies") = %+v, want nil`, got)
+	// Trailing bare IMDb ids stay supported — the tt prefix is unambiguous.
+	got = ParseFolderIDs("Some Movie (2010) tt1375666")
+	if got == nil || got.ImdbID != "tt1375666" {
+		t.Errorf(`ParseFolderIDs("Some Movie (2010) tt1375666") = %+v, want ImdbID="tt1375666"`, got)
 	}
 }
