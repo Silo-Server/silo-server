@@ -178,6 +178,32 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 	return enriched, nil
 }
 
+// HasPendingItems reports whether a scheduled sweep has any audiobook rows to
+// process. It mirrors claimBatch's eligibility predicate without loading rows
+// or provider IDs, so the scheduler can skip no-op executions without adding
+// task-history noise.
+func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
+	if e == nil || e.pool == nil || e.chainRepo == nil {
+		return false, nil
+	}
+
+	var exists bool
+	err := e.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM media_items mi
+			WHERE mi.type = 'audiobook'
+			  AND (mi.poster_path IS NULL OR mi.poster_path = '')
+			  AND mi.last_refreshed IS NULL
+			LIMIT 1
+		)
+	`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking pending audiobook enrichment: %w", err)
+	}
+	return exists, nil
+}
+
 // runBatch processes items in parallel using e.workers goroutines. The
 // enrichFn parameter exists for testing: production calls pass e.enrichItem.
 // Returns the count of items where enrichFn returned nil.

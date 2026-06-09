@@ -188,7 +188,8 @@ func (f *fakeServiceHost) Shutdown(context.Context) error {
 }
 
 type fakePluginClient struct {
-	manifest *pluginv1.PluginManifest
+	manifest              *pluginv1.PluginManifest
+	metadataProviderCalls int
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -196,6 +197,7 @@ func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
 }
 
 func (f *fakePluginClient) MetadataProvider(string) (*pluginhost.MetadataProviderClient, error) {
+	f.metadataProviderCalls++
 	return nil, nil
 }
 
