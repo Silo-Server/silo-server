@@ -56,6 +56,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		slog.Info("jellycompat debug logging enabled", logAttrs...)
 	}
+	r.Use(compatImageProxyTagVariantMiddleware(deps.IDCodec))
 	r.Use(requestLoggerMiddleware)
 	r.Use(middleware.Recoverer)
 
@@ -99,7 +100,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Client = deps.S3Client
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
-	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.HTTPClient, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret)
+	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -261,14 +262,14 @@ func withDefaults(deps Dependencies) Dependencies {
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
 	}
-	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
-	}
 	if deps.DeviceProfiles == nil {
 		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now)
 	}
 	if deps.PlaybackStore == nil {
 		deps.PlaybackStore = NewPlaybackSessionStore(playbackTTL, deps.Now)
+	}
+	if deps.HTTPClient == nil {
+		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 
 	// Build ContentService from repos if not provided
