@@ -440,6 +440,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
 		AttachRequestRouter(requestSvc, deps.PluginService)
+		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}

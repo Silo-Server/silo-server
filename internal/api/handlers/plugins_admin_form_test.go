@@ -21,10 +21,11 @@ func TestAdminFormToJSONSchemaFields(t *testing.T) {
 		SubmitLabel: "Connect",
 		Fields: []*pluginv1.AdminFormField{
 			{
-				Key:            "quality_profile_ids",
-				Label:          "Quality Profiles",
-				Control:        pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_MULTI_SELECT,
-				DynamicOptions: true,
+				Key:                 "quality_profile_ids",
+				Label:               "Quality Profiles",
+				Control:             pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_MULTI_SELECT,
+				DynamicOptions:      true,
+				ExclusiveGroupField: "service_kind",
 				ShowWhen: []*pluginv1.AdminFormCondition{
 					{Field: "service_type", Equals: []string{"radarr", "sonarr"}},
 				},
@@ -81,6 +82,7 @@ func TestAdminFormToJSONSchemaFields(t *testing.T) {
 				MinLength int32   `json:"min_length"`
 				MaxLength int32   `json:"max_length"`
 			} `json:"validation"`
+			ExclusiveGroupField string `json:"exclusive_group_field"`
 		} `json:"fields"`
 		Sections []struct {
 			Key              string   `json:"key"`
@@ -110,6 +112,9 @@ func TestAdminFormToJSONSchemaFields(t *testing.T) {
 	}
 	if !field.DynamicOptions {
 		t.Error("dynamic_options = false, want true")
+	}
+	if field.ExclusiveGroupField != "service_kind" {
+		t.Errorf("exclusive_group_field = %q, want %q", field.ExclusiveGroupField, "service_kind")
 	}
 	if len(field.ShowWhen) != 1 || field.ShowWhen[0].Field != "service_type" ||
 		len(field.ShowWhen[0].Equals) != 2 {

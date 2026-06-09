@@ -676,12 +676,13 @@ function integrationToForm(integration?: RequestIntegration): IntegrationFormSta
 type ConnectionOptionsStatus = "idle" | "loading" | "error";
 
 // useConnectionOptions debounces a ListConfigOptions probe keyed on the connection
-// IDENTITY (base URL + key ref + installation) — NOT the full plugin_config, so
-// editing a quality profile / switch doesn't re-probe the arr API. It backs the
-// dynamic SELECT options (root folders, quality profiles, tags) the descriptor
-// declares. The probe is silent (no toasts); callers surface failures inline via
-// `status`. A generation counter enforces latest-wins so a slow older probe can't
-// overwrite a newer result, and options are cleared whenever a probe can't run.
+// IDENTITY (base URL + key ref + installation + capability) — NOT the full
+// plugin_config, so editing a quality profile / switch doesn't re-probe the arr
+// API. It backs the dynamic SELECT options (root folders, quality profiles, tags)
+// the descriptor declares. The probe is silent (no toasts); callers surface
+// failures inline via `status`. A generation counter enforces latest-wins so a
+// slow older probe can't overwrite a newer result, and options are cleared
+// whenever a probe can't run.
 function useConnectionOptions(
   connectionID: string,
   draft: {
@@ -703,6 +704,7 @@ function useConnectionOptions(
   const canLoad =
     draft.base_url.trim().length > 0 &&
     Boolean(draft.installation_id) &&
+    draft.capability_id.trim().length > 0 &&
     Boolean(draft.api_key_ref.trim() || draft.has_api_key);
 
   // Options depend ONLY on the connection identity. plugin_config is still sent
@@ -712,6 +714,7 @@ function useConnectionOptions(
     u: draft.base_url,
     k: draft.api_key_ref,
     i: draft.installation_id,
+    c: draft.capability_id,
   });
   const debouncedSig = useDebounce(sig, 400);
 

@@ -175,20 +175,21 @@ type pluginAdminFormJSON struct {
 }
 
 type pluginAdminFormFieldJSON struct {
-	Key            string                         `json:"key"`
-	Label          string                         `json:"label"`
-	Description    string                         `json:"description,omitempty"`
-	Control        string                         `json:"control"`
-	Placeholder    string                         `json:"placeholder,omitempty"`
-	Required       bool                           `json:"required"`
-	Secret         bool                           `json:"secret"`
-	Multiline      bool                           `json:"multiline"`
-	DefaultValue   any                            `json:"default_value,omitempty"`
-	Options        []pluginAdminFormOptionJSON    `json:"options,omitempty"`
-	Rows           int32                          `json:"rows,omitempty"`
-	DynamicOptions bool                           `json:"dynamic_options,omitempty"`
-	ShowWhen       []pluginAdminFormConditionJSON `json:"show_when,omitempty"`
-	Validation     *pluginAdminFormValidationJSON `json:"validation,omitempty"`
+	Key                 string                         `json:"key"`
+	Label               string                         `json:"label"`
+	Description         string                         `json:"description,omitempty"`
+	Control             string                         `json:"control"`
+	Placeholder         string                         `json:"placeholder,omitempty"`
+	Required            bool                           `json:"required"`
+	Secret              bool                           `json:"secret"`
+	Multiline           bool                           `json:"multiline"`
+	DefaultValue        any                            `json:"default_value,omitempty"`
+	Options             []pluginAdminFormOptionJSON    `json:"options,omitempty"`
+	Rows                int32                          `json:"rows,omitempty"`
+	DynamicOptions      bool                           `json:"dynamic_options,omitempty"`
+	ShowWhen            []pluginAdminFormConditionJSON `json:"show_when,omitempty"`
+	Validation          *pluginAdminFormValidationJSON `json:"validation,omitempty"`
+	ExclusiveGroupField string                         `json:"exclusive_group_field,omitempty"`
 }
 
 type pluginAdminFormOptionJSON struct {
@@ -689,7 +690,7 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 			continue
 		}
 		if err := h.chainRepo.AppendProviderToAllChains(ctx, installation.ID, cap.ID, func(level string) int {
-			return metadata.LookupDefaultPriority(ctx, h.chainRepo.Pool(), installation.ID, level)
+			return metadata.LookupDefaultPriority(ctx, h.chainRepo.Pool(), installation.ID, cap.ID, level)
 		}); err != nil {
 			slog.Warn("failed to append provider to library chains",
 				"installation_id", installation.ID,
@@ -1384,20 +1385,21 @@ func adminFormToJSON(form *pluginv1.AdminFormDescriptor) *pluginAdminFormJSON {
 			}
 		}
 		fields = append(fields, pluginAdminFormFieldJSON{
-			Key:            field.GetKey(),
-			Label:          field.GetLabel(),
-			Description:    field.GetDescription(),
-			Control:        strings.TrimPrefix(field.GetControl().String(), "ADMIN_FORM_CONTROL_"),
-			Placeholder:    field.GetPlaceholder(),
-			Required:       field.GetRequired(),
-			Secret:         field.GetSecret(),
-			Multiline:      field.GetMultiline(),
-			DefaultValue:   defaultValue,
-			Options:        options,
-			Rows:           field.GetRows(),
-			DynamicOptions: field.GetDynamicOptions(),
-			ShowWhen:       adminFormConditionsToJSON(field.GetShowWhen()),
-			Validation:     validation,
+			Key:                 field.GetKey(),
+			Label:               field.GetLabel(),
+			Description:         field.GetDescription(),
+			Control:             strings.TrimPrefix(field.GetControl().String(), "ADMIN_FORM_CONTROL_"),
+			Placeholder:         field.GetPlaceholder(),
+			Required:            field.GetRequired(),
+			Secret:              field.GetSecret(),
+			Multiline:           field.GetMultiline(),
+			DefaultValue:        defaultValue,
+			Options:             options,
+			Rows:                field.GetRows(),
+			DynamicOptions:      field.GetDynamicOptions(),
+			ShowWhen:            adminFormConditionsToJSON(field.GetShowWhen()),
+			Validation:          validation,
+			ExclusiveGroupField: field.GetExclusiveGroupField(),
 		})
 	}
 	sections := make([]pluginAdminFormSectionJSON, 0, len(form.GetSections()))

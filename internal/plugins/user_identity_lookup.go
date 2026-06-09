@@ -76,6 +76,9 @@ func RequesterIdentityFromLookup(l UserIdentityLookup) *requesterIdentityAdapter
 }
 
 func (a *requesterIdentityAdapter) ResolveRequester(ctx context.Context, userID int) (string, string, error) {
+	if a == nil || a.lookup == nil || userID <= 0 {
+		return "", "", nil
+	}
 	id, err := a.lookup.LookupIdentity(ctx, userID, "")
 	if err != nil {
 		return "", "", err
