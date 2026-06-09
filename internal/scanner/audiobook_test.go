@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -33,6 +35,74 @@ func (f *fakeFilesystemItemWriter) Upsert(_ context.Context, item *models.MediaI
 	cp := *item
 	f.upserts = append(f.upserts, &cp)
 	return nil
+}
+
+type fakeAudiobookPosterExec struct {
+	calls int
+	query string
+	args  []any
+}
+
+func (f *fakeAudiobookPosterExec) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	f.calls++
+	f.query = query
+	f.args = append([]any(nil), args...)
+	return pgconn.CommandTag{}, nil
+}
+
+type fakeScannerCoverCacher struct {
+	data      []byte
+	contentID string
+}
+
+func (f *fakeScannerCoverCacher) CacheAudiobookCover(_ context.Context, data []byte, contentID string) (string, string, string, error) {
+	f.data = append([]byte(nil), data...)
+	f.contentID = contentID
+	return "local/audiobooks/" + contentID + "/poster", ".webp", "thumbhash", nil
+}
+
+func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
+	dir := t.TempDir()
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf cover-bytes\n"), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+
+	exec := &fakeAudiobookPosterExec{}
+	cacher := &fakeScannerCoverCacher{}
+
+	applied, err := applyAudiobookEmbeddedCover(
+		context.Background(),
+		exec,
+		ffmpegPath,
+		cacher,
+		"/library/Author/Book/book.m4b",
+		"content-1",
+	)
+	if err != nil {
+		t.Fatalf("applyAudiobookEmbeddedCover: %v", err)
+	}
+	if !applied {
+		t.Fatal("applied = false, want true")
+	}
+	if string(cacher.data) != "cover-bytes" || cacher.contentID != "content-1" {
+		t.Fatalf("cacher got data=%q contentID=%q", string(cacher.data), cacher.contentID)
+	}
+	if exec.calls != 1 {
+		t.Fatalf("Exec calls = %d, want 1", exec.calls)
+	}
+	if len(exec.args) != 3 {
+		t.Fatalf("Exec args = %#v, want 3 args", exec.args)
+	}
+	if exec.args[0] != "local/audiobooks/content-1/poster/original.webp" {
+		t.Fatalf("poster arg = %#v", exec.args[0])
+	}
+	if exec.args[1] != "thumbhash" || exec.args[2] != "content-1" {
+		t.Fatalf("thumb/content args = %#v", exec.args)
+	}
+	if !strings.Contains(exec.query, "poster_path = $1") {
+		t.Fatalf("query did not update poster_path: %s", exec.query)
+	}
 }
 
 func TestPopulateFromTags_SeriesDoesNotFallBackToAlbum(t *testing.T) {
@@ -367,6 +437,43 @@ func TestStripNarratorSuffix(t *testing.T) {
 		got := stripNarratorSuffix(c.in)
 		if got != c.want {
 			t.Errorf("stripNarratorSuffix(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestAudiobookDedupeTitlesMatchPunctuationVariants(t *testing.T) {
+	if !audiobookDedupeTitlesMatch(
+		"Witch vs. Witch: F/F Paranormal Romance Novella",
+		"Witch vs. Witch - F/F Paranormal Romance Novella",
+	) {
+		t.Fatal("expected punctuation-only title variants to match")
+	}
+}
+
+func TestAudiobookDedupeTitlesKeepDifferentBooksSeparate(t *testing.T) {
+	if audiobookDedupeTitlesMatch(
+		"Adventure of Constance Verity 1 - The Last Adventure of Constance Verity",
+		"Adventure of Constance Verity 2 - Constance Verity Saves the World",
+	) {
+		t.Fatal("expected different series entries to remain separate")
+	}
+}
+
+func TestAudiobookLookupPathsIncludeCaseFoldedVariants(t *testing.T) {
+	got := audiobookLookupPaths([]parsedAudiobookFile{
+		{Path: "/Library/A. A. Milne/Winnie-The-Pooh.m4b"},
+		{Path: ""},
+	})
+	want := []string{
+		"/Library/A. A. Milne/Winnie-The-Pooh.m4b",
+		"/library/a. a. milne/winnie-the-pooh.m4b",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("paths = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paths[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 }
