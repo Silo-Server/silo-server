@@ -315,3 +315,173 @@ func TestClearProgressBatch_CompactsDirtyInput(t *testing.T) {
 		t.Fatalf("watch_progress row count = %d, want 1", count)
 	}
 }
+
+// newProgressDB opens an in-memory SQLite DB with the schema initialised.
+func newProgressDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	return db
+}
+
+// seedProgressRow inserts/overwrites a watch_progress row with an explicit
+// updated_at so the RestartMinGapSeconds time-guard can be exercised
+// deterministically.
+func seedProgressRow(t *testing.T, db *sql.DB, profileID, itemID string, pos, dur float64, completed bool, updatedAt time.Time) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
+			position_seconds = excluded.position_seconds,
+			duration_seconds = excluded.duration_seconds,
+			completed = excluded.completed,
+			updated_at = excluded.updated_at`,
+		profileID, itemID, pos, dur, completed, updatedAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+}
+
+func mustGetProgress(t *testing.T, db *sql.DB, profileID, itemID string) *WatchProgress {
+	t.Helper()
+	wp, err := GetProgress(db, profileID, itemID)
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if wp == nil {
+		t.Fatalf("GetProgress(%s) = nil, want row", itemID)
+	}
+	return wp
+}
+
+// TestUpdateProgress_RewatchRestartDetect pins the rewatch latch-release
+// behaviour added to fix "Continue Watching" not showing re-watched items.
+// A finished item must re-enter the in-progress set (completed=false) when an
+// early-position heartbeat arrives well after completion, while genuine
+// completions, late heartbeats, and recent-completion stale heartbeats must NOT
+// release the latch.
+func TestUpdateProgress_RewatchRestartDetect(t *testing.T) {
+	// Pin the clock so the RestartMinGapSeconds time-gap guard is exercised
+	// deterministically: UpdateProgress stamps rows with this fixed "now", and
+	// the seed timestamps below are positioned relative to it.
+	fixedNow := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+	origNow := nowUTC
+	nowUTC = func() string { return fixedNow.Format(time.RFC3339) }
+	t.Cleanup(func() { nowUTC = origNow })
+
+	th := userstore.ProgressThresholds{WatchedPct: 90, MinResumePct: 5}
+	old := fixedNow.Add(-2 * time.Minute) // > RestartMinGapSeconds before fixedNow
+
+	t.Run("in_progress row stays in progress", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 300, 3600, false, old)
+		if err := UpdateProgress(db, "p", "m", 600, 3600, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if wp.Completed || wp.PositionSeconds != 600 {
+			t.Fatalf("got completed=%v pos=%v, want completed=false pos=600", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("rewatch releases latch and adopts fresh position", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 7200, 7200, true, old)
+		// 600/7200 = 8.3%: above the 5% min-resume floor, below the 50%
+		// restart-detect threshold -> genuine rewatch, releases the latch.
+		if err := UpdateProgress(db, "p", "m", 600, 7200, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if wp.Completed || wp.PositionSeconds != 600 {
+			t.Fatalf("got completed=%v pos=%v, want completed=false pos=600", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("late heartbeat does not release latch", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 7200, 7200, true, old)
+		// 5000/7200 = 69% > RestartDetectFraction (50%) -> not a restart.
+		if err := UpdateProgress(db, "p", "m", 5000, 7200, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if !wp.Completed || wp.PositionSeconds != 7200 {
+			t.Fatalf("got completed=%v pos=%v, want completed=true pos=7200", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("recent completion blocks restart (time guard)", func(t *testing.T) {
+		db := newProgressDB(t)
+		recent := fixedNow.Add(-5 * time.Second) // < RestartMinGapSeconds before fixedNow
+		seedProgressRow(t, db, "p", "m", 7200, 7200, true, recent)
+		// Early position but only seconds after completion -> stale heartbeat,
+		// must NOT release the latch.
+		if err := UpdateProgress(db, "p", "m", 300, 7200, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if !wp.Completed || wp.PositionSeconds != 7200 {
+			t.Fatalf("got completed=%v pos=%v, want completed=true pos=7200 (time guard)", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("completion still latches forward", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 300, 7200, false, old)
+		// 6600/7200 = 91.7% > WatchedFraction (90%) -> completes.
+		if err := UpdateProgress(db, "p", "m", 6600, 7200, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if !wp.Completed || wp.PositionSeconds != 7200 {
+			t.Fatalf("got completed=%v pos=%v, want completed=true pos=7200", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("multi-version duration change uses GREATEST duration", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 7200, 7200, true, old)
+		// Director's cut: 4000 < MAX(9000,7200)*0.5 = 4500 -> restart.
+		if err := UpdateProgress(db, "p", "m", 4000, 9000, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if wp.Completed || wp.PositionSeconds != 4000 {
+			t.Fatalf("got completed=%v pos=%v, want completed=false pos=4000", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("stored duration zero falls back to heartbeat duration", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 0, 0, true, old)
+		// 300/3600 = 8.3% passes min-resume; 300 < MAX(3600,0)*0.5 = 1800 -> restart.
+		if err := UpdateProgress(db, "p", "m", 300, 3600, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if wp.Completed || wp.PositionSeconds != 300 {
+			t.Fatalf("got completed=%v pos=%v, want completed=false pos=300", wp.Completed, wp.PositionSeconds)
+		}
+	})
+
+	t.Run("below min-resume heartbeat is discarded", func(t *testing.T) {
+		db := newProgressDB(t)
+		seedProgressRow(t, db, "p", "m", 7200, 7200, true, old)
+		// 100/7200 = 1.4% < MinResumeFraction (5%) -> early return, no write.
+		if err := UpdateProgress(db, "p", "m", 100, 7200, th); err != nil {
+			t.Fatalf("UpdateProgress: %v", err)
+		}
+		wp := mustGetProgress(t, db, "p", "m")
+		if !wp.Completed || wp.PositionSeconds != 7200 {
+			t.Fatalf("got completed=%v pos=%v, want unchanged completed=true pos=7200", wp.Completed, wp.PositionSeconds)
+		}
+	})
+}

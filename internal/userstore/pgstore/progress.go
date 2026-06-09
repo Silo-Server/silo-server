@@ -64,12 +64,36 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
-			position_seconds = GREATEST(excluded.position_seconds, user_watch_progress.position_seconds),
+			position_seconds = CASE
+				-- Re-watch of a finished item: an early-position heartbeat
+				-- (below RestartDetectFraction of the runtime) lands on a row
+				-- already completed, at least RestartMinGapSeconds after it was
+				-- finished. Adopt the fresh resume point instead of keeping the
+				-- stale end-of-file position so "Continue Watching" resumes
+				-- correctly. The time gap rejects stale heartbeats from a
+				-- concurrent/offline session arriving just after completion.
+				WHEN NOT excluded.completed
+					AND user_watch_progress.completed
+					AND excluded.position_seconds < GREATEST(excluded.duration_seconds, user_watch_progress.duration_seconds) * $8
+					AND excluded.updated_at - user_watch_progress.updated_at > make_interval(secs => $9)
+					THEN excluded.position_seconds
+				ELSE GREATEST(excluded.position_seconds, user_watch_progress.position_seconds)
+			END,
 			duration_seconds = excluded.duration_seconds,
-			completed = CASE WHEN excluded.completed
-				THEN TRUE ELSE user_watch_progress.completed END,
+			completed = CASE
+				WHEN excluded.completed THEN TRUE
+				-- Same re-watch signal releases the completed latch so the
+				-- item re-enters "Continue Watching". Only fires on an already
+				-- completed row; in-progress rows keep their prior semantics.
+				WHEN user_watch_progress.completed
+					AND excluded.position_seconds < GREATEST(excluded.duration_seconds, user_watch_progress.duration_seconds) * $8
+					AND excluded.updated_at - user_watch_progress.updated_at > make_interval(secs => $9)
+					THEN FALSE
+				ELSE user_watch_progress.completed
+			END,
 			updated_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, now,
+		userstore.RestartDetectFraction, userstore.RestartMinGapSeconds,
 	)
 	if err != nil {
 		return fmt.Errorf("updating progress: %w", err)

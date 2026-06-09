@@ -20,15 +20,39 @@ type WatchHistoryEntry = userstore.WatchHistoryEntry
 // The position is only updated if the new value is greater than the existing one.
 // The completed flag is set to true when position/duration exceeds the watched threshold.
 func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
+	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+		return nil
+	}
 	now := nowUTC()
+	// Mirrors the Postgres pgstore UpdateProgress: position moves forward via
+	// MAX, completed latches one-way TRUE — EXCEPT a genuine rewatch of a
+	// finished item (an early-position heartbeat, below RestartDetectFraction
+	// of the runtime, landing on an already-completed row at least
+	// RestartMinGapSeconds later) releases the latch and adopts the fresh
+	// resume point so the item re-enters "Continue Watching". The time gap
+	// rejects stale heartbeats from a concurrent/offline session that arrive
+	// just after completion. julianday() diffs are in days → *86400 = seconds.
 	query := `
 		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
-			position_seconds = MAX(excluded.position_seconds, watch_progress.position_seconds),
+			position_seconds = CASE
+				WHEN excluded.completed = 0
+					AND watch_progress.completed = 1
+					AND excluded.position_seconds < MAX(excluded.duration_seconds, watch_progress.duration_seconds) * ?
+					AND (julianday(excluded.updated_at) - julianday(watch_progress.updated_at)) * 86400.0 > ?
+					THEN excluded.position_seconds
+				ELSE MAX(excluded.position_seconds, watch_progress.position_seconds)
+			END,
 			duration_seconds = excluded.duration_seconds,
-			completed = CASE WHEN excluded.completed = 1
-				THEN 1 ELSE watch_progress.completed END,
+			completed = CASE
+				WHEN excluded.completed = 1 THEN 1
+				WHEN watch_progress.completed = 1
+					AND excluded.position_seconds < MAX(excluded.duration_seconds, watch_progress.duration_seconds) * ?
+					AND (julianday(excluded.updated_at) - julianday(watch_progress.updated_at)) * 86400.0 > ?
+					THEN 0
+				ELSE watch_progress.completed
+			END,
 			updated_at = excluded.updated_at
 	`
 	completed := false
@@ -36,7 +60,9 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 		completed = true
 		position = duration // match MarkWatched() — reset so no stale resume point
 	}
-	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now)
+	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now,
+		userstore.RestartDetectFraction, userstore.RestartMinGapSeconds,
+		userstore.RestartDetectFraction, userstore.RestartMinGapSeconds)
 	if err != nil {
 		return fmt.Errorf("updating progress: %w", err)
 	}
