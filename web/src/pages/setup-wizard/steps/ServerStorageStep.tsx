@@ -23,6 +23,7 @@ import {
   useInstallJellyfinCompatWeb,
   useJellyfinCompatStatus,
 } from "@/hooks/queries/admin/settings";
+import { hasPinnedJellyfinWebInstalled } from "@/lib/jellyfinCompat";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SettingField } from "@/pages/admin-settings/SettingField";
 import { useWizardContext } from "../WizardContext";
@@ -266,6 +267,7 @@ export function ServerStorageStep() {
   const jellyfinMissingPrerequisites =
     jellyfinStatus?.prerequisites?.filter((item) => !item.available) ?? [];
   const jellyfinSettingsDirty = form.dirtyKeys.some((key) => key.startsWith("jellyfin_compat."));
+  const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(jellyfinStatus);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -394,6 +396,10 @@ export function ServerStorageStep() {
               <span className="text-muted-foreground">Pinned version</span>
               <span>{jellyfinStatus?.pinned_version || "Not set"}</span>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Installed version</span>
+              <span>{jellyfinStatus?.installed_version || "Not installed"}</span>
+            </div>
             <div className="flex items-center justify-between gap-3 sm:col-span-2">
               <span className="text-muted-foreground">Install path</span>
               <span className="max-w-[60%] truncate font-mono">{jellyfinStatus?.install_path}</span>
@@ -408,26 +414,39 @@ export function ServerStorageStep() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={
-                jellyfinSettingsDirty ||
-                installJellyfinWeb.isPending ||
-                jellyfinOperationRunning ||
-                jellyfinStatus?.installer_ready === false
-              }
-              onClick={() =>
-                installJellyfinWeb.mutate({
-                  version:
-                    form.getValue("jellyfin_compat.web_version") || jellyfinStatus?.pinned_version,
-                })
-              }
-            >
-              <Download className="mr-2 h-4 w-4" />
-              {jellyfinOperationRunning ? "Web UI Busy" : "Install Web UI"}
-            </Button>
+            {!pinnedJellyfinWebInstalled && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={
+                  jellyfinSettingsDirty ||
+                  installJellyfinWeb.isPending ||
+                  jellyfinOperationRunning ||
+                  jellyfinStatus?.installer_ready === false
+                }
+                onClick={() =>
+                  installJellyfinWeb.mutate({
+                    version:
+                      form.getValue("jellyfin_compat.web_version") ||
+                      jellyfinStatus?.pinned_version,
+                  })
+                }
+              >
+                <Download className="mr-2 h-4 w-4" />
+                {jellyfinStatus?.web_state === "update_available"
+                  ? "Update Web UI"
+                  : jellyfinOperationRunning
+                    ? "Web UI Busy"
+                    : "Install Web UI"}
+              </Button>
+            )}
+            {pinnedJellyfinWebInstalled && (
+              <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Pinned Web UI version installed
+              </span>
+            )}
             {jellyfinStatus?.license_present && jellyfinStatus?.provenance_present && (
               <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
                 <CheckCircle2 className="h-3.5 w-3.5" />

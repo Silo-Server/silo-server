@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { AlertCircle, CheckCircle2, Download, Loader2, Trash2 } from "lucide-react";
+import { useId, useMemo, useState } from "react";
+import { AlertCircle, CheckCircle2, ChevronRight, Download, Loader2, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
   useJellyfinCompatStatus,
   useRemoveJellyfinCompatWeb,
 } from "@/hooks/queries/admin/settings";
+import { hasPinnedJellyfinWebInstalled } from "@/lib/jellyfinCompat";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 
 import { FieldGroup } from "./FieldGroup";
@@ -79,12 +80,57 @@ function LayerDescription({ title, children }: { title: string; children: React.
   );
 }
 
+function CollapsibleFieldGroup({
+  label,
+  expanded,
+  onToggle,
+  children,
+}: {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const labelId = useId();
+  const contentId = useId();
+
+  return (
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      className="surface-panel rounded-2xl border-0 p-4 sm:p-5"
+    >
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        onClick={onToggle}
+        className={`text-muted-foreground hover:text-foreground flex w-full items-center gap-2 text-left transition-colors ${expanded ? "mb-3" : ""}`}
+      >
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+        />
+        <span id={labelId} className="text-xs font-semibold tracking-[0.22em] uppercase">
+          {label}
+        </span>
+      </button>
+
+      {expanded && (
+        <div id={contentId} className="divide-border divide-y">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CompatibilityProxiesSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const statusQuery = useJellyfinCompatStatus();
   const installWeb = useInstallJellyfinCompatWeb();
   const removeWeb = useRemoveJellyfinCompatWeb();
   const status = statusQuery.data;
+  const [jellyfinExpanded, setJellyfinExpanded] = useState(false);
 
   if (form.isLoading || statusQuery.isLoading)
     return (
@@ -116,6 +162,7 @@ export default function CompatibilityProxiesSettings() {
   const jellyfinEnabledChecked =
     jellyfinEnabledValue === "" ? Boolean(status?.enabled) : jellyfinEnabledValue === "true";
   const jellyfinEnabledDirty = form.dirtyKeys.includes("jellyfin_compat.enabled");
+  const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(status);
 
   return (
     <div className="flex h-full flex-col">
@@ -127,7 +174,11 @@ export default function CompatibilityProxiesSettings() {
       </div>
 
       <div className="flex-1 space-y-6">
-        <FieldGroup label="Jellyfin">
+        <CollapsibleFieldGroup
+          label="Jellyfin"
+          expanded={jellyfinExpanded}
+          onToggle={() => setJellyfinExpanded((current) => !current)}
+        >
           <div className="space-y-4 py-3">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div className="space-y-0.5">
@@ -247,26 +298,28 @@ export default function CompatibilityProxiesSettings() {
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={() =>
-                  installWeb.mutate({ version: form.getValue("jellyfin_compat.web_version") })
-                }
-                disabled={
-                  hasDirtyWebConfig ||
-                  installWeb.isPending ||
-                  operationRunning ||
-                  status?.installer_ready === false
-                }
-              >
-                <Download className="mr-2 h-4 w-4" />
-                {status?.web_state === "update_available"
-                  ? "Update Web UI"
-                  : operationRunning
-                    ? "Web UI Busy"
-                    : "Install Web UI"}
-              </Button>
+              {!pinnedJellyfinWebInstalled && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() =>
+                    installWeb.mutate({ version: form.getValue("jellyfin_compat.web_version") })
+                  }
+                  disabled={
+                    hasDirtyWebConfig ||
+                    installWeb.isPending ||
+                    operationRunning ||
+                    status?.installer_ready === false
+                  }
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {status?.web_state === "update_available"
+                    ? "Update Web UI"
+                    : operationRunning
+                      ? "Web UI Busy"
+                      : "Install Web UI"}
+                </Button>
+              )}
               <Button
                 type="button"
                 size="sm"
@@ -291,6 +344,12 @@ export default function CompatibilityProxiesSettings() {
                 <span className="text-muted-foreground text-sm">
                   Missing installer prerequisites:{" "}
                   {missingPrerequisites.map((item) => item.command).join(", ")}
+                </span>
+              )}
+              {pinnedJellyfinWebInstalled && (
+                <span className="text-muted-foreground inline-flex items-center gap-1 text-sm">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Pinned Web UI version installed
                 </span>
               )}
               {(status?.license_present && status?.provenance_present && (
@@ -358,7 +417,7 @@ export default function CompatibilityProxiesSettings() {
               />
             </div>
           </div>
-        </FieldGroup>
+        </CollapsibleFieldGroup>
 
         <FieldGroup label="Audiobookshelf">
           <SettingField
