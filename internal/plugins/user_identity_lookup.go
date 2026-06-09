@@ -14,6 +14,7 @@ import (
 // UIs without reaching back into the browser's localStorage.
 type UserIdentity struct {
 	Username         string
+	Email            string
 	ProfileName      string
 	ProfileIsPrimary bool
 }
@@ -44,8 +45,8 @@ func (l *PgUserIdentityLookup) LookupIdentity(ctx context.Context, userID int, p
 	}
 
 	err := l.pool.QueryRow(ctx,
-		"SELECT username FROM users WHERE id = $1", userID,
-	).Scan(&out.Username)
+		"SELECT username, COALESCE(email, '') FROM users WHERE id = $1", userID,
+	).Scan(&out.Username, &out.Email)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
@@ -64,4 +65,23 @@ func (l *PgUserIdentityLookup) LookupIdentity(ctx context.Context, userID int, p
 		return out, err
 	}
 	return out, nil
+}
+
+// RequesterIdentityFromLookup adapts a UserIdentityLookup into the requests
+// service's requester-identity resolver (email + username by user id).
+type requesterIdentityAdapter struct{ lookup UserIdentityLookup }
+
+func RequesterIdentityFromLookup(l UserIdentityLookup) *requesterIdentityAdapter {
+	return &requesterIdentityAdapter{lookup: l}
+}
+
+func (a *requesterIdentityAdapter) ResolveRequester(ctx context.Context, userID int) (string, string, error) {
+	if a == nil || a.lookup == nil || userID <= 0 {
+		return "", "", nil
+	}
+	id, err := a.lookup.LookupIdentity(ctx, userID, "")
+	if err != nil {
+		return "", "", err
+	}
+	return id.Email, id.Username, nil
 }

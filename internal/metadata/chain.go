@@ -309,7 +309,7 @@ func resolveEnabledProvidersByPriority(
 	// single-purpose provider is never invoked for content it does not handle.
 	items := make([]ranked, 0, len(caps))
 	for _, c := range caps {
-		metadataJSON := lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID)
+		metadataJSON := lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)
 		if !providerSupportsLevel(metadataJSON, contentLevel) {
 			slog.Debug("skipping metadata provider: does not declare support for content level",
 				"installation_id", c.PluginInstallationID,
@@ -357,14 +357,16 @@ func providerSupportsLevel(metadataJSON []byte, contentLevel string) bool {
 }
 
 // lookupCapabilityMetadata returns the raw plugin_capabilities.metadata JSON for
-// a provider's metadata_provider.v1 capability, or nil if absent.
-func lookupCapabilityMetadata(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int) []byte {
+// a provider's exact metadata_provider.v1 capability, or nil if absent.
+func lookupCapabilityMetadata(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID string) []byte {
 	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
 		`SELECT metadata FROM plugin_capabilities
-		 WHERE plugin_installation_id = $1 AND capability_type = 'metadata_provider.v1'
-		 LIMIT 1`,
+		 WHERE plugin_installation_id = $1
+		   AND capability_id = $2
+		   AND capability_type = 'metadata_provider.v1'`,
 		pluginInstallationID,
+		capabilityID,
 	).Scan(&metadataJSON)
 	if err != nil {
 		return nil
@@ -374,8 +376,8 @@ func lookupCapabilityMetadata(ctx context.Context, pool *pgxpool.Pool, pluginIns
 
 // LookupDefaultPriority queries plugin_capabilities for a provider's declared
 // default_priority at the given content level. Returns 0 if not found.
-func LookupDefaultPriority(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, contentLevel string) int {
-	return extractDefaultPriority(lookupCapabilityMetadata(ctx, pool, pluginInstallationID), contentLevel)
+func LookupDefaultPriority(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) int {
+	return extractDefaultPriority(lookupCapabilityMetadata(ctx, pool, pluginInstallationID, capabilityID), contentLevel)
 }
 
 // extractDefaultPriority parses the default_priority for a content level from

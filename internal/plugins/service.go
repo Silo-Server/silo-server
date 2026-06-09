@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -27,6 +29,7 @@ type pluginClient interface {
 	MediaAnalyzer(capabilityID string) (*pluginhost.MediaAnalyzerClient, error)
 	ScheduledTask(capabilityID string) (*pluginhost.ScheduledTaskClient, error)
 	ScanSource(capabilityID string) (*pluginhost.ScanSourceClient, error)
+	RequestRouter(capabilityID string) (*pluginhost.RequestRouterClient, error)
 	EventConsumer(capabilityID string) (*pluginhost.EventConsumerClient, error)
 	AuthProvider(capabilityID string) (*pluginhost.AuthProviderClient, error)
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
@@ -66,6 +69,7 @@ type Service struct {
 	dispatcher     *EventDispatcher
 	lifecycleMu    sync.RWMutex
 	lifecycleHooks []func(context.Context)
+	launchGroup    singleflight.Group
 }
 
 // SetEventDispatcher wires the EventDispatcher into the Service. The
@@ -482,6 +486,18 @@ func (s *Service) ScanSourceClient(
 	return client.ScanSource(capabilityID)
 }
 
+func (s *Service) RequestRouterClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.RequestRouterClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.RequestRouter(capabilityID)
+}
+
 func (s *Service) ScanSourceClientByPluginID(
 	ctx context.Context,
 	pluginID string,
@@ -605,7 +621,25 @@ func (s *Service) ManifestForInstallation(
 	return s.manifestForInstallation(ctx, installationID, false)
 }
 
+// ensureClient returns a running client for the installation, collapsing
+// concurrent first-use of a cold installation into a single launch so a burst of
+// callers does not spawn redundant plugin processes (Host.Start releases its lock
+// during the slow launch and cannot dedupe). After the flight completes the key
+// is freed, so subsequent callers re-run and hit the now-warm cache.
 func (s *Service) ensureClient(ctx context.Context, installationID int) (pluginClient, error) {
+	v, err, _ := s.launchGroup.Do(strconv.Itoa(installationID), func() (any, error) {
+		// Isolate the shared launch from the leader caller's cancellation: other
+		// waiters depend on this in-flight launch, so a single caller's canceled
+		// request must not tear it down. Values (tracing, auth) are preserved.
+		return s.doEnsureClient(context.WithoutCancel(ctx), installationID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(pluginClient), nil
+}
+
+func (s *Service) doEnsureClient(ctx context.Context, installationID int) (pluginClient, error) {
 	installation, err := s.loadInstallation(ctx, installationID, true)
 	if err != nil {
 		return nil, err

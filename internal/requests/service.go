@@ -27,30 +27,6 @@ type TMDBExternalIDClient interface {
 
 const externalIDHydrationConcurrency = 4
 
-type MovieFulfillmentAdapter interface {
-	SubmitMovie(ctx context.Context, req Request, integration Integration) (FulfillmentResult, error)
-}
-
-type SeriesFulfillmentAdapter interface {
-	SubmitSeries(ctx context.Context, req Request, integration Integration) (FulfillmentResult, error)
-}
-
-type MovieStatusAdapter interface {
-	CheckMovieStatus(ctx context.Context, req Request, integration Integration) (FulfillmentStatus, error)
-}
-
-type SeriesStatusAdapter interface {
-	CheckSeriesStatus(ctx context.Context, req Request, integration Integration) (FulfillmentStatus, error)
-}
-
-type MovieIntegrationOptionsAdapter interface {
-	ListMovieIntegrationOptions(ctx context.Context, integration Integration) (*IntegrationOptions, error)
-}
-
-type SeriesIntegrationOptionsAdapter interface {
-	ListSeriesIntegrationOptions(ctx context.Context, integration Integration) (*IntegrationOptions, error)
-}
-
 type EntitlementResolver interface {
 	// MaxPlaybackQuality returns the requester's effective playback-quality
 	// ceiling (already combining account- and profile-level caps). Empty string
@@ -58,14 +34,20 @@ type EntitlementResolver interface {
 	MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error)
 }
 
+// RequesterIdentityResolver resolves a requesting user id into the identity a
+// per-user request_router plugin needs (e.g. Seerr attribution by email).
+type RequesterIdentityResolver interface {
+	ResolveRequester(ctx context.Context, userID int) (email, username string, err error)
+}
+
 type Service struct {
-	store         Store
-	tmdb          TMDBClient
-	presence      PresenceResolver
-	movieAdapter  MovieFulfillmentAdapter
-	seriesAdapter SeriesFulfillmentAdapter
-	entitlements  EntitlementResolver
-	Now           func() time.Time
+	store             Store
+	tmdb              TMDBClient
+	presence          PresenceResolver
+	router            RequestRouterProvider
+	entitlements      EntitlementResolver
+	requesterIdentity RequesterIdentityResolver
+	Now               func() time.Time
 }
 
 type DiscoverySection struct {
@@ -86,12 +68,27 @@ func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *
 	}
 }
 
-func (s *Service) SetFulfillmentAdapters(movie MovieFulfillmentAdapter, series SeriesFulfillmentAdapter) {
-	s.movieAdapter = movie
-	s.seriesAdapter = series
-}
+func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
 
 func (s *Service) SetEntitlementResolver(r EntitlementResolver) { s.entitlements = r }
+
+func (s *Service) SetRequesterIdentityResolver(r RequesterIdentityResolver) {
+	s.requesterIdentity = r
+}
+
+// populateRequesterIdentity fills req.RequesterEmail/Username from the resolver.
+// Nil resolver or any error leaves them empty (the plugin then behaves as admin).
+func (s *Service) populateRequesterIdentity(ctx context.Context, req *Request) {
+	if s.requesterIdentity == nil || req.RequestedByUserID <= 0 {
+		return
+	}
+	email, username, err := s.requesterIdentity.ResolveRequester(ctx, req.RequestedByUserID)
+	if err != nil {
+		slog.WarnContext(ctx, "requests: requester identity resolve failed; attributing to admin", "user_id", req.RequestedByUserID, "error", err)
+		return
+	}
+	req.RequesterEmail, req.RequesterUsername = email, username
+}
 
 func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID string) string {
 	if s.entitlements == nil {
@@ -102,6 +99,94 @@ func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID st
 		return access.PlaybackQualityStandard // fail safe: HD only
 	}
 	return q
+}
+
+// allowedQualities returns the qualities a request may receive: 1080p always,
+// plus 2160p when force-dual is on or the requester's entitlement ceiling allows 4K.
+func (s *Service) allowedQualities(ctx context.Context, req Request, settings Settings) []Quality {
+	out := []Quality{Quality1080p}
+	ceiling := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
+	// QualityAllowed treats an empty ceiling as "no cap" (the "Any" preset), so a
+	// requester with unlimited playback quality correctly gets 4K. A raw
+	// CompareQuality would rank "" as the LOWEST quality and wrongly drop 4K.
+	if settings.ForceDualQuality || access.QualityAllowed(access.PlaybackQuality4K, ceiling) {
+		out = append(out, Quality2160p)
+	}
+	return out
+}
+
+// fulfillContext caches the global fulfillment inputs for one reconcile cycle
+// (or a single Approve/Retry) so integrations and settings are fetched once
+// instead of per request. API keys need no cache here: the repository decrypts
+// api_key_ref on read, so Integration.APIKeyRef already holds the literal key.
+type fulfillContext struct {
+	integrations []Integration
+	settings     Settings
+}
+
+func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error) {
+	integrations, err := s.store.ListIntegrations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &fulfillContext{integrations: integrations, settings: settings}, nil
+}
+
+// resolveRouterConnections turns enabled request_router integrations that serve
+// the given media type into ResolvedRouterConnections (api key resolved to
+// plaintext, plugin_config attached), and returns the installation+capability to
+// dispatch to.
+//
+// It filters by media type to match the integrationConfigured auto-approve gate
+// (so a series-only connection is never used for a movie request). Multi-
+// installation routing isn't supported yet: it picks the first eligible
+// connection's installation and includes ONLY connections belonging to it, so a
+// second installation's resolved plaintext credentials are never handed to the
+// first plugin. A connection whose api key cannot be resolved (or resolves empty)
+// is skipped rather than aborting the whole request — a sibling healthy
+// connection can still fulfill it, and an unauthenticated request is never sent.
+func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillContext, mediaType MediaType) ([]ResolvedRouterConnection, int, string, error) {
+	var conns []ResolvedRouterConnection
+	installationID, capabilityID := 0, ""
+	chosen := false
+	for _, in := range fc.integrations {
+		if !eligibleRouterConnection(in, mediaType) {
+			continue
+		}
+		// Contain to the first chosen (installation, capability): a plugin may
+		// expose more than one request_router capability, and a connection of a
+		// different capability must never be handed to the chosen one.
+		if chosen && (*in.InstallationID != installationID || in.CapabilityID != capabilityID) {
+			continue
+		}
+		// in.APIKeyRef was decrypted by the repo on read; empty means unconfigured.
+		apiKey := strings.TrimSpace(in.APIKeyRef)
+		if apiKey == "" {
+			slog.WarnContext(ctx, "requests: skipping router connection with no api key", "connection_id", in.ID)
+			continue
+		}
+		// Lock on the first SUCCESSFULLY resolved connection so a skipped
+		// bad-key connection never pins the installation/capability.
+		if !chosen {
+			installationID, capabilityID, chosen = *in.InstallationID, in.CapabilityID, true
+		}
+		conns = append(conns, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig})
+	}
+	return conns, installationID, capabilityID, nil
+}
+
+// eligibleRouterConnection reports whether a connection is a candidate fulfillment
+// backend for the media type: enabled, bound to an installation, and naming a
+// capability sub-id that serves the media type. resolveRouterConnections (which
+// then resolves credentials) and integrationConfigured (the auto-approval gate)
+// share this predicate so the two cannot drift.
+func eligibleRouterConnection(in Integration, mediaType MediaType) bool {
+	return in.Enabled && in.CapabilityID != "" && in.InstallationID != nil &&
+		integrationSupportsMediaType(in, mediaType)
 }
 
 func (s *Service) Search(ctx context.Context, viewer Viewer, query string, mediaType MediaType, page int) (*MediaPage, error) {
@@ -371,7 +456,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		return nil, err
 	}
 	if req.Status == StatusApproved {
-		return s.submitApprovedRequest(ctx, *req, viewer)
+		return s.submitApprovedRequest(ctx, *req, viewer, nil)
 	}
 	return req, nil
 }
@@ -507,7 +592,7 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
-	return s.submitApprovedRequest(ctx, *approved, viewer)
+	return s.submitApprovedRequest(ctx, *approved, viewer, nil)
 }
 
 func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
@@ -576,69 +661,16 @@ func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request
 	if req.Outcome != OutcomeFailed {
 		return nil, ErrInvalidState
 	}
-	active, err := s.store.SetOutcome(ctx, req.ID, OutcomeActive, viewer, "retry requested")
+	if _, err := s.store.SetOutcome(ctx, req.ID, OutcomeActive, viewer, "retry requested"); err != nil {
+		return nil, err
+	}
+	// submitApprovedRequest only re-submits qualities lacking a healthy target, so
+	// it is idempotent; gate it on the approved status it expects.
+	active, err := s.store.SetStatus(ctx, req.ID, StatusApproved, viewer)
 	if err != nil {
 		return nil, err
 	}
-
-	instances, err := s.store.ListIntegrations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	existing, err := s.store.ListTargets(ctx, active.ID)
-	if err != nil {
-		return nil, err
-	}
-	ceiling := s.requesterCeiling(ctx, active.RequestedByUserID, active.RequestedByProfileID)
-	planned := routeTargets(*active, ceiling, settings, instances)
-	if len(planned) == 0 {
-		return s.markSubmissionFailed(ctx, active.ID, viewer,
-			fmt.Errorf("no %s instance configured for the requested quality",
-				integrationKindForMediaType(active.MediaType)))
-	}
-
-	return s.submitPlannedTargets(ctx, *active, planned, existing, viewer)
-}
-
-// submitPlannedTargets submits each planned target idempotently against the
-// already-recorded targets: a non-failed target for a quality is left alone, a
-// failed one is deleted and re-submitted, and a missing one is submitted fresh.
-// This is shared by Retry and the reconcile-driven submit so a re-run never
-// violates the UNIQUE(request_id, quality) constraint.
-func (s *Service) submitPlannedTargets(ctx context.Context, req Request, planned []plannedTarget, existing []Target, actor Viewer) (*Request, error) {
-	hasOK := make(map[Quality]bool)
-	for _, t := range existing {
-		if t.Status != StatusFailed {
-			hasOK[t.Quality] = true
-		}
-	}
-
-	latest := &req
-	for _, pt := range planned {
-		if hasOK[pt.Quality] {
-			continue // healthy target already exists for this quality
-		}
-		// remove the stale failed target for this quality before re-submitting
-		for _, t := range existing {
-			if t.Quality == pt.Quality && t.Status == StatusFailed {
-				if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
-					return nil, err
-				}
-			}
-		}
-		updated, err := s.submitPlannedTarget(ctx, req, pt, actor)
-		if err != nil {
-			return nil, err
-		}
-		if updated != nil {
-			latest = updated
-		}
-	}
-	return latest, nil
+	return s.submitApprovedRequest(ctx, *active, viewer, nil)
 }
 
 func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileResult, error) {
@@ -652,12 +684,16 @@ func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileRe
 	if err != nil {
 		return ReconcileResult{}, err
 	}
+	fc, err := s.newFulfillContext(ctx)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
 	result := ReconcileResult{Checked: len(candidates)}
 	for _, req := range candidates {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		change, err := s.reconcileRequest(ctx, *req)
+		change, err := s.reconcileRequest(ctx, *req, fc)
 		if err != nil {
 			slog.WarnContext(ctx, "request reconcile failed",
 				"request_id", req.ID,
@@ -765,14 +801,17 @@ func (s *Service) CreateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	if err := validateInstance(&in); err != nil {
-		return nil, err
-	}
 	id, err := idgen.NextID()
 	if err != nil {
 		return nil, err
 	}
 	in.ID = id
+	if err := validateInstance(&in); err != nil {
+		return nil, err
+	}
+	if err := s.validateViaPlugin(ctx, in); err != nil {
+		return nil, err
+	}
 	return s.store.SaveIntegrationWithDefaults(ctx, in, true)
 }
 
@@ -786,7 +825,84 @@ func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if err := validateInstance(&in); err != nil {
 		return nil, err
 	}
+	if err := s.validateViaPlugin(ctx, in); err != nil {
+		return nil, err
+	}
 	return s.store.SaveIntegrationWithDefaults(ctx, in, false)
+}
+
+// validateViaPlugin asks the bound request_router plugin to validate the
+// connection config on save. Field/form errors are surfaced as *ValidationError
+// so the API layer can render them inline.
+func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
+	if s.router == nil || in.InstallationID == nil {
+		return nil
+	}
+	// On UPDATE the client omits api_key_ref ("leave blank to keep saved key"),
+	// so we would otherwise validate against an empty credential. Mirror
+	// LoadIntegrationOptions's backfill: load the stored row by id and reuse the
+	// saved (already-decrypted) api key (and BaseURL/PluginConfig if also blank).
+	// Nil-safe — a brand-new id has no stored row, so just proceed with what the
+	// body carries.
+	if strings.TrimSpace(in.APIKeyRef) == "" && strings.TrimSpace(in.ID) != "" {
+		stored, err := s.store.GetIntegration(ctx, in.ID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if stored != nil {
+			// Don't pair a stored API key with a caller-changed base URL: require the
+			// key to be re-entered when the server URL changes (defense against
+			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
+			if strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.BaseURL) != strings.TrimSpace(stored.BaseURL) {
+				return &ValidationError{FieldErrors: map[string]string{"api_key_ref": "re-enter the API key when changing the base URL"}}
+			}
+			in.APIKeyRef = stored.APIKeyRef
+			if strings.TrimSpace(in.BaseURL) == "" {
+				in.BaseURL = stored.BaseURL
+			}
+			if in.PluginConfig == nil {
+				in.PluginConfig = stored.PluginConfig
+			}
+		}
+	}
+	// in.APIKeyRef is the decrypted literal (from the body, or backfilled from the
+	// stored row above).
+	apiKey := strings.TrimSpace(in.APIKeyRef)
+	conn := ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: apiKey, Config: in.PluginConfig}
+	siblings, err := s.siblingConnections(ctx, in)
+	if err != nil {
+		return err
+	}
+	fe, form, err := s.router.Validate(ctx, *in.InstallationID, in.CapabilityID, conn, siblings)
+	if err != nil {
+		return err
+	}
+	if len(fe) > 0 || form != "" {
+		return &ValidationError{FieldErrors: fe, FormError: form}
+	}
+	return nil
+}
+
+// siblingConnections returns the other connections bound to the same plugin
+// installation as `in` (self excluded), carrying only id + config so a plugin
+// can enforce cross-connection rules without the host resolving sibling
+// credentials.
+func (s *Service) siblingConnections(ctx context.Context, in Integration) ([]ResolvedRouterConnection, error) {
+	if in.InstallationID == nil {
+		return nil, nil
+	}
+	all, err := s.store.ListIntegrations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []ResolvedRouterConnection
+	for _, other := range all {
+		if other.ID == in.ID || other.InstallationID == nil || *other.InstallationID != *in.InstallationID {
+			continue
+		}
+		out = append(out, ResolvedRouterConnection{ID: other.ID, Config: other.PluginConfig})
+	}
+	return out, nil
 }
 
 func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id string) error {
@@ -797,78 +913,68 @@ func (s *Service) DeleteIntegration(ctx context.Context, viewer Viewer, id strin
 }
 
 func validateInstance(in *Integration) error {
-	in.Kind = strings.TrimSpace(in.Kind)
-	if in.Kind != "radarr" && in.Kind != "sonarr" {
-		return fmt.Errorf("%w: kind must be radarr or sonarr", ErrInvalidInput)
-	}
 	if strings.TrimSpace(in.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidInput)
 	}
-	if in.IsDefault && in.Is4K {
-		return fmt.Errorf("%w: the HD default cannot be a 4K server", ErrInvalidInput)
+	// capability_id carries the capability SUB-ID ("arr"/"seerr"), not the type:
+	// the host resolves the plugin via requireCapability("request_router.v1", id),
+	// which keys on (type, id), so storing the type "request_router.v1" here
+	// resolves nothing. Matches the scan_source/metadata convention
+	// (autoscan_sources.capability_id = "arr"). The bound plugin's Validate RPC is
+	// the authority on whether the sub-id names a real capability.
+	in.CapabilityID = strings.TrimSpace(in.CapabilityID)
+	if in.CapabilityID == "" {
+		return fmt.Errorf("%w: capability_id is required", ErrInvalidInput)
 	}
-	if in.IsDefault4K && !in.Is4K {
-		return fmt.Errorf("%w: the 4K default must be a 4K server", ErrInvalidInput)
+	if in.InstallationID == nil {
+		return fmt.Errorf("%w: installation_id is required", ErrInvalidInput)
 	}
+	// The is_default/is_4k/is_default_4k cross-field consistency check is owned by
+	// the request_router plugin's Validate RPC, which surfaces it as an inline
+	// field error (better UX than a generic host 400). See validateViaPlugin.
 	return nil
 }
 
-func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, integration Integration) (*IntegrationOptions, error) {
+func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, integration Integration) (map[string][]RouterOption, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	// For a saved instance the request body carries only the path id (no kind and
-	// often no creds), so resolve the saved row by id and backfill what the body
-	// omitted. This makes "Test connection" reuse the correct per-instance key
-	// (each kind can have multiple instances) instead of borrowing a sibling's.
+	// For a saved instance the request body carries only the path id (no creds and
+	// often no plugin wiring), so resolve the saved row by id and backfill what the
+	// body omitted. This makes "Test connection" reuse the correct per-instance key
+	// (each plugin can have multiple connections) instead of borrowing a sibling's.
 	if id := strings.TrimSpace(integration.ID); id != "" && id != "new" {
 		stored, err := s.store.GetIntegration(ctx, id)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
 		if stored != nil {
-			if strings.TrimSpace(integration.Kind) == "" {
-				integration.Kind = stored.Kind
-			}
+			submittedBaseURL := strings.TrimSpace(integration.BaseURL)
+			storedBaseURL := strings.TrimSpace(stored.BaseURL)
 			if strings.TrimSpace(integration.BaseURL) == "" {
 				integration.BaseURL = stored.BaseURL
 			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" {
+			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || submittedBaseURL == storedBaseURL) {
 				integration.APIKeyRef = stored.APIKeyRef
+			}
+			if strings.TrimSpace(integration.CapabilityID) == "" {
+				integration.CapabilityID = stored.CapabilityID
+			}
+			if integration.InstallationID == nil {
+				integration.InstallationID = stored.InstallationID
+			}
+			if integration.PluginConfig == nil {
+				integration.PluginConfig = stored.PluginConfig
 			}
 		}
 	}
 
-	normalized, err := normalizeIntegrationConnection(integration)
-	if err != nil {
-		return nil, err
+	apiKey := strings.TrimSpace(integration.APIKeyRef)
+	if s.router == nil || integration.InstallationID == nil {
+		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
-	if strings.TrimSpace(normalized.BaseURL) == "" {
-		return nil, fmt.Errorf("%w: base_url is required", ErrInvalidInput)
-	}
-	if strings.TrimSpace(normalized.APIKeyRef) == "" {
-		return nil, fmt.Errorf("%w: api_key_ref is required", ErrInvalidInput)
-	}
-	// APIKeyRef is already the literal key: a saved instance was decrypted by
-	// GetIntegration above; a new instance carries the key the admin just typed.
-	resolved := normalized
-
-	switch resolved.Kind {
-	case "radarr":
-		adapter, ok := s.movieAdapter.(MovieIntegrationOptionsAdapter)
-		if !ok {
-			return nil, fmt.Errorf("request radarr integration options are not configured")
-		}
-		return adapter.ListMovieIntegrationOptions(ctx, resolved)
-	case "sonarr":
-		adapter, ok := s.seriesAdapter.(SeriesIntegrationOptionsAdapter)
-		if !ok {
-			return nil, fmt.Errorf("request sonarr integration options are not configured")
-		}
-		return adapter.ListSeriesIntegrationOptions(ctx, resolved)
-	default:
-		return nil, fmt.Errorf("%w: invalid integration kind", ErrInvalidInput)
-	}
+	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
+	return s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 }
 
 func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
@@ -1139,105 +1245,247 @@ func (s *Service) detectRequestAnime(ctx context.Context, mediaType MediaType, t
 	return detectAnime(detail.KeywordIDs)
 }
 
+// integrationConfigured reports whether a fulfillment backend exists for the
+// media type, gating auto-approval (pending vs approved). It uses the same
+// router-connection selection as resolveRouterConnections — an enabled
+// request_router.v1 connection with an installation — and additionally honors a
+// connection's declared media-type support so a movie request only auto-approves
+// when a router connection supporting "movie" exists.
 func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType) (bool, error) {
 	instances, err := s.store.ListIntegrations(ctx)
 	if err != nil {
 		return false, err
 	}
-	kind := integrationKindForMediaType(mediaType)
 	for _, in := range instances {
-		if in.Kind == kind && in.Enabled && (in.IsDefault || in.IsDefault4K) && integrationIsConfigured(in) {
+		if eligibleRouterConnection(in, mediaType) &&
+			strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.APIKeyRef) != "" {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor Viewer) (*Request, error) {
+// integrationSupportsMediaType reports whether a router connection serves the
+// given media type. An empty SupportedMediaTypes is treated as "supports all".
+func integrationSupportsMediaType(in Integration, mediaType MediaType) bool {
+	if len(in.SupportedMediaTypes) == 0 {
+		return true
+	}
+	for _, mt := range in.SupportedMediaTypes {
+		if mt == string(mediaType) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor Viewer, fc *fulfillContext) (*Request, error) {
 	if req.Outcome != OutcomeActive || req.Status != StatusApproved {
 		return &req, nil
 	}
-	instances, err := s.store.ListIntegrations(ctx)
+	if s.router == nil {
+		return s.markSubmissionFailed(ctx, req.ID, actor, fmt.Errorf("no fulfillment backend configured"))
+	}
+	if fc == nil {
+		built, err := s.newFulfillContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		fc = built
+	}
+	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, fc, req.MediaType)
 	if err != nil {
 		return nil, err
 	}
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil {
-		return nil, err
+	if len(conns) == 0 {
+		// Distinguish "no backend at all" from the migration breakage where an
+		// existing connection row exists but its installation_id is NULL (the row
+		// predates the plugin install and was never re-bound).
+		msg := "no fulfillment backend configured"
+		for _, in := range fc.integrations {
+			if in.Enabled && in.CapabilityID != "" && in.InstallationID == nil {
+				msg = "request backend connection is not bound to a plugin installation; re-save it in admin"
+				break
+			}
+		}
+		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
 	}
-	ceiling := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
-	planned := routeTargets(req, ceiling, settings, instances)
-	if len(planned) == 0 {
-		return s.markSubmissionFailed(ctx, req.ID, actor,
-			fmt.Errorf("no %s instance configured for the requested quality",
-				integrationKindForMediaType(req.MediaType)))
-	}
-
-	// Reconcile can re-run submit while the request is still 'approved'; skip
-	// qualities that already have a live target and replace failed ones so the
-	// UNIQUE(request_id, quality) constraint is never violated.
 	existing, err := s.store.ListTargets(ctx, req.ID)
 	if err != nil {
 		return nil, err
 	}
-	return s.submitPlannedTargets(ctx, req, planned, existing, actor)
-}
-
-// submitPlannedTarget creates a target row, submits it to the adapter, and
-// records the result (queued or failed) via UpdateTargetStatus (which recomputes
-// the request aggregate). Returns the latest request snapshot.
-func (s *Service) submitPlannedTarget(ctx context.Context, req Request, pt plannedTarget, actor Viewer) (*Request, error) {
-	resolved := resolveInstance(pt)
-	// The repo already decrypted the stored key; a blank one means unconfigured.
-	if strings.TrimSpace(resolved.APIKeyRef) == "" {
-		return s.createFailedTarget(ctx, req, pt, resolved, "missing api key", actor)
+	healthy := map[Quality]bool{}
+	for _, t := range existing {
+		if t.Status != StatusFailed {
+			healthy[t.Quality] = true
+		}
 	}
-
-	target, err := s.store.CreateTarget(ctx, Target{
-		RequestID: req.ID, IntegrationID: resolved.ID, IntegrationKind: resolved.Kind,
-		Quality: pt.Quality, IsAnime: pt.IsAnime, Status: StatusQueued,
-	})
+	allowed := s.allowedQualities(ctx, req, fc.settings)
+	if !fc.settings.ForceDualQuality {
+		allowed = filterUnconfiguredOptionalQualities(allowed, conns)
+	}
+	var want []Quality
+	for _, q := range allowed {
+		if !healthy[q] {
+			want = append(want, q)
+		}
+	}
+	if len(want) == 0 {
+		return &req, nil
+	}
+	for _, t := range existing { // drop stale failed targets for the qualities we re-submit
+		if t.Status == StatusFailed {
+			for _, q := range want {
+				if t.Quality == q {
+					if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
+	s.populateRequesterIdentity(ctx, &req)
+	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
 	if err != nil {
 		return nil, err
 	}
-
-	result, serr := s.submitTarget(ctx, req, resolved)
-	if serr != nil {
-		return s.store.UpdateTargetStatus(ctx, target.ID, StatusFailed, "", "", serr.Error(), actor)
+	if len(targets) == 0 {
+		if msg == "" {
+			msg = "fulfillment backend created no targets"
+		}
+		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
 	}
-	return s.store.UpdateTargetStatus(ctx, target.ID, StatusQueued,
-		result.ExternalID, result.ExternalStatus, "", actor)
+	connKind := connectionKindByID(conns)
+	latest := &req
+	// The plugin is an out-of-process trust boundary: validate every returned
+	// target against the DB CHECK constraints (quality, status) and skip any
+	// quality that is duplicated in the batch or already has a healthy target, so
+	// a misbehaving plugin can't violate UNIQUE(request_id, quality) and wedge the
+	// request.
+	validQuality := map[Quality]bool{Quality1080p: true, Quality2160p: true}
+	validStatus := map[Status]bool{StatusQueued: true, StatusDownloading: true, StatusCompleted: true, StatusFailed: true}
+	returned := map[Quality]bool{}
+	for _, rt := range targets {
+		if !validQuality[rt.Quality] {
+			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "request_id", req.ID, "quality", string(rt.Quality))
+			continue
+		}
+		if returned[rt.Quality] || healthy[rt.Quality] {
+			continue // dup-in-batch, or a healthy target already exists for this quality
+		}
+		if rt.ConnectionID != "" {
+			if _, ok := connKind[rt.ConnectionID]; !ok {
+				slog.WarnContext(ctx, "requests: plugin returned unknown connection id; skipping target", "request_id", req.ID, "connection_id", rt.ConnectionID)
+				continue
+			}
+		}
+		returned[rt.Quality] = true
+		created, err := s.store.CreateTarget(ctx, Target{
+			RequestID: req.ID, IntegrationID: rt.ConnectionID, IntegrationKind: connKind[rt.ConnectionID],
+			Quality: rt.Quality, IsAnime: req.IsAnime, Status: StatusQueued,
+		})
+		if err != nil {
+			return nil, err
+		}
+		status := rt.Status
+		if status == "" || !validStatus[status] {
+			status = StatusQueued // coerce unknown/empty status to the DB-valid default
+		}
+		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, rt.Message, actor)
+		if err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			latest = updated
+		}
+	}
+	// Any wanted quality the plugin did not fulfill is recorded as a failed target
+	// rather than silently dropped, so it stays visible and Retry re-attempts it
+	// (a failed target is not "healthy").
+	const noTargetMsg = "fulfillment backend returned no target for this quality"
+	for _, q := range want {
+		if returned[q] {
+			continue
+		}
+		created, err := s.store.CreateTarget(ctx, Target{
+			RequestID: req.ID, Quality: q, IsAnime: req.IsAnime, Status: StatusFailed, LastError: noTargetMsg,
+		})
+		if err != nil {
+			return nil, err
+		}
+		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, StatusFailed, "", "", noTargetMsg, actor)
+		if err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			latest = updated
+		}
+	}
+	return latest, nil
 }
 
-func (s *Service) createFailedTarget(ctx context.Context, req Request, pt plannedTarget, resolved Integration, msg string, actor Viewer) (*Request, error) {
-	target, err := s.store.CreateTarget(ctx, Target{
-		RequestID: req.ID, IntegrationID: resolved.ID, IntegrationKind: resolved.Kind,
-		Quality: pt.Quality, IsAnime: pt.IsAnime, Status: StatusFailed, LastError: msg,
-	})
-	if err != nil {
-		return nil, err
+// connectionKindByID maps each connection id to its plugin-declared service kind
+// (e.g. "radarr"/"sonarr") from PluginConfig["service_kind"], for the
+// integration_kind column on persisted targets. Missing kinds map to "".
+func connectionKindByID(conns []ResolvedRouterConnection) map[string]string {
+	out := make(map[string]string, len(conns))
+	for _, c := range conns {
+		out[c.ID] = ""
+		if c.Config != nil {
+			if kind, ok := c.Config["service_kind"].(string); ok {
+				out[c.ID] = kind
+			}
+		}
 	}
-	return s.store.UpdateTargetStatus(ctx, target.ID, StatusFailed, "", "", msg, actor)
+	return out
 }
 
-// submitTarget calls the correct adapter with a per-target Request copy. The
-// adapters read root folder/quality/tags (and Sonarr series_type) from the
-// resolved Integration.
-func (s *Service) submitTarget(ctx context.Context, req Request, resolved Integration) (FulfillmentResult, error) {
-	switch req.MediaType {
-	case MediaTypeMovie:
-		if s.movieAdapter == nil {
-			return FulfillmentResult{}, fmt.Errorf("no movie adapter configured")
+func filterUnconfiguredOptionalQualities(qualities []Quality, conns []ResolvedRouterConnection) []Quality {
+	out := make([]Quality, 0, len(qualities))
+	for _, q := range qualities {
+		if q == Quality2160p && !routerQualityConfigured(q, conns) {
+			continue
 		}
-		return s.movieAdapter.SubmitMovie(ctx, req, resolved)
-	case MediaTypeSeries:
-		if s.seriesAdapter == nil {
-			return FulfillmentResult{}, fmt.Errorf("no series adapter configured")
-		}
-		return s.seriesAdapter.SubmitSeries(ctx, req, resolved)
-	default:
-		return FulfillmentResult{}, fmt.Errorf("unsupported media type %q", req.MediaType)
+		out = append(out, q)
 	}
+	return out
+}
+
+func routerQualityConfigured(q Quality, conns []ResolvedRouterConnection) bool {
+	usesTieredDefaults := false
+	for _, conn := range conns {
+		if conn.Config == nil {
+			continue
+		}
+		if hasRouterQualityKey(conn.Config) {
+			usesTieredDefaults = true
+		}
+		if q == Quality2160p && boolConfig(conn.Config, "is_default_4k") {
+			return true
+		}
+	}
+	// Generic request_router implementations may not expose arr-style HD/4K
+	// default flags. In that case, preserve the host's requested qualities and
+	// let the plugin decide what it can fulfill.
+	return !usesTieredDefaults
+}
+
+func hasRouterQualityKey(config map[string]any) bool {
+	for _, key := range []string{"is_default", "is_default_4k", "is_4k"} {
+		if _, ok := config[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func boolConfig(config map[string]any, key string) bool {
+	v, ok := config[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
 
 func (s *Service) markSubmissionFailed(ctx context.Context, requestID string, actor Viewer, submitErr error) (*Request, error) {
@@ -1259,7 +1507,7 @@ const (
 	reconcileFailed      reconcileChange = "failed"
 )
 
-func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileChange, error) {
+func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfillContext) (reconcileChange, error) {
 	completed, err := s.requestAvailable(ctx, req)
 	if err != nil {
 		return reconcileUnchanged, err
@@ -1286,7 +1534,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 	}
 
 	if req.Status == StatusApproved {
-		updated, err := s.submitApprovedRequest(ctx, req, Viewer{})
+		updated, err := s.submitApprovedRequest(ctx, req, Viewer{}, fc)
 		if err != nil {
 			return reconcileUnchanged, err
 		}
@@ -1304,41 +1552,51 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 	if err != nil {
 		return reconcileUnchanged, err
 	}
-	instances, err := s.store.ListIntegrations(ctx)
+	if s.router == nil {
+		return reconcileUnchanged, nil
+	}
+	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, fc, req.MediaType)
 	if err != nil {
 		return reconcileUnchanged, err
 	}
-	byID := make(map[string]Integration, len(instances))
-	for _, in := range instances {
-		byID[in.ID] = in
+	if len(conns) == 0 {
+		return reconcileUnchanged, nil
 	}
-	change := reconcileUnchanged
+
+	var refs []RouterTargetRef
 	for _, t := range targets {
 		if t.Status == StatusCompleted || t.Status == StatusFailed {
 			continue
 		}
-		in, ok := byID[t.IntegrationID]
-		if !ok {
+		refs = append(refs, RouterTargetRef{Quality: t.Quality, ConnectionID: t.IntegrationID, ExternalID: t.ExternalID})
+	}
+	if len(refs) == 0 {
+		return reconcileUnchanged, nil
+	}
+
+	statuses, err := s.router.CheckStatus(ctx, installationID, capabilityID, req, refs, conns)
+	if err != nil {
+		return reconcileUnchanged, err
+	}
+
+	change := reconcileUnchanged
+	for _, st := range statuses {
+		// Match the returned status to the live target by (quality, connection).
+		var target *Target
+		for i := range targets {
+			if targets[i].Quality == st.Quality && targets[i].IntegrationID == st.ConnectionID {
+				target = &targets[i]
+				break
+			}
+		}
+		if target == nil || target.Status == StatusCompleted || target.Status == StatusFailed {
 			continue
 		}
-		// in.APIKeyRef was decrypted by ListIntegrations; skip if unconfigured.
-		if strings.TrimSpace(in.APIKeyRef) == "" {
+		newStatus := st.Status
+		if newStatus == "" || newStatus == target.Status {
 			continue
 		}
-		probe := req
-		probe.ExternalID = t.ExternalID
-		st, err := s.checkFulfillmentStatus(ctx, probe, in)
-		if err != nil {
-			continue
-		}
-		if st.Status == "" && st.Outcome == "" {
-			continue
-		}
-		newStatus := targetStatusFromFulfillment(st)
-		if newStatus == t.Status {
-			continue
-		}
-		if _, err := s.store.UpdateTargetStatus(ctx, t.ID, newStatus, st.ExternalID, st.ExternalStatus, "", Viewer{}); err != nil {
+		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
 			return reconcileUnchanged, err
 		}
 		switch newStatus {
@@ -1355,20 +1613,6 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request) (reconcileC
 		}
 	}
 	return change, nil
-}
-
-func targetStatusFromFulfillment(st FulfillmentStatus) Status {
-	switch st.Status {
-	case StatusCompleted:
-		return StatusCompleted
-	case StatusDownloading:
-		return StatusDownloading
-	default:
-		if st.Outcome == OutcomeFailed {
-			return StatusFailed
-		}
-		return StatusQueued
-	}
 }
 
 // hasLiveTargets reports whether the request has any non-terminal (queued or
@@ -1392,33 +1636,6 @@ func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, erro
 		return false, err
 	}
 	return matches[req.TMDBID].Available, nil
-}
-
-func (s *Service) checkFulfillmentStatus(ctx context.Context, req Request, resolved Integration) (FulfillmentStatus, error) {
-	switch req.MediaType {
-	case MediaTypeMovie:
-		checker, ok := s.movieAdapter.(MovieStatusAdapter)
-		if !ok {
-			return FulfillmentStatus{}, nil
-		}
-		return checker.CheckMovieStatus(ctx, req, resolved)
-	case MediaTypeSeries:
-		checker, ok := s.seriesAdapter.(SeriesStatusAdapter)
-		if !ok {
-			return FulfillmentStatus{}, nil
-		}
-		return checker.CheckSeriesStatus(ctx, req, resolved)
-	default:
-		return FulfillmentStatus{}, nil
-	}
-}
-
-func integrationIsConfigured(integration Integration) bool {
-	return integration.Enabled &&
-		strings.TrimSpace(integration.BaseURL) != "" &&
-		strings.TrimSpace(integration.APIKeyRef) != "" &&
-		strings.TrimSpace(integration.RootFolder) != "" &&
-		integration.QualityProfileID != nil
 }
 
 func (s *Service) now() time.Time {
@@ -1527,21 +1744,6 @@ func normalizeUserLimit(limit UserLimit) (UserLimit, error) {
 		return UserLimit{}, fmt.Errorf("%w: invalid approval mode", ErrInvalidInput)
 	}
 	return limit, nil
-}
-
-func normalizeIntegrationConnection(integration Integration) (Integration, error) {
-	integration.Kind = strings.ToLower(strings.TrimSpace(integration.Kind))
-	switch integration.Kind {
-	case "radarr", "sonarr":
-	default:
-		return Integration{}, fmt.Errorf("%w: invalid integration kind", ErrInvalidInput)
-	}
-	integration.BaseURL = strings.TrimRight(strings.TrimSpace(integration.BaseURL), "/")
-	integration.APIKeyRef = strings.TrimSpace(integration.APIKeyRef)
-	if integration.Options == nil {
-		integration.Options = map[string]any{}
-	}
-	return integration, nil
 }
 
 func normalizeMediaType(mediaType MediaType) (MediaType, error) {

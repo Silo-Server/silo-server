@@ -72,8 +72,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
-	"github.com/Silo-Server/silo-server/internal/requests/radarr"
-	"github.com/Silo-Server/silo-server/internal/requests/sonarr"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -1541,7 +1539,8 @@ func main() {
 				catalog.NewProviderIDRepository(deps.DB),
 			),
 		)
-		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		if userStoreProvider != nil {
 			reconcileResolver := access.NewResolver(
 				auth.NewUserRepository(deps.DB),

@@ -217,6 +217,10 @@ func (f *fakePluginClient) ScanSource(string) (*pluginhost.ScanSourceClient, err
 	return nil, nil
 }
 
+func (f *fakePluginClient) RequestRouter(string) (*pluginhost.RequestRouterClient, error) {
+	return nil, nil
+}
+
 func (f *fakePluginClient) EventConsumer(string) (*pluginhost.EventConsumerClient, error) {
 	return nil, nil
 }

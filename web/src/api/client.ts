@@ -202,6 +202,14 @@ async function refreshAccessToken(
 }
 
 export class ApiClientError extends Error {
+  /**
+   * Raw parsed JSON body of the error response, when the body parsed as JSON.
+   * Carries fields the normalized `details: ApiError` does not surface (e.g.
+   * plugin validation `field_errors` / `form_error` on a 400). Undefined for
+   * non-JSON or empty bodies.
+   */
+  public body?: unknown;
+
   constructor(
     public status: number,
     public code: string,
@@ -257,14 +265,32 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === target);
 }
 
-async function parseApiError(res: Response): Promise<ApiError> {
+interface ParsedApiError {
+  /** Normalized error with guaranteed `error`/`message` fields. */
+  apiErr: ApiError;
+  /** Raw parsed JSON body, or undefined when the body wasn't JSON/empty. */
+  raw?: unknown;
+}
+
+async function parseApiError(res: Response): Promise<ParsedApiError> {
   let apiErr: Partial<ApiError> = {};
+  let raw: unknown;
   try {
-    apiErr = await res.json();
+    raw = await res.json();
+    if (raw && typeof raw === "object") {
+      apiErr = raw as Partial<ApiError>;
+    }
   } catch {
     // response wasn't JSON
   }
-  return normalizeApiError(apiErr, res);
+  return { apiErr: normalizeApiError(apiErr, res), raw };
+}
+
+/** Builds an ApiClientError from a parsed error response, attaching the raw body. */
+function apiClientErrorFrom(status: number, parsed: ParsedApiError): ApiClientError {
+  const err = new ApiClientError(status, parsed.apiErr.error, parsed.apiErr.message, parsed.apiErr);
+  err.body = parsed.raw;
+  return err;
 }
 
 export interface RestoredUserSession<TUser> {
@@ -304,8 +330,7 @@ export async function restoreUserSession<TUser>({
   }
 
   if (!res.ok) {
-    const apiErr = await parseApiError(res);
-    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+    throw apiClientErrorFrom(res.status, await parseApiError(res));
   }
 
   return {
@@ -335,12 +360,12 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   if (!res.ok) {
-    const apiErr = await parseApiError(res);
-    if (res.status === 403 && apiErr.error === "profile_unverified") {
+    const parsed = await parseApiError(res);
+    if (res.status === 403 && parsed.apiErr.error === "profile_unverified") {
       setProfileToken(null);
       profileUnverifiedListener?.();
     }
-    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+    throw apiClientErrorFrom(res.status, parsed);
   }
 
   // Handle empty successful responses.
@@ -400,8 +425,7 @@ export async function apiDownload(
   }
 
   if (!res.ok) {
-    const apiErr = await parseApiError(res);
-    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+    throw apiClientErrorFrom(res.status, await parseApiError(res));
   }
 
   const blob = await res.blob();
