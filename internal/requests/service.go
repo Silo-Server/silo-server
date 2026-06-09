@@ -116,8 +116,9 @@ func (s *Service) allowedQualities(ctx context.Context, req Request, settings Se
 }
 
 // fulfillContext caches the global fulfillment inputs for one reconcile cycle
-// (or a single Approve/Retry) so integrations, settings, and resolved API keys
-// are fetched/decrypted once instead of per request.
+// (or a single Approve/Retry) so integrations and settings are fetched once
+// instead of per request. API keys need no cache here: the repository decrypts
+// api_key_ref on read, so Integration.APIKeyRef already holds the literal key.
 type fulfillContext struct {
 	integrations []Integration
 	settings     Settings

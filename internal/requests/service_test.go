@@ -157,6 +157,38 @@ func TestCreateRequestAutoApprovalRequiresConfiguredIntegration(t *testing.T) {
 	}
 }
 
+// TestCreateRequestAutoApprovalEmptyKeyTreatedAsUnconfigured guards that a router
+// connection that is enabled + bound but has no api key (empty after the repo's
+// decrypt) reads as "not configured": auto-approval is declined and the request
+// stays pending, rather than being auto-approved and then failing submission when
+// resolveRouterConnections skips the keyless connection. This pins the empty-key
+// check in integrationConfigured against the skip in resolveRouterConnections so
+// the two can't drift at the public CreateRequest surface.
+func TestCreateRequestAutoApprovalEmptyKeyTreatedAsUnconfigured(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	store.settings.GlobalAutoApprovalEnabled = true
+	store.integrations = []Integration{autoApproveRouterInst("router-1", "")}
+	service := newTestService(store)
+	router := &fakeRouterProvider{}
+	service.SetRouterProvider(router)
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+	if req.Status != StatusPending {
+		t.Fatalf("status = %q, want pending (empty-key connection is unconfigured)", req.Status)
+	}
+	if router.fulfillCalls != 0 {
+		t.Fatalf("fulfill calls = %d, want 0 (must not submit to a keyless connection)", router.fulfillCalls)
+	}
+}
+
 func TestCreateRequestAutoApprovesWithConfiguredIntegration(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
