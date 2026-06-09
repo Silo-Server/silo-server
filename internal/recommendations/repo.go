@@ -52,8 +52,8 @@ const tasteSeedCandidateQuery = `
 			SELECT mi.content_id
 			FROM   media_items mi
 			LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
-			WHERE  mi.status = 'matched'
-			  AND  mi.type IN ('movie', 'series')
+			WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
+			  AND  mi.type IN ('movie', 'series', 'audiobook')
 			  AND  mi.poster_path IS NOT NULL
 			  AND  mi.poster_path <> ''
 			ORDER  BY COALESCE(wc.watch_count, 0) DESC,
@@ -279,7 +279,7 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 
 	conditions := []string{
-		"mi.status = 'matched'",
+		"(mi.status = 'matched' OR mi.type = 'audiobook')",
 		"e.media_item_id != ALL($2)",
 	}
 	args := []any{pgvector.NewVector(embedding), excludeIDs}
@@ -1223,7 +1223,7 @@ func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser 
 
 // --- Cold Start Queries ---
 
-// GetPopularItems returns the most-watched series/movies over the given number of days.
+// GetPopularItems returns the most-played media items over the given number of days.
 // Episodes are resolved to their parent series.
 func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -1270,11 +1270,13 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 }
 
 // GetRecentlyAddedItems returns items added within the given number of days.
+// Audiobooks bypass the matched-status gate because their scan-derived metadata
+// is authoritative before any external-provider match exists.
 func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT content_id, created_at
 		FROM   media_items
-		WHERE  status = 'matched'
+		WHERE  (status = 'matched' OR type = 'audiobook')
 		  AND  created_at > NOW() - ($1 || ' days')::interval
 		ORDER  BY created_at DESC
 		LIMIT  $2`,
@@ -1325,7 +1327,7 @@ func (r *Repo) GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]S
 	return items, rows.Err()
 }
 
-// GetTasteSeedCandidates returns movie/series content IDs ordered for the
+// GetTasteSeedCandidates returns movie/series/audiobook content IDs ordered for the
 // taste-seeding picker: server engagement first (most-watched in the last
 // 180 days), then rating reliability and rating score, then recency. This keeps
 // fresh servers from front-loading single-vote TMDB 10.0 obscurities while
@@ -1393,7 +1395,7 @@ func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
 	return genres, rows.Err()
 }
 
-// GetGenreSamplerItems returns the most-watched series/movies in a specific genre.
+// GetGenreSamplerItems returns the most-played media items in a specific genre.
 func (r *Repo) GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH watched_items AS (
@@ -1614,7 +1616,7 @@ func (r *Repo) GetAllUsersWithTasteProfiles(ctx context.Context) ([]StaleProfile
 	return profiles, rows.Err()
 }
 
-// GetWatchedItemIDs returns content IDs of series/movies the user has watched
+// GetWatchedItemIDs returns content IDs of media items the user has watched
 // (>= 50% progress or completed). Episodes are resolved to their parent series.
 func (r *Repo) GetWatchedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `

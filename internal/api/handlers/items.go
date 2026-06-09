@@ -225,6 +225,9 @@ type sortMetricsResponse struct {
 	ProgressRatio  *float64 `json:"progress_ratio,omitempty"`
 	ViewedAt       string   `json:"viewed_at,omitempty"`
 	PlayCount      *int     `json:"play_count,omitempty"`
+	Author         string   `json:"author,omitempty"`
+	Narrator       string   `json:"narrator,omitempty"`
+	SeriesName     string   `json:"series_name,omitempty"`
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -891,8 +894,88 @@ func (h *ItemsHandler) listSortMetrics(
 		}
 	case "progress", "date_viewed", "plays":
 		h.listUserSortMetrics(ctx, items, sortField, store, profileID, metrics)
+	case "author", "narrator", "series":
+		h.listAudiobookSortMetrics(ctx, items, sortField, metrics)
 	}
 	return metrics
+}
+
+func (h *ItemsHandler) listAudiobookSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	sortField string,
+	metrics map[string]*sortMetricsResponse,
+) {
+	if h == nil || h.browseRepo == nil || h.browseRepo.Pool() == nil || len(items) == 0 {
+		return
+	}
+	contentIDs := uniqueItemContentIDs(items)
+	if len(contentIDs) == 0 {
+		return
+	}
+
+	var query string
+	switch sortField {
+	case "author":
+		query = audiobookPersonSortMetricQuery(int(models.PersonKindAuthor))
+	case "narrator":
+		query = audiobookPersonSortMetricQuery(int(models.PersonKindNarrator))
+	case "series":
+		query = `
+			SELECT target.content_id, BTRIM(s.series_name) AS value
+			FROM unnest($1::text[]) WITH ORDINALITY AS target(content_id, ord)
+			JOIN audiobook_series s ON s.content_id = target.content_id
+			WHERE BTRIM(s.series_name) <> ''`
+	default:
+		return
+	}
+
+	rows, err := h.browseRepo.Pool().Query(ctx, query, contentIDs)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var contentID, value string
+		if err := rows.Scan(&contentID, &value); err != nil {
+			return
+		}
+		value = strings.TrimSpace(value)
+		if contentID == "" || value == "" {
+			continue
+		}
+		resp := metrics[contentID]
+		if resp == nil {
+			resp = &sortMetricsResponse{}
+			metrics[contentID] = resp
+		}
+		switch sortField {
+		case "author":
+			resp.Author = value
+		case "narrator":
+			resp.Narrator = value
+		case "series":
+			resp.SeriesName = value
+		}
+	}
+}
+
+func audiobookPersonSortMetricQuery(kind int) string {
+	return fmt.Sprintf(`
+		SELECT target.content_id, person.name AS value
+		FROM unnest($1::text[]) WITH ORDINALITY AS target(content_id, ord)
+		JOIN LATERAL (
+			SELECT BTRIM(p.name) AS name
+			FROM item_people ip
+			JOIN people p ON p.id = ip.person_id
+			WHERE ip.content_id = target.content_id
+			  AND ip.kind = %d
+			  AND p.name IS NOT NULL
+			  AND BTRIM(p.name) <> ''
+			ORDER BY p.name ASC
+			LIMIT 1
+		) person ON TRUE`, kind)
 }
 
 func (h *ItemsHandler) listUserSortMetrics(

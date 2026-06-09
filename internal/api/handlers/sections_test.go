@@ -282,6 +282,66 @@ func TestBuildSectionsResponseBatchResolvesImageURLs(t *testing.T) {
 	}
 }
 
+func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
+	tests := []string{
+		`{"continue_type":"watching"}`,
+		`{"continue_type":"listening"}`,
+		`{"continue_type":"reading"}`,
+		`{"filter_type":"audiobook"}`,
+	}
+
+	for _, config := range tests {
+		t.Run(config, func(t *testing.T) {
+			if msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(config)); !ok {
+				t.Fatalf("validateSectionConfig(%s) rejected config: %s", config, msg)
+			}
+		})
+	}
+}
+
+func TestValidateSectionConfigRejectsUnknownContinueType(t *testing.T) {
+	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`))
+	if ok {
+		t.Fatal("validateSectionConfig accepted unknown continue_type")
+	}
+	if msg != "continue_type must be 'watching', 'listening', or 'reading'" {
+		t.Fatalf("message = %q", msg)
+	}
+}
+
+func TestInjectNextUpAfterContiguousContinueRows(t *testing.T) {
+	in := []sections.ResolvedSection{
+		{
+			ID:          "cw",
+			SectionType: sections.SectionContinueWatching,
+			Title:       "Continue Watching",
+			Config:      sections.ContinueTypeConfig(sections.ContinueTypeWatching),
+		},
+		{
+			ID:          "cl",
+			SectionType: sections.SectionContinueWatching,
+			Title:       "Continue Listening",
+			Config:      sections.ContinueTypeConfig(sections.ContinueTypeListening),
+		},
+		{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added"},
+	}
+
+	got := injectNextUpSection(in)
+	gotIDs := make([]string, 0, len(got))
+	for _, section := range got {
+		gotIDs = append(gotIDs, section.ID)
+	}
+	wantIDs := []string{"cw", "cl", "system-next-up", "recent"}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("section ids = %v, want %v", gotIDs, wantIDs)
+	}
+	for i := range wantIDs {
+		if gotIDs[i] != wantIDs[i] {
+			t.Fatalf("section ids = %v, want %v", gotIDs, wantIDs)
+		}
+	}
+}
+
 func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 	in := []sections.SectionWithItems{
 		// empty seasonal — drop

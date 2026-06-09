@@ -181,7 +181,7 @@ func ParseConfigFilters(config json.RawMessage) SectionConfigFilters {
 		def, err := ParseQueryDefinition(config)
 		if err == nil {
 			switch def.MediaScope {
-			case "movie", "series":
+			case "movie", "series", "audiobook":
 				f.FilterType = def.MediaScope
 			}
 			if len(def.LibraryIDs) > 0 {

@@ -11,7 +11,10 @@ export interface ActiveFilterBadge {
  * Compute displayable badge descriptors for all active "secondary" filters.
  * Skips mediaScope, sortField, sortOrder (shown inline in the bar).
  */
-export function getActiveFilterBadges(state: GuidedFormState): ActiveFilterBadge[] {
+export function getActiveFilterBadges(
+  state: GuidedFormState,
+  options: { isAudiobookLibrary?: boolean } = {},
+): ActiveFilterBadge[] {
   const badges: ActiveFilterBadge[] = [];
 
   // Genres — one badge per selected genre
@@ -165,9 +168,16 @@ export function getActiveFilterBadges(state: GuidedFormState): ActiveFilterBadge
   }
 
   if (state.watchStatus) {
+    const statusLabel = options.isAudiobookLibrary
+      ? state.watchStatus === "watched"
+        ? "listened"
+        : state.watchStatus === "unwatched"
+          ? "unlistened"
+          : state.watchStatus.replace("_", " ")
+      : state.watchStatus.replace("_", " ");
     badges.push({
       key: "watchStatus",
-      label: `Watch: ${state.watchStatus.replace("_", " ")}`,
+      label: `${options.isAudiobookLibrary ? "Listening" : "Watch"}: ${statusLabel}`,
       clearPatch: { watchStatus: "" },
     });
   }

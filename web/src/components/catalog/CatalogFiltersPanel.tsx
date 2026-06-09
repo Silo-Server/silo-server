@@ -52,7 +52,12 @@ export default function CatalogFiltersPanel({
 
   const qd = state.query_definition ?? createEmptyQueryDefinition();
   const guidedState = useMemo(() => queryDefinitionToGuidedState(qd), [qd]);
-  const badges = useMemo(() => getActiveFilterBadges(guidedState), [guidedState]);
+  const isAudiobookLibrary =
+    libraryType === "audiobook" || libraryType === "audiobooks" || guidedState.mediaScope === "audiobook";
+  const badges = useMemo(
+    () => getActiveFilterBadges(guidedState, { isAudiobookLibrary }),
+    [guidedState, isAudiobookLibrary],
+  );
   const activeCount = useMemo(() => countActiveFilters(guidedState), [guidedState]);
 
   // Locked sources don't support filtering

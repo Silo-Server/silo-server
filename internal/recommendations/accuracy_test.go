@@ -90,6 +90,37 @@ func TestApplyMediaTypeFloorAddsAvailableSupplementalType(t *testing.T) {
 	}
 }
 
+func TestApplyMediaTypeFloorAddsAvailableAudiobooks(t *testing.T) {
+	items := []ScoredItem{
+		{MediaItemID: "m1", Score: 1.00},
+		{MediaItemID: "m2", Score: 0.99},
+		{MediaItemID: "m3", Score: 0.98},
+		{MediaItemID: "m4", Score: 0.97},
+		{MediaItemID: "m5", Score: 0.96},
+		{MediaItemID: "m6", Score: 0.95},
+		{MediaItemID: "m7", Score: 0.94},
+		{MediaItemID: "m8", Score: 0.93},
+		{MediaItemID: "m9", Score: 0.92},
+		{MediaItemID: "m10", Score: 0.91},
+	}
+	candidates := append([]ScoredItem(nil), items...)
+	candidates = append(candidates,
+		ScoredItem{MediaItemID: "a1", Score: 0.90},
+		ScoredItem{MediaItemID: "a2", Score: 0.89},
+	)
+	mediaTypes := map[string]string{
+		"m1": "movie", "m2": "movie", "m3": "movie", "m4": "movie", "m5": "movie",
+		"m6": "movie", "m7": "movie", "m8": "movie", "m9": "movie", "m10": "movie",
+		"a1": "audiobook", "a2": "audiobook",
+	}
+
+	mixed := applyMediaTypeFloor(items, candidates, mediaTypes)
+
+	if got := countMediaType(mixed, mediaTypes, "audiobook"); got != 2 {
+		t.Fatalf("expected 2 audiobooks from supplemental candidates, got %d in %#v", got, mixed)
+	}
+}
+
 func TestApplyMediaTypeFloorNoopsWithoutSupplementalType(t *testing.T) {
 	items := []ScoredItem{
 		{MediaItemID: "s1", Score: 1.00},

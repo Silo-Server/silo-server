@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -7,18 +6,20 @@ import { MemoryRouter } from "react-router";
 import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
-  playerMounts: [] as Array<{ initialPositionSeconds: number; mountId: number }>,
+  controller: null as null | {
+    active: null | { contentId: string; playing: boolean; currentTime: number; duration: number; hasFile: boolean };
+    activeRequest: null | { contentId: string };
+    isBackgroundBarVisible: boolean;
+    startPlayback: ReturnType<typeof vi.fn>;
+    stopPlayback: ReturnType<typeof vi.fn>;
+    toggleActivePlayback: ReturnType<typeof vi.fn>;
+  },
+  startPlayback: vi.fn(),
+  toggleActivePlayback: vi.fn(),
 }));
 
-let playerMountCounter = 0;
-vi.mock("@/pages/audiobooks/player/AudiobookPlayer", () => ({
-  default: function PlayerStub({ initialPositionSeconds }: { initialPositionSeconds: number }) {
-    useEffect(() => {
-      playerMountCounter += 1;
-      mocks.playerMounts.push({ initialPositionSeconds, mountId: playerMountCounter });
-    }, []);
-    return <div data-testid="player-stub">player @ {initialPositionSeconds}</div>;
-  },
+vi.mock("@/pages/audiobooks/player/audiobookPlaybackContext", () => ({
+  useAudiobookPlaybackController: () => mocks.controller,
 }));
 
 vi.mock("@/components/AddToCollectionDialog", () => ({
@@ -102,32 +103,46 @@ function bookWithProgress(seconds: number): ItemDetail & { type: "audiobook" } {
   };
 }
 
-describe("AudiobookContent Play-from-Start remount", () => {
+describe("AudiobookContent playback actions", () => {
   beforeEach(() => {
-    mocks.playerMounts.length = 0;
-    playerMountCounter = 0;
+    mocks.startPlayback.mockClear();
+    mocks.toggleActivePlayback.mockClear();
+    mocks.controller = {
+      active: null,
+      activeRequest: null,
+      isBackgroundBarVisible: false,
+      startPlayback: mocks.startPlayback,
+      stopPlayback: vi.fn(),
+      toggleActivePlayback: mocks.toggleActivePlayback,
+    };
   });
 
-  it("forces a player remount on every openPlayer call, even when startSeconds is unchanged", async () => {
+  it("sends every Play-from-Start click to the shared audiobook player", async () => {
     render(
       <MemoryRouter>
         <AudiobookContent item={bookWithProgress(5000)} />
       </MemoryRouter>,
     );
 
-    expect(mocks.playerMounts).toHaveLength(0);
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: /play from start/i }));
-    expect(mocks.playerMounts).toHaveLength(1);
-    expect(mocks.playerMounts[0]?.initialPositionSeconds).toBe(0);
+    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
+    expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
+    expect(mocks.startPlayback.mock.calls[0]?.[0]).toMatchObject({
+      contentId: "book-1",
+      title: "Test Book",
+      initialPositionSeconds: 0,
+    });
 
-    await userEvent.click(screen.getByRole("button", { name: /play from start/i }));
-    expect(mocks.playerMounts).toHaveLength(2);
-    expect(mocks.playerMounts[1]?.initialPositionSeconds).toBe(0);
-    expect(mocks.playerMounts[1]?.mountId).not.toBe(mocks.playerMounts[0]?.mountId);
+    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
+    expect(mocks.startPlayback).toHaveBeenCalledTimes(2);
+    expect(mocks.startPlayback.mock.calls[1]?.[0]).toMatchObject({
+      contentId: "book-1",
+      initialPositionSeconds: 0,
+    });
   });
 
-  it("remounts when switching from Resume to Play-from-Start", async () => {
+  it("sends resume and Listen-from-Start with the correct start positions", async () => {
     render(
       <MemoryRouter>
         <AudiobookContent item={bookWithProgress(5000)} />
@@ -135,11 +150,43 @@ describe("AudiobookContent Play-from-Start remount", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: /^resume/i }));
-    expect(mocks.playerMounts).toHaveLength(1);
-    expect(mocks.playerMounts[0]?.initialPositionSeconds).toBe(5000);
+    expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
+    expect(mocks.startPlayback.mock.calls[0]?.[0]).toMatchObject({
+      initialPositionSeconds: 5000,
+    });
 
-    await userEvent.click(screen.getByRole("button", { name: /play from start/i }));
-    expect(mocks.playerMounts).toHaveLength(2);
-    expect(mocks.playerMounts[1]?.initialPositionSeconds).toBe(0);
+    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
+    expect(mocks.startPlayback).toHaveBeenCalledTimes(2);
+    expect(mocks.startPlayback.mock.calls[1]?.[0]).toMatchObject({
+      initialPositionSeconds: 0,
+    });
+  });
+
+  it("toggles the active shared player instead of starting a duplicate", async () => {
+    mocks.controller = {
+      active: {
+        contentId: "book-1",
+        playing: true,
+        currentTime: 5000,
+        duration: 36_000,
+        hasFile: true,
+      },
+      activeRequest: { contentId: "book-1" },
+      isBackgroundBarVisible: true,
+      startPlayback: mocks.startPlayback,
+      stopPlayback: vi.fn(),
+      toggleActivePlayback: mocks.toggleActivePlayback,
+    };
+
+    render(
+      <MemoryRouter>
+        <AudiobookContent item={bookWithProgress(5000)} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^pause/i }));
+
+    expect(mocks.toggleActivePlayback).toHaveBeenCalledTimes(1);
+    expect(mocks.startPlayback).not.toHaveBeenCalled();
   });
 });

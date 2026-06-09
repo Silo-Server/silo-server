@@ -107,6 +107,70 @@ func TestFilterSupersededEpisodeProgressEntriesDropsOlderPartialsAfterLaterCompl
 	}
 }
 
+func TestMatchesContinueWatchingFilterIncludesAudiobooks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		filterType string
+		itemType   string
+		want       bool
+	}{
+		{name: "movie keeps movie", filterType: "movie", itemType: "movie", want: true},
+		{name: "movie keeps episode through watching type", filterType: "movie", itemType: "episode", want: true},
+		{name: "series keeps episode", filterType: "series", itemType: "episode", want: true},
+		{name: "audiobook keeps audiobook", filterType: "audiobook", itemType: "audiobook", want: true},
+		{name: "audiobook rejects movie", filterType: "audiobook", itemType: "movie", want: false},
+		{name: "ebook keeps ebook", filterType: "ebook", itemType: "ebook", want: true},
+		{name: "unknown passes through audiobook", filterType: "unknown", itemType: "audiobook", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesContinueWatchingFilter(tt.filterType, tt.itemType); got != tt.want {
+				t.Fatalf("matchesContinueWatchingFilter(%q, %q) = %v, want %v", tt.filterType, tt.itemType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseContinueType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config string
+		want   ContinueType
+	}{
+		{name: "missing defaults watching", config: `{}`, want: ContinueTypeWatching},
+		{name: "explicit watching", config: `{"continue_type":"watching"}`, want: ContinueTypeWatching},
+		{name: "explicit listening", config: `{"continue_type":"listening"}`, want: ContinueTypeListening},
+		{name: "legacy audiobook filter", config: `{"filter_type":"audiobook"}`, want: ContinueTypeListening},
+		{name: "legacy audiobook media scope", config: `{"media_scope":"audiobook"}`, want: ContinueTypeListening},
+		{name: "future reading", config: `{"continue_type":"reading"}`, want: ContinueTypeReading},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseContinueType([]byte(tt.config))
+			if err != nil {
+				t.Fatalf("ParseContinueType(%s): %v", tt.config, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseContinueType(%s) = %q, want %q", tt.config, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseContinueTypeRejectsUnknownExplicitType(t *testing.T) {
+	t.Parallel()
+
+	if _, err := ParseContinueType([]byte(`{"continue_type":"scrolling"}`)); err == nil {
+		t.Fatal("ParseContinueType accepted unknown continue_type")
+	}
+}
+
 func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
 	t.Parallel()
 

@@ -6,7 +6,15 @@
 UPDATE server_settings
 SET value = 'true'
 WHERE key = 'audiobookshelf_compat.enabled'
-  AND lower(trim(value)) IN ('', '0', 'false', 'no', 'off');
+  AND trim(value) = '';
+
+INSERT INTO server_settings (key, value)
+SELECT 'audiobookshelf_compat.enabled', 'true'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM server_settings
+    WHERE key = 'audiobookshelf_compat.enabled'
+);
 
 DELETE FROM server_settings
 WHERE key = 'audiobooks.enabled';
@@ -14,11 +22,6 @@ WHERE key = 'audiobooks.enabled';
 
 -- +goose Down
 -- +goose StatementBegin
-UPDATE server_settings
-SET value = 'false'
-WHERE key = 'audiobookshelf_compat.enabled'
-  AND lower(trim(value)) = 'true';
-
 INSERT INTO server_settings (key, value)
 VALUES ('audiobooks.enabled', 'false')
 ON CONFLICT (key) DO NOTHING;

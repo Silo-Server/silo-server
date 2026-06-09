@@ -17,6 +17,7 @@ func TestDefaultHomeSectionsWithoutLibraries(t *testing.T) {
 	if sections[0].SectionType != SectionContinueWatching {
 		t.Fatalf("expected continue watching, got %s", sections[0].SectionType)
 	}
+	assertContinueType(t, sections[0].Config, ContinueTypeWatching)
 }
 
 func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
@@ -61,6 +62,7 @@ func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
 		}
 		if tt.libraryID == 0 {
+			assertContinueType(t, section.Config, ContinueTypeWatching)
 			continue
 		}
 		libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(section.Config)
@@ -79,6 +81,46 @@ func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "release_date", Order: "desc"},
 	})
+}
+
+func TestDefaultHomeSectionsWithAudiobookLibrary(t *testing.T) {
+	libraries := []*models.MediaFolder{
+		{ID: 7, Name: "Movies", Type: "movies", SortOrder: 1},
+		{ID: 10, Name: "Books", Type: "audiobooks", SortOrder: 2},
+	}
+
+	got := DefaultHomeSections(libraries)
+	if len(got) != 9 {
+		t.Fatalf("expected 9 default home sections, got %d", len(got))
+	}
+
+	tests := []struct {
+		index        int
+		id           string
+		title        string
+		position     int
+		continueType ContinueType
+	}{
+		{index: 0, id: "default-continue-watching", title: "Continue Watching", position: 0, continueType: ContinueTypeWatching},
+		{index: 1, id: "default-continue-listening", title: "Continue Listening", position: 1, continueType: ContinueTypeListening},
+	}
+	for _, tt := range tests {
+		section := got[tt.index]
+		if section.ID != tt.id {
+			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
+		}
+		if section.Title != tt.title {
+			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
+		}
+		if section.Position != tt.position {
+			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
+		}
+		assertContinueType(t, section.Config, tt.continueType)
+	}
+
+	if got[2].Position != 2 || got[2].Title != "Recently Added in Movies" {
+		t.Fatalf("first generated library row = position %d title %q", got[2].Position, got[2].Title)
+	}
 }
 
 func TestDefaultLibrarySectionsForTypeMovies(t *testing.T) {
@@ -122,6 +164,7 @@ func TestDefaultLibrarySectionsForTypeMovies(t *testing.T) {
 			t.Fatalf("section %d featured = true, want false", tt.index)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
 
 	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
 		MediaScope: "movie",
@@ -185,6 +228,7 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 			t.Fatalf("section %d featured = true, want false", tt.index)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
 
 	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
 		MediaScope: "series",
@@ -253,6 +297,7 @@ func TestDefaultLibrarySectionsForTypeAudiobooks(t *testing.T) {
 			t.Fatalf("section %d featured = true, want false", tt.index)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeListening)
 
 	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
 		MediaScope: "audiobook",
@@ -310,6 +355,7 @@ func TestDefaultLibrarySectionsForTypeMixed(t *testing.T) {
 			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
 }
 
 func assertQueryDefinition(t *testing.T, raw json.RawMessage, want catalog.QueryDefinition) {
@@ -354,6 +400,17 @@ func assertEmptyJSON(t *testing.T, raw json.RawMessage) {
 	t.Helper()
 	if string(raw) != "{}" {
 		t.Fatalf("config = %s, want {}", string(raw))
+	}
+}
+
+func assertContinueType(t *testing.T, raw json.RawMessage, want ContinueType) {
+	t.Helper()
+	got, err := ParseContinueType(raw)
+	if err != nil {
+		t.Fatalf("ParseContinueType(%s): %v", string(raw), err)
+	}
+	if got != want {
+		t.Fatalf("continue_type = %q, want %q (config %s)", got, want, string(raw))
 	}
 }
 

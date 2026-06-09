@@ -31,14 +31,15 @@ type Session struct {
 	TargetBitrateKbps int    // requested output bitrate cap for transcodes
 	TranscodeHWAccel  string // effective hardware acceleration mode for transcodes
 
-	Position              float64
-	IsPaused              bool
-	HasWebSocket          bool
-	HasRealtimeConnection bool
-	StartedAt             time.Time
-	UpdatedAt             time.Time
-	LastActivityAt        time.Time
-	activeTransportCount  int
+	Position                   float64
+	IsPaused                   bool
+	HasWebSocket               bool
+	HasRealtimeConnection      bool
+	DisableProgressPersistence bool
+	StartedAt                  time.Time
+	UpdatedAt                  time.Time
+	LastActivityAt             time.Time
+	activeTransportCount       int
 }
 
 // SessionStreamState stores the mutable stream-specific details that can
@@ -367,6 +368,23 @@ func (m *SessionManager) SetRealtimeConnection(sessionID string, connected bool)
 	s.HasRealtimeConnection = connected
 	// The admin/session sync layer still exposes a generic websocket flag.
 	s.HasWebSocket = connected
+	m.touchSessionLocked(s)
+	return nil
+}
+
+// SetProgressPersistenceDisabled controls whether session progress updates and
+// stop events should write resume/history state. This is useful for players
+// whose resume timeline is not the same as the session's file-local timeline.
+func (m *SessionManager) SetProgressPersistenceDisabled(sessionID string, disabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	s.DisableProgressPersistence = disabled
 	m.touchSessionLocked(s)
 	return nil
 }

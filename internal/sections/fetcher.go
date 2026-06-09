@@ -357,6 +357,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	if limit <= 0 {
 		limit = 20
 	}
+	continueType := ContinueTypeFromConfig(resolved.Config)
 
 	cfgFilters := ParseConfigFilters(resolved.Config)
 	configLibraryIDs := cfgFilters.LibraryIDs()
@@ -367,78 +368,49 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		effectiveLibraryIDs = configLibraryIDs
 	}
 
-	progressEntries, err := store.ListProgress(ctx, profileID, "in_progress", limit, 0)
-	if err != nil {
-		return SectionWithItems{}, fmt.Errorf("listing progress: %w", err)
-	}
-	progressEntries = f.filterContinueWatchingDismissals(ctx, store, profileID, progressEntries)
-
-	// Build in-progress items
-	var orderedItems []*models.MediaItem
+	dismissals := f.listContinueWatchingDismissals(ctx, store, profileID)
+	orderedItems := make([]*models.MediaItem, 0, limit)
 	itemMeta := make(map[string]SectionItemMeta)
 
-	if len(progressEntries) > 0 {
-		contentIDs := make([]string, 0, len(progressEntries))
-		for _, entry := range progressEntries {
-			contentIDs = append(contentIDs, entry.MediaItemID)
+	for offset := 0; len(orderedItems) < limit && offset < continueProgressMaxScanned; offset += continueProgressPageSize {
+		pageLimit := continueProgressPageSize
+		if remaining := continueProgressMaxScanned - offset; remaining < pageLimit {
+			pageLimit = remaining
 		}
+		progressEntries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
+		if err != nil {
+			return SectionWithItems{}, fmt.Errorf("listing progress: %w", err)
+		}
+		if len(progressEntries) == 0 {
+			break
+		}
+		rawProgressCount := len(progressEntries)
+		progressEntries = filterContinueWatchingDismissals(progressEntries, dismissals)
 
-		mediaItems, err := f.fetchItemsByContentIDs(ctx, contentIDs, effectiveLibID, effectiveLibraryIDs, filter)
+		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, effectiveLibID, effectiveLibraryIDs, filter)
 		if err != nil {
 			return SectionWithItems{}, err
 		}
-
-		episodeItems, episodeMeta, err := f.fetchEpisodeTargetsByContentIDs(ctx, contentIDs, effectiveLibID, effectiveLibraryIDs, filter)
-		if err != nil {
-			return SectionWithItems{}, err
-		}
-
-		itemByID := make(map[string]*models.MediaItem, len(mediaItems)+len(episodeItems))
-		for _, item := range mediaItems {
-			itemByID[item.ContentID] = item
-		}
-		for _, item := range episodeItems {
-			itemByID[item.ContentID] = item
-		}
-
-		maps.Copy(itemMeta, episodeMeta)
-		supersededEpisodeProgress, err := f.fetchSupersededEpisodeProgressIDs(ctx, store, profileID, progressEntries)
-		if err != nil {
-			return SectionWithItems{}, err
-		}
-		progressEntries = filterSupersededEpisodeProgressEntries(progressEntries, supersededEpisodeProgress)
-
-		for _, entry := range progressEntries {
-			meta := itemMeta[entry.MediaItemID]
-			position := entry.PositionSeconds
-			duration := entry.DurationSeconds
-			meta.PositionSeconds = &position
-			meta.DurationSeconds = &duration
-			meta.ProgressUpdatedAt = &entry.UpdatedAt
-			meta.ItemSource = "in_progress"
-			if updatedAt, parseErr := time.Parse(time.RFC3339, entry.UpdatedAt); parseErr == nil {
-				meta.SortTimestamp = updatedAt
-			}
-			itemMeta[entry.MediaItemID] = meta
-		}
-
-		orderedItems = make([]*models.MediaItem, 0, len(progressEntries))
-		for _, entry := range progressEntries {
-			item, ok := itemByID[entry.MediaItemID]
-			if !ok {
-				continue
+		for _, item := range pageItems {
+			if len(orderedItems) >= limit {
+				break
 			}
 			orderedItems = append(orderedItems, item)
 		}
+		maps.Copy(itemMeta, pageMeta)
+		if rawProgressCount < pageLimit {
+			break
+		}
 	}
 
-	// Fetch next-up items (combined mode by default)
-	nextUpMode, _ := store.GetSetting(ctx, "next_up_mode")
-	if nextUpMode == "" {
-		nextUpMode = "combined"
+	nextUpMode := ""
+	if ContinueTypeAllowsNextUp(continueType) {
+		nextUpMode, _ = store.GetSetting(ctx, "next_up_mode")
+		if nextUpMode == "" {
+			nextUpMode = "combined"
+		}
 	}
-
-	if nextUpMode == "combined" {
+	if ContinueTypeAllowsNextUp(continueType) && nextUpMode == "combined" {
 		nextUpItems, nextUpMeta, nextUpErr := f.FetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit)
 		if nextUpErr != nil {
 			slog.Error("fetching next-up items", "error", nextUpErr)
@@ -446,18 +418,6 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 			orderedItems = append(orderedItems, nextUpItems...)
 			maps.Copy(itemMeta, nextUpMeta)
 		}
-	}
-
-	// Apply type filter after next-up items are appended
-	if cfgFilters.FilterType != "" {
-		filtered := make([]*models.MediaItem, 0, len(orderedItems))
-		for _, item := range orderedItems {
-			if (cfgFilters.FilterType == "movie" && item.Type == "movie") ||
-				(cfgFilters.FilterType == "series" && item.Type == "episode") {
-				filtered = append(filtered, item)
-			}
-		}
-		orderedItems = filtered
 	}
 
 	if nextUpMode == "combined" && len(orderedItems) > 1 {
@@ -482,6 +442,84 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		TotalCount:      len(orderedItems),
 		ItemMeta:        itemMeta,
 	}, nil
+}
+
+const (
+	continueProgressPageSize   = 100
+	continueProgressMaxScanned = 1000
+)
+
+func (f *Fetcher) fetchContinueProgressItems(ctx context.Context, store userstore.UserStore, profileID string, entries []userstore.WatchProgress, continueType ContinueType, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
+	if len(entries) == 0 {
+		return nil, map[string]SectionItemMeta{}, nil
+	}
+
+	contentIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		contentIDs = append(contentIDs, entry.MediaItemID)
+	}
+
+	mediaItems, err := f.fetchItemsByContentIDs(ctx, contentIDs, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	episodeItems, episodeMeta, err := f.fetchEpisodeTargetsByContentIDs(ctx, contentIDs, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	itemByID := make(map[string]*models.MediaItem, len(mediaItems)+len(episodeItems))
+	for _, item := range mediaItems {
+		itemByID[item.ContentID] = item
+	}
+	for _, item := range episodeItems {
+		itemByID[item.ContentID] = item
+	}
+
+	matchingEntries := make([]userstore.WatchProgress, 0, len(entries))
+	hasEpisodeEntries := false
+	for _, entry := range entries {
+		item, ok := itemByID[entry.MediaItemID]
+		if !ok || !ContinueTypeMatchesItem(continueType, item.Type) {
+			continue
+		}
+		if item.Type == "episode" {
+			hasEpisodeEntries = true
+		}
+		matchingEntries = append(matchingEntries, entry)
+	}
+	if ContinueTypeAllowsNextUp(continueType) && hasEpisodeEntries {
+		supersededEpisodeProgress, err := f.fetchSupersededEpisodeProgressIDs(ctx, store, profileID, matchingEntries)
+		if err != nil {
+			return nil, nil, err
+		}
+		matchingEntries = filterSupersededEpisodeProgressEntries(matchingEntries, supersededEpisodeProgress)
+	}
+
+	itemMeta := make(map[string]SectionItemMeta, len(matchingEntries))
+	orderedItems := make([]*models.MediaItem, 0, len(matchingEntries))
+	for _, entry := range matchingEntries {
+		item, ok := itemByID[entry.MediaItemID]
+		if !ok {
+			continue
+		}
+		meta := episodeMeta[entry.MediaItemID]
+		position := entry.PositionSeconds
+		duration := entry.DurationSeconds
+		meta.PositionSeconds = &position
+		meta.DurationSeconds = &duration
+		progressUpdatedAt := entry.UpdatedAt
+		meta.ProgressUpdatedAt = &progressUpdatedAt
+		meta.ItemSource = "in_progress"
+		if updatedAt, parseErr := time.Parse(time.RFC3339, entry.UpdatedAt); parseErr == nil {
+			meta.SortTimestamp = updatedAt
+		}
+		itemMeta[entry.MediaItemID] = meta
+		orderedItems = append(orderedItems, item)
+	}
+
+	return orderedItems, itemMeta, nil
 }
 
 func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
@@ -792,23 +830,22 @@ func episodeOrdinal(meta SectionItemMeta) int {
 	return season*100000 + episode
 }
 
-func (f *Fetcher) filterContinueWatchingDismissals(ctx context.Context, store userstore.UserStore, profileID string, entries []userstore.WatchProgress) []userstore.WatchProgress {
-	if len(entries) == 0 {
-		return entries
-	}
-
+func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store userstore.UserStore, profileID string) map[string]userstore.HomeItemDismissal {
 	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceContinueWatching)
 	if err != nil {
 		slog.Error("listing continue watching dismissals", "profile_id", profileID, "error", err)
-		return entries
+		return map[string]userstore.HomeItemDismissal{}
 	}
-	if len(dismissals) == 0 {
-		return entries
-	}
-
 	dismissalByItemID := make(map[string]userstore.HomeItemDismissal, len(dismissals))
 	for _, dismissal := range dismissals {
 		dismissalByItemID[dismissal.MediaItemID] = dismissal
+	}
+	return dismissalByItemID
+}
+
+func filterContinueWatchingDismissals(entries []userstore.WatchProgress, dismissalByItemID map[string]userstore.HomeItemDismissal) []userstore.WatchProgress {
+	if len(entries) == 0 || len(dismissalByItemID) == 0 {
+		return entries
 	}
 
 	filtered := make([]userstore.WatchProgress, 0, len(entries))
@@ -2801,6 +2838,19 @@ func applyConfigTypeFilter(alias string, filterType string, conditions *[]string
 	*conditions = append(*conditions, fmt.Sprintf("%s.type = $%d", alias, *argIdx))
 	*args = append(*args, filterType)
 	*argIdx++
+}
+
+func matchesContinueWatchingFilter(filterType string, itemType string) bool {
+	switch filterType {
+	case "movie", "series", "episode":
+		return ContinueTypeMatchesItem(ContinueTypeWatching, itemType)
+	case "audiobook":
+		return ContinueTypeMatchesItem(ContinueTypeListening, itemType)
+	case "ebook":
+		return ContinueTypeMatchesItem(ContinueTypeReading, itemType)
+	default:
+		return true
+	}
 }
 
 // fetchSeasonalThemed returns items for a seasonal_themed section.
