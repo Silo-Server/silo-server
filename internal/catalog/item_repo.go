@@ -106,6 +106,35 @@ func qualifiedItemColumns(alias string) string {
 	return strings.Join(prefixed, ", ")
 }
 
+// qualifiedItemColumnsAliased is qualifiedItemColumns with each COALESCE-wrapped
+// column aliased back to its bare name (Postgres otherwise names the projection
+// "coalesce"). Use it for a CTE SELECT list whose columns are referenced by name
+// in an outer query; qualifiedItemColumns is for GROUP BY, where "expr AS name"
+// is invalid.
+func qualifiedItemColumnsAliased(alias string) string {
+	cols := []string{
+		"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
+		"content_rating", "runtime", "overview", "tagline",
+		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
+		"imdb_id", "tmdb_id", "tvdb_id",
+		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
+		"metadata_s3_path", "metadata_etag", "season_count",
+		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
+		"show_status",
+		"matched_at", "last_refreshed", "refresh_failures",
+		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
+	}
+	prefixed := make([]string, len(cols))
+	for i, col := range cols {
+		expr := qualifiedNullableStringColumn(alias, col)
+		if expr != alias+"."+col {
+			expr += " AS " + col
+		}
+		prefixed[i] = expr
+	}
+	return strings.Join(prefixed, ", ")
+}
+
 func qualifiedListItemColumns(alias string) string {
 	cols := []string{
 		"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
@@ -987,6 +1016,9 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	// Use qualified column names inside the CTE to avoid ambiguity when
 	// the FROM clause includes a JOIN to media_item_libraries.
 	qualifiedCols := qualifiedItemColumns("mi")
+	// The CTE SELECT aliases columns so the outer SELECT can reference them by
+	// name; GROUP BY below uses the unaliased qualifiedCols.
+	selectCols := qualifiedItemColumnsAliased("mi")
 	scoredCTE := fmt.Sprintf(`
 		WITH scored AS (
 			SELECT
@@ -1013,7 +1045,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 			%s
 			GROUP BY %s
 		)
-	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, qualifiedCols)
+	`, selectCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, qualifiedCols)
 
 	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
 	// duplicates from the library JOIN, so the window count preserves the
