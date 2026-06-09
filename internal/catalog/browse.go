@@ -36,6 +36,7 @@ type BrowseFilters struct {
 	MaxLimit           int // optional caller-specific cap; zero keeps the default browse cap
 	Offset             int
 	SnapshotAt         *time.Time // pagination fence: exclude items created after this timestamp
+	RequireBackdrop    bool       // only return items with a non-empty backdrop_path (Jellyfin ImageTypes=Backdrop filter)
 }
 
 // BrowseResult contains the paginated result of a browse query.
@@ -293,6 +294,13 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 		conditions = append(conditions, fmt.Sprintf("mi.status = $%d", argIdx))
 		args = append(args, filters.Status)
 		argIdx++
+	}
+
+	// Backdrop presence filter (Jellyfin ImageTypes=Backdrop). Pushed down so
+	// random/limited selections only ever pick items that actually have a
+	// backdrop — filtering after the LIMIT would wrongly return empty pages.
+	if filters.RequireBackdrop {
+		conditions = append(conditions, "NULLIF(BTRIM(mi.backdrop_path), '') IS NOT NULL")
 	}
 
 	// Library access control: restrict to user's accessible libraries.

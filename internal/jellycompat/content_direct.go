@@ -226,6 +226,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		Limit:              fetchLimit,
 		MaxLimit:           compatBrowseMaxLimit,
 		Offset:             requestedOffset,
+		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
 	}
 
 	var collected []upstreamListItem

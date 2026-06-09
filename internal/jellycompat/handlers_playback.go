@@ -439,7 +439,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	allow4KTranscode := h.allow4KVideoTranscode(r.Context())
 	for _, version := range detail.Versions {
 		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
-		if req.MediaSourceID != "" && source.ID != req.MediaSourceID {
+		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
 		}
 		sources = append(sources, source)

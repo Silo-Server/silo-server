@@ -141,6 +141,21 @@ func (c *ResourceIDCodec) LookupMediaSourceOwner(fileID int64) (string, bool) {
 	return contentID, ok
 }
 
+// mediaSourceIDsEqual reports whether two media-source IDs refer to the same
+// source, tolerating UUID format differences. Silo exposes the canonical
+// dashed compat UUID (e.g. "03000000-0000-0000-0000-00000019e8c2"), but some
+// Jellyfin clients (e.g. Wholphin) echo it back in the compact 32-char hex
+// form ("0300000000000000000000000019e8c2"). Both parse to the same UUID, so
+// matching must compare the parsed values rather than the raw strings.
+func mediaSourceIDsEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ua, errA := uuid.Parse(a)
+	ub, errB := uuid.Parse(b)
+	return errA == nil && errB == nil && ua == ub
+}
+
 // DecodeID unpacks a compat UUID into its original numeric value.
 func DecodeID(raw string) (DecodedID, error) {
 	parsed, err := uuid.Parse(raw)
