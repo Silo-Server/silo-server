@@ -51,7 +51,12 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 		return nil, fmt.Errorf("open user store: %w", err)
 	}
 
-	favorites, err := store.ListFavorites(ctx, session.ProfileID, limit, offset)
+	// ABS-surface favorites (audiobooks/podcasts) are filtered out below, so
+	// the limit/offset window must apply to the *filtered* list — a raw
+	// store-level window would shift or shrink the visible page. Over-fetch
+	// the raw rows, filter, then window.
+	scanLimit := min(max((limit+offset)*2, 200), 10000)
+	favorites, err := store.ListFavorites(ctx, session.ProfileID, scanLimit, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list favorites: %w", err)
 	}
@@ -73,18 +78,31 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	// Build a map for ordering by the original favorites list order
 	itemMap := make(map[string]*upstreamListItem, len(items))
 	for _, mi := range items {
+		// Favorites are shared with the ABS surface; its media types are
+		// never exposed here (they would 404 on detail/PlaybackInfo).
+		if isCompatExcludedMediaType(mi.Type) {
+			continue
+		}
 		li := mediaItemToListItem(mi)
-		li.PosterURL = compatPresignImage(s.detailSvc, ctx, li.PosterURL, "poster", compatCardImageSize)
-		li.BackdropURL = compatPresignImage(s.detailSvc, ctx, li.BackdropURL, "backdrop", compatCardImageSize)
-		li.LogoURL = compatPresignImage(s.detailSvc, ctx, li.LogoURL, "logo", compatCardImageSize)
 		itemMap[mi.ContentID] = &li
 	}
 
-	result := make([]upstreamListItem, 0, len(contentIDs))
+	ordered := make([]upstreamListItem, 0, len(contentIDs))
 	for _, id := range contentIDs {
 		if li, ok := itemMap[id]; ok {
-			result = append(result, *li)
+			ordered = append(ordered, *li)
 		}
+	}
+
+	// Presign artwork only for the page being returned.
+	result := slicePage(ordered, offset, limit)
+	for i := range result {
+		result[i].PosterURL = compatPresignImage(s.detailSvc, ctx, result[i].PosterURL, "poster", compatCardImageSize)
+		result[i].BackdropURL = compatPresignImage(s.detailSvc, ctx, result[i].BackdropURL, "backdrop", compatCardImageSize)
+		result[i].LogoURL = compatPresignImage(s.detailSvc, ctx, result[i].LogoURL, "logo", compatCardImageSize)
+	}
+	if result == nil {
+		result = []upstreamListItem{}
 	}
 	return result, nil
 }

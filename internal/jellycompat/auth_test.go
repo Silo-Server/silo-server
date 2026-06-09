@@ -130,9 +130,9 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 	mw := PlaybackSessionAuth(sessions, playbackStore, nil)
 
 	cases := []struct {
-		name      string
-		rawQuery  string
-		wantCode  int
+		name     string
+		rawQuery string
+		wantCode int
 	}{
 		// Wholphin's jellyfin-sdk-kotlin direct-play URL: lowercase playSessionId,
 		// no api_key and no auth header. Previously 401'd (case-sensitive lookup).

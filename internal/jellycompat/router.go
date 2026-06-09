@@ -76,6 +76,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.recommender = deps.Recommender
+	if deps.DB != nil {
+		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+	}
+	itemsHandler.posterPresigner = deps.PosterPresigner
+	itemsHandler.presignTTL = deps.PresignTTL
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
@@ -102,6 +107,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
+	imagesHandler.collections = itemsHandler.collections
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -157,6 +163,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Genres", itemsHandler.HandleGenres)
+			r.Get("/Genres/{name}", itemsHandler.HandleGenreByName)
 			r.Get("/Shows/{id}/Seasons", itemsHandler.HandleSeasons)
 			r.Get("/Shows/{id}/Episodes", itemsHandler.HandleEpisodes)
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
@@ -232,6 +239,10 @@ func withDefaults(deps Dependencies) Dependencies {
 	if deps.Now == nil {
 		deps.Now = timeNow
 	}
+	// Stamp the compat surface's media-type exclusions onto every resolved
+	// access filter so all consumers (content service, items/images handlers,
+	// recommendations) inherit them without per-call-site guards.
+	deps.AccessFilterFn = compatAccessFilterResolver(deps.AccessFilterFn)
 	if deps.JWTSecret == "" && deps.Config != nil {
 		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}

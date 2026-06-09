@@ -41,6 +41,11 @@ type ItemsHandler struct {
 	accessFilter AccessFilterResolver
 	subtitleRepo subtitles.Repository
 	recommender  recommendations.Recommender
+	// collections is optional; when set, library collections are exposed as
+	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
+	collections     collectionSource
+	posterPresigner LibraryPosterPresigner
+	presignTTL      time.Duration
 	// FileResolver is optional; when set, /MediaSegments returns real intro/
 	// credits/recap/preview segments for any file that has them.
 	FileResolver FilePathResolver
@@ -130,8 +135,25 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 
 	query := parseItemsQuery(r, h.codec)
 	switch {
-	case len(query.specificIDs) > 0:
+	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0:
 		h.handleSpecificItems(w, r, session, query)
+	case query.parentCollectionID != "":
+		h.handleBoxSetChildren(w, r, session, query)
+	case query.hasItemTypeFilter && len(query.itemTypes) == 0:
+		// Every requested type is one catalog browse cannot serve. BoxSet has
+		// its own listing (unless a user-state filter applies — collections
+		// carry no favorite/played state, so those return empty, matching the
+		// pre-existing favorites guard); CollectionFolder means the library
+		// views; anything else (Playlist, MusicAlbum, ...) is empty.
+		hasUserStateFilter := query.isFavorite || query.isResumable || query.isPlayed != nil
+		switch {
+		case query.wantsBoxSets && !hasUserStateFilter:
+			h.handleBoxSetsList(w, r, session, query)
+		case query.wantsViews && !hasUserStateFilter && query.searchTerm == "":
+			h.handleViewsResponse(w, r, session)
+		default:
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		}
 	case query.isResumable:
 		h.handleResumeResponse(w, r, session, query)
 	case query.isPlayed != nil && *query.isPlayed:
@@ -149,6 +171,15 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleViewsResponse(w, r, session)
 	default:
 		h.handleBrowseItems(w, r, session, query)
+	}
+}
+
+// emptyQueryResult is the canonical empty /Items page.
+func emptyQueryResult(startIndex int) queryResultDTO {
+	return queryResultDTO{
+		Items:            []baseItemDTO{},
+		TotalRecordCount: 0,
+		StartIndex:       startIndex,
 	}
 }
 
@@ -181,6 +212,11 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	// CollectionFolder items using the library UUID from /UserViews.
 	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, rawID); err == nil {
 		h.handleLibraryItem(w, r, session, int(libraryID))
+		return
+	}
+
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, rawID); err == nil {
+		h.handleBoxSetItem(w, r, session, collectionID)
 		return
 	}
 
@@ -902,6 +938,46 @@ func (h *ItemsHandler) HandleGenres(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleGenreByName serves GET /Genres/{name}. Jellyfin addresses genres by
+// (URL-escaped) display name; clients use the returned Id for GenreIds= item
+// queries.
+func (h *ItemsHandler) HandleGenreByName(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	if decoded, err := url.PathUnescape(name); err == nil {
+		name = strings.TrimSpace(decoded)
+	}
+	if name == "" {
+		writeError(w, http.StatusNotFound, "NotFound", "Genre not found")
+		return
+	}
+
+	// Confirm the genre exists within the caller's visible scope so the
+	// response carries the canonical casing.
+	filters, err := h.content.ListItemFilters(r.Context(), session, urlValuesFromItemsQuery(parseItemsQuery(r, h.codec)))
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	for _, genre := range filters.Genres {
+		if strings.EqualFold(strings.TrimSpace(genre), name) {
+			writeJSON(w, http.StatusOK, baseItemDTO{
+				ID:       h.codec.EncodeStringID(EncodedIDGenre, genre),
+				Type:     "Genre",
+				Name:     genre,
+				ServerID: h.mapper.serverID,
+			})
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "NotFound", "Genre not found")
+}
+
 // HandleSeasons serves GET /Shows/{id}/Seasons.
 func (h *ItemsHandler) HandleSeasons(w http.ResponseWriter, r *http.Request) {
 	defer func() {
@@ -1515,6 +1591,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 			AllowedLibraryIDs:  access.AllowedLibraryIDs,
 			DisabledLibraryIDs: access.DisabledLibraryIDs,
 			MaxContentRating:   clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating),
+			ExcludedMediaTypes: access.ExcludedMediaTypes,
 			SortField:          query.sort,
 			SortOrder:          query.order,
 			Limit:              query.limit,
@@ -1718,6 +1795,16 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
 		items = append(items, dto)
 	}
+
+	// Ids= may also reference collections (BoxSet route IDs handed out by the
+	// collections listing); append their DTOs so clients can re-hydrate them.
+	boxSets, err := h.boxSetsByIDs(r.Context(), session, query.specificCollectionIDs)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	items = append(items, boxSets...)
+
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: len(items),
@@ -2024,9 +2111,9 @@ func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Sessio
 
 func (h *ItemsHandler) resolveAccessFilter(ctx context.Context, session *Session) catalog.AccessFilter {
 	if h.accessFilter != nil {
-		return h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID)
+		return withCompatAccessExclusions(h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID))
 	}
-	return catalog.AccessFilter{}
+	return withCompatAccessExclusions(catalog.AccessFilter{})
 }
 
 func (h *ItemsHandler) presignCompatListItem(ctx context.Context, item *upstreamListItem) {

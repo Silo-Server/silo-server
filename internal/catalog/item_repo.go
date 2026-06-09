@@ -620,9 +620,9 @@ func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access 
 		argIdx++
 	}
 
-	// Apply MaxContentRating like applyAccessFilter does.
+	// Apply MaxContentRating and type exclusions like applyAccessFilter does.
 	var ratingConditions []string
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating}, &ratingConditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, ExcludedMediaTypes: access.ExcludedMediaTypes}, &ratingConditions, &args, &argIdx)
 	for _, c := range ratingConditions {
 		sql += " AND " + c
 	}
@@ -947,7 +947,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	if needsLibJoin {
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 	}
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
@@ -1161,7 +1161,7 @@ func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string,
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf("SELECT 1 FROM %s WHERE %s LIMIT 1", fromClause, strings.Join(conditions, " AND "))
 	var found int

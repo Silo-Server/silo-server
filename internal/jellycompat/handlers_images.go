@@ -30,6 +30,9 @@ type ImagesHandler struct {
 	presignTTL   time.Duration
 	imageTags    *imageTagSigner
 	httpClient   *http.Client
+	// collections is optional; when set, BoxSet (library collection) artwork
+	// resolves durably instead of depending on the in-memory image cache.
+	collections collectionSource
 }
 
 type imageItemRepository interface {
@@ -118,6 +121,11 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	// Try decoding as a person ID first.
 	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
 		h.handlePersonImage(w, r, routeID, imageType, personID)
+		return
+	}
+
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
+		h.handleCollectionImage(w, r, session, routeID, imageType, imageSize, collectionID)
 		return
 	}
 
@@ -258,11 +266,103 @@ func (h *ImagesHandler) resolveItemImageURLFromTag(ctx context.Context, routeID,
 	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, routeID); err == nil {
 		return h.resolveLibraryImageURLFromTag(ctx, routeID, int(libraryID), imageType, imageSize, tag)
 	}
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
+		return h.resolveCollectionImageURLFromTag(ctx, routeID, collectionID, imageType, tag)
+	}
 	contentID, err := decodeContentID(h.codec, routeID)
 	if err != nil {
 		return catalog.ResolvedImageURL{}, false, nil
 	}
 	return h.resolveItemImageURLFromReposWithoutSession(ctx, routeID, contentID, imageType, imageSize, tag)
+}
+
+// collectionArtworkKey returns the stored artwork reference for the requested
+// compat image type ("" when the collection has none of that type).
+func collectionArtworkKey(c *models.LibraryCollection, imageType string) string {
+	switch imageType {
+	case "Primary":
+		return c.PosterURL
+	case "Backdrop":
+		return c.BackdropURL
+	}
+	return ""
+}
+
+// presignCollectionArtwork resolves a collection artwork reference like the
+// main API's presignGPURL: absolute and app-relative references pass through,
+// bare keys presign against the general-purpose bucket.
+func (h *ImagesHandler) presignCollectionArtwork(ctx context.Context, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return path
+	}
+	return h.presignLibraryPosterURL(ctx, path)
+}
+
+// resolveCollectionImageURLFromTag serves tag-authenticated BoxSet artwork.
+// The tag must match the stable seed boxSetFromCollection signs.
+func (h *ImagesHandler) resolveCollectionImageURLFromTag(ctx context.Context, routeID, collectionID, imageType, tag string) (catalog.ResolvedImageURL, bool, error) {
+	if h.collections == nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	collection, err := h.collections.GetByID(ctx, collectionID)
+	if err != nil || collection == nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	key := collectionArtworkKey(collection, imageType)
+	if key == "" || !h.imageTags.Equal(
+		imageTagSeed(routeID, imageType, compatCardImageSize, key, "", time.Time{}),
+		"",
+		tag,
+	) {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	imageURL := h.presignCollectionArtwork(ctx, key)
+	if imageURL == "" {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	return catalog.ResolvedImageURL{URL: imageURL}, true, nil
+}
+
+// handleCollectionImage serves session-authenticated BoxSet artwork, applying
+// the same visibility rules as the BoxSet item endpoints.
+func (h *ImagesHandler) handleCollectionImage(w http.ResponseWriter, r *http.Request, session *Session, routeID, imageType, imageSize, collectionID string) {
+	if h.collections == nil {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	collection, err := h.collections.GetByID(r.Context(), collectionID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+			return
+		}
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if collection == nil || !strings.EqualFold(collection.Visibility, "visible") {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if !collectionVisible(collection, visible) {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	imageURL := h.presignCollectionArtwork(r.Context(), collectionArtworkKey(collection, imageType))
+	if imageURL == "" {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	h.images.RememberSized(routeID, imageType, imageURL, imageSize)
+	h.serveImageURL(w, r, imageURL)
 }
 
 func (h *ImagesHandler) resolveLibraryImageURLFromTag(ctx context.Context, routeID string, libraryID int, imageType, _ string, tag string) (catalog.ResolvedImageURL, bool, error) {
