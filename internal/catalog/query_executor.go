@@ -282,8 +282,14 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, filterWhere)
 	}
 	if def.MediaScope != "" && !isEpisodeCatalogScope(def.MediaScope) {
-		conditions = append(conditions, fmt.Sprintf("mi.type = $%d", argIdx))
-		args = append(args, def.MediaScope)
+		scopeTypes := MediaScopeItemTypes(def.MediaScope)
+		if len(scopeTypes) == 1 {
+			conditions = append(conditions, fmt.Sprintf("mi.type = $%d", argIdx))
+			args = append(args, scopeTypes[0])
+		} else {
+			conditions = append(conditions, fmt.Sprintf("mi.type = ANY($%d)", argIdx))
+			args = append(args, scopeTypes)
+		}
 		argIdx++
 	}
 	libScopeWhere, libScopeArgs, hasLibraryScope := "", []any(nil), false

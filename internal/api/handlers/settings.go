@@ -20,6 +20,7 @@ const subtitleAppearanceSettingKey = "subtitle_appearance"
 const (
 	libraryPageStateSettingKey         = "ui.library_page_state"
 	rememberLibraryPageStateSettingKey = "ui.remember_library_page_state"
+	searchMediaScopeSettingKey         = "search.media_scope"
 )
 
 const (
@@ -170,6 +171,14 @@ var settingsRegistry = map[string]settingSpec{
 		Scope:        scopeDevice,
 		DefaultValue: "true",
 		Validate:     validateBoolSetting(rememberLibraryPageStateSettingKey),
+	},
+	// Preferred default scope for global/catalog search. "video" keeps
+	// results to movies and series; "all" mixes audiobooks in.
+	searchMediaScopeSettingKey: {
+		Scope:        scopeUser,
+		DefaultValue: "video",
+		Validate: validateEnumSetting(searchMediaScopeSettingKey,
+			"all", "video", "audiobook"),
 	},
 	"player.hdr_enabled": {
 		Scope:        scopeDevice,
