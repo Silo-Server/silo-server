@@ -53,7 +53,9 @@ export default function CatalogFiltersPanel({
   const qd = state.query_definition ?? createEmptyQueryDefinition();
   const guidedState = useMemo(() => queryDefinitionToGuidedState(qd), [qd]);
   const isAudiobookLibrary =
-    libraryType === "audiobook" || libraryType === "audiobooks" || guidedState.mediaScope === "audiobook";
+    libraryType === "audiobook" ||
+    libraryType === "audiobooks" ||
+    guidedState.mediaScope === "audiobook";
   const badges = useMemo(
     () => getActiveFilterBadges(guidedState, { isAudiobookLibrary }),
     [guidedState, isAudiobookLibrary],

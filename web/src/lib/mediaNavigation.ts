@@ -19,7 +19,10 @@ function appendQuery(base: string, params: Record<string, string | number | bool
   return suffix ? `${base}?${suffix}` : base;
 }
 
-export function buildItemHref({ contentId, libraryId }: Pick<MediaHrefInput, "contentId" | "libraryId">) {
+export function buildItemHref({
+  contentId,
+  libraryId,
+}: Pick<MediaHrefInput, "contentId" | "libraryId">) {
   return appendQuery(`/item/${contentId}`, { libraryId });
 }
 

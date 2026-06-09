@@ -179,9 +179,7 @@ describe("invalidateMediaSurfaceQueries", () => {
       };
     };
 
-    expect(
-      queryClient.getQueryData<CachedHomeSection>(sectionKeys.homeItems("continue")),
-    ).toEqual({
+    expect(queryClient.getQueryData<CachedHomeSection>(sectionKeys.homeItems("continue"))).toEqual({
       section: {
         id: "continue",
         section_type: "continue_watching",
