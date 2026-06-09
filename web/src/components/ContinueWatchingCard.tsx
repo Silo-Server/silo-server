@@ -45,6 +45,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             libraryId: props.libraryId,
           }),
           title: props.sectionItem.title,
+          seriesId: props.sectionItem.series_id,
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
           episodeNumber: props.sectionItem.episode_number,
@@ -65,6 +66,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             libraryId: props.libraryId,
           }),
           title: props.detail.title,
+          seriesId: props.detail.series_id,
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
           episodeNumber: props.detail.episode_number,
@@ -105,7 +107,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     card.durationSeconds > 0 ? (card.positionSeconds / card.durationSeconds) * 100 : 0;
   const hasPartialProgress = progressPercent > 0 && progressPercent < 100;
   const hasEpisodeMeta = card.seasonNumber != null && card.episodeNumber != null;
-  const heading = hasEpisodeMeta && card.seriesTitle ? card.seriesTitle : card.title;
+  const headingIsSeries = hasEpisodeMeta && !!card.seriesTitle;
+  const heading = headingIsSeries ? card.seriesTitle : card.title;
+  // The heading shows the series title for episodes, so it should navigate to
+  // the series page; everything else heads to the item's own page.
+  const headingHref =
+    headingIsSeries && card.seriesId
+      ? buildItemHref({ contentId: card.seriesId, libraryId: props.libraryId })
+      : card.itemHref;
   const episodeLabel = hasEpisodeMeta
     ? `Season ${card.seasonNumber} Episode ${card.episodeNumber}`
     : null;
@@ -195,18 +204,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
 
   return (
     <div className={`group/card ${containerWidth}`}>
-      <div className="relative">
-        <ViewTransitionLink
-          to={card.watchHref}
-          onClick={handleWatchClick}
-          className="group/play block"
-        >
+      <div className="group/media relative">
+        <ViewTransitionLink to={card.itemHref} className="block">
           <div className={`media-card-image relative ${imageAspect} overflow-hidden rounded-xl`}>
             {imageSrc ? (
               <img
                 src={imageSrc}
                 alt={heading}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover/play:scale-105"
+                className="h-full w-full object-cover transition-transform duration-300 group-hover/media:scale-105"
                 loading="lazy"
               />
             ) : (
@@ -223,12 +228,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               />
             )}
 
-            {/* Play overlay */}
-            <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-150 group-hover/play:bg-black/30">
-              <div className="bg-primary text-primary-foreground flex h-11 w-11 items-center justify-center rounded-full opacity-0 shadow-lg transition-all duration-200 group-hover/play:scale-100 group-hover/play:opacity-100 group-focus-visible/play:opacity-100">
-                <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
-              </div>
-            </div>
+            {/* Hover dim behind the play button */}
+            <div className="absolute inset-0 bg-black/0 transition-colors duration-150 pointer-fine:group-hover/media:bg-black/30" />
 
             {/* Progress bar */}
             {!isNextUp && progressPercent > 0 && (
@@ -243,6 +244,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               </div>
             )}
           </div>
+        </ViewTransitionLink>
+        <ViewTransitionLink
+          to={card.watchHref}
+          onClick={handleWatchClick}
+          aria-label={`Play ${heading}`}
+          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
+        >
+          <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
         </ViewTransitionLink>
         <MediaItemMenu
           contentId={
@@ -264,8 +273,13 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
       </div>
 
       {/* Info */}
-      <ViewTransitionLink to={card.itemHref} className="block px-0.5 pt-2.5">
-        <div className="truncate text-[13px] font-semibold">{heading}</div>
+      <div className="px-0.5 pt-2.5">
+        <ViewTransitionLink
+          to={headingHref}
+          className="block truncate text-[13px] font-semibold hover:underline"
+        >
+          {heading}
+        </ViewTransitionLink>
         {episodeMeta && <div className="text-muted-foreground truncate text-xs">{episodeMeta}</div>}
         {premiereBadge && (
           <div className="mt-1">
@@ -279,7 +293,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           </div>
         )}
         {timeLeftLabel && <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>}
-      </ViewTransitionLink>
+      </div>
     </div>
   );
 }
