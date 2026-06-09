@@ -157,6 +157,32 @@ func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, 
 	if limit <= 0 {
 		limit = 20
 	}
+	args := []any{source.ContentID, source.Type}
+	matchFilters := make([]string, 0, 3)
+	if strings.TrimSpace(source.Title) != "" {
+		args = append(args, source.Title)
+		matchFilters = append(matchFilters, fmt.Sprintf("LOWER(mi.title) = LOWER($%d)", len(args)))
+	}
+	for provider, providerID := range source.ExternalIDs {
+		if provider == "" || provider == "asin" || providerID == "" {
+			continue
+		}
+		args = append(args, provider, providerID)
+		matchFilters = append(matchFilters, fmt.Sprintf("provider_ids.external_ids ->> $%d = $%d", len(args)-1, len(args)))
+	}
+	if strings.TrimSpace(source.SeriesName) != "" && source.SeriesIndex != nil {
+		args = append(args, source.SeriesName, *source.SeriesIndex)
+		matchFilters = append(matchFilters, fmt.Sprintf(
+			"(LOWER(COALESCE(book_series.series_name, '')) = LOWER($%d) AND book_series.series_index = $%d)",
+			len(args)-1,
+			len(args),
+		))
+	}
+	matchWhere := ""
+	if len(matchFilters) > 0 {
+		matchWhere = " AND (" + strings.Join(matchFilters, " OR ") + ")"
+	}
+	args = append(args, limit)
 	rows, err := r.queryMatchItems(ctx, `
 		WHERE mi.content_id <> $1
 		  AND mi.type IN ('ebook', 'audiobook')
@@ -169,9 +195,10 @@ func (r *Repository) ListMatchCandidates(ctx context.Context, source MatchItem, 
 				OR (d.source_content_id = mi.content_id AND d.target_content_id = $1)
 			  )
 		  )
+		`+matchWhere+`
 		ORDER BY mi.title ASC, mi.content_id ASC
-		LIMIT $3
-	`, source.ContentID, source.Type, limit)
+		LIMIT $`+fmt.Sprint(len(args))+`
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
