@@ -181,13 +181,6 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 		m["playback.chapter_thumbnail_node_capacity"] = strconv.Itoa(raw.Playback.ChapterThumbnailNodeCapacity)
 	}
 	m["playback.transcode_enabled"] = strconv.FormatBool(raw.Playback.TranscodeEnabled)
-	m["playback.allow_hevc_encoding"] = strconv.FormatBool(raw.Playback.AllowHEVCEncoding)
-	if raw.Playback.TranscodeAheadSegments != 0 {
-		m["playback.transcode_ahead_segments"] = strconv.Itoa(raw.Playback.TranscodeAheadSegments)
-	}
-	if raw.Playback.SegmentDuration != 0 {
-		m["playback.segment_duration"] = strconv.Itoa(raw.Playback.SegmentDuration)
-	}
 
 	// Redis
 	m["redis.url"] = raw.Redis.URL

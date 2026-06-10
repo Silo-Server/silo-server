@@ -11,12 +11,9 @@ const KEYS = [
   "playback.hw_accel",
   "playback.transcode_enabled",
   "playback.local_transcode_fallback",
-  "playback.allow_hevc_encoding",
   "allow_4k_transcode",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
-  "playback.transcode_ahead_segments",
-  "playback.segment_duration",
   "playback.chapter_thumbnail_workers",
   "playback.chapter_thumbnail_execution",
   "playback.chapter_thumbnail_node_capacity",
@@ -96,12 +93,6 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("playback.local_transcode_fallback", v)}
           />
           <SettingField
-            label="Allow HEVC Encoding"
-            type="toggle"
-            value={form.getValue("playback.allow_hevc_encoding")}
-            onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
-          />
-          <SettingField
             label="Allow 4K Transcoding"
             type="toggle"
             value={form.getValue("allow_4k_transcode")}
@@ -125,18 +116,6 @@ export default function PlaybackSettings() {
         </FieldGroup>
 
         <FieldGroup label="Segments">
-          <SettingField
-            label="Transcode Ahead Segments"
-            type="number"
-            value={form.getValue("playback.transcode_ahead_segments")}
-            onChange={(v) => form.setValue("playback.transcode_ahead_segments", v)}
-          />
-          <SettingField
-            label="Segment Duration"
-            type="number"
-            value={form.getValue("playback.segment_duration")}
-            onChange={(v) => form.setValue("playback.segment_duration", v)}
-          />
           <SettingField
             label="Chapter Thumbnail Workers"
             type="number"

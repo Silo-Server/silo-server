@@ -181,12 +181,16 @@ func (h *PlaybackHandler) SetProfileRefreshRequester(requester ProfileRefreshReq
 }
 
 // playbackConfig returns the current playback config, falling back to the
-// default transcode dir when no provider is wired (tests, minimal setups).
+// same defaults as config loading (transcode enabled, temp transcode dir)
+// when no provider is wired (tests, minimal setups).
 func (h *PlaybackHandler) playbackConfig() config.PlaybackConfig {
 	if h.PlaybackConfig != nil {
 		return h.PlaybackConfig()
 	}
-	return config.PlaybackConfig{TranscodeDir: filepath.Join(os.TempDir(), "silo-transcode")}
+	return config.PlaybackConfig{
+		TranscodeEnabled: true,
+		TranscodeDir:     filepath.Join(os.TempDir(), "silo-transcode"),
+	}
 }
 
 // CleanupOrphanedTranscodes removes stale per-session temp directories for
@@ -624,9 +628,9 @@ func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	return directPlayAudioTrackIndex(file)
 }
 
-func playbackAdminSettingsFromRequest(ctx context.Context, repo PlaybackSettingsReader) playback.AdminSettings {
+func playbackAdminSettingsFromRequest(ctx context.Context, repo PlaybackSettingsReader, transcodeEnabled bool) playback.AdminSettings {
 	settings := playback.AdminSettings{
-		TranscodeEnabled: true,
+		TranscodeEnabled: transcodeEnabled,
 	}
 	if repo != nil {
 		if v, _ := repo.Get(ctx, "allow_4k_transcode"); v == "true" {
@@ -671,7 +675,7 @@ func (h *PlaybackHandler) resolveCapabilityPlaybackSelection(
 	}
 
 	audioTrackIndex = normalizeAudioTrackIndex(requestedFile, audioTrackIndex)
-	adminSettings := playbackAdminSettingsFromRequest(ctx, h.SettingsRepo)
+	adminSettings := playbackAdminSettingsFromRequest(ctx, h.SettingsRepo, h.playbackConfig().TranscodeEnabled)
 	method, transcodeAudio := resolvePlaybackMethodForFile(requestedFile, req, audioTrackIndex, adminSettings)
 
 	if requestedFile.Resolution == "2160p" &&

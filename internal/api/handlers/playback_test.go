@@ -185,7 +185,11 @@ func writePlaybackTestFFmpeg(t *testing.T) string {
 
 func playbackTestConfig(ffmpegPath, transcodeDir string) func() config.PlaybackConfig {
 	return func() config.PlaybackConfig {
-		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir}
+		return config.PlaybackConfig{
+			FFmpegPath:       ffmpegPath,
+			TranscodeDir:     transcodeDir,
+			TranscodeEnabled: true,
+		}
 	}
 }
 
