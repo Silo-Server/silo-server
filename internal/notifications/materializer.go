@@ -1,0 +1,88 @@
+package notifications
+
+import (
+	"context"
+	"log/slog"
+	"sync/atomic"
+
+	evt "github.com/Silo-Server/silo-server/internal/events"
+)
+
+type matcherFunc func(ctx context.Context, env evt.Envelope) error
+
+type namedMatcher struct {
+	name string
+	fn   matcherFunc
+}
+
+// Materializer subscribes to the events hub and turns events into
+// notifications rows via registered matchers. Matcher failures are isolated:
+// one matcher erroring or panicking never blocks the hub or other matchers.
+type Materializer struct {
+	hub       *evt.Hub
+	svc       *Service
+	content   ContentResolver // nil disables the content matcher
+	matchers  []namedMatcher
+	processed atomic.Int64
+	unsub     func()
+}
+
+func NewMaterializer(hub *evt.Hub, svc *Service, content ContentResolver) *Materializer {
+	m := &Materializer{hub: hub, svc: svc, content: content}
+	m.register("request", m.matchRequest)
+	m.register("send", m.matchSend)
+	if content != nil {
+		m.register("content", m.matchContent)
+	}
+	m.register("admin", m.matchAdmin)
+	return m
+}
+
+func (m *Materializer) register(name string, fn matcherFunc) {
+	m.matchers = append(m.matchers, namedMatcher{name: name, fn: fn})
+}
+
+// Processed reports how many envelopes have been fully processed (test hook).
+func (m *Materializer) Processed() int64 { return m.processed.Load() }
+
+func (m *Materializer) Start(ctx context.Context) error {
+	ch, unsub := m.hub.Subscribe()
+	m.unsub = unsub
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case env, ok := <-ch:
+				if !ok {
+					return
+				}
+				m.handle(ctx, env)
+				m.processed.Add(1)
+			}
+		}
+	}()
+	return nil
+}
+
+func (m *Materializer) Stop() {
+	if m.unsub != nil {
+		m.unsub()
+		m.unsub = nil
+	}
+}
+
+func (m *Materializer) handle(ctx context.Context, env evt.Envelope) {
+	for _, matcher := range m.matchers {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.ErrorContext(ctx, "notifications: matcher panicked", "matcher", matcher.name, "event", env.Event, "panic", r)
+				}
+			}()
+			if err := matcher.fn(ctx, env); err != nil {
+				slog.WarnContext(ctx, "notifications: matcher failed", "matcher", matcher.name, "event", env.Event, "error", err)
+			}
+		}()
+	}
+}
