@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -435,6 +436,48 @@ func jobFailedEnvelope(jobID, jobType string) evt.Envelope {
 	}
 }
 
+func TestAdminMatcher_ScanFailedNotifiesAdmins(t *testing.T) {
+	store := &fakeStore{admins: []int{1}}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	data, _ := json.Marshal(map[string]any{
+		"id":   "scan-9",
+		"mode": "full",
+	})
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel:   evt.ChannelScans,
+		Event:     "scan.failed",
+		Data:      data,
+		AdminOnly: true,
+	})
+
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 insert, got %d", len(store.inserted))
+	}
+	n := store.inserted[0]
+	if n.Type != "scan.failed" {
+		t.Errorf("type = %q, want %q", n.Type, "scan.failed")
+	}
+	if !strings.Contains(n.Body, "full") {
+		t.Errorf("Body does not contain 'full': %q", n.Body)
+	}
+	if !strings.Contains(n.Body, "scan-9") {
+		t.Errorf("Body does not contain 'scan-9': %q", n.Body)
+	}
+	if n.Link == nil || *n.Link != "/admin/tasks" {
+		t.Errorf("Link = %v, want %q", n.Link, "/admin/tasks")
+	}
+	if !strings.HasPrefix(n.DedupRef, "scan.failed:full:") {
+		t.Errorf("DedupRef prefix incorrect: %q (want to start with 'scan.failed:full:')", n.DedupRef)
+	}
+}
+
 func TestAdminMatcher_JobFailedNotifiesAdmins(t *testing.T) {
 	store := &fakeStore{admins: []int{1, 2}}
 	svc, hub := newTestService(store)
@@ -465,6 +508,21 @@ func TestAdminMatcher_JobFailedNotifiesAdmins(t *testing.T) {
 	}
 	if !seen[1] || !seen[2] {
 		t.Errorf("expected both admins (1, 2) notified; got %v", seen)
+	}
+
+	// Assert on one inserted row: Body contains job_type and id; Link and DedupRef prefix
+	n := store.inserted[0]
+	if !strings.Contains(n.Body, "export") {
+		t.Errorf("Body does not contain job_type 'export': %q", n.Body)
+	}
+	if !strings.Contains(n.Body, "job-abc") {
+		t.Errorf("Body does not contain job id 'job-abc': %q", n.Body)
+	}
+	if n.Link == nil || *n.Link != "/admin/tasks" {
+		t.Errorf("Link = %v, want %q", n.Link, "/admin/tasks")
+	}
+	if !strings.HasPrefix(n.DedupRef, "job.failed:export:") {
+		t.Errorf("DedupRef prefix incorrect: %q (want to start with 'job.failed:export:')", n.DedupRef)
 	}
 }
 

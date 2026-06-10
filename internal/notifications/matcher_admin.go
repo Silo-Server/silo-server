@@ -26,7 +26,7 @@ var adminAlertEvents = map[string]string{
 var adminAlertChannels = map[evt.EventChannel]bool{
 	evt.ChannelJobs:  true,
 	evt.ChannelScans: true,
-	evt.ChannelTasks: true,
+	evt.ChannelTasks: true, // no task failure event exists yet (only task.updated); kept so a future task.failed event needs only a map entry
 }
 
 // matchAdmin fans failure events out to all admin users. A day-bucketed
