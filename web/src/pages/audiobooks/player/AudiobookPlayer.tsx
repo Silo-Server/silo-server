@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
+import { useAudiobookKeyboardShortcuts } from "./useAudiobookKeyboardShortcuts";
 import { useAudiobookPlayback } from "./useAudiobookPlayback";
+import { useAudiobookPrefs } from "./useAudiobookPrefs";
 import { MiniBar } from "./MiniBar";
 import { NowListening } from "./NowListening";
 
@@ -43,14 +45,25 @@ export default function AudiobookPlayer({
   onPlaybackStateChange,
   onControlsChange,
 }: AudiobookPlayerProps) {
+  const prefs = useAudiobookPrefs();
   const playback = useAudiobookPlayback({
     contentId,
     files,
     initialPositionSeconds,
     autoPlay,
+    smartRewindEnabled: prefs.smartRewind,
     onStopRequested: onClose,
   });
   const [mode, setMode] = useState<"mini" | "now-listening">("mini");
+
+  useAudiobookKeyboardShortcuts({
+    playback,
+    prefs,
+    expanded: mode === "now-listening",
+    onToggleExpanded: () => setMode((m) => (m === "mini" ? "now-listening" : "mini")),
+    onCollapse: () => setMode("mini"),
+  });
+
   const lastPlaybackStateEmitRef = useRef<{
     emittedAt: number;
     duration: number;
@@ -145,6 +158,7 @@ export default function AudiobookPlayer({
           title={title}
           posterUrl={posterUrl}
           playback={playback}
+          prefs={prefs}
           onClose={onClose}
           onExpand={() => setMode("now-listening")}
         />
@@ -156,6 +170,7 @@ export default function AudiobookPlayer({
           narrator={narrator}
           posterUrl={posterUrl ?? ""}
           playback={playback}
+          prefs={prefs}
           onCollapse={() => setMode("mini")}
         />
       )}

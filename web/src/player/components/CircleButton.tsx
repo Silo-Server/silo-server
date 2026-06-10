@@ -5,6 +5,8 @@ export type CircleButtonProps = {
   onClick?: () => void;
   disabled?: boolean;
   children: React.ReactNode;
+  className?: string;
+  title?: string;
   "data-paused"?: boolean;
 };
 
@@ -22,6 +24,8 @@ export function CircleButton({
   onClick,
   disabled,
   children,
+  className,
+  title,
   "data-paused": dataPaused,
 }: CircleButtonProps) {
   const base =
@@ -37,9 +41,10 @@ export function CircleButton({
     <button
       type="button"
       aria-label={ariaLabel}
+      title={title}
       onClick={onClick}
       disabled={disabled}
-      className={`${base} ${sizing} ${skin}`}
+      className={`${base} ${sizing} ${skin}${className ? ` ${className}` : ""}`}
       data-paused={dataPaused ? "true" : undefined}
     >
       {children}
