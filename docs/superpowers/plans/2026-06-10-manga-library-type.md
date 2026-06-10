@@ -254,26 +254,36 @@ DROP TABLE IF EXISTS manga_chapters;
 - [ ] **Step 3:** Apply against a scratch DB and verify: `make migrate-up` then `make migrate-status`. Expected: the migration shows applied.
 - [ ] **Step 4:** Commit `feat(db): manga_chapters link table`.
 
-### Task 5: `manga_chapters` repository (upsert + list)
+### Task 5: `manga_chapters` repository (thin SQL) + pure group-key
+
+**Pattern note:** `internal/scanner` has **no DB-backed tests** — DB writes are thin SQL whose *decision* logic is extracted into pure functions (see `planEbookSeriesWrite`, tested with no DB at `ebook_test.go:843`). Follow that: unit-test the pure pieces; the thin SQL upsert/list is validated by the live re-scan in Phase 6. Do NOT introduce a Postgres test harness.
 
 **Files:**
 - Create: `internal/scanner/manga_chapters_repo.go`
 - Test: `internal/scanner/manga_chapters_repo_test.go`
 
-Follow the existing repo pattern (`internal/scanner/ebook_scan.go` `upsertEbookSeries` uses `s.fileRepo.Pool()`). Provide:
+Thin DB helpers (mirroring `upsertEbookSeries`, which uses `s.fileRepo.Pool()`):
 
 ```go
-// UpsertMangaChapter links a chapter item to its series with an ordering index.
+// upsertMangaChapter links a chapter item to its series with an ordering index.
 func upsertMangaChapter(ctx context.Context, pool *pgxpool.Pool, chapterID, seriesID string, index *float64, volume string) error
-// ListMangaChapters returns a series' chapter content_ids in order.
+// listMangaChapters returns a series' chapter content_ids in order.
 func listMangaChapters(ctx context.Context, pool *pgxpool.Pool, seriesID string) ([]string, error)
 ```
 
-- [ ] **Step 1:** Write a table-driven test using a real pgx pool against a test DB (mirror the style of existing `*_repo_test.go` in `internal/scanner`; if those tests gate on a DSN env var, reuse the same gate). Insert two media_items (a series + a chapter), upsert a link, assert `listMangaChapters` returns the chapter; upsert again with a new index and assert it updates, not duplicates.
-- [ ] **Step 2:** Run, verify FAIL (undefined funcs).
-- [ ] **Step 3:** Implement with `INSERT … ON CONFLICT (chapter_content_id) DO UPDATE SET series_content_id=…, chapter_index=…, volume=…, updated_at=NOW()`.
-- [ ] **Step 4:** Run, verify PASS.
-- [ ] **Step 5:** Commit `feat(scanner): manga_chapters repository`.
+The only non-trivial logic is normalizing the parser output into the `chapter_index`/`volume` write — extract it pure and test it:
+
+```go
+// mangaChapterWrite turns a parsed (volume, index, has) into the (index, volume)
+// values to persist: index is nil when has=false, volume is "" when absent.
+func mangaChapterWrite(volume string, index float64, has bool) (idx *float64, vol string)
+```
+
+- [ ] **Step 1:** Write a pure unit test for `mangaChapterWrite`: `(has=true, idx=178)` → non-nil 178 + the volume token; `(has=false)` → nil index. No DB.
+- [ ] **Step 2:** Run, verify FAIL (undefined).
+- [ ] **Step 3:** Implement `mangaChapterWrite` (pure) and the two thin SQL helpers (`INSERT … ON CONFLICT (chapter_content_id) DO UPDATE SET series_content_id=…, chapter_index=…, volume=…, updated_at=NOW()`; `SELECT chapter_content_id FROM manga_chapters WHERE series_content_id=$1 ORDER BY chapter_index NULLS LAST`).
+- [ ] **Step 4:** Run the `mangaChapterWrite` test, verify PASS; `go build ./internal/scanner/` to confirm the SQL helpers compile.
+- [ ] **Step 5:** Commit `feat(scanner): manga_chapters repository + pure chapter-write mapping`.
 
 ---
 
@@ -345,38 +355,63 @@ Also update the library-type → metadata-levels mapping covered by `internal/ap
 
 ### Task 9: `reconcileMangaFile` — series item + chapter link
 
-**Files:** Modify `internal/scanner/manga_scan.go`.
+**Pattern note:** no DB test. Extract the pure decisions and unit-test those; the find-or-create + upsert orchestration is thin and validated by the Phase 6 live re-scan.
 
-`reconcileMangaFile` forks `reconcileEbookFile` (`internal/scanner/ebook_scan.go:425`). It keeps the ebook-chapter upsert (`upsertEbookMediaItem`) so chapters stay readable, then adds the series layer:
+**Files:**
+- Modify `internal/scanner/manga_scan.go`
+- Modify `internal/scanner/manga_parse.go` (the pure series group-key)
+- Test `internal/scanner/manga_parse_test.go`
 
-- [ ] **Step 1: Write the failing integration test** in `internal/scanner/manga_scan_test.go`: build a temp tree with two real-looking files under one series folder (`<tmp>/One-Punch Man/One-Punch Man 178 ….cbz`, `… 179 ….cbz`), run the manga reconcile for both against a test DB + a folder row, then assert: exactly one `type='manga'` item titled "One-Punch Man" exists, both chapters are `type='ebook'`, and `listMangaChapters(series)` returns both ordered 178,179.
+- [ ] **Step 1: Write the failing pure test** in `manga_parse_test.go` for the stable series identity key — the thing that guarantees all chapters of one series resolve to one series item, and that re-scans are idempotent:
 
 ```go
-func TestReconcileMangaFileGroupsChapters(t *testing.T) {
-	// ... set up Scanner with a test pool + temp tree (see ebook_scan_test.go for harness) ...
-	// reconcile file 178 then 179
-	// assert one manga series item, two ebook chapters linked & ordered
+func TestMangaSeriesGroupKey(t *testing.T) {
+	a := mangaSeriesGroupKey(8, "One-Punch Man")
+	b := mangaSeriesGroupKey(8, "  one-punch man ")          // case/space-insensitive → same series
+	c := mangaSeriesGroupKey(8, "Bakuman")
+	d := mangaSeriesGroupKey(9, "One-Punch Man")             // different library → different series
+	if a == "" || a != b {
+		t.Fatalf("same series must yield same key: %q vs %q", a, b)
+	}
+	if a == c || a == d {
+		t.Fatalf("different series/library must differ: a=%q c=%q d=%q", a, c, d)
+	}
 }
 ```
 
-- [ ] **Step 2:** Run, verify FAIL (`undefined: reconcileMangaFile` or assertion fails).
-- [ ] **Step 3: Implement** `reconcileMangaFile`:
+- [ ] **Step 2:** Run `-run TestMangaSeriesGroupKey`; verify FAIL (`undefined: mangaSeriesGroupKey`).
+- [ ] **Step 3a: Implement `mangaSeriesGroupKey`** in `manga_parse.go` (pure; reuse the existing `normalizeEbookIdentityPart` if suitable, else lower+trim+collapse spaces):
+
+```go
+// mangaSeriesGroupKey is the stable identity of a manga series item: a function
+// of (library, normalized series name) only — no per-file component — so every
+// chapter of a series resolves to one series item and re-scans are idempotent.
+func mangaSeriesGroupKey(folderID int, seriesName string) string {
+	n := strings.ToLower(strings.Join(strings.Fields(seriesName), " "))
+	if n == "" {
+		return ""
+	}
+	return fmt.Sprintf("manga:series:%d:%s", folderID, n)
+}
+```
+
+- [ ] **Step 3b: Implement `reconcileMangaFile`** in `manga_scan.go` (thin orchestration, no new test — validated live):
   1. `parsed, _ := parseEbookFile(filePath)` (cover, page count) — reuse.
-  2. `seriesName := mangaSeriesFromPath(filePath)`; if empty, fall back to filename-derived name.
+  2. `seriesName := mangaSeriesFromPath(filePath)`; if empty, fall back to a filename-derived name (`ebookTitleFromPath`).
   3. `vol, idx, has := parseMangaIndex(strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)))`.
-  4. Find-or-create the `type='manga'` series item keyed on `(folder.ID, normalized seriesName)` — reuse a content-group-key derived from the series folder so it is stable across chapters and re-scans. Set its `title = seriesName`, mark it needing enrichment (mirror how `upsertEbookMediaItem` sets a skeleton/pending status; the metadata worker then enriches `type='manga'`).
+  4. Find-or-create the `type='manga'` series item keyed on `mangaSeriesGroupKey(folder.ID, seriesName)`; set `title = seriesName`; mark it needing enrichment (mirror how `upsertEbookMediaItem` sets a skeleton/pending status so the metadata worker enriches `type='manga'`).
   5. Upsert the chapter as today (`upsertEbookMediaItem` with the per-file group key) → `chapterID`.
-  6. `upsertMangaChapter(ctx, pool, chapterID, seriesID, idxPtr(has, idx), vol)`.
-- [ ] **Step 4:** Run, verify PASS.
+  6. `idxPtr, volOut := mangaChapterWrite(vol, idx, has)`; `upsertMangaChapter(ctx, pool, chapterID, seriesID, idxPtr, volOut)`.
+- [ ] **Step 4:** Run `-run TestMangaSeriesGroupKey` (PASS) and `go build ./internal/scanner/` (compiles).
 - [ ] **Step 5:** Commit `feat(scanner): group manga chapters under a series item`.
 
-### Task 10: Idempotent re-scan
+### Task 10: Idempotency (covered by the pure key) + live validation note
 
-**Files:** Modify `internal/scanner/manga_scan_test.go`.
+Idempotency is guaranteed structurally: `mangaSeriesGroupKey` has no per-file component, so re-scanning re-finds the same series item, and `upsertMangaChapter`'s `ON CONFLICT (chapter_content_id)` makes chapter links idempotent. The Task 9 `TestMangaSeriesGroupKey` already pins the stable-key property.
 
-- [ ] **Step 1:** Extend the Task 9 test: reconcile both files a second time; assert still exactly one series item, two chapter links, no duplicates.
-- [ ] **Step 2:** Run; if it fails (duplicate series), make the series content-group-key purely a function of `(folder, series folder)` (no per-file component) so re-finds hit the same item.
-- [ ] **Step 3:** Commit `test(scanner): manga scan is idempotent`.
+- [ ] **Step 1:** Confirm `TestMangaSeriesGroupKey` asserts `a == b` for the same series (re-scan stability). If not already, strengthen it.
+- [ ] **Step 2:** Add a `// live-validation:` comment in `manga_scan.go` noting that grouping/idempotency is verified by the Phase 6 re-scan (counts: one series per folder, no duplicate links), since there is no scanner DB test harness.
+- [ ] **Step 3:** Commit `docs(scanner): note manga scan idempotency is key-derived + live-validated`.
 
 ---
 
