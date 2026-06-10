@@ -127,7 +127,7 @@ function AIConnectionCard() {
         type="text"
         value={asrBaseUrl}
         onChange={setAsrBaseUrl}
-        hint="Optional separate Whisper server (faster-whisper, speaches, …). Blank uses the base URL."
+        hint="Whisper-capable endpoint with segment timestamps: api.groq.com/openai, api.openai.com, or a local faster-whisper/speaches server. Blank uses the base URL — note that chat-only gateways (e.g. OpenRouter) cannot transcribe."
       />
       <SettingField
         label="Transcription API key"
