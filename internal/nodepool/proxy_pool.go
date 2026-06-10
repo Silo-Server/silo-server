@@ -3,6 +3,7 @@ package nodepool
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ProxyPool manages proxy nodes with round-robin selection.
@@ -52,4 +53,12 @@ func (p *ProxyPool) Nodes() []*Node {
 	cp := make([]*Node, len(p.nodes))
 	copy(cp, p.nodes)
 	return cp
+}
+
+// ApplyHealth records a health check result by swapping the node for an
+// updated copy, keeping published *Node values immutable.
+func (p *ProxyPool) ApplyHealth(id int, healthy bool, activeJobs, egressKbps int, checkedAt time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	applyNodeHealth(p.nodes, id, healthy, activeJobs, egressKbps, checkedAt)
 }

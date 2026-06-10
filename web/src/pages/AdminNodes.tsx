@@ -28,6 +28,10 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type NodeType = "proxy" | "transcode";
 
+function formatMbps(kbps: number): string {
+  return (Math.round(kbps / 100) / 10).toString();
+}
+
 interface NodeSectionProps {
   type: NodeType;
   nodes: StreamNode[];
@@ -54,7 +58,7 @@ function NodeSection({
   checkingHealthId,
 }: NodeSectionProps) {
   const label = type === "proxy" ? "Proxy" : "Transcode";
-  const colCount = showJobs ? 7 : 6;
+  const colCount = (showJobs ? 8 : 7) + (type === "proxy" ? 1 : 0);
 
   return (
     <div className="space-y-3">
@@ -76,9 +80,11 @@ function NodeSection({
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>URL</TableHead>
+              <TableHead>Group</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Health</TableHead>
-              {showJobs && <TableHead>Jobs</TableHead>}
+              {showJobs && <TableHead>{type === "proxy" ? "Streams" : "Jobs"}</TableHead>}
+              {type === "proxy" && <TableHead>Egress</TableHead>}
               <TableHead>Last Check</TableHead>
               <TableHead className="w-32">Actions</TableHead>
             </TableRow>
@@ -107,6 +113,13 @@ function NodeSection({
                     <TableCell className="font-medium">{node.name}</TableCell>
                     <TableCell className="font-mono text-sm">{node.url}</TableCell>
                     <TableCell>
+                      {node.group ? (
+                        <Badge variant="outline">{node.group}</Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <Switch checked={node.enabled} onCheckedChange={() => onToggle(node)} />
                     </TableCell>
                     <TableCell>
@@ -125,7 +138,26 @@ function NodeSection({
                         </span>
                       </span>
                     </TableCell>
-                    {showJobs && <TableCell>{node.active_jobs}</TableCell>}
+                    {showJobs && (
+                      <TableCell>
+                        {node.active_jobs}
+                        {node.max_jobs != null && (
+                          <span className="text-muted-foreground"> / {node.max_jobs}</span>
+                        )}
+                      </TableCell>
+                    )}
+                    {type === "proxy" && (
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {formatMbps(node.egress_kbps)}
+                        {node.max_bandwidth_kbps != null && (
+                          <span className="text-muted-foreground">
+                            {" "}
+                            / {formatMbps(node.max_bandwidth_kbps)}
+                          </span>
+                        )}{" "}
+                        Mbps
+                      </TableCell>
+                    )}
                     <TableCell className="text-muted-foreground text-xs">
                       {node.last_health_check
                         ? new Date(node.last_health_check).toLocaleString()
@@ -188,6 +220,11 @@ function NodeForm({
 }) {
   const [name, setName] = useState(node?.name ?? "");
   const [url, setUrl] = useState(node?.url ?? "");
+  const [group, setGroup] = useState(node?.group ?? "");
+  const [maxJobs, setMaxJobs] = useState(node?.max_jobs?.toString() ?? "");
+  const [maxBandwidthMbps, setMaxBandwidthMbps] = useState(
+    node?.max_bandwidth_kbps ? (node.max_bandwidth_kbps / 1000).toString() : "",
+  );
   const createMutation = useCreateNode();
   const updateMutation = useUpdateNode();
   const isPending = createMutation.isPending || updateMutation.isPending;
@@ -197,10 +234,23 @@ function NodeForm({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    // The backend treats an empty group as "ungrouped" and caps <= 0 as
+    // "unlimited", so cleared inputs reset those fields.
+    const parsedMaxJobs = parseInt(maxJobs, 10);
+    const parsedMaxBandwidthMbps = parseFloat(maxBandwidthMbps);
+    const fields = {
+      name,
+      url,
+      group: group.trim(),
+      max_jobs: Number.isNaN(parsedMaxJobs) ? 0 : parsedMaxJobs,
+      max_bandwidth_kbps: Number.isNaN(parsedMaxBandwidthMbps)
+        ? 0
+        : Math.round(parsedMaxBandwidthMbps * 1000),
+    };
     if (node) {
-      updateMutation.mutate({ id: node.id, body: { name, url } }, { onSuccess: onClose });
+      updateMutation.mutate({ id: node.id, body: fields }, { onSuccess: onClose });
     } else {
-      const body: CreateNodeRequest = { name, type: nodeType, url };
+      const body: CreateNodeRequest = { type: nodeType, ...fields };
       createMutation.mutate(body, { onSuccess: onClose });
     }
   }
@@ -243,6 +293,49 @@ function NodeForm({
           </p>
         )}
       </div>
+
+      <div className="space-y-2">
+        <Label>Group</Label>
+        <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="e.g. rack-1" />
+        <p className="text-muted-foreground text-sm">
+          Optional. Nodes in the same group are treated as co-located: transcoded streams are served
+          by a proxy from the transcode node's group, keeping traffic on the same LAN. A group is
+          only used while all of its nodes are healthy.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>{nodeType === "proxy" ? "Max Streams" : "Max Transcodes"}</Label>
+        <Input
+          type="number"
+          min={0}
+          value={maxJobs}
+          onChange={(e) => setMaxJobs(e.target.value)}
+          placeholder="Unlimited"
+        />
+        <p className="text-muted-foreground text-sm">
+          Optional concurrency cap for this node. Leave empty (or 0) for unlimited.
+        </p>
+      </div>
+
+      {nodeType === "proxy" && (
+        <div className="space-y-2">
+          <Label>Max Egress Bandwidth (Mbps)</Label>
+          <Input
+            type="number"
+            min={0}
+            step="any"
+            value={maxBandwidthMbps}
+            onChange={(e) => setMaxBandwidthMbps(e.target.value)}
+            placeholder="Unlimited"
+          />
+          <p className="text-muted-foreground text-sm">
+            Optional. New streams are routed elsewhere once this node's measured egress (plus the
+            expected bitrate of the new stream) would exceed the cap. Active streams are never
+            interrupted. Leave empty (or 0) for unlimited.
+          </p>
+        </div>
+      )}
 
       <Button type="submit" className="w-full" disabled={isPending}>
         {isPending ? "Saving..." : "Save"}
@@ -329,7 +422,7 @@ export default function AdminNodes() {
       <NodeSection
         type="proxy"
         nodes={proxyNodes}
-        showJobs={false}
+        showJobs={true}
         onAdd={() => handleAdd("proxy")}
         onEdit={handleEdit}
         onDelete={handleDelete}

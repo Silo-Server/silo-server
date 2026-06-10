@@ -98,6 +98,7 @@ type Dependencies struct {
 	NodeRepo                     *nodepool.Repository            // stream node repository (may be nil)
 	ProxyPool                    *nodepool.ProxyPool             // proxy node pool (may be nil)
 	TranscodePool                *nodepool.TranscodePool         // transcode node pool (may be nil)
+	NodePlanner                  *nodepool.Planner               // group/cap-aware node selection (may be nil)
 	SessionSyncer                handlers.PlaybackSessionSyncer  // optional; immediate playback session sync trigger
 	EventBus                     cache.EventBus
 	AdminStatsProvider           handlers.AdminStatsSource
@@ -654,12 +655,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 		}
 
-		// Wire optional proxy/transcode pools and JWT secret for node-aware stream URLs.
-		if deps.ProxyPool != nil {
-			playbackHandler.ProxyPool = deps.ProxyPool
-		}
-		if deps.TranscodePool != nil {
-			playbackHandler.TranscodePool = deps.TranscodePool
+		// Wire the optional node planner and JWT secret for node-aware stream URLs.
+		if deps.NodePlanner != nil {
+			playbackHandler.NodePlanner = deps.NodePlanner
 		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret

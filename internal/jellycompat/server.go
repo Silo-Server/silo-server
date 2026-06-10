@@ -70,8 +70,7 @@ type Dependencies struct {
 	FileResolver      FilePathResolver
 	UserStoreProvider userstore.UserStoreProvider
 	AccessFilterFn    AccessFilterResolver
-	ProxyPool         *nodepool.ProxyPool
-	TranscodePool     *nodepool.TranscodePool
+	NodePlanner       nodepool.SessionPlanner
 	JWTSecret         string
 	Recommender       recommendations.Recommender
 	RecWorker         *recommendations.Worker

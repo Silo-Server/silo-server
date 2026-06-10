@@ -24,15 +24,33 @@ type Server struct {
 	watcher    *nodeconfig.Watcher
 	tracker    *nodesessions.Tracker
 	httpClient *http.Client
+	egress     *egressMeter
 }
 
 // NewServer creates a new proxy server backed by a config watcher and session tracker.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	return &Server{
-		watcher:    watcher,
-		tracker:    tracker,
-		httpClient: &http.Client{}, // no timeout for long streams
+		watcher: watcher,
+		tracker: tracker,
+		// No overall timeout — stream bodies are long-lived. Hung nodes are
+		// bounded by the transport's response-header timeout instead.
+		httpClient: &http.Client{Transport: newStreamTransport()},
+		egress:     newEgressMeter(),
 	}
+}
+
+// newStreamTransport tunes the proxy→transcode-node connection pool. Many
+// concurrent viewers fan their segment fetches through one proxy→node pair,
+// and Go's default of 2 idle connections per host causes constant connection
+// churn (and TLS re-handshakes) under load. The response-header timeout
+// bounds requests to a hung node; the longest legitimate server-side wait is
+// the 30s manifest-readiness poll on the transcode node.
+func newStreamTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 128
+	t.MaxIdleConnsPerHost = 32
+	t.ResponseHeaderTimeout = 60 * time.Second
+	return t
 }
 
 // Handler returns the chi.Router with all proxy routes mounted.
@@ -47,15 +65,20 @@ func (s *Server) Handler() http.Handler {
 		MaxAge:         86400,
 	}))
 	r.Get("/api/v1/health", s.handleHealth)
-	r.Head("/stream/direct/{token}", s.handleDirectPlay)
-	r.Get("/stream/direct/{token}", s.handleDirectPlay)
-	r.Head("/stream/remux/{token}", s.handleRemux)
-	r.Get("/stream/remux/{token}", s.handleRemux)
-	r.Head("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
-	r.Get("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
-	r.Get("/stream/transcode/{token}/segment/{name}", s.handleTranscodeSegment)
-	r.Get("/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts)
-	r.Get("/stream/subtitles/{token}/{track}", s.handleSubtitle)
+	r.Group(func(r chi.Router) {
+		// Everything under /stream counts toward the node's measured
+		// egress bandwidth.
+		r.Use(s.meterEgress)
+		r.Head("/stream/direct/{token}", s.handleDirectPlay)
+		r.Get("/stream/direct/{token}", s.handleDirectPlay)
+		r.Head("/stream/remux/{token}", s.handleRemux)
+		r.Get("/stream/remux/{token}", s.handleRemux)
+		r.Head("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
+		r.Get("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
+		r.Get("/stream/transcode/{token}/segment/{name}", s.handleTranscodeSegment)
+		r.Get("/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts)
+		r.Get("/stream/subtitles/{token}/{track}", s.handleSubtitle)
+	})
 
 	// Admin routes — bearer-auth protected.
 	r.Group(func(r chi.Router) {
@@ -67,12 +90,22 @@ func (s *Server) Handler() http.Handler {
 }
 
 type healthResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	ActiveJobs int    `json:"active_jobs"`
+	EgressKbps int    `json:"egress_kbps"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	activeJobs := 0
+	if s.tracker != nil {
+		activeJobs = s.tracker.ActiveCount()
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(healthResponse{Status: "ok"})
+	json.NewEncoder(w).Encode(healthResponse{
+		Status:     "ok",
+		ActiveJobs: activeJobs,
+		EgressKbps: s.egress.RateKbps(),
+	})
 }
 
 // requireBearer checks Authorization: Bearer {secret} for admin endpoints.
@@ -149,6 +182,7 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 	if claims == nil {
 		return
 	}
+	s.touchTranscodeSession(r, claims)
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/master.m3u8")
 }
 
@@ -157,8 +191,23 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 	if claims == nil {
 		return
 	}
+	s.touchTranscodeSession(r, claims)
 	name := chi.URLParam(r, "name")
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/segment/"+name)
+}
+
+// touchTranscodeSession keeps HLS sessions visible in the active stream count.
+// Unlike direct play and remux, transcode playback reaches the proxy as many
+// short manifest/segment requests, so the session is tracked by recent
+// activity instead of request lifetime.
+func (s *Server) touchTranscodeSession(r *http.Request, claims *streamtoken.Claims) {
+	s.tracker.Touch(r.Context(), nodesessions.SessionInfo{
+		SessionID: claims.SessionID,
+		NodeURL:   s.tracker.NodeURL(),
+		NodeName:  s.tracker.NodeName(),
+		Type:      "transcode",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {

@@ -670,6 +670,7 @@ func main() {
 
 		deps.ProxyPool = proxyPool
 		deps.TranscodePool = transcodePool
+		deps.NodePlanner = nodepool.NewPlanner(proxyPool, transcodePool)
 
 		healthChecker := nodepool.NewHealthChecker(proxyPool, transcodePool, nodeRepo)
 		healthChecker.Start(appCtx)
@@ -1897,8 +1898,7 @@ func main() {
 			DB:               deps.DB,
 			SecretCipher:     dataCipher,
 			ClientIPResolver: ipResolver,
-			ProxyPool:        deps.ProxyPool,
-			TranscodePool:    deps.TranscodePool,
+			NodePlanner:      deps.NodePlanner,
 			JWTSecret:        cfg.Auth.JWTSecret,
 			RecWorker:        recWorker,
 		}

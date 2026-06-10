@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -96,9 +97,12 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	if d := float64(source.Version.Duration); d > 0 && seekSeconds > d {
 		seekSeconds = d
 	}
-	if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, "", seekSeconds); redirectErr == nil {
-		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
-		return
+	if h.NodePlanner != nil && h.JWTSecret != "" {
+		plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, "", false, source.Version.Bitrate)
+		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, "", seekSeconds, plan.ProxyNode); redirectErr == nil {
+			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+			return
+		}
 	}
 
 	switch method {
@@ -191,7 +195,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 
 	var err error
-	if h.ProxyPool != nil && h.JWTSecret != "" && h.TranscodePool != nil {
+	if h.NodePlanner != nil && h.JWTSecret != "" {
 		playSession, err = h.ensureUpstreamPlayback(r.Context(), session, playSession.ID, *source, "transcode")
 		if err != nil {
 			writeCompatUpstreamError(w, err)
@@ -199,7 +203,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		}
 		upstreamSession, upstreamErr := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
 		if upstreamErr == nil {
-			if tcNode := h.pickTranscodeNode(upstreamSession.TranscodeNodeURL); tcNode != nil {
+			plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, upstreamSession.TranscodeNodeURL, true, source.Version.Bitrate)
+			if tcNode := plan.TranscodeNode; tcNode != nil {
 				if h.fileResolver == nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
 					return
@@ -221,7 +226,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusBadGateway, "TranscodeStartFailed", "Transcode node rejected the request")
 					return
 				}
-				redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, tcNode.URL, 0)
+				redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, tcNode.URL, 0, plan.ProxyNode)
 				if redirectErr != nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to sign proxy stream URL")
 					return
@@ -230,6 +235,14 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 				return
 			}
 		}
+	}
+
+	// In distributed mode admins can disable the local fallback so the API
+	// server never transcodes when no eligible node exists.
+	if h.NodePlanner != nil && !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
+		writeError(w, http.StatusServiceUnavailable, "NoTranscodeNode",
+			"No transcode node is available and local transcode fallback is disabled")
+		return
 	}
 
 	// Ensure the transcode process is running.

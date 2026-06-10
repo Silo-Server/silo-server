@@ -10,6 +10,7 @@ const KEYS = [
   "playback.transcode_dir",
   "playback.hw_accel",
   "playback.transcode_enabled",
+  "playback.local_transcode_fallback",
   "playback.allow_hevc_encoding",
   "allow_4k_transcode",
   "enable_transcode_throttle",
@@ -86,6 +87,13 @@ export default function PlaybackSettings() {
             type="toggle"
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
+          />
+          <SettingField
+            label="Local Transcode Fallback"
+            type="toggle"
+            hint="When no eligible transcode node is available, transcode on this server instead. Disable to keep all transcoding on dedicated nodes — playback that requires transcoding fails while no node is eligible."
+            value={form.getValue("playback.local_transcode_fallback") || "true"}
+            onChange={(v) => form.setValue("playback.local_transcode_fallback", v)}
           />
           <SettingField
             label="Allow HEVC Encoding"

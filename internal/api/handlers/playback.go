@@ -59,17 +59,6 @@ type sessionStarterWithFilesContext interface {
 	StartSessionWithFilesContext(ctx context.Context, userID int, profileID string, effectiveFileID int, requestedFileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 }
 
-// ProxyPicker selects a proxy node for stream routing.
-type ProxyPicker interface {
-	Pick() *nodepool.Node
-}
-
-// TranscodeAcquirer selects a transcode node for transcoding jobs.
-type TranscodeAcquirer interface {
-	Acquire() *nodepool.Node
-	FindByURL(url string) *nodepool.Node
-}
-
 type PlaybackItemAccessChecker interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
 }
@@ -119,8 +108,7 @@ type PlaybackHandler struct {
 	SessionSyncer           PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
 	EventsHub               *evt.Hub
 	MissingMarker           MissingFileMarker
-	ProxyPool               ProxyPicker               // optional; enables proxy-based stream URLs
-	TranscodePool           TranscodeAcquirer         // optional; enables transcode node selection
+	NodePlanner             nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
 	JWTSecret               string                    // needed for signing stream tokens
 	ItemAccess              PlaybackItemAccessChecker // optional; enables file authorization checks
 	EpisodeLookup           PlaybackEpisodeLookup     // optional; resolves episode files to their series
@@ -443,6 +431,13 @@ func playbackStreamURL(s *playback.Session) string {
 		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", s.ID)
 	}
 	return fmt.Sprintf("/stream/%s", s.ID)
+}
+
+func fileBitrateKbps(file *models.MediaFile) int {
+	if file == nil || file.Bitrate <= 0 {
+		return 0
+	}
+	return file.Bitrate
 }
 
 func buildPlaybackInfo(session *playback.Session, file *models.MediaFile) *playbackInfoResult {
@@ -1372,10 +1367,14 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	}
 	resp.SubtitleURLs = buildSubtitleURLs(session.ID, effectiveFile, downloadedSubs)
 
-	// If proxy nodes are available, generate proxy-based stream URLs.
-	if h.ProxyPool != nil && h.JWTSecret != "" {
-		proxyNode := h.ProxyPool.Pick()
-		if proxyNode != nil {
+	// If stream nodes are available, generate proxy-based stream URLs.
+	// Remux and transcode both use HLS via a transcode node, so the planner
+	// picks the transcode node and its group's proxy together.
+	if h.NodePlanner != nil && h.JWTSecret != "" {
+		needsTranscode := session.PlayMethod == playback.PlayTranscode || session.PlayMethod == playback.PlayRemux
+		plan := h.NodePlanner.PlanSession(session.ID, "", needsTranscode, fileBitrateKbps(effectiveFile))
+		proxyNode := plan.ProxyNode
+		if proxyNode != nil && (!needsTranscode || plan.TranscodeNode != nil) {
 			tokenClaims := streamtoken.Claims{
 				SessionID:  session.ID,
 				PlayMethod: string(session.PlayMethod),
@@ -1389,12 +1388,9 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 			tokenClaims.TranscodeAudio = session.TranscodeAudio
 			tokenClaims.AudioTrackIndex = session.AudioTrackIndex
 
-			// Remux and transcode both use HLS via a transcode node.
-			if (session.PlayMethod == playback.PlayTranscode || session.PlayMethod == playback.PlayRemux) && h.TranscodePool != nil {
-				if tcNode := h.TranscodePool.Acquire(); tcNode != nil {
-					tokenClaims.TranscodeNode = tcNode.URL
-					_ = h.sessionMgr.SetTranscodeNodeURL(session.ID, tcNode.URL)
-				}
+			if plan.TranscodeNode != nil {
+				tokenClaims.TranscodeNode = plan.TranscodeNode.URL
+				_ = h.sessionMgr.SetTranscodeNodeURL(session.ID, plan.TranscodeNode.URL)
 			}
 
 			token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, 24*time.Hour)
@@ -1771,8 +1767,14 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 		PlaybackInfo:    buildPlaybackInfo(&updatedSession, file),
 	}
 
-	if h.ProxyPool != nil && h.JWTSecret != "" {
-		if proxyNode := h.ProxyPool.Pick(); proxyNode != nil {
+	if h.NodePlanner != nil && h.JWTSecret != "" {
+		needsTranscode := updatedSession.PlayMethod == playback.PlayTranscode
+		estKbps := updatedSession.TargetBitrateKbps
+		if estKbps <= 0 {
+			estKbps = fileBitrateKbps(file)
+		}
+		plan := h.NodePlanner.PlanSession(sessionID, session.TranscodeNodeURL, needsTranscode, estKbps)
+		if proxyNode := plan.ProxyNode; proxyNode != nil && (!needsTranscode || plan.TranscodeNode != nil) {
 			tokenClaims := streamtoken.Claims{
 				SessionID:       sessionID,
 				PlayMethod:      string(updatedSession.PlayMethod),
@@ -1780,11 +1782,9 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				TranscodeAudio:  updatedSession.TranscodeAudio,
 				AudioTrackIndex: req.AudioTrackIndex,
 			}
-			if updatedSession.PlayMethod == playback.PlayTranscode && h.TranscodePool != nil {
-				if tcNode := h.TranscodePool.Acquire(); tcNode != nil {
-					tokenClaims.TranscodeNode = tcNode.URL
-					_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, tcNode.URL)
-				}
+			if plan.TranscodeNode != nil {
+				tokenClaims.TranscodeNode = plan.TranscodeNode.URL
+				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, plan.TranscodeNode.URL)
 			}
 			if token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, 24*time.Hour); signErr == nil {
 				switch updatedSession.PlayMethod {
@@ -2037,7 +2037,15 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	}
 
 	// Determine whether to run locally or forward to a remote transcode node.
-	tcNode := h.PickTranscodeNode(session.TranscodeNodeURL)
+	var plan nodepool.Plan
+	if h.NodePlanner != nil {
+		estKbps := req.TargetBitrateKbps
+		if estKbps <= 0 {
+			estKbps = fileBitrateKbps(file)
+		}
+		plan = h.NodePlanner.PlanSession(req.SessionID, session.TranscodeNodeURL, true, estKbps)
+	}
+	tcNode := plan.TranscodeNode
 
 	if tcNode != nil {
 		// Remote transcode: forward to the assigned node.
@@ -2102,7 +2110,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			effectiveHWAccel = strings.TrimSpace(nodeReq.HWAccel)
 		}
 
-		manifestURL := h.buildProxyManifestURL(req.SessionID, session, tcNode.URL)
+		manifestURL := h.buildProxyManifestURL(req.SessionID, session, tcNode.URL, plan.ProxyNode)
 		h.finalizeTranscodeStart(r, transcodeStartState{
 			req:            req,
 			file:           file,
@@ -2115,6 +2123,13 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	}
 
 	// Local transcode (integrated mode — no transcode nodes available).
+	// In distributed mode admins can disable this fallback so the API server
+	// never transcodes when no eligible node exists.
+	if h.NodePlanner != nil && !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
+		writeError(w, http.StatusServiceUnavailable, "no_transcode_node",
+			"No transcode node is available and local transcode fallback is disabled")
+		return
+	}
 	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare transcode directory")
 		return
@@ -2456,40 +2471,11 @@ func (h *PlaybackHandler) closeTranscodeSession(sessionID, transcodeNodeURL stri
 	}
 }
 
-// PickTranscodeNode selects a transcode node with soft affinity.
-// If currentURL is set and that node is healthy, reuse it unless another node
-// has significantly fewer active jobs (2+ difference).
-func (h *PlaybackHandler) PickTranscodeNode(currentURL string) *nodepool.Node {
-	if h.TranscodePool == nil {
-		return nil
-	}
-	best := h.TranscodePool.Acquire()
-	if best == nil {
-		return nil
-	}
-	if currentURL == "" || best.URL == currentURL {
-		return best
-	}
-	// Reuse current node unless the best alternative has significantly fewer jobs.
-	current := h.TranscodePool.FindByURL(currentURL)
-	if current != nil && current.Healthy && current.Enabled &&
-		best.ActiveJobs+2 <= current.ActiveJobs {
-		return best // switch to less-loaded node
-	}
-	if current != nil && current.Healthy && current.Enabled {
-		return current // soft affinity — stay on current
-	}
-	return best // current node is gone or unhealthy
-}
-
-// buildProxyManifestURL signs a stream token and builds the proxy-based manifest URL.
-func (h *PlaybackHandler) buildProxyManifestURL(sessionID string, session *playback.Session, transcodeNodeURL string) string {
-	if h.ProxyPool == nil {
-		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", sessionID)
-	}
-	proxyNode := h.ProxyPool.Pick()
+// buildProxyManifestURL signs a stream token and builds the proxy-based
+// manifest URL. proxyNode is the planner's pick for this session; when nil
+// the URL falls back to the API-local path.
+func (h *PlaybackHandler) buildProxyManifestURL(sessionID string, session *playback.Session, transcodeNodeURL string, proxyNode *nodepool.Node) string {
 	if proxyNode == nil {
-		// No proxy — fall back to API-local path.
 		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", sessionID)
 	}
 
