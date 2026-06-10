@@ -454,7 +454,9 @@ export class DocumentLoader {
 
 export const getDirection = (doc: Document) => {
   const { defaultView } = doc;
-  let { writingMode, direction } = defaultView!.getComputedStyle(doc.body);
+  const computedStyle = defaultView!.getComputedStyle(doc.body);
+  const { direction } = computedStyle;
+  let { writingMode } = computedStyle;
   if (!writingMode || writingMode === "horizontal-tb") {
     const firstChild = doc.body.querySelector(":scope > :not([cfi-inert])");
     if (firstChild) {
