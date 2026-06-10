@@ -23,6 +23,7 @@ import {
   Send,
   RefreshCw,
   SkipForward,
+  Megaphone,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -116,6 +117,7 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
       label: "Users",
       items: [
         { label: "Users", icon: Users, href: "/admin/users" },
+        { label: "Announcements", icon: Megaphone, href: "/admin/announcements" },
         { label: "Devices", icon: MonitorSmartphone, href: "/admin/devices" },
         { label: "Playback History", icon: History, href: "/admin/history" },
         { label: "History Import", icon: Download, href: "/admin/history-import" },

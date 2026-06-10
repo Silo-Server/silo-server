@@ -58,6 +58,7 @@ import AdminMaintenance from "@/pages/AdminMaintenance";
 import AdminApiKeys from "@/pages/AdminApiKeys";
 import AdminSubtitles from "@/pages/AdminSubtitles";
 import AdminUserDetail from "@/pages/AdminUserDetail";
+import AdminAnnouncements from "@/pages/AdminAnnouncements";
 import AdminTasks from "@/pages/AdminTasks";
 import AdminTaskDetail from "@/pages/AdminTaskDetail";
 import AdminPlugins from "@/pages/AdminPlugins";
@@ -394,6 +395,7 @@ function AppRoutes() {
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />
                   <Route path="users/:id" element={<AdminUserDetail />} />
+                  <Route path="announcements" element={<AdminAnnouncements />} />
                   <Route path="devices" element={<AdminDevices />} />
                   <Route path="devices/:userId/:deviceId" element={<AdminDevices />} />
                   <Route path="nodes" element={<AdminNodes />} />
