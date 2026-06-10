@@ -48,7 +48,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	if len(candidates) == 0 {
-		return s.reconcileEbookScan(ctx, folder, scans, nil, fullScan)
+		return s.reconcileMangaScan(ctx, folder, scans, nil, fullScan)
 	}
 
 	workers := ebookScanWorkers()
@@ -153,7 +153,45 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	for _, p := range candidates {
 		seenPaths[p] = true
 	}
-	return s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan)
+	return s.reconcileMangaScan(ctx, folder, scans, seenPaths, fullScan)
+}
+
+// reconcileMangaScan runs the shared ebook missing-file reconciliation (which
+// removes vanished chapters) and then deletes any type='manga' series left with
+// no chapters. Series items are file-less parents reconciled by chapter count,
+// not file presence — catalog.ReconcileFolderMembership deliberately skips them.
+func (s *Scanner) reconcileMangaScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool) error {
+	if err := s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan); err != nil {
+		return err
+	}
+	return s.deleteOrphanedMangaSeries(ctx, folder.ID)
+}
+
+// deleteOrphanedMangaSeries removes type='manga' series items in the folder that
+// have no remaining linked chapters (e.g. once every chapter was deleted as
+// missing). The cascade clears the now-empty library membership.
+func (s *Scanner) deleteOrphanedMangaSeries(ctx context.Context, folderID int) error {
+	if s == nil || s.fileRepo == nil {
+		return nil
+	}
+	tag, err := s.fileRepo.Pool().Exec(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.type = 'manga'
+		  AND EXISTS (
+			SELECT 1 FROM media_item_libraries mil
+			WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $1
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM manga_chapters mc WHERE mc.series_content_id = mi.content_id
+		  )
+	`, folderID)
+	if err != nil {
+		return fmt.Errorf("deleting orphaned manga series for folder %d: %w", folderID, err)
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		slog.Info("manga scan: removed orphaned series", "folder_id", folderID, "deleted", n)
+	}
+	return nil
 }
 
 // reconcileMangaFile indexes one .cbz/.cbr chapter file: it keeps the file as a
