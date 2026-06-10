@@ -65,6 +65,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/presence"
+	"github.com/Silo-Server/silo-server/internal/push"
 	"github.com/Silo-Server/silo-server/internal/partman"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
@@ -496,6 +498,15 @@ func main() {
 		log.Fatalf("realtime hub start: %v", err)
 	}
 	eventsHub := realtimeHub.EventsHub()
+	var presenceRegistry presence.Registry
+	if cfg.Redis.URL != "" {
+		if rc, err := cache.NewRedisClient(cfg.Redis); err == nil {
+			presenceRegistry = presence.NewRedisRegistry(rc, 60*time.Second)
+		}
+	}
+	if presenceRegistry == nil {
+		presenceRegistry = presence.NewMemoryRegistry()
+	}
 	scanRegistry := evt.NewScanRegistry()
 	operationalWriter, opsRepo, opsPM := configureOperationalLogging(appCtx, pool, settingsRepo, cfg.Redis, logStreamHub, quietFilter, nodeID)
 	defer func() {
@@ -635,6 +646,20 @@ func main() {
 		log.Fatalf("notifications materializer start: %v", err)
 	}
 	deps.NotificationsService = notificationsSvc
+	deps.PresenceRegistry = presenceRegistry
+
+	// Push subsystem: store → config → enqueuer → transports → worker.
+	pushStore := push.NewStore(pool)
+	pushConfig := push.NewConfig(settingsRepo)
+	notificationsSvc.SetPushEnqueuer(push.NewEnqueuer(pushStore, 30*time.Second, time.Now))
+	pushTransports := []push.Transport{
+		push.NewWebPushTransport(pushConfig.WebPush),
+		push.NewAPNsTransport(pushConfig.APNs),
+		push.NewFCMTransport(pushConfig.FCM),
+	}
+	pushWorker := push.NewWorker(push.NewStoreQueue(pushStore), presenceRegistry, pushTransports, time.Now)
+	deps.PushStore = pushStore
+	deps.PushConfig = pushConfig
 
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
 	absCompatEnabled, err := audiobooksService.ABSCompatEnabled(appCtx)
@@ -1674,8 +1699,9 @@ func main() {
 				taskMgr.Register(pluginTask)
 			}
 		}
-		taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationsStore, nil))
+		taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationsStore, pushStore))
 		taskMgr.Register(tasks.NewNotificationsDigestTask(notificationsSvc))
+		taskMgr.Register(push.NewPushDeliveryTask(pushWorker))
 
 		taskMgr.Start(appCtx)
 		defer taskMgr.Stop()

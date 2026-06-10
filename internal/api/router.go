@@ -46,6 +46,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/presence"
 	"github.com/Silo-Server/silo-server/internal/push"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -189,6 +190,10 @@ type Dependencies struct {
 	// PushConfig reads push provider configuration from the settings repo.
 	// May be nil; push routes are not registered when PushStore is nil.
 	PushConfig *push.Config
+
+	// PresenceRegistry tracks live WebSocket connections for presence-aware
+	// push suppression. May be nil; a no-op fallback is used in that case.
+	PresenceRegistry presence.Registry
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -1510,8 +1515,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.LibraryScanQueue,
 						historyImportSvc,
 						deps.NotificationsService,
-						nil, // presenceReg wired in Task 15
-					)
+					deps.PresenceRegistry,
+				)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 				}
 
