@@ -91,6 +91,16 @@ var SensitiveSettingKeys = map[string]bool{
 	// still referenced by older request_integrations rows until backfilled).
 	"requests.radarr.api_key": true,
 	"requests.sonarr.api_key": true,
+
+	// Push notification provider credentials.
+	"push.apns.p8_key":              true,
+	"push.apns.key_id":              true,
+	"push.apns.team_id":             true,
+	"push.apns.bundle_id":           true,
+	"push.fcm.service_account_json": true,
+	"push.webpush.vapid_private":    true,
+	"push.webpush.vapid_public":     true,
+	"push.webpush.subject":          true,
 }
 
 // EncryptedSettingsRepo decorates a raw settings store, transparently
