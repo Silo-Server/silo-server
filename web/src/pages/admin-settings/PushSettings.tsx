@@ -60,7 +60,7 @@ function CredentialField({
             placeholder={sensitiveConfigured ? "configured" : hint}
             aria-describedby={hint ? hintId : undefined}
             rows={5}
-            className="border-input bg-background ring-offset-background focus-visible:ring-ring max-w-md w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+            className="border-input bg-background ring-offset-background focus-visible:ring-ring w-full max-w-md rounded-md border px-3 py-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
           />
           {hint && (
             <p id={hintId} className="text-muted-foreground text-xs">
@@ -242,9 +242,7 @@ function FcmCard() {
 
   const [serviceAccountJson, setServiceAccountJson] = useState("");
 
-  const jsonConfigured = new Set(sensitive?.configured ?? []).has(
-    "push.fcm.service_account_json",
-  );
+  const jsonConfigured = new Set(sensitive?.configured ?? []).has("push.fcm.service_account_json");
 
   return (
     <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">

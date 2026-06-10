@@ -48,10 +48,7 @@ describe("PushSettings", () => {
   it("reflects configured status on non-password fields", () => {
     render(<PushSettings />);
     // SettingField renders placeholder "configured" for a configured field.
-    expect(screen.getByLabelText("VAPID Public Key")).toHaveAttribute(
-      "placeholder",
-      "configured",
-    );
+    expect(screen.getByLabelText("VAPID Public Key")).toHaveAttribute("placeholder", "configured");
     expect(screen.getByLabelText("Key ID")).toHaveAttribute("placeholder", "configured");
     // A field that is not in the configured list does not get the indicator.
     expect(screen.getByLabelText("Team ID")).not.toHaveAttribute("placeholder", "configured");

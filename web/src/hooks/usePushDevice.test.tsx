@@ -24,29 +24,44 @@ function wrap() {
 let subscribeMock: ReturnType<typeof vi.fn>;
 let getSubMock: ReturnType<typeof vi.fn>;
 
+type MockNotification = {
+  permission: NotificationPermission;
+  requestPermission: () => Promise<NotificationPermission>;
+};
+const g = globalThis as unknown as {
+  PushManager?: unknown;
+  Notification?: MockNotification;
+};
+const nav = navigator as unknown as { serviceWorker?: unknown };
+
 beforeEach(() => {
   apiMock.mockReset();
   cacheVapidMock.mockReset();
   subscribeMock = vi.fn(async () => ({ toJSON: () => ({ endpoint: "https://x", keys: {} }) }));
   getSubMock = vi.fn(async () => null);
-  (globalThis as any).PushManager = function () {};
-  (navigator as any).serviceWorker = {
+  g.PushManager = function () {};
+  nav.serviceWorker = {
     register: vi.fn(),
-    ready: Promise.resolve({ pushManager: { subscribe: subscribeMock, getSubscription: getSubMock } }),
+    ready: Promise.resolve({
+      pushManager: { subscribe: subscribeMock, getSubscription: getSubMock },
+    }),
   };
-  (globalThis as any).Notification = { permission: "default", requestPermission: vi.fn(async () => "granted") };
+  g.Notification = {
+    permission: "default",
+    requestPermission: vi.fn(async (): Promise<NotificationPermission> => "granted"),
+  };
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("usePushDevice", () => {
   it("reports unsupported when PushManager missing", () => {
-    delete (globalThis as any).PushManager;
+    delete g.PushManager;
     const { result } = renderHook(() => usePushDevice(), { wrapper: wrap() });
     expect(result.current.status).toBe("unsupported");
   });
 
   it("reports blocked when permission denied", () => {
-    (globalThis as any).Notification.permission = "denied";
+    g.Notification!.permission = "denied";
     const { result } = renderHook(() => usePushDevice(), { wrapper: wrap() });
     expect(result.current.status).toBe("blocked");
   });
@@ -57,7 +72,9 @@ describe("usePushDevice", () => {
       return Promise.resolve(undefined); // PUT device
     });
     const { result } = renderHook(() => usePushDevice(), { wrapper: wrap() });
-    await act(async () => { await result.current.enable(); });
+    await act(async () => {
+      await result.current.enable();
+    });
     expect(subscribeMock).toHaveBeenCalledOnce();
     expect(cacheVapidMock).toHaveBeenCalledWith("AQID");
     const putCall = apiMock.mock.calls.find((c) => c[0] === "/notifications/push/device");
@@ -67,9 +84,13 @@ describe("usePushDevice", () => {
   });
 
   it("enable(): permission denied short-circuits, no subscribe", async () => {
-    (globalThis as any).Notification.requestPermission = vi.fn(async () => "denied");
+    g.Notification!.requestPermission = vi.fn(
+      async (): Promise<NotificationPermission> => "denied",
+    );
     const { result } = renderHook(() => usePushDevice(), { wrapper: wrap() });
-    await act(async () => { await result.current.enable(); });
+    await act(async () => {
+      await result.current.enable();
+    });
     expect(subscribeMock).not.toHaveBeenCalled();
     expect(result.current.status).toBe("blocked");
   });
@@ -79,9 +100,13 @@ describe("usePushDevice", () => {
     getSubMock.mockResolvedValue({ unsubscribe: unsub });
     apiMock.mockResolvedValue(undefined);
     const { result } = renderHook(() => usePushDevice(), { wrapper: wrap() });
-    await act(async () => { await result.current.disable(); });
+    await act(async () => {
+      await result.current.disable();
+    });
     expect(unsub).toHaveBeenCalled();
-    const del = apiMock.mock.calls.find((c) => c[0] === "/notifications/push/device" && c[1]?.method === "DELETE");
+    const del = apiMock.mock.calls.find(
+      (c) => c[0] === "/notifications/push/device" && c[1]?.method === "DELETE",
+    );
     expect(del).toBeTruthy();
     await waitFor(() => expect(result.current.status).toBe("off"));
   });
@@ -103,16 +128,23 @@ describe("usePushDevice", () => {
 
     // Start enable() without awaiting — it stalls at the webpush-key call (gen=1).
     let innerEnableResolve!: () => void;
-    const innerEnableDone = new Promise<void>((res) => { innerEnableResolve = res; });
+    const innerEnableDone = new Promise<void>((res) => {
+      innerEnableResolve = res;
+    });
     act(() => {
       void result.current.enable().then(innerEnableResolve, innerEnableResolve);
     });
 
     // Drain microtasks so enable() reaches the webpush-key await (past requestPermission + sw.ready).
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     // Run disable() to full completion — increments gen to 2, sets status "off".
-    await act(async () => { await result.current.disable(); });
+    await act(async () => {
+      await result.current.disable();
+    });
 
     // Reject the stale enable()'s webpush-key call — gen=1 is superseded so
     // the catch's set("off") is a no-op; disable's "off" (gen=2) must survive.

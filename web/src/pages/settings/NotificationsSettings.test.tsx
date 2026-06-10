@@ -295,9 +295,7 @@ describe("NotificationsSettings", () => {
 
     await render(<NotificationsSettings />);
 
-    expect(container.textContent).toContain(
-      "This browser doesn’t support push notifications.",
-    );
+    expect(container.textContent).toContain("This browser doesn’t support push notifications.");
 
     const labels = Array.from(container.querySelectorAll("label"));
     const deviceLabel = labels.find((l) => l.textContent?.trim() === "Push on this device");
