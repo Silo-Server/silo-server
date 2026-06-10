@@ -93,7 +93,8 @@ func TestSupportsEbookFile(t *testing.T) {
 		{"book.cbz", true},
 		{"book.cbr", true},
 		{"book.txt", false},
-		{"book.md", true},
+		{"book.md", false},
+		{"README.md", false},
 		{"book.mp3", false},
 		{"movie.mkv", false},
 	}
@@ -114,7 +115,6 @@ func TestParseEbookFileSupportsReaderFormatsWithoutEmbeddedMetadata(t *testing.T
 		{"book.azw", "azw"},
 		{"book.azw3", "azw3"},
 		{"book.cbr", "cbr"},
-		{"book.md", "md"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), tc.name)
@@ -796,20 +796,20 @@ func TestEbookSeriesDesiredParsesIndex(t *testing.T) {
 
 func TestUpsertEbookSeriesNilScannerReturnsError(t *testing.T) {
 	var s *Scanner
-	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}); err == nil {
+	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}, false); err == nil {
 		t.Fatal("upsertEbookSeries nil scanner error = nil, want error")
 	}
 }
 
 func TestUpsertEbookSeriesNilFileRepoReturnsError(t *testing.T) {
 	s := &Scanner{}
-	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}); err == nil {
+	if err := s.upsertEbookSeries(context.Background(), "content-1", &parsedEbook{Series: "Series"}, false); err == nil {
 		t.Fatal("upsertEbookSeries nil fileRepo error = nil, want error")
 	}
 }
 
 func TestPlanEbookSeriesWriteInsertsWhenRowAbsent(t *testing.T) {
-	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " Series ", SeriesIndex: "2 of 9"}, nil, nil, pgx.ErrNoRows)
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " Series ", SeriesIndex: "2 of 9"}, nil, nil, pgx.ErrNoRows, false)
 	if err != nil {
 		t.Fatalf("planEbookSeriesWrite: %v", err)
 	}
@@ -823,7 +823,7 @@ func TestPlanEbookSeriesWriteInsertsWhenRowAbsent(t *testing.T) {
 
 func TestPlanEbookSeriesWriteBlankSeriesDeletesExistingAndSkipsAbsent(t *testing.T) {
 	currentName := "Series"
-	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " "}, &currentName, nil, nil)
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: " "}, &currentName, nil, nil, false)
 	if err != nil {
 		t.Fatalf("planEbookSeriesWrite delete: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestPlanEbookSeriesWriteBlankSeriesDeletesExistingAndSkipsAbsent(t *testing
 		t.Fatalf("blank existing plan = %+v, want delete", plan)
 	}
 
-	plan, err = planEbookSeriesWrite(&parsedEbook{Series: ""}, nil, nil, pgx.ErrNoRows)
+	plan, err = planEbookSeriesWrite(&parsedEbook{Series: ""}, nil, nil, pgx.ErrNoRows, false)
 	if err != nil {
 		t.Fatalf("planEbookSeriesWrite absent: %v", err)
 	}
@@ -843,7 +843,7 @@ func TestPlanEbookSeriesWriteBlankSeriesDeletesExistingAndSkipsAbsent(t *testing
 func TestPlanEbookSeriesWriteSkipsIdenticalRow(t *testing.T) {
 	currentName := "Series"
 	currentIdx := 3.5
-	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "Series", SeriesIndex: "3.5"}, &currentName, &currentIdx, nil)
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "Series", SeriesIndex: "3.5"}, &currentName, &currentIdx, nil, false)
 	if err != nil {
 		t.Fatalf("planEbookSeriesWrite: %v", err)
 	}
@@ -853,7 +853,7 @@ func TestPlanEbookSeriesWriteSkipsIdenticalRow(t *testing.T) {
 }
 
 func TestPlanEbookSeriesWriteAllowsNullNumericIndex(t *testing.T) {
-	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "Series", SeriesIndex: "appendix"}, nil, nil, pgx.ErrNoRows)
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "Series", SeriesIndex: "appendix"}, nil, nil, pgx.ErrNoRows, false)
 	if err != nil {
 		t.Fatalf("planEbookSeriesWrite: %v", err)
 	}
@@ -862,9 +862,65 @@ func TestPlanEbookSeriesWriteAllowsNullNumericIndex(t *testing.T) {
 	}
 }
 
+func TestPlanEbookSeriesWriteFillOnlyNeverReplacesOrDeletesExistingRow(t *testing.T) {
+	currentName := "Provider Series"
+	currentIdx := 1.0
+
+	// A curated item with an existing (provider-enriched) row must not be
+	// replaced by a differing file-embedded series...
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "File Series", SeriesIndex: "4"}, &currentName, &currentIdx, nil, true)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite replace: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteNone {
+		t.Fatalf("fill-only replace plan = %+v, want none", plan)
+	}
+
+	// ...nor deleted when the file carries no series at all.
+	plan, err = planEbookSeriesWrite(&parsedEbook{Series: ""}, &currentName, &currentIdx, nil, true)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite delete: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteNone {
+		t.Fatalf("fill-only delete plan = %+v, want none", plan)
+	}
+}
+
+func TestPlanEbookSeriesWriteFillOnlyInsertsWhenRowAbsent(t *testing.T) {
+	plan, err := planEbookSeriesWrite(&parsedEbook{Series: "File Series", SeriesIndex: "2"}, nil, nil, pgx.ErrNoRows, true)
+	if err != nil {
+		t.Fatalf("planEbookSeriesWrite: %v", err)
+	}
+	if plan.Kind != ebookSeriesWriteUpsert || plan.Name != "File Series" {
+		t.Fatalf("plan = %+v, want fill-empty upsert", plan)
+	}
+}
+
+func TestEbookPeopleWriteAllowedFillsEmptyOnlyWhenCurated(t *testing.T) {
+	providerAuthor := []models.ItemPerson{{Person: models.Person{Name: "Provider Author"}, Kind: models.PersonKindAuthor}}
+	nonAuthorOnly := []models.ItemPerson{{Person: models.Person{Name: "Manual Writer"}, Kind: models.PersonKindWriter}}
+
+	cases := []struct {
+		name     string
+		curated  bool
+		existing []models.ItemPerson
+		want     bool
+	}{
+		{"pending item always writes", false, providerAuthor, true},
+		{"curated with provider authors is read-only", true, providerAuthor, false},
+		{"curated without author credits fills empty", true, nil, true},
+		{"curated with only non-author credits fills empty", true, nonAuthorOnly, true},
+	}
+	for _, tc := range cases {
+		if got := ebookPeopleWriteAllowed(tc.curated, tc.existing); got != tc.want {
+			t.Errorf("%s: ebookPeopleWriteAllowed = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestPlanEbookSeriesWriteReturnsQueryError(t *testing.T) {
 	queryErr := errors.New("query failed")
-	if _, err := planEbookSeriesWrite(&parsedEbook{Series: "Series"}, nil, nil, queryErr); !errors.Is(err, queryErr) {
+	if _, err := planEbookSeriesWrite(&parsedEbook{Series: "Series"}, nil, nil, queryErr, false); !errors.Is(err, queryErr) {
 		t.Fatalf("planEbookSeriesWrite error = %v, want query error", err)
 	}
 }
@@ -954,6 +1010,9 @@ func TestResolveEbookMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
 	if item.Type != "ebook" || item.Title != "Book" || item.Year != 2024 || item.Overview != "Overview" || item.OriginalLanguage != "en" {
 		t.Fatalf("upserted ebook item = %+v", item)
 	}
+	if item.Status != "pending" {
+		t.Fatalf("Status = %q, want pending so enrichment can promote it to matched", item.Status)
+	}
 }
 
 func TestResolveEbookMediaItemReusesRootScopedContentID(t *testing.T) {
@@ -982,7 +1041,7 @@ func TestResolveEbookExistingRootAppliesParsedMetadata(t *testing.T) {
 	}}}
 	writer := &fakeFilesystemItemWriter{}
 
-	err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
+	curated, err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
 		Title:     "New Title",
 		Year:      2026,
 		Publisher: "New Press",
@@ -991,6 +1050,9 @@ func TestResolveEbookExistingRootAppliesParsedMetadata(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("updateExistingEbookMediaItem: %v", err)
+	}
+	if curated {
+		t.Fatal("curated = true, want false for an unmatched item")
 	}
 	if len(writer.upserts) != 1 {
 		t.Fatalf("upserts = %d, want 1", len(writer.upserts))
@@ -1013,7 +1075,7 @@ func TestResolveEbookExistingRootReplacesHTMLOverview(t *testing.T) {
 	}}}
 	writer := &fakeFilesystemItemWriter{}
 
-	err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
+	_, err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
 		Title:       "New Title",
 		Description: "Clean overview",
 	})
@@ -1290,6 +1352,194 @@ func TestScanEbookPersistenceSQLWritesLibraryMembershipAndISBNOnly(t *testing.T)
 	}
 }
 
+func TestCollectEbookRootScansExcludesUnmountedRootFromReconciliation(t *testing.T) {
+	healthy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(healthy, "book.epub"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+	unmounted := filepath.Join(t.TempDir(), "gone")
+
+	scans, err := collectEbookRootScans(context.Background(), 44, []string{unmounted, healthy})
+	if err != nil {
+		t.Fatalf("collectEbookRootScans: %v", err)
+	}
+	if len(scans) != 2 {
+		t.Fatalf("scans = %d, want 2", len(scans))
+	}
+	if !scans[0].failed() || scans[0].rootErr == nil {
+		t.Fatalf("unmounted root scan = %+v, want failed with rootErr", scans[0])
+	}
+	if scans[1].failed() || len(scans[1].files) != 1 {
+		t.Fatalf("healthy root scan = %+v, want 1 file and no failure", scans[1])
+	}
+
+	reconcileRoots, sawFiles := splitEbookReconcileRoots(scans)
+	if !sawFiles {
+		t.Fatal("sawFiles = false, want true for the healthy root")
+	}
+	if len(reconcileRoots) != 1 || reconcileRoots[0] != healthy {
+		t.Fatalf("reconcileRoots = %v, want only the healthy root: an unmounted root must never be reconciled (no mass-missing, no deletion)", reconcileRoots)
+	}
+}
+
+func TestCollectEbookRootScansTreatsNonDirectoryRootAsFailed(t *testing.T) {
+	dir := t.TempDir()
+	fileRoot := filepath.Join(dir, "book.epub")
+	if err := os.WriteFile(fileRoot, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+
+	scans, err := collectEbookRootScans(context.Background(), 44, []string{fileRoot})
+	if err != nil {
+		t.Fatalf("collectEbookRootScans: %v", err)
+	}
+	if len(scans) != 1 || !scans[0].failed() {
+		t.Fatalf("scans = %+v, want one failed scan for a non-directory root", scans)
+	}
+	// The file itself is still indexed; only reconciliation is withheld.
+	if len(scans[0].files) != 1 {
+		t.Fatalf("files = %v, want the ebook file root indexed", scans[0].files)
+	}
+	if roots, _ := splitEbookReconcileRoots(scans); len(roots) != 0 {
+		t.Fatalf("reconcileRoots = %v, want none", roots)
+	}
+}
+
+func TestCollectEbookRootScansMidWalkSubtreeErrorExcludesRoot(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permission-based subtree failure cannot be simulated as root")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "readable.epub"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+	locked := filepath.Join(root, "zz-locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "hidden.epub"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write hidden ebook: %v", err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	scans, err := collectEbookRootScans(context.Background(), 44, []string{root})
+	if err != nil {
+		t.Fatalf("collectEbookRootScans: %v", err)
+	}
+	if len(scans) != 1 {
+		t.Fatalf("scans = %d, want 1", len(scans))
+	}
+	if scans[0].walkFailures == 0 || !scans[0].failed() {
+		t.Fatalf("scan = %+v, want walk failure recorded for unreadable subtree", scans[0])
+	}
+	if len(scans[0].files) != 1 {
+		t.Fatalf("files = %v, want the readable ebook still indexed", scans[0].files)
+	}
+	// The unseen hidden.epub must not be marked missing: the whole root sits
+	// out of reconciliation.
+	if roots, _ := splitEbookReconcileRoots(scans); len(roots) != 0 {
+		t.Fatalf("reconcileRoots = %v, want none after a mid-walk subtree error", roots)
+	}
+}
+
+func TestCollectEbookRootScansFollowsSymlinkedRoot(t *testing.T) {
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "book.epub"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "library")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	scans, err := collectEbookRootScans(context.Background(), 44, []string{link})
+	if err != nil {
+		t.Fatalf("collectEbookRootScans: %v", err)
+	}
+	if len(scans) != 1 || scans[0].failed() {
+		t.Fatalf("scans = %+v, want one clean scan through the symlinked root", scans)
+	}
+	want := filepath.Join(link, "book.epub")
+	if len(scans[0].files) != 1 || scans[0].files[0] != want {
+		t.Fatalf("files = %v, want %q recorded under the logical (symlink) path", scans[0].files, want)
+	}
+	if roots, sawFiles := splitEbookReconcileRoots(scans); !sawFiles || len(roots) != 1 {
+		t.Fatalf("reconcileRoots/sawFiles = %v/%v, want symlinked root reconcilable", roots, sawFiles)
+	}
+}
+
+type fakeEbookCleanupGuard struct {
+	allowance    bool
+	consumeCalls int
+	warnings     []string
+	consumeErr   error
+}
+
+func (f *fakeEbookCleanupGuard) ConsumeEmptyCleanupAllowance(_ context.Context, _ int) (bool, error) {
+	f.consumeCalls++
+	return f.allowance, f.consumeErr
+}
+
+func (f *fakeEbookCleanupGuard) SetScanWarning(_ context.Context, _ int, code, _ string, _ time.Time) error {
+	f.warnings = append(f.warnings, code)
+	return nil
+}
+
+func TestEbookEmptyCleanupAllowedRequiresExplicitAllowance(t *testing.T) {
+	guard := &fakeEbookCleanupGuard{allowance: false}
+
+	allowed, err := ebookEmptyCleanupAllowed(context.Background(), guard, 44, true)
+	if err != nil {
+		t.Fatalf("ebookEmptyCleanupAllowed: %v", err)
+	}
+	if allowed {
+		t.Fatal("allowed = true, want false: an empty root must not reconcile without confirmation")
+	}
+	if guard.consumeCalls != 1 {
+		t.Fatalf("consumeCalls = %d, want 1", guard.consumeCalls)
+	}
+	if len(guard.warnings) != 1 || guard.warnings[0] != "empty_root" {
+		t.Fatalf("warnings = %v, want one empty_root scan warning", guard.warnings)
+	}
+}
+
+func TestEbookEmptyCleanupAllowedConsumesAllowanceOnce(t *testing.T) {
+	guard := &fakeEbookCleanupGuard{allowance: true}
+
+	allowed, err := ebookEmptyCleanupAllowed(context.Background(), guard, 44, true)
+	if err != nil {
+		t.Fatalf("ebookEmptyCleanupAllowed: %v", err)
+	}
+	if !allowed {
+		t.Fatal("allowed = false, want true once the operator confirmed cleanup")
+	}
+	if len(guard.warnings) != 0 {
+		t.Fatalf("warnings = %v, want none for a confirmed cleanup", guard.warnings)
+	}
+}
+
+func TestEbookEmptyCleanupAllowedNeverConsumesForSubtreeScans(t *testing.T) {
+	guard := &fakeEbookCleanupGuard{allowance: true}
+
+	allowed, err := ebookEmptyCleanupAllowed(context.Background(), guard, 44, false)
+	if err != nil {
+		t.Fatalf("ebookEmptyCleanupAllowed: %v", err)
+	}
+	if allowed || guard.consumeCalls != 0 {
+		t.Fatalf("allowed/consumeCalls = %v/%d, want subtree scans to skip cleanup without touching the folder allowance", allowed, guard.consumeCalls)
+	}
+}
+
+func TestEbookEmptyCleanupAllowedNilGuardDeniesCleanup(t *testing.T) {
+	allowed, err := ebookEmptyCleanupAllowed(context.Background(), nil, 44, true)
+	if err != nil || allowed {
+		t.Fatalf("allowed/err = %v/%v, want denial when no guard repository is wired", allowed, err)
+	}
+}
+
 func TestScanEbookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "bad.epub"), []byte("not a real epub"), 0o644); err != nil {
@@ -1493,4 +1743,154 @@ func writeTestEPUBWithCover(t *testing.T, coverHref string, coverType string, co
 		t.Fatalf("close epub: %v", err)
 	}
 	return path
+}
+
+func TestUpdateExistingEbookMediaItemPreservesCuratedMatchedItem(t *testing.T) {
+	reader := &fakeFilesystemItemReader{items: []*models.MediaItem{{
+		ContentID: "ebook-root-id",
+		Type:      "ebook",
+		Title:     "Curated Title",
+		Year:      2020,
+		Status:    "matched",
+	}}}
+	writer := &fakeFilesystemItemWriter{}
+
+	curated, err := updateExistingEbookMediaItem(context.Background(), reader, writer, "ebook-root-id", &parsedEbook{
+		Title: "Embedded File Title",
+		Year:  2026,
+	})
+	if err != nil {
+		t.Fatalf("updateExistingEbookMediaItem: %v", err)
+	}
+	if !curated {
+		t.Fatal("curated = false, want true for a matched item")
+	}
+	if len(writer.upserts) != 0 {
+		t.Fatalf("upserts = %d, want 0: matched items must not be overwritten by file metadata", len(writer.upserts))
+	}
+}
+
+func TestEbookItemHasCuratedMetadata(t *testing.T) {
+	cases := []struct {
+		item *models.MediaItem
+		want bool
+	}{
+		{nil, false},
+		{&models.MediaItem{Status: "matched"}, true},
+		{&models.MediaItem{Status: " Matched "}, true},
+		{&models.MediaItem{Status: "pending"}, false},
+		{&models.MediaItem{Status: "unmatched"}, false},
+		{&models.MediaItem{}, false},
+	}
+	for _, tc := range cases {
+		if got := ebookItemHasCuratedMetadata(tc.item); got != tc.want {
+			t.Errorf("ebookItemHasCuratedMetadata(%+v) = %v, want %v", tc.item, got, tc.want)
+		}
+	}
+}
+
+func TestParseEbookPDFReadsInfoDictionaryFromFileTail(t *testing.T) {
+	// Non-linearized PDFs put the Info dictionary at the end of the file and
+	// typically have no Info keys in the head at all; the parser must find the
+	// trailing dictionary past the head scan window and use it to fill every
+	// key the head did not produce.
+	head := "%PDF-1.7\n" +
+		"1 0 obj\n" +
+		"<< /Author (Ada Writer)\n" +
+		">>\nendobj\n"
+	tail := "2 0 obj\n" +
+		"<< /Title (Tail Info Title)\n" +
+		"   /CreationDate (D:20240102030405Z)\n" +
+		">>\nendobj\n" +
+		"trailer\n<< /Info 2 0 R >>\n%%EOF"
+	padding := strings.Repeat("x", maxPDFMetadataScanSize)
+
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte(head+padding+tail), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Title != "Tail Info Title" {
+		t.Fatalf("Title = %q, want tail Info dictionary value", got.Title)
+	}
+	if strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("Authors = %v, want head-only value preserved", got.Authors)
+	}
+	if got.Year != 2024 {
+		t.Fatalf("Year = %d, want 2024 from tail CreationDate", got.Year)
+	}
+}
+
+func TestParseEbookPDFHeadInfoWinsOverTailStreamGarbage(t *testing.T) {
+	// Linearized PDFs carry the real Info dictionary in the head; a
+	// "/Title"-shaped byte pattern inside a trailing compressed stream must
+	// not replace it.
+	head := "%PDF-1.7\n" +
+		"1 0 obj\n" +
+		"<< /Linearized 1 >>\nendobj\n" +
+		"2 0 obj\n" +
+		"<< /Title (Real Head Title)\n" +
+		"   /Author (Ada Writer)\n" +
+		">>\nendobj\n"
+	tail := "3 0 obj\n" +
+		"<< /Length 64 >>\nstream\n" +
+		"\x01\x02/Title (\xfe\xba\xad binary stream garbage)\x03\x04\n" +
+		"endstream\nendobj\n" +
+		"trailer\n<< /Info 2 0 R >>\n%%EOF"
+	padding := strings.Repeat("x", maxPDFMetadataScanSize)
+
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte(head+padding+tail), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Title != "Real Head Title" {
+		t.Fatalf("Title = %q, want authoritative head value over tail stream garbage", got.Title)
+	}
+}
+
+func TestFindPDFInfoValueRequiresProperKeyDelimiter(t *testing.T) {
+	// "/TitleSort" must not satisfy a "/Title" lookup, and the real key later
+	// in the window must still be found.
+	data := []byte(`<< /TitleSort (Adventures of, The) /Title (The Adventures) >>`)
+	value, ok := findPDFInfoValue(data, "Title")
+	if !ok || value != "The Adventures" {
+		t.Fatalf("findPDFInfoValue = %q, %v; want the properly delimited /Title", value, ok)
+	}
+}
+
+func TestFindPDFInfoValueRetriesPastUnparseableOccurrences(t *testing.T) {
+	// A key match inside binary stream data whose "value" is not a PDF string
+	// must not end the search; the real key/value pair later in the window
+	// still wins.
+	data := []byte("stream\x00/Title \x07\x08garbage\x00endstream\n" +
+		"<< /Title (Recovered Title) >>")
+	value, ok := findPDFInfoValue(data, "Title")
+	if !ok || value != "Recovered Title" {
+		t.Fatalf("findPDFInfoValue = %q, %v; want recovery past unparseable match", value, ok)
+	}
+
+	if _, ok := findPDFInfoValue([]byte("/Titled (Nope)"), "Title"); ok {
+		t.Fatal("findPDFInfoValue matched a longer key sharing the prefix")
+	}
+}
+
+func TestParseEbookFB2RejectsOversizedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.fb2")
+	if err := os.WriteFile(path, make([]byte, maxEPUBMetadataEntrySize+1), 0o644); err != nil {
+		t.Fatalf("write fb2: %v", err)
+	}
+
+	_, err := parseEbookFile(path)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("parseEbookFile error = %v, want size-cap rejection", err)
+	}
 }

@@ -36,7 +36,6 @@ var ebookExtensions = map[string]bool{
 	".fbz":  true,
 	".cbz":  true,
 	".cbr":  true,
-	".md":   true,
 }
 
 type parsedEbook struct {
@@ -86,7 +85,7 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 		book, err = parseEbookCBZ(path)
 	case ".pdf":
 		book, err = parseEbookPDF(path)
-	case ".mobi", ".azw", ".azw3", ".cbr", ".md":
+	case ".mobi", ".azw", ".azw3", ".cbr":
 		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
@@ -103,11 +102,22 @@ func parseEbookPDF(path string) (parsedEbook, error) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, maxPDFMetadataScanSize))
+	head, tail, err := readPDFMetadataWindows(file)
 	if err != nil {
 		return book, err
 	}
-	info := parsePDFInfoFields(data)
+	info := parsePDFInfoFields(head)
+	// A head match comes from a linearized PDF whose Info dictionary sits at
+	// the start of the file and is authoritative; non-linearized PDFs (the
+	// common case) store the Info dictionary near the end and usually have no
+	// head match at all. The tail therefore only fills keys the head did not
+	// produce, so key-shaped byte noise inside trailing compressed streams can
+	// never replace a good head value.
+	for key, value := range parsePDFInfoFields(tail) {
+		if value != "" && info[key] == "" {
+			info[key] = value
+		}
+	}
 	book.Title = info["Title"]
 	book.Authors = splitEbookAuthors(info["Author"])
 	book.Description = info["Subject"]
@@ -128,6 +138,34 @@ func parseEbookPDF(path string) (parsedEbook, error) {
 		book.Year = t.Year()
 	}
 	return book, nil
+}
+
+// readPDFMetadataWindows reads the first and last maxPDFMetadataScanSize bytes
+// of the file. The windows never overlap: for files at most one window long
+// the tail is nil, and for files shorter than two windows the tail starts
+// where the head ends.
+func readPDFMetadataWindows(file *os.File) (head []byte, tail []byte, err error) {
+	head, err = io.ReadAll(io.LimitReader(file, maxPDFMetadataScanSize))
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	size := info.Size()
+	if size <= int64(len(head)) {
+		return head, nil, nil
+	}
+	tailStart := size - maxPDFMetadataScanSize
+	if tailStart < int64(len(head)) {
+		tailStart = int64(len(head))
+	}
+	tail = make([]byte, size-tailStart)
+	if _, err := file.ReadAt(tail, tailStart); err != nil {
+		return nil, nil, err
+	}
+	return head, tail, nil
 }
 
 func ebookFileFormat(path string) string {
@@ -333,12 +371,22 @@ func parseEbookEPUB(path string) (parsedEbook, error) {
 }
 
 func parseEbookFB2(path string) (parsedEbook, error) {
+	book := parsedEbook{Format: "fb2"}
 	file, err := os.Open(path)
 	if err != nil {
-		return parsedEbook{Format: "fb2"}, err
+		return book, err
 	}
 	defer file.Close()
-	return parseEbookFB2Reader(file, "fb2")
+	// Mirror the .fbz entry cap so a plain .fb2 cannot stream unbounded
+	// bytes through the XML decoder.
+	info, err := file.Stat()
+	if err != nil {
+		return book, err
+	}
+	if info.Size() > maxEPUBMetadataEntrySize {
+		return book, fmt.Errorf("fb2 file too large: %s", path)
+	}
+	return parseEbookFB2Reader(io.LimitReader(file, maxEPUBMetadataEntrySize+1), "fb2")
 }
 
 func parseEbookFBZ(path string) (parsedEbook, error) {
@@ -560,21 +608,58 @@ func parseEbookFB2Reader(reader io.Reader, format string) (parsedEbook, error) {
 func parsePDFInfoFields(data []byte) map[string]string {
 	fields := map[string]string{}
 	for _, key := range []string{"Title", "Author", "Subject", "Keywords", "CreationDate", "ISBN"} {
-		token := []byte("/" + key)
-		idx := bytes.Index(data, token)
-		if idx < 0 {
-			continue
-		}
-		rest := bytes.TrimLeft(data[idx+len(token):], " \t\r\n")
-		if len(rest) == 0 {
-			continue
-		}
-		value, ok := readPDFString(rest)
-		if ok {
+		if value, ok := findPDFInfoValue(data, key); ok {
 			fields[key] = value
 		}
 	}
 	return fields
+}
+
+// pdfWhitespace is the PDF whitespace character set (ISO 32000-1, table 1).
+const pdfWhitespace = "\x00\t\n\f\r "
+
+// isPDFTokenDelimiter reports whether b legally terminates a PDF name token.
+// Without this check a key with a shared prefix (e.g. "/TitleSort") would be
+// mistaken for the key itself (e.g. "/Title").
+func isPDFTokenDelimiter(b byte) bool {
+	switch b {
+	case '\x00', '\t', '\n', '\f', '\r', ' ', '(', ')', '<', '>', '[', ']', '{', '}', '/', '%':
+		return true
+	default:
+		return false
+	}
+}
+
+// findPDFInfoValue scans every occurrence of "/<key>" in the window and
+// returns the first whose token is properly delimited and whose value parses
+// as a PDF string. Raw byte search can match key-shaped noise inside
+// compressed streams, so a failed parse moves on to the next occurrence
+// instead of giving up.
+func findPDFInfoValue(data []byte, key string) (string, bool) {
+	token := []byte("/" + key)
+	for offset := 0; offset < len(data); {
+		idx := bytes.Index(data[offset:], token)
+		if idx < 0 {
+			return "", false
+		}
+		idx += offset
+		offset = idx + len(token)
+		rest := data[idx+len(token):]
+		if len(rest) == 0 {
+			return "", false
+		}
+		if !isPDFTokenDelimiter(rest[0]) {
+			continue
+		}
+		trimmed := bytes.TrimLeft(rest, pdfWhitespace)
+		if len(trimmed) == 0 {
+			return "", false
+		}
+		if value, ok := readPDFString(trimmed); ok {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 func decodeEbookXML(data []byte, v any) error {

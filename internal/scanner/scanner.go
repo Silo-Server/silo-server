@@ -274,7 +274,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		return &ScanResult{}, nil
 	}
 	if isEbookLibraryType(folder.Type) {
-		if err := s.scanEbookPaths(watchCtx, folder, []string{cleanSubtree}); err != nil {
+		if err := s.scanEbookPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -394,6 +394,16 @@ func isIgnoredDirectoryPath(path string) bool {
 	return ignoredDirNames[strings.ToLower(filepath.Base(path))]
 }
 
+// recordWalkFailure counts an entry the walk could not read or resolve.
+// Callers that pass a non-nil counter (the book scanners) use it to exclude
+// incompletely walked roots from missing-file reconciliation; the video walk
+// passes nil and keeps its historical log-and-continue behavior.
+func recordWalkFailure(failures *int) {
+	if failures != nil {
+		*failures++
+	}
+}
+
 func walkLogicalTree(
 	ctx context.Context,
 	logicalPath string,
@@ -401,6 +411,7 @@ func walkLogicalTree(
 	mode walkMode,
 	visitedPhysicalDirs map[string]struct{},
 	filePaths *[]string,
+	walkFailures *int,
 ) error {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -411,6 +422,7 @@ func walkLogicalTree(
 	info, err := os.Lstat(physicalPath)
 	if err != nil {
 		slog.Warn("scanner: walk lstat failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures)
 		return nil
 	}
 
@@ -418,15 +430,17 @@ func walkLogicalTree(
 		resolved, err := filepath.EvalSymlinks(physicalPath)
 		if err != nil {
 			slog.Warn("scanner: symlink resolve failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+			recordWalkFailure(walkFailures)
 			return nil
 		}
 		targetInfo, err := os.Stat(resolved)
 		if err != nil {
 			slog.Warn("scanner: symlink stat failed", "path", logicalPath, "resolved_path", resolved, "error", err)
+			recordWalkFailure(walkFailures)
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, filePaths)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, filePaths, walkFailures)
 		}
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
@@ -450,6 +464,7 @@ func walkLogicalTree(
 	canonicalDir, err := canonicalWalkPath(physicalPath)
 	if err != nil {
 		slog.Warn("scanner: canonical path resolution failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures)
 		return nil
 	}
 	if _, seen := visitedPhysicalDirs[canonicalDir]; seen {
@@ -467,6 +482,7 @@ func walkLogicalTree(
 	entries, err := os.ReadDir(physicalPath)
 	if err != nil {
 		slog.Warn("scanner: directory read failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures)
 		return nil
 	}
 	for _, entry := range entries {
@@ -483,15 +499,17 @@ func walkLogicalTree(
 			resolved, err := filepath.EvalSymlinks(physicalChild)
 			if err != nil {
 				slog.Warn("scanner: symlink resolve failed", "path", logicalChild, "physical_path", physicalChild, "error", err)
+				recordWalkFailure(walkFailures)
 				continue
 			}
 			targetInfo, err := os.Stat(resolved)
 			if err != nil {
 				slog.Warn("scanner: symlink stat failed", "path", logicalChild, "resolved_path", resolved, "error", err)
+				recordWalkFailure(walkFailures)
 				continue
 			}
 			if targetInfo.IsDir() {
-				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, filePaths); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, filePaths, walkFailures); err != nil {
 					return err
 				}
 				continue
@@ -506,7 +524,7 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, filePaths); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, filePaths, walkFailures); err != nil {
 				return err
 			}
 			continue
@@ -538,7 +556,7 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if cleanRoot == "" || cleanRoot == "." {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths); err != nil {
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths, nil); err != nil {
 			return nil, err
 		}
 	}

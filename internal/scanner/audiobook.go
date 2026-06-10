@@ -48,7 +48,7 @@ func stripNarratorSuffix(title string) string {
 // The scanner write path (Task 8) converts this into media_items +
 // media_files + item_people rows.
 type parsedAudiobook struct {
-	Title    string
+	Title          string
 	Author         string
 	Narrator       string
 	Series         string
