@@ -11,6 +11,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// EbookFinishedProgressThresholdSQL is models.EbookFinishedProgressThreshold
+// rendered as a SQL numeric literal. Queries that classify ebook reader
+// progress as finished must interpolate this value instead of hardcoding the
+// threshold so the definition of "finished" cannot drift between subsystems.
+var EbookFinishedProgressThresholdSQL = strconv.FormatFloat(models.EbookFinishedProgressThreshold, 'f', -1, 64)
+
 type QueryBuilder struct {
 	alias      string
 	argIdx     int
@@ -191,7 +197,7 @@ func UserHistoryCTESQL(argIdx int) string {
 		UNION ALL
 		SELECT erp.content_id AS media_item_id, NULL::timestamptz, erp.updated_at
 		FROM ebook_reader_progress erp
-		WHERE erp.user_id = $%d AND erp.profile_id = $%d AND erp.progress >= 0.9
+		WHERE erp.user_id = $%d AND erp.profile_id = $%d AND erp.progress >= %s
 	) src
 	WHERE NOT EXISTS (
 		SELECT 1 FROM user_history_hidden_items hhi
@@ -200,7 +206,7 @@ func UserHistoryCTESQL(argIdx int) string {
 		  AND COALESCE(src.uwh_at, src.uwp_at) <= hhi.hidden_before
 	)
 	GROUP BY src.media_item_id
-)`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1)
+)`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1, EbookFinishedProgressThresholdSQL, argIdx, argIdx+1)
 }
 
 func (qb *QueryBuilder) BuildSortClause(sortConfig QuerySort) (string, []any, error) {
@@ -996,8 +1002,16 @@ func (qb *QueryBuilder) buildEbookInProgressClause(value bool) string {
 		  AND erp.profile_id = $%d
 		  AND erp.content_id = %s.content_id
 		  AND erp.progress > 0
-		  AND erp.progress < 0.9
-	)`, qb.argIdx, qb.argIdx+1, qb.alias)
+		  AND erp.progress < %s
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = $%d
+			  AND hhi.profile_id = $%d
+			  AND hhi.media_item_id = erp.content_id
+			  AND erp.updated_at <= hhi.hidden_before
+		  )
+	)`, qb.argIdx, qb.argIdx+1, qb.alias, EbookFinishedProgressThresholdSQL, qb.argIdx, qb.argIdx+1)
 	qb.argIdx += 2
 	if !value {
 		return "NOT (" + clause + ")"
@@ -1164,8 +1178,16 @@ func (qb *QueryBuilder) ebookUserStateCompletionClause() string {
 		WHERE erp.user_id = $%d
 		  AND erp.profile_id = $%d
 		  AND erp.content_id = %s.content_id
-		  AND erp.progress >= 0.9
-	)`, qb.argIdx, qb.argIdx+1, qb.alias)
+		  AND erp.progress >= %s
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = $%d
+			  AND hhi.profile_id = $%d
+			  AND hhi.media_item_id = erp.content_id
+			  AND erp.updated_at <= hhi.hidden_before
+		  )
+	)`, qb.argIdx, qb.argIdx+1, qb.alias, EbookFinishedProgressThresholdSQL, qb.argIdx, qb.argIdx+1)
 	qb.argIdx += 2
 	return clause
 }
@@ -1429,14 +1451,22 @@ func (qb *QueryBuilder) ebookProgressSortPlan() (string, []string, []any) {
 			SELECT erp.content_id,
 				CASE
 					WHEN erp.progress > 0
-					  AND erp.progress < 0.9
+					  AND erp.progress < %s
+					  AND (hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before)
 					THEN erp.progress::double precision
 					ELSE NULL
 				END AS progress_ratio
 			FROM ebook_reader_progress erp
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%d
+			   AND hhi.profile_id = $%d
+			   AND hhi.media_item_id = erp.content_id
 			WHERE erp.user_id = $%d
 			  AND erp.profile_id = $%d
 		) sort_progress ON sort_progress.content_id = %s.content_id`,
+		EbookFinishedProgressThresholdSQL,
+		qb.argIdx,
+		qb.argIdx+1,
 		qb.argIdx,
 		qb.argIdx+1,
 		qb.alias,
@@ -1503,14 +1533,22 @@ func (qb *QueryBuilder) ebookDateViewedSortPlan() (string, []string, []any) {
 		`LEFT JOIN (
 			SELECT erp.content_id,
 				CASE
-					WHEN erp.progress >= 0.9
+					WHEN erp.progress >= %s
+					  AND (hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before)
 					THEN erp.updated_at
 					ELSE NULL
 				END AS viewed_at
 			FROM ebook_reader_progress erp
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%d
+			   AND hhi.profile_id = $%d
+			   AND hhi.media_item_id = erp.content_id
 			WHERE erp.user_id = $%d
 			  AND erp.profile_id = $%d
 		) sort_ebook_viewed ON sort_ebook_viewed.content_id = %s.content_id`,
+		EbookFinishedProgressThresholdSQL,
+		qb.argIdx,
+		qb.argIdx+1,
 		qb.argIdx,
 		qb.argIdx+1,
 		qb.alias,
@@ -1577,14 +1615,22 @@ func (qb *QueryBuilder) ebookPlaysSortPlan() (string, []string, []any) {
 		`LEFT JOIN (
 			SELECT erp.content_id,
 				CASE
-					WHEN erp.progress >= 0.9
+					WHEN erp.progress >= %s
+					  AND (hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before)
 					THEN 1
 					ELSE 0
 				END AS completed_play_count
 			FROM ebook_reader_progress erp
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%d
+			   AND hhi.profile_id = $%d
+			   AND hhi.media_item_id = erp.content_id
 			WHERE erp.user_id = $%d
 			  AND erp.profile_id = $%d
 		) sort_ebook_plays ON sort_ebook_plays.content_id = %s.content_id`,
+		EbookFinishedProgressThresholdSQL,
+		qb.argIdx,
+		qb.argIdx+1,
 		qb.argIdx,
 		qb.argIdx+1,
 		qb.alias,
