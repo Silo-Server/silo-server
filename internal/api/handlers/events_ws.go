@@ -13,6 +13,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/presence"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/gorilla/websocket"
@@ -46,6 +47,7 @@ type EventsHandler struct {
 	persistedScans activeScanLister
 	historyImports historyImportActiveLister
 	notifications  notificationUnreadCounter
+	presence       presence.Registry
 }
 
 func NewEventsHandler(
@@ -57,6 +59,7 @@ func NewEventsHandler(
 	persistedScans *scanqueue.Service,
 	historyImports historyImportActiveLister,
 	notificationsSvc *notifications.Service,
+	presenceReg presence.Registry,
 ) *EventsHandler {
 	return &EventsHandler{
 		hub:            hub,
@@ -67,6 +70,7 @@ func NewEventsHandler(
 		persistedScans: persistedScans,
 		historyImports: historyImports,
 		notifications:  notificationsSvc,
+		presence:       presenceReg,
 	}
 }
 
@@ -94,7 +98,16 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	eventsCh, unsubscribe := h.hub.Subscribe()
 	defer unsubscribe()
+
+	if h.presence != nil {
+		release := h.presence.Add(ctx, claims.UserID)
+		defer release()
+	}
+
 	startWebSocketPingLoop(ctx, func() error {
+		if rr, ok := h.presence.(interface{ Refresh(context.Context, int) }); ok {
+			rr.Refresh(ctx, claims.UserID)
+		}
 		return writeWebSocketControl(conn, websocket.PingMessage, nil)
 	})
 

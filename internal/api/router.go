@@ -1501,6 +1501,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.LibraryScanQueue,
 						historyImportSvc,
 						deps.NotificationsService,
+						nil, // presenceReg wired in Task 15
 					)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 				}
