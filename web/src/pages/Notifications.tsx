@@ -52,9 +52,19 @@ export default function Notifications() {
   const dismiss = useDismissNotification();
   const { data: unreadCount = 0 } = useUnreadCount();
 
-  // Mark-on-view: fire once when page 1 arrives
+  // Mark-on-view: fire once when page 1 arrives, reset when tab changes
   const firstPage = list.data?.pages?.[0];
   const markedRef = useRef(false);
+  const prevTabRef = useRef(activeTab);
+
+  useEffect(() => {
+    // Reset marked flag when tab changes
+    if (prevTabRef.current !== activeTab) {
+      prevTabRef.current = activeTab;
+      markedRef.current = false;
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     if (markedRef.current || !firstPage) return;
     const unreadIds = (firstPage.items ?? []).filter((n) => !n.read_at).map((n) => n.id);
@@ -117,7 +127,7 @@ export default function Notifications() {
         <ul className="space-y-2">
           {allItems.map((n) => {
             const isUnread = !n.read_at;
-            const relTime = timeAgo(n.created_at) ?? n.created_at;
+            const relTime = timeAgo(n.created_at, "") ?? n.created_at;
             const inner = (
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium leading-snug">{n.title}</p>

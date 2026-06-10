@@ -64,7 +64,7 @@ import Notifications from "./Notifications";
 // ---------------------------------------------------------------------------
 function makeNotification(
   id: number,
-  overrides: Partial<{ title: string; body: string; category: string; read_at: string; link: string }> = {},
+  overrides: Partial<{ title: string; body: string; category: string; read_at: string; link: string; created_at: string }> = {},
 ) {
   return {
     id,
@@ -263,5 +263,63 @@ describe("Notifications page", () => {
     });
 
     expect(mocks.fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 7: relative time displays without "Added" prefix
+  // -------------------------------------------------------------------------
+  it("shows relative time without Added prefix (e.g., '1 minute ago')", async () => {
+    const now = Date.now();
+    mocks.listPages = [
+      {
+        items: [
+          makeNotification(1, { created_at: new Date(now - 60_000).toISOString() }),
+        ],
+      },
+    ];
+
+    const el = await mount(root, container, wrap(<Notifications />));
+
+    expect(el.textContent).toContain("1 minute ago");
+    expect(el.textContent).not.toContain("Added 1 minute ago");
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 8: tab switch resets mark-on-view and marks unread in new tab
+  // -------------------------------------------------------------------------
+  it("resets mark-on-view per tab; marks unread when switching to Requests", async () => {
+    // All tab has notification 1 (unread)
+    mocks.listPages = [
+      {
+        items: [makeNotification(1)],
+      },
+    ];
+
+    const el = await mount(root, container, wrap(<Notifications />));
+
+    // All tab: marks notification 1
+    expect(mocks.markReadMutate).toHaveBeenCalledTimes(1);
+    expect(mocks.markReadMutate).toHaveBeenCalledWith({ ids: [1] });
+
+    // Switch to Requests tab with a different unread notification (9)
+    mocks.listPages = [
+      {
+        items: [makeNotification(9)],
+      },
+    ];
+
+    const requestsBtn = Array.from(el.querySelectorAll("button")).find((b) =>
+      b.textContent?.trim() === "Requests",
+    );
+    expect(requestsBtn).toBeDefined();
+
+    await act(async () => {
+      requestsBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    // Requests tab: marks notification 9 (called a second time)
+    expect(mocks.markReadMutate).toHaveBeenCalledTimes(2);
+    expect(mocks.markReadMutate).toHaveBeenLastCalledWith({ ids: [9] });
   });
 });
