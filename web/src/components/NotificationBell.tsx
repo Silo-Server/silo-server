@@ -26,7 +26,11 @@ export function NotificationBell() {
   const items = (list.data?.pages ?? []).flatMap((p) => p.items ?? []).slice(0, 10);
 
   return (
-    <Popover onOpenChange={(open) => { bellOpenFlag = open; }}>
+    <Popover
+      onOpenChange={(open) => {
+        bellOpenFlag = open;
+      }}
+    >
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
           <Bell className="h-5 w-5" />

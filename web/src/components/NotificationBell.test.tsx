@@ -40,7 +40,9 @@ function renderBell() {
 beforeEach(() => {
   mockMarkReadMutate.mockClear();
   mockedUnreadCount.mockReturnValue({ data: 0 } as ReturnType<typeof useUnreadCount>);
-  mockedList.mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useNotificationsList>);
+  mockedList.mockReturnValue({ data: undefined } as unknown as ReturnType<
+    typeof useNotificationsList
+  >);
 });
 
 describe("NotificationBell", () => {
@@ -72,7 +74,13 @@ describe("NotificationBell", () => {
           pages: [
             {
               items: [
-                { id: 1, title: "Movie Released", body: "Dune 3 is out", link: "/item/dune3", read_at: null },
+                {
+                  id: 1,
+                  title: "Movie Released",
+                  body: "Dune 3 is out",
+                  link: "/item/dune3",
+                  read_at: null,
+                },
                 { id: 2, title: "Request Approved", body: "", link: null, read_at: "2024-01-01" },
               ],
               next_cursor: null,
@@ -145,7 +153,9 @@ describe("NotificationBell", () => {
         data: {
           pages: [
             {
-              items: [{ id: 4, title: "With Link Item", body: "", link: "/item/42", read_at: null }],
+              items: [
+                { id: 4, title: "With Link Item", body: "", link: "/item/42", read_at: null },
+              ],
               next_cursor: null,
             },
           ],

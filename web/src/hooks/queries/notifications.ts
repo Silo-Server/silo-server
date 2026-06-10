@@ -1,10 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type {
-  Announcement,
-  NotificationListResponse,
-  NotificationPreference,
-} from "@/api/types";
+import type { Announcement, NotificationListResponse, NotificationPreference } from "@/api/types";
 import { notificationKeys } from "./keys";
 import { toast } from "sonner";
 
@@ -116,7 +112,8 @@ export function useSetNotificationPreferences() {
       queryClient.invalidateQueries({ queryKey: notificationKeys.preferences() });
     },
     onError: (err, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(notificationKeys.preferences(), context.previous);
+      if (context?.previous)
+        queryClient.setQueryData(notificationKeys.preferences(), context.previous);
       toast.error(err instanceof Error ? err.message : "Failed to save preferences");
     },
   });

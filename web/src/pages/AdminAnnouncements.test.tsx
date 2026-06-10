@@ -165,7 +165,10 @@ describe("AdminAnnouncements", () => {
     await user.click(screen.getByRole("button", { name: /publish/i }));
 
     expect(createAnnouncementMutateMock).toHaveBeenCalledOnce();
-    const [payload] = createAnnouncementMutateMock.mock.calls[0] as [Record<string, unknown>, ...unknown[]];
+    const [payload] = createAnnouncementMutateMock.mock.calls[0] as [
+      Record<string, unknown>,
+      ...unknown[],
+    ];
     expect(payload.title).toBe("Hello");
     expect(payload.body).toBe("World");
     expect(payload.audience).toEqual({ all: true });
@@ -189,7 +192,10 @@ describe("AdminAnnouncements", () => {
     await user.click(screen.getByRole("button", { name: /publish/i }));
 
     expect(createAnnouncementMutateMock).toHaveBeenCalledOnce();
-    const [payload] = createAnnouncementMutateMock.mock.calls[0] as [Record<string, unknown>, ...unknown[]];
+    const [payload] = createAnnouncementMutateMock.mock.calls[0] as [
+      Record<string, unknown>,
+      ...unknown[],
+    ];
     const audience = payload.audience as Record<string, unknown>;
     expect(audience).toEqual({ library_ids: [5] });
     expect(Object.keys(audience)).not.toContain("all");

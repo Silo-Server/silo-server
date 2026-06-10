@@ -1,5 +1,8 @@
 import { useAuth } from "@/hooks/useAuth";
-import { useNotificationPreferences, useSetNotificationPreferences } from "@/hooks/queries/notifications";
+import {
+  useNotificationPreferences,
+  useSetNotificationPreferences,
+} from "@/hooks/queries/notifications";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { Switch } from "@/components/ui/switch";

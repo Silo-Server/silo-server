@@ -44,8 +44,7 @@ export default function Notifications() {
 
   useDocumentTitle("Notifications");
 
-  const filters =
-    activeTab === "" ? {} : { category: activeTab };
+  const filters = activeTab === "" ? {} : { category: activeTab };
 
   const list = useInfiniteList(filters);
   const markRead = useMarkRead();
@@ -74,9 +73,7 @@ export default function Notifications() {
 
   const visibleTabs = TABS.filter((t) => !t.adminOnly || user?.role === "admin");
 
-  const allItems: AppNotification[] = (list.data?.pages ?? []).flatMap(
-    (p) => p.items ?? [],
-  );
+  const allItems: AppNotification[] = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);
 
   const isEmpty = allItems.length === 0;
 
@@ -130,10 +127,8 @@ export default function Notifications() {
             const relTime = timeAgo(n.created_at, "") ?? n.created_at;
             const inner = (
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium leading-snug">{n.title}</p>
-                {n.body ? (
-                  <p className="text-muted-foreground mt-0.5 text-xs">{n.body}</p>
-                ) : null}
+                <p className="text-sm leading-snug font-medium">{n.title}</p>
+                {n.body ? <p className="text-muted-foreground mt-0.5 text-xs">{n.body}</p> : null}
                 <p className="text-muted-foreground mt-1 text-xs">{relTime}</p>
               </div>
             );
@@ -160,7 +155,7 @@ export default function Notifications() {
                 <button
                   type="button"
                   aria-label="Dismiss"
-                  className="relative z-10 ml-auto mt-0.5 flex-shrink-0 rounded-md p-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
+                  className="relative z-10 mt-0.5 ml-auto flex-shrink-0 rounded-md p-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -178,11 +173,7 @@ export default function Notifications() {
       {/* Load more */}
       {list.hasNextPage ? (
         <div className="flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => list.fetchNextPage()}
-          >
+          <Button variant="outline" size="sm" onClick={() => list.fetchNextPage()}>
             Load more
           </Button>
         </div>

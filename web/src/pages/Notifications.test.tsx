@@ -15,7 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Hoisted mutable mock state
 // ---------------------------------------------------------------------------
 const mocks = vi.hoisted(() => ({
-  listPages: [] as Array<{ items: Array<{ id: number; title: string; body: string; category: string; created_at: string; read_at?: string; link?: string }> }>,
+  listPages: [] as Array<{
+    items: Array<{
+      id: number;
+      title: string;
+      body: string;
+      category: string;
+      created_at: string;
+      read_at?: string;
+      link?: string;
+    }>;
+  }>,
   hasNextPage: false,
   fetchNextPage: vi.fn(),
   markReadMutate: vi.fn(),
@@ -64,7 +74,14 @@ import Notifications from "./Notifications";
 // ---------------------------------------------------------------------------
 function makeNotification(
   id: number,
-  overrides: Partial<{ title: string; body: string; category: string; read_at: string; link: string; created_at: string }> = {},
+  overrides: Partial<{
+    title: string;
+    body: string;
+    category: string;
+    read_at: string;
+    link: string;
+    created_at: string;
+  }> = {},
 ) {
   return {
     id,
@@ -178,8 +195,8 @@ describe("Notifications page", () => {
     expect(mocks.listFilters.category).toBeUndefined();
 
     // Find and click the Requests tab
-    const requestsBtn = Array.from(el.querySelectorAll("button")).find((b) =>
-      b.textContent?.trim() === "Requests",
+    const requestsBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Requests",
     );
     expect(requestsBtn).toBeDefined();
 
@@ -211,8 +228,8 @@ describe("Notifications page", () => {
     expect(mocks.markReadMutate).toHaveBeenCalledWith({ ids: [1] });
 
     // Force a re-render by toggling a tab back and forth; mutate must NOT be called again
-    const allBtn = Array.from(el.querySelectorAll("button")).find((b) =>
-      b.textContent?.trim() === "All",
+    const allBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "All",
     );
     if (allBtn) {
       await act(async () => {
@@ -272,9 +289,7 @@ describe("Notifications page", () => {
     const now = Date.now();
     mocks.listPages = [
       {
-        items: [
-          makeNotification(1, { created_at: new Date(now - 60_000).toISOString() }),
-        ],
+        items: [makeNotification(1, { created_at: new Date(now - 60_000).toISOString() })],
       },
     ];
 
@@ -308,8 +323,8 @@ describe("Notifications page", () => {
       },
     ];
 
-    const requestsBtn = Array.from(el.querySelectorAll("button")).find((b) =>
-      b.textContent?.trim() === "Requests",
+    const requestsBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Requests",
     );
     expect(requestsBtn).toBeDefined();
 
