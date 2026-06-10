@@ -163,6 +163,7 @@ function AIFeaturesCard() {
   const [subtitleTranslate, setSubtitleTranslate] = useState("false");
   const [transcribe, setTranscribe] = useState("false");
   const [metadataTranslate, setMetadataTranslate] = useState("false");
+  const [onView, setOnView] = useState("off");
   const [batchSize, setBatchSize] = useState("40");
   const [contextNeighbors, setContextNeighbors] = useState("2");
 
@@ -171,6 +172,7 @@ function AIFeaturesCard() {
     setSubtitleTranslate(settings["subtitle_ai.enabled"] ?? "false");
     setTranscribe(settings["subtitle_ai.transcribe_enabled"] ?? "false");
     setMetadataTranslate(settings["metadata_ai.enabled"] ?? "false");
+    setOnView(settings["metadata_ai.on_view"] ?? "off");
     setBatchSize(settings["subtitle_ai.batch_size"] ?? "40");
     setContextNeighbors(settings["subtitle_ai.context_neighbors"] ?? "2");
   }, [settings]);
@@ -190,6 +192,7 @@ function AIFeaturesCard() {
       updateSetting.mutateAsync({ key: "subtitle_ai.enabled", value: subtitleTranslate }),
       updateSetting.mutateAsync({ key: "subtitle_ai.transcribe_enabled", value: transcribe }),
       updateSetting.mutateAsync({ key: "metadata_ai.enabled", value: metadataTranslate }),
+      updateSetting.mutateAsync({ key: "metadata_ai.on_view", value: onView }),
       updateSetting.mutateAsync({ key: "subtitle_ai.batch_size", value: String(parsedBatch) }),
       updateSetting.mutateAsync({
         key: "subtitle_ai.context_neighbors",
@@ -227,6 +230,18 @@ function AIFeaturesCard() {
         value={metadataTranslate}
         onChange={setMetadataTranslate}
         hint="Translate overviews and taglines from the metadata editor, plus the per-library auto-translate option."
+      />
+      <SettingField
+        label="On-view translation"
+        type="select"
+        value={onView}
+        onChange={setOnView}
+        options={[
+          { value: "off", label: "Off" },
+          { value: "button", label: "Translate button on detail pages" },
+          { value: "auto", label: "Automatic on view" },
+        ]}
+        hint="Let viewers get descriptions in their profile's metadata language: a Translate button, or automatic translation when they open a detail page. Requires description translation."
       />
       <SettingField
         label="Subtitle batch size"

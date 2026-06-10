@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -475,7 +476,9 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	case "off", "button", "auto":
 		cfg.MetadataAI.OnView = onView
 	default:
-		return nil, fmt.Errorf("invalid metadata_ai.on_view %q (must be off, button, or auto)", onView)
+		// A bad row must not block startup; the feature just stays off.
+		slog.Warn("invalid metadata_ai.on_view setting; using off", "value", onView)
+		cfg.MetadataAI.OnView = "off"
 	}
 
 	// Download
