@@ -13,7 +13,10 @@ import type {
 } from "@/api/types";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
-import { getCachedWatchedInvalidationKeys } from "@/pages/ItemDetail/watchedState";
+import {
+  getCachedWatchedInvalidationKeys,
+  getWatchedToastMessage,
+} from "@/pages/ItemDetail/watchedState";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -266,7 +269,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
       toast.error(err instanceof Error ? err.message : "Failed to update watched state");
     },
     onSuccess: (_data, nextPlayed) => {
-      toast.success(nextPlayed ? "Marked as watched" : "Marked as unwatched");
+      toast.success(getWatchedToastMessage(item, nextPlayed));
     },
     onSettled: async () => {
       await invalidateMediaSurfaceQueries(queryClient, {

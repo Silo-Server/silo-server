@@ -8,10 +8,15 @@ import EbookContent from "./EbookContent";
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   useEbookReaderProgress: vi.fn(),
+  useWatchedStateMutation: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
+}));
+
+vi.mock("@/hooks/queries/items", () => ({
+  useWatchedStateMutation: mocks.useWatchedStateMutation,
 }));
 
 vi.mock("@/hooks/useAmbientColor", () => ({
@@ -199,6 +204,8 @@ describe("EbookContent", () => {
     mocks.useAuth.mockReturnValue({ user: { download_allowed: true } });
     mocks.useEbookReaderProgress.mockReset();
     mocks.useEbookReaderProgress.mockReturnValue({ data: null });
+    mocks.useWatchedStateMutation.mockReset();
+    mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
   });
 
   it("renders ebook authors without audiobook narrator credits", () => {
@@ -256,7 +263,33 @@ describe("EbookContent", () => {
         <EbookContent item={makeEbookItem({ versions: [] })} />
       </MemoryRouter>,
     );
-    expect(markup).not.toContain("Read");
+    expect(markup).not.toContain("/reader/ebook/");
+  });
+
+  it("shows the mark read toggle backed by the watched mutation", () => {
+    const item = makeEbookItem();
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent item={item} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Mark Read");
+    expect(mocks.useWatchedStateMutation).toHaveBeenCalledWith(item);
+  });
+
+  it("shows the mark unread toggle for ebooks already marked read", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <EbookContent
+          item={makeEbookItem({
+            user_data: { played: true, position_seconds: 0, duration_seconds: 0 },
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Mark Unread");
   });
 
   it("preserves library context on reader links", () => {
@@ -310,7 +343,7 @@ describe("EbookContent", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).not.toContain("Read");
+    expect(markup).not.toContain("/reader/ebook/");
     expect(markup).toContain("Download");
   });
 

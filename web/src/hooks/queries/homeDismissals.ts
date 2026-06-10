@@ -18,7 +18,7 @@ export interface DismissHomeItemVariables {
 }
 
 function dismissalPath({ itemId, surface }: DismissHomeItemVariables) {
-  return `/home/dismissals/${surface}/${itemId}`;
+  return `/home/dismissals/${surface}/${encodeURIComponent(itemId)}`;
 }
 
 function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItemVariables) {
@@ -29,9 +29,9 @@ function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItem
 
 function dismissalSuccessLabel({ mediaType, surface }: DismissHomeItemVariables) {
   if (surface === "next_up") return "Removed from Next Up";
-  return mediaType === "audiobook"
-    ? "Removed from Continue Listening"
-    : "Removed from Continue Watching";
+  if (mediaType === "audiobook") return "Removed from Continue Listening";
+  if (mediaType === "ebook") return "Removed from Continue Reading";
+  return "Removed from Continue Watching";
 }
 
 export function useDismissHomeItem() {

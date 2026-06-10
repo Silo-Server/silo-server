@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BookOpen, Download } from "lucide-react";
+import { BookOpen, Check, Download } from "lucide-react";
 import { Link } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useEbookReaderProgress } from "@/hooks/queries/ebookReaderProgress";
+import { useWatchedStateMutation } from "@/hooks/queries/items";
 import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import {
   formatReaderProgress,
@@ -18,6 +19,7 @@ import {
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
+import { getWatchedActionLabel } from "./watchedState";
 import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
 
 function authorNames(item: ItemDetail): string[] {
@@ -79,6 +81,8 @@ export default function EbookContent({
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
   const { data: readerProgress } = useEbookReaderProgress(item.content_id);
+  const watchedMutation = useWatchedStateMutation(item);
+  const isRead = item.user_data?.played === true;
   const [downloadOpen, setDownloadOpen] = useState(false);
   const authors = authorNames(item);
   const publisher = item.ebook?.publisher || (item.studios ?? [])[0];
@@ -138,37 +142,45 @@ export default function EbookContent({
         genres={item.genres}
         genreHref={(genre) => genreHref(genre, libraryId)}
         actions={
-          canRead || canDownload ? (
-            <div className="flex flex-wrap gap-3">
-              {canRead && (
-                <Button
-                  asChild
-                  className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
-                >
-                  <Link to={readerHref}>
-                    <BookOpen className="size-[18px]" />
-                    {hasSavedProgress ? "Continue" : "Read"}
-                    {progressLabel && (
-                      <span className="text-primary-foreground/75 text-xs font-semibold tabular-nums">
-                        {progressLabel}
-                      </span>
-                    )}
-                  </Link>
-                </Button>
-              )}
-              {canDownload && (
-                <Button
-                  type="button"
-                  variant={canRead ? "outline" : "default"}
-                  className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
-                  onClick={() => setDownloadOpen(true)}
-                >
-                  <Download className="size-[18px]" />
-                  Download
-                </Button>
-              )}
-            </div>
-          ) : undefined
+          <div className="flex flex-wrap gap-3">
+            {canRead && (
+              <Button
+                asChild
+                className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
+              >
+                <Link to={readerHref}>
+                  <BookOpen className="size-[18px]" />
+                  {hasSavedProgress ? "Continue" : "Read"}
+                  {progressLabel && (
+                    <span className="text-primary-foreground/75 text-xs font-semibold tabular-nums">
+                      {progressLabel}
+                    </span>
+                  )}
+                </Link>
+              </Button>
+            )}
+            {canDownload && (
+              <Button
+                type="button"
+                variant={canRead ? "outline" : "default"}
+                className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
+                onClick={() => setDownloadOpen(true)}
+              >
+                <Download className="size-[18px]" />
+                Download
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
+              onClick={() => watchedMutation.mutate(!isRead)}
+              disabled={watchedMutation.isPending}
+            >
+              <Check className="size-[18px]" />
+              {getWatchedActionLabel(item)}
+            </Button>
+          </div>
         }
       />
 

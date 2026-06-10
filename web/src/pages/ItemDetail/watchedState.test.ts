@@ -1,11 +1,12 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import { catalogKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
+import { catalogKeys, ebookKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
 import type { ItemDetail } from "@/api/types";
 import {
   getCachedWatchedInvalidationKeys,
   getWatchedActionLabel,
   getWatchedInvalidationKeys,
+  getWatchedToastMessage,
 } from "./watchedState";
 
 function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
@@ -89,6 +90,45 @@ describe("getWatchedActionLabel", () => {
       ),
     ).toBe("Mark Series Watched");
   });
+
+  it("returns listening labels for audiobooks", () => {
+    expect(
+      getWatchedActionLabel(makeItem({ type: "audiobook", user_data: { played: false } })),
+    ).toBe("Mark Listened");
+    expect(
+      getWatchedActionLabel(makeItem({ type: "audiobook", user_data: { played: true } })),
+    ).toBe("Mark Unlistened");
+  });
+
+  it("returns reading labels for ebooks", () => {
+    expect(getWatchedActionLabel(makeItem({ type: "ebook", user_data: { played: false } }))).toBe(
+      "Mark Read",
+    );
+    expect(getWatchedActionLabel(makeItem({ type: "ebook", user_data: { played: true } }))).toBe(
+      "Mark Unread",
+    );
+  });
+});
+
+describe("getWatchedToastMessage", () => {
+  it("uses watched copy for video items", () => {
+    expect(getWatchedToastMessage(makeItem({ type: "movie" }), true)).toBe("Marked as watched");
+    expect(getWatchedToastMessage(makeItem({ type: "movie" }), false)).toBe("Marked as unwatched");
+  });
+
+  it("uses listened copy for audiobooks", () => {
+    expect(getWatchedToastMessage(makeItem({ type: "audiobook" }), true)).toBe(
+      "Marked as listened",
+    );
+    expect(getWatchedToastMessage(makeItem({ type: "audiobook" }), false)).toBe(
+      "Marked as unlistened",
+    );
+  });
+
+  it("uses read copy for ebooks", () => {
+    expect(getWatchedToastMessage(makeItem({ type: "ebook" }), true)).toBe("Marked as read");
+    expect(getWatchedToastMessage(makeItem({ type: "ebook" }), false)).toBe("Marked as unread");
+  });
 });
 
 describe("getWatchedInvalidationKeys", () => {
@@ -143,6 +183,22 @@ describe("getWatchedInvalidationKeys", () => {
       episodeKeys.all,
       catalogKeys.itemEpisodes("season-2"),
       episodeKeys.byItem("season-2"),
+    ]);
+  });
+
+  it("includes the ebook reader progress query for an ebook target", () => {
+    expect(
+      getWatchedInvalidationKeys(
+        makeItem({
+          content_id: "ebook-1",
+          type: "ebook",
+        }),
+      ),
+    ).toEqual([
+      catalogKeys.itemDetail("ebook-1"),
+      itemKeys.detail("ebook-1"),
+      progressKeys.all,
+      ebookKeys.readerProgress("ebook-1"),
     ]);
   });
 
