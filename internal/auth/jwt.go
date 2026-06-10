@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -36,29 +37,37 @@ const (
 const PluginAccessCookieName = "silo_plugin_access"
 
 // JWTService handles JWT token generation and validation using HMAC-SHA256.
+// The expiry durations are atomics so they can be hot-reloaded from admin
+// settings while tokens are being generated; the secret is fixed for the
+// service lifetime (changing it would invalidate every outstanding token).
 type JWTService struct {
 	secret        []byte
-	accessExpiry  time.Duration
-	refreshExpiry time.Duration
+	accessExpiry  atomic.Int64 // nanoseconds
+	refreshExpiry atomic.Int64 // nanoseconds
 }
 
 // NewJWTService creates a new JWTService with the given secret and expiry durations.
 func NewJWTService(secret string, accessExpiry, refreshExpiry time.Duration) *JWTService {
-	return &JWTService{
-		secret:        []byte(secret),
-		accessExpiry:  accessExpiry,
-		refreshExpiry: refreshExpiry,
-	}
+	j := &JWTService{secret: []byte(secret)}
+	j.SetExpiries(accessExpiry, refreshExpiry)
+	return j
+}
+
+// SetExpiries updates the token expiry durations. Safe for concurrent use;
+// applies to tokens generated afterwards.
+func (j *JWTService) SetExpiries(access, refresh time.Duration) {
+	j.accessExpiry.Store(int64(access))
+	j.refreshExpiry.Store(int64(refresh))
 }
 
 // AccessExpiry returns the configured access token expiry duration.
 func (j *JWTService) AccessExpiry() time.Duration {
-	return j.accessExpiry
+	return time.Duration(j.accessExpiry.Load())
 }
 
 // RefreshExpiry returns the configured refresh token expiry duration.
 func (j *JWTService) RefreshExpiry() time.Duration {
-	return j.refreshExpiry
+	return time.Duration(j.refreshExpiry.Load())
 }
 
 // GenerateAccessToken creates a signed JWT access token with the configured
@@ -93,11 +102,11 @@ func (j *JWTService) GeneratePluginAccessToken(userID int, role, sessionID strin
 }
 
 func (j *JWTService) generateAccessToken(claims Claims) (string, error) {
-	return j.generateToken(claims, TokenTypeAccess, j.accessExpiry)
+	return j.generateToken(claims, TokenTypeAccess, j.AccessExpiry())
 }
 
 func (j *JWTService) generateRefreshToken(claims Claims) (string, error) {
-	return j.generateToken(claims, TokenTypeRefresh, j.refreshExpiry)
+	return j.generateToken(claims, TokenTypeRefresh, j.RefreshExpiry())
 }
 
 // generateToken creates a signed JWT with the given claims and expiry duration.

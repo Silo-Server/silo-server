@@ -1668,6 +1668,9 @@ func main() {
 			cfg.Auth.AccessTokenExpiry,
 			cfg.Auth.RefreshTokenExpiry,
 		)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			absJWTService.SetExpiries(updated.Auth.AccessTokenExpiry, updated.Auth.RefreshTokenExpiry)
+		})
 		absAuthSvc := auth.NewService(
 			auth.NewLocalProvider(absUserRepo, absSessionRepo),
 			absJWTService,
@@ -2000,6 +2003,9 @@ func main() {
 				cfg.Auth.AccessTokenExpiry,
 				cfg.Auth.RefreshTokenExpiry,
 			)
+			configWatcher.OnChange(func(_, updated *config.Config) {
+				jwtService.SetExpiries(updated.Auth.AccessTokenExpiry, updated.Auth.RefreshTokenExpiry)
+			})
 			provider := auth.NewLocalProvider(userRepo, sessionRepo)
 			compatDeps.AuthService = auth.NewService(provider, jwtService, sessionRepo, userRepo, nil, nil, nil)
 

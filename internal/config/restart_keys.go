@@ -21,10 +21,8 @@ var restartRequiredKeys = map[string]bool{
 	"opslog.capture_level": true,
 
 	// Auth. The JWT secret is baked into token services and stream signers;
-	// expiries are frozen until the JWT conversion lands.
-	"auth.jwt_secret":           true,
-	"auth.access_token_expiry":  true,
-	"auth.refresh_token_expiry": true,
+	// the expiry durations hot-reload (new tokens only).
+	"auth.jwt_secret": true,
 
 	// Rate limiting gates middleware construction; tier/limit values inside
 	// the dedicated /admin/rate-limits endpoint hot-reload and report their

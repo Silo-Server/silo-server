@@ -279,6 +279,12 @@ func NewRouter(deps Dependencies) chi.Router {
 			deps.Config.Auth.AccessTokenExpiry,
 			deps.Config.Auth.RefreshTokenExpiry,
 		)
+		if deps.OnConfigChange != nil {
+			jwtForReload := jwtService
+			deps.OnConfigChange(func(_, updated *config.Config) {
+				jwtForReload.SetExpiries(updated.Auth.AccessTokenExpiry, updated.Auth.RefreshTokenExpiry)
+			})
+		}
 		provider := auth.NewLocalProvider(userRepo, sessionRepo)
 		authService = auth.NewService(
 			provider,
