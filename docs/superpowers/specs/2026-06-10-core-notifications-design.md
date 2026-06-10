@@ -182,3 +182,7 @@ Same three features in silo-apple and silo-android against the frozen REST API: 
 - Request unification: core `request.*` events replace the book plugins' `notifications.send` publishes; notifications unchanged.
 - Push: APNs/FCM device registry; the notifier gains a push fan-out alongside WS.
 - Digest scheduling preferences (weekly, time-of-day).
+- Profile claims enrichment: embed `is_child` in profile-scoped auth claims. Fixes two implementation-time findings: the WS pipeline cannot child-filter (snapshot and live frames use client-asserted profile identity; REST remains authoritative and fails closed — see the snapshot comment in `internal/api/handlers/events_ws.go`), and the REST `childSafe` check costs one profile lookup per request.
+- Admin-alert coverage: only `job.failed` and `scan.failed` events exist today. `task.failed` and plugin-host crash events are not published by their subsystems yet; when they are, the admin matcher needs only a map entry.
+- Dedicated `item_added` catalog event: the content matcher keys on `catalog.item.changed` (`metadata_updated`) plus a 48-hour `media_items.created_at` recency gate, because the scanner publishes no per-item add event. An explicit ingest-time event would remove the proxy heuristic.
+- New-device login notifications: deferred from v1 (no device-fingerprint store exists); password-change notifications shipped.
