@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 	"github.com/jackc/pgx/v5"
@@ -224,29 +224,22 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		return fmt.Errorf("parse ebook file %s: %w", filePath, err)
 	}
 	if parsed.Title == "" {
-		parsed.Title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		parsed.Title = ebookTitleFromPath(filePath)
 	}
 
-	unlock := groupLocks.lock(ebookContentGroupKey(&parsed, filePath))
+	groupKey := ebookContentGroupKey(&parsed, filePath)
+	unlock := groupLocks.lock(groupKey)
 	defer unlock()
 
-	contentID, err := s.upsertEbookMediaItem(ctx, folder.ID, filePath, &parsed)
+	contentID, err := s.upsertEbookMediaItem(ctx, folder.ID, filePath, &parsed, groupKey)
 	if err != nil {
 		return fmt.Errorf("upsert ebook item: %w", err)
 	}
-	if err := s.upsertEbookMediaFile(ctx, folder, contentID, filePath, size, modifiedAt, &parsed); err != nil {
+	if err := s.upsertEbookMediaFile(ctx, folder, contentID, filePath, size, modifiedAt, &parsed, groupKey); err != nil {
 		return fmt.Errorf("upsert ebook file: %w", err)
 	}
-	if err := applyEbookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, filePath); err != nil {
-		slog.Warn("ebook scan: sidecar cover upload failed",
-			"folder_id", folder.ID,
-			"content_id", contentID,
-			"path", filePath,
-			"error", err,
-		)
-	}
-	if err := applyEbookEmbeddedCover(ctx, s.itemRepo, s.imageCacher, contentID, &parsed); err != nil {
-		slog.Warn("ebook scan: embedded cover upload failed",
+	if err := applyEbookLocalCover(ctx, s.itemRepo, s.imageCacher, contentID, filePath, &parsed); err != nil {
+		slog.Warn("ebook scan: local cover upload failed",
 			"folder_id", folder.ID,
 			"content_id", contentID,
 			"path", filePath,
@@ -295,6 +288,12 @@ func (s *Scanner) ebookFileShouldSkip(ctx context.Context, folder *models.MediaF
 	if mf.ContentID == "" {
 		return false, nil
 	}
+	if mf.GroupKeyVersion != ebookGroupKeyVersion {
+		// The grouping scheme changed since this row was written; reprocess
+		// once so the stored key is rewritten under the current scheme and
+		// sibling-format lookups can find it again.
+		return false, nil
+	}
 	statuses, err := s.itemRepo.GetStatusByIDs(ctx, []string{mf.ContentID})
 	if err != nil {
 		return false, fmt.Errorf("get item status: %w", err)
@@ -302,7 +301,7 @@ func (s *Scanner) ebookFileShouldSkip(ctx context.Context, folder *models.MediaF
 	return !strings.EqualFold(strings.TrimSpace(statuses[mf.ContentID]), "unmatched"), nil
 }
 
-func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePath string, book *parsedEbook) (string, error) {
+func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePath string, book *parsedEbook, groupKey string) (string, error) {
 	if s.itemRepo == nil {
 		return "", fmt.Errorf("itemRepo not configured on Scanner")
 	}
@@ -330,7 +329,13 @@ func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePa
 		}
 		return existing.ContentID, nil
 	}
-	if existing := s.findEbookByContentGroupKey(ctx, folderID, ebookContentGroupKey(book, filePath)); existing != nil {
+	if existing := s.findEbookByContentGroupKey(ctx, folderID, groupKey, book.Format, filePath); existing != nil {
+		// The sibling file joins the group either way, but curated metadata
+		// on a provider-matched item must not be clobbered by whatever this
+		// file happens to embed.
+		if strings.EqualFold(strings.TrimSpace(existing.Status), "matched") {
+			return existing.ContentID, nil
+		}
 		applyEbookToMediaItem(existing, book)
 		if existing.SortTitle == "" {
 			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
@@ -367,7 +372,7 @@ func resolveEbookMediaItem(
 
 	cleanTitle := strings.TrimSpace(book.Title)
 	if cleanTitle == "" {
-		cleanTitle = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		cleanTitle = ebookTitleFromPath(filePath)
 	}
 	return createEbookMediaItem(ctx, itemWriter, book, cleanTitle)
 }
@@ -465,7 +470,13 @@ func (s *Scanner) findEbookByFilePath(ctx context.Context, filePath string) *mod
 	return items[0]
 }
 
-func (s *Scanner) findEbookByContentGroupKey(ctx context.Context, folderID int, groupKey string) *models.MediaItem {
+// findEbookByContentGroupKey locates an existing item that a sibling format of
+// the same book should join. Grouping merges *different* formats only: an item
+// that already owns another file of the same format is excluded, so two
+// distinct books whose sparse metadata collides on the same key (e.g. every
+// volume carrying the series name as its title) stay separate items instead of
+// silently merging.
+func (s *Scanner) findEbookByContentGroupKey(ctx context.Context, folderID int, groupKey string, format string, filePath string) *models.MediaItem {
 	if s.fileRepo == nil || s.itemRepo == nil || strings.TrimSpace(groupKey) == "" {
 		return nil
 	}
@@ -475,14 +486,21 @@ func (s *Scanner) findEbookByContentGroupKey(ctx context.Context, folderID int, 
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
-		  AND mf.group_key_version = 1
-		  AND mf.content_group_key = $2
+		  AND mf.group_key_version = $2
+		  AND mf.content_group_key = $3
 		  AND mf.missing_since IS NULL
 		  AND mi.type = 'ebook'
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_files dup
+			WHERE dup.content_id = mf.content_id
+			  AND dup.missing_since IS NULL
+			  AND lower(dup.container) = lower($4)
+			  AND dup.file_path <> $5
+		  )
 		ORDER BY CASE WHEN lower(trim(mi.status)) = 'matched' THEN 0 ELSE 1 END,
 		         mf.id ASC
 		LIMIT 1
-	`, folderID, groupKey).Scan(&existingID)
+	`, folderID, ebookGroupKeyVersion, groupKey, format, filePath).Scan(&existingID)
 	if err != nil || existingID == "" {
 		return nil
 	}
@@ -493,22 +511,28 @@ func (s *Scanner) findEbookByContentGroupKey(ctx context.Context, folderID int, 
 	return items[0]
 }
 
-func (s *Scanner) upsertEbookMediaFile(ctx context.Context, folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook) error {
-	mf := buildEbookMediaFile(folder, contentID, filePath, size, modifiedAt, book)
+// ebookGroupKeyVersion versions the ebookContentGroupKey scheme. Bump it
+// whenever the key shape changes so rows keyed under an older scheme are
+// reprocessed and re-keyed (see ebookFileShouldSkip) instead of silently never
+// matching sibling-format lookups again.
+const ebookGroupKeyVersion = 2
+
+func (s *Scanner) upsertEbookMediaFile(ctx context.Context, folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook, groupKey string) error {
+	mf := buildEbookMediaFile(folder, contentID, filePath, size, modifiedAt, book, groupKey)
 	if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
 		return fmt.Errorf("upsert media file %s: %w", filePath, err)
 	}
 	return nil
 }
 
-func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook) models.MediaFile {
+func buildEbookMediaFile(folder *models.MediaFolder, contentID string, filePath string, size int64, modifiedAt time.Time, book *parsedEbook, groupKey string) models.MediaFile {
 	return models.MediaFile{
 		ContentID:          contentID,
 		MediaFolderID:      folder.ID,
 		CanonicalRootPath:  filePath,
 		ObservedRootPath:   filePath,
-		ContentGroupKey:    ebookContentGroupKey(book, filePath),
-		GroupKeyVersion:    1,
+		ContentGroupKey:    groupKey,
+		GroupKeyVersion:    ebookGroupKeyVersion,
 		BaseTitle:          book.Title,
 		BaseYear:           book.Year,
 		BaseType:           "ebook",
@@ -577,8 +601,10 @@ func ebookTitleFromPath(filePath string) string {
 	if base == "." || base == string(filepath.Separator) {
 		return ""
 	}
-	if format := ebookFileFormat(base); format != "" {
-		return strings.TrimSuffix(base, format)
+	// ".fb2.zip" is a double extension that filepath.Ext (and the
+	// normalized ".fbz" format token) would leave half-stripped.
+	if strings.HasSuffix(strings.ToLower(base), ".fb2.zip") {
+		return base[:len(base)-len(".fb2.zip")]
 	}
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
@@ -628,85 +654,129 @@ func (l *ebookGroupLocks) lock(key string) func() {
 	return groupLock.Unlock
 }
 
+// localEbookPosterPrefix mirrors the storage layout produced by
+// imagecache.CacheEbookCover ("local/ebooks/{contentID}/poster/..."); it marks
+// posters this pipeline owns and is therefore allowed to refresh.
+const localEbookPosterPrefix = "local/ebooks/"
+
 type ebookCoverMetadataStore interface {
-	GetPosterPath(ctx context.Context, contentID string) (string, error)
-	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error
+	GetPoster(ctx context.Context, contentID string) (posterPath string, posterThumbhash string, err error)
+	SetLocalPoster(ctx context.Context, contentID, posterPath, thumbhash, localPrefix string) (bool, error)
 }
 
-func applyEbookEmbeddedCover(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, book *parsedEbook) error {
-	if store == nil || cacher == nil || contentID == "" || book == nil || book.Cover == nil || len(book.Cover.Bytes) == 0 {
+// applyEbookLocalCover records the best locally available cover for the file:
+// a sidecar image that belongs to this book wins over the embedded cover, and
+// exactly one cover is applied per reconcile. A sidecar discovery error does
+// not block the embedded fallback.
+func applyEbookLocalCover(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, ebookFilePath string, book *parsedEbook) error {
+	if store == nil || cacher == nil || contentID == "" {
 		return nil
 	}
-	return cacheEbookCoverBytes(ctx, store, cacher, contentID, book.Cover.Bytes)
-}
-
-func applyEbookSidecarCover(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, ebookFilePath string) error {
-	if store == nil || cacher == nil || contentID == "" || ebookFilePath == "" {
-		return nil
+	var data []byte
+	var sidecarErr error
+	if ebookFilePath != "" {
+		cover, _, err := findSidecarBookCover(ebookFilePath)
+		if err != nil {
+			sidecarErr = err
+		} else if cover != nil {
+			data = cover.Bytes
+		}
 	}
-	cover, _, err := findSidecarBookCover(filepath.Dir(ebookFilePath))
-	if err != nil || cover == nil {
-		return err
+	if len(data) == 0 && book != nil && book.Cover != nil {
+		data = book.Cover.Bytes
 	}
-	return cacheEbookCoverBytes(ctx, store, cacher, contentID, cover.Bytes)
+	if len(data) == 0 {
+		return sidecarErr
+	}
+	return errors.Join(sidecarErr, cacheEbookCoverBytes(ctx, store, cacher, contentID, data))
 }
 
 func cacheEbookCoverBytes(ctx context.Context, store ebookCoverMetadataStore, cacher ebookCoverCacher, contentID string, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	existingPosterPath, err := store.GetPosterPath(ctx, contentID)
+	existingPath, existingThumbhash, err := store.GetPoster(ctx, contentID)
 	if err != nil {
-		return fmt.Errorf("get ebook poster path for cover: %w", err)
+		return fmt.Errorf("get ebook poster for cover: %w", err)
 	}
-	if strings.TrimSpace(existingPosterPath) != "" {
-		return nil
+	existingPath = strings.TrimSpace(existingPath)
+	if existingPath != "" {
+		// Provider or manually applied artwork always wins over scan covers.
+		if !strings.HasPrefix(existingPath, localEbookPosterPrefix) {
+			return nil
+		}
+		// Re-extracted bytes of an unchanged cover hash identically; skip
+		// the variant regeneration and upload churn. A replaced cover hashes
+		// differently and falls through to refresh the stale poster.
+		if thumbhash, err := imageutil.Thumbhash(data); err == nil && thumbhash == existingThumbhash {
+			return nil
+		}
 	}
 	basePath, ext, thumbhash, err := cacher.CacheEbookCover(ctx, data, contentID)
 	if err != nil {
 		return err
 	}
 	posterPath := strings.TrimRight(basePath, "/") + "/original" + ext
-	update := &catalog.MetadataUpdate{PosterPath: &posterPath}
-	if thumbhash != "" {
-		update.PosterThumbhash = &thumbhash
+	if _, err := store.SetLocalPoster(ctx, contentID, posterPath, thumbhash, localEbookPosterPrefix); err != nil {
+		return fmt.Errorf("set ebook local poster: %w", err)
 	}
-	return store.UpdateMetadata(ctx, contentID, update)
+	return nil
 }
 
 var sidecarCoverNames = []string{"cover", "folder", "front", "poster", "thumbnail"}
 var sidecarCoverExtensions = []string{".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".bmp"}
 
-func findSidecarBookCover(dir string) (*parsedEbookCover, string, error) {
-	if dir == "" {
+// findSidecarBookCover looks for cover art next to the ebook file. An image
+// named after the book file always belongs to it; the generic artwork names
+// (cover.jpg, folder.png, ...) are trusted only when this is the directory's
+// sole ebook, so one cover.jpg in a flat multi-book folder is not applied to
+// every book in it.
+func findSidecarBookCover(ebookFilePath string) (*parsedEbookCover, string, error) {
+	if ebookFilePath == "" {
 		return nil, "", nil
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(filepath.Dir(ebookFilePath))
 	if err != nil {
 		return nil, "", err
 	}
 	byName := make(map[string]string, len(entries))
+	ebookCount := 0
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		byName[strings.ToLower(entry.Name())] = filepath.Join(dir, entry.Name())
-	}
-	for _, name := range sidecarCoverNames {
-		for _, ext := range sidecarCoverExtensions {
-			path := byName[name+ext]
-			if path == "" {
-				continue
-			}
-			data, err := readSidecarCover(path)
-			if err != nil {
-				return nil, path, err
-			}
-			return &parsedEbookCover{
-				ContentType: ebookImageContentType(path),
-				Bytes:       data,
-			}, path, nil
+		if SupportsEbookFile(entry.Name()) {
+			ebookCount++
 		}
+		byName[strings.ToLower(entry.Name())] = filepath.Join(filepath.Dir(ebookFilePath), entry.Name())
+	}
+
+	var candidates []string
+	if base := strings.ToLower(ebookTitleFromPath(ebookFilePath)); base != "" {
+		for _, ext := range sidecarCoverExtensions {
+			candidates = append(candidates, base+ext)
+		}
+	}
+	if ebookCount <= 1 {
+		for _, name := range sidecarCoverNames {
+			for _, ext := range sidecarCoverExtensions {
+				candidates = append(candidates, name+ext)
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		path := byName[candidate]
+		if path == "" {
+			continue
+		}
+		data, err := readSidecarCover(path)
+		if err != nil {
+			return nil, path, err
+		}
+		return &parsedEbookCover{
+			ContentType: ebookImageContentType(path),
+			Bytes:       data,
+		}, path, nil
 	}
 	return nil, "", nil
 }
