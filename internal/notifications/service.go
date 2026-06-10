@@ -108,7 +108,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) error {
 		ProfileID: in.ProfileID,
 		AdminOnly: n.Category == CategoryAdmin,
 	}); err != nil {
-		slog.Warn("notifications: publish failed", "error", err, "notification_id", n.ID)
+		slog.WarnContext(ctx, "notifications: publish failed", "error", err, "notification_id", n.ID)
 	}
 	return nil
 }

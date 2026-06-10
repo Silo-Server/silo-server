@@ -210,3 +210,33 @@ func TestCreate_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCreate_DigestAbsentPrefSuppressed(t *testing.T) {
+	store := &fakeStore{}
+	svc, _ := newTestService(store)
+	err := svc.Create(context.Background(), CreateInput{
+		UserID: 7, Category: CategoryContent, Type: TypeContentDigest, Title: "Digest",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(store.inserted) != 0 {
+		t.Fatalf("digest without opt-in was inserted")
+	}
+}
+
+func TestCreate_DigestOptInInserts(t *testing.T) {
+	store := &fakeStore{prefs: map[int]map[Category]bool{
+		7: {CategoryContentDigest: true},
+	}}
+	svc, _ := newTestService(store)
+	err := svc.Create(context.Background(), CreateInput{
+		UserID: 7, Category: CategoryContent, Type: TypeContentDigest, Title: "Digest",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("opted-in digest was not inserted: %d", len(store.inserted))
+	}
+}
