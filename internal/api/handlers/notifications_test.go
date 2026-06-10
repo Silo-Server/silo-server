@@ -16,7 +16,33 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// ---------------------------------------------------------------------------
+// Fake profile resolver for child-safe tests.
+// ---------------------------------------------------------------------------
+
+// fakeProfileStore satisfies userstore.UserStore minimally.
+// Only GetProfile is exercised by childSafe.
+type fakeProfileStore struct {
+	userstore.UserStore // embed for unimplemented methods
+	isChild            bool
+}
+
+func (s *fakeProfileStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
+	return &userstore.Profile{ID: id, IsChild: s.isChild}, nil
+}
+
+// fakeResolverAsProfileResolver implements the profileResolver interface used
+// by NotificationsHandler.
+type fakeResolverAsProfileResolver struct {
+	isChild bool
+}
+
+func (f *fakeResolverAsProfileResolver) ForUser(_ context.Context, _ int) (userstore.UserStore, error) {
+	return &fakeProfileStore{isChild: f.isChild}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Fake store implementing notifications.Store for handler tests.
@@ -35,6 +61,9 @@ type fakeNotificationsStore struct {
 	setPrefErr        error
 	deleteAnnouncementErr error
 	insertCalled      bool
+
+	// capturedFilter records the most recent ListFilter passed to List.
+	capturedFilter *notifications.ListFilter
 }
 
 func (f *fakeNotificationsStore) Insert(_ context.Context, n *notifications.Notification) (bool, error) {
@@ -43,7 +72,8 @@ func (f *fakeNotificationsStore) Insert(_ context.Context, n *notifications.Noti
 	return true, nil
 }
 
-func (f *fakeNotificationsStore) List(_ context.Context, _ notifications.ListFilter) ([]*notifications.Notification, error) {
+func (f *fakeNotificationsStore) List(_ context.Context, filter notifications.ListFilter) ([]*notifications.Notification, error) {
+	f.capturedFilter = &filter
 	return f.list, nil
 }
 
@@ -119,6 +149,12 @@ func newTestNotificationsHandler(store *fakeNotificationsStore) *NotificationsHa
 	hub := evt.NewHub("test", nil)
 	svc := notifications.NewService(store, hub)
 	return NewNotificationsHandler(svc)
+}
+
+func newTestNotificationsHandlerWithResolver(store *fakeNotificationsStore, resolver profileResolver) *NotificationsHandler {
+	hub := evt.NewHub("test", nil)
+	svc := notifications.NewService(store, hub)
+	return NewNotificationsHandler(svc, resolver)
 }
 
 // notifUserRequest creates an authenticated request with a profile ID.
@@ -484,6 +520,76 @@ func TestNotificationsHandleListAnnouncements_ReturnsItems(t *testing.T) {
 	}
 	if len(resp.Items) != 1 {
 		t.Fatalf("items count = %d, want 1", len(resp.Items))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: ChildSafe profile filtering
+// ---------------------------------------------------------------------------
+
+// TestNotificationsList_ChildProfileFiltered asserts that when the profile
+// resolver reports IsChild=true, the ListFilter passed to the store has
+// ChildSafe=true.
+func TestNotificationsList_ChildProfileFiltered(t *testing.T) {
+	store := &fakeNotificationsStore{}
+	resolver := &fakeResolverAsProfileResolver{isChild: true}
+	h := newTestNotificationsHandlerWithResolver(store, resolver)
+
+	rec := httptest.NewRecorder()
+	req := notifUserRequest(http.MethodGet, "/notifications", nil, 1, "prof-child")
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if store.capturedFilter == nil {
+		t.Fatal("List was not called; capturedFilter is nil")
+	}
+	if !store.capturedFilter.ChildSafe {
+		t.Fatalf("capturedFilter.ChildSafe = false, want true for child profile")
+	}
+}
+
+// TestNotificationsList_AdultProfileNotFiltered asserts that a non-child
+// profile leaves ChildSafe=false in the ListFilter.
+func TestNotificationsList_AdultProfileNotFiltered(t *testing.T) {
+	store := &fakeNotificationsStore{}
+	resolver := &fakeResolverAsProfileResolver{isChild: false}
+	h := newTestNotificationsHandlerWithResolver(store, resolver)
+
+	rec := httptest.NewRecorder()
+	req := notifUserRequest(http.MethodGet, "/notifications", nil, 1, "prof-adult")
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if store.capturedFilter == nil {
+		t.Fatal("List was not called; capturedFilter is nil")
+	}
+	if store.capturedFilter.ChildSafe {
+		t.Fatalf("capturedFilter.ChildSafe = true, want false for non-child profile")
+	}
+}
+
+// TestNotificationsList_NilResolverDefaultsToFalse asserts that when no
+// resolver is wired (nil), ChildSafe remains false.
+func TestNotificationsList_NilResolverDefaultsToFalse(t *testing.T) {
+	store := &fakeNotificationsStore{}
+	h := newTestNotificationsHandler(store) // no resolver
+
+	rec := httptest.NewRecorder()
+	req := notifUserRequest(http.MethodGet, "/notifications", nil, 1, "prof-1")
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if store.capturedFilter == nil {
+		t.Fatal("List was not called; capturedFilter is nil")
+	}
+	if store.capturedFilter.ChildSafe {
+		t.Fatalf("capturedFilter.ChildSafe = true, want false when no resolver is wired")
 	}
 }
 

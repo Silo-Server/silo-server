@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -10,16 +12,49 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// profileResolver is the minimal interface NotificationsHandler needs from the
+// userstore provider. Defined on the handler side so tests can stub it without
+// importing the full provider.
+type profileResolver interface {
+	ForUser(ctx context.Context, userID int) (userstore.UserStore, error)
+}
 
 // NotificationsHandler handles inbox, preferences, and announcement endpoints.
 type NotificationsHandler struct {
-	svc *notifications.Service
+	svc      *notifications.Service
+	profiles profileResolver // nil-tolerant: ChildSafe=false when absent
 }
 
 // NewNotificationsHandler creates a new NotificationsHandler.
-func NewNotificationsHandler(svc *notifications.Service) *NotificationsHandler {
-	return &NotificationsHandler{svc: svc}
+// provider may be nil; when nil, ChildSafe defaults to false on all requests.
+func NewNotificationsHandler(svc *notifications.Service, provider ...profileResolver) *NotificationsHandler {
+	h := &NotificationsHandler{svc: svc}
+	if len(provider) > 0 {
+		h.profiles = provider[0]
+	}
+	return h
+}
+
+// childSafe resolves the active profile and returns Profile.IsChild.
+// Returns false on any error; logs at debug level only — never fails the request.
+func (h *NotificationsHandler) childSafe(r *http.Request, userID int, profileID string) bool {
+	if h.profiles == nil || userID == 0 || profileID == "" {
+		return false
+	}
+	store, err := h.profiles.ForUser(r.Context(), userID)
+	if err != nil {
+		slog.Debug("notifications: childSafe: ForUser failed", "user_id", userID, "error", err)
+		return false
+	}
+	p, err := store.GetProfile(r.Context(), profileID)
+	if err != nil || p == nil {
+		slog.Debug("notifications: childSafe: GetProfile failed", "profile_id", profileID, "error", err)
+		return false
+	}
+	return p.IsChild
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +84,7 @@ func (h *NotificationsHandler) HandleList(w http.ResponseWriter, r *http.Request
 		UserID:    userID,
 		ProfileID: profileID,
 		Limit:     limit,
+		ChildSafe: h.childSafe(r, userID, profileID),
 	}
 	if q.Get("unread") == "1" {
 		f.UnreadOnly = true
@@ -89,7 +125,7 @@ func (h *NotificationsHandler) HandleUnreadCount(w http.ResponseWriter, r *http.
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
-	count, err := h.svc.UnreadCount(r.Context(), userID, profileID, false)
+	count, err := h.svc.UnreadCount(r.Context(), userID, profileID, h.childSafe(r, userID, profileID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get unread count")
 		return

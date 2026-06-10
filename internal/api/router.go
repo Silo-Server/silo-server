@@ -1648,7 +1648,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				// Notifications inbox and preferences (profile-scoped).
 				if deps.NotificationsService != nil {
-					notificationsHandler := handlers.NewNotificationsHandler(deps.NotificationsService)
+					notificationsHandler := handlers.NewNotificationsHandler(deps.NotificationsService, deps.UserStoreProvider)
 					r.Route("/notifications", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", notificationsHandler.HandleList)
@@ -2415,7 +2415,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/logs/ws", adminLogsHandler.HandleLogStreamWebSocket)
 							}
 							if deps.NotificationsService != nil {
-								notificationsHandler := handlers.NewNotificationsHandler(deps.NotificationsService)
+								notificationsHandler := handlers.NewNotificationsHandler(deps.NotificationsService, deps.UserStoreProvider)
 								r.Route("/announcements", func(r chi.Router) {
 									r.Get("/", notificationsHandler.HandleListAnnouncements)
 									r.Post("/", notificationsHandler.HandleCreateAnnouncement)
