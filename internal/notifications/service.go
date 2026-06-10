@@ -200,6 +200,38 @@ func (s *Service) CreateSystem(ctx context.Context, userID int, typ, title, body
 	}
 }
 
+// RunDailyDigest creates one digest notification per opted-in user summarizing
+// catalog additions in their accessible libraries over the lookback window.
+func (s *Service) RunDailyDigest(ctx context.Context, since time.Time) error {
+	subs, err := s.store.DigestSubscribers(ctx)
+	if err != nil {
+		return fmt.Errorf("notifications: digest subscribers: %w", err)
+	}
+	dedupRef := "digest:" + time.Now().UTC().Format("20060102")
+	for _, uid := range subs {
+		count, err := s.store.AddedItemCountForUser(ctx, uid, since)
+		if err != nil {
+			slog.WarnContext(ctx, "notifications: digest count failed", "user_id", uid, "error", err)
+			continue
+		}
+		if count == 0 {
+			continue
+		}
+		if err := s.Create(ctx, CreateInput{
+			UserID:   uid,
+			Category: CategoryContent,
+			Type:     TypeContentDigest,
+			Title:    "New in your libraries",
+			Body:     fmt.Sprintf("%d new items were added in the last day", count),
+			Link:     "/recently-added",
+			DedupRef: dedupRef,
+		}); err != nil {
+			slog.WarnContext(ctx, "notifications: digest create failed", "user_id", uid, "error", err)
+		}
+	}
+	return nil
+}
+
 // Create validates, applies preferences, inserts (idempotent on DedupRef) and
 // publishes notification.created for live clients. A dedup conflict is not an
 // error and publishes nothing.

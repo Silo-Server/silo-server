@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,11 @@ type fakeStore struct {
 	// recorded args for dismiss calls
 	dismissTyp      string
 	dismissDedupRef string
+
+	// digest support
+	digestSubs  []int
+	addedCounts map[int]int           // userID → count
+	addedErrors map[int]error         // userID → error (optional per-user error)
 }
 
 func (f *fakeStore) Insert(_ context.Context, n *Notification) (bool, error) {
@@ -67,6 +73,22 @@ func (f *fakeStore) DismissUnreadByTypeAndRef(_ context.Context, typ, dedupRef s
 }
 
 func (f *fakeStore) DeleteAnnouncement(context.Context, int64) error { return nil }
+
+func (f *fakeStore) DigestSubscribers(context.Context) ([]int, error) {
+	return f.digestSubs, nil
+}
+
+func (f *fakeStore) AddedItemCountForUser(_ context.Context, userID int, _ time.Time) (int, error) {
+	if f.addedErrors != nil {
+		if err, ok := f.addedErrors[userID]; ok {
+			return 0, err
+		}
+	}
+	if f.addedCounts != nil {
+		return f.addedCounts[userID], nil
+	}
+	return 0, nil
+}
 
 func newTestService(store Store) (*Service, *evt.Hub) {
 	hub := evt.NewHub("test-node", nil)
@@ -438,5 +460,107 @@ func TestCreateSystem_StoreFailureDoesNotPanic(t *testing.T) {
 
 	if len(store.inserted) != 0 {
 		t.Errorf("expected 0 insertions on store error, got %d", len(store.inserted))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RunDailyDigest tests
+// ---------------------------------------------------------------------------
+
+func TestRunDailyDigest_OptedInUserGetsOne(t *testing.T) {
+	store := &fakeStore{
+		digestSubs:  []int{7},
+		addedCounts: map[int]int{7: 3},
+		prefs: map[int]map[Category]bool{
+			7: {CategoryContentDigest: true},
+		},
+	}
+	svc, _ := newTestService(store)
+
+	err := svc.RunDailyDigest(context.Background(), time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("RunDailyDigest returned error: %v", err)
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 inserted notification, got %d", len(store.inserted))
+	}
+	n := store.inserted[0]
+	if n.UserID != 7 {
+		t.Errorf("expected user_id 7, got %d", n.UserID)
+	}
+	if n.Type != TypeContentDigest {
+		t.Errorf("expected type %q, got %q", TypeContentDigest, n.Type)
+	}
+	if n.Title != "New in your libraries" {
+		t.Errorf("expected title %q, got %q", "New in your libraries", n.Title)
+	}
+	if !strings.Contains(n.Body, "3") {
+		t.Errorf("expected body to contain count %q, got %q", "3", n.Body)
+	}
+}
+
+func TestRunDailyDigest_ZeroCountSkipped(t *testing.T) {
+	store := &fakeStore{
+		digestSubs:  []int{7},
+		addedCounts: map[int]int{7: 0},
+		prefs: map[int]map[Category]bool{
+			7: {CategoryContentDigest: true},
+		},
+	}
+	svc, _ := newTestService(store)
+
+	err := svc.RunDailyDigest(context.Background(), time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("RunDailyDigest returned error: %v", err)
+	}
+	if len(store.inserted) != 0 {
+		t.Errorf("expected 0 notifications for zero count, got %d", len(store.inserted))
+	}
+}
+
+func TestRunDailyDigest_SameDayRerunDedups(t *testing.T) {
+	store := &fakeStore{
+		digestSubs:  []int{7},
+		addedCounts: map[int]int{7: 5},
+		prefs: map[int]map[Category]bool{
+			7: {CategoryContentDigest: true},
+		},
+	}
+	svc, _ := newTestService(store)
+
+	since := time.Now().Add(-24 * time.Hour)
+	if err := svc.RunDailyDigest(context.Background(), since); err != nil {
+		t.Fatalf("first RunDailyDigest: %v", err)
+	}
+	if err := svc.RunDailyDigest(context.Background(), since); err != nil {
+		t.Fatalf("second RunDailyDigest: %v", err)
+	}
+
+	if len(store.inserted) != 1 {
+		t.Errorf("expected 1 notification after two same-day runs (dedup), got %d", len(store.inserted))
+	}
+}
+
+func TestRunDailyDigest_CountErrorContinues(t *testing.T) {
+	store := &fakeStore{
+		digestSubs:  []int{7, 8},
+		addedCounts: map[int]int{8: 2},
+		addedErrors: map[int]error{7: errors.New("db timeout")},
+		prefs: map[int]map[Category]bool{
+			7: {CategoryContentDigest: true},
+			8: {CategoryContentDigest: true},
+		},
+	}
+	svc, _ := newTestService(store)
+
+	err := svc.RunDailyDigest(context.Background(), time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("RunDailyDigest returned error on count failure: %v", err)
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 notification (user 7 skipped, user 8 notified), got %d", len(store.inserted))
+	}
+	if store.inserted[0].UserID != 8 {
+		t.Errorf("expected notification for user 8, got user %d", store.inserted[0].UserID)
 	}
 }

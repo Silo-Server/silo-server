@@ -36,6 +36,8 @@ type Store interface {
 	AdminUserIDs(ctx context.Context) ([]int, error)
 	UserIDsWithLibraryAccess(ctx context.Context, libraryID int) ([]int, error)
 	AllEnabledUserIDs(ctx context.Context) ([]int, error)
+	DigestSubscribers(ctx context.Context) ([]int, error)
+	AddedItemCountForUser(ctx context.Context, userID int, since time.Time) (int, error)
 }
 
 // Repository implements Store against a pgxpool.
@@ -444,6 +446,54 @@ func (r *Repository) UserIDsWithLibraryAccess(ctx context.Context, libraryID int
 		return nil, fmt.Errorf("iterate user ids with library access: %w", err)
 	}
 	return out, nil
+}
+
+// DigestSubscribers returns IDs of enabled users who opted into the daily digest.
+func (r *Repository) DigestSubscribers(ctx context.Context) ([]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT p.user_id
+		FROM notification_preferences p
+		JOIN users u ON u.id = p.user_id AND u.enabled = true
+		WHERE p.category = 'content_digest'
+		  AND p.enabled = true
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("digest subscribers: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan digest subscriber: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate digest subscribers: %w", err)
+	}
+	return ids, nil
+}
+
+// AddedItemCountForUser counts distinct catalog items added since `since` in
+// libraries the user can access.  A NULL library_ids means the user can access
+// all libraries.  count(DISTINCT ...) prevents double-counting items that belong
+// to multiple folders.
+func (r *Repository) AddedItemCountForUser(ctx context.Context, userID int, since time.Time) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(DISTINCT mi.content_id)
+		FROM media_items mi
+		JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+		JOIN users u ON u.id = $1
+		WHERE mi.created_at > $2
+		  AND (u.library_ids IS NULL OR mil.media_folder_id = ANY(u.library_ids))
+	`, userID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("added item count for user %d: %w", userID, err)
+	}
+	return count, nil
 }
 
 // AllEnabledUserIDs returns every enabled user id.
