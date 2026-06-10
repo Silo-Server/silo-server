@@ -13,12 +13,11 @@ import "strings"
 // remove its key here — the admin UI restart banner is driven by this
 // registry.
 var restartRequiredKeys = map[string]bool{
-	// Process & logging.
+	// Process & logging. log_level/log_quiet hot-reload via the config
+	// watcher (shared slog.LevelVar + logfilter.SetQuiet).
 	"server.listen":        true,
 	"server.mode":          true,
 	"server.log_format":    true,
-	"server.log_level":     true, // until logging conversion lands
-	"server.log_quiet":     true, // until logging conversion lands
 	"opslog.capture_level": true,
 
 	// Auth. The JWT secret is baked into token services and stream signers;

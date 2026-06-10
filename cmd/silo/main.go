@@ -120,12 +120,25 @@ func resolvePluginCacheDir() string {
 	return filepath.Join(os.TempDir(), "silo-plugins")
 }
 
-func buildBaseHandler(format string, level slog.Level) slog.Handler {
+func buildBaseHandler(format string, level slog.Leveler) slog.Handler {
 	opts := &slog.HandlerOptions{Level: level}
 	if strings.EqualFold(format, "json") {
 		return slog.NewJSONHandler(os.Stderr, opts)
 	}
 	return slog.NewTextHandler(os.Stderr, opts)
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func mustGetSetting(store interface {
@@ -144,8 +157,7 @@ func configureOperationalLogging(
 	settingsRepo catalog.SettingsStore,
 	redisCfg config.RedisConfig,
 	logStreamHub *logstream.Hub,
-	baseHandler slog.Handler,
-	logQuiet string,
+	filteredHandler slog.Handler,
 	nodeID string,
 ) (opslog.Writer, *opslog.Repo, *partman.Manager) {
 	if err := opslog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -182,7 +194,6 @@ func configureOperationalLogging(
 		opsCaptureLevel = slog.LevelError
 	}
 
-	filteredHandler := logfilter.New(baseHandler, logQuiet)
 	slog.SetDefault(slog.New(opslog.NewHandler(filteredHandler, operationalWriter, opsCaptureLevel, nodeID)))
 
 	return operationalWriter, opslog.NewRepo(pool), opsPM
@@ -457,20 +468,14 @@ func main() {
 		log.Fatalf("config validation: %v", err)
 	}
 
-	// Step 10: Configure log level
-	var slogLevel slog.Level
-	switch strings.ToLower(cfg.Server.LogLevel) {
-	case "debug":
-		slogLevel = slog.LevelDebug
-	case "warn", "warning":
-		slogLevel = slog.LevelWarn
-	case "error":
-		slogLevel = slog.LevelError
-	default:
-		slogLevel = slog.LevelInfo
-	}
-	baseHandler := buildBaseHandler(cfg.Server.LogFormat, slogLevel)
-	slog.SetDefault(slog.New(logfilter.New(baseHandler, cfg.Server.LogQuiet)))
+	// Step 10: Configure log level. The level var and quiet filter are
+	// shared with the operational-logging handler chain and hot-reloaded by
+	// the config watcher in integrated mode.
+	logLevelVar := new(slog.LevelVar)
+	logLevelVar.Set(parseLogLevel(cfg.Server.LogLevel))
+	baseHandler := buildBaseHandler(cfg.Server.LogFormat, logLevelVar)
+	quietFilter := logfilter.New(baseHandler, cfg.Server.LogQuiet)
+	slog.SetDefault(slog.New(quietFilter))
 
 	mode := cfg.Server.Mode
 	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
@@ -492,7 +497,7 @@ func main() {
 	}
 	eventsHub := realtimeHub.EventsHub()
 	scanRegistry := evt.NewScanRegistry()
-	operationalWriter, opsRepo, opsPM := configureOperationalLogging(appCtx, pool, settingsRepo, cfg.Redis, logStreamHub, baseHandler, cfg.Server.LogQuiet, nodeID)
+	operationalWriter, opsRepo, opsPM := configureOperationalLogging(appCtx, pool, settingsRepo, cfg.Redis, logStreamHub, quietFilter, nodeID)
 	defer func() {
 		if err := eventBus.Close(); err != nil {
 			slog.Warn("event bus close error", "error", err)
@@ -569,6 +574,13 @@ func main() {
 		log.Fatalf("config watcher start: %v", err)
 	}
 	cfg = configWatcher.Config()
+
+	// Apply server.log_level / server.log_quiet changes live. Both feed the
+	// shared level var and quiet filter inside the default logger chain.
+	configWatcher.OnChange(func(_, updated *config.Config) {
+		logLevelVar.Set(parseLogLevel(updated.Server.LogLevel))
+		quietFilter.SetQuiet(updated.Server.LogQuiet)
+	})
 
 	// Determine which components to initialize based on mode.
 	needsS3 := mode == "integrated" || mode == "api"
