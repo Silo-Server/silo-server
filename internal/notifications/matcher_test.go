@@ -75,6 +75,9 @@ func TestRequestMatcher_ApprovedCreatesNotification(t *testing.T) {
 	if n.Body != "Dune" {
 		t.Errorf("expected Body %q, got %q", "Dune", n.Body)
 	}
+	if n.Title != "Request approved" {
+		t.Fatalf("title = %q", n.Title)
+	}
 }
 
 func TestRequestMatcher_SubmittedDoesNotNotifyRequester(t *testing.T) {

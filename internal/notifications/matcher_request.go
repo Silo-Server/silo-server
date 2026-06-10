@@ -10,12 +10,14 @@ import (
 
 // RequestEventData mirrors requests.RequestEventPayload (kept separate to
 // avoid an import cycle: requests must not import notifications).
+// MediaType and Quality are carried for completeness of the mirror; matchers do not use them yet.
 type RequestEventData struct {
 	RequestID string `json:"request_id"`
 	UserID    int    `json:"user_id"`
 	ProfileID string `json:"profile_id,omitempty"`
 	Title     string `json:"title"`
 	MediaType string `json:"media_type"`
+	Quality   string `json:"quality,omitempty"`
 	Status    string `json:"status"`
 }
 

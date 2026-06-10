@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -25,6 +26,7 @@ type Materializer struct {
 	matchers  []namedMatcher
 	processed atomic.Int64
 	unsub     func()
+	stopOnce  sync.Once
 }
 
 func NewMaterializer(hub *evt.Hub, svc *Service, content ContentResolver) *Materializer {
@@ -66,13 +68,17 @@ func (m *Materializer) Start(ctx context.Context) error {
 }
 
 func (m *Materializer) Stop() {
-	if m.unsub != nil {
-		m.unsub()
-		m.unsub = nil
-	}
+	m.stopOnce.Do(func() {
+		if m.unsub != nil {
+			m.unsub()
+		}
+	})
 }
 
 func (m *Materializer) handle(ctx context.Context, env evt.Envelope) {
+	if env.Channel == evt.ChannelNotifications {
+		return // never react to our own output — the materializer consumes, it must not feed itself
+	}
 	for _, matcher := range m.matchers {
 		func() {
 			defer func() {
