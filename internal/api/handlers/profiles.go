@@ -124,11 +124,6 @@ type verifyPINResponse struct {
 	ExpiresAt    string `json:"expires_at,omitempty"`
 }
 
-func isAdminProfileRequest(ctx context.Context) bool {
-	claims := apimw.GetClaims(ctx)
-	return claims != nil && claims.Role == "admin"
-}
-
 // canManageHouseholdProfiles reports whether the caller may create/update/delete
 // profiles belonging to their user. Server admins always can. Otherwise the
 // caller's active profile must be the primary profile for the household.
@@ -138,7 +133,7 @@ func isAdminProfileRequest(ctx context.Context) bool {
 // bypass the profile lock by sending only X-Profile-Id.
 func (h *ProfileHandler) canManageHouseholdProfiles(r *http.Request, store userstore.UserStore) (bool, error) {
 	ctx := r.Context()
-	if isAdminProfileRequest(ctx) {
+	if apimw.IsAdmin(ctx) {
 		return true, nil
 	}
 	activeProfileID := apimw.GetProfileID(ctx)
@@ -316,7 +311,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 	// Access-policy fields only make sense when set by a manager on a managed
 	// profile. On bootstrap the caller is becoming primary themselves, so non-
 	// admin bootstrap creations must leave those fields at their defaults.
-	if isBootstrap && !isAdminProfileRequest(r.Context()) &&
+	if isBootstrap && !apimw.IsAdmin(r.Context()) &&
 		(req.IsChild || req.MaxContentRating != "" ||
 			req.LibraryRestrictionsEnabled || len(req.AllowedLibraryIDs) > 0 ||
 			req.MaxPlaybackQuality != "") {

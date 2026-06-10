@@ -7,6 +7,7 @@ import {
 } from "@/hooks/queries/admin/settings";
 
 import { Button } from "@/components/ui/button";
+import { QUOTA_PERIODS, QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
 import { CredentialStatus } from "./CredentialStatus";
 import { SettingField } from "./SettingField";
 
@@ -264,6 +265,8 @@ function AIFeaturesCard() {
   const [batchSize, setBatchSize] = useState("40");
   const [contextNeighbors, setContextNeighbors] = useState("2");
   const [asrChunkSeconds, setAsrChunkSeconds] = useState("600");
+  const [transcribeQuotaJobs, setTranscribeQuotaJobs] = useState("0");
+  const [transcribeQuotaPeriod, setTranscribeQuotaPeriod] = useState("day");
 
   useEffect(() => {
     if (!settings) return;
@@ -274,6 +277,8 @@ function AIFeaturesCard() {
     setBatchSize(settings["subtitle_ai.batch_size"] ?? "40");
     setContextNeighbors(settings["subtitle_ai.context_neighbors"] ?? "2");
     setAsrChunkSeconds(settings["subtitle_ai.asr_chunk_seconds"] ?? "600");
+    setTranscribeQuotaJobs(settings["subtitle_ai.transcribe_quota_jobs"] ?? "0");
+    setTranscribeQuotaPeriod(settings["subtitle_ai.transcribe_quota_period"] ?? "day");
   }, [settings]);
 
   function save() {
@@ -296,6 +301,11 @@ function AIFeaturesCard() {
       toast.error("Transcription chunk length must be between 60 and 600 seconds.");
       return;
     }
+    const parsedQuotaJobs = Number.parseInt(transcribeQuotaJobs, 10);
+    if (!Number.isInteger(parsedQuotaJobs) || parsedQuotaJobs < 0) {
+      toast.error("Transcription limit must be zero (unlimited) or a positive whole number.");
+      return;
+    }
     void Promise.all([
       updateSetting.mutateAsync({ key: "subtitle_ai.enabled", value: subtitleTranslate }),
       updateSetting.mutateAsync({ key: "subtitle_ai.transcribe_enabled", value: transcribe }),
@@ -309,6 +319,14 @@ function AIFeaturesCard() {
       updateSetting.mutateAsync({
         key: "subtitle_ai.asr_chunk_seconds",
         value: String(parsedChunkSeconds),
+      }),
+      updateSetting.mutateAsync({
+        key: "subtitle_ai.transcribe_quota_jobs",
+        value: String(parsedQuotaJobs),
+      }),
+      updateSetting.mutateAsync({
+        key: "subtitle_ai.transcribe_quota_period",
+        value: transcribeQuotaPeriod,
       }),
     ]);
   }
@@ -375,6 +393,24 @@ function AIFeaturesCard() {
         value={asrChunkSeconds}
         onChange={setAsrChunkSeconds}
         hint="60–600. Shorter chunks keep Whisper timestamps tighter on long files (try 300 if subtitles drift), at the cost of more requests and occasional clipped words at chunk boundaries."
+      />
+      <SettingField
+        label="Transcription limit per account"
+        type="number"
+        value={transcribeQuotaJobs}
+        onChange={setTranscribeQuotaJobs}
+        hint="Maximum transcription jobs per user account each period; profiles on an account share the limit. The admin account's primary profile is exempt. 0 = unlimited. Jobs that fail before transcribing anything don't count."
+      />
+      <SettingField
+        label="Transcription limit period"
+        type="select"
+        value={transcribeQuotaPeriod}
+        onChange={setTranscribeQuotaPeriod}
+        options={QUOTA_PERIODS.map((p) => ({
+          value: p,
+          label: `Per ${p} (rolling ${QUOTA_PERIOD_WINDOW_LABELS[p]})`,
+        }))}
+        hint="Rolling window the transcription limit counts against."
       />
       <div className="pt-2">
         <Button type="button" onClick={save} disabled={updateSetting.isPending}>

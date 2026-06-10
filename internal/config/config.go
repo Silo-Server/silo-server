@@ -273,6 +273,11 @@ type SubtitleAIConfig struct {
 	// (60..600). Shorter chunks bound Whisper timestamp drift on long files;
 	// longer chunks mean fewer requests and fewer boundary word-clips.
 	ASRChunkSeconds int `yaml:"-"`
+	// TranscribeQuotaJobs caps how many transcription jobs each non-admin user
+	// may start per rolling quota period (0 = unlimited).
+	TranscribeQuotaJobs int `yaml:"-"`
+	// TranscribeQuotaPeriod is the rolling quota window: "day", "week", "month".
+	TranscribeQuotaPeriod string `yaml:"-"`
 }
 
 // MetadataAIConfig holds the metadata translation feature toggles. The

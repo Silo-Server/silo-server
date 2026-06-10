@@ -181,6 +181,14 @@ func GetClaims(ctx context.Context) *auth.Claims {
 	return claims
 }
 
+// IsAdmin reports whether the context's authenticated user account has the
+// admin role. Returns false when no claims are present. Note this is the
+// account-level role; it says nothing about which household profile is active.
+func IsAdmin(ctx context.Context) bool {
+	claims := GetClaims(ctx)
+	return claims != nil && claims.Role == "admin"
+}
+
 // GetUserID retrieves the user ID from the JWT claims in the context.
 // Returns 0 if no claims are present.
 func GetUserID(ctx context.Context) int {

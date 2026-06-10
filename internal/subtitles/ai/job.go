@@ -78,6 +78,10 @@ type JobRequest struct {
 	SourceLanguage string
 	TargetLanguage string
 	RequestedBy    *int
+	// QuotaExempt skips the per-user transcription quota. The HTTP layer
+	// decides exemption policy (the household parent of an admin account
+	// manages the budget, so it is not bound by it); the service enforces.
+	QuotaExempt bool
 	// SessionID, when set, streams live cues to that playback session.
 	SessionID string
 	// StartPosition (seconds) makes translation start at the viewer's playhead.
