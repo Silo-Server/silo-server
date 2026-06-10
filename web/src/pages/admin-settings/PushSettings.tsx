@@ -40,7 +40,9 @@ function CredentialField({
   function save() {
     if (value.trim() === "") return;
     void updateSetting.mutateAsync({ key: settingKey, value }).then(() => {
-      if (sensitiveConfigured !== undefined) onChange("");
+      // Always clear the field on a successful save so it reverts to showing
+      // the configured indicator/placeholder rather than the typed value.
+      onChange("");
     });
   }
 
@@ -95,7 +97,10 @@ function WebPushCard() {
   const [vapidPrivate, setVapidPrivate] = useState("");
   const [subject, setSubject] = useState("");
 
-  const privateConfigured = new Set(sensitive?.configured ?? []).has("push.webpush.vapid_private");
+  const configured = new Set(sensitive?.configured ?? []);
+  const publicConfigured = configured.has("push.webpush.vapid_public");
+  const privateConfigured = configured.has("push.webpush.vapid_private");
+  const subjectConfigured = configured.has("push.webpush.subject");
 
   function generate() {
     void generateKeys.mutateAsync().then((keys) => {
@@ -123,6 +128,7 @@ function WebPushCard() {
         type="text"
         value={vapidPublic}
         onChange={setVapidPublic}
+        sensitiveConfigured={publicConfigured}
       />
       <CredentialField
         settingKey="push.webpush.vapid_private"
@@ -139,6 +145,7 @@ function WebPushCard() {
         type="text"
         value={subject}
         onChange={setSubject}
+        sensitiveConfigured={subjectConfigured}
         hint="mailto:you@example.com"
       />
 
@@ -173,7 +180,11 @@ function ApnsCard() {
   const [teamId, setTeamId] = useState("");
   const [bundleId, setBundleId] = useState("");
 
-  const p8Configured = new Set(sensitive?.configured ?? []).has("push.apns.p8_key");
+  const configured = new Set(sensitive?.configured ?? []);
+  const p8Configured = configured.has("push.apns.p8_key");
+  const keyIdConfigured = configured.has("push.apns.key_id");
+  const teamIdConfigured = configured.has("push.apns.team_id");
+  const bundleIdConfigured = configured.has("push.apns.bundle_id");
 
   return (
     <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
@@ -203,6 +214,7 @@ function ApnsCard() {
         type="text"
         value={keyId}
         onChange={setKeyId}
+        sensitiveConfigured={keyIdConfigured}
       />
       <CredentialField
         settingKey="push.apns.team_id"
@@ -210,6 +222,7 @@ function ApnsCard() {
         type="text"
         value={teamId}
         onChange={setTeamId}
+        sensitiveConfigured={teamIdConfigured}
       />
       <CredentialField
         settingKey="push.apns.bundle_id"
@@ -217,6 +230,7 @@ function ApnsCard() {
         type="text"
         value={bundleId}
         onChange={setBundleId}
+        sensitiveConfigured={bundleIdConfigured}
       />
     </div>
   );

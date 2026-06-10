@@ -159,7 +159,7 @@ export function SettingField({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="max-w-md"
-        placeholder={hint}
+        placeholder={sensitiveConfigured ? "configured" : hint}
         aria-describedby={hint && type === "duration" ? hintId : undefined}
       />
       {hint && type === "duration" && (
