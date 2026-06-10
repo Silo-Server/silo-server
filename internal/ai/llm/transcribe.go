@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -61,6 +62,39 @@ type transcriptionResponse struct {
 	} `json:"error"`
 }
 
+// chatOnlyGatewayHosts lists OpenAI-compatible gateways that cannot serve
+// Silo's transcription needs: they either lack /v1/audio/transcriptions
+// entirely or (OpenRouter) return plain text with no segment timestamps,
+// which subtitle cues require. Matched by host suffix.
+var chatOnlyGatewayHosts = []string{
+	"openrouter.ai",
+}
+
+// IsChatOnlyGateway reports whether baseURL points at a known chat-only
+// gateway that cannot produce timestamped transcriptions. Used to validate
+// the transcription settings and to disable ASR rather than fail jobs at
+// runtime.
+func IsChatOnlyGateway(baseURL string) bool {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return false
+	}
+	if !strings.Contains(baseURL, "://") {
+		baseURL = "https://" + baseURL
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, gateway := range chatOnlyGatewayHosts {
+		if host == gateway || strings.HasSuffix(host, "."+gateway) {
+			return true
+		}
+	}
+	return false
+}
+
 // Transcribe performs one audio transcription against the ASR endpoint
 // (falling back to the chat endpoint's base URL/key when no ASR override is
 // configured), using the OpenAI-compatible /v1/audio/transcriptions API with
@@ -68,6 +102,10 @@ type transcriptionResponse struct {
 func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transcription, error) {
 	if !c.cfg.ASRConfigured() {
 		return nil, fmt.Errorf("transcription endpoint is not configured")
+	}
+	if IsChatOnlyGateway(c.cfg.asrBaseURL()) {
+		return nil, fmt.Errorf("the configured transcription endpoint (%s) cannot produce timestamped transcriptions; "+
+			"set a Whisper-compatible Transcription base URL under Admin Settings → AI Services", c.cfg.asrBaseURL())
 	}
 	if len(req.Audio) == 0 {
 		return nil, fmt.Errorf("no audio data to transcribe")

@@ -14,6 +14,67 @@ import { SettingField } from "./SettingField";
 // subtitle_ai.* rows (mirroring the server's loader) so an existing setup
 // shows its effective values, while saves always write the new keys.
 
+// Chat-only gateways have no timestamped transcription API; the server
+// rejects them for the transcription URL — mirror that check for instant
+// feedback. Keep in sync with llm.IsChatOnlyGateway.
+const CHAT_ONLY_GATEWAY_HOSTS = ["openrouter.ai"];
+
+function isChatOnlyGateway(rawUrl: string): boolean {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  try {
+    const host = new URL(
+      trimmed.includes("://") ? trimmed : `https://${trimmed}`,
+    ).hostname.toLowerCase();
+    return CHAT_ONLY_GATEWAY_HOSTS.some((g) => host === g || host.endsWith(`.${g}`));
+  } catch {
+    return false;
+  }
+}
+
+// Recommended transcription endpoints, fastest path first. Clicking a preset
+// fills the URL + model; the API key still comes from the operator.
+const TRANSCRIPTION_PRESETS: {
+  id: string;
+  label: string;
+  description: string;
+  baseUrl: string;
+  model: string;
+}[] = [
+  {
+    id: "groq-turbo",
+    label: "Groq · fast & cheap",
+    description:
+      "whisper-large-v3-turbo on Groq — fastest hosted option, very low cost. Needs a Groq API key in the transcription key field.",
+    baseUrl: "https://api.groq.com/openai",
+    model: "whisper-large-v3-turbo",
+  },
+  {
+    id: "groq-accurate",
+    label: "Groq · most accurate",
+    description:
+      "whisper-large-v3 on Groq — best multilingual accuracy among hosted options, slightly slower and pricier than turbo.",
+    baseUrl: "https://api.groq.com/openai",
+    model: "whisper-large-v3",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    description:
+      "whisper-1 on OpenAI — solid quality, higher cost than Groq. Uses the main API key if the transcription key is blank.",
+    baseUrl: "https://api.openai.com",
+    model: "whisper-1",
+  },
+  {
+    id: "local",
+    label: "Self-hosted · private & free",
+    description:
+      "A speaches/faster-whisper server on your own hardware — no per-minute cost, audio never leaves your network. Adjust the URL to where it runs.",
+    baseUrl: "http://localhost:8000",
+    model: "Systran/faster-whisper-large-v3",
+  },
+];
+
 function AIConnectionCard() {
   const { data: settings } = useAdminServerSettings();
   const { data: sensitive } = useAdminSensitiveStatus();
@@ -56,6 +117,12 @@ function AIConnectionCard() {
     }
     if (!Number.isInteger(parsedMaxConcurrent) || parsedMaxConcurrent < 1) {
       toast.error("Max concurrent jobs must be a positive whole number.");
+      return;
+    }
+    if (isChatOnlyGateway(asrBaseUrl)) {
+      toast.error(
+        "That endpoint can't produce timestamped transcriptions (chat-only gateway). Pick a transcription preset below or use a Whisper-capable server.",
+      );
       return;
     }
 
@@ -115,12 +182,42 @@ function AIConnectionCard() {
         sensitiveConfigured={apiKeyConfigured}
         hint="Leave blank to keep current. Empty is fine for keyless local servers."
       />
+      <div className="border-border/60 mt-4 mb-1 border-t pt-3">
+        <p className="text-sm font-medium">Transcription</p>
+        <p className="text-muted-foreground text-xs">
+          Subtitle generation needs a Whisper endpoint that returns segment timestamps. Pick a
+          preset or configure your own:
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {TRANSCRIPTION_PRESETS.map((preset) => {
+            const active = asrBaseUrl.trim() === preset.baseUrl && asrModel.trim() === preset.model;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                title={preset.description}
+                onClick={() => {
+                  setAsrBaseUrl(preset.baseUrl);
+                  setAsrModel(preset.model);
+                }}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  active
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <SettingField
         label="Transcription model"
         type="text"
         value={asrModel}
         onChange={setAsrModel}
-        hint="Whisper model for subtitle generation, e.g. whisper-1"
+        hint="Whisper model for subtitle generation, e.g. whisper-large-v3-turbo"
       />
       <SettingField
         label="Transcription base URL"

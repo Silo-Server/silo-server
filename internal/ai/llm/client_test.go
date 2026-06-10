@@ -232,3 +232,30 @@ func TestTranscribeChatOnlyGatewayGetsConfigHint(t *testing.T) {
 		t.Fatalf("err = %v, want configuration hint", err)
 	}
 }
+
+func TestIsChatOnlyGateway(t *testing.T) {
+	cases := map[string]bool{
+		"https://openrouter.ai/api":           true,
+		"https://openrouter.ai":               true,
+		"openrouter.ai/api/v1":                true,
+		"https://gateway.openrouter.ai":       true,
+		"https://api.groq.com/openai":         false,
+		"https://api.openai.com":              false,
+		"http://localhost:8000":               false,
+		"https://my-openrouter.ai.example.io": false,
+		"":                                    false,
+	}
+	for in, want := range cases {
+		if got := IsChatOnlyGateway(in); got != want {
+			t.Errorf("IsChatOnlyGateway(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestTranscribeRefusesChatOnlyGateway(t *testing.T) {
+	cfg := Config{BaseURL: "https://openrouter.ai/api", ChatModel: "m", ASRModel: "whisper-1"}
+	_, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	if err == nil || !strings.Contains(err.Error(), "cannot produce timestamped transcriptions") {
+		t.Fatalf("err = %v, want chat-only refusal", err)
+	}
+}

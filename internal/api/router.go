@@ -928,10 +928,25 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
+		// A chat-only gateway (e.g. OpenRouter) cannot produce timestamped
+		// transcriptions; disable ASR rather than let every job fail. The
+		// settings API rejects such values for the ASR URL, but the chat base
+		// URL legitimately may be one — this catches the blank-ASR-URL
+		// fallback case.
+		transcribeEnabled := deps.Config.SubtitleAI.TranscribeEnabled
+		effectiveASRBase := deps.Config.AI.ASRBaseURL
+		if effectiveASRBase == "" {
+			effectiveASRBase = deps.Config.AI.BaseURL
+		}
+		if transcribeEnabled && llm.IsChatOnlyGateway(effectiveASRBase) {
+			slog.Warn("subtitle transcription disabled: the effective transcription endpoint is a chat-only gateway; "+
+				"set a Whisper-compatible Transcription base URL in AI Services", "endpoint", effectiveASRBase)
+			transcribeEnabled = false
+		}
 		aiCfg := subtitleai.Config{
 			Configured:        deps.Config.AI.BaseURL != "",
 			TranslateEnabled:  deps.Config.SubtitleAI.Enabled,
-			TranscribeEnabled: deps.Config.SubtitleAI.TranscribeEnabled,
+			TranscribeEnabled: transcribeEnabled,
 			ChatModel:         deps.Config.AI.ChatModel,
 			ASRModel:          deps.Config.AI.ASRModel,
 			BatchSize:         deps.Config.SubtitleAI.BatchSize,
