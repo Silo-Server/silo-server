@@ -9,11 +9,14 @@ import { NarratorCard } from "@/pages/audiobooks/components/NarratorCard";
 import { NarratorPicker } from "@/pages/audiobooks/components/NarratorPicker";
 import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
+import PageBack from "@/components/PageBack";
 import MetadataBadges from "@/pages/ItemDetail/components/MetadataBadges";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { buildChapterList, findChapterAt, totalAudiobookDuration } from "@/lib/audiobooks/chapters";
 import { audiobookFilesFromVersions } from "@/lib/audiobooks/files";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
+import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
+import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
 
 function formatSeconds(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -120,7 +123,7 @@ export default function AudiobookContent({
       audiobookPlayback?.toggleActivePlayback();
       return;
     }
-    openPlayer(hasProgress ? resumeSeconds : 0);
+    openPlayer(hasProgress ? coldResumePosition(resumeSeconds, getAudiobookSmartRewind()) : 0);
   }
 
   function primaryPlaybackLabel() {
@@ -142,7 +145,13 @@ export default function AudiobookContent({
       return;
     }
     handledPlayParamRef.current = true;
-    openPlayer(searchParams.get("restart") === "1" ? 0 : hasProgress ? resumeSeconds : 0);
+    openPlayer(
+      searchParams.get("restart") === "1"
+        ? 0
+        : hasProgress
+          ? coldResumePosition(resumeSeconds, getAudiobookSmartRewind())
+          : 0,
+    );
   }, [files.length, hasProgress, openPlayer, resumeSeconds, searchParams]);
 
   return (
@@ -156,6 +165,7 @@ export default function AudiobookContent({
 
       <DetailHero
         title={item.title}
+        topNav={<PageBack />}
         context="Audiobook"
         studioLabel={item.audiobook?.publisher || item.studios?.[0] || undefined}
         posterUrl={item.poster_url}

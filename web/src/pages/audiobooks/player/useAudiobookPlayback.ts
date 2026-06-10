@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type RefObject } from "react";
 import { toast } from "sonner";
 import { useReportMediaProgress } from "@/hooks/queries/progress";
+import { buildPlayerChapters, nextChapterStart, prevChapterStart } from "@/lib/audiobooks/chapters";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
+import { getPersistedVolume, persistVolume } from "@/player/components/VolumeControl";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { playerFetch } from "@/player/player-fetch";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
@@ -9,6 +11,8 @@ import { buildPlayerStreamUrl } from "@/player/stream-url";
 import type { PlaybackSessionResponse, PlayerChapter } from "@/player/types";
 import { usePlaybackRealtime } from "@/player/hooks/usePlaybackRealtime";
 import type { SleepSetting } from "@/player/components/SleepTimerMenu";
+import { smartRewindSeconds } from "./smartRewind";
+import { clampAudiobookRate, getBookRate, setBookRate } from "./useAudiobookPrefs";
 
 const REPORT_INTERVAL_MS = 10_000;
 
@@ -17,6 +21,7 @@ export interface UseAudiobookPlaybackOptions {
   files: AudiobookFile[];
   initialPositionSeconds: number;
   autoPlay?: boolean;
+  smartRewindEnabled?: boolean;
   onStopRequested?: () => void;
 }
 
@@ -31,10 +36,16 @@ export interface AudiobookPlayback {
   rate: number;
   chapters: PlayerChapter[];
   currentChapter: PlayerChapter | null;
+  volume: number;
+  muted: boolean;
   togglePlay: () => void;
   seekTo: (seconds: number) => void;
   skip: (delta: number) => void;
   setRate: (r: number) => void;
+  setVolume: (volume: number) => void;
+  setMuted: (muted: boolean) => void;
+  nextChapter: () => void;
+  prevChapter: () => void;
   sleep: { setting: SleepSetting; remainingMs: number | null };
   setSleep: (next: SleepSetting) => void;
 }
@@ -134,27 +145,6 @@ function absoluteBufferedRanges(
   } as TimeRanges;
 }
 
-function buildPlayerChapters(files: AudiobookFile[]): PlayerChapter[] {
-  const out: PlayerChapter[] = [];
-  let offset = 0;
-  let nextIndex = 0;
-  for (const file of files) {
-    for (const chapter of file.chapters ?? []) {
-      const start = offset + chapter.start_seconds;
-      const end = offset + (chapter.end_seconds || chapter.start_seconds);
-      out.push({
-        index: nextIndex++,
-        title: chapter.title || `Chapter ${chapter.index + 1}`,
-        start_seconds: start,
-        end_seconds: end > start ? end : start + 1,
-        source: chapter.source || "embedded",
-      });
-    }
-    offset += file.duration_seconds ?? 0;
-  }
-  return out;
-}
-
 function readNumericPayload(
   payload: Record<string, unknown> | undefined,
   ...keys: string[]
@@ -184,6 +174,7 @@ export function useAudiobookPlayback({
   files,
   initialPositionSeconds,
   autoPlay = true,
+  smartRewindEnabled = true,
   onStopRequested,
 }: UseAudiobookPlaybackOptions): AudiobookPlayback {
   const config = usePlayerConfig();
@@ -199,7 +190,9 @@ export function useAudiobookPlayback({
     clampedBookTime(initialPositionSeconds, duration),
   );
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
-  const [rate, setRateState] = useState(1);
+  const [rate, setRateState] = useState(() => getBookRate(contentId) ?? 1);
+  const [volume, setVolumeState] = useState(() => getPersistedVolume().volume);
+  const [muted, setMutedState] = useState(() => getPersistedVolume().muted);
   const [sessionState, setSessionState] = useState<AudiobookSessionState>({
     sessionId: null,
     streamUrl: "",
@@ -220,6 +213,9 @@ export function useAudiobookPlayback({
   );
   const playAfterSourceSwitchRef = useRef(false);
   const autoPlayPendingRef = useRef(autoPlay);
+  // Wall-clock time playback last paused, for smart rewind on resume. Cleared
+  // by explicit seeks so a hand-picked position is never second-guessed.
+  const pausedAtRef = useRef<number | null>(null);
 
   const setAbsoluteTime = useCallback(
     (seconds: number) => {
@@ -418,6 +414,7 @@ export function useAudiobookPlayback({
       reportSessionRef.current(absoluteFromAudio(), false);
     };
     const onPause = () => {
+      pausedAtRef.current = performance.now();
       setPlaying(false);
       reportRef.current(absoluteFromAudio());
     };
@@ -488,6 +485,15 @@ export function useAudiobookPlayback({
 
   useEffect(() => {
     const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = volume;
+    audio.muted = muted;
+    // sessionState.streamUrl keeps this in the deps so a freshly mounted
+    // element picks the persisted values up before playback starts.
+  }, [muted, sessionState.streamUrl, volume]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
     return () => {
       if (audio && !audio.paused) {
         audio.pause();
@@ -496,18 +502,9 @@ export function useAudiobookPlayback({
     };
   }, []);
 
-  const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) {
-      audio.play().catch((err) => console.error("audiobook play failed", err));
-    } else {
-      audio.pause();
-    }
-  }, []);
-
   const seekTo = useCallback(
     (seconds: number) => {
+      pausedAtRef.current = null;
       const target = clampedBookTime(seconds, duration);
       const nextIndex = findPartIndex(parts, target);
       const nextPart = parts[nextIndex];
@@ -531,6 +528,38 @@ export function useAudiobookPlayback({
     [activeFileIndex, duration, parts, playing],
   );
 
+  const resumePlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const pausedAtMs = pausedAtRef.current;
+    pausedAtRef.current = null;
+    if (smartRewindEnabled && pausedAtMs != null) {
+      const rewind = smartRewindSeconds(performance.now() - pausedAtMs);
+      if (rewind > 0) {
+        const target = clampedBookTime(currentTimeRef.current - rewind, duration);
+        const targetIndex = findPartIndex(parts, target);
+        seekTo(target);
+        if (targetIndex !== activeFileIndex) {
+          // The rewind crossed a file boundary; playback resumes once the new
+          // source is ready instead of racing the source switch.
+          playAfterSourceSwitchRef.current = true;
+          return;
+        }
+      }
+    }
+    audio.play().catch((err) => console.error("audiobook play failed", err));
+  }, [activeFileIndex, duration, parts, seekTo, smartRewindEnabled]);
+
+  const togglePlay = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      resumePlayback();
+    } else {
+      audio.pause();
+    }
+  }, [resumePlayback]);
+
   const skip = useCallback(
     (delta: number) => {
       seekTo(currentTimeRef.current + delta);
@@ -538,10 +567,32 @@ export function useAudiobookPlayback({
     [seekTo],
   );
 
-  const setRate = useCallback((nextRate: number) => {
-    setRateState(nextRate);
-    if (audioRef.current) audioRef.current.playbackRate = nextRate;
-  }, []);
+  const setRate = useCallback(
+    (nextRate: number) => {
+      const clamped = clampAudiobookRate(nextRate);
+      setRateState(clamped);
+      setBookRate(contentId, clamped);
+      if (audioRef.current) audioRef.current.playbackRate = clamped;
+    },
+    [contentId],
+  );
+
+  const setVolume = useCallback(
+    (next: number) => {
+      const clamped = Math.min(1, Math.max(0, Number.isFinite(next) ? next : 1));
+      setVolumeState(clamped);
+      persistVolume(clamped, muted);
+    },
+    [muted],
+  );
+
+  const setMuted = useCallback(
+    (next: boolean) => {
+      setMutedState(next);
+      persistVolume(volume, next);
+    },
+    [volume],
+  );
 
   const executeRealtimeCommand = useCallback(
     async (command: PlaybackRealtimeCommandEnvelope) => {
@@ -553,12 +604,12 @@ export function useAudiobookPlayback({
           return;
         case "unpause":
           if (!audio) return;
-          await audio.play();
+          resumePlayback();
           return;
         case "play_pause":
           if (!audio) return;
           if (audio.paused) {
-            await audio.play();
+            resumePlayback();
           } else {
             audio.pause();
           }
@@ -577,13 +628,13 @@ export function useAudiobookPlayback({
           return;
         }
         case "set_volume": {
-          const volume = readNumericPayload(command.payload, "volume", "level");
-          if (volume === null || !audio) {
+          const nextVolume = readNumericPayload(command.payload, "volume", "level");
+          if (nextVolume === null || !audio) {
             throw new Error("missing_volume");
           }
-          audio.volume = Math.min(1, Math.max(0, volume));
-          if (audio.volume > 0 && audio.muted) {
-            audio.muted = false;
+          setVolume(nextVolume);
+          if (nextVolume > 0) {
+            setMuted(false);
           }
           return;
         }
@@ -614,7 +665,7 @@ export function useAudiobookPlayback({
           throw new Error("unsupported");
       }
     },
-    [onStopRequested, seekTo],
+    [onStopRequested, resumePlayback, seekTo, setMuted, setVolume],
   );
 
   usePlaybackRealtime({
@@ -632,6 +683,16 @@ export function useAudiobookPlayback({
     }
     return chapters[0] ?? null;
   }, [chapters, currentTime]);
+
+  const nextChapter = useCallback(() => {
+    const target = nextChapterStart(chapters, currentChapter);
+    if (target != null) seekTo(target);
+  }, [chapters, currentChapter, seekTo]);
+
+  const prevChapter = useCallback(() => {
+    const target = prevChapterStart(chapters, currentChapter, currentTimeRef.current);
+    if (target != null) seekTo(target);
+  }, [chapters, currentChapter, seekTo]);
 
   const [sleepSetting, setSleepSetting] = useState<SleepSetting>({ kind: "off" });
   const [sleepTargetMs, setSleepTargetMs] = useState<number | null>(null);
@@ -697,10 +758,16 @@ export function useAudiobookPlayback({
     rate,
     chapters,
     currentChapter,
+    volume,
+    muted,
     togglePlay,
     seekTo,
     skip,
     setRate,
+    setVolume,
+    setMuted,
+    nextChapter,
+    prevChapter,
     sleep: { setting: sleepSetting, remainingMs: sleepRemainingMs },
     setSleep,
   };

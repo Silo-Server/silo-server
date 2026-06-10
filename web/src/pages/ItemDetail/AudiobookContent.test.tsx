@@ -157,8 +157,9 @@ describe("AudiobookContent playback actions", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /^resume/i }));
     expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
+    // Smart rewind backs a cold resume up 10s so the listener regains context.
     expect(mocks.startPlayback.mock.calls[0]?.[0]).toMatchObject({
-      initialPositionSeconds: 5000,
+      initialPositionSeconds: 4990,
     });
 
     await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));

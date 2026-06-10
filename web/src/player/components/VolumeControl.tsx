@@ -23,6 +23,12 @@ interface VolumeControlProps {
   muted: boolean;
   onVolumeChange: (volume: number) => void;
   onMutedChange: (muted: boolean) => void;
+  /**
+   * "overlay" (default) is the white-on-dark video HUD styling; "surface"
+   * uses theme tokens for placement on regular app surfaces like the
+   * audiobook mini bar.
+   */
+  tone?: "overlay" | "surface";
 }
 
 export function VolumeControl({
@@ -30,6 +36,7 @@ export function VolumeControl({
   muted,
   onVolumeChange,
   onMutedChange,
+  tone = "overlay",
 }: VolumeControlProps) {
   const sliderRef = useRef<HTMLDivElement>(null);
 
@@ -133,6 +140,17 @@ export function VolumeControl({
     [volume, muted, onVolumeChange, onMutedChange],
   );
 
+  const surface = tone === "surface";
+  const buttonClass = surface
+    ? "text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors"
+    : "player-utility-btn";
+  const sliderFocusClass = surface ? "focus-visible:ring-ring" : "focus-visible:ring-white/70";
+  const trackClass = surface ? "bg-muted" : "bg-white/15";
+  const fillClass = surface
+    ? "bg-foreground"
+    : "bg-white shadow-[0_0_8px_-1px_rgb(255_255_255/0.35)]";
+  const thumbClass = surface ? "bg-foreground ring-border" : "bg-white ring-black/10";
+
   return (
     // Scroll-wheel still adjusts volume from anywhere in the group, but the
     // mute button and slider are now fully independent items — nothing shifts
@@ -140,9 +158,10 @@ export function VolumeControl({
     <div className="group/vol flex items-center gap-2" onWheel={handleWheel}>
       <button
         type="button"
-        className="player-utility-btn"
+        className={buttonClass}
         onClick={() => onMutedChange(!muted)}
         aria-label={muted ? "Unmute" : "Mute"}
+        title={muted ? "Unmute (M)" : "Mute (M)"}
         data-active={muted || volume === 0 ? "false" : undefined}
       >
         {muted || volume === 0 ? (
@@ -164,18 +183,20 @@ export function VolumeControl({
         aria-valuemax={100}
         aria-valuenow={Math.round(displayVolume * 100)}
         aria-valuetext={`Volume ${Math.round(displayVolume * 100)}%`}
-        className="group/vol-slider relative flex h-6 w-24 cursor-pointer touch-none items-center rounded-full focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+        className={`group/vol-slider relative flex h-6 w-24 cursor-pointer touch-none items-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${sliderFocusClass}`}
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onKeyDown={handleKeyDown}
       >
-        <div className="relative h-[3px] w-full rounded-full bg-white/15 transition-[height] duration-150 ease-out group-hover/vol-slider:h-[5px]">
+        <div
+          className={`relative h-[3px] w-full rounded-full transition-[height] duration-150 ease-out group-hover/vol-slider:h-[5px] ${trackClass}`}
+        >
           <div
-            className="absolute inset-y-0 left-0 rounded-full bg-white shadow-[0_0_8px_-1px_rgb(255_255_255/0.35)]"
+            className={`absolute inset-y-0 left-0 rounded-full ${fillClass}`}
             style={{ width: `${displayVolume * 100}%` }}
           />
           <div
-            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_8px_rgb(0_0_0/0.5)] ring-1 ring-black/10 transition-opacity duration-150 group-hover/vol-slider:opacity-100"
+            className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-0 shadow-[0_2px_8px_rgb(0_0_0/0.5)] ring-1 transition-opacity duration-150 group-hover/vol-slider:opacity-100 ${thumbClass}`}
             style={{ left: `${displayVolume * 100}%` }}
           />
         </div>

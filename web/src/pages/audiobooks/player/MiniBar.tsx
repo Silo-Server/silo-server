@@ -1,21 +1,22 @@
-import { X, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
+import { X, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
-import { SpeedMenu } from "@/player/components/SpeedMenu";
 import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";
+import { VolumeControl } from "@/player/components/VolumeControl";
 import { CoverExpandTile } from "./CoverExpandTile";
+import { PlayerSettingsMenu } from "./PlayerSettingsMenu";
+import { SkipIcon } from "./SkipIcon";
+import { SpeedControl } from "./SpeedControl";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
-
-const SKIP_BACK_SECONDS = 30;
-const SKIP_FORWARD_SECONDS = 30;
-const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
+import type { AudiobookPrefs } from "./useAudiobookPrefs";
 
 interface MiniBarProps {
   contentId: string;
   title?: string;
   posterUrl?: string;
   playback: AudiobookPlayback;
+  prefs: AudiobookPrefs;
   onClose?: () => void;
   onExpand?: () => void;
 }
@@ -25,9 +26,14 @@ export function MiniBar({
   title,
   posterUrl,
   playback,
+  prefs,
   onClose,
   onExpand,
 }: MiniBarProps) {
+  const hasChapters = playback.chapters.length > 0;
+  const hasNextChapter =
+    playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;
+
   return (
     <div
       className="bg-background fixed right-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6"
@@ -78,20 +84,38 @@ export function MiniBar({
         </div>
 
         <div className="flex items-center justify-center gap-2 sm:gap-3">
+          {hasChapters && (
+            <span className="hidden sm:contents">
+              <CircleButton
+                size="sm"
+                variant="secondary"
+                ariaLabel="Previous chapter"
+                title="Previous chapter (P)"
+                onClick={playback.prevChapter}
+                disabled={!playback.hasFile}
+              >
+                <SkipBack className="h-4 w-4" strokeWidth={0} fill="currentColor" />
+              </CircleButton>
+            </span>
+          )}
+
           <CircleButton
             size="sm"
             variant="secondary"
-            ariaLabel={`Back ${SKIP_BACK_SECONDS} seconds`}
-            onClick={() => playback.skip(-SKIP_BACK_SECONDS)}
+            ariaLabel={`Back ${prefs.skipBack} seconds`}
+            title={`Back ${prefs.skipBack} seconds (←)`}
+            className="group"
+            onClick={() => playback.skip(-prefs.skipBack)}
             disabled={!playback.hasFile}
           >
-            <SkipIcon direction="back" seconds={SKIP_BACK_SECONDS} />
+            <SkipIcon direction="back" seconds={prefs.skipBack} />
           </CircleButton>
 
           <CircleButton
             size="md"
             variant="primary"
             ariaLabel={playback.playing ? "Pause" : "Play"}
+            title={playback.playing ? "Pause (space)" : "Play (space)"}
             onClick={playback.togglePlay}
             disabled={!playback.hasFile}
             data-paused={!playback.playing}
@@ -106,28 +130,55 @@ export function MiniBar({
           <CircleButton
             size="sm"
             variant="secondary"
-            ariaLabel={`Forward ${SKIP_FORWARD_SECONDS} seconds`}
-            onClick={() => playback.skip(SKIP_FORWARD_SECONDS)}
+            ariaLabel={`Forward ${prefs.skipForward} seconds`}
+            title={`Forward ${prefs.skipForward} seconds (→)`}
+            className="group"
+            onClick={() => playback.skip(prefs.skipForward)}
             disabled={!playback.hasFile}
           >
-            <SkipIcon direction="forward" seconds={SKIP_FORWARD_SECONDS} />
+            <SkipIcon direction="forward" seconds={prefs.skipForward} />
           </CircleButton>
+
+          {hasChapters && (
+            <span className="hidden sm:contents">
+              <CircleButton
+                size="sm"
+                variant="secondary"
+                ariaLabel="Next chapter"
+                title="Next chapter (N)"
+                onClick={playback.nextChapter}
+                disabled={!playback.hasFile || !hasNextChapter}
+              >
+                <SkipForward className="h-4 w-4" strokeWidth={0} fill="currentColor" />
+              </CircleButton>
+            </span>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2">
+          <div className="hidden md:block">
+            <VolumeControl
+              tone="surface"
+              volume={playback.volume}
+              muted={playback.muted}
+              onVolumeChange={playback.setVolume}
+              onMutedChange={playback.setMuted}
+            />
+          </div>
           <SleepTimerMenu
             setting={playback.sleep.setting}
             remainingMs={playback.sleep.remainingMs}
             onChange={playback.setSleep}
           />
-          {playback.chapters.length > 0 && (
+          {hasChapters && (
             <ChaptersMenu
               chapters={playback.chapters}
               currentTime={playback.currentTime}
               onSeek={playback.seekTo}
             />
           )}
-          <SpeedMenu rates={PLAYBACK_RATES} value={playback.rate} onChange={playback.setRate} />
+          <SpeedControl value={playback.rate} onChange={playback.setRate} />
+          <PlayerSettingsMenu prefs={prefs} />
           {onClose && (
             <button
               type="button"
@@ -141,17 +192,5 @@ export function MiniBar({
         </div>
       </div>
     </div>
-  );
-}
-
-function SkipIcon({ direction, seconds }: { direction: "back" | "forward"; seconds: number }) {
-  const Arrow = direction === "back" ? RotateCcw : RotateCw;
-  return (
-    <span className="relative flex h-6 w-6 items-center justify-center">
-      <Arrow className="h-6 w-6" strokeWidth={1.6} />
-      <span className="absolute inset-0 flex items-center justify-center pb-[1px] text-[8px] font-semibold tracking-tight tabular-nums">
-        {seconds}
-      </span>
-    </span>
   );
 }
