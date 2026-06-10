@@ -365,6 +365,32 @@ func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
 	return false
 }
 
+// IsMisplacedSeriesFile reports whether filePath is a TV episode that lives
+// inside an explicit "Season NN/" (or "Specials"/"Extras") directory. Such a
+// file is a series structure dropped into a movie-type library (e.g. a fan
+// "supercuts" pack): a movie library would otherwise turn every episode into a
+// bogus per-episode "Season NN" movie that never matches a movie provider.
+//
+// The check is intentionally strict — it requires BOTH an SxxExx pattern in the
+// file name AND an explicit season/specials ancestor directory — so legitimate
+// movies that merely carry an episode-like substring in their release name
+// (e.g. "...S01E43..." inside a "Title (Year)/" folder) are never flagged.
+func IsMisplacedSeriesFile(filePath string) bool {
+	clean := filepath.Clean(filePath)
+	baseName := filepath.Base(clean)
+	nameNoExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	if !inferSeasonEpisodeRe.MatchString(nameNoExt) {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(clean), "/")
+	for _, part := range parts[:max(len(parts)-1, 0)] {
+		if inferSeasonDirRe.MatchString(part) || inferSpecialsDirRe.MatchString(part) {
+			return true
+		}
+	}
+	return false
+}
+
 func detectInferMovieFolderEvidence(parentBase string, nameNoExt string, hasSeasonStructure bool) bool {
 	if hasSeasonStructure {
 		return false

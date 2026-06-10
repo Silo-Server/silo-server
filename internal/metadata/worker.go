@@ -620,6 +620,22 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		)
 		return false
 	}
+	if skeleton != nil && skeleton.ItemStatus == "skipped" {
+		// Deliberately skipped during skeleton creation (e.g. a misplaced TV
+		// episode inside a movie library): no item is created on purpose.
+		// Dequeue immediately; the recorded skipped root keeps the file out of
+		// future enqueues (see movieQueueFileEligibleCond), so this drains rows
+		// claimed before the skipped root was recorded.
+		if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
+			slog.Warn("metadata: failed to delete skipped movie queue row",
+				"file_id", file.ID,
+				"path", file.FilePath,
+				"error", err,
+			)
+			return false
+		}
+		return true
+	}
 	if skeleton == nil || strings.TrimSpace(skeleton.ContentID) == "" {
 		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, truncateSeriesQueueError("movie queue claimed without a content id")); updateErr != nil {
 			slog.Warn("metadata: failed to update movie queue error",

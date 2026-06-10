@@ -786,11 +786,17 @@ func newFakeSkippedRootRepo() *fakeSkippedRootRepo {
 	return &fakeSkippedRootRepo{skipped: make(map[string]models.SkippedMediaRoot)}
 }
 
-func (r *fakeSkippedRootRepo) Upsert(_ context.Context, root models.SkippedMediaRoot) error {
+func (r *fakeSkippedRootRepo) UpsertObservedFile(_ context.Context, folderID int, rootPath, reason, sampleFilePath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := fmt.Sprintf("%d:%s", root.MediaFolderID, root.RootPath)
-	r.skipped[key] = root
+	key := fmt.Sprintf("%d:%s", folderID, rootPath)
+	r.skipped[key] = models.SkippedMediaRoot{
+		MediaFolderID:  folderID,
+		RootPath:       rootPath,
+		Reason:         reason,
+		SampleFilePath: sampleFilePath,
+		FileCount:      1,
+	}
 	return nil
 }
 
