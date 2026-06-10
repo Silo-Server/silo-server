@@ -2221,7 +2221,8 @@ export type EventChannel =
   | "tasks"
   | "scans"
   | "history_import"
-  | "user_state";
+  | "user_state"
+  | "notifications";
 
 export interface EventsHelloMessage {
   type: "hello";
@@ -3751,4 +3752,49 @@ export interface FilesystemBrowseResponse {
   path: string;
   parent: string;
   entries: FilesystemBrowseEntry[];
+}
+
+export type NotificationCategory = "request" | "content" | "announcement" | "system" | "admin";
+
+export type NotificationPreferenceCategory = NotificationCategory | "content_digest";
+
+export interface AppNotification {
+  id: number;
+  user_id: number;
+  profile_id?: string;
+  category: NotificationCategory;
+  type: string;
+  title: string;
+  body: string;
+  link?: string;
+  item_id?: string;
+  created_at: string;
+  read_at?: string;
+  expires_at?: string;
+}
+
+export interface NotificationListResponse {
+  items: AppNotification[] | null;
+  next_cursor: number | null;
+}
+
+export interface NotificationPreference {
+  category: NotificationPreferenceCategory;
+  enabled: boolean;
+}
+
+export interface AnnouncementAudience {
+  all?: boolean;
+  user_ids?: number[];
+  library_ids?: number[];
+}
+
+export interface Announcement {
+  id: number;
+  title: string;
+  body: string;
+  audience: AnnouncementAudience;
+  created_by?: number;
+  created_at: string;
+  expires_at?: string;
 }
