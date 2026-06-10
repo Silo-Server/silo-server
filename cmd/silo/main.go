@@ -512,6 +512,7 @@ func main() {
 			Mode:        cfg.Server.Mode,
 			DatabaseURL: cfg.Database.URL,
 			JFListen:    cfg.JellyfinCompat.Listen,
+			RedisURL:    bc.RedisURL,
 		}
 		watcher := nodeconfig.NewWatcher(pool, dataCipher, eventBus, bootstrap)
 		if err := watcher.Start(appCtx); err != nil {
