@@ -80,14 +80,14 @@ Wholphin's Seerr integration (`/api/v1/...` discover/request endpoints) targets 
 |---|---|---|---|
 | `GET /Items/{id}/ThemeSongs` | `ThemeSongPlayer.kt` | ~~404 → feature silently dead.~~ **Resolved 2026-06-09:** now stubbed with an empty `ThemeMediaResult` (including the `OwnerId` field jellyfin-sdk-kotlin requires). | Resolved |
 | `GET /Audio/{id}/universal` | `ThemeSongPlayer.kt`, `MusicService.kt` | Audio streaming for theme songs and music playback. No music libraries are exposed today, but this is the second half of the theme-song path and the blocker for any future audio support in jellycompat. | Low (today) |
-| `GET /Items/{id}/Download` | `SlideshowViewModel.kt`, `ScreensaverService.kt` | ~~Inconsistency: `CanDownload=true` while the route 404s.~~ **Resolved 2026-06-09:** `mapping.go` now sets `CanDownload=false`, so clients no longer attempt downloads. Revisit if a download route is ever implemented. | Resolved |
+| `GET /Items/{id}/Download` | `SlideshowViewModel.kt`, `ScreensaverService.kt` | ~~Inconsistency: `CanDownload=true` while the route 404s.~~ **Resolved 2026-06-09:** a real `/Items/{id}/Download` route now serves the original file (`streams.go`), and `CanDownload=true` again. The earlier `CanDownload=false` workaround broke Infuse, which requires the flag for Direct Play. | Resolved |
 | `POST /ClientLog/Document` | `MediaReportService.kt`, `DebugPage.kt` | "Upload logs to server" debug action fails. | Low |
 | `GET /Audio/{id}/Lyrics` | `NowPlayingViewModel.kt` | Music-only; unreachable until audio libraries exist. | Low |
 
 ## Recommendations (priority order)
 
 1. **Merge the repeated-`Fields` fix** (PR #110). `parseItemsQuery` still reads `q.Get("Fields")` (`internal/jellycompat/query.go`), which truncates jellyfin-sdk-kotlin's repeated query params and breaks Wholphin episode auto-advance. This is the only *covered* endpoint with a known correctness bug for this client. Follow up by sweeping the remaining single-value reads (`Ids`, `GenreIds`, `PersonIds`, `Filters`, `SortBy`, `SortOrder`) to `q.Values`, matching how `IncludeItemTypes`/`MediaTypes`/`ImageTypes` are already handled.
-2. ~~Resolve the `CanDownload` inconsistency~~ — **done 2026-06-09**: `CanDownload=false` until a download route exists.
+2. ~~Resolve the `CanDownload` inconsistency~~ — **done 2026-06-09**: real `/Items/{id}/Download` route added; `CanDownload` stays `true` (Infuse requires it for Direct Play).
 3. ~~Stub `GET /Items/{id}/ThemeSongs`~~ — **done 2026-06-09**: empty `ThemeMediaResult` stub registered.
 4. **Websocket server-push** (remote control: server-initiated pause/stop, display messages) — tracked in issue #122.
 5. **Optional, later:** `POST /ClientLog/Document` accept-and-discard stub and real `/Studios` data. Playlists, lyrics, and universal audio only matter once silo exposes those content types through jellycompat.

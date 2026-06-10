@@ -218,6 +218,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	// (e.g. libmpv) that don't forward auth headers or query parameters.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Method(http.MethodHead, "/Items/{id}/Download", http.HandlerFunc(playbackHandler.HandleDownload))
+		r.Get("/Items/{id}/Download", playbackHandler.HandleDownload)
 		r.Method(http.MethodHead, "/Videos/{id}/stream", http.HandlerFunc(playbackHandler.HandleVideoStream))
 		r.Get("/Videos/{id}/stream", playbackHandler.HandleVideoStream)
 		r.Method(http.MethodHead, "/Videos/{id}/stream.{container}", http.HandlerFunc(playbackHandler.HandleVideoStream))
