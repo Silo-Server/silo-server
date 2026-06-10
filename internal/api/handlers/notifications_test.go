@@ -13,8 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/auth"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -28,7 +28,7 @@ import (
 // Only GetProfile is exercised by childSafe.
 type fakeProfileStore struct {
 	userstore.UserStore // embed for unimplemented methods
-	isChild            bool
+	isChild             bool
 }
 
 func (s *fakeProfileStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
@@ -59,16 +59,16 @@ func (f *fakeResolverWithError) ForUser(_ context.Context, _ int) (userstore.Use
 type fakeNotificationsStore struct {
 	notifications.Store // embed for unimplemented panics
 
-	list              []*notifications.Notification
-	announcements     []*notifications.Announcement
-	unreadCount       int
-	prefs             map[notifications.Category]bool
-	markReadCalled    bool
-	markAllReadCalled bool
-	dismissErr        error
-	setPrefErr        error
+	list                  []*notifications.Notification
+	announcements         []*notifications.Announcement
+	unreadCount           int
+	prefs                 map[notifications.Category]bool
+	markReadCalled        bool
+	markAllReadCalled     bool
+	dismissErr            error
+	setPrefErr            error
 	deleteAnnouncementErr error
-	insertCalled      bool
+	insertCalled          bool
 
 	// capturedFilter records the most recent ListFilter passed to List.
 	capturedFilter *notifications.ListFilter
@@ -138,9 +138,13 @@ func (f *fakeNotificationsStore) DeleteAnnouncement(_ context.Context, id int64)
 	return notifications.ErrNotFound
 }
 
-func (f *fakeNotificationsStore) DismissUnreadByTypeAndRef(_ context.Context, _, _ string) error { return nil }
-func (f *fakeNotificationsStore) PurgeOld(_ context.Context, _, _ time.Time) (int64, error)     { return 0, nil }
-func (f *fakeNotificationsStore) AdminUserIDs(_ context.Context) ([]int, error)                 { return nil, nil }
+func (f *fakeNotificationsStore) DismissUnreadByTypeAndRef(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeNotificationsStore) PurgeOld(_ context.Context, _, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (f *fakeNotificationsStore) AdminUserIDs(_ context.Context) ([]int, error) { return nil, nil }
 func (f *fakeNotificationsStore) UserIDsWithLibraryAccess(_ context.Context, _ int) ([]int, error) {
 	return nil, nil
 }
