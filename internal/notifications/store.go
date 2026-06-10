@@ -94,6 +94,7 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]*Notification, e
 	if limit <= 0 {
 		limit = 50
 	} else if limit > 100 {
+		// keep in sync with the clamp in internal/api/handlers/notifications.go HandleList
 		limit = 100
 	}
 

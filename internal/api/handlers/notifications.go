@@ -39,7 +39,10 @@ func NewNotificationsHandler(svc *notifications.Service, provider ...profileReso
 }
 
 // childSafe resolves the active profile and returns Profile.IsChild.
-// Returns false on any error; logs at debug level only — never fails the request.
+// Fails closed: an unresolvable profile is treated as a child so restricted
+// categories are never leaked on errors. Logs at debug level only — never fails
+// the request. Nil resolver / missing ids keep returning false (unauthenticated
+// paths never reach here; that's the wiring-absent case).
 func (h *NotificationsHandler) childSafe(r *http.Request, userID int, profileID string) bool {
 	if h.profiles == nil || userID == 0 || profileID == "" {
 		return false
@@ -47,12 +50,12 @@ func (h *NotificationsHandler) childSafe(r *http.Request, userID int, profileID 
 	store, err := h.profiles.ForUser(r.Context(), userID)
 	if err != nil {
 		slog.Debug("notifications: childSafe: ForUser failed", "user_id", userID, "error", err)
-		return false
+		return true // fail closed: treat unknown as child
 	}
 	p, err := store.GetProfile(r.Context(), profileID)
 	if err != nil || p == nil {
 		slog.Debug("notifications: childSafe: GetProfile failed", "profile_id", profileID, "error", err)
-		return false
+		return true // fail closed: treat unknown as child
 	}
 	return p.IsChild
 }
@@ -76,6 +79,7 @@ func (h *NotificationsHandler) HandleList(w http.ResponseWriter, r *http.Request
 			limit = n
 		}
 	}
+	// keep in sync with the clamp in internal/notifications/store.go List
 	if limit > 100 {
 		limit = 100
 	}

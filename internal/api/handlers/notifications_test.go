@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +43,13 @@ type fakeResolverAsProfileResolver struct {
 
 func (f *fakeResolverAsProfileResolver) ForUser(_ context.Context, _ int) (userstore.UserStore, error) {
 	return &fakeProfileStore{isChild: f.isChild}, nil
+}
+
+// fakeResolverWithError returns an error from ForUser.
+type fakeResolverWithError struct{}
+
+func (f *fakeResolverWithError) ForUser(_ context.Context, _ int) (userstore.UserStore, error) {
+	return nil, errors.New("resolver failed")
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +598,67 @@ func TestNotificationsList_NilResolverDefaultsToFalse(t *testing.T) {
 	}
 	if store.capturedFilter.ChildSafe {
 		t.Fatalf("capturedFilter.ChildSafe = true, want false when no resolver is wired")
+	}
+}
+
+// TestNotificationsList_ResolverErrorFailsClosed asserts that when the resolver
+// returns an error, ChildSafe=true (fail closed).
+func TestNotificationsList_ResolverErrorFailsClosed(t *testing.T) {
+	store := &fakeNotificationsStore{}
+	resolver := &fakeResolverWithError{}
+	h := newTestNotificationsHandlerWithResolver(store, resolver)
+
+	rec := httptest.NewRecorder()
+	req := notifUserRequest(http.MethodGet, "/notifications", nil, 1, "prof-1")
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if store.capturedFilter == nil {
+		t.Fatal("List was not called; capturedFilter is nil")
+	}
+	if !store.capturedFilter.ChildSafe {
+		t.Fatalf("capturedFilter.ChildSafe = false, want true (fail closed on resolver error)")
+	}
+}
+
+// TestNotificationsList_NextCursorSet asserts that when limit=2 and the store
+// returns exactly 2 notifications, next_cursor is set to the last item's ID.
+func TestNotificationsList_NextCursorSet(t *testing.T) {
+	now := time.Now().UTC()
+	store := &fakeNotificationsStore{
+		list: []*notifications.Notification{
+			{ID: 12, UserID: 1, Category: notifications.CategoryContent, Type: "content.added", Title: "New Movie", CreatedAt: now},
+			{ID: 11, UserID: 1, Category: notifications.CategoryRequest, Type: "request.approved", Title: "Approved", CreatedAt: now.Add(-time.Minute)},
+		},
+	}
+	h := newTestNotificationsHandler(store)
+
+	rec := httptest.NewRecorder()
+	req := notifUserRequest(http.MethodGet, "/notifications?limit=2", nil, 1, "prof-1")
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Items      []*notifications.Notification `json:"items"`
+		NextCursor *int64                        `json:"next_cursor"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("items count = %d, want 2", len(resp.Items))
+	}
+	// With limit=2 and 2 items returned, next_cursor should be set to the last item's ID (11).
+	if resp.NextCursor == nil {
+		t.Fatal("next_cursor is nil, want 11")
+	}
+	if *resp.NextCursor != 11 {
+		t.Fatalf("next_cursor = %d, want 11", *resp.NextCursor)
 	}
 }
 
