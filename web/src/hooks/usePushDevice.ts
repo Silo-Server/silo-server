@@ -44,12 +44,15 @@ export function usePushDevice() {
       setStatus("unsupported");
       return;
     }
-    genRef.current += 1;
-    setStatus("pending");
+    const myGen = (genRef.current += 1);
+    const set = (s: PushDeviceStatus) => {
+      if (genRef.current === myGen) setStatus(s);
+    };
+    set("pending");
     try {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") {
-        setStatus(perm === "denied" ? "blocked" : "off");
+        set(perm === "denied" ? "blocked" : "off");
         return;
       }
       const reg = await navigator.serviceWorker.ready;
@@ -57,7 +60,7 @@ export function usePushDevice() {
         "/notifications/push/webpush-key",
       );
       if (!vapid_public_key) {
-        setStatus("off");
+        set("off");
         return;
       }
       await cacheVapidKey(vapid_public_key);
@@ -69,15 +72,18 @@ export function usePushDevice() {
         method: "PUT",
         body: JSON.stringify({ transport: "webpush", token: JSON.stringify(sub.toJSON()) }),
       });
-      setStatus("on");
+      set("on");
     } catch {
-      setStatus("off");
+      set("off");
     }
   }, []);
 
   const disable = useCallback(async () => {
-    genRef.current += 1;
-    setStatus("pending");
+    const myGen = (genRef.current += 1);
+    const set = (s: PushDeviceStatus) => {
+      if (genRef.current === myGen) setStatus(s);
+    };
+    set("pending");
     try {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
@@ -90,7 +96,7 @@ export function usePushDevice() {
     } catch {
       /* server may already lack the row */
     }
-    setStatus("off");
+    set("off");
   }, []);
 
   return { status, enable, disable, refresh };

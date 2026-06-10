@@ -85,4 +85,43 @@ describe("usePushDevice", () => {
     expect(del).toBeTruthy();
     await waitFor(() => expect(result.current.status).toBe("off"));
   });
+
+  it("generation guard: enable() superseded by disable() — disable wins, stale enable cannot clobber", async () => {
+    // Hold enable()'s webpush-key fetch so we can let disable() run to completion first.
+    let rejectKey!: (e: unknown) => void;
+    const keyPromise = new Promise<{ vapid_public_key: string }>((_, rej) => {
+      rejectKey = rej;
+    });
+
+    apiMock.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path.includes("webpush-key")) return keyPromise;
+      if (path.includes("device") && opts?.method === "DELETE") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+
+    const { result } = renderHook(() => usePushDevice(), { wrapper: wrap() });
+
+    // Start enable() without awaiting — it stalls at the webpush-key call (gen=1).
+    let innerEnableResolve!: () => void;
+    const innerEnableDone = new Promise<void>((res) => { innerEnableResolve = res; });
+    act(() => {
+      void result.current.enable().then(innerEnableResolve, innerEnableResolve);
+    });
+
+    // Drain microtasks so enable() reaches the webpush-key await (past requestPermission + sw.ready).
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // Run disable() to full completion — increments gen to 2, sets status "off".
+    await act(async () => { await result.current.disable(); });
+
+    // Reject the stale enable()'s webpush-key call — gen=1 is superseded so
+    // the catch's set("off") is a no-op; disable's "off" (gen=2) must survive.
+    await act(async () => {
+      rejectKey(new Error("stale"));
+      await innerEnableDone;
+    });
+
+    // disable() (gen=2) is the last winner; status must remain "off".
+    expect(result.current.status).toBe("off");
+  });
 });
