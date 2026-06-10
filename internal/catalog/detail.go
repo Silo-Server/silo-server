@@ -164,6 +164,9 @@ type ItemDetail struct {
 
 	// Ebook-specific detail. Present only when Type == "ebook".
 	Ebook *EbookDetailExtension `json:"ebook,omitempty"`
+
+	// Manga-specific detail. Present only when Type == "manga".
+	Manga *MangaDetailExtension `json:"manga,omitempty"`
 }
 
 type AudiobookDetailExtension struct {
@@ -213,6 +216,21 @@ type EbookDetailExtension struct {
 	Publisher string                  `json:"publisher,omitempty"`
 	Series    *AudiobookSeriesGroup   `json:"series,omitempty"`
 	Related   AudiobookRelatedContent `json:"related"`
+}
+
+// MangaDetailExtension is the manga-series detail payload. A manga series item
+// (media_items.type='manga') owns a set of readable chapter items
+// (media_items.type='ebook') linked via the manga_chapters table.
+type MangaDetailExtension struct {
+	Chapters []MangaChapter `json:"chapters"`
+}
+
+// MangaChapter is one chapter of a manga series, ordered by chapter index.
+type MangaChapter struct {
+	ContentID    string   `json:"content_id"`
+	Title        string   `json:"title"`
+	ChapterIndex *float64 `json:"chapter_index,omitempty"`
+	Volume       string   `json:"volume,omitempty"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -961,6 +979,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	if item.Type == "ebook" {
 		detail.Ebook = s.buildEbookExtension(ctx, item, crewCredits, filter)
 	}
+	if item.Type == "manga" {
+		detail.Manga = s.buildMangaExtension(ctx, item)
+	}
 
 	// Series folder paths from confirmed claims when available, otherwise from
 	// the file links that currently belong to the item. This keeps provisional
@@ -1120,6 +1141,60 @@ func (s *DetailService) buildEbookExtension(
 			Similar:      s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter),
 		},
 	}
+}
+
+// buildMangaExtension assembles the manga-series detail payload by listing the
+// series' chapters (ebook items linked via manga_chapters).
+func (s *DetailService) buildMangaExtension(ctx context.Context, item *models.MediaItem) *MangaDetailExtension {
+	if item == nil {
+		return nil
+	}
+	return &MangaDetailExtension{
+		Chapters: s.fetchMangaChapters(ctx, item.ContentID),
+	}
+}
+
+// mangaChaptersQuery is the SQL listing a manga series' chapters in reading
+// order. Chapters with a parsed index sort first (ascending); those without
+// fall back to sort_title. Kept as a package var so the ordering contract can
+// be asserted without a database.
+const mangaChaptersQuery = `
+	SELECT m.content_id, m.title, mc.chapter_index, mc.volume
+	FROM manga_chapters mc
+	JOIN media_items m ON m.content_id = mc.chapter_content_id
+	WHERE mc.series_content_id = $1
+	ORDER BY mc.chapter_index NULLS LAST, m.sort_title
+`
+
+// fetchMangaChapters returns the ordered chapters for a manga series. It never
+// returns nil so the JSON payload always carries a (possibly empty) array.
+func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID string) []MangaChapter {
+	chapters := make([]MangaChapter, 0, 16)
+	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
+		return chapters
+	}
+	rows, err := s.itemRepo.pool.Query(ctx, mangaChaptersQuery, seriesContentID)
+	if err != nil {
+		return chapters
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			ch     MangaChapter
+			index  *float64
+			volume *string
+		)
+		if err := rows.Scan(&ch.ContentID, &ch.Title, &index, &volume); err != nil {
+			return chapters
+		}
+		ch.ChapterIndex = index
+		if volume != nil {
+			ch.Volume = *volume
+		}
+		chapters = append(chapters, ch)
+	}
+	return chapters
 }
 
 func audiobookPeopleFromCrew(crew []CrewCredit, job string) []AudiobookPerson {
