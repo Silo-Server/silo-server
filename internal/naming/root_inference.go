@@ -384,8 +384,7 @@ func IsMisplacedSeriesFile(filePath string) bool {
 	}
 	parts := strings.Split(filepath.ToSlash(clean), "/")
 	for _, part := range parts[:max(len(parts)-1, 0)] {
-		segment := filepath.Base(part)
-		if inferSeasonDirRe.MatchString(segment) || inferSpecialsDirRe.MatchString(segment) {
+		if inferSeasonDirRe.MatchString(part) || inferSpecialsDirRe.MatchString(part) {
 			return true
 		}
 	}
