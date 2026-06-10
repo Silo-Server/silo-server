@@ -24,6 +24,82 @@ func publishAndSettle(t *testing.T, hub *evt.Hub, m *Materializer, env evt.Envel
 	}
 }
 
+func TestSendContract_CreatesNotification(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	payload := map[string]any{
+		"user_id": 5, "category": "request", "type": "request.fulfilled",
+		"title": "Your audiobook is ready", "body": "Dune by Frank Herbert",
+		"dedup_ref": "ab-req-9:fulfilled",
+	}
+	data, _ := json.Marshal(payload)
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelPlugins, Event: "plugin.silo.audiobook-requests.notifications.send", Data: data,
+	})
+
+	if len(store.inserted) != 1 {
+		t.Fatalf("inserted = %d, want 1", len(store.inserted))
+	}
+	n := store.inserted[0]
+	if n.UserID != 5 || n.Category != CategoryRequest || n.Type != "request.fulfilled" ||
+		n.Title != "Your audiobook is ready" || n.DedupRef != "ab-req-9:fulfilled" ||
+		n.SourceEvent != "plugin.silo.audiobook-requests.notifications.send" {
+		t.Fatalf("bad notification: %+v", n)
+	}
+}
+
+func TestSendContract_MalformedDropped(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	for _, raw := range []string{
+		`{"category":"request","type":"t","title":"x"}`,                  // no user_id
+		`{"user_id":5,"category":"announcement","type":"t","title":"x"}`, // plugins may not create announcements
+		`{"user_id":5,"category":"bogus","type":"t","title":"x"}`,        // invalid category
+		`{"user_id":5,"category":"request","title":"x"}`,                 // no type
+		`{"user_id":5,"category":"request","type":"t"}`,                  // no title
+		`not json`,
+	} {
+		publishAndSettle(t, hub, m, evt.Envelope{
+			Channel: evt.ChannelPlugins, Event: "notifications.send", Data: json.RawMessage(raw),
+		})
+	}
+	if len(store.inserted) != 0 {
+		t.Fatalf("malformed payloads were inserted: %d", len(store.inserted))
+	}
+}
+
+func TestSendContract_IgnoresUnrelatedPluginEvents(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	data, _ := json.Marshal(map[string]any{"user_id": 5, "category": "request", "type": "t", "title": "x"})
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelPlugins, Event: "plugin.silo.ebooks.request_submitted", Data: data,
+	})
+	if len(store.inserted) != 0 {
+		t.Fatalf("unrelated plugin event created a notification")
+	}
+}
+
 func TestRequestMatcher_ApprovedCreatesNotification(t *testing.T) {
 	store := &fakeStore{}
 	svc, hub := newTestService(store)
