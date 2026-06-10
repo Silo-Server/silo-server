@@ -35,6 +35,7 @@ import EbookReader from "@/pages/EbookReader";
 import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
+import Notifications from "@/pages/Notifications";
 import Requests from "@/pages/Requests";
 import RequestBrowse from "@/pages/RequestBrowse";
 import RequestDetail from "@/pages/RequestDetail";
@@ -532,6 +533,7 @@ function AppRoutes() {
                             element={<RecommendationsSection />}
                           />
                           <Route path="/calendar" element={<Calendar />} />
+                          <Route path="/notifications" element={<Notifications />} />
                           <Route
                             path="/profile/customize-home"
                             element={<ProfileCustomizeHome />}
