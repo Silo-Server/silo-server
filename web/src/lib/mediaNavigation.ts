@@ -1,4 +1,11 @@
-type PlayableMediaType = "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
+type PlayableMediaType =
+  | "movie"
+  | "series"
+  | "season"
+  | "episode"
+  | "audiobook"
+  | "ebook"
+  | "podcast";
 
 interface MediaHrefInput {
   contentId: string;
@@ -23,15 +30,22 @@ export function buildItemHref({
   contentId,
   libraryId,
 }: Pick<MediaHrefInput, "contentId" | "libraryId">) {
-  return appendQuery(`/item/${contentId}`, { libraryId });
+  return appendQuery(`/item/${encodeURIComponent(contentId)}`, { libraryId });
 }
 
 export function buildMediaPlayHref({ contentId, type, libraryId, restart }: MediaHrefInput) {
   if (type === "movie" || type === "episode") {
-    return appendQuery(`/watch/${contentId}`, { libraryId, restart });
+    return appendQuery(`/watch/${encodeURIComponent(contentId)}`, { libraryId, restart });
   }
   if (type === "audiobook") {
-    return appendQuery(`/item/${contentId}`, { libraryId, play: true, restart });
+    return appendQuery(`/item/${encodeURIComponent(contentId)}`, {
+      libraryId,
+      play: true,
+      restart,
+    });
+  }
+  if (type === "ebook") {
+    return appendQuery(`/reader/ebook/${encodeURIComponent(contentId)}`, { libraryId });
   }
   return buildItemHref({ contentId, libraryId });
 }

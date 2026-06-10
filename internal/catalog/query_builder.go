@@ -11,6 +11,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// EbookFinishedProgressThresholdSQL is models.EbookFinishedProgressThreshold
+// rendered as a SQL numeric literal. Queries that classify ebook reader
+// progress as finished must interpolate this value instead of hardcoding the
+// threshold so the definition of "finished" cannot drift between subsystems.
+var EbookFinishedProgressThresholdSQL = strconv.FormatFloat(models.EbookFinishedProgressThreshold, 'f', -1, 64)
+
 type QueryBuilder struct {
 	alias      string
 	argIdx     int
@@ -159,9 +165,10 @@ func (qb *QueryBuilder) UserHistoryCTEArgs() []any {
 // UserHistoryCTESQL returns the user_last_watched CTE definition. The two
 // placeholder positions (user_id, profile_id) are bound to the args returned
 // by UserHistoryCTEArgs and should be the first two entries in the final
-// statement's arg list. The CTE aggregates user_watch_history watch_at and
-// user_watch_progress.completed=TRUE updated_at into one row per
-// media_item_id, filtering out items the user has hidden via
+// statement's arg list. The CTE aggregates user_watch_history watched_at,
+// user_watch_progress.completed=TRUE updated_at, and completed ebook reader
+// progress updated_at into one row per media_item_id, filtering out videos the
+// user has hidden via
 // user_history_hidden_items. The single GROUP BY replaces the two
 // correlated MAX subqueries the previous lastWatchedExpr emitted (audit
 // 2026-05-01 §3.1 Pattern B).
@@ -187,6 +194,10 @@ func UserHistoryCTESQL(argIdx int) string {
 		SELECT uwp.media_item_id, NULL::timestamptz, uwp.updated_at
 		FROM user_watch_progress uwp
 		WHERE uwp.user_id = $%d AND uwp.profile_id = $%d AND uwp.completed = TRUE
+		UNION ALL
+		SELECT erp.content_id AS media_item_id, NULL::timestamptz, erp.updated_at
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $%d AND erp.profile_id = $%d AND erp.progress >= %s
 	) src
 	WHERE NOT EXISTS (
 		SELECT 1 FROM user_history_hidden_items hhi
@@ -195,7 +206,7 @@ func UserHistoryCTESQL(argIdx int) string {
 		  AND COALESCE(src.uwh_at, src.uwp_at) <= hhi.hidden_before
 	)
 	GROUP BY src.media_item_id
-)`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1)
+)`, argIdx, argIdx+1, argIdx, argIdx+1, argIdx, argIdx+1, EbookFinishedProgressThresholdSQL, argIdx, argIdx+1)
 }
 
 func (qb *QueryBuilder) BuildSortClause(sortConfig QuerySort) (string, []any, error) {
@@ -298,7 +309,8 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (QuerySortPlan, erro
 		return plan, nil
 	case "series":
 		plan.Joins = []string{fmt.Sprintf(
-			"LEFT JOIN audiobook_series sort_series ON sort_series.content_id = %s.content_id",
+			"LEFT JOIN %s sort_series ON sort_series.content_id = %s.content_id",
+			qb.bookSeriesTable(),
 			qb.alias,
 		)}
 		// Sort by series name primarily, then by series_index so books
@@ -385,7 +397,7 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	case "narrator":
 		return qb.buildPersonClause(models.PersonKindNarrator, rule)
 	case "series":
-		return qb.buildAudiobookSeriesClause(rule)
+		return qb.buildBookSeriesClause(rule)
 	case "watched":
 		return qb.buildWatchedClause(rule)
 	case "favorited":
@@ -502,14 +514,21 @@ func (qb *QueryBuilder) personKindSortJoin(kind models.PersonKind, alias string)
 	)
 }
 
-func (qb *QueryBuilder) buildAudiobookSeriesClause(rule QueryRule) (string, error) {
+func (qb *QueryBuilder) bookSeriesTable() string {
+	if qb.mediaScope == "ebook" {
+		return "ebook_series"
+	}
+	return "audiobook_series"
+}
+
+func (qb *QueryBuilder) buildBookSeriesClause(rule QueryRule) (string, error) {
 	qb.args = append(qb.args, rule.Value)
 	clause := fmt.Sprintf(`EXISTS (
 		SELECT 1
-		FROM audiobook_series s
+		FROM %s s
 		WHERE s.content_id = %s.content_id
 		  AND LOWER(BTRIM(s.series_name)) = LOWER(BTRIM($%d))
-	)`, qb.alias, qb.argIdx)
+)`, qb.bookSeriesTable(), qb.alias, qb.argIdx)
 	qb.argIdx++
 	if rule.Op == "is_not" {
 		return "NOT (" + clause + ")", nil
@@ -947,6 +966,9 @@ func (qb *QueryBuilder) buildInProgressClause(rule QueryRule) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("in_progress requires a boolean value")
 	}
+	if qb.mediaScope == "ebook" {
+		return qb.buildEbookInProgressClause(value), nil
+	}
 	qb.args = append(qb.args, qb.userID, qb.profileID)
 	clause := fmt.Sprintf(`EXISTS (
 		SELECT 1
@@ -969,6 +991,32 @@ func (qb *QueryBuilder) buildInProgressClause(rule QueryRule) (string, error) {
 		return "NOT (" + clause + ")", nil
 	}
 	return clause, nil
+}
+
+func (qb *QueryBuilder) buildEbookInProgressClause(value bool) string {
+	qb.args = append(qb.args, qb.userID, qb.profileID)
+	clause := fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $%d
+		  AND erp.profile_id = $%d
+		  AND erp.content_id = %s.content_id
+		  AND erp.progress > 0
+		  AND erp.progress < %s
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = $%d
+			  AND hhi.profile_id = $%d
+			  AND hhi.media_item_id = erp.content_id
+			  AND erp.updated_at <= hhi.hidden_before
+		  )
+	)`, qb.argIdx, qb.argIdx+1, qb.alias, EbookFinishedProgressThresholdSQL, qb.argIdx, qb.argIdx+1)
+	qb.argIdx += 2
+	if !value {
+		return "NOT (" + clause + ")"
+	}
+	return clause
 }
 
 func (qb *QueryBuilder) buildLastWatchedClause(rule QueryRule) (string, error) {
@@ -1069,6 +1117,9 @@ func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
 }
 
 func (qb *QueryBuilder) userStateCompletionClause() string {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookUserStateCompletionClause()
+	}
 	qb.args = append(qb.args, qb.userID, qb.profileID)
 	clause := fmt.Sprintf(`(
 		EXISTS (
@@ -1115,6 +1166,28 @@ func (qb *QueryBuilder) userStateCompletionClause() string {
 		qb.argIdx,
 		qb.argIdx+1,
 	)
+	qb.argIdx += 2
+	return clause
+}
+
+func (qb *QueryBuilder) ebookUserStateCompletionClause() string {
+	qb.args = append(qb.args, qb.userID, qb.profileID)
+	clause := fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $%d
+		  AND erp.profile_id = $%d
+		  AND erp.content_id = %s.content_id
+		  AND erp.progress >= %s
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = $%d
+			  AND hhi.profile_id = $%d
+			  AND hhi.media_item_id = erp.content_id
+			  AND erp.updated_at <= hhi.hidden_before
+		  )
+	)`, qb.argIdx, qb.argIdx+1, qb.alias, EbookFinishedProgressThresholdSQL, qb.argIdx, qb.argIdx+1)
 	qb.argIdx += 2
 	return clause
 }
@@ -1342,6 +1415,9 @@ func (qb *QueryBuilder) consumeIntArgs(values []int) ([]string, []any) {
 }
 
 func (qb *QueryBuilder) progressSortPlan() (string, []string, []any) {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookProgressSortPlan()
+	}
 	joinSQL := fmt.Sprintf(
 		`LEFT JOIN (
 			SELECT uwp.media_item_id AS content_id,
@@ -1369,7 +1445,39 @@ func (qb *QueryBuilder) progressSortPlan() (string, []string, []any) {
 	return "sort_progress.progress_ratio", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
+func (qb *QueryBuilder) ebookProgressSortPlan() (string, []string, []any) {
+	joinSQL := fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT erp.content_id,
+				CASE
+					WHEN erp.progress > 0
+					  AND erp.progress < %s
+					  AND (hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before)
+					THEN erp.progress::double precision
+					ELSE NULL
+				END AS progress_ratio
+			FROM ebook_reader_progress erp
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%d
+			   AND hhi.profile_id = $%d
+			   AND hhi.media_item_id = erp.content_id
+			WHERE erp.user_id = $%d
+			  AND erp.profile_id = $%d
+		) sort_progress ON sort_progress.content_id = %s.content_id`,
+		EbookFinishedProgressThresholdSQL,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.alias,
+	)
+	return "sort_progress.progress_ratio", []string{joinSQL}, []any{qb.userID, qb.profileID}
+}
+
 func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookDateViewedSortPlan()
+	}
 	historyJoin := fmt.Sprintf(
 		`LEFT JOIN (
 			SELECT uwh.media_item_id AS content_id, MAX(uwh.watched_at) AS viewed_at
@@ -1420,7 +1528,38 @@ func (qb *QueryBuilder) dateViewedSortPlan() (string, []string, []any) {
 	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
 }
 
+func (qb *QueryBuilder) ebookDateViewedSortPlan() (string, []string, []any) {
+	joinSQL := fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT erp.content_id,
+				CASE
+					WHEN erp.progress >= %s
+					  AND (hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before)
+					THEN erp.updated_at
+					ELSE NULL
+				END AS viewed_at
+			FROM ebook_reader_progress erp
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%d
+			   AND hhi.profile_id = $%d
+			   AND hhi.media_item_id = erp.content_id
+			WHERE erp.user_id = $%d
+			  AND erp.profile_id = $%d
+		) sort_ebook_viewed ON sort_ebook_viewed.content_id = %s.content_id`,
+		EbookFinishedProgressThresholdSQL,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.alias,
+	)
+	return "sort_ebook_viewed.viewed_at", []string{joinSQL}, []any{qb.userID, qb.profileID}
+}
+
 func (qb *QueryBuilder) playsSortPlan() (string, []string, []any) {
+	if qb.mediaScope == "ebook" {
+		return qb.ebookPlaysSortPlan()
+	}
 	historyJoin := fmt.Sprintf(
 		`LEFT JOIN (
 			SELECT uwh.media_item_id AS content_id, COUNT(*) AS play_count
@@ -1469,6 +1608,34 @@ func (qb *QueryBuilder) playsSortPlan() (string, []string, []any) {
 		COALESCE(sort_progress_plays.completed_play_count, 0)
 	), 0)`
 	return expr, []string{historyJoin, progressJoin}, []any{qb.userID, qb.profileID}
+}
+
+func (qb *QueryBuilder) ebookPlaysSortPlan() (string, []string, []any) {
+	joinSQL := fmt.Sprintf(
+		`LEFT JOIN (
+			SELECT erp.content_id,
+				CASE
+					WHEN erp.progress >= %s
+					  AND (hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before)
+					THEN 1
+					ELSE 0
+				END AS completed_play_count
+			FROM ebook_reader_progress erp
+			LEFT JOIN user_history_hidden_items hhi
+				ON hhi.user_id = $%d
+			   AND hhi.profile_id = $%d
+			   AND hhi.media_item_id = erp.content_id
+			WHERE erp.user_id = $%d
+			  AND erp.profile_id = $%d
+		) sort_ebook_plays ON sort_ebook_plays.content_id = %s.content_id`,
+		EbookFinishedProgressThresholdSQL,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.argIdx,
+		qb.argIdx+1,
+		qb.alias,
+	)
+	return "NULLIF(sort_ebook_plays.completed_play_count, 0)", []string{joinSQL}, []any{qb.userID, qb.profileID}
 }
 
 func (qb *QueryBuilder) lastAirDateSortPlan() (string, []string) {

@@ -34,6 +34,7 @@ type SectionHandler struct {
 	DetailSvc      *catalog.DetailService
 	Settings       catalog.SettingsStore
 	CollectionRepo *catalog.LibraryCollectionRepository
+	EbookProgress  EbookReaderProgressLister
 }
 
 // NewSectionHandler creates a new SectionHandler.
@@ -1380,7 +1381,10 @@ func (h *SectionHandler) listSectionItemUserStates(r *http.Request, items []*mod
 	if err != nil || store == nil {
 		return map[string]*itemUserStateResponse{}
 	}
-	states, err := resolveItemUserStates(r.Context(), store, profileID, h.EpisodeRepo, items)
+	states, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.EpisodeRepo, items, itemUserStateOptions{
+		UserID:             userID,
+		EbookProgressStore: h.EbookProgress,
+	})
 	if err != nil {
 		return map[string]*itemUserStateResponse{}
 	}

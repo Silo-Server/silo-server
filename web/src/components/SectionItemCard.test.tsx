@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import SectionItemCard from "./SectionItemCard";
 
 vi.mock("@/components/ViewTransitionLink", () => ({
-  default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  default: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
 
 vi.mock("@/components/MediaItemMenu", () => ({
@@ -21,6 +21,31 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
 }));
 
 describe("SectionItemCard", () => {
+  it("encodes item links while preserving library context", () => {
+    const markup = renderToStaticMarkup(
+      <SectionItemCard
+        libraryId={12}
+        item={{
+          content_id: "ebook 1/isbn:978",
+          type: "ebook",
+          title: "A Reader",
+          year: 2026,
+          genres: ["Fantasy"],
+          status: "matched",
+          rating_imdb: null,
+          overview: "Overview",
+          poster_url: "",
+          poster_thumbhash: "",
+          backdrop_url: "",
+          backdrop_thumbhash: "",
+          logo_url: "",
+        }}
+      />,
+    );
+
+    expect(markup).toContain('href="/item/ebook%201%2Fisbn%3A978?libraryId=12"');
+  });
+
   it("renders episode cards with series title, episode title, and episode code", () => {
     const markup = renderToStaticMarkup(
       <SectionItemCard

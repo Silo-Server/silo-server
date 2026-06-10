@@ -8,7 +8,7 @@ import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
 import { cn } from "@/lib/utils";
-import { normalizeQuerySortForScope, type QuerySortRelevanceScope } from "@/lib/querySortOptions";
+import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import {
   Select,
@@ -20,7 +20,9 @@ import {
 import {
   AUDIOBOOK_BROWSE_AXES,
   audiobookBrowseAxisFromBrowseType,
+  getLibrarySortRelevanceScope,
   isAudiobookLibraryType,
+  isEbookLibraryType,
   type AudiobookBrowseAxis,
   type LibraryBrowseType,
 } from "./libraryPageSearchParams";
@@ -97,29 +99,6 @@ function AudiobookAxisTabs({
   );
 }
 
-function getLibrarySortRelevanceScope(
-  libraryType: string,
-  mediaScope?: QueryDefinition["media_scope"],
-): QuerySortRelevanceScope {
-  if (libraryType === "movie" || libraryType === "series") {
-    return libraryType;
-  }
-  // The DB stores audiobook library type as the plural "audiobooks";
-  // the sort scope is the singular "audiobook" (matches QueryDefinition.media_scope).
-  if (libraryType === "audiobook" || libraryType === "audiobooks") {
-    return "audiobook";
-  }
-  if (
-    mediaScope === "movie" ||
-    mediaScope === "series" ||
-    mediaScope === "episode" ||
-    mediaScope === "audiobook"
-  ) {
-    return mediaScope;
-  }
-  return "all";
-}
-
 export default function LibraryBrowse({
   libraryId,
   libraryType,
@@ -141,9 +120,11 @@ export default function LibraryBrowse({
         ? queryDefinition.media_scope
         : isAudiobookLibraryType(libraryType)
           ? "audiobook"
-          : libraryType === "movie"
-            ? libraryType
-            : undefined,
+          : isEbookLibraryType(libraryType)
+            ? "ebook"
+            : libraryType === "movie"
+              ? libraryType
+              : undefined,
     sort: normalizeQuerySortForScope(queryDefinition.sort, {
       includePersonalized: true,
       relevanceScope: sortRelevanceScope,

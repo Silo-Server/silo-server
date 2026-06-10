@@ -77,23 +77,27 @@ function parseAudiobookLibraryBrowseType(value: string | undefined): LibraryBrow
   return value === "series" || value === "authors" || value === "narrators" ? value : "books";
 }
 
-function getLibrarySortRelevanceScope(
+export function getLibrarySortRelevanceScope(
   libraryType: string,
   mediaScope?: QueryDefinition["media_scope"],
 ): QuerySortRelevanceScope {
   if (libraryType === "movie" || libraryType === "series") {
     return libraryType;
   }
-  // The DB stores audiobook library type as the plural "audiobooks";
-  // the sort scope is the singular "audiobook" (matches QueryDefinition.media_scope).
+  // The DB stores book library types as plurals; sort scopes are singular
+  // values matching QueryDefinition.media_scope.
   if (libraryType === "audiobook" || libraryType === "audiobooks") {
     return "audiobook";
+  }
+  if (libraryType === "ebook" || libraryType === "ebooks") {
+    return "ebook";
   }
   if (
     mediaScope === "movie" ||
     mediaScope === "series" ||
     mediaScope === "episode" ||
-    mediaScope === "audiobook"
+    mediaScope === "audiobook" ||
+    mediaScope === "ebook"
   ) {
     return mediaScope;
   }
@@ -102,6 +106,10 @@ function getLibrarySortRelevanceScope(
 
 export function isAudiobookLibraryType(libraryType: string): boolean {
   return libraryType === "audiobook" || libraryType === "audiobooks";
+}
+
+export function isEbookLibraryType(libraryType: string): boolean {
+  return libraryType === "ebook" || libraryType === "ebooks";
 }
 
 function readString(value: string | null): string | undefined {
@@ -295,11 +303,14 @@ export function parseLibraryPageState(
     (mediaScopeParam === "movie" ||
       mediaScopeParam === "series" ||
       mediaScopeParam === "episode" ||
-      mediaScopeParam === "audiobook")
+      mediaScopeParam === "audiobook" ||
+      mediaScopeParam === "ebook")
       ? mediaScopeParam
       : isAudiobookLibraryType(libraryType)
         ? "audiobook"
-        : undefined;
+        : isEbookLibraryType(libraryType)
+          ? "ebook"
+          : undefined;
   const sortRelevanceScope =
     libraryType === "series" && browseType === "episode"
       ? "all"

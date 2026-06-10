@@ -84,14 +84,17 @@ export default function SectionRow({ section, libraryId }: SectionRowProps) {
     >
       {section.section_type === "continue_watching" || section.section_type === "next_up"
         ? (() => {
-            // Continue Watching with only movies and/or audiobooks looks better
-            // as upright covers (audiobook covers render square within the
-            // poster variant). Episodes (incl. Next Up) keep the wide variant
-            // so stills are shown with their natural 16:9 framing.
+            // Continue Watching with only movies, audiobooks, and/or ebooks
+            // looks better as upright covers (audiobook covers render square
+            // within the poster variant; ebook covers are naturally 2:3).
+            // Episodes (incl. Next Up) keep the wide variant so stills are
+            // shown with their natural 16:9 framing.
             const cardVariant: "wide" | "poster" =
               section.section_type === "continue_watching" &&
               section.items.length > 0 &&
-              section.items.every((it) => it.type === "movie" || it.type === "audiobook")
+              section.items.every(
+                (it) => it.type === "movie" || it.type === "audiobook" || it.type === "ebook",
+              )
                 ? "poster"
                 : "wide";
             return section.items.map((item) => (

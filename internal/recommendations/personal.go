@@ -11,7 +11,7 @@ import (
 
 const aggregateMediaTypeFloorDivisor = 5
 
-var aggregateSupplementMediaTypes = []string{"movie", "series", "audiobook"}
+var aggregateSupplementMediaTypes = []string{"movie", "series", "audiobook", "ebook"}
 
 // ForYou returns personalised recommendations grouped by taste clusters.
 // For cold-start users, non-personalized rows are returned.

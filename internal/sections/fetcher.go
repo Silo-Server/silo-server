@@ -382,35 +382,39 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	orderedItems := make([]*models.MediaItem, 0, limit)
 	itemMeta := make(map[string]SectionItemMeta)
 
-	for offset := 0; len(orderedItems) < limit && offset < continueProgressMaxScanned; offset += continueProgressPageSize {
-		pageLimit := continueProgressPageSize
-		if remaining := continueProgressMaxScanned - offset; remaining < pageLimit {
-			pageLimit = remaining
-		}
-		progressEntries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
-		if err != nil {
-			return SectionWithItems{}, fmt.Errorf("listing progress: %w", err)
-		}
-		if len(progressEntries) == 0 {
-			break
-		}
-		rawProgressCount := len(progressEntries)
-		progressEntries = dismissals.FilterProgress(progressEntries)
-
-		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, effectiveLibID, effectiveLibraryIDs, filter)
+	// Ebook resume points live in ebook_reader_progress rather than the
+	// watch-progress store, so reading sections pull from that table and skip
+	// the next-up handling below.
+	if continueType == ContinueTypeReading {
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta,
+			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
+				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
+				if err != nil {
+					return nil, fmt.Errorf("listing ebook reader progress: %w", err)
+				}
+				return entries, nil
+			})
 		if err != nil {
 			return SectionWithItems{}, err
 		}
-		for _, item := range pageItems {
-			if len(orderedItems) >= limit {
-				break
+		return SectionWithItems{
+			ResolvedSection: resolved,
+			Items:           orderedItems,
+			TotalCount:      len(orderedItems),
+			ItemMeta:        itemMeta,
+		}, nil
+	}
+
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta,
+		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
+			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
+			if err != nil {
+				return nil, fmt.Errorf("listing progress: %w", err)
 			}
-			orderedItems = append(orderedItems, item)
-		}
-		maps.Copy(itemMeta, pageMeta)
-		if rawProgressCount < pageLimit {
-			break
-		}
+			return entries, nil
+		})
+	if err != nil {
+		return SectionWithItems{}, err
 	}
 
 	nextUpMode := ""
@@ -452,6 +456,137 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		TotalCount:      len(orderedItems),
 		ItemMeta:        itemMeta,
 	}, nil
+}
+
+// collectContinueProgressItems pages through in-progress entries from
+// listPage, drops dismissed entries, resolves the remainder to media items,
+// and appends them to orderedItems until limit is reached, the source is
+// exhausted, or continueProgressMaxScanned entries have been scanned. Paging
+// past the requested limit matters because dismissal filtering and
+// library/access scoping happen after the source query: trimming at the
+// source LIMIT would under-fill the section whenever dismissals exist.
+func (f *Fetcher) collectContinueProgressItems(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	dismissals catalog.HomeDismissalIndex,
+	continueType ContinueType,
+	libraryID *int,
+	libraryIDs []int,
+	filter catalog.AccessFilter,
+	limit int,
+	orderedItems []*models.MediaItem,
+	itemMeta map[string]SectionItemMeta,
+	listPage func(pageLimit, offset int) ([]userstore.WatchProgress, error),
+) ([]*models.MediaItem, error) {
+	// LIMIT/OFFSET pages over a live, updated_at-ordered source: a progress
+	// write between page fetches shifts rows across page boundaries, so the
+	// same content_id can be returned on two consecutive pages. Track what has
+	// already been appended so a card never appears twice in one section.
+	seen := make(map[string]struct{}, limit)
+	for _, item := range orderedItems {
+		seen[item.ContentID] = struct{}{}
+	}
+	for offset := 0; len(orderedItems) < limit && offset < continueProgressMaxScanned; offset += continueProgressPageSize {
+		pageLimit := continueProgressPageSize
+		if remaining := continueProgressMaxScanned - offset; remaining < pageLimit {
+			pageLimit = remaining
+		}
+		progressEntries, err := listPage(pageLimit, offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(progressEntries) == 0 {
+			break
+		}
+		rawProgressCount := len(progressEntries)
+		progressEntries = dismissals.FilterProgress(progressEntries)
+
+		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, libraryID, libraryIDs, filter)
+		if err != nil {
+			return nil, err
+		}
+		orderedItems = appendUniqueContinueItems(orderedItems, pageItems, seen, limit)
+		maps.Copy(itemMeta, pageMeta)
+		if rawProgressCount < pageLimit {
+			break
+		}
+	}
+	return orderedItems, nil
+}
+
+// appendUniqueContinueItems appends pageItems to orderedItems up to limit,
+// skipping content IDs already recorded in seen and recording every appended
+// ID. Pages come from a live LIMIT/OFFSET scan, so without this guard an item
+// shifted across a page boundary by a concurrent progress write would surface
+// twice in the same section.
+func appendUniqueContinueItems(orderedItems, pageItems []*models.MediaItem, seen map[string]struct{}, limit int) []*models.MediaItem {
+	for _, item := range pageItems {
+		if len(orderedItems) >= limit {
+			break
+		}
+		if _, dup := seen[item.ContentID]; dup {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		orderedItems = append(orderedItems, item)
+	}
+	return orderedItems
+}
+
+// ebookContinueWatchingProgressQuery lists in-progress ebook resume points for
+// Continue Reading. Like the video path (pgstore ListProgress "in_progress"),
+// rows the user hid via user_history_hidden_items are excluded while reading
+// activity after hidden_before counts again.
+var ebookContinueWatchingProgressQuery = fmt.Sprintf(`
+	SELECT content_id, progress::double precision, updated_at
+	FROM ebook_reader_progress
+	WHERE user_id = $1
+		AND profile_id = $2
+		AND progress > 0
+		AND progress < %s
+		AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = ebook_reader_progress.user_id
+				AND hhi.profile_id = ebook_reader_progress.profile_id
+				AND hhi.media_item_id = ebook_reader_progress.content_id
+				AND ebook_reader_progress.updated_at <= hhi.hidden_before
+		)
+	ORDER BY updated_at DESC, content_id ASC
+	LIMIT $3 OFFSET $4
+`, catalog.EbookFinishedProgressThresholdSQL)
+
+func (f *Fetcher) listEbookContinueWatchingProgress(ctx context.Context, userID int, profileID string, limit, offset int) ([]userstore.WatchProgress, error) {
+	if f.pool == nil || userID <= 0 || profileID == "" || limit <= 0 {
+		return nil, nil
+	}
+
+	rows, err := f.pool.Query(ctx, ebookContinueWatchingProgressQuery, userID, profileID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]userstore.WatchProgress, 0)
+	for rows.Next() {
+		var contentID string
+		var progress float64
+		var updatedAt time.Time
+		if err := rows.Scan(&contentID, &progress, &updatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, userstore.WatchProgress{
+			MediaItemID:     contentID,
+			PositionSeconds: progress,
+			DurationSeconds: 1,
+			UpdatedAt:       updatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 const (

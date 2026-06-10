@@ -390,6 +390,161 @@ func TestBuildSortClause_PersonalizedComputedSorts(t *testing.T) {
 	}
 }
 
+func TestBuildSortClause_EbookPersonalizedComputedSortsUseReaderProgress(t *testing.T) {
+	builder := NewQueryBuilder("mi").WithMediaScope("ebook").WithUserScope(42, "profile-1")
+	tests := []struct {
+		field      string
+		expectJoin []string
+		expectExpr []string
+	}{
+		{
+			field: "progress",
+			expectJoin: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress > 0",
+				"erp.progress < 0.9",
+				"LEFT JOIN user_history_hidden_items hhi",
+				"hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before",
+			},
+			expectExpr: []string{"sort_progress.progress_ratio"},
+		},
+		{
+			field: "date_viewed",
+			expectJoin: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress >= 0.9",
+				"LEFT JOIN user_history_hidden_items hhi",
+				"hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before",
+			},
+			expectExpr: []string{"sort_ebook_viewed.viewed_at"},
+		},
+		{
+			field: "plays",
+			expectJoin: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress >= 0.9",
+				"completed_play_count",
+				"LEFT JOIN user_history_hidden_items hhi",
+				"hhi.media_item_id IS NULL OR erp.updated_at > hhi.hidden_before",
+			},
+			expectExpr: []string{"sort_ebook_plays.completed_play_count"},
+		},
+	}
+
+	for _, tt := range tests {
+		plan, err := builder.BuildSortPlan(QuerySort{Field: tt.field, Order: "desc"})
+		if err != nil {
+			t.Fatalf("%s: BuildSortPlan returned error: %v", tt.field, err)
+		}
+		if len(plan.Args) != 2 || plan.Args[0] != 42 || plan.Args[1] != "profile-1" {
+			t.Fatalf("%s: expected user scope args, got %v", tt.field, plan.Args)
+		}
+		joined := strings.Join(plan.Joins, "\n")
+		for _, fragment := range tt.expectJoin {
+			if !strings.Contains(joined, fragment) {
+				t.Fatalf("%s: expected joins to contain %q, got %q", tt.field, fragment, joined)
+			}
+		}
+		for _, fragment := range tt.expectExpr {
+			if !strings.Contains(plan.OrderBy, fragment) {
+				t.Fatalf("%s: expected order by to contain %q, got %q", tt.field, fragment, plan.OrderBy)
+			}
+		}
+	}
+}
+
+func TestBuild_EbookUserStateRulesUseReaderProgress(t *testing.T) {
+	tests := []struct {
+		name        string
+		rule        QueryRule
+		expectSQL   []string
+		unexpectSQL []string
+	}{
+		{
+			name: "watched",
+			rule: QueryRule{Field: "watched", Op: "is", Value: true},
+			expectSQL: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress >= 0.9",
+				"FROM user_history_hidden_items hhi",
+				"hhi.media_item_id = erp.content_id",
+				"erp.updated_at <= hhi.hidden_before",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp", "FROM user_watch_history uwh"},
+		},
+		{
+			name: "unread",
+			rule: QueryRule{Field: "watched", Op: "is", Value: false},
+			expectSQL: []string{
+				"NOT (EXISTS",
+				"FROM ebook_reader_progress erp",
+				"erp.progress >= 0.9",
+				"FROM user_history_hidden_items hhi",
+				"hhi.media_item_id = erp.content_id",
+				"erp.updated_at <= hhi.hidden_before",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp", "FROM user_watch_history uwh"},
+		},
+		{
+			name: "in progress",
+			rule: QueryRule{Field: "in_progress", Op: "is", Value: true},
+			expectSQL: []string{
+				"FROM ebook_reader_progress erp",
+				"erp.progress > 0",
+				"erp.progress < 0.9",
+				"FROM user_history_hidden_items hhi",
+				"hhi.media_item_id = erp.content_id",
+				"erp.updated_at <= hhi.hidden_before",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp"},
+		},
+		{
+			name: "not in progress",
+			rule: QueryRule{Field: "in_progress", Op: "is", Value: false},
+			expectSQL: []string{
+				"NOT (EXISTS",
+				"FROM ebook_reader_progress erp",
+				"erp.progress > 0",
+				"erp.progress < 0.9",
+				"FROM user_history_hidden_items hhi",
+				"hhi.media_item_id = erp.content_id",
+				"erp.updated_at <= hhi.hidden_before",
+			},
+			unexpectSQL: []string{"FROM user_watch_progress uwp"},
+		},
+	}
+
+	for _, tt := range tests {
+		clause, args, err := NewQueryBuilder("mi").
+			WithMediaScope("ebook").
+			WithUserScope(42, "profile-1").
+			Build(QueryDefinition{
+				MediaScope: "ebook",
+				Match:      "all",
+				Groups: []QueryGroup{{
+					Match: "all",
+					Rules: []QueryRule{tt.rule},
+				}},
+			})
+		if err != nil {
+			t.Fatalf("%s: Build returned error: %v", tt.name, err)
+		}
+		if len(args) != 2 || args[0] != 42 || args[1] != "profile-1" {
+			t.Fatalf("%s: expected user scope args, got %v", tt.name, args)
+		}
+		for _, fragment := range tt.expectSQL {
+			if !strings.Contains(clause, fragment) {
+				t.Fatalf("%s: expected clause to contain %q, got %q", tt.name, fragment, clause)
+			}
+		}
+		for _, fragment := range tt.unexpectSQL {
+			if strings.Contains(clause, fragment) {
+				t.Fatalf("%s: did not expect clause to contain %q, got %q", tt.name, fragment, clause)
+			}
+		}
+	}
+}
+
 func TestBuild_ResolutionNormalizes4KAndScopesMediaFiles(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").
 		WithLibraryScope([]int{3}).
@@ -531,6 +686,26 @@ func TestBuild_SeriesClauseJoinsAudiobookSeries(t *testing.T) {
 	}
 }
 
+func TestBuild_SeriesClauseJoinsEbookSeriesForEbookScope(t *testing.T) {
+	clause, args, err := NewQueryBuilder("mi").
+		WithMediaScope("ebook").
+		Build(QueryDefinition{
+			Match: "all",
+			Groups: []QueryGroup{
+				{Match: "all", Rules: []QueryRule{{Field: "series", Op: "is", Value: "Wayfarers"}}},
+			},
+		})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if len(args) != 1 || args[0] != "Wayfarers" {
+		t.Fatalf("expected series arg, got %v", args)
+	}
+	if !strings.Contains(clause, "FROM ebook_series s") {
+		t.Fatalf("expected ebook_series join in series clause, got %q", clause)
+	}
+}
+
 func TestBuildSortPlan_AuthorJoinsLateralOnPersonKindAuthor(t *testing.T) {
 	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{Field: "author", Order: "asc"})
 	if err != nil {
@@ -573,6 +748,18 @@ func TestBuildSortPlan_SeriesOrdersByNameThenIndex(t *testing.T) {
 	if !strings.Contains(plan.OrderBy, "sort_series.series_name ASC NULLS LAST") ||
 		!strings.Contains(plan.OrderBy, "sort_series.series_index ASC NULLS LAST") {
 		t.Fatalf("expected name+index ordering with NULLS LAST, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildSortPlan_SeriesUsesEbookSeriesForEbookScope(t *testing.T) {
+	plan, err := NewQueryBuilder("mi").
+		WithMediaScope("ebook").
+		BuildSortPlan(QuerySort{Field: "series", Order: "asc"})
+	if err != nil {
+		t.Fatalf("BuildSortPlan(series) returned error: %v", err)
+	}
+	if len(plan.Joins) != 1 || !strings.Contains(plan.Joins[0], "ebook_series sort_series") {
+		t.Fatalf("expected LEFT JOIN ebook_series, got %v", plan.Joins)
 	}
 }
 
@@ -711,5 +898,20 @@ func TestQueryBuilder_LastWatched_RequiresCTE(t *testing.T) {
 	_ = qb.lastWatchedExpr("last_watched")
 	if !qb.RequiresUserHistoryCTE() {
 		t.Fatalf("after lastWatchedExpr, builder should require CTE")
+	}
+}
+
+func TestUserHistoryCTESQLIncludesCompletedEbookReaderProgress(t *testing.T) {
+	sql := UserHistoryCTESQL(1)
+	expectedFragments := []string{
+		"FROM ebook_reader_progress erp",
+		"erp.progress >= 0.9",
+		"erp.content_id",
+		"erp.updated_at",
+	}
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("expected CTE to contain %q, got:\n%s", fragment, sql)
+		}
 	}
 }

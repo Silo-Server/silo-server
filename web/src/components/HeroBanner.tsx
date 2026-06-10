@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
 import { Link } from "react-router";
-import { Info, ChevronLeft, ChevronRight, Play, Pause } from "lucide-react";
+import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -45,6 +45,9 @@ function formatRuntime(seconds: number | undefined | null): string | null {
 }
 
 function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
+  if (item.type === "ebook") {
+    return "Read";
+  }
   if (item.type !== "audiobook") {
     return "Play";
   }
@@ -252,7 +255,9 @@ export default function HeroBanner({
                 onClick={handlePlayClick}
                 className="pill pill-primary transition-colors duration-[--duration-fast]"
               >
-                {activeAudiobookPlaying ? (
+                {current.type === "ebook" ? (
+                  <BookOpen className="h-4 w-4" />
+                ) : activeAudiobookPlaying ? (
                   <Pause className="h-4 w-4 fill-current" />
                 ) : (
                   <Play className="h-4 w-4 fill-current" />

@@ -11,6 +11,7 @@ vi.mock("@/api/client", () => ({
 import {
   fetchCatalogItemDetail,
   fetchCatalogItemEpisodes,
+  fetchCatalogItemVersions,
   fetchCatalogSeasonDetail,
   fetchCatalogSeasonEpisodes,
   fetchCatalogSeriesSeasons,
@@ -26,6 +27,28 @@ describe("catalog read helpers", () => {
     await fetchCatalogItemDetail("movie-123");
 
     expect(mocks.api).toHaveBeenCalledWith("/catalog/items/movie-123", undefined);
+  });
+
+  it("encodes item IDs in catalog item endpoints", async () => {
+    await fetchCatalogItemDetail("ebook 1/isbn:978", 12);
+    await fetchCatalogItemVersions("ebook 1/isbn:978");
+    await fetchCatalogItemEpisodes("season 1/id:abc");
+
+    expect(mocks.api).toHaveBeenNthCalledWith(
+      1,
+      "/catalog/items/ebook%201%2Fisbn%3A978?library_id=12",
+      undefined,
+    );
+    expect(mocks.api).toHaveBeenNthCalledWith(
+      2,
+      "/catalog/items/ebook%201%2Fisbn%3A978/versions",
+      undefined,
+    );
+    expect(mocks.api).toHaveBeenNthCalledWith(
+      3,
+      "/catalog/items/season%201%2Fid%3Aabc/episodes",
+      undefined,
+    );
   });
 
   it("fetches item episodes from the canonical catalog item episodes endpoint", async () => {

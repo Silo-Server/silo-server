@@ -39,10 +39,9 @@ type CatalogFiltersResult struct {
 	Resolutions       []string
 	AudioLanguages    []string
 	SubtitleLanguages []string
-	// Authors, Narrators and Series are audiobook-native facets. Populated
-	// whenever the scope contains audiobook items; empty for video-only
-	// scopes. They share the item_people / audiobook_series tables so
-	// callers don't need to switch on media type.
+	// Authors, Narrators and Series are book-native facets. Authors and
+	// Narrators use item_people; Series uses the active book series table.
+	// Video-only scopes return these empty.
 	Authors   []string
 	Narrators []string
 	Series    []string
@@ -64,8 +63,8 @@ type facetFetcher interface {
 	// PeopleByKind returns distinct people names for the given PersonKind
 	// across the scoped result set. Used for Authors / Narrators facets.
 	PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
-	// AudiobookSeries returns distinct series_name values from
-	// audiobook_series joined onto the scoped result set.
+	// AudiobookSeries returns distinct series_name values from the active
+	// book series table joined onto the scoped result set.
 	AudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error)
 	// SearchDistinctArrayColumn prefix-searches an array-column facet
 	// (genres, studios, networks, countries). Returns up to limit
@@ -710,7 +709,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 		return r.listFiltersForSource(ctx, filters, options, episodeCatalogBaseRelation, req.Query.MediaScope)
 	}
 
-	return r.listFiltersForSource(ctx, filters, options, "media_items mi", "")
+	return r.listFiltersForSource(ctx, filters, options, "media_items mi", req.Query.MediaScope)
 }
 
 // CatalogFacetSearchResult is the typed return for SearchFacet. Matches
@@ -798,10 +797,9 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	}
 
 	baseRelation := "media_items mi"
-	mediaScope := ""
+	mediaScope := req.Query.MediaScope
 	if isEpisodeCatalogScope(req.Query.MediaScope) {
 		baseRelation = episodeCatalogBaseRelation
-		mediaScope = req.Query.MediaScope
 	}
 
 	facets := r.facets
@@ -837,6 +835,9 @@ func dispatchFacetSearch(ctx context.Context, facets facetFetcher, facet string,
 	case "author":
 		return facets.SearchPeopleByKind(ctx, models.PersonKindAuthor, filters, baseRelation, mediaScope, prefix, limit)
 	case "narrator":
+		if mediaScope == "ebook" {
+			return nil, false, fmt.Errorf("%w: narrator facet is not available for ebook scope", ErrInvalidCatalogRequest)
+		}
 		return facets.SearchPeopleByKind(ctx, models.PersonKindNarrator, filters, baseRelation, mediaScope, prefix, limit)
 	case "series":
 		return facets.SearchAudiobookSeries(ctx, filters, baseRelation, mediaScope, prefix, limit)
@@ -958,14 +959,16 @@ func (r *CatalogResolver) listFiltersForSource(
 		authors = out
 		return nil
 	}))
-	eg.Go(withLimit(func() error {
-		out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
-		if err != nil {
-			return fmt.Errorf("listing catalog narrators: %w", err)
-		}
-		narrators = out
-		return nil
-	}))
+	if mediaScope != "ebook" {
+		eg.Go(withLimit(func() error {
+			out, err := facets.PeopleByKind(gctx, models.PersonKindNarrator, filters, baseRelation, mediaScope)
+			if err != nil {
+				return fmt.Errorf("listing catalog narrators: %w", err)
+			}
+			narrators = out
+			return nil
+		}))
+	}
 	eg.Go(withLimit(func() error {
 		out, err := facets.AudiobookSeries(gctx, filters, baseRelation, mediaScope)
 		if err != nil {
@@ -1087,7 +1090,7 @@ func validateCatalogExactCollectionRequest(req CatalogRequest) error {
 
 func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
 	if !IsValidMediaScope(def.MediaScope) {
-		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', or 'video'", ErrInvalidCatalogRequest)
+		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', or 'video'", ErrInvalidCatalogRequest)
 	}
 	if def.Match != "" && def.Match != "all" && def.Match != "any" {
 		return fmt.Errorf("%w: match must be 'all' or 'any'", ErrInvalidCatalogRequest)

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
+  apiBlob,
   bootstrapAccessToken,
   getAccessToken,
   getPersonCatalogItems,
@@ -117,6 +118,51 @@ describe("client helper inventory", () => {
     const clientModule = await import("./client");
 
     expect(clientModule).not.toHaveProperty("getPersonItems");
+  });
+});
+
+describe("apiBlob", () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "sessionStorage", {
+      value: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        clear: () => {},
+      },
+      configurable: true,
+    });
+  });
+
+  it("rejects responses whose Content-Length exceeds the in-memory cap", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const res = new Response("x", { status: 200 });
+      // 3 GiB; Response normally derives Content-Length from the body, so
+      // override the header lookup instead of materializing a huge body.
+      vi.spyOn(res.headers, "get").mockImplementation((name) =>
+        name.toLowerCase() === "content-length" ? String(3 * 1024 * 1024 * 1024) : null,
+      );
+      return res;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiBlob("/ebooks/abc/files/1/read")).rejects.toMatchObject({
+      name: "ApiClientError",
+      code: "response_too_large",
+      message: expect.stringContaining("too large to open in the browser"),
+    });
+  });
+
+  it("returns the blob when Content-Length is within the cap or missing", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const res = new Response("epub-bytes", { status: 200 });
+      vi.spyOn(res.headers, "get").mockReturnValue(null);
+      return res;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const blob = await apiBlob("/ebooks/abc/files/1/read");
+    await expect(blob.text()).resolves.toBe("epub-bytes");
   });
 });
 

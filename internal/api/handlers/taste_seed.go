@@ -181,7 +181,10 @@ func (h *RecommendationsHandler) resolveTasteSeedUserStates(ctx context.Context,
 	if err != nil || store == nil {
 		return nil
 	}
-	states, err := resolveItemUserStates(ctx, store, profileID, h.EpisodeRepo, mediaItems)
+	states, err := resolveItemUserStatesWithOptions(ctx, store, profileID, h.EpisodeRepo, mediaItems, itemUserStateOptions{
+		UserID:             userID,
+		EbookProgressStore: h.EbookProgress,
+	})
 	if err != nil {
 		return nil
 	}

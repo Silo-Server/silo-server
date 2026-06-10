@@ -187,6 +187,10 @@ export const episodeKeys = {
   byItem: (itemId: string) => ["episodes", "item", itemId] as const,
 };
 
+export const ebookKeys = {
+  readerProgress: (contentId: string | undefined) => ["ebook-reader-progress", contentId] as const,
+};
+
 export const libraryKeys = {
   all: ["libraries"] as const,
   user: (profileId?: string | null) => ["libraries", "user", profileId ?? "none"] as const,

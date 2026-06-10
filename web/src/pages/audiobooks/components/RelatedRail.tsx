@@ -12,26 +12,35 @@ interface RelatedRailProps {
   heading: string;
   subtitle?: string;
   items: RelatedRailItem[];
+  coverAspect?: "square" | "poster";
 }
 
-export function RelatedRail({ heading, subtitle, items }: RelatedRailProps) {
+export function RelatedRail({
+  heading,
+  subtitle,
+  items,
+  coverAspect = "square",
+}: RelatedRailProps) {
   if (items.length === 0) return null;
+  const coverAspectClass = coverAspect === "poster" ? "aspect-[2/3]" : "aspect-square";
   return (
     <section>
       <div className="mb-4">
         <h2 className="text-xl font-semibold tracking-tight">{heading}</h2>
         {subtitle && <p className="text-muted-foreground mt-1 text-xs">{subtitle}</p>}
       </div>
-      <div className="-mx-2 flex gap-3 overflow-x-auto px-2 pb-2">
+      <div className="-mx-2 -mt-1 flex gap-3 overflow-x-auto px-2 pt-1 pb-2">
         {items.map((item) => (
           <ViewTransitionLink
             key={item.content_id}
-            to={`/item/${item.content_id}`}
-            className={`block w-[140px] shrink-0 sm:w-[160px] lg:w-[185px] ${
-              item.highlight ? "ring-primary rounded-lg ring-2 ring-offset-2" : ""
-            }`}
+            to={`/item/${encodeURIComponent(item.content_id)}`}
+            className="block w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
           >
-            <div className="bg-muted relative aspect-square overflow-hidden rounded-lg">
+            <div
+              className={`bg-muted relative ${coverAspectClass} overflow-hidden rounded-lg ${
+                item.highlight ? "ring-primary ring-offset-background ring-2 ring-offset-2" : ""
+              }`}
+            >
               {item.poster_url ? (
                 <img
                   src={item.poster_url}

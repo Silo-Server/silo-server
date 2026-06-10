@@ -115,7 +115,7 @@ export function getActiveFilterBadges(
     });
   }
 
-  if (state.narrator) {
+  if (state.narrator && state.mediaScope === "audiobook") {
     badges.push({
       key: "narrator",
       label: `Narrator: ${state.narrator}`,
@@ -168,6 +168,11 @@ export function getActiveFilterBadges(
   }
 
   if (state.watchStatus) {
+    const statusVerb = options.isAudiobookLibrary
+      ? "Listening"
+      : state.mediaScope === "ebook"
+        ? "Read"
+        : "Watch";
     const statusLabel = options.isAudiobookLibrary
       ? state.watchStatus === "watched"
         ? "listened"
@@ -177,7 +182,7 @@ export function getActiveFilterBadges(
       : state.watchStatus.replace("_", " ");
     badges.push({
       key: "watchStatus",
-      label: `${options.isAudiobookLibrary ? "Listening" : "Watch"}: ${statusLabel}`,
+      label: `${statusVerb}: ${statusLabel}`,
       clearPatch: { watchStatus: "" },
     });
   }

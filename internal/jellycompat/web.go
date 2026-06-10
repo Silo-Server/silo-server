@@ -44,6 +44,10 @@ func newCompatWebHandler(webFS fs.FS, version string) http.Handler {
 		if version != "" {
 			w.Header().Set("X-Silo-Jellyfin-Web-Version", version)
 		}
+		// Block content sniffing on everything we serve here. A CSP is
+		// intentionally NOT set: the vendored jellyfin-web bundle relies on
+		// inline scripts and would break under any meaningful policy.
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 
 		if fileExists(webFS, relPath) {
 			if relPath == "index.html" {

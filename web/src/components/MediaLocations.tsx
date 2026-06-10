@@ -13,6 +13,7 @@ interface MediaLocationsProps {
   className?: string;
   emptyMessage?: string;
   compact?: boolean;
+  summaryBuilder?: (version: FileVersion) => string;
 }
 
 interface MediaLocationEntry {
@@ -51,7 +52,10 @@ function splitMediaPath(
   };
 }
 
-function deriveMediaLocations(versions: FileVersion[]): MediaLocationEntry[] {
+function deriveMediaLocationsWithSummary(
+  versions: FileVersion[],
+  summaryBuilder: (version: FileVersion) => string,
+): MediaLocationEntry[] {
   return [...versions]
     .sort((a, b) => {
       const resolutionDelta = resolutionScore(b.resolution) - resolutionScore(a.resolution);
@@ -69,7 +73,7 @@ function deriveMediaLocations(versions: FileVersion[]): MediaLocationEntry[] {
       return {
         ...location,
         fileId: version.file_id,
-        versionLabel: buildQualitySummary(version) || `Version ${index + 1}`,
+        versionLabel: summaryBuilder(version) || `Version ${index + 1}`,
       };
     })
     .filter((location): location is MediaLocationEntry => Boolean(location));
@@ -90,8 +94,12 @@ export default function MediaLocations({
   className,
   emptyMessage,
   compact = false,
+  summaryBuilder = buildQualitySummary,
 }: MediaLocationsProps) {
-  const locations = useMemo(() => deriveMediaLocations(versions), [versions]);
+  const locations = useMemo(
+    () => deriveMediaLocationsWithSummary(versions, summaryBuilder),
+    [versions, summaryBuilder],
+  );
 
   if (locations.length === 0) {
     if (!emptyMessage) return null;

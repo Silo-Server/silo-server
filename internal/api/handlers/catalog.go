@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -89,6 +90,7 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 		h.itemsH.accessFilter(r),
 		overlaySummaries,
 		store,
+		apimw.GetUserID(r.Context()),
 		profileID,
 	)
 	items := make([]itemListResponse, 0, len(result.Items))
