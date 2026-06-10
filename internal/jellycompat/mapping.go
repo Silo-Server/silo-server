@@ -382,9 +382,10 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 			dto.RunTimeTicks = secondsToTicks(float64(firstVersion.Duration))
 		}
 		dto.DateCreated = formatCompatTime(firstVersion.AddedAt)
-		// No /Items/{id}/Download route exists; advertising download support
-		// sends clients (e.g. Wholphin's screensaver) into 404s.
-		dto.CanDownload = false
+		// CanDownload is load-bearing for Infuse: it refuses Direct Play
+		// (Static=true streaming) of items it believes it cannot download.
+		// The flag is backed by the /Items/{id}/Download route (streams.go).
+		dto.CanDownload = true
 		dto.HasSubtitles = versionsHaveSubtitles(item.Versions)
 		dto.SupportsSync = false
 		dto.Container = strings.ToLower(firstVersion.Container)
