@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -22,14 +23,16 @@ function makeSeason(overrides: Partial<Season> = {}): Season {
 describe("SeasonCarousel", () => {
   it("renders an Embla viewport and container for the season cards", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/series-1"]}>
-        <SeasonCarousel
-          seasons={[
-            makeSeason(),
-            makeSeason({ content_id: "season-2", season_number: 2, title: "Season 2" }),
-          ]}
-        />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/series-1"]}>
+          <SeasonCarousel
+            seasons={[
+              makeSeason(),
+              makeSeason({ content_id: "season-2", season_number: 2, title: "Season 2" }),
+            ]}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(markup).toContain("embla__viewport");
