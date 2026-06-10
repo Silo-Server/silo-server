@@ -35,6 +35,7 @@ export function useNotificationsList(filters: { unread?: boolean; category?: str
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    staleTime: 2 * 60 * 1000,
   });
 }
 

@@ -8,7 +8,8 @@ import { useMarkRead, useNotificationsList, useUnreadCount } from "@/hooks/queri
 
 let bellOpenFlag = false;
 
-/** True while the bell dropdown is open — used to suppress toasts. */
+/** True while the bell dropdown is open — used to suppress toasts.
+ * Single-instance only: the bell must be mounted once; a second instance would fight over this flag. */
 export function isNotificationDropdownOpen() {
   return bellOpenFlag;
 }
