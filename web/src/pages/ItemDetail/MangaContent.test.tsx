@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import type { ItemDetail } from "@/api/types";
+import type { ItemDetail, MangaChapter } from "@/api/types";
 
 vi.mock("@/hooks/useAmbientColor", () => ({ useAmbientColor: () => undefined }));
 vi.mock("@/components/PageBack", () => ({ default: () => null }));
@@ -18,7 +18,7 @@ vi.mock("@/pages/ItemDetail/DetailHero", () => ({
 
 import MangaContent from "./MangaContent";
 
-function mangaItem(): ItemDetail & { type: "manga" } {
+function mangaItem(chapters: MangaChapter[]): ItemDetail & { type: "manga" } {
   return {
     content_id: "manga-1",
     type: "manga",
@@ -53,52 +53,70 @@ function mangaItem(): ItemDetail & { type: "manga" } {
     subtitles: [],
     intro: null,
     credits: null,
-    manga: {
-      chapters: [
-        { content_id: "v1-c1", title: "Chapter 1", chapter_index: 1, volume: "v1" },
-        { content_id: "v1-c2", title: "Chapter 2", chapter_index: 2, volume: "v1" },
-        { content_id: "loose", title: "Bonus" },
-      ],
-    },
+    manga: { chapters },
   } as ItemDetail & { type: "manga" };
 }
 
+function volumeSeries(): ItemDetail & { type: "manga" } {
+  return mangaItem([
+    { content_id: "v01", title: "Railgun v01", chapter_index: 1, volume: "v01" },
+    { content_id: "v02", title: "Railgun v02", chapter_index: 2, volume: "v02" },
+  ]);
+}
+
+function multiChapterVolume(): ItemDetail & { type: "manga" } {
+  return mangaItem([
+    { content_id: "v1-c1", title: "Chapter 1", chapter_index: 1, volume: "v01" },
+    { content_id: "v1-c2", title: "Chapter 2", chapter_index: 2, volume: "v01" },
+  ]);
+}
+
 describe("MangaContent", () => {
-  it("renders a volume header and a fallback Chapters header", () => {
+  it("renders a volume-based series as flat 'Volume N' rows with no nested chapter", () => {
     render(
       <MemoryRouter>
-        <MangaContent item={mangaItem()} libraryId={7} />
+        <MangaContent item={volumeSeries()} libraryId={7} />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Volume 1")).toBeInTheDocument();
-    expect(screen.getByText("Chapters")).toBeInTheDocument();
+    // Flat rows: the volume labels ARE the links, and there is no redundant
+    // "Chapter 1" nested under "Volume 1".
+    expect(screen.getByRole("link", { name: /Volume 1/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Volume 2/i })).toBeInTheDocument();
+    expect(screen.queryByText(/^Chapter \d/)).not.toBeInTheDocument();
   });
 
-  it("links each chapter to the ebook reader by content_id with the library id", () => {
+  it("links a flat volume row to the ebook reader by content_id with the library id", () => {
     render(
       <MemoryRouter>
-        <MangaContent item={mangaItem()} libraryId={7} />
+        <MangaContent item={volumeSeries()} libraryId={7} />
       </MemoryRouter>,
     );
+
+    expect(screen.getByRole("link", { name: /Volume 1/i })).toHaveAttribute(
+      "href",
+      "/reader/ebook/v01?libraryId=7",
+    );
+  });
+
+  it("nests a multi-chapter volume as a section header with chapter rows", () => {
+    render(
+      <MemoryRouter>
+        <MangaContent item={multiChapterVolume()} libraryId={7} />
+      </MemoryRouter>,
+    );
+
+    // "Volume 1" is a plain header (not a link); chapters are the links.
+    expect(screen.queryByRole("link", { name: /^Volume 1$/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Volume 1")).toBeInTheDocument();
 
     const firstChapter = screen.getByRole("link", { name: /Chapter 1/i });
     expect(firstChapter).toHaveAttribute("href", "/reader/ebook/v1-c1?libraryId=7");
 
-    const bonus = screen.getByRole("link", { name: /Bonus/i });
-    expect(bonus).toHaveAttribute("href", "/reader/ebook/loose?libraryId=7");
-  });
-
-  it("orders chapters within a volume by chapter index", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent item={mangaItem()} libraryId={7} />
-      </MemoryRouter>,
-    );
-
     const links = screen.getAllByRole("link");
-    const labels = links.map((link) => within(link).queryByText(/Chapter|Bonus/)?.textContent);
-    const order = labels.filter(Boolean);
+    const order = links
+      .map((link) => within(link).queryByText(/Chapter \d/)?.textContent)
+      .filter(Boolean);
     expect(order.indexOf("Chapter 1")).toBeLessThan(order.indexOf("Chapter 2"));
   });
 });

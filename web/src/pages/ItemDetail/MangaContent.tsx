@@ -5,7 +5,7 @@ import type { ItemDetail, MangaChapter } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { buildMediaPlayHref } from "@/lib/mediaNavigation";
-import { groupMangaChapters, prettifyVolumeLabel } from "@/lib/mangaChapters";
+import { buildMangaList } from "@/lib/mangaChapters";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
@@ -32,6 +32,28 @@ function chapterLabel(chapter: MangaChapter): string {
   return chapter.title || "Chapter";
 }
 
+// MangaRow is a single flat clickable reader row used for volume units, loose
+// chapters, and chapters nested inside a volume section.
+function MangaRow({
+  chapter,
+  label,
+  libraryId,
+}: {
+  chapter: MangaChapter;
+  label: string;
+  libraryId?: number;
+}) {
+  return (
+    <Link
+      to={buildMediaPlayHref({ contentId: chapter.content_id, type: "ebook", libraryId })}
+      className="hover:bg-muted/40 flex items-center gap-3 px-4 py-3 transition-colors"
+    >
+      <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
+      <span className="text-foreground/90 truncate text-[15px] font-medium">{label}</span>
+    </Link>
+  );
+}
+
 export default function MangaContent({
   item,
   libraryId,
@@ -40,10 +62,7 @@ export default function MangaContent({
   libraryId?: number;
 }) {
   useAmbientColor(item.poster_thumbhash);
-  const groups = useMemo(
-    () => groupMangaChapters(item.manga?.chapters ?? []),
-    [item.manga?.chapters],
-  );
+  const entries = useMemo(() => buildMangaList(item.manga?.chapters ?? []), [item.manga?.chapters]);
   const year = item.year ? String(item.year) : "";
   const publisher = item.studios?.[0];
 
@@ -76,41 +95,36 @@ export default function MangaContent({
         genreHref={(genre) => genreHref(genre, libraryId)}
       />
 
-      <div className="page-shell space-y-10 py-10">
-        {groups.length === 0 ? (
+      <div className="page-shell space-y-6 py-10">
+        {entries.length === 0 ? (
           <p className="text-muted-foreground text-sm">No chapters found.</p>
         ) : (
-          groups.map((group) => (
-            <section key={group.volume ?? "__loose__"} className="space-y-3">
-              <h2 className="text-foreground text-lg font-bold tracking-tight">
-                {group.volume === null ? "Chapters" : prettifyVolumeLabel(group.volume)}
-              </h2>
-              <ul className="divide-border/40 border-border/40 divide-y overflow-hidden rounded-lg border">
-                {group.chapters.map((chapter) => (
-                  <li key={chapter.content_id}>
-                    <Link
-                      to={buildMediaPlayHref({
-                        contentId: chapter.content_id,
-                        type: "ebook",
-                        libraryId,
-                      })}
-                      className="hover:bg-muted/40 flex items-center gap-3 px-4 py-3 transition-colors"
-                    >
-                      <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
-                      <span className="text-foreground/90 truncate text-[15px] font-medium">
-                        {chapterLabel(chapter)}
-                      </span>
-                      {chapter.title && chapterLabel(chapter) !== chapter.title && (
-                        <span className="text-muted-foreground truncate text-sm">
-                          {chapter.title}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))
+          <ul className="divide-border/40 border-border/40 divide-y overflow-hidden rounded-lg border">
+            {entries.map((entry) =>
+              entry.kind === "section" ? (
+                <li key={`section-${entry.label}`}>
+                  <h2 className="text-muted-foreground bg-muted/30 px-4 py-2 text-sm font-bold tracking-tight uppercase">
+                    {entry.label}
+                  </h2>
+                  <ul className="divide-border/40 divide-y">
+                    {entry.chapters.map((chapter) => (
+                      <li key={chapter.content_id} className="pl-4">
+                        <MangaRow
+                          chapter={chapter}
+                          label={chapterLabel(chapter)}
+                          libraryId={libraryId}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ) : (
+                <li key={entry.chapter.content_id}>
+                  <MangaRow chapter={entry.chapter} label={entry.label} libraryId={libraryId} />
+                </li>
+              ),
+            )}
+          </ul>
         )}
       </div>
     </div>

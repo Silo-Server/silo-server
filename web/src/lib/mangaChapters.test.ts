@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MangaChapter } from "@/api/types";
-import { groupMangaChapters, prettifyVolumeLabel } from "./mangaChapters";
+import { buildMangaList, prettifyVolumeLabel } from "./mangaChapters";
 
 function chapter(partial: Partial<MangaChapter>): MangaChapter {
   return {
@@ -14,51 +14,103 @@ function chapter(partial: Partial<MangaChapter>): MangaChapter {
   };
 }
 
-describe("groupMangaChapters", () => {
-  it("groups chapters by volume and orders within a group by chapter_index", () => {
-    const groups = groupMangaChapters([
-      chapter({ content_id: "v1-c2", chapter_index: 2, volume: "v1" }),
-      chapter({ content_id: "v1-c1", chapter_index: 1, volume: "v1" }),
-      chapter({ content_id: "v2-c3", chapter_index: 3, volume: "v2" }),
+describe("buildMangaList", () => {
+  it("renders a pure-volume series as flat volume units (no nested chapter)", () => {
+    const entries = buildMangaList([
+      chapter({ content_id: "v1", chapter_index: 1, volume: "v01" }),
+      chapter({ content_id: "v2", chapter_index: 2, volume: "v02" }),
     ]);
 
-    expect(groups.map((g) => g.volume)).toEqual(["v1", "v2"]);
-    expect(groups[0]?.chapters.map((c) => c.content_id)).toEqual(["v1-c1", "v1-c2"]);
-    expect(groups[1]?.chapters.map((c) => c.content_id)).toEqual(["v2-c3"]);
+    expect(entries).toEqual([
+      { kind: "volume", chapter: expect.objectContaining({ content_id: "v1" }), label: "Volume 1" },
+      { kind: "volume", chapter: expect.objectContaining({ content_id: "v2" }), label: "Volume 2" },
+    ]);
   });
 
-  it("orders groups by their minimum chapter_index", () => {
-    const groups = groupMangaChapters([
-      chapter({ content_id: "v2-c10", chapter_index: 10, volume: "v2" }),
-      chapter({ content_id: "v1-c1", chapter_index: 1, volume: "v1" }),
+  it("renders a pure-chapter series as flat loose chapters ordered by index", () => {
+    const entries = buildMangaList([
+      chapter({ content_id: "c178", chapter_index: 178, volume: "" }),
+      chapter({ content_id: "c179", chapter_index: 179 }),
     ]);
 
-    expect(groups.map((g) => g.volume)).toEqual(["v1", "v2"]);
+    expect(entries).toEqual([
+      {
+        kind: "chapter",
+        chapter: expect.objectContaining({ content_id: "c178" }),
+        label: "Chapter 178",
+      },
+      {
+        kind: "chapter",
+        chapter: expect.objectContaining({ content_id: "c179" }),
+        label: "Chapter 179",
+      },
+    ]);
   });
 
-  it("collects loose chapters (no volume) into a single trailing 'Chapters' group", () => {
-    const groups = groupMangaChapters([
-      chapter({ content_id: "loose-b", chapter_index: 6, volume: "" }),
-      chapter({ content_id: "v1-c1", chapter_index: 1, volume: "v1" }),
-      chapter({ content_id: "loose-a", chapter_index: 5 }),
+  it("nests only when a single volume holds multiple chapters", () => {
+    const entries = buildMangaList([
+      chapter({ content_id: "v1-c2", chapter_index: 2, volume: "v01" }),
+      chapter({ content_id: "v1-c1", chapter_index: 1, volume: "v01" }),
     ]);
 
-    expect(groups.map((g) => g.volume)).toEqual(["v1", null]);
-    const loose = groups.find((g) => g.volume === null);
-    expect(loose?.chapters.map((c) => c.content_id)).toEqual(["loose-a", "loose-b"]);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    expect(entry?.kind).toBe("section");
+    if (entry?.kind === "section") {
+      expect(entry.label).toBe("Volume 1");
+      expect(entry.chapters.map((c) => c.content_id)).toEqual(["v1-c1", "v1-c2"]);
+    }
   });
 
-  it("places chapters with a null chapter_index last within their group", () => {
-    const groups = groupMangaChapters([
-      chapter({ content_id: "v1-cNull", volume: "v1" }),
-      chapter({ content_id: "v1-c1", chapter_index: 1, volume: "v1" }),
+  it("orders all top-level entries by representative index, loose chapters not forced last", () => {
+    const entries = buildMangaList([
+      chapter({ content_id: "loose-5", chapter_index: 5 }),
+      chapter({ content_id: "v-c10", chapter_index: 10, volume: "v02" }),
+      chapter({ content_id: "v-c1", chapter_index: 1, volume: "v01" }),
+      chapter({ content_id: "loose-3", chapter_index: 3, volume: "" }),
     ]);
 
-    expect(groups[0]?.chapters.map((c) => c.content_id)).toEqual(["v1-c1", "v1-cNull"]);
+    expect(entries.map((e) => e.label)).toEqual(["Volume 1", "Chapter 3", "Chapter 5", "Volume 2"]);
+  });
+
+  it("orders a section by its minimum chapter index relative to other entries", () => {
+    const entries = buildMangaList([
+      chapter({ content_id: "v2-c9", chapter_index: 9, volume: "v02" }),
+      chapter({ content_id: "v2-c10", chapter_index: 10, volume: "v02" }),
+      chapter({ content_id: "v1", chapter_index: 1, volume: "v01" }),
+    ]);
+
+    expect(entries.map((e) => e.label)).toEqual(["Volume 1", "Volume 2"]);
+    expect(entries[1]?.kind).toBe("section");
+  });
+
+  it("labels a loose chapter without an index by its trimmed title", () => {
+    const entries = buildMangaList([chapter({ content_id: "bonus", title: "  Bonus  " })]);
+
+    expect(entries).toEqual([
+      {
+        kind: "chapter",
+        chapter: expect.objectContaining({ content_id: "bonus" }),
+        label: "Bonus",
+      },
+    ]);
+  });
+
+  it("places chapters with a null index last within a section", () => {
+    const entries = buildMangaList([
+      chapter({ content_id: "v1-cNull", volume: "v01" }),
+      chapter({ content_id: "v1-c1", chapter_index: 1, volume: "v01" }),
+      chapter({ content_id: "v1-c2", chapter_index: 2, volume: "v01" }),
+    ]);
+
+    expect(entries[0]?.kind).toBe("section");
+    if (entries[0]?.kind === "section") {
+      expect(entries[0].chapters.map((c) => c.content_id)).toEqual(["v1-c1", "v1-c2", "v1-cNull"]);
+    }
   });
 
   it("returns an empty array for no chapters", () => {
-    expect(groupMangaChapters([])).toEqual([]);
+    expect(buildMangaList([])).toEqual([]);
   });
 });
 
