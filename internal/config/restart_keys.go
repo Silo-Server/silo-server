@@ -30,14 +30,15 @@ var restartRequiredKeys = map[string]bool{
 	"ratelimit.enabled": true,
 	"ratelimit.backend": true,
 
-	// Playback transcode infrastructure. ffmpeg path and hwaccel feed several
-	// startup-built consumers (stream handler, scanner ffprobe, chapter
-	// thumbnails, audiobook enricher); the chapter-thumbnail worker pool is
-	// sized at construction.
+	// Playback transcode infrastructure. The playback/stream handlers read
+	// ffmpeg path and hwaccel live (new transcode sessions), but several
+	// startup-built consumers still freeze them (scanner ffprobe, chapter
+	// thumbnails, audiobook enricher) — keep restart-required until those
+	// convert. transcode_dir is fully live (only the playback handler reads
+	// it). The chapter-thumbnail worker pool is sized at construction.
 	"playback.ffmpeg_path":               true,
 	"playback.hw_accel":                  true,
 	"playback.hw_device":                 true,
-	"playback.transcode_dir":             true, // until playback conversion lands
 	"playback.chapter_thumbnail_workers": true,
 
 	// Scanner / matcher / metadata worker pools and toggles captured at

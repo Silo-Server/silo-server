@@ -686,13 +686,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
 		}
 		if deps.Config != nil {
-			playbackHandler.FFmpegPath = deps.Config.Playback.FFmpegPath
-			playbackHandler.HWAccel = deps.Config.Playback.HWAccel
-			playbackHandler.TranscodeDir = deps.Config.Playback.TranscodeDir
+			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
+				return deps.CurrentConfig().Playback
+			}
 			if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
-				slog.Warn("playback transcode cleanup failed", "dir", playbackHandler.TranscodeDir, "error", err)
+				slog.Warn("playback transcode cleanup failed", "dir", deps.Config.Playback.TranscodeDir, "error", err)
 			} else if cleaned > 0 {
-				slog.Info("playback transcode cleanup removed orphaned dirs", "dir", playbackHandler.TranscodeDir, "count", cleaned)
+				slog.Info("playback transcode cleanup removed orphaned dirs", "dir", deps.Config.Playback.TranscodeDir, "count", cleaned)
 			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
@@ -755,7 +755,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		streamHandler.S3Bucket = deps.S3Public.Bucket()
 	}
 	if streamHandler != nil && deps.Config != nil {
-		streamHandler.FFmpegPath = deps.Config.Playback.FFmpegPath
+		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
+			return deps.CurrentConfig().Playback
+		}
 	}
 
 	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher)
