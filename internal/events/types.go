@@ -16,6 +16,8 @@ const (
 	ChannelHistoryImport EventChannel = "history_import"
 	ChannelUserState     EventChannel = "user_state"
 	ChannelPlugins       EventChannel = "plugins"
+	ChannelNotifications EventChannel = "notifications"
+	ChannelRequests      EventChannel = "requests"
 )
 
 var AllChannels = []EventChannel{
@@ -27,6 +29,8 @@ var AllChannels = []EventChannel{
 	ChannelHistoryImport,
 	ChannelUserState,
 	ChannelPlugins,
+	ChannelNotifications,
+	ChannelRequests,
 }
 
 type Envelope struct {
