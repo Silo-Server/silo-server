@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"testing"
+	"time"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
 )
@@ -13,6 +14,11 @@ type fakeStore struct {
 	prefs    map[int]map[Category]bool
 	admins   []int
 	libUsers map[int][]int
+	allUsers []int
+
+	// recorded args for dismiss calls
+	dismissTyp        string
+	dismissDedupPrefix string
 }
 
 func (f *fakeStore) Insert(_ context.Context, n *Notification) (bool, error) {
@@ -39,6 +45,21 @@ func (f *fakeStore) AdminUserIDs(context.Context) ([]int, error) { return f.admi
 func (f *fakeStore) UserIDsWithLibraryAccess(_ context.Context, lib int) ([]int, error) {
 	return f.libUsers[lib], nil
 }
+
+func (f *fakeStore) AllEnabledUserIDs(context.Context) ([]int, error) { return f.allUsers, nil }
+
+func (f *fakeStore) InsertAnnouncement(_ context.Context, a *Announcement) error {
+	a.ID = 1
+	return nil
+}
+
+func (f *fakeStore) DismissUnreadByTypeRef(_ context.Context, typ, dedupPrefix string) error {
+	f.dismissTyp = typ
+	f.dismissDedupPrefix = dedupPrefix
+	return nil
+}
+
+func (f *fakeStore) DeleteAnnouncement(context.Context, int64) error { return nil }
 
 func newTestService(store Store) (*Service, *evt.Hub) {
 	hub := evt.NewHub("test-node", nil)
@@ -238,5 +259,139 @@ func TestCreate_DigestOptInInserts(t *testing.T) {
 	}
 	if len(store.inserted) != 1 {
 		t.Fatalf("opted-in digest was not inserted: %d", len(store.inserted))
+	}
+}
+
+func TestPublishAnnouncement_FanOutAll(t *testing.T) {
+	store := &fakeStore{allUsers: []int{1, 2, 3}}
+	svc, _ := newTestService(store)
+
+	err := svc.PublishAnnouncement(context.Background(), &Announcement{
+		Title:    "Maintenance",
+		Audience: Audience{All: true},
+	})
+	if err != nil {
+		t.Fatalf("PublishAnnouncement returned error: %v", err)
+	}
+	if len(store.inserted) != 3 {
+		t.Fatalf("expected 3 inserted rows, got %d", len(store.inserted))
+	}
+	for _, n := range store.inserted {
+		if n.Category != CategoryAnnouncement {
+			t.Errorf("expected category %q, got %q", CategoryAnnouncement, n.Category)
+		}
+		if n.DedupRef != "announcement-1" {
+			t.Errorf("expected dedup_ref %q, got %q", "announcement-1", n.DedupRef)
+		}
+	}
+}
+
+func TestPublishAnnouncement_FanOutUserIDs(t *testing.T) {
+	store := &fakeStore{}
+	svc, _ := newTestService(store)
+
+	err := svc.PublishAnnouncement(context.Background(), &Announcement{
+		Title:    "Hello",
+		Audience: Audience{UserIDs: []int{5, 9}},
+	})
+	if err != nil {
+		t.Fatalf("PublishAnnouncement returned error: %v", err)
+	}
+	if len(store.inserted) != 2 {
+		t.Fatalf("expected 2 inserted rows, got %d", len(store.inserted))
+	}
+}
+
+func TestPublishAnnouncement_FanOutLibraryIDs(t *testing.T) {
+	store := &fakeStore{
+		libUsers: map[int][]int{
+			3: {4, 5},
+			7: {5, 6},
+		},
+	}
+	svc, _ := newTestService(store)
+
+	err := svc.PublishAnnouncement(context.Background(), &Announcement{
+		Title:    "Library News",
+		Audience: Audience{LibraryIDs: []int{3, 7}},
+	})
+	if err != nil {
+		t.Fatalf("PublishAnnouncement returned error: %v", err)
+	}
+	// users 4, 5, 6 — 5 is deduplicated
+	if len(store.inserted) != 3 {
+		t.Fatalf("expected 3 inserted rows (dedup user 5), got %d", len(store.inserted))
+	}
+}
+
+func TestPublishAnnouncement_AudienceValidation(t *testing.T) {
+	store := &fakeStore{}
+	svc, _ := newTestService(store)
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		a    *Announcement
+	}{
+		{
+			name: "no audience fields set",
+			a:    &Announcement{Title: "Test"},
+		},
+		{
+			name: "two fields set (All+UserIDs)",
+			a:    &Announcement{Title: "Test", Audience: Audience{All: true, UserIDs: []int{1}}},
+		},
+		{
+			name: "empty title",
+			a:    &Announcement{Audience: Audience{All: true}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := svc.PublishAnnouncement(ctx, tc.a)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestPublishAnnouncement_ExpiryPropagates(t *testing.T) {
+	store := &fakeStore{allUsers: []int{1, 2}}
+	svc, _ := newTestService(store)
+
+	exp := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	err := svc.PublishAnnouncement(context.Background(), &Announcement{
+		Title:     "Expiring",
+		Audience:  Audience{All: true},
+		ExpiresAt: &exp,
+	})
+	if err != nil {
+		t.Fatalf("PublishAnnouncement returned error: %v", err)
+	}
+	if len(store.inserted) != 2 {
+		t.Fatalf("expected 2 inserted rows, got %d", len(store.inserted))
+	}
+	for _, n := range store.inserted {
+		if n.ExpiresAt == nil || !n.ExpiresAt.Equal(exp) {
+			t.Errorf("expected ExpiresAt %v, got %v", exp, n.ExpiresAt)
+		}
+	}
+}
+
+func TestDeleteAnnouncement_DismissesUnread(t *testing.T) {
+	store := &fakeStore{}
+	svc, _ := newTestService(store)
+
+	err := svc.DeleteAnnouncement(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("DeleteAnnouncement returned error: %v", err)
+	}
+	if store.dismissTyp != "announcement" {
+		t.Errorf("expected dismissTyp %q, got %q", "announcement", store.dismissTyp)
+	}
+	if store.dismissDedupPrefix != "announcement-42" {
+		t.Errorf("expected dismissDedupPrefix %q, got %q", "announcement-42", store.dismissDedupPrefix)
 	}
 }

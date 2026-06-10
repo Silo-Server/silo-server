@@ -35,6 +35,7 @@ type Store interface {
 	PurgeOld(ctx context.Context, dismissedBefore, allBefore time.Time) (int64, error)
 	AdminUserIDs(ctx context.Context) ([]int, error)
 	UserIDsWithLibraryAccess(ctx context.Context, libraryID int) ([]int, error)
+	AllEnabledUserIDs(ctx context.Context) ([]int, error)
 }
 
 // Repository implements Store against a pgxpool.
@@ -443,4 +444,22 @@ func (r *Repository) UserIDsWithLibraryAccess(ctx context.Context, libraryID int
 		return nil, fmt.Errorf("iterate user ids with library access: %w", err)
 	}
 	return out, nil
+}
+
+// AllEnabledUserIDs returns every enabled user id.
+func (r *Repository) AllEnabledUserIDs(ctx context.Context) ([]int, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id FROM users WHERE enabled = true`)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled users: %w", err)
+	}
+	defer rows.Close()
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan user id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

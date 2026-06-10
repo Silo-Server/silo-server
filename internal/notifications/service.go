@@ -42,6 +42,84 @@ func validCategory(c Category) bool {
 	return false
 }
 
+// PublishAnnouncement stores the announcement and fans it out to notifications
+// rows at publish time, resolving the audience to user ids now.
+func (s *Service) PublishAnnouncement(ctx context.Context, a *Announcement) error {
+	if a.Title == "" {
+		return fmt.Errorf("notifications: announcement title required")
+	}
+	set := 0
+	if a.Audience.All {
+		set++
+	}
+	if len(a.Audience.UserIDs) > 0 {
+		set++
+	}
+	if len(a.Audience.LibraryIDs) > 0 {
+		set++
+	}
+	if set != 1 {
+		return fmt.Errorf("notifications: audience must set exactly one of all/user_ids/library_ids")
+	}
+
+	if err := s.store.InsertAnnouncement(ctx, a); err != nil {
+		return fmt.Errorf("notifications: insert announcement: %w", err)
+	}
+
+	userIDs, err := s.resolveAudience(ctx, a.Audience)
+	if err != nil {
+		return err
+	}
+	for _, uid := range userIDs {
+		in := CreateInput{
+			UserID:    uid,
+			Category:  CategoryAnnouncement,
+			Type:      "announcement",
+			Title:     a.Title,
+			Body:      a.Body,
+			DedupRef:  fmt.Sprintf("announcement-%d", a.ID),
+			ExpiresAt: a.ExpiresAt,
+		}
+		if err := s.Create(ctx, in); err != nil {
+			slog.WarnContext(ctx, "notifications: announcement fan-out failed", "user_id", uid, "error", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) resolveAudience(ctx context.Context, a Audience) ([]int, error) {
+	switch {
+	case a.All:
+		return s.store.AllEnabledUserIDs(ctx)
+	case len(a.UserIDs) > 0:
+		return a.UserIDs, nil
+	default:
+		seen := map[int]struct{}{}
+		var out []int
+		for _, lib := range a.LibraryIDs {
+			ids, err := s.store.UserIDsWithLibraryAccess(ctx, lib)
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range ids {
+				if _, ok := seen[id]; !ok {
+					seen[id] = struct{}{}
+					out = append(out, id)
+				}
+			}
+		}
+		return out, nil
+	}
+}
+
+// DeleteAnnouncement removes the announcement and dismisses its unread rows.
+func (s *Service) DeleteAnnouncement(ctx context.Context, id int64) error {
+	if err := s.store.DeleteAnnouncement(ctx, id); err != nil {
+		return err
+	}
+	return s.store.DismissUnreadByTypeRef(ctx, "announcement", fmt.Sprintf("announcement-%d", id))
+}
+
 // Create validates, applies preferences, inserts (idempotent on DedupRef) and
 // publishes notification.created for live clients. A dedup conflict is not an
 // error and publishes nothing.
