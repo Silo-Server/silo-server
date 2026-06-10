@@ -6,6 +6,9 @@ import {
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { Switch } from "@/components/ui/switch";
+import { usePushDevice } from "@/hooks/usePushDevice";
+import { usePushDevices, useTogglePushDevice } from "@/hooks/queries/push";
+import { timeAgo } from "@/lib/timeAgo";
 import type { NotificationPreferenceCategory } from "@/api/types";
 
 const PREF_META: {
@@ -46,6 +49,9 @@ export default function NotificationsSettings() {
   const { user } = useAuth();
   const { data: preferences, isLoading } = useNotificationPreferences();
   const setPreferences = useSetNotificationPreferences();
+  const { status, enable, disable } = usePushDevice();
+  const { data: devices, isLoading: devicesLoading } = usePushDevices();
+  const toggleDevice = useTogglePushDevice();
 
   const isAdmin = user?.role === "admin";
 
@@ -88,6 +94,63 @@ export default function NotificationsSettings() {
             )}
           />
         ))}
+      </SettingsGroup>
+
+      <SettingsGroup title="Push notifications">
+        <SettingRow
+          label="Push on this device"
+          description="Receive notifications on this browser even when the app is closed."
+          control={(id) => {
+            if (status === "unsupported") {
+              return (
+                <p className="text-muted-foreground text-[13px] leading-relaxed">
+                  This browser doesn&rsquo;t support push notifications.
+                </p>
+              );
+            }
+            if (status === "blocked") {
+              return (
+                <p className="text-muted-foreground text-[13px] leading-relaxed">
+                  Notifications are blocked for this site. Re-enable them in your browser settings.
+                </p>
+              );
+            }
+            return (
+              <Switch
+                id={id}
+                checked={status === "on"}
+                disabled={status === "pending"}
+                onCheckedChange={(on) => (on ? enable() : disable())}
+              />
+            );
+          }}
+        />
+
+        {devicesLoading ? null : devices && devices.length > 0 ? (
+          devices.map((d) => {
+            const registered = d.registered_at ? timeAgo(d.registered_at, "Registered") : null;
+            return (
+              <SettingRow
+                key={d.device_id}
+                label={d.name || d.device_id}
+                description={registered ? `${d.transport} · ${registered}` : d.transport}
+                control={(id) => (
+                  <Switch
+                    id={id}
+                    checked={d.push_enabled}
+                    onCheckedChange={(enabled) =>
+                      toggleDevice.mutate({ deviceId: d.device_id, enabled })
+                    }
+                  />
+                )}
+              />
+            );
+          })
+        ) : (
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            No devices registered for push yet.
+          </p>
+        )}
       </SettingsGroup>
 
       <p className="text-muted-foreground px-1 text-[13px] leading-relaxed">

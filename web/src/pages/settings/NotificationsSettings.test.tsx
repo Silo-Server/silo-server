@@ -5,14 +5,20 @@ import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { NotificationPreference } from "@/api/types";
+import type { NotificationPreference, PushDeviceInfo } from "@/api/types";
 
 const mutateMock = vi.fn();
+const enableMock = vi.fn();
+const disableMock = vi.fn();
+const toggleDeviceMutateMock = vi.fn();
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   useNotificationPreferences: vi.fn(),
   useSetNotificationPreferences: vi.fn(),
+  usePushDevice: vi.fn(),
+  usePushDevices: vi.fn(),
+  useTogglePushDevice: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -25,7 +31,33 @@ vi.mock("@/hooks/queries/notifications", () => ({
     mocks.useSetNotificationPreferences(...args),
 }));
 
+vi.mock("@/hooks/usePushDevice", () => ({
+  usePushDevice: (...args: unknown[]) => mocks.usePushDevice(...args),
+}));
+
+vi.mock("@/hooks/queries/push", () => ({
+  usePushDevices: (...args: unknown[]) => mocks.usePushDevices(...args),
+  useTogglePushDevice: (...args: unknown[]) => mocks.useTogglePushDevice(...args),
+}));
+
 import NotificationsSettings from "./NotificationsSettings";
+
+const DEVICES: PushDeviceInfo[] = [
+  {
+    device_id: "dev-1",
+    name: "Chrome on Mac",
+    platform: "web",
+    transport: "webpush",
+    push_enabled: true,
+  },
+  {
+    device_id: "dev-2",
+    name: "Firefox",
+    platform: "web",
+    transport: "webpush",
+    push_enabled: false,
+  },
+];
 
 function makePreference(
   category: NotificationPreference["category"],
@@ -57,12 +89,26 @@ describe("NotificationsSettings", () => {
     mocks.useAuth.mockReset();
     mocks.useNotificationPreferences.mockReset();
     mocks.useSetNotificationPreferences.mockReset();
+    mocks.usePushDevice.mockReset();
+    mocks.usePushDevices.mockReset();
+    mocks.useTogglePushDevice.mockReset();
     mutateMock.mockReset();
+    enableMock.mockReset();
+    disableMock.mockReset();
+    toggleDeviceMutateMock.mockReset();
 
     mocks.useSetNotificationPreferences.mockReturnValue({
       isPending: false,
       mutate: mutateMock,
     });
+    mocks.usePushDevice.mockReturnValue({
+      status: "off",
+      enable: enableMock,
+      disable: disableMock,
+      refresh: vi.fn(),
+    });
+    mocks.usePushDevices.mockReturnValue({ data: DEVICES, isLoading: false });
+    mocks.useTogglePushDevice.mockReturnValue({ mutate: toggleDeviceMutateMock });
   });
 
   afterEach(async () => {
@@ -87,7 +133,10 @@ describe("NotificationsSettings", () => {
 
     await render(<NotificationsSettings />);
 
-    const switches = container.querySelectorAll('[role="switch"]');
+    // Scope to the first SettingsGroup (category preferences); the second group
+    // holds the push-on-this-device control and device list.
+    const categoryGroup = container.querySelector("section")!;
+    const switches = categoryGroup.querySelectorAll('[role="switch"]');
     expect(switches).toHaveLength(5);
     expect(container.textContent).toContain("Admin alerts");
   });
@@ -101,7 +150,8 @@ describe("NotificationsSettings", () => {
 
     await render(<NotificationsSettings />);
 
-    const switches = container.querySelectorAll('[role="switch"]');
+    const categoryGroup = container.querySelector("section")!;
+    const switches = categoryGroup.querySelectorAll('[role="switch"]');
     expect(switches).toHaveLength(4);
     expect(container.textContent).not.toContain("Admin alerts");
   });
@@ -167,8 +217,10 @@ describe("NotificationsSettings", () => {
 
     await render(<NotificationsSettings />);
 
+    // Scope to the category-preferences group; push switches are independent.
+    const categoryGroup = container.querySelector("section")!;
     const switches = Array.from(
-      container.querySelectorAll('[role="switch"]'),
+      categoryGroup.querySelectorAll('[role="switch"]'),
     ) as HTMLButtonElement[];
     expect(switches.length).toBeGreaterThan(0);
     for (const sw of switches) {
@@ -185,5 +237,71 @@ describe("NotificationsSettings", () => {
     expect(container.textContent).toContain(
       "Announcements from your server admin can’t be turned off.",
     );
+  });
+
+  it("calls enable() when the 'Push on this device' switch is toggled on", async () => {
+    mocks.useAuth.mockReturnValue({ user: { role: "user" } });
+    mocks.useNotificationPreferences.mockReturnValue({ data: ALL_PREFS, isLoading: false });
+
+    await render(<NotificationsSettings />);
+
+    const labels = Array.from(container.querySelectorAll("label"));
+    const deviceLabel = labels.find((l) => l.textContent?.trim() === "Push on this device");
+    expect(deviceLabel).toBeDefined();
+
+    const forId = deviceLabel!.getAttribute("for");
+    const deviceSwitch = container.querySelector(`[id="${forId}"]`) as HTMLButtonElement | null;
+    expect(deviceSwitch).not.toBeNull();
+
+    await act(async () => {
+      deviceSwitch!.click();
+    });
+
+    expect(enableMock).toHaveBeenCalledTimes(1);
+    expect(disableMock).not.toHaveBeenCalled();
+  });
+
+  it("calls useTogglePushDevice mutate with the device_id when a device switch is toggled", async () => {
+    mocks.useAuth.mockReturnValue({ user: { role: "user" } });
+    mocks.useNotificationPreferences.mockReturnValue({ data: ALL_PREFS, isLoading: false });
+
+    await render(<NotificationsSettings />);
+
+    const labels = Array.from(container.querySelectorAll("label"));
+    const deviceLabel = labels.find((l) => l.textContent?.trim() === "Chrome on Mac");
+    expect(deviceLabel).toBeDefined();
+
+    const forId = deviceLabel!.getAttribute("for");
+    const deviceSwitch = container.querySelector(`[id="${forId}"]`) as HTMLButtonElement | null;
+    expect(deviceSwitch).not.toBeNull();
+
+    await act(async () => {
+      deviceSwitch!.click();
+    });
+
+    // dev-1 starts push_enabled=true, so toggling sends enabled=false
+    expect(toggleDeviceMutateMock).toHaveBeenCalledWith({ deviceId: "dev-1", enabled: false });
+  });
+
+  it("renders helper text and no this-device switch when push is unsupported", async () => {
+    mocks.useAuth.mockReturnValue({ user: { role: "user" } });
+    mocks.useNotificationPreferences.mockReturnValue({ data: ALL_PREFS, isLoading: false });
+    mocks.usePushDevice.mockReturnValue({
+      status: "unsupported",
+      enable: enableMock,
+      disable: disableMock,
+      refresh: vi.fn(),
+    });
+
+    await render(<NotificationsSettings />);
+
+    expect(container.textContent).toContain(
+      "This browser doesn’t support push notifications.",
+    );
+
+    const labels = Array.from(container.querySelectorAll("label"));
+    const deviceLabel = labels.find((l) => l.textContent?.trim() === "Push on this device");
+    const forId = deviceLabel!.getAttribute("for");
+    expect(container.querySelector(`[id="${forId}"]`)).toBeNull();
   });
 });
