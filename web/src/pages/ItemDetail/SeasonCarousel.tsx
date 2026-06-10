@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Season } from "@/api/types";
+import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { formatSeasonMeta, getSeasonDisplayTitle } from "./itemDetailLayout";
 
@@ -11,6 +12,7 @@ interface SeasonCarouselProps {
 export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const prefetchSeason = usePrefetchCatalogSeason();
 
   if (sorted.length === 0) {
     return null;
@@ -54,6 +56,9 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
                   <Link
                     to={`/item/${season.content_id}`}
                     className="group/season block w-[160px] sm:w-[170px]"
+                    onMouseEnter={() => prefetchSeason(season.content_id)}
+                    onFocus={() => prefetchSeason(season.content_id)}
+                    onTouchStart={() => prefetchSeason(season.content_id)}
                   >
                     {/* Poster */}
                     <div className="media-card-image relative aspect-[2/3] overflow-hidden rounded-xl">

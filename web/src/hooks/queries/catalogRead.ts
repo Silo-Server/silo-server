@@ -1,4 +1,5 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 
 import { api } from "@/api/client";
 import type {
@@ -102,6 +103,28 @@ export function useCatalogItemEpisodes(id: string | undefined, libraryId?: numbe
     enabled: !!id,
     placeholderData: keepPreviousData,
   });
+}
+
+/**
+ * Returns a callback that warms the cache for a season detail page (item
+ * detail + episodes), so navigating there from a series page renders without
+ * a request waterfall. Prefetches are no-ops while the cached data is fresh.
+ */
+export function usePrefetchCatalogSeason(libraryId?: number) {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (seasonId: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: catalogKeys.itemDetail(seasonId, libraryId),
+        queryFn: () => fetchCatalogItemDetail(seasonId, libraryId),
+      });
+      void queryClient.prefetchQuery({
+        queryKey: catalogKeys.itemEpisodes(seasonId, libraryId),
+        queryFn: () => fetchCatalogItemEpisodes(seasonId, libraryId),
+      });
+    },
+    [queryClient, libraryId],
+  );
 }
 
 export function useCatalogSeriesSeasons(seriesId: string | undefined, libraryId?: number) {
