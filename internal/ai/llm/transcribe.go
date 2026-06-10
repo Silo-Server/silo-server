@@ -83,7 +83,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	url := strings.TrimRight(c.cfg.asrBaseURL(), "/") + "/v1/audio/transcriptions"
 
 	var result *Transcription
-	err := c.doWithRetry(ctx, c.asrHTTP, "transcription API",
+	doErr := c.doWithRetry(ctx, c.asrHTTP, "transcription API",
 		func() (*http.Request, error) {
 			var buf bytes.Buffer
 			w := multipart.NewWriter(&buf)
@@ -140,8 +140,26 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 			result = out
 			return nil
 		})
-	if err != nil {
-		return nil, err
+	if doErr != nil {
+		return nil, decorateTranscribeError(doErr)
 	}
 	return result, nil
+}
+
+// decorateTranscribeError appends a configuration hint to the errors a
+// chat-only gateway produces when it receives a transcription upload (no
+// /v1/audio/transcriptions route, or multipart rejected). Operators routinely
+// point the shared base URL at a chat-only provider; without the hint the raw
+// 400/404 reads like a pipeline bug instead of "set a Whisper endpoint".
+func decorateTranscribeError(err error) error {
+	msg := err.Error()
+	likelyUnsupported := strings.Contains(msg, "returned 400") ||
+		strings.Contains(msg, "returned 404") ||
+		strings.Contains(msg, "returned 405")
+	if !likelyUnsupported {
+		return err
+	}
+	return fmt.Errorf("%w — the configured endpoint likely does not support audio transcription; "+
+		"set a Whisper-compatible Transcription base URL (and model) under Admin Settings → AI Services "+
+		"(e.g. api.openai.com with whisper-1, api.groq.com/openai with whisper-large-v3, or a local faster-whisper server)", err)
 }

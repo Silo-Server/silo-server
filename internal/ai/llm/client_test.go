@@ -217,3 +217,18 @@ func TestTranscribeRequiresConfig(t *testing.T) {
 		t.Fatal("expected not-configured error")
 	}
 }
+
+func TestTranscribeChatOnlyGatewayGetsConfigHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"invalid content-type: multipart/form-data","code":400}}`))
+	}))
+	defer srv.Close()
+
+	cfg := chatConfig(srv.URL)
+	cfg.ASRModel = "whisper-test"
+	_, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	if err == nil || !strings.Contains(err.Error(), "Whisper-compatible Transcription base URL") {
+		t.Fatalf("err = %v, want configuration hint", err)
+	}
+}
