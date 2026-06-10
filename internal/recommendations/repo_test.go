@@ -24,6 +24,67 @@ func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
 	}
 }
 
+func TestTasteSeedCandidateQueryIncludesEbooks(t *testing.T) {
+	query := strings.Join(strings.Fields(tasteSeedCandidateQuery), " ")
+
+	for _, term := range []string{
+		"(mi.status = 'matched' OR mi.type = 'audiobook' OR mi.type = 'ebook')",
+		"mi.type IN ('movie', 'series', 'audiobook', 'ebook')",
+	} {
+		if !strings.Contains(query, term) {
+			t.Fatalf("taste seed candidate query missing %q: %s", term, query)
+		}
+	}
+}
+
+func TestItemWatchersQueryCountsDistinctWatchersPerItem(t *testing.T) {
+	query := strings.Join(strings.Fields(itemWatchersQuery), " ")
+
+	// watched_activity rolls episodes up to their parent series, so one
+	// watcher can emit many rows per item. The pairs must be deduplicated
+	// before ROW_NUMBER ranking and the HAVING watcher count, otherwise a
+	// single binge-watcher inflates both.
+	assertQueryTermsInOrder(t, query,
+		"ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY MAX(updated_at) DESC) AS rn",
+		"GROUP BY user_id, profile_id, watcher_id, item_id",
+		"WHERE rn <= $1",
+		"GROUP BY media_item_id",
+		"HAVING COUNT(DISTINCT user_id) >= $2",
+	)
+}
+
+func TestItemWatchersQueryMinWatchersCountsDistinctAccounts(t *testing.T) {
+	query := strings.Join(strings.Fields(itemWatchersQuery), " ")
+
+	// The minimum-watchers floor is a sparsity/privacy threshold: one login
+	// account with N household profiles must not satisfy it by itself, so the
+	// HAVING clause counts distinct user_id (accounts), not watcher rows. The
+	// per-profile watcher_id array is still aggregated for Jaccard math.
+	assertQueryTermsInOrder(t, query,
+		"SELECT user_id, watcher_id, item_id AS media_item_id",
+		"ARRAY_AGG(watcher_id) AS watchers",
+		"HAVING COUNT(DISTINCT user_id) >= $2",
+	)
+	if strings.Contains(query, "HAVING COUNT(*) >= $2") {
+		t.Fatal("minWatchers floor must not count per-profile watcher rows")
+	}
+}
+
+func TestEbookReaderProgressForUserQueryGatesHiddenHistory(t *testing.T) {
+	query := strings.Join(strings.Fields(ebookReaderProgressForUserQuery), " ")
+
+	// Mirrors GetWatchProgressForUser: rows the user hid stay hidden while
+	// updated_at <= hidden_before; reading activity after hidden_before
+	// surfaces again.
+	assertQueryTermsInOrder(t, query,
+		"FROM ebook_reader_progress",
+		"NOT EXISTS",
+		"FROM user_history_hidden_items hhi",
+		"hhi.media_item_id = ebook_reader_progress.content_id",
+		"ebook_reader_progress.updated_at <= hhi.hidden_before",
+	)
+}
+
 func TestWatchedActivityCTEIncludesEbookReaderProgress(t *testing.T) {
 	query := strings.Join(strings.Fields(watchedActivityCTE), " ")
 

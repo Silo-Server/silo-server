@@ -12,6 +12,7 @@ const (
 	canonicalKindSeries  canonicalContentKind = "series"
 	canonicalKindSeason  canonicalContentKind = "season"
 	canonicalKindEpisode canonicalContentKind = "episode"
+	canonicalKindEbook   canonicalContentKind = "ebook"
 )
 
 const (
@@ -310,7 +311,11 @@ func buildCanonicalImplicitSignals(progress []WatchProgressRow, rewatches []Rewa
 			if timestamp.After(builder.lastSignalAt) {
 				builder.lastSignalAt = timestamp
 			}
-		case canonicalKindMovie, canonicalKindSeries:
+		case canonicalKindMovie, canonicalKindSeries, canonicalKindEbook:
+			// Ebooks are their own canonical entity. Reader progress rows carry
+			// progress as position with duration 1, so implicitWatchWeight
+			// treats the reading ratio exactly like a movie's
+			// position/duration ratio (finished book == finished movie).
 			signals[signal.Ref.CanonicalID] += signal.Weight * timeDecay(timestamp, now, halfLife)
 		}
 	}

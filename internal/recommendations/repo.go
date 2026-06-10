@@ -39,7 +39,11 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 const minHNSWEfSearch = 200
 
-const watchedActivityCTE = `
+// watchedActivityCTE unifies video watch progress and ebook reader progress
+// into one activity stream. Episodes roll up to their parent series via
+// COALESCE(e.series_id, ...). The ebook completed flag is derived from the
+// shared finished-progress threshold.
+var watchedActivityCTE = fmt.Sprintf(`
 watched_activity AS (
 	SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
 	       wp.media_item_id AS leaf_item_id,
@@ -66,7 +70,7 @@ watched_activity AS (
 	       erp.profile_id,
 	       erp.user_id::text || ':' || COALESCE(erp.profile_id, '') AS watcher_id,
 	       erp.updated_at,
-	       erp.progress >= 0.9 AS completed
+	       erp.progress >= %s AS completed
 	FROM   ebook_reader_progress erp
 	WHERE  erp.progress >= 0.5
 	  AND  NOT EXISTS (
@@ -77,10 +81,10 @@ watched_activity AS (
 		  AND  hhi.media_item_id = erp.content_id
 		  AND  erp.updated_at <= hhi.hidden_before
 	  )
-)`
+)`, catalog.EbookFinishedProgressThresholdSQL)
 
-const tasteSeedCandidateQuery = `
-			WITH ` + watchedActivityCTE + `,
+var tasteSeedCandidateQuery = fmt.Sprintf(`
+			WITH %s,
 			watched_counts AS (
 				SELECT item_id, COUNT(DISTINCT watcher_id) AS watch_count
 				FROM   watched_activity
@@ -90,8 +94,8 @@ const tasteSeedCandidateQuery = `
 			SELECT mi.content_id
 			FROM   media_items mi
 			LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
-			WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
-			  AND  mi.type IN ('movie', 'series', 'audiobook')
+			WHERE  %s
+			  AND  mi.type IN ('movie', 'series', 'audiobook', 'ebook')
 			  AND  mi.poster_path IS NOT NULL
 			  AND  mi.poster_path <> ''
 			ORDER  BY COALESCE(wc.watch_count, 0) DESC,
@@ -104,7 +108,7 @@ const tasteSeedCandidateQuery = `
 			          CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END DESC NULLS LAST,
 			          mi.year DESC NULLS LAST,
 			          mi.content_id ASC
-			LIMIT  $1 OFFSET $2`
+			LIMIT  $1 OFFSET $2`, watchedActivityCTE, recommendationItemEligibilityWhereClause("mi"))
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
@@ -1189,16 +1193,30 @@ func (r *Repo) GetWatchProgressForUser(ctx context.Context, userID int, profileI
 	return result, rows.Err()
 }
 
+// ebookReaderProgressForUserQuery maps ebook reader progress onto the
+// WatchProgressRow shape (progress as position with duration 1). Rows hidden
+// via user_history_hidden_items are excluded with the same semantics as
+// GetWatchProgressForUser: hidden when updated_at <= hidden_before, visible
+// again once new reading activity lands after hidden_before.
+var ebookReaderProgressForUserQuery = fmt.Sprintf(`
+	SELECT content_id,
+	       progress::double precision AS position_seconds,
+	       1::double precision AS duration_seconds,
+	       progress >= %s AS completed,
+	       updated_at
+	FROM   ebook_reader_progress
+	WHERE  user_id = $1 AND profile_id = $2
+	  AND  NOT EXISTS (
+		SELECT 1
+		FROM   user_history_hidden_items hhi
+		WHERE  hhi.user_id = ebook_reader_progress.user_id
+		  AND  hhi.profile_id = ebook_reader_progress.profile_id
+		  AND  hhi.media_item_id = ebook_reader_progress.content_id
+		  AND  ebook_reader_progress.updated_at <= hhi.hidden_before
+	  )`, catalog.EbookFinishedProgressThresholdSQL)
+
 func (r *Repo) GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id,
-		       progress::double precision AS position_seconds,
-		       1::double precision AS duration_seconds,
-		       progress >= 0.9 AS completed,
-		       updated_at
-		FROM   ebook_reader_progress
-		WHERE  user_id = $1 AND profile_id = $2`,
-		userID, profileID)
+	rows, err := r.pool.Query(ctx, ebookReaderProgressForUserQuery, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get ebook reader progress: %w", err)
 	}
@@ -1255,24 +1273,38 @@ func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID strin
 	return result, rows.Err()
 }
 
+// itemWatchersQuery feeds co-watch matrix computation. watched_activity rolls
+// episodes up to their parent series, so a single watcher can produce many
+// rows for the same item; the GROUP BY collapses them to one row per
+// (watcher, item) before ranking and aggregation so a lone binge-watcher
+// cannot satisfy the minimum-watchers threshold ($2) by itself and the
+// per-user recency cap ($1) counts distinct items rather than raw rows.
+//
+// Watcher identity is (user_id, profile_id) for the Jaccard math — profiles of
+// one account legitimately have distinct tastes — but the minimum-watchers
+// floor ($2) is a sparsity/privacy threshold and must count distinct login
+// ACCOUNTS: one household account with N profiles must not satisfy it alone,
+// so the HAVING clause counts DISTINCT user_id rather than watcher rows.
+var itemWatchersQuery = fmt.Sprintf(`
+	WITH %s,
+	user_watches AS (
+		SELECT user_id,
+		       watcher_id,
+		       item_id AS media_item_id,
+		       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY MAX(updated_at) DESC) AS rn
+		FROM   watched_activity
+		GROUP  BY user_id, profile_id, watcher_id, item_id
+	)
+	SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
+	FROM   user_watches
+	WHERE  rn <= $1
+	GROUP  BY media_item_id
+	HAVING COUNT(DISTINCT user_id) >= $2`, watchedActivityCTE)
+
 // ItemWatchers maps item_id to profile identities that watched >= 50% progress.
 // Used for co-watch matrix computation.
 func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser int) (map[string][]string, error) {
-	// Get all watch progress entries where progress >= 50% or completed
-	query := fmt.Sprintf(`
-		WITH %s,
-		user_watches AS (
-			SELECT user_id::text || ':' || COALESCE(profile_id, '') AS watcher_id,
-			       item_id AS media_item_id,
-			       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY updated_at DESC) AS rn
-			FROM   watched_activity
-		)
-		SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
-		FROM   user_watches
-		WHERE  rn <= $1
-		GROUP  BY media_item_id
-		HAVING COUNT(*) >= $2`, watchedActivityCTE)
-	rows, err := r.pool.Query(ctx, query, maxPerUser, minWatchers)
+	rows, err := r.pool.Query(ctx, itemWatchersQuery, maxPerUser, minWatchers)
 	if err != nil {
 		return nil, fmt.Errorf("get item watchers: %w", err)
 	}
@@ -1329,8 +1361,9 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 }
 
 // GetRecentlyAddedItems returns items added within the given number of days.
-// Audiobooks bypass the matched-status gate because their scan-derived metadata
-// is authoritative before any external-provider match exists.
+// Audiobooks and ebooks bypass the matched-status gate because their
+// scan-derived metadata is authoritative before any external-provider match
+// exists.
 func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
 	query := fmt.Sprintf(`
 		SELECT mi.content_id, mi.created_at
