@@ -49,6 +49,34 @@ func TestValidateMarkerProviderUsesSnakeCaseStats(t *testing.T) {
 	}
 }
 
+type fakePluginMarkerSubmitter struct{ fakeMarkerStatsSubmitter }
+
+func (fakePluginMarkerSubmitter) ID() string { return "plugin:6:introdb" }
+
+// Browsers send encodeURIComponent-escaped provider IDs (plugin%3A6%3Aintrodb),
+// and chi matches the raw path, so the handler must decode the route param.
+func TestValidateMarkerProviderDecodesEncodedID(t *testing.T) {
+	reg := markers.NewRegistry(nil)
+	if err := reg.Register(fakePluginMarkerSubmitter{}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	h := NewAdminMarkerProvidersHandler(reg, nil, nil, nil)
+
+	router := chi.NewRouter()
+	router.Post("/admin/markers/providers/{provider}/validate", h.HandleValidateProvider)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/markers/providers/plugin%3A6%3Aintrodb/validate", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"valid":true`) {
+		t.Fatalf("unexpected response: %s", rec.Body.String())
+	}
+}
+
 func TestMarkerProviderResponseIncludesPluginMetadata(t *testing.T) {
 	resp := toProviderConfigResponse(
 		markers.ProviderConfig{Provider: "plugin:4:markers", FetchEnabled: true, FetchPriority: 25},

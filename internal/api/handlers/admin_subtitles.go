@@ -12,7 +12,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subdl"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,7 +56,11 @@ func (h *AdminSubtitleHandler) HandleListProviders(w http.ResponseWriter, r *htt
 
 // HandleUpdateProvider handles PUT /api/v1/admin/subtitle-providers/{provider}
 func (h *AdminSubtitleHandler) HandleUpdateProvider(w http.ResponseWriter, r *http.Request) {
-	providerName := chi.URLParam(r, "provider")
+	providerName, err := decodedURLParam(r, "provider")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider name")
+		return
+	}
 
 	var req updateSubtitleProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -83,7 +86,11 @@ func (h *AdminSubtitleHandler) HandleUpdateProvider(w http.ResponseWriter, r *ht
 
 // HandleTestProvider handles POST /api/v1/admin/subtitle-providers/{provider}/test
 func (h *AdminSubtitleHandler) HandleTestProvider(w http.ResponseWriter, r *http.Request) {
-	providerName := chi.URLParam(r, "provider")
+	providerName, err := decodedURLParam(r, "provider")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider name")
+		return
+	}
 
 	cfg, err := h.repo.GetProviderConfig(r.Context(), providerName)
 	if err != nil {

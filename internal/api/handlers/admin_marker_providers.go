@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/markers"
 )
@@ -122,7 +120,11 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 		return
 	}
-	provider := chi.URLParam(r, "provider")
+	provider, err := decodedURLParam(r, "provider")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
+		return
+	}
 	existing, ok := h.Config.Get(provider)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found", "Unknown marker provider")
@@ -179,7 +181,11 @@ func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWrit
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 		return
 	}
-	provider := chi.URLParam(r, "provider")
+	provider, err := decodedURLParam(r, "provider")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
+		return
+	}
 	var submitter markers.Submitter
 	for _, p := range h.Registry.Providers() {
 		if p.ID() == provider {

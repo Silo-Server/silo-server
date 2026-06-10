@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
@@ -220,7 +218,11 @@ func (h *WatchProviderHandler) connectionStatus(w http.ResponseWriter, r *http.R
 func watchProviderRequestScope(w http.ResponseWriter, r *http.Request) (int, string, string, bool) {
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
-	provider := chi.URLParam(r, "provider")
+	provider, err := decodedURLParam(r, "provider")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider name")
+		return 0, "", "", false
+	}
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return 0, "", "", false
