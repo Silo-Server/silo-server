@@ -332,6 +332,7 @@ export function PlayerControls({
               onRefreshSubtitles={onRefreshSubtitles}
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
+              audioTracks={audioTracks}
             />
 
             <QualityMenu

@@ -286,6 +286,21 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           Preferred language for titles, summaries, and artwork fetched from providers.
         </p>
       </div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-0.5">
+          <Label htmlFor="auto-translate-metadata">Auto-translate descriptions</Label>
+          <p className="text-muted-foreground text-xs">
+            When providers have no translation for this library&apos;s language, translate
+            descriptions with AI after each refresh. Requires AI description translation in Admin
+            Settings → AI Services.
+          </p>
+        </div>
+        <Switch
+          id="auto-translate-metadata"
+          checked={form.autoTranslateMetadata}
+          onCheckedChange={form.setAutoTranslateMetadata}
+        />
+      </div>
       {form.contentLevels.length > 0 && (
         <div className="space-y-1.5">
           <Label>Provider Priority</Label>

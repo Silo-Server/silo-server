@@ -20,7 +20,7 @@ func scanProfile(scanner interface {
 	var createdAt, updatedAt time.Time
 	err := scanner.Scan(
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating,
-		&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
+		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
 		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &createdAt, &updatedAt,
@@ -66,13 +66,13 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_profiles (
 			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
-			quality_preference, language, subtitle_language, subtitle_mode,
+			quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
 			library_restrictions_enabled,
 			show_forced_subtitles, max_playback_quality, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
 		p.ID, s.userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
-		p.QualityPreference, p.Language, p.SubtitleLanguage, p.SubtitleMode,
+		p.QualityPreference, p.Language, p.PreferredMetadataLanguage, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.LibraryRestrictionsEnabled,
 		p.ShowForcedSubtitles, p.MaxPlaybackQuality, p.CreatedAt, p.UpdatedAt,
@@ -89,7 +89,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 func (s *PostgresUserStore) GetProfile(ctx context.Context, id string) (*userstore.Profile, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
-		       quality_preference, language, subtitle_language, subtitle_mode,
+		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 		       show_forced_subtitles, max_playback_quality, created_at, updated_at
 		FROM user_profiles WHERE user_id = $1 AND id = $2`, s.userID, id)
@@ -111,7 +111,7 @@ func (s *PostgresUserStore) GetProfile(ctx context.Context, id string) (*usersto
 func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
-		       quality_preference, language, subtitle_language, subtitle_mode,
+		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 		       show_forced_subtitles, max_playback_quality, created_at, updated_at
 		FROM user_profiles WHERE user_id = $1 ORDER BY created_at ASC`, s.userID)
@@ -184,6 +184,9 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 	}
 	if u.Language != nil {
 		addArg("language", *u.Language)
+	}
+	if u.PreferredMetadataLanguage != nil {
+		addArg("preferred_metadata_language", *u.PreferredMetadataLanguage)
 	}
 	if u.SubtitleLanguage != nil {
 		addArg("subtitle_language", *u.SubtitleLanguage)

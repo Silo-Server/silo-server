@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 )
 
 // recordingRepo is a JobRepository that records ResetStaleJobs calls and no-ops
@@ -49,7 +51,7 @@ func TestRecoverReapsStaleJobsImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // stops the reaper goroutine started by Recover
 
-	svc := NewService(ctx, Config{}, repo, nil, nil, nil, nil, nil, "", nil)
+	svc := NewService(ctx, Config{}, repo, nil, nil, nil, nil, nil, nil, "", nil, nil)
 
 	approxNow := time.Now()
 	svc.Recover()
@@ -58,7 +60,7 @@ func TestRecoverReapsStaleJobsImmediately(t *testing.T) {
 	if resets < 1 {
 		t.Fatalf("Recover did not reap immediately: resets=%d", resets)
 	}
-	want := approxNow.Add(-staleJobThreshold)
+	want := approxNow.Add(-jobrunner.StaleJobThreshold)
 	if diff := before.Sub(want); diff > 2*time.Second || diff < -2*time.Second {
 		t.Errorf("stale cutoff = %v, want ~%v (now-staleJobThreshold)", before, want)
 	}

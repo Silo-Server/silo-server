@@ -48,6 +48,7 @@ type createProfileRequest struct {
 	MaxContentRating           string `json:"max_content_rating,omitempty"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
+	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
 	SubtitleLanguage           string `json:"subtitle_language,omitempty"`
 	SubtitleMode               string `json:"subtitle_mode,omitempty"`
 	AutoSkipIntro              bool   `json:"auto_skip_intro"`
@@ -68,6 +69,7 @@ type updateProfileRequest struct {
 	MaxContentRating           *string `json:"max_content_rating,omitempty"`
 	QualityPreference          *string `json:"quality_preference,omitempty"`
 	Language                   *string `json:"language,omitempty"`
+	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty"`
 	SubtitleLanguage           *string `json:"subtitle_language,omitempty"`
 	SubtitleMode               *string `json:"subtitle_mode,omitempty"`
 	AutoSkipIntro              *bool   `json:"auto_skip_intro,omitempty"`
@@ -96,6 +98,7 @@ type profileResponse struct {
 	MaxContentRating           string `json:"max_content_rating,omitempty"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
+	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
 	SubtitleLanguage           string `json:"subtitle_language,omitempty"`
 	SubtitleMode               string `json:"subtitle_mode,omitempty"`
 	AutoSkipIntro              bool   `json:"auto_skip_intro"`
@@ -356,6 +359,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		MaxContentRating:           req.MaxContentRating,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
+		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
 		SubtitleLanguage:           req.SubtitleLanguage,
 		SubtitleMode:               req.SubtitleMode,
 		AutoSkipIntro:              req.AutoSkipIntro,
@@ -505,6 +509,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		MaxContentRating:           req.MaxContentRating,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
+		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
 		SubtitleLanguage:           req.SubtitleLanguage,
 		SubtitleMode:               req.SubtitleMode,
 		AutoSkipIntro:              req.AutoSkipIntro,
@@ -684,6 +689,7 @@ func (h *ProfileHandler) toProfileResponse(ctx context.Context, p userstore.Prof
 		MaxContentRating:           p.MaxContentRating,
 		QualityPreference:          p.QualityPreference,
 		Language:                   p.Language,
+		PreferredMetadataLanguage:  p.PreferredMetadataLanguage,
 		SubtitleLanguage:           p.SubtitleLanguage,
 		SubtitleMode:               p.SubtitleMode,
 		AutoSkipIntro:              p.AutoSkipIntro,

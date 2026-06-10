@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Captions, CaptionsOff, Languages, Minus, Plus, SlidersHorizontal } from "lucide-react";
-import type { PlayerSubtitleInfo } from "../types";
+import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
 import { SubtitleTranslateModal, isTranslatableSource } from "./SubtitleTranslateModal";
@@ -22,6 +22,7 @@ interface SubtitleMenuProps {
   onRefreshSubtitles?: () => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
+  audioTracks?: PlayerAudioTrack[];
 }
 
 const DELAY_STEP_MS = 100;
@@ -50,11 +51,13 @@ export function SubtitleMenu({
   onRefreshSubtitles,
   sessionId,
   getSubtitleStartPosition,
+  audioTracks,
 }: SubtitleMenuProps) {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [translateOpen, setTranslateOpen] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiTranscribeEnabled, setAiTranscribeEnabled] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -67,12 +70,19 @@ export function SubtitleMenu({
   useEffect(() => {
     if (!playerConfig) return;
     let cancelled = false;
-    playerFetch<{ enabled: boolean }>(playerConfig, "/subtitles/ai/status")
+    playerFetch<{ enabled: boolean; transcribe_enabled?: boolean }>(
+      playerConfig,
+      "/subtitles/ai/status",
+    )
       .then((res) => {
-        if (!cancelled) setAiEnabled(Boolean(res?.enabled));
+        if (cancelled) return;
+        setAiEnabled(Boolean(res?.enabled));
+        setAiTranscribeEnabled(Boolean(res?.transcribe_enabled));
       })
       .catch(() => {
-        if (!cancelled) setAiEnabled(false);
+        if (cancelled) return;
+        setAiEnabled(false);
+        setAiTranscribeEnabled(false);
       });
     return () => {
       cancelled = true;
@@ -301,23 +311,26 @@ export function SubtitleMenu({
                 Search Online…
               </button>
             )}
-            {aiEnabled && mediaFileId && playerConfig && tracks.some(isTranslatableSource) && (
-              <button
-                ref={(el) => {
-                  menuItemsRef.current[menuItemIndex + 2] = el;
-                }}
-                role="menuitem"
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
-                onClick={() => {
-                  setTranslateOpen(true);
-                  setOpen(false);
-                }}
-              >
-                <Languages className="h-3.5 w-3.5 text-white/50" />
-                Translate with AI…
-              </button>
-            )}
+            {mediaFileId &&
+              playerConfig &&
+              ((aiEnabled && tracks.some(isTranslatableSource)) ||
+                (aiTranscribeEnabled && (audioTracks?.length ?? 0) > 0)) && (
+                <button
+                  ref={(el) => {
+                    menuItemsRef.current[menuItemIndex + 2] = el;
+                  }}
+                  role="menuitem"
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  onClick={() => {
+                    setTranslateOpen(true);
+                    setOpen(false);
+                  }}
+                >
+                  <Languages className="h-3.5 w-3.5 text-white/50" />
+                  Translate with AI…
+                </button>
+              )}
             <button
               ref={(el) => {
                 menuItemsRef.current[menuItemIndex + 3] = el;
@@ -361,6 +374,9 @@ export function SubtitleMenu({
           mediaFileId={mediaFileId}
           playerConfig={playerConfig}
           tracks={tracks}
+          audioTracks={audioTracks}
+          translateEnabled={aiEnabled}
+          transcribeEnabled={aiTranscribeEnabled}
           isOpen={translateOpen}
           sessionId={sessionId}
           getStartPosition={getSubtitleStartPosition}

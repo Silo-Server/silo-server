@@ -246,18 +246,43 @@ type RecommendationsConfig struct {
 	CowatchCron            string  `yaml:"-"`
 }
 
-// SubtitleAIConfig holds settings for on-demand AI subtitle translation (and,
-// in a follow-up, Whisper ASR generation) via a single OpenAI-compatible
-// endpoint — the operator can point it at OpenAI, Groq, a local Ollama server,
-// etc. Mirrors the recommendations embedding client's configuration style.
-type SubtitleAIConfig struct {
-	Enabled           bool   `yaml:"-"`
+// AIConfig holds the shared connection settings for Silo's AI features
+// (subtitle translation, metadata translation, Whisper ASR): one
+// OpenAI-compatible endpoint the operator can point at OpenAI, Groq, a local
+// Ollama/llama.cpp server, etc., with an optional separate endpoint for audio
+// transcription (operators often run a dedicated Whisper server). Settings
+// load from the ai.* keys, falling back to the legacy subtitle_ai.* rows.
+type AIConfig struct {
 	BaseURL           string `yaml:"-"`
 	APIKey            string `yaml:"-"`
 	ChatModel         string `yaml:"-"`
-	MaxConcurrentJobs int    `yaml:"-"`
-	BatchSize         int    `yaml:"-"`
-	ContextNeighbors  int    `yaml:"-"`
+	ASRBaseURL        string `yaml:"-"` // empty = BaseURL
+	ASRAPIKey         string `yaml:"-"` // empty = APIKey
+	ASRModel          string `yaml:"-"`
+	MaxConcurrentJobs int    `yaml:"-"` // one shared bound across all AI job services
+}
+
+// SubtitleAIConfig holds the subtitle-AI feature toggles and tuning. The
+// endpoint connection lives in AIConfig.
+type SubtitleAIConfig struct {
+	Enabled           bool `yaml:"-"` // on-demand translation
+	TranscribeEnabled bool `yaml:"-"` // Whisper ASR generation
+	BatchSize         int  `yaml:"-"`
+	ContextNeighbors  int  `yaml:"-"`
+	// ASRChunkSeconds is the audio chunk length per transcription request
+	// (60..600). Shorter chunks bound Whisper timestamp drift on long files;
+	// longer chunks mean fewer requests and fewer boundary word-clips.
+	ASRChunkSeconds int `yaml:"-"`
+}
+
+// MetadataAIConfig holds the metadata translation feature toggles. The
+// endpoint connection lives in AIConfig.
+type MetadataAIConfig struct {
+	Enabled bool `yaml:"-"`
+	// OnView controls viewer-triggered description translation on detail
+	// pages: "off" (default), "button" (explicit chip), or "auto" (translate
+	// on view with a loading animation).
+	OnView string `yaml:"-"`
 }
 
 // DownloadConfig holds server-wide download policy settings.
@@ -291,7 +316,9 @@ type Config struct {
 	JellyfinCompat       JellyfinCompatConfig       `yaml:"-"`
 	AudiobookshelfCompat AudiobookshelfCompatConfig `yaml:"-"`
 	Recommendations      RecommendationsConfig      `yaml:"-"`
+	AI                   AIConfig                   `yaml:"-"`
 	SubtitleAI           SubtitleAIConfig           `yaml:"-"`
+	MetadataAI           MetadataAIConfig           `yaml:"-"`
 	Download             DownloadConfig             `yaml:"-"`
 	TMDBAPIKey           string                     `yaml:"-"`
 	MDBListAPIKey        string                     `yaml:"-"`

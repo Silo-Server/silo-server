@@ -36,6 +36,10 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/hooks/useOnViewTranslation", () => ({
+  useOnViewTranslation: () => ({ translating: false, onTranslate: undefined }),
+}));
+
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
   useOptionalAuth: mocks.useAuth,

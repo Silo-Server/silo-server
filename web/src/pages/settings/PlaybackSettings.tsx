@@ -114,6 +114,7 @@ export default function PlaybackSettings() {
   const saveProfileField = (body: {
     quality_preference?: string;
     language?: string;
+    preferred_metadata_language?: string;
     auto_skip_intro?: boolean;
     auto_skip_credits?: boolean;
     auto_skip_recap?: boolean;
@@ -192,6 +193,39 @@ export default function PlaybackSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preference</SelectItem>
+                  {LANGUAGE_OPTIONS.filter((language) => language.value).map((language) => (
+                    <SelectItem key={language.value} value={language.value}>
+                      {language.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        />
+
+        <SettingRow
+          label="Metadata language"
+          description="Show titles and descriptions in this language when available. Descriptions can be translated automatically when the server has AI translation enabled."
+          control={(id) => (
+            <div className="w-full">
+              <Select
+                value={profile.preferred_metadata_language || "none"}
+                onValueChange={(value) =>
+                  saveProfileField({
+                    preferred_metadata_language: value === "none" ? "" : value,
+                  })
+                }
+              >
+                <SelectTrigger
+                  id={id}
+                  className="w-full sm:w-[220px]"
+                  disabled={updateMutation.isPending}
+                >
+                  <SelectValue placeholder="Library default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Library default</SelectItem>
                   {LANGUAGE_OPTIONS.filter((language) => language.value).map((language) => (
                     <SelectItem key={language.value} value={language.value}>
                       {language.label}

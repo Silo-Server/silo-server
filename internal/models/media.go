@@ -13,6 +13,7 @@ type MediaFolder struct {
 	Name                     string
 	Enabled                  bool
 	MetadataLanguage         string // ISO 639-1 code (e.g. "en", "ja")
+	AutoTranslateMetadata    bool   // AI-translate descriptions when providers lack this language
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
 	PosterPath               string     // S3 key for library poster image
@@ -421,6 +422,16 @@ type EpisodeLibrary struct {
 	FirstSeenAt   time.Time
 }
 
+// Localization field provenance values. Precedence when writing:
+// manual beats provider beats ai — a provider refresh may overwrite an AI
+// translation but never a manual edit, and AI never overwrites either
+// (except provider, when the admin explicitly forces a re-translation).
+const (
+	LocalizationSourceProvider = "provider"
+	LocalizationSourceAI       = "ai"
+	LocalizationSourceManual   = "manual"
+)
+
 type MediaItemLocalization struct {
 	ContentID         string
 	Language          string
@@ -433,6 +444,8 @@ type MediaItemLocalization struct {
 	BackdropPath      string
 	BackdropThumbhash string
 	LogoPath          string
+	OverviewSource    string // provider | ai | manual
+	TaglineSource     string // provider | ai | manual
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -444,6 +457,7 @@ type SeasonLocalization struct {
 	Overview        string
 	PosterPath      string
 	PosterThumbhash string
+	OverviewSource  string // provider | ai | manual
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -453,6 +467,7 @@ type EpisodeLocalization struct {
 	Language         string
 	Title            string
 	Overview         string
+	OverviewSource   string // provider | ai | manual
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

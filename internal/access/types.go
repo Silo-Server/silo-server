@@ -9,8 +9,11 @@ type Scope struct {
 	LibrariesRestricted bool
 	MaxContentRating    string
 	MaxPlaybackQuality  string
-	PolicyRevision      int64
-	ProfileVerified     bool
+	// PreferredMetadataLanguage is the profile's metadata (presentation)
+	// language; "" inherits the library's metadata language.
+	PreferredMetadataLanguage string
+	PolicyRevision            int64
+	ProfileVerified           bool
 }
 
 // ResolveInput is the request input for resolving a viewer access scope.

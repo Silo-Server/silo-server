@@ -13,6 +13,7 @@ type Profile struct {
 	MaxContentRating           string
 	QualityPreference          string
 	Language                   string
+	PreferredMetadataLanguage  string // ISO 639-1; "" = inherit library metadata language
 	SubtitleLanguage           string
 	SubtitleMode               string
 	AutoSkipIntro              bool
@@ -58,6 +59,7 @@ type UpdateProfileInput struct {
 	MaxContentRating           *string
 	QualityPreference          *string
 	Language                   *string
+	PreferredMetadataLanguage  *string
 	SubtitleLanguage           *string
 	SubtitleMode               *string
 	AutoSkipIntro              *bool

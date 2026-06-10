@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { MetadataTranslatePanel } from "@/components/MetadataTranslatePanel";
 import { TagInput } from "@/components/TagInput";
 import ImageSelectorTab from "@/components/ImageSelectorTab";
 import type { ItemDetail } from "@/api/types";
@@ -339,6 +340,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                       placeholder="No tagline"
                     />
                   </FieldRow>
+
+                  {(item.type === "movie" || item.type === "series") && (
+                    <MetadataTranslatePanel item={item} />
+                  )}
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FieldRow label="Content Rating" lockIcon={renderLockIcon("content_rating")}>
