@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useUnreadCount } from "@/hooks/queries/notifications";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
@@ -53,6 +54,7 @@ import {
   Puzzle,
   BookHeadphones,
   Send,
+  Bell,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
@@ -169,6 +171,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
   const isAdmin = user?.role === "admin";
   const { data: libraries } = useUserLibraries();
+  const { data: unreadCount = 0 } = useUnreadCount();
   const { pins } = useSidebarPins();
   const { togglePin } = useToggleSidebarPin();
   const { data: pluginSettings } = usePluginSettingsList();
@@ -641,6 +644,30 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 )}
                 <Clock className="h-[18px] w-[18px] shrink-0" />
                 <SidebarLabel show={showLabels}>History</SidebarLabel>
+              </ViewTransitionLink>
+            </li>
+            <li>
+              <ViewTransitionLink
+                to="/notifications"
+                onClick={onNavigate}
+                className={navLinkClass("/notifications")}
+                aria-current={isActive("/notifications") ? "page" : undefined}
+              >
+                {isActive("/notifications") && (
+                  <span
+                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                    style={{ background: "var(--primary)" }}
+                  />
+                )}
+                <span className="relative shrink-0">
+                  <Bell className="h-[18px] w-[18px] shrink-0" />
+                  {unreadCount > 0 && (
+                    <span className="bg-primary text-primary-foreground absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 text-[9px] leading-none">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </span>
+                <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
               </ViewTransitionLink>
             </li>
           </ul>
