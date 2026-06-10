@@ -35,7 +35,7 @@ func (t *NotificationsDigestTask) IsHidden() bool { return false }
 
 func (t *NotificationsDigestTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeInterval, IntervalMs: 24 * 60 * 60 * 1000},
+		{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "08:00"},
 	}
 }
 

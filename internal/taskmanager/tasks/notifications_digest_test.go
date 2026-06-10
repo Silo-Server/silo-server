@@ -44,12 +44,11 @@ func TestNotificationsDigestTask_Metadata(t *testing.T) {
 	if len(triggers) != 1 {
 		t.Fatalf("DefaultTriggers() length = %d, want 1", len(triggers))
 	}
-	if triggers[0].Type != taskmanager.TriggerTypeInterval {
-		t.Fatalf("trigger type = %q, want interval", triggers[0].Type)
+	if triggers[0].Type != taskmanager.TriggerTypeDaily {
+		t.Fatalf("trigger type = %q, want daily", triggers[0].Type)
 	}
-	wantMs := int64(24 * 60 * 60 * 1000)
-	if triggers[0].IntervalMs != wantMs {
-		t.Fatalf("IntervalMs = %d, want %d", triggers[0].IntervalMs, wantMs)
+	if triggers[0].TimeOfDay != "08:00" {
+		t.Fatalf("TimeOfDay = %q, want 08:00", triggers[0].TimeOfDay)
 	}
 }
 
