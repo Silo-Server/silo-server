@@ -257,3 +257,158 @@ func TestMaterializer_MatcherPanicIsolated(t *testing.T) {
 		t.Errorf("expected 1 inserted notification despite panic, got %d", len(store.inserted))
 	}
 }
+
+// fakeResolver satisfies ContentResolver for unit tests.
+type fakeResolver struct {
+	title    string
+	seriesID string
+	library  int
+	refs     []ProfileRef
+}
+
+func (f *fakeResolver) ItemContext(_ context.Context, _ string) (string, string, int, error) {
+	return f.title, f.seriesID, f.library, nil
+}
+
+func (f *fakeResolver) InterestedProfiles(_ context.Context, _, _ string, _ int, _ time.Time) ([]ProfileRef, error) {
+	return f.refs, nil
+}
+
+// catalogItemChangedEnvelope builds a raw evt.Envelope for catalog.item.changed events.
+func catalogItemChangedEnvelope(libraryID int, contentID, change string) evt.Envelope {
+	data, _ := json.Marshal(map[string]any{
+		"library_id": libraryID,
+		"content_id": contentID,
+		"change":     change,
+	})
+	return evt.Envelope{
+		Channel: evt.ChannelCatalog,
+		Event:   "catalog.item.changed",
+		Data:    data,
+	}
+}
+
+func TestContentMatcher_NotifiesInterestedProfiles(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+
+	resolver := &fakeResolver{
+		title:    "Inception",
+		seriesID: "",
+		library:  1,
+		refs: []ProfileRef{
+			{UserID: 10, ProfileID: "profile-a"},
+			{UserID: 11, ProfileID: "profile-b"},
+		},
+	}
+
+	m := NewMaterializer(hub, svc, resolver)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	publishAndSettle(t, hub, m, catalogItemChangedEnvelope(1, "content-42", "metadata_updated"))
+
+	if len(store.inserted) != 2 {
+		t.Fatalf("expected 2 inserted notifications, got %d", len(store.inserted))
+	}
+	n := store.inserted[0]
+	if n.Category != CategoryContent {
+		t.Errorf("category = %q, want %q", n.Category, CategoryContent)
+	}
+	if n.Type != "content.added" {
+		t.Errorf("type = %q, want %q", n.Type, "content.added")
+	}
+	if n.ItemID == nil || *n.ItemID != "content-42" {
+		t.Errorf("item_id = %v, want %q", n.ItemID, "content-42")
+	}
+	if n.ProfileID == nil || *n.ProfileID != "profile-a" {
+		t.Errorf("profile_id = %v, want %q", n.ProfileID, "profile-a")
+	}
+}
+
+func TestContentMatcher_BurstCollapsesViaDedup(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+
+	resolver := &fakeResolver{
+		title:    "Episode",
+		seriesID: "series-99",
+		library:  1,
+		refs: []ProfileRef{
+			{UserID: 10, ProfileID: "profile-a"},
+		},
+	}
+
+	m := NewMaterializer(hub, svc, resolver)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Three episodes from the same series published sequentially.
+	// All share the same (series_id, profile_id, hourBucket) → same dedup_ref → only 1 insert.
+	for _, epID := range []string{"ep-1", "ep-2", "ep-3"} {
+		publishAndSettle(t, hub, m, catalogItemChangedEnvelope(1, epID, "metadata_updated"))
+	}
+
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 insert (dedup collapsed burst), got %d", len(store.inserted))
+	}
+}
+
+func TestContentMatcher_NonAddedChangeIgnored(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+
+	resolver := &fakeResolver{
+		title:   "Something",
+		library: 1,
+		refs:    []ProfileRef{{UserID: 10, ProfileID: "profile-a"}},
+	}
+
+	m := NewMaterializer(hub, svc, resolver)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// "library_rescan" is not a recognized addition change value → should be ignored.
+	data, _ := json.Marshal(map[string]any{
+		"library_id": 1,
+		"content_id": "content-x",
+		"change":     "library_rescan",
+	})
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelCatalog,
+		Event:   "catalog.item.changed",
+		Data:    data,
+	})
+
+	if len(store.inserted) != 0 {
+		t.Fatalf("expected 0 inserts for non-addition change, got %d", len(store.inserted))
+	}
+}
+
+func TestContentMatcher_NilResolverDisabled(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+
+	// nil resolver → content matcher not registered
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	publishAndSettle(t, hub, m, catalogItemChangedEnvelope(1, "content-zzz", "metadata_updated"))
+
+	if len(store.inserted) != 0 {
+		t.Fatalf("expected 0 inserts when resolver is nil, got %d", len(store.inserted))
+	}
+}

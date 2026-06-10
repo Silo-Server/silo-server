@@ -465,3 +465,117 @@ func (r *Repository) AllEnabledUserIDs(ctx context.Context) ([]int, error) {
 	}
 	return ids, nil
 }
+
+// ContentResolverRepo implements ContentResolver against a pgxpool.
+type ContentResolverRepo struct{ pool *pgxpool.Pool }
+
+// NewContentResolverRepo returns a ContentResolverRepo backed by pool.
+func NewContentResolverRepo(pool *pgxpool.Pool) *ContentResolverRepo {
+	return &ContentResolverRepo{pool: pool}
+}
+
+// ItemContext resolves the display title, series id (empty for non-episodes),
+// and library id for the given content_id.
+//
+// media_item_libraries.media_folder_id is the same integer as the library_id
+// field in catalog events.
+func (c *ContentResolverRepo) ItemContext(ctx context.Context, contentID string) (title, seriesID string, libraryID int, err error) {
+	err = c.pool.QueryRow(ctx, `
+		SELECT
+			mi.title,
+			COALESCE(e.series_id, '') AS series_id,
+			COALESCE(mil.media_folder_id, 0) AS library_id
+		FROM media_items mi
+		LEFT JOIN episodes e ON e.content_id = mi.content_id
+		LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+		WHERE mi.content_id = $1
+		LIMIT 1
+	`, contentID).Scan(&title, &seriesID, &libraryID)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("item context for %s: %w", contentID, err)
+	}
+	return title, seriesID, libraryID, nil
+}
+
+// InterestedProfiles returns (user_id, profile_id) pairs that should receive a
+// content.added notification for the given item.  It unions three interest legs:
+//
+//  1. Watchlist — profiles whose watchlist contains contentID or seriesID.
+//  2. Favorites — profiles whose favorites contain contentID or seriesID.
+//  3. In-progress — profiles with recent watch_progress on any episode of
+//     seriesID (only when seriesID is non-empty) within the in-progress window.
+//
+// Results are restricted to users who are enabled and have access to libraryID.
+func (c *ContentResolverRepo) InterestedProfiles(
+	ctx context.Context,
+	contentID, seriesID string,
+	libraryID int,
+	inProgressSince time.Time,
+) ([]ProfileRef, error) {
+	// Build the query with optional in-progress leg.
+	// The in-progress leg requires seriesID to be non-empty: it joins episodes
+	// on series_id to find profiles that watched any episode of the series.
+	query := `
+		WITH eligible_users AS (
+			SELECT id AS user_id
+			FROM users
+			WHERE enabled = true
+			  AND (library_ids IS NULL OR $1 = ANY(library_ids))
+		),
+		watchlist_leg AS (
+			SELECT user_id, profile_id
+			FROM user_watchlist
+			WHERE media_item_id IN ($2, $3)
+		),
+		favorites_leg AS (
+			SELECT user_id, profile_id
+			FROM user_favorites
+			WHERE media_item_id IN ($2, $3)
+		),
+		inprogress_leg AS (
+			SELECT uwp.user_id, uwp.profile_id
+			FROM user_watch_progress uwp
+			JOIN episodes e ON e.content_id = uwp.media_item_id
+			WHERE $3 <> ''
+			  AND e.series_id = $3
+			  AND uwp.updated_at >= $4
+		),
+		all_interests AS (
+			SELECT user_id, profile_id FROM watchlist_leg
+			UNION
+			SELECT user_id, profile_id FROM favorites_leg
+			UNION
+			SELECT user_id, profile_id FROM inprogress_leg
+		)
+		SELECT DISTINCT ai.user_id, ai.profile_id
+		FROM all_interests ai
+		JOIN eligible_users eu ON eu.user_id = ai.user_id
+		ORDER BY ai.user_id, ai.profile_id
+	`
+
+	// When seriesID is empty we pass contentID for both the $2 and $3 slots.
+	// The in-progress leg's "$3 <> ''" guard makes it a no-op in that case.
+	seriesArg := seriesID
+	if seriesArg == "" {
+		seriesArg = contentID // harmless: IN (contentID, contentID) = IN (contentID)
+	}
+
+	rows, err := c.pool.Query(ctx, query, libraryID, contentID, seriesArg, inProgressSince)
+	if err != nil {
+		return nil, fmt.Errorf("interested profiles for %s: %w", contentID, err)
+	}
+	defer rows.Close()
+
+	var refs []ProfileRef
+	for rows.Next() {
+		var ref ProfileRef
+		if err := rows.Scan(&ref.UserID, &ref.ProfileID); err != nil {
+			return nil, fmt.Errorf("scan interested profile: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate interested profiles: %w", err)
+	}
+	return refs, nil
+}
