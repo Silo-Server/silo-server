@@ -5,6 +5,7 @@ type PlayableMediaType =
   | "episode"
   | "audiobook"
   | "ebook"
+  | "manga"
   | "podcast";
 
 interface MediaHrefInput {
@@ -47,6 +48,9 @@ export function buildMediaPlayHref({ contentId, type, libraryId, restart }: Medi
   if (type === "ebook") {
     return appendQuery(`/reader/ebook/${encodeURIComponent(contentId)}`, { libraryId });
   }
+  // Manga series (and series/season) are not directly playable: you open the
+  // detail page and read an individual chapter (itself an ebook item) from
+  // there. Fall through to the item href.
   return buildItemHref({ contentId, libraryId });
 }
 
