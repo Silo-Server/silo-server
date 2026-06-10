@@ -2940,6 +2940,8 @@ export interface StreamNode {
   active_jobs: number;
   group: string | null;
   max_jobs: number | null;
+  max_bandwidth_kbps: number | null;
+  egress_kbps: number;
   last_health_check: string | null;
   created_at: string;
 }
@@ -2950,20 +2952,23 @@ export interface CreateNodeRequest {
   url: string;
   group?: string;
   max_jobs?: number;
+  max_bandwidth_kbps?: number;
 }
 
 export interface UpdateNodeRequest {
   name?: string;
   url?: string;
   enabled?: boolean;
-  // Empty string clears the group; 0 clears the cap (unlimited).
+  // Empty string clears the group; 0 clears the caps (unlimited).
   group?: string;
   max_jobs?: number;
+  max_bandwidth_kbps?: number;
 }
 
 export interface CheckNodeResponse {
   healthy: boolean;
   active_jobs: number;
+  egress_kbps: number;
 }
 
 // User-facing library (simplified, no admin fields)

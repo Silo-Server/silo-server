@@ -13,36 +13,37 @@ import (
 type healthResponse struct {
 	Status     string `json:"status"`
 	ActiveJobs int    `json:"active_jobs"`
+	EgressKbps int    `json:"egress_kbps"`
 }
 
-// CheckNode pings a node's /health endpoint and returns its health status
-// and active job count.
-func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs int) {
+// CheckNode pings a node's /health endpoint and returns its health status,
+// active job count, and reported egress bandwidth.
+func CheckNode(ctx context.Context, n *Node) (healthy bool, activeJobs, egressKbps int) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, n.URL+"/api/v1/health", nil)
 	if err != nil {
-		return false, 0
+		return false, 0, 0
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, 0
+		return false, 0, 0
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, 0
+		return false, 0, 0
 	}
 
 	var hr healthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
-		return false, 0
+		return false, 0, 0
 	}
 
-	return true, hr.ActiveJobs
+	return true, hr.ActiveJobs, hr.EgressKbps
 }
 
 // HealthChecker runs periodic health checks on all nodes in both pools,
@@ -83,13 +84,13 @@ func (hc *HealthChecker) Start(ctx context.Context) {
 
 func (hc *HealthChecker) checkAll(ctx context.Context) {
 	var wg sync.WaitGroup
-	check := func(n *Node, applyHealth func(int, bool, int, time.Time)) {
+	check := func(n *Node, applyHealth func(int, bool, int, int, time.Time)) {
 		wg.Go(func() {
-			healthy, activeJobs := CheckNode(ctx, n)
+			healthy, activeJobs, egressKbps := CheckNode(ctx, n)
 
 			// Publish the result through the pool lock so readers never see
 			// a Node struct mutated in place (the pool swaps in a copy).
-			applyHealth(n.ID, healthy, activeJobs, time.Now())
+			applyHealth(n.ID, healthy, activeJobs, egressKbps, time.Now())
 
 			if n.Healthy && !healthy {
 				slog.Warn("stream node unhealthy", "id", n.ID, "name", n.Name, "url", n.URL)
@@ -98,7 +99,7 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 			}
 
 			if hc.repo != nil {
-				if err := hc.repo.UpdateHealth(ctx, n.ID, healthy, activeJobs); err != nil {
+				if err := hc.repo.UpdateHealth(ctx, n.ID, healthy, activeJobs, egressKbps); err != nil {
 					slog.Error("failed to persist node health", "id", n.ID, "error", err)
 				}
 			}

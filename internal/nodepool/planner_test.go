@@ -50,7 +50,7 @@ func TestPlanTranscodePairsProxyFromSameGroup(t *testing.T) {
 		},
 	)
 
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
 		t.Fatalf("expected least-loaded tc-b, got %+v", plan.TranscodeNode)
 	}
@@ -73,7 +73,7 @@ func TestDegradedGroupExcludesItsTranscodeNodes(t *testing.T) {
 		},
 	)
 
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
 		t.Fatalf("expected tc-b (rack-a degraded), got %+v", plan.TranscodeNode)
 	}
@@ -95,7 +95,7 @@ func TestUnhealthyTranscodeMemberDegradesGroup(t *testing.T) {
 
 	// All enabled members of a group must be healthy for the group to be
 	// eligible — even the healthy sibling is excluded.
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode != nil {
 		t.Fatalf("expected no transcode node, got %+v", plan.TranscodeNode)
 	}
@@ -113,7 +113,7 @@ func TestUngroupedNodesKeepLegacyBehavior(t *testing.T) {
 		},
 	)
 
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-2" {
 		t.Fatalf("expected least-connections tc-2, got %+v", plan.TranscodeNode)
 	}
@@ -123,7 +123,7 @@ func TestUngroupedNodesKeepLegacyBehavior(t *testing.T) {
 
 	// Round-robin across both proxies for subsequent sessions.
 	first := plan.ProxyNode.URL
-	second := f.planner.PlanSession("s2", "", true).ProxyNode.URL
+	second := f.planner.PlanSession("s2", "", true, 0).ProxyNode.URL
 	if first == second {
 		t.Fatalf("expected round-robin to alternate proxies, got %s twice", first)
 	}
@@ -135,7 +135,7 @@ func TestGroupWithoutProxiesFallsBackToGlobalProxy(t *testing.T) {
 		[]*Node{transcodeNode(2, "http://tc-a", strPtr("rack-a"), 0)},
 	)
 
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-a" {
 		t.Fatalf("expected tc-a, got %+v", plan.TranscodeNode)
 	}
@@ -154,14 +154,14 @@ func TestSoftAffinityKeepsCurrentNode(t *testing.T) {
 	)
 
 	// Difference of 1 job: stay on current.
-	plan := f.planner.PlanSession("s1", "http://tc-1", true)
+	plan := f.planner.PlanSession("s1", "http://tc-1", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-1" {
 		t.Fatalf("expected soft affinity to keep tc-1, got %+v", plan.TranscodeNode)
 	}
 
 	// Difference of 2+: switch to the less-loaded node.
 	f.transcodes.Nodes()[0].ActiveJobs = 4
-	plan = f.planner.PlanSession("s1", "http://tc-1", true)
+	plan = f.planner.PlanSession("s1", "http://tc-1", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-2" {
 		t.Fatalf("expected switch to tc-2, got %+v", plan.TranscodeNode)
 	}
@@ -178,14 +178,14 @@ func TestTranscodeCapSkipsFullNode(t *testing.T) {
 		},
 	)
 
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-2" {
 		t.Fatalf("expected at-cap tc-1 to be skipped, got %+v", plan.TranscodeNode)
 	}
 
 	// All nodes at cap: no transcode node.
 	f.transcodes.Nodes()[1].MaxJobs = intPtr(5)
-	plan = f.planner.PlanSession("s2", "", true)
+	plan = f.planner.PlanSession("s2", "", true, 0)
 	if plan.TranscodeNode != nil {
 		t.Fatalf("expected no eligible node, got %+v", plan.TranscodeNode)
 	}
@@ -201,7 +201,7 @@ func TestProxyCapSkipsFullProxy(t *testing.T) {
 	)
 
 	for i := 0; i < 3; i++ {
-		plan := f.planner.PlanSession("s", "", false)
+		plan := f.planner.PlanSession("s", "", false, 0)
 		if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-2" {
 			t.Fatalf("expected proxy-2 (proxy-1 at cap), got %+v", plan.ProxyNode)
 		}
@@ -222,7 +222,7 @@ func TestGroupAtProxyCapacityExcludesGroupTranscode(t *testing.T) {
 
 	// rack-a's only proxy is full, so its transcode node must not be used —
 	// streams pinned to rack-a would have nowhere to go.
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-1" {
 		t.Fatalf("expected ungrouped tc-1, got %+v", plan.TranscodeNode)
 	}
@@ -240,14 +240,14 @@ func TestGroupProxyReservationsGateGroupCapacity(t *testing.T) {
 	)
 
 	// The first session reserves the group's only proxy slot.
-	plan := f.planner.PlanSession("s1", "", true)
+	plan := f.planner.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode == nil || plan.ProxyNode == nil {
 		t.Fatalf("first session should get both nodes, got %+v", plan)
 	}
 
 	// With the group's proxy fully reserved, its transcode node is
 	// ineligible too — streams pinned to the group would have nowhere to go.
-	plan = f.planner.PlanSession("s2", "", true)
+	plan = f.planner.PlanSession("s2", "", true, 0)
 	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
 		t.Fatalf("second session should be rejected, got %+v", plan)
 	}
@@ -264,18 +264,18 @@ func TestReservationsCountTowardCaps(t *testing.T) {
 	)
 
 	// Two sessions fill the cap via reservations before any health refresh.
-	if f.planner.PlanSession("s1", "", true).TranscodeNode == nil {
+	if f.planner.PlanSession("s1", "", true, 0).TranscodeNode == nil {
 		t.Fatal("first session should be admitted")
 	}
-	if f.planner.PlanSession("s2", "", true).TranscodeNode == nil {
+	if f.planner.PlanSession("s2", "", true, 0).TranscodeNode == nil {
 		t.Fatal("second session should be admitted")
 	}
-	if got := f.planner.PlanSession("s3", "", true).TranscodeNode; got != nil {
+	if got := f.planner.PlanSession("s3", "", true, 0).TranscodeNode; got != nil {
 		t.Fatalf("third session should be rejected, got %+v", got)
 	}
 
 	// Re-planning an admitted session must not double-count it.
-	if f.planner.PlanSession("s2", "http://tc-1", true).TranscodeNode == nil {
+	if f.planner.PlanSession("s2", "http://tc-1", true, 0).TranscodeNode == nil {
 		t.Fatal("re-plan of s2 should be admitted")
 	}
 
@@ -285,7 +285,7 @@ func TestReservationsCountTowardCaps(t *testing.T) {
 	capped.LastHealthCheck = &newer
 	capped.ActiveJobs = 1
 	f.now = f.now.Add(20 * time.Second)
-	if f.planner.PlanSession("s4", "", true).TranscodeNode == nil {
+	if f.planner.PlanSession("s4", "", true, 0).TranscodeNode == nil {
 		t.Fatal("session should be admitted after fresh health report")
 	}
 }
@@ -298,17 +298,17 @@ func TestReservationsExpire(t *testing.T) {
 		[]*Node{capped},
 	)
 
-	if f.planner.PlanSession("s1", "", true).TranscodeNode == nil {
+	if f.planner.PlanSession("s1", "", true, 0).TranscodeNode == nil {
 		t.Fatal("first session should be admitted")
 	}
-	if got := f.planner.PlanSession("s2", "", true).TranscodeNode; got != nil {
+	if got := f.planner.PlanSession("s2", "", true, 0).TranscodeNode; got != nil {
 		t.Fatalf("second session should be rejected, got %+v", got)
 	}
 
 	// Without health reports (LastHealthCheck nil) reservations still expire
 	// after maxReservationAge so a stalled health checker can't wedge admission.
 	f.now = f.now.Add(maxReservationAge + time.Second)
-	if f.planner.PlanSession("s3", "", true).TranscodeNode == nil {
+	if f.planner.PlanSession("s3", "", true, 0).TranscodeNode == nil {
 		t.Fatal("session should be admitted after reservation expiry")
 	}
 }
@@ -319,7 +319,7 @@ func TestDirectPlayIgnoresGroups(t *testing.T) {
 		[]*Node{},
 	)
 
-	plan := f.planner.PlanSession("s1", "", false)
+	plan := f.planner.PlanSession("s1", "", false, 0)
 	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
 		t.Fatalf("expected grouped proxy to serve direct play, got %+v", plan.ProxyNode)
 	}
@@ -339,7 +339,7 @@ func TestGroupRoundRobinAcrossGroupProxies(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i, id := range []string{"s1", "s2"} {
-		plan := f.planner.PlanSession(id, "", true)
+		plan := f.planner.PlanSession(id, "", true, 0)
 		if plan.ProxyNode == nil {
 			t.Fatalf("plan %d: expected a proxy", i)
 		}
@@ -352,8 +352,120 @@ func TestGroupRoundRobinAcrossGroupProxies(t *testing.T) {
 
 func TestNilPlannerReturnsEmptyPlan(t *testing.T) {
 	var p *Planner
-	plan := p.PlanSession("s1", "", true)
+	plan := p.PlanSession("s1", "", true, 0)
 	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
 		t.Fatalf("expected empty plan from nil planner, got %+v", plan)
+	}
+}
+
+func TestBandwidthCapSkipsSaturatedProxy(t *testing.T) {
+	saturated := proxyNode(1, "http://proxy-1", nil)
+	saturated.MaxBandwidthKbps = intPtr(100_000) // 100 Mbps
+	saturated.EgressKbps = 97_000
+	f := newFixture(
+		[]*Node{saturated, proxyNode(2, "http://proxy-2", nil)},
+		[]*Node{},
+	)
+
+	// A 6 Mbps stream doesn't fit in proxy-1's 3 Mbps of headroom.
+	for i := 0; i < 3; i++ {
+		plan := f.planner.PlanSession("s", "", false, 6_000)
+		if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-2" {
+			t.Fatalf("expected proxy-2 (proxy-1 saturated), got %+v", plan.ProxyNode)
+		}
+	}
+
+	// A 2 Mbps stream still fits.
+	plan := f.planner.PlanSession("s2", "", false, 2_000)
+	if plan.ProxyNode == nil {
+		t.Fatal("expected a proxy for a stream that fits")
+	}
+}
+
+func TestBandwidthReservationsCountDuringBridge(t *testing.T) {
+	capped := proxyNode(1, "http://proxy-1", nil)
+	capped.MaxBandwidthKbps = intPtr(10_000)
+	f := newFixture([]*Node{capped}, []*Node{})
+
+	// Two 4 Mbps admissions fit; the third would exceed the 10 Mbps cap
+	// because the first two are still bridged as reservations.
+	if f.planner.PlanSession("s1", "", false, 4_000).ProxyNode == nil {
+		t.Fatal("first stream should be admitted")
+	}
+	if f.planner.PlanSession("s2", "", false, 4_000).ProxyNode == nil {
+		t.Fatal("second stream should be admitted")
+	}
+	if got := f.planner.PlanSession("s3", "", false, 4_000).ProxyNode; got != nil {
+		t.Fatalf("third stream should be rejected, got %+v", got)
+	}
+
+	// Unlike job reservations, bandwidth bridges ignore health freshness —
+	// a report right after admission would not reflect the streams yet.
+	newer := f.now.Add(5 * time.Second)
+	f.proxies.ApplyHealth(1, true, 0, 0, newer)
+	f.now = f.now.Add(10 * time.Second)
+	if got := f.planner.PlanSession("s4", "", false, 4_000).ProxyNode; got != nil {
+		t.Fatalf("stream should still be rejected during bridge window, got %+v", got)
+	}
+
+	// After the bridge window the measured egress is authoritative. The
+	// meter now reports 8 Mbps, so one more 4 Mbps stream still won't fit,
+	// but a 2 Mbps one will.
+	f.now = f.now.Add(bandwidthBridgeAge)
+	f.proxies.ApplyHealth(1, true, 0, 8_000, f.now)
+	if got := f.planner.PlanSession("s5", "", false, 4_000).ProxyNode; got != nil {
+		t.Fatalf("4 Mbps stream should not fit at 8/10 Mbps, got %+v", got)
+	}
+	if f.planner.PlanSession("s6", "", false, 2_000).ProxyNode == nil {
+		t.Fatal("2 Mbps stream should fit at 8/10 Mbps")
+	}
+}
+
+func TestGroupBandwidthGatesGroupTranscode(t *testing.T) {
+	groupProxy := proxyNode(1, "http://proxy-a", strPtr("rack-a"))
+	groupProxy.MaxBandwidthKbps = intPtr(10_000)
+	groupProxy.EgressKbps = 9_000
+	f := newFixture(
+		[]*Node{groupProxy, proxyNode(2, "http://proxy-1", nil)},
+		[]*Node{
+			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0),
+			transcodeNode(4, "http://tc-1", nil, 7),
+		},
+	)
+
+	// rack-a's proxy has no bandwidth headroom for a 4 Mbps stream, so the
+	// group's idle transcode node must be skipped.
+	plan := f.planner.PlanSession("s1", "", true, 4_000)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-1" {
+		t.Fatalf("expected ungrouped tc-1, got %+v", plan.TranscodeNode)
+	}
+	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-1" {
+		t.Fatalf("expected ungrouped proxy-1, got %+v", plan.ProxyNode)
+	}
+
+	// A 500 kbps stream fits and stays pinned to the group.
+	plan = f.planner.PlanSession("s2", "", true, 500)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-a" {
+		t.Fatalf("expected rack-a tc-a for small stream, got %+v", plan.TranscodeNode)
+	}
+	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
+		t.Fatalf("expected rack-a proxy, got %+v", plan.ProxyNode)
+	}
+}
+
+func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
+	p := proxyNode(1, "http://proxy-1", nil)
+	p.MaxBandwidthKbps = intPtr(10_000)
+	p.EgressKbps = 9_999
+	f := newFixture([]*Node{p}, []*Node{})
+
+	// Unknown bitrate (0): admitted while measured egress is below the cap.
+	if f.planner.PlanSession("s1", "", false, 0).ProxyNode == nil {
+		t.Fatal("unknown-bitrate stream should be admitted below cap")
+	}
+
+	f.proxies.ApplyHealth(1, true, 0, 10_000, f.now)
+	if got := f.planner.PlanSession("s2", "", false, 0).ProxyNode; got != nil {
+		t.Fatalf("unknown-bitrate stream should be rejected at cap, got %+v", got)
 	}
 }

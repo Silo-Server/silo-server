@@ -66,14 +66,14 @@ func (p *TranscodePool) Nodes() []*Node {
 
 // ApplyHealth records a health check result by swapping the node for an
 // updated copy, keeping published *Node values immutable.
-func (p *TranscodePool) ApplyHealth(id int, healthy bool, activeJobs int, checkedAt time.Time) {
+func (p *TranscodePool) ApplyHealth(id int, healthy bool, activeJobs, egressKbps int, checkedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	applyNodeHealth(p.nodes, id, healthy, activeJobs, checkedAt)
+	applyNodeHealth(p.nodes, id, healthy, activeJobs, egressKbps, checkedAt)
 }
 
 // applyNodeHealth replaces the slice entry for id with an updated copy.
-func applyNodeHealth(nodes []*Node, id int, healthy bool, activeJobs int, checkedAt time.Time) {
+func applyNodeHealth(nodes []*Node, id int, healthy bool, activeJobs, egressKbps int, checkedAt time.Time) {
 	for i, n := range nodes {
 		if n.ID != id {
 			continue
@@ -81,6 +81,7 @@ func applyNodeHealth(nodes []*Node, id int, healthy bool, activeJobs int, checke
 		clone := *n
 		clone.Healthy = healthy
 		clone.ActiveJobs = activeJobs
+		clone.EgressKbps = egressKbps
 		clone.LastHealthCheck = &checkedAt
 		nodes[i] = &clone
 		return

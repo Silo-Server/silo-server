@@ -433,6 +433,13 @@ func playbackStreamURL(s *playback.Session) string {
 	return fmt.Sprintf("/stream/%s", s.ID)
 }
 
+func fileBitrateKbps(file *models.MediaFile) int {
+	if file == nil || file.Bitrate <= 0 {
+		return 0
+	}
+	return file.Bitrate
+}
+
 func buildPlaybackInfo(session *playback.Session, file *models.MediaFile) *playbackInfoResult {
 	if session == nil {
 		return nil
@@ -1365,7 +1372,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	// picks the transcode node and its group's proxy together.
 	if h.NodePlanner != nil && h.JWTSecret != "" {
 		needsTranscode := session.PlayMethod == playback.PlayTranscode || session.PlayMethod == playback.PlayRemux
-		plan := h.NodePlanner.PlanSession(session.ID, "", needsTranscode)
+		plan := h.NodePlanner.PlanSession(session.ID, "", needsTranscode, fileBitrateKbps(effectiveFile))
 		proxyNode := plan.ProxyNode
 		if proxyNode != nil && (!needsTranscode || plan.TranscodeNode != nil) {
 			tokenClaims := streamtoken.Claims{
@@ -1762,7 +1769,11 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 
 	if h.NodePlanner != nil && h.JWTSecret != "" {
 		needsTranscode := updatedSession.PlayMethod == playback.PlayTranscode
-		plan := h.NodePlanner.PlanSession(sessionID, session.TranscodeNodeURL, needsTranscode)
+		estKbps := updatedSession.TargetBitrateKbps
+		if estKbps <= 0 {
+			estKbps = fileBitrateKbps(file)
+		}
+		plan := h.NodePlanner.PlanSession(sessionID, session.TranscodeNodeURL, needsTranscode, estKbps)
 		if proxyNode := plan.ProxyNode; proxyNode != nil && (!needsTranscode || plan.TranscodeNode != nil) {
 			tokenClaims := streamtoken.Claims{
 				SessionID:       sessionID,
@@ -2028,7 +2039,11 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// Determine whether to run locally or forward to a remote transcode node.
 	var plan nodepool.Plan
 	if h.NodePlanner != nil {
-		plan = h.NodePlanner.PlanSession(req.SessionID, session.TranscodeNodeURL, true)
+		estKbps := req.TargetBitrateKbps
+		if estKbps <= 0 {
+			estKbps = fileBitrateKbps(file)
+		}
+		plan = h.NodePlanner.PlanSession(req.SessionID, session.TranscodeNodeURL, true, estKbps)
 	}
 	tcNode := plan.TranscodeNode
 

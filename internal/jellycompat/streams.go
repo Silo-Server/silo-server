@@ -98,7 +98,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		seekSeconds = d
 	}
 	if h.NodePlanner != nil && h.JWTSecret != "" {
-		plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, "", false)
+		plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, "", false, source.Version.Bitrate)
 		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, "", seekSeconds, plan.ProxyNode); redirectErr == nil {
 			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 			return
@@ -203,7 +203,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		}
 		upstreamSession, upstreamErr := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
 		if upstreamErr == nil {
-			plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, upstreamSession.TranscodeNodeURL, true)
+			plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, upstreamSession.TranscodeNodeURL, true, source.Version.Bitrate)
 			if tcNode := plan.TranscodeNode; tcNode != nil {
 				if h.fileResolver == nil {
 					writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
