@@ -43,7 +43,8 @@ type Tracker struct {
 	nodeHash string // first 8 chars of SHA-256 of nodeURL
 
 	mu       sync.Mutex
-	sessions map[string]struct{} // set of active session IDs
+	sessions map[string]struct{}  // set of active session IDs
+	touched  map[string]time.Time // ephemeral sessions by last-activity time
 }
 
 // NewTracker creates a session tracker for the given node.
@@ -57,6 +58,7 @@ func NewTracker(rdb *redis.Client, nodeURL, nodeName, nodeType string) *Tracker 
 		nodeType: nodeType,
 		nodeHash: hex.EncodeToString(h[:4]), // 8 hex chars
 		sessions: make(map[string]struct{}),
+		touched:  make(map[string]time.Time),
 	}
 }
 
@@ -80,11 +82,22 @@ func (tr *Tracker) NodeName() string {
 	return tr.nodeName
 }
 
-// ActiveCount returns the number of active sessions tracked by this node.
+// ActiveCount returns the number of active sessions tracked by this node,
+// including ephemeral sessions touched within the session TTL.
 func (tr *Tracker) ActiveCount() int {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	return len(tr.sessions)
+	now := time.Now()
+	count := len(tr.sessions)
+	for id, last := range tr.touched {
+		if _, dup := tr.sessions[id]; dup {
+			continue
+		}
+		if now.Sub(last) <= sessionTTL {
+			count++
+		}
+	}
+	return count
 }
 
 // Track registers an active session in Redis with a TTL.
@@ -108,6 +121,32 @@ func (tr *Tracker) Track(ctx context.Context, info SessionInfo) {
 	tr.mu.Unlock()
 }
 
+// Touch registers or refreshes an ephemeral session that has no explicit end,
+// such as HLS manifest/segment fetches flowing through a proxy. The session is
+// written to Redis on first touch and drops out of the active count after
+// sessionTTL without further touches (pruned by the refresh loop).
+func (tr *Tracker) Touch(ctx context.Context, info SessionInfo) {
+	if tr.rdb == nil {
+		return
+	}
+	tr.mu.Lock()
+	_, known := tr.touched[info.SessionID]
+	tr.touched[info.SessionID] = time.Now()
+	tr.mu.Unlock()
+	if known {
+		return
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		slog.Debug("session touch marshal failed", "error", err)
+		return
+	}
+	if err := tr.rdb.Set(ctx, tr.redisKey(info.SessionID), data, sessionTTL).Err(); err != nil {
+		slog.Debug("session touch set failed", "error", err, "session", info.SessionID)
+	}
+}
+
 // Remove deletes a session from Redis and the in-memory set.
 func (tr *Tracker) Remove(ctx context.Context, sessionID string) {
 	if tr.rdb == nil {
@@ -115,6 +154,7 @@ func (tr *Tracker) Remove(ctx context.Context, sessionID string) {
 	}
 	tr.mu.Lock()
 	delete(tr.sessions, sessionID)
+	delete(tr.touched, sessionID)
 	tr.mu.Unlock()
 
 	if err := tr.rdb.Del(ctx, tr.redisKey(sessionID)).Err(); err != nil {
@@ -128,11 +168,17 @@ func (tr *Tracker) Cleanup(ctx context.Context) {
 		return
 	}
 	tr.mu.Lock()
-	ids := make([]string, 0, len(tr.sessions))
+	ids := make([]string, 0, len(tr.sessions)+len(tr.touched))
 	for id := range tr.sessions {
 		ids = append(ids, id)
 	}
+	for id := range tr.touched {
+		if _, dup := tr.sessions[id]; !dup {
+			ids = append(ids, id)
+		}
+	}
 	tr.sessions = make(map[string]struct{})
+	tr.touched = make(map[string]time.Time)
 	tr.mu.Unlock()
 
 	if len(ids) == 0 {
@@ -169,10 +215,22 @@ func (tr *Tracker) StartRefresh(ctx context.Context) {
 }
 
 func (tr *Tracker) refreshAll(ctx context.Context) {
+	now := time.Now()
 	tr.mu.Lock()
-	ids := make([]string, 0, len(tr.sessions))
+	ids := make([]string, 0, len(tr.sessions)+len(tr.touched))
 	for id := range tr.sessions {
 		ids = append(ids, id)
+	}
+	for id, last := range tr.touched {
+		if now.Sub(last) > sessionTTL {
+			// Idle ephemeral session: stop refreshing and let the Redis
+			// key expire on its own.
+			delete(tr.touched, id)
+			continue
+		}
+		if _, dup := tr.sessions[id]; !dup {
+			ids = append(ids, id)
+		}
 	}
 	tr.mu.Unlock()
 

@@ -26,7 +26,7 @@ type NodeRepository interface {
 	Create(ctx context.Context, input nodepool.CreateNodeInput) (*nodepool.Node, error)
 	Update(ctx context.Context, id int, input nodepool.UpdateNodeInput) (*nodepool.Node, error)
 	Delete(ctx context.Context, id int) error
-	UpdateHealth(ctx context.Context, id int, healthy bool, activeJobs int) error
+	UpdateHealth(ctx context.Context, id int, healthy bool, activeJobs, egressKbps int) error
 }
 
 // NodeListEnabled queries enabled nodes by type for pool reload.
@@ -70,6 +70,7 @@ type ForceReloadResult struct {
 type checkNodeResult struct {
 	Healthy    bool `json:"healthy"`
 	ActiveJobs int  `json:"active_jobs"`
+	EgressKbps int  `json:"egress_kbps"`
 }
 
 // HandleListNodes handles GET /admin/nodes.
@@ -181,15 +182,16 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	healthy, activeJobs := nodepool.CheckNode(r.Context(), node)
+	healthy, activeJobs, egressKbps := nodepool.CheckNode(r.Context(), node)
 
-	if err := h.repo.UpdateHealth(r.Context(), id, healthy, activeJobs); err != nil {
+	if err := h.repo.UpdateHealth(r.Context(), id, healthy, activeJobs, egressKbps); err != nil {
 		slog.Error("persisting health check result", "node_id", id, "error", err)
 	}
 
 	writeJSON(w, http.StatusOK, checkNodeResult{
 		Healthy:    healthy,
 		ActiveJobs: activeJobs,
+		EgressKbps: egressKbps,
 	})
 }
 

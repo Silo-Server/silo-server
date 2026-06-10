@@ -24,6 +24,7 @@ import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogethe
 import { getPersistedVolume, persistVolume } from "./VolumeControl";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { deriveDisplayedPlaybackState } from "../playback-info";
+import { preconnectToStreamOrigin } from "../stream-url";
 import { WatchTogetherPanel } from "./WatchTogetherPanel";
 import type {
   PlaybackRealtimeCommandEnvelope,
@@ -465,6 +466,13 @@ export function VideoPlayer({
   useEffect(() => {
     compatibilityFallbackKeyRef.current = null;
   }, [sessionId]);
+
+  // Warm the connection to the stream origin (a proxy node in distributed
+  // deployments) while the transcode start request is still in flight, so
+  // the first manifest fetch doesn't pay DNS/TCP/TLS handshakes.
+  useEffect(() => {
+    if (streamUrl) preconnectToStreamOrigin(streamUrl);
+  }, [streamUrl]);
 
   useEffect(() => {
     setPendingSeekTime(null);

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -225,7 +226,16 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		s.activeJobs.Add(-1)
 		_ = old.Close()
-		os.RemoveAll(outputDir)
+		// Move the old segment directory aside and delete it in the
+		// background: removing a long session's segments can take seconds
+		// on slow disks, and the playback start that triggered this switch
+		// is blocked waiting for our 202.
+		staleDir := outputDir + ".stale-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.Rename(outputDir, staleDir); err == nil {
+			go func() { _ = os.RemoveAll(staleDir) }()
+		} else {
+			os.RemoveAll(outputDir)
+		}
 	} else {
 		s.mu.Unlock()
 	}
@@ -242,9 +252,12 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.activeJobs.Add(1)
 
-	// Track session in Redis
+	// Track session in Redis off the request path — the API server (and
+	// behind it the playback client) is blocked on this 202, and the
+	// tracking write is monitoring-only.
 	effectiveHWAccel := session.Opts().HWAccel
-	s.tracker.Track(r.Context(), nodesessions.SessionInfo{
+	trackCtx := context.WithoutCancel(r.Context())
+	go s.tracker.Track(trackCtx, nodesessions.SessionInfo{
 		SessionID:  req.SessionID,
 		NodeURL:    s.tracker.NodeURL(),
 		NodeName:   s.tracker.NodeName(),

@@ -119,8 +119,7 @@ type PlaybackHandler struct {
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver
 	storeProvider           userstore.UserStoreProvider
-	ProxyPool               *nodepool.ProxyPool
-	TranscodePool           *nodepool.TranscodePool
+	NodePlanner             nodepool.SessionPlanner
 	JWTSecret               string
 	profileStaler           profileStaler
 	profileRefreshRequester profileRefreshRequester
@@ -215,28 +214,8 @@ func NewPlaybackHandler(
 	return h
 }
 
-func (h *PlaybackHandler) pickTranscodeNode(currentURL string) *nodepool.Node {
-	if h.TranscodePool == nil {
-		return nil
-	}
-	best := h.TranscodePool.Acquire()
-	if best == nil {
-		return nil
-	}
-	if currentURL == "" || best.URL == currentURL {
-		return best
-	}
-	current := h.TranscodePool.FindByURL(currentURL)
-	if current != nil && current.Healthy && current.Enabled &&
-		best.ActiveJobs+2 <= current.ActiveJobs {
-		return best
-	}
-	if current != nil && current.Healthy && current.Enabled {
-		return current
-	}
-	return best
-}
-
+// buildProxyRedirectURL signs a stream token and builds the redirect URL for
+// the given proxy node (the planner's pick for this session).
 func (h *PlaybackHandler) buildProxyRedirectURL(
 	playSessionID string,
 	upstreamSessionID string,
@@ -245,12 +224,9 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 	source PlaybackMediaSource,
 	transcodeNodeURL string,
 	seekSeconds float64,
+	proxyNode *nodepool.Node,
 ) (string, error) {
-	if h.ProxyPool == nil || h.JWTSecret == "" {
-		return "", fmt.Errorf("proxy transport unavailable")
-	}
-	proxyNode := h.ProxyPool.Pick()
-	if proxyNode == nil {
+	if proxyNode == nil || h.JWTSecret == "" {
 		return "", fmt.Errorf("proxy transport unavailable")
 	}
 
@@ -352,6 +328,11 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	if err != nil {
 		return fmt.Errorf("marshal transcode request: %w", err)
 	}
+	// Bound the dispatch like the native path does (playback.go) — without
+	// this, an unreachable transcode node hangs the compat manifest request
+	// until the OS gives up on the connection.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, transcodeNodeURL+"/transcode/start", strings.NewReader(string(body)))
 	if err != nil {
 		return fmt.Errorf("build transcode request: %w", err)

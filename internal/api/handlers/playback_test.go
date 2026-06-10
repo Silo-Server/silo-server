@@ -1117,7 +1117,7 @@ func TestHandleStartTranscode_PreservesRecomputedBaseMethodAfterFallback(t *test
 		Healthy:    true,
 		ActiveJobs: 0,
 	}})
-	handler.TranscodePool = pool
+	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), pool)
 
 	transcodeReq := httptest.NewRequest(
 		"POST",
