@@ -77,7 +77,7 @@ function parseAudiobookLibraryBrowseType(value: string | undefined): LibraryBrow
   return value === "series" || value === "authors" || value === "narrators" ? value : "books";
 }
 
-function getLibrarySortRelevanceScope(
+export function getLibrarySortRelevanceScope(
   libraryType: string,
   mediaScope?: QueryDefinition["media_scope"],
 ): QuerySortRelevanceScope {

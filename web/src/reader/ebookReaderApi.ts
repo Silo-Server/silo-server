@@ -1,4 +1,4 @@
-import { api } from "@/api/client";
+import { api, apiKeepalive } from "@/api/client";
 
 export type EbookReaderConfigEnvelope = {
   content_id?: string;
@@ -58,6 +58,20 @@ export async function saveEbookReaderConfig(
   return envelope.config && typeof envelope.config === "object" && !Array.isArray(envelope.config)
     ? envelope.config
     : {};
+}
+
+/**
+ * Fire-and-forget config save for page unload (pagehide), when a normal
+ * authenticated request can no longer complete or refresh tokens.
+ */
+export function saveEbookReaderConfigKeepalive(
+  contentID: string,
+  config: Record<string, unknown>,
+): void {
+  apiKeepalive(ebookReaderConfigPath(contentID), {
+    method: "PUT",
+    body: JSON.stringify({ config }),
+  });
 }
 
 export async function fetchEbookReaderAnnotations(

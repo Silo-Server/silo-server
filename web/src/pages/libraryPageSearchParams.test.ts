@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySavedLibraryPageSearchParams,
+  getLibrarySortRelevanceScope,
   hasLibraryPageSearchParams,
   parseLibraryPageState,
   serializeLibraryPageSearchParams,
@@ -443,5 +444,23 @@ describe("library page saved state helpers", () => {
       sort: "year",
       order: "desc",
     });
+  });
+});
+
+describe("getLibrarySortRelevanceScope", () => {
+  it("maps library types to sort relevance scopes", () => {
+    expect(getLibrarySortRelevanceScope("movie")).toBe("movie");
+    expect(getLibrarySortRelevanceScope("series")).toBe("series");
+    expect(getLibrarySortRelevanceScope("audiobook")).toBe("audiobook");
+    expect(getLibrarySortRelevanceScope("audiobooks")).toBe("audiobook");
+    expect(getLibrarySortRelevanceScope("ebook")).toBe("ebook");
+    expect(getLibrarySortRelevanceScope("ebooks")).toBe("ebook");
+  });
+
+  it("falls back to the media scope and then to all for mixed libraries", () => {
+    expect(getLibrarySortRelevanceScope("mixed", "episode")).toBe("episode");
+    expect(getLibrarySortRelevanceScope("mixed", "ebook")).toBe("ebook");
+    expect(getLibrarySortRelevanceScope("mixed")).toBe("all");
+    expect(getLibrarySortRelevanceScope("unknown")).toBe("all");
   });
 });

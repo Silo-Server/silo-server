@@ -50,6 +50,7 @@ import FoliateBookReader, {
   formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
+  parseReaderLocation,
   readerFileFormat,
   type FoliateBookReaderHandle,
   type ReaderLoadState,
@@ -63,6 +64,7 @@ import {
   fetchEbookReaderAnnotations,
   fetchEbookReaderConfig,
   saveEbookReaderConfig,
+  saveEbookReaderConfigKeepalive,
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
 
@@ -229,6 +231,12 @@ export default function EbookReader() {
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
   const configLoadedRef = useRef(false);
+  // Tracks settings the user changed in this session so a slow server config
+  // fetch cannot clobber them after the fact.
+  const settingsDirtyRef = useRef(false);
+  // Mirrors readerSettings synchronously so updates merge correctly even when
+  // several setting changes land in the same render batch.
+  const readerSettingsRef = useRef(readerSettings);
   const saveConfigTimerRef = useRef<number | null>(null);
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<ReaderSearchResult[]>([]);
@@ -264,20 +272,20 @@ export default function EbookReader() {
   );
   const updateReaderSettings = useCallback(
     (next: Partial<ReaderSettings>) => {
-      setReaderSettings((current) => {
-        const merged = normalizeReaderSettings({ ...current, ...next });
-        saveReaderSettings(merged);
-        if (contentId && configLoadedRef.current) {
-          if (saveConfigTimerRef.current !== null) {
-            window.clearTimeout(saveConfigTimerRef.current);
-          }
-          saveConfigTimerRef.current = window.setTimeout(() => {
-            saveConfigTimerRef.current = null;
-            void saveEbookReaderConfig(contentId, { settings: merged });
-          }, 400);
+      const merged = normalizeReaderSettings({ ...readerSettingsRef.current, ...next });
+      readerSettingsRef.current = merged;
+      settingsDirtyRef.current = true;
+      setReaderSettings(merged);
+      saveReaderSettings(merged);
+      if (contentId && configLoadedRef.current) {
+        if (saveConfigTimerRef.current !== null) {
+          window.clearTimeout(saveConfigTimerRef.current);
         }
-        return merged;
-      });
+        saveConfigTimerRef.current = window.setTimeout(() => {
+          saveConfigTimerRef.current = null;
+          void saveEbookReaderConfig(contentId, { settings: merged });
+        }, 400);
+      }
     },
     [contentId],
   );
@@ -287,6 +295,8 @@ export default function EbookReader() {
       window.clearTimeout(saveConfigTimerRef.current);
       saveConfigTimerRef.current = null;
     }
+    readerSettingsRef.current = defaults;
+    settingsDirtyRef.current = true;
     saveReaderSettings(defaults);
     setReaderSettings(defaults);
     if (contentId) {
@@ -337,6 +347,17 @@ export default function EbookReader() {
     setAnnotations((current) => [created, ...current]);
     setPanel("notes");
   }, [contentId, item?.title, readerProgress, selection]);
+  const handleAnnotationNavigate = useCallback((annotation: EbookReaderAnnotation) => {
+    // Toolbar bookmarks store synthetic "fraction:<n>" locations that foliate's
+    // goTo cannot resolve; route those through goToFraction instead.
+    const target = parseReaderLocation(annotation.cfi_range || annotation.location);
+    if (!target) return;
+    if (target.type === "fraction") {
+      void readerRef.current?.goToFraction(target.fraction);
+    } else {
+      readerRef.current?.goTo(target.location);
+    }
+  }, []);
   const handleDeleteAnnotation = useCallback(
     async (annotationID: string) => {
       if (!contentId) return;
@@ -420,14 +441,22 @@ export default function EbookReader() {
     if (!contentId) return;
     let cancelled = false;
     configLoadedRef.current = false;
+    settingsDirtyRef.current = false;
     void fetchEbookReaderConfig(contentId)
       .then((config) => {
         if (cancelled) return;
+        configLoadedRef.current = true;
+        if (settingsDirtyRef.current) {
+          // The user already changed settings while the fetch was in flight;
+          // persist their choices instead of clobbering them with stale config.
+          void saveEbookReaderConfig(contentId, { settings: readerSettingsRef.current });
+          return;
+        }
         const settings =
           config.settings && typeof config.settings === "object" && !Array.isArray(config.settings)
             ? normalizeReaderSettings(config.settings as Partial<ReaderSettings>)
             : loadStoredReaderSettings();
-        configLoadedRef.current = true;
+        readerSettingsRef.current = settings;
         saveReaderSettings(settings);
         setReaderSettings(settings);
       })
@@ -436,12 +465,30 @@ export default function EbookReader() {
           configLoadedRef.current = true;
         }
       });
+    // A scheduled timer means updateReaderSettings has unsaved settings;
+    // consume it exactly once so unmount and pagehide cannot double-send.
+    const flushPendingConfigSave = (options?: { keepalive?: boolean }) => {
+      if (saveConfigTimerRef.current === null) return;
+      window.clearTimeout(saveConfigTimerRef.current);
+      saveConfigTimerRef.current = null;
+      if (options?.keepalive) {
+        saveEbookReaderConfigKeepalive(contentId, { settings: readerSettingsRef.current });
+      } else {
+        void saveEbookReaderConfig(contentId, { settings: readerSettingsRef.current });
+      }
+    };
+    // At tab close a normal request can be torn down with the page; keepalive
+    // lets the debounced save survive unload.
+    const flushConfigOnPageHide = () => flushPendingConfigSave({ keepalive: true });
+    window.addEventListener("pagehide", flushConfigOnPageHide);
     return () => {
       cancelled = true;
-      if (saveConfigTimerRef.current !== null) {
-        window.clearTimeout(saveConfigTimerRef.current);
-        saveConfigTimerRef.current = null;
-      }
+      window.removeEventListener("pagehide", flushConfigOnPageHide);
+      // Flush instead of dropping the debounced save: on quick SPA navigation a
+      // dropped save would let the stale server config revert the user's last
+      // change on next open. The page is still alive here, so a normal
+      // authenticated request is fine.
+      flushPendingConfigSave();
     };
   }, [contentId]);
 
@@ -761,9 +808,9 @@ export default function EbookReader() {
                     </Button>
                   </form>
                   <div className="space-y-1">
-                    {searchResults.map((result) => (
+                    {searchResults.map((result, index) => (
                       <Button
-                        key={result.cfi}
+                        key={`${result.cfi}-${index}`}
                         variant="ghost"
                         size="sm"
                         onClick={() => readerRef.current?.goTo(result.cfi)}
@@ -799,11 +846,7 @@ export default function EbookReader() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() =>
-                              readerRef.current?.goTo(
-                                annotation.cfi_range || annotation.location || "",
-                              )
-                            }
+                            onClick={() => handleAnnotationNavigate(annotation)}
                             className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left whitespace-normal"
                           >
                             <span className="min-w-0">

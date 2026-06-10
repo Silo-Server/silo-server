@@ -8,7 +8,7 @@ import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
 import { cn } from "@/lib/utils";
-import { normalizeQuerySortForScope, type QuerySortRelevanceScope } from "@/lib/querySortOptions";
+import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import {
   Select,
@@ -20,6 +20,7 @@ import {
 import {
   AUDIOBOOK_BROWSE_AXES,
   audiobookBrowseAxisFromBrowseType,
+  getLibrarySortRelevanceScope,
   isAudiobookLibraryType,
   isEbookLibraryType,
   type AudiobookBrowseAxis,
@@ -96,33 +97,6 @@ function AudiobookAxisTabs({
       })}
     </div>
   );
-}
-
-function getLibrarySortRelevanceScope(
-  libraryType: string,
-  mediaScope?: QueryDefinition["media_scope"],
-): QuerySortRelevanceScope {
-  if (libraryType === "movie" || libraryType === "series") {
-    return libraryType;
-  }
-  // The DB stores book library types as plurals; sort scopes are singular
-  // values matching QueryDefinition.media_scope.
-  if (libraryType === "audiobook" || libraryType === "audiobooks") {
-    return "audiobook";
-  }
-  if (libraryType === "ebook" || libraryType === "ebooks") {
-    return "ebook";
-  }
-  if (
-    mediaScope === "movie" ||
-    mediaScope === "series" ||
-    mediaScope === "episode" ||
-    mediaScope === "audiobook" ||
-    mediaScope === "ebook"
-  ) {
-    return mediaScope;
-  }
-  return "all";
 }
 
 export default function LibraryBrowse({

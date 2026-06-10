@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   captureReaderSettings: vi.fn(),
   fetchEbookReaderConfig: vi.fn(),
   saveEbookReaderConfig: vi.fn(),
+  saveEbookReaderConfigKeepalive: vi.fn(),
   fetchEbookReaderAnnotations: vi.fn(),
   createEbookReaderAnnotation: vi.fn(),
   deleteEbookReaderAnnotation: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("@/reader/ebookReaderApi", () => ({
   fetchEbookReaderAnnotations: mocks.fetchEbookReaderAnnotations,
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
+  saveEbookReaderConfigKeepalive: mocks.saveEbookReaderConfigKeepalive,
 }));
 
 vi.mock("@/reader/FoliateBookReader", async () => {
@@ -238,6 +240,7 @@ describe("EbookReader", () => {
     mocks.captureReaderSettings.mockReset();
     mocks.fetchEbookReaderConfig.mockReset();
     mocks.saveEbookReaderConfig.mockReset();
+    mocks.saveEbookReaderConfigKeepalive.mockReset();
     mocks.fetchEbookReaderAnnotations.mockReset();
     mocks.createEbookReaderAnnotation.mockReset();
     mocks.deleteEbookReaderAnnotation.mockReset();
@@ -545,6 +548,102 @@ describe("EbookReader", () => {
     vi.useRealTimers();
   });
 
+  it("flushes a pending debounced settings save when unmounting inside the debounce window", async () => {
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
+    await act(async () => {
+      if (!theme) return;
+      theme.value = "dark";
+      theme.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(mocks.saveEbookReaderConfig).not.toHaveBeenCalled();
+
+    // Unmount before the 400ms debounce elapses (quick SPA navigation).
+    await act(async () => {
+      root.unmount();
+    });
+
+    expect(mocks.saveEbookReaderConfig).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ theme: "dark" }),
+      }),
+    );
+
+    vi.useRealTimers();
+  });
+
+  it("flushes a pending debounced settings save with keepalive on pagehide, exactly once", async () => {
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
+    await act(async () => {
+      if (!theme) return;
+      theme.value = "sepia";
+      theme.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(mocks.saveEbookReaderConfigKeepalive).toHaveBeenCalledTimes(1);
+    expect(mocks.saveEbookReaderConfigKeepalive).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ theme: "sepia" }),
+      }),
+    );
+
+    // The pending save was consumed: neither the debounce timer firing nor the
+    // unmount flush may send it again.
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+    });
+    await act(async () => {
+      root.unmount();
+    });
+    expect(mocks.saveEbookReaderConfig).not.toHaveBeenCalled();
+    expect(mocks.saveEbookReaderConfigKeepalive).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
   it("resets reader settings to stock defaults", async () => {
     vi.useFakeTimers();
     mocks.fetchEbookReaderConfig.mockResolvedValue({
@@ -774,6 +873,162 @@ describe("EbookReader", () => {
         selected_text: "sample text",
       }),
     );
+  });
+
+  it("navigates fraction bookmarks through goToFraction and CFI annotations through goTo", async () => {
+    mocks.fetchEbookReaderAnnotations.mockResolvedValue([
+      {
+        id: "ann-frac",
+        content_id: "ebook-1",
+        kind: "bookmark",
+        location: "fraction:0.250000",
+        selected_text: "",
+        note: "Fraction bookmark",
+        style: "",
+        color: "",
+      },
+      {
+        id: "ann-cfi",
+        content_id: "ebook-1",
+        kind: "highlight",
+        cfi_range: "epubcfi(/6/12)",
+        selected_text: "CFI highlight",
+        note: "",
+        style: "highlight",
+        color: "#facc15",
+      },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const notesTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Annotations and bookmarks"]',
+    );
+    await act(async () => {
+      notesTab?.click();
+    });
+
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>("button"));
+    const fractionBookmark = buttons.find((button) =>
+      button.textContent?.includes("Fraction bookmark"),
+    );
+    await act(async () => {
+      fractionBookmark?.click();
+    });
+
+    expect(mocks.readerGoToFraction).toHaveBeenCalledWith(0.25);
+    expect(mocks.readerGoTo).not.toHaveBeenCalled();
+
+    const cfiHighlight = buttons.find((button) => button.textContent?.includes("CFI highlight"));
+    await act(async () => {
+      cfiHighlight?.click();
+    });
+
+    expect(mocks.readerGoTo).toHaveBeenCalledWith("epubcfi(/6/12)");
+  });
+
+  it("keeps settings changed before the server config arrives and persists them", async () => {
+    let resolveConfig!: (config: Record<string, unknown>) => void;
+    mocks.fetchEbookReaderConfig.mockReturnValue(
+      new Promise<Record<string, unknown>>((resolve) => {
+        resolveConfig = resolve;
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
+    await act(async () => {
+      if (!theme) return;
+      theme.value = "dark";
+      theme.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      resolveConfig({ settings: { theme: "sepia", fontSize: 130 } });
+    });
+
+    // The late server config must not clobber the user's in-flight change...
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ theme: "dark" }),
+    );
+    // ...and the user's settings win on the server too.
+    expect(mocks.saveEbookReaderConfig).toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ theme: "dark" }),
+      }),
+    );
+  });
+
+  it("renders search results with duplicate CFIs without key collisions", async () => {
+    mocks.readerSearch.mockResolvedValue([
+      { cfi: "epubcfi(/6/8)", excerpt: "first match" },
+      { cfi: "epubcfi(/6/8)", excerpt: "second match" },
+    ]);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      await act(async () => {
+        root.render(
+          <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+            <Routes>
+              <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+      });
+
+      const searchTab = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Search book"]',
+      );
+      await act(async () => {
+        searchTab?.click();
+      });
+
+      const input = container.querySelector<HTMLInputElement>('input[aria-label="Search text"]');
+      await act(async () => {
+        if (!input) return;
+        setInputValue(input, "match");
+      });
+
+      const submit = container.querySelector<HTMLButtonElement>('button[aria-label="Run search"]');
+      await act(async () => {
+        submit?.click();
+      });
+
+      expect(container.textContent).toContain("first match");
+      expect(container.textContent).toContain("second match");
+      const keyWarnings = consoleError.mock.calls.filter((call) =>
+        String(call[0]).includes("same key"),
+      );
+      expect(keyWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("shows read aloud and reading aid controls", async () => {

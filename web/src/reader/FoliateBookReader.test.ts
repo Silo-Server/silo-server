@@ -12,6 +12,7 @@ import {
   formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
+  parseReaderLocation,
   READER_FONT_STACKS,
   readerRendererAttributes,
   readerStyles,
@@ -75,6 +76,11 @@ describe("FoliateBookReader helpers", () => {
     expect(isReaderSupportedFile(version({ file_name: "notes.txt" }))).toBe(false);
   });
 
+  it("does not advertise markdown as a supported ebook format", () => {
+    expect(isReaderSupportedFile(version({ file_name: "notes.md" }))).toBe(false);
+    expect(readerMimeType("md")).toBe("application/octet-stream");
+  });
+
   it("rejects plain text when the document loader is called directly", async () => {
     const file = new File(["notes"], "notes.txt", { type: "text/plain" });
 
@@ -85,7 +91,6 @@ describe("FoliateBookReader helpers", () => {
     expect(readerMimeType("epub")).toBe("application/epub+zip");
     expect(readerMimeType("azw3")).toBe("application/vnd.amazon.mobi8-ebook");
     expect(readerMimeType("fbz")).toBe("application/x-zip-compressed-fb2");
-    expect(readerMimeType("md")).toBe("text/markdown");
   });
 
   it("converts relocate events into saveable progress", () => {
@@ -134,6 +139,18 @@ describe("FoliateBookReader helpers", () => {
         progress: 0.3,
       }),
     ).toEqual({ type: "location", location: "epubcfi(/6/4)" });
+  });
+
+  it("parses stored reader locations into navigation targets", () => {
+    expect(parseReaderLocation("fraction:0.500000")).toEqual({ type: "fraction", fraction: 0.5 });
+    expect(parseReaderLocation("fraction:1.5")).toEqual({ type: "fraction", fraction: 1 });
+    expect(parseReaderLocation(" epubcfi(/6/4) ")).toEqual({
+      type: "location",
+      location: "epubcfi(/6/4)",
+    });
+    expect(parseReaderLocation("fraction:not-a-number")).toBeNull();
+    expect(parseReaderLocation("")).toBeNull();
+    expect(parseReaderLocation(undefined)).toBeNull();
   });
 
   it("formats reader progress for compact controls", () => {
