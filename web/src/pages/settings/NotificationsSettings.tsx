@@ -128,7 +128,9 @@ export default function NotificationsSettings() {
 
         {devicesLoading ? null : devices && devices.length > 0 ? (
           devices.map((d) => {
-            const registered = d.registered_at ? timeAgo(d.registered_at, "Registered") : null;
+            const registered = d.registered_at
+              ? (timeAgo(d.registered_at, "Registered") ?? `Registered ${new Date(d.registered_at).toLocaleDateString()}`)
+              : null;
             return (
               <SettingRow
                 key={d.device_id}
