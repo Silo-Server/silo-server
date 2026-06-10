@@ -313,6 +313,15 @@ export const themeKeys = {
   catalogIndex: () => ["theme", "catalog"] as const,
 };
 
+export const notificationKeys = {
+  all: ["notifications"] as const,
+  list: (filters: { unread?: boolean; category?: string }) =>
+    [...notificationKeys.all, "list", filters] as const,
+  unreadCount: () => [...notificationKeys.all, "unread-count"] as const,
+  preferences: () => [...notificationKeys.all, "preferences"] as const,
+  announcements: () => ["admin", "announcements"] as const,
+};
+
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
   userDetail: (userId: number) => ["admin", "users", userId] as const,
