@@ -68,6 +68,9 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 	if req.WebEnabled != nil {
 		updates["jellyfin_compat.web_enabled"] = strconv.FormatBool(*req.WebEnabled)
 	}
+	if req.Enabled != nil && !*req.Enabled {
+		updates["jellyfin_compat.web_enabled"] = "false"
+	}
 	setOptionalString(updates, "jellyfin_compat.web_version", req.WebVersion)
 	setOptionalString(updates, "jellyfin_compat.web_install_dir", req.WebInstallDir)
 	if req.WebDir != nil {
@@ -147,6 +150,14 @@ func (h *AdminHandler) HandleRemoveJellyfinCompatWeb(w http.ResponseWriter, r *h
 		writeJellyfinCompatOperationError(w, err)
 		return
 	}
+	if err := h.persistJellyfinCompatWebEnabled(r.Context(), false); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting")
+		return
+	}
+	settings, ok = h.jellyfinCompatSettings(w, r)
+	if !ok {
+		return
+	}
 	writeJSON(w, http.StatusAccepted, jellycompat.WebComponentStatusForConfig(h.Config, settings))
 }
 
@@ -223,6 +234,18 @@ func (h *AdminHandler) persistJellyfinCompatWebInstallSettings(ctx context.Conte
 		}
 		h.publishSettingChangedContext(ctx, key, value)
 	}
+	return nil
+}
+
+func (h *AdminHandler) persistJellyfinCompatWebEnabled(ctx context.Context, enabled bool) error {
+	if h.SettingsRepo == nil {
+		return nil
+	}
+	value := strconv.FormatBool(enabled)
+	if err := h.SettingsRepo.Set(ctx, "jellyfin_compat.web_enabled", value); err != nil {
+		return fmt.Errorf("persist Jellyfin Web setting jellyfin_compat.web_enabled: %w", err)
+	}
+	h.publishSettingChangedContext(ctx, "jellyfin_compat.web_enabled", value)
 	return nil
 }
 

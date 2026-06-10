@@ -33,6 +33,7 @@ const JELLYFIN_KEYS = [
   "jellyfin_compat.server_name",
   "jellyfin_compat.server_id",
   "jellyfin_compat.emulated_server_version",
+  "jellyfin_compat.web_enabled",
   "jellyfin_compat.web_version",
   "jellyfin_compat.web_install_dir",
   "jellyfin_compat.session_ttl",
@@ -199,6 +200,12 @@ export default function CompatibilityProxiesSettings() {
   const jellyfinWebServing = jellyfinProxyRunning && status?.web_enabled !== false;
   const installedWebAssetsPresent = Boolean(status?.installed_version);
   const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(status);
+  const setJellyfinAPIEnabled = (value: string) => {
+    form.setValue("jellyfin_compat.enabled", value);
+    if (value === "false") {
+      form.setValue("jellyfin_compat.web_enabled", "false");
+    }
+  };
   const installJellyfinWeb = () => {
     const version = form.getValue("jellyfin_compat.web_version").trim();
     installWeb.mutate(version ? { version } : {});
@@ -225,7 +232,7 @@ export default function CompatibilityProxiesSettings() {
                 type="toggle"
                 hint="Starts the Jellyfin-compatible API listener for external Jellyfin clients."
                 value={jellyfinEnabledChecked ? "true" : "false"}
-                onChange={(value) => form.setValue("jellyfin_compat.enabled", value)}
+                onChange={setJellyfinAPIEnabled}
                 disabled={form.isSaving}
               />
               <div className="flex flex-wrap items-center gap-2">

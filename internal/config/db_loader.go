@@ -56,6 +56,17 @@ func boolOr(m map[string]string, key string, fallback bool) (bool, error) {
 	return b, nil
 }
 
+func jellyfinCompatEnabledOrLegacyDefault(m map[string]string) (bool, error) {
+	if v, ok := m["jellyfin_compat.enabled"]; ok && v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid bool for %q: %w", "jellyfin_compat.enabled", err)
+		}
+		return b, nil
+	}
+	return stringOr(m, "jellyfin_compat.listen", ":8096") != "", nil
+}
+
 func firstConfiguredBool(m map[string]string, fallback bool, keys ...string) (bool, error) {
 	for _, key := range keys {
 		v, ok := m[key]
@@ -349,7 +360,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 
 	// JellyfinCompat
-	compatEnabled, err := boolOr(m, "jellyfin_compat.enabled", false)
+	compatEnabled, err := jellyfinCompatEnabledOrLegacyDefault(m)
 	if err != nil {
 		return nil, err
 	}

@@ -78,6 +78,100 @@ func TestUpdateJellyfinCompatSettingsUpdatesWebEnabled(t *testing.T) {
 	}
 }
 
+func TestUpdateJellyfinCompatSettingsDisablesWebWhenAPIDisabled(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		"jellyfin_compat.enabled":     "true",
+		"jellyfin_compat.web_enabled": "true",
+	}}
+	restartStatus := NewServerRestartStatusTracker()
+	published := map[string]string{}
+	handler := &AdminHandler{
+		Config:        cfg,
+		SettingsRepo:  settings,
+		RestartStatus: restartStatus,
+		OnServerSettingUpdated: func(_ context.Context, key, value string) {
+			published[key] = value
+		},
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/admin/jellyfin-compat/settings",
+		strings.NewReader(`{"enabled":false,"web_enabled":true}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateJellyfinCompatSettings(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := settings.values["jellyfin_compat.enabled"]; got != "false" {
+		t.Fatalf("jellyfin_compat.enabled = %q, want false", got)
+	}
+	if got := settings.values["jellyfin_compat.web_enabled"]; got != "false" {
+		t.Fatalf("jellyfin_compat.web_enabled = %q, want false", got)
+	}
+	if got := published["jellyfin_compat.web_enabled"]; got != "false" {
+		t.Fatalf("published jellyfin_compat.web_enabled = %q, want false", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"enabled":false`) {
+		t.Fatalf("response body %q does not include disabled API", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"web_enabled":false`) {
+		t.Fatalf("response body %q does not include disabled web_enabled", rec.Body.String())
+	}
+	if snapshot := restartStatus.Snapshot(); !snapshot.RestartRequired {
+		t.Fatal("RestartRequired = false, want true for API setting update")
+	}
+}
+
+func TestRemoveJellyfinCompatWebDisablesWebSetting(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		"jellyfin_compat.enabled":         "true",
+		"jellyfin_compat.web_enabled":     "true",
+		"jellyfin_compat.web_install_dir": t.TempDir(),
+	}}
+	published := map[string]string{}
+	handler := &AdminHandler{
+		Config:       cfg,
+		SettingsRepo: settings,
+		OnServerSettingUpdated: func(_ context.Context, key, value string) {
+			published[key] = value
+		},
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/admin/jellyfin-compat/web/remove",
+		strings.NewReader(`{}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.HandleRemoveJellyfinCompatWeb(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	if got := settings.values["jellyfin_compat.web_enabled"]; got != "false" {
+		t.Fatalf("jellyfin_compat.web_enabled = %q, want false", got)
+	}
+	if got := published["jellyfin_compat.web_enabled"]; got != "false" {
+		t.Fatalf("published jellyfin_compat.web_enabled = %q, want false", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"web_enabled":false`) {
+		t.Fatalf("response body %q does not include disabled web_enabled", rec.Body.String())
+	}
+}
+
 func TestUpdateJellyfinCompatSettingsMarksRestartForProxyChanges(t *testing.T) {
 	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {

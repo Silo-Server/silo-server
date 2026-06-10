@@ -195,7 +195,7 @@ export function ServerStorageStep() {
       }
       if (shouldInstallJellyfinWeb) {
         const version = form.getValue("jellyfin_compat.web_version").trim();
-        installJellyfinWeb.mutate(version ? { version } : {});
+        await installJellyfinWeb.mutateAsync(version ? { version } : {});
       }
       markDone("server");
     } catch (err) {
