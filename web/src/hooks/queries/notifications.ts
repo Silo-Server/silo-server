@@ -96,10 +96,27 @@ export function useSetNotificationPreferences() {
         method: "PUT",
         body: JSON.stringify(body),
       }),
+    onMutate: async (body) => {
+      await queryClient.cancelQueries({ queryKey: notificationKeys.preferences() });
+      const previous = queryClient.getQueryData(notificationKeys.preferences());
+      queryClient.setQueryData(
+        notificationKeys.preferences(),
+        (old: { preferences: NotificationPreference[] } | undefined) => {
+          if (!old) return old;
+          return {
+            preferences: old.preferences.map(
+              (p) => body.preferences.find((b) => b.category === p.category) ?? p,
+            ),
+          };
+        },
+      );
+      return { previous };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: notificationKeys.preferences() });
     },
-    onError: (err) => {
+    onError: (err, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(notificationKeys.preferences(), context.previous);
       toast.error(err instanceof Error ? err.message : "Failed to save preferences");
     },
   });
