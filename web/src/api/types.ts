@@ -125,6 +125,7 @@ export interface Profile {
   max_content_rating: string;
   quality_preference: string;
   language: string;
+  preferred_metadata_language?: string;
   subtitle_language: string;
   subtitle_mode: string;
   show_forced_subtitles?: boolean;
@@ -152,6 +153,7 @@ export interface CreateProfileRequest {
   max_content_rating?: string;
   quality_preference?: string;
   language?: string;
+  preferred_metadata_language?: string;
   subtitle_language?: string;
   subtitle_mode?: string;
   show_forced_subtitles?: boolean;
@@ -958,6 +960,12 @@ export interface ItemDetail {
   year: number;
   overview: string;
   tagline?: string;
+  /**
+   * When set, the viewer's presentation language is missing a localized
+   * description; on-view AI translation (auto or button, per server config)
+   * keys off this.
+   */
+  pending_translation_language?: string;
   runtime: number;
   content_rating: string;
   genres: string[];

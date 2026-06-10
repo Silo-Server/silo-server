@@ -17,6 +17,7 @@ import MatchItemDialog from "@/components/MatchItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
+import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import SeasonCarousel from "./SeasonCarousel";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import MetadataBadges from "./components/MetadataBadges";
@@ -29,6 +30,8 @@ import { getWatchedActionLabel } from "./watchedState";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 export default function SeriesContent({ item }: { item: ItemDetail & { type: "series" } }) {
+  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
+    useOnViewTranslation(item);
   const navigate = useNavigate();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
@@ -144,6 +147,8 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           />
         }
         overview={item.overview}
+        overviewTranslating={overviewTranslating}
+        onTranslateOverview={onTranslateOverview}
         crewLine={
           <HeroCrewLine crew={item.crew ?? []} genres={item.genres} jobLabel="Created by" />
         }

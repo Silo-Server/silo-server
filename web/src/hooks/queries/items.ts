@@ -454,11 +454,13 @@ export interface MetadataTranslationJob {
   updated_at: string;
 }
 
-/** Whether the server has metadata AI translation configured. */
+/** Whether the server has metadata AI translation configured, and the
+ * viewer-facing on-view mode. */
 export function useMetadataAIStatus(enabled = true) {
   return useQuery({
     queryKey: ["metadata-ai", "status"],
-    queryFn: () => api<{ enabled: boolean }>("/metadata/ai/status"),
+    queryFn: () =>
+      api<{ enabled: boolean; on_view?: "off" | "button" | "auto" }>("/metadata/ai/status"),
     staleTime: 5 * 60 * 1000,
     enabled,
   });

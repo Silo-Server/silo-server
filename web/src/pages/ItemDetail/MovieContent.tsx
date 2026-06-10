@@ -19,6 +19,7 @@ import MatchItemDialog from "@/components/MatchItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
+import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import MetadataBadges from "./components/MetadataBadges";
 import QualityBadges from "./components/QualityBadges";
 import ScoreRow from "./components/ScoreRow";
@@ -43,6 +44,8 @@ function formatDuration(minutes: number): string {
 }
 
 export default function MovieContent({ item }: { item: ItemDetail & { type: "movie" } }) {
+  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
+    useOnViewTranslation(item);
   const navigate = useNavigate();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
@@ -213,6 +216,8 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
           />
         }
         overview={item.overview}
+        overviewTranslating={overviewTranslating}
+        onTranslateOverview={onTranslateOverview}
         crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
         actions={
           <ActionBar

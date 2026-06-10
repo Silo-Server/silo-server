@@ -33,6 +33,10 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/hooks/useOnViewTranslation", () => ({
+  useOnViewTranslation: () => ({ translating: false, onTranslate: undefined }),
+}));
+
 vi.mock("@/hooks/queries/favorites", () => ({
   useIsFavorite: mocks.useIsFavorite,
   useToggleFavorite: mocks.useToggleFavorite,
