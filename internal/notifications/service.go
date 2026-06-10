@@ -25,14 +25,23 @@ type CreateInput struct {
 	ExpiresAt   *time.Time
 }
 
+// PushEnqueuer mirrors a created notification to push delivery. Implemented by
+// internal/push; nil when push is disabled.
+type PushEnqueuer interface {
+	EnqueueForNotification(ctx context.Context, n *Notification)
+}
+
 type Service struct {
 	store Store
 	hub   *evt.Hub
+	push  PushEnqueuer
 }
 
 func NewService(store Store, hub *evt.Hub) *Service {
 	return &Service{store: store, hub: hub}
 }
+
+func (s *Service) SetPushEnqueuer(e PushEnqueuer) { s.push = e }
 
 func validCategory(c Category) bool {
 	switch c {
@@ -299,6 +308,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput) error {
 		AdminOnly: n.Category == CategoryAdmin,
 	}); err != nil {
 		slog.WarnContext(ctx, "notifications: publish failed", "error", err, "notification_id", n.ID)
+	}
+	if s.push != nil {
+		s.push.EnqueueForNotification(ctx, n)
 	}
 	return nil
 }
