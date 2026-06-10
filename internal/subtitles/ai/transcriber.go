@@ -16,9 +16,13 @@ import (
 )
 
 const (
-	// asrChunkSeconds is the audio chunk length sent per transcription request.
-	// 10 minutes of 16 kHz mono WAV is ~19 MB — under typical 25 MB API limits.
-	asrChunkSeconds = 600
+	// Default/maximum audio chunk length sent per transcription request.
+	// 10 minutes of 16 kHz mono WAV is ~19 MB — under typical 25 MB API
+	// limits. Shorter chunks bound Whisper's within-chunk timestamp drift at
+	// the cost of more requests and more boundary word-clips; the operator
+	// tunes this via subtitle_ai.asr_chunk_seconds.
+	defaultASRChunkSeconds = 600
+	minASRChunkSeconds     = 60
 	// Per-chunk request timeout: 3× realtime accommodates local Whisper
 	// servers on modest hardware.
 	asrChunkTimeoutFactor = 3
@@ -60,17 +64,24 @@ type WhisperTranscriber struct {
 	client       audioTranscriber
 	ffmpegPath   string
 	chunkSeconds int
-	// extract is playback.ExtractAudioChunks, injectable for tests.
-	extract func(ctx context.Context, filePath string, audioTrackIndex int, dir, ffmpegPath string, chunkSeconds int) ([]string, error)
+	// extract and probeOffset are playback helpers, injectable for tests.
+	extract     func(ctx context.Context, filePath string, audioTrackIndex int, dir, ffmpegPath string, chunkSeconds int) ([]playback.AudioChunk, error)
+	probeOffset func(ctx context.Context, filePath string, audioTrackIndex int, ffmpegPath string) float64
 }
 
 // NewWhisperTranscriber builds a transcriber backed by the shared AI client.
-func NewWhisperTranscriber(client *llm.Client, ffmpegPath string) *WhisperTranscriber {
+// chunkSeconds outside [minASRChunkSeconds, defaultASRChunkSeconds] falls
+// back to the default (longer chunks would exceed upload limits).
+func NewWhisperTranscriber(client *llm.Client, ffmpegPath string, chunkSeconds int) *WhisperTranscriber {
+	if chunkSeconds < minASRChunkSeconds || chunkSeconds > defaultASRChunkSeconds {
+		chunkSeconds = defaultASRChunkSeconds
+	}
 	return &WhisperTranscriber{
 		client:       client,
 		ffmpegPath:   ffmpegPath,
-		chunkSeconds: asrChunkSeconds,
+		chunkSeconds: chunkSeconds,
 		extract:      playback.ExtractAudioChunks,
+		probeOffset:  playback.ProbeAudioStartOffset,
 	}
 }
 
@@ -91,7 +102,12 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 		return nil, "", err
 	}
 
-	order := chunkOrderFromPosition(len(chunks), req.StartPosition, t.chunkSeconds)
+	// Audio streams can start after the container's timeline origin (TS
+	// remuxes especially); Whisper times are relative to the first audio
+	// sample, so the delta is a constant sync error unless added back.
+	startOffset := t.probeOffset(ctx, req.FilePath, req.AudioTrackIndex, t.ffmpegPath)
+
+	order := chunkOrderForPosition(chunks, req.StartPosition)
 	timeout := time.Duration(t.chunkSeconds*asrChunkTimeoutFactor) * time.Second
 
 	var all []SubtitleCue
@@ -100,12 +116,12 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 		if err := ctx.Err(); err != nil {
 			return nil, "", err
 		}
-		data, err := os.ReadFile(chunks[idx])
+		data, err := os.ReadFile(chunks[idx].Path)
 		if err != nil {
 			return nil, "", fmt.Errorf("read audio chunk: %w", err)
 		}
 		tr, err := t.client.Transcribe(ctx, llm.TranscribeRequest{
-			Filename: filepath.Base(chunks[idx]),
+			Filename: filepath.Base(chunks[idx].Path),
 			Audio:    data,
 			Language: req.LanguageHint,
 			Timeout:  timeout,
@@ -115,12 +131,12 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 		}
 		// Each chunk is read exactly once; deleting it as we go caps disk usage
 		// at one extraction rather than extraction + retranscription leftovers.
-		_ = os.Remove(chunks[idx])
+		_ = os.Remove(chunks[idx].Path)
 
 		if detected == "" {
 			detected = normalizeDetectedLanguage(tr.Language)
 		}
-		cues := cuesFromSegments(tr.Segments, float64(idx*t.chunkSeconds))
+		cues := cuesFromSegments(tr.Segments, chunks[idx].Start+startOffset)
 		all = append(all, cues...)
 		if onChunk != nil {
 			onChunk(cues, done+1, len(order))
@@ -133,19 +149,22 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 	return all, detected, nil
 }
 
-// chunkOrderFromPosition orders chunk indexes so the chunk containing
+// chunkOrderForPosition orders chunk indexes so the chunk containing
 // startSeconds is processed first, then forward, then wrapping to the start —
 // the viewer's current region fills first, mirroring translation's
 // playhead-first cue order.
-func chunkOrderFromPosition(n int, startSeconds float64, chunkSeconds int) []int {
-	order := make([]int, 0, n)
+func chunkOrderForPosition(chunks []playback.AudioChunk, startSeconds float64) []int {
+	n := len(chunks)
 	pivot := 0
-	if startSeconds > 0 && chunkSeconds > 0 {
-		pivot = int(startSeconds) / chunkSeconds
-		if pivot >= n {
-			pivot = 0
+	if startSeconds > 0 {
+		for i := n - 1; i >= 0; i-- {
+			if chunks[i].Start <= startSeconds {
+				pivot = i
+				break
+			}
 		}
 	}
+	order := make([]int, 0, n)
 	for i := pivot; i < n; i++ {
 		order = append(order, i)
 	}

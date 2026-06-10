@@ -465,6 +465,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.SubtitleAI.ContextNeighbors = subtitleAIContextNeighbors
+	subtitleAIChunkSeconds, err := intOr(m, "subtitle_ai.asr_chunk_seconds", 600)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.ASRChunkSeconds = subtitleAIChunkSeconds
 
 	// Metadata AI translation feature toggles.
 	metadataAIEnabled, err := boolOr(m, "metadata_ai.enabled", false)

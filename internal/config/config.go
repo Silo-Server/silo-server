@@ -269,6 +269,10 @@ type SubtitleAIConfig struct {
 	TranscribeEnabled bool `yaml:"-"` // Whisper ASR generation
 	BatchSize         int  `yaml:"-"`
 	ContextNeighbors  int  `yaml:"-"`
+	// ASRChunkSeconds is the audio chunk length per transcription request
+	// (60..600). Shorter chunks bound Whisper timestamp drift on long files;
+	// longer chunks mean fewer requests and fewer boundary word-clips.
+	ASRChunkSeconds int `yaml:"-"`
 }
 
 // MetadataAIConfig holds the metadata translation feature toggles. The

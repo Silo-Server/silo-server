@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // fakeASRClient transcribes by returning canned segments per chunk filename.
@@ -30,28 +31,37 @@ func (f *fakeASRClient) Transcribe(_ context.Context, req llm.TranscribeRequest)
 	return &llm.Transcription{Language: f.language, Segments: f.perChunk[req.Filename]}, nil
 }
 
-// stubExtract writes n fake chunk files into dir and records dir for cleanup
-// assertions.
-func stubExtract(n int, recordDir *string) func(context.Context, string, int, string, string, int) ([]string, error) {
-	return func(_ context.Context, _ string, _ int, dir, _ string, _ int) ([]string, error) {
+// stubExtract writes fake chunk files into dir (one per start offset) and
+// records dir for cleanup assertions.
+func stubExtract(starts []float64, recordDir *string) func(context.Context, string, int, string, string, int) ([]playback.AudioChunk, error) {
+	return func(_ context.Context, _ string, _ int, dir, _ string, _ int) ([]playback.AudioChunk, error) {
 		*recordDir = dir
-		var chunks []string
-		for i := 0; i < n; i++ {
+		var chunks []playback.AudioChunk
+		for i, start := range starts {
 			p := filepath.Join(dir, fmt.Sprintf("chunk%05d.wav", i))
 			if err := os.WriteFile(p, []byte("RIFF"), 0o644); err != nil {
 				return nil, err
 			}
-			chunks = append(chunks, p)
+			chunks = append(chunks, playback.AudioChunk{Path: p, Start: start})
 		}
 		return chunks, nil
 	}
+}
+
+func evenStarts(n int) []float64 {
+	starts := make([]float64, n)
+	for i := range starts {
+		starts[i] = float64(i * 600)
+	}
+	return starts
 }
 
 func newTestTranscriber(client *fakeASRClient, chunks int, recordDir *string) *WhisperTranscriber {
 	return &WhisperTranscriber{
 		client:       client,
 		chunkSeconds: 600,
-		extract:      stubExtract(chunks, recordDir),
+		extract:      stubExtract(evenStarts(chunks), recordDir),
+		probeOffset:  func(context.Context, string, int, string) float64 { return 0 },
 	}
 }
 
@@ -203,15 +213,48 @@ func TestCuesFromSegmentsGuardsDegenerateTimes(t *testing.T) {
 	}
 }
 
-func TestChunkOrderFromPosition(t *testing.T) {
-	if got := fmt.Sprint(chunkOrderFromPosition(4, 0, 600)); got != "[0 1 2 3]" {
+func TestChunkOrderForPosition(t *testing.T) {
+	chunks := []playback.AudioChunk{{Start: 0}, {Start: 600.06}, {Start: 1200.13}, {Start: 1800.2}}
+	if got := fmt.Sprint(chunkOrderForPosition(chunks, 0)); got != "[0 1 2 3]" {
 		t.Errorf("no playhead: %s", got)
 	}
-	if got := fmt.Sprint(chunkOrderFromPosition(4, 1900, 600)); got != "[3 0 1 2]" {
+	if got := fmt.Sprint(chunkOrderForPosition(chunks, 1900)); got != "[3 0 1 2]" {
 		t.Errorf("late playhead: %s", got)
 	}
-	if got := fmt.Sprint(chunkOrderFromPosition(4, 99999, 600)); got != "[0 1 2 3]" {
-		t.Errorf("out-of-range playhead should fall back: %s", got)
+	if got := fmt.Sprint(chunkOrderForPosition(chunks, 99999)); got != "[3 0 1 2]" {
+		t.Errorf("beyond-last playhead starts at the final chunk: %s", got)
+	}
+}
+
+// Cue timing must use the muxer-reported chunk start (not index*chunkSeconds)
+// plus the probed audio start offset, or sync drifts on long files and
+// delayed-audio containers.
+func TestTranscribeUsesExactChunkStartsAndAudioOffset(t *testing.T) {
+	var dir string
+	client := &fakeASRClient{
+		language: "en",
+		perChunk: map[string][]llm.TranscriptionSegment{
+			"chunk00000.wav": {{Start: 1, End: 2, Text: "first"}},
+			"chunk00001.wav": {{Start: 1, End: 2, Text: "second"}},
+		},
+	}
+	tr := &WhisperTranscriber{
+		client:       client,
+		chunkSeconds: 600,
+		// The second chunk really starts at 600.5s, not 600s.
+		extract:     stubExtract([]float64{0, 600.5}, &dir),
+		probeOffset: func(context.Context, string, int, string) float64 { return 1.25 },
+	}
+
+	cues, _, err := tr.Transcribe(context.Background(), TranscribeJobRequest{FilePath: "/x.mkv"}, nil)
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if want := time.Duration(2.25 * float64(time.Second)); cues[0].Start != want {
+		t.Errorf("cue 0 start = %v, want %v (1s segment + 1.25s audio offset)", cues[0].Start, want)
+	}
+	if want := time.Duration(602.75 * float64(time.Second)); cues[1].Start != want {
+		t.Errorf("cue 1 start = %v, want %v (600.5s chunk + 1s segment + 1.25s offset)", cues[1].Start, want)
 	}
 }
 

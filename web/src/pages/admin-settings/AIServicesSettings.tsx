@@ -263,6 +263,7 @@ function AIFeaturesCard() {
   const [onView, setOnView] = useState("off");
   const [batchSize, setBatchSize] = useState("40");
   const [contextNeighbors, setContextNeighbors] = useState("2");
+  const [asrChunkSeconds, setAsrChunkSeconds] = useState("600");
 
   useEffect(() => {
     if (!settings) return;
@@ -272,6 +273,7 @@ function AIFeaturesCard() {
     setOnView(settings["metadata_ai.on_view"] ?? "off");
     setBatchSize(settings["subtitle_ai.batch_size"] ?? "40");
     setContextNeighbors(settings["subtitle_ai.context_neighbors"] ?? "2");
+    setAsrChunkSeconds(settings["subtitle_ai.asr_chunk_seconds"] ?? "600");
   }, [settings]);
 
   function save() {
@@ -285,6 +287,15 @@ function AIFeaturesCard() {
       toast.error("Context lines must be zero or a positive whole number.");
       return;
     }
+    const parsedChunkSeconds = Number.parseInt(asrChunkSeconds, 10);
+    if (
+      !Number.isInteger(parsedChunkSeconds) ||
+      parsedChunkSeconds < 60 ||
+      parsedChunkSeconds > 600
+    ) {
+      toast.error("Transcription chunk length must be between 60 and 600 seconds.");
+      return;
+    }
     void Promise.all([
       updateSetting.mutateAsync({ key: "subtitle_ai.enabled", value: subtitleTranslate }),
       updateSetting.mutateAsync({ key: "subtitle_ai.transcribe_enabled", value: transcribe }),
@@ -294,6 +305,10 @@ function AIFeaturesCard() {
       updateSetting.mutateAsync({
         key: "subtitle_ai.context_neighbors",
         value: String(parsedNeighbors),
+      }),
+      updateSetting.mutateAsync({
+        key: "subtitle_ai.asr_chunk_seconds",
+        value: String(parsedChunkSeconds),
       }),
     ]);
   }
@@ -353,6 +368,13 @@ function AIFeaturesCard() {
         value={contextNeighbors}
         onChange={setContextNeighbors}
         hint="Preceding source cues sent for scene continuity across batches."
+      />
+      <SettingField
+        label="Transcription chunk length (seconds)"
+        type="number"
+        value={asrChunkSeconds}
+        onChange={setAsrChunkSeconds}
+        hint="60–600. Shorter chunks keep Whisper timestamps tighter on long files (try 300 if subtitles drift), at the cost of more requests and occasional clipped words at chunk boundaries."
       />
       <div className="pt-2">
         <Button type="button" onClick={save} disabled={updateSetting.isPending}>
