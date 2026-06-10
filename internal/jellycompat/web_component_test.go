@@ -136,7 +136,7 @@ func TestWebComponentStatusUsesPersistedSettingsForDisplay(t *testing.T) {
 	}
 }
 
-func TestWebComponentStatusDefaultsPinnedVersionToEmulatedVersion(t *testing.T) {
+func TestWebComponentStatusDoesNotDefaultPinnedVersionToEmulatedVersion(t *testing.T) {
 	root := t.TempDir()
 	cfg, err := config.LoadFromDB(map[string]string{
 		"jellyfin_compat.emulated_server_version": "10.12.0",
@@ -153,8 +153,8 @@ func TestWebComponentStatusDefaultsPinnedVersionToEmulatedVersion(t *testing.T) 
 		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
 	})
 
-	if status.PinnedVersion != "10.12.0" {
-		t.Fatalf("PinnedVersion = %q, want emulated API version", status.PinnedVersion)
+	if status.PinnedVersion != config.DefaultJellyfinWebVersion {
+		t.Fatalf("PinnedVersion = %q, want configured Web default", status.PinnedVersion)
 	}
 }
 
@@ -262,14 +262,17 @@ func TestSelectCompatibleWebVersionRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestParseRemoteWebVersions(t *testing.T) {
-	versions := parseRemoteWebVersions(strings.Join([]string{
-		"abc123\trefs/tags/v10.11.6",
-		"def456\trefs/tags/10.12.0",
-		"ghi789\trefs/heads/main",
-		"jkl012\trefs/tags/not-a-version",
-	}, "\n"))
-	want := []string{"10.11.6", "10.12.0"}
+func TestParseRemoteWebReleaseVersions(t *testing.T) {
+	versions, err := parseRemoteWebReleaseVersions(strings.NewReader(`[
+		{"tag_name":"v10.11.6","draft":false,"prerelease":false},
+		{"tag_name":"10.12.0","draft":true,"prerelease":false},
+		{"tag_name":"10.12.1","draft":false,"prerelease":true},
+		{"tag_name":"not-a-version","draft":false,"prerelease":false}
+	]`))
+	if err != nil {
+		t.Fatalf("parseRemoteWebReleaseVersions: %v", err)
+	}
+	want := []string{"10.11.6"}
 	if len(versions) != len(want) {
 		t.Fatalf("versions = %#v, want %#v", versions, want)
 	}

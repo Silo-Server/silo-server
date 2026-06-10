@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -192,20 +193,6 @@ func DefaultWebVersion(cfg *config.Config) string {
 	return config.DefaultJellyfinWebVersion
 }
 
-func defaultWebVersionTarget(cfg *config.Config, settings map[string]string) string {
-	emulatedVersion := ""
-	if settings != nil {
-		emulatedVersion = strings.TrimSpace(settings["jellyfin_compat.emulated_server_version"])
-	}
-	if emulatedVersion == "" && cfg != nil {
-		emulatedVersion = strings.TrimSpace(cfg.JellyfinCompat.EmulatedServerVersion)
-	}
-	if normalized := normalizeWebVersion(emulatedVersion); normalized != "" {
-		return normalized
-	}
-	return DefaultWebVersion(cfg)
-}
-
 func ResolveCompatibleWebVersion(ctx context.Context, sourceURL, apiVersion string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -266,28 +253,50 @@ func SelectCompatibleWebVersion(apiVersion string, available []string) (string, 
 }
 
 func listRemoteWebVersions(ctx context.Context, sourceURL string) ([]string, error) {
-	out, err := commandOutput(ctx, "", "git", "ls-remote", "--tags", "--refs", sourceURL)
+	if _, err := normalizeWebSourceURL(sourceURL); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/jellyfin/jellyfin-web/releases?per_page=100", nil)
 	if err != nil {
 		return nil, err
 	}
-	return parseRemoteWebVersions(out), nil
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "silo-jellyfin-web-installer")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("GitHub releases request returned %s", resp.Status)
+	}
+	return parseRemoteWebReleaseVersions(resp.Body)
 }
 
-func parseRemoteWebVersions(out string) []string {
+type webReleaseVersion struct {
+	TagName    string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+}
+
+func parseRemoteWebReleaseVersions(r io.Reader) ([]string, error) {
+	var releases []webReleaseVersion
+	if err := json.NewDecoder(io.LimitReader(r, 4<<20)).Decode(&releases); err != nil {
+		return nil, err
+	}
 	versions := []string{}
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
+	for _, release := range releases {
+		if release.Draft || release.Prerelease {
 			continue
 		}
-		ref := strings.TrimPrefix(fields[1], "refs/tags/")
-		version := normalizeWebVersion(ref)
+		version := normalizeWebVersion(release.TagName)
 		if version == "" {
 			continue
 		}
 		versions = append(versions, version)
 	}
-	return versions
+	return versions, nil
 }
 
 type webStableVersion struct {
@@ -361,7 +370,7 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 
 	root := stringSetting(settings, "jellyfin_compat.web_install_dir", DefaultWebInstallRoot(cfg))
 	webDir := stringSetting(settings, "jellyfin_compat.web_dir", DefaultWebInstallPath(cfg))
-	pinned := stringSetting(settings, "jellyfin_compat.web_version", defaultWebVersionTarget(cfg, settings))
+	pinned := stringSetting(settings, "jellyfin_compat.web_version", DefaultWebVersion(cfg))
 	sourceURL := stringSetting(settings, "jellyfin_compat.web_source_url", DefaultWebSourceURL)
 
 	status := webComponentStatus(root, webDir, pinned, sourceURL)
