@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { ChevronDown, MoreHorizontal, Pause, Play, RotateCcw, RotateCw } from "lucide-react";
+import { ChevronDown, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
 import { CircleButton } from "@/player/components/CircleButton";
-import { SpeedMenu } from "@/player/components/SpeedMenu";
 import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";
+import { VolumeControl } from "@/player/components/VolumeControl";
+import { PlayerSettingsMenu } from "./PlayerSettingsMenu";
+import { SkipIcon } from "./SkipIcon";
+import { SpeedControl, formatRate } from "./SpeedControl";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
+import type { AudiobookPrefs } from "./useAudiobookPrefs";
 
-const SKIP_BACK_SECONDS = 30;
-const SKIP_FORWARD_SECONDS = 30;
-const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
+type TimeMode = "total" | "remaining" | "remaining-at-speed";
 
 interface NowListeningProps {
   contentId: string;
@@ -18,6 +20,7 @@ interface NowListeningProps {
   narrator?: string;
   posterUrl: string;
   playback: AudiobookPlayback;
+  prefs: AudiobookPrefs;
   onCollapse: () => void;
 }
 
@@ -28,13 +31,35 @@ export function NowListening({
   narrator,
   posterUrl,
   playback,
+  prefs,
   onCollapse,
 }: NowListeningProps) {
-  const [showRemaining, setShowRemaining] = useState(false);
+  const [timeMode, setTimeMode] = useState<TimeMode>("total");
 
-  const rightTimeLabel = showRemaining
-    ? `-${formatTime(Math.max(0, playback.duration - playback.currentTime))}`
-    : formatTime(playback.duration);
+  const remaining = Math.max(0, playback.duration - playback.currentTime);
+  // "At current speed" only exists as a distinct reading when rate ≠ 1.
+  const effectiveMode =
+    timeMode === "remaining-at-speed" && playback.rate === 1 ? "remaining" : timeMode;
+  const rightTimeLabel =
+    effectiveMode === "total"
+      ? formatTime(playback.duration)
+      : effectiveMode === "remaining"
+        ? `-${formatTime(remaining)}`
+        : `-${formatTime(remaining / playback.rate)} at ${formatRate(playback.rate)}`;
+
+  const cycleTimeMode = () => {
+    setTimeMode((mode) => {
+      if (mode === "total") return "remaining";
+      if (mode === "remaining") {
+        return playback.rate !== 1 ? "remaining-at-speed" : "total";
+      }
+      return "total";
+    });
+  };
+
+  const hasChapters = playback.chapters.length > 0;
+  const hasNextChapter =
+    playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;
 
   return (
     <div className="bg-background fixed inset-0 z-50 flex flex-col overflow-y-auto">
@@ -47,13 +72,7 @@ export function NowListening({
           <ChevronDown className="h-5 w-5" />
           <span>Back to player</span>
         </button>
-        <button
-          type="button"
-          aria-label="More"
-          className="text-muted-foreground hover:text-foreground rounded p-1.5"
-        >
-          <MoreHorizontal className="h-5 w-5" />
-        </button>
+        <PlayerSettingsMenu prefs={prefs} />
       </div>
 
       <div className="grid flex-1 grid-cols-1 items-center gap-8 px-6 pt-2 pb-10 sm:gap-10 md:grid-cols-[auto_1fr] md:px-16">
@@ -101,7 +120,8 @@ export function NowListening({
               <button
                 type="button"
                 data-testid="now-listening-right-time"
-                onClick={() => setShowRemaining((v) => !v)}
+                onClick={cycleTimeMode}
+                title="Toggle total / remaining / remaining at speed"
                 className="hover:text-foreground transition-colors"
               >
                 {rightTimeLabel}
@@ -109,21 +129,37 @@ export function NowListening({
             </div>
           </div>
 
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-3 sm:gap-4">
+            {hasChapters && (
+              <CircleButton
+                size="sm"
+                variant="secondary"
+                ariaLabel="Previous chapter"
+                title="Previous chapter (P)"
+                onClick={playback.prevChapter}
+                disabled={!playback.hasFile}
+              >
+                <SkipBack className="h-4 w-4" strokeWidth={0} fill="currentColor" />
+              </CircleButton>
+            )}
+
             <CircleButton
               size="sm"
               variant="secondary"
-              ariaLabel={`Back ${SKIP_BACK_SECONDS} seconds`}
-              onClick={() => playback.skip(-SKIP_BACK_SECONDS)}
+              ariaLabel={`Back ${prefs.skipBack} seconds`}
+              title={`Back ${prefs.skipBack} seconds (←)`}
+              className="group"
+              onClick={() => playback.skip(-prefs.skipBack)}
               disabled={!playback.hasFile}
             >
-              <SkipIcon direction="back" seconds={SKIP_BACK_SECONDS} />
+              <SkipIcon direction="back" seconds={prefs.skipBack} size="lg" />
             </CircleButton>
 
             <CircleButton
               size="lg"
               variant="primary"
               ariaLabel={playback.playing ? "Pause" : "Play"}
+              title={playback.playing ? "Pause (space)" : "Play (space)"}
               onClick={playback.togglePlay}
               disabled={!playback.hasFile}
               data-paused={!playback.playing}
@@ -138,43 +174,53 @@ export function NowListening({
             <CircleButton
               size="sm"
               variant="secondary"
-              ariaLabel={`Forward ${SKIP_FORWARD_SECONDS} seconds`}
-              onClick={() => playback.skip(SKIP_FORWARD_SECONDS)}
+              ariaLabel={`Forward ${prefs.skipForward} seconds`}
+              title={`Forward ${prefs.skipForward} seconds (→)`}
+              className="group"
+              onClick={() => playback.skip(prefs.skipForward)}
               disabled={!playback.hasFile}
             >
-              <SkipIcon direction="forward" seconds={SKIP_FORWARD_SECONDS} />
+              <SkipIcon direction="forward" seconds={prefs.skipForward} size="lg" />
             </CircleButton>
+
+            {hasChapters && (
+              <CircleButton
+                size="sm"
+                variant="secondary"
+                ariaLabel="Next chapter"
+                title="Next chapter (N)"
+                onClick={playback.nextChapter}
+                disabled={!playback.hasFile || !hasNextChapter}
+              >
+                <SkipForward className="h-4 w-4" strokeWidth={0} fill="currentColor" />
+              </CircleButton>
+            )}
           </div>
 
-          <div className="text-muted-foreground flex items-center justify-center gap-6 text-sm">
+          <div className="text-muted-foreground flex flex-wrap items-center justify-center gap-4 text-sm sm:gap-6">
+            <VolumeControl
+              tone="surface"
+              volume={playback.volume}
+              muted={playback.muted}
+              onVolumeChange={playback.setVolume}
+              onMutedChange={playback.setMuted}
+            />
             <SleepTimerMenu
               setting={playback.sleep.setting}
               remainingMs={playback.sleep.remainingMs}
               onChange={playback.setSleep}
             />
-            {playback.chapters.length > 0 && (
+            {hasChapters && (
               <ChaptersMenu
                 chapters={playback.chapters}
                 currentTime={playback.currentTime}
                 onSeek={playback.seekTo}
               />
             )}
-            <SpeedMenu rates={PLAYBACK_RATES} value={playback.rate} onChange={playback.setRate} />
+            <SpeedControl value={playback.rate} onChange={playback.setRate} />
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function SkipIcon({ direction, seconds }: { direction: "back" | "forward"; seconds: number }) {
-  const Arrow = direction === "back" ? RotateCcw : RotateCw;
-  return (
-    <span className="relative flex h-7 w-7 items-center justify-center">
-      <Arrow className="h-7 w-7" strokeWidth={1.6} />
-      <span className="absolute inset-0 flex items-center justify-center pb-[1px] text-[8.5px] font-semibold tracking-tight tabular-nums">
-        {seconds}
-      </span>
-    </span>
   );
 }
