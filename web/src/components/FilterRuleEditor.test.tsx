@@ -9,6 +9,7 @@ import {
 } from "@/components/collections/collectionBuilderFields";
 
 import FilterRuleEditor from "./FilterRuleEditor";
+import { getFilterRuleFieldOptions } from "./FilterRuleEditor";
 
 describe("FilterRuleEditor", () => {
   it("renders rule-management controls as non-submit buttons", () => {
@@ -74,5 +75,16 @@ describe("FilterRuleEditor", () => {
       inputType: "select",
       selectOptions: expect.arrayContaining(["2160p"]),
     });
+  });
+
+  it("labels watched fields as read fields for ebook scope", () => {
+    const ebookOptions = getFilterRuleFieldOptions(true, "ebook");
+    const movieOptions = getFilterRuleFieldOptions(true, "movie");
+
+    expect(ebookOptions.find((option) => option.value === "watched")?.label).toBe("Read");
+    expect(ebookOptions.find((option) => option.value === "in_progress")?.label).toBe(
+      "In Progress",
+    );
+    expect(movieOptions.find((option) => option.value === "watched")?.label).toBe("Watched");
   });
 });

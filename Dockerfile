@@ -3,6 +3,7 @@ FROM node:22-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/vendor/foliate-js ./vendor/foliate-js
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ .

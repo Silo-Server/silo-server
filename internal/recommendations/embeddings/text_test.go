@@ -61,6 +61,42 @@ func TestBuildEmbeddingTextAudiobookUsesAuthorAndNarrator(t *testing.T) {
 	}
 }
 
+func TestBuildEmbeddingTextEbookUsesAuthorWithoutNarratorOrCast(t *testing.T) {
+	item := &models.MediaItem{
+		Title:    "A Wizard of Earthsea",
+		Type:     "ebook",
+		Year:     1968,
+		Genres:   []string{"Fantasy"},
+		Overview: "Ged learns the cost of power.",
+		People: []models.ItemPerson{
+			{Person: models.Person{ID: 1, Name: "Ursula K. Le Guin"}, Kind: models.PersonKindAuthor},
+			{Person: models.Person{ID: 2, Name: "Narrator Should Not Apply"}, Kind: models.PersonKindNarrator},
+			{Person: models.Person{ID: 3, Name: "Actor Should Not Apply"}, Kind: models.PersonKindActor, Character: "Ged"},
+			{Person: models.Person{ID: 4, Name: "Writer Should Not Apply"}, Kind: models.PersonKindWriter},
+		},
+	}
+
+	text := BuildEmbeddingText(item)
+
+	if !strings.Contains(text, "Fantasy ebook about Ged learns the cost of power.") {
+		t.Fatalf("ebook lede missing or wrong: %q", text)
+	}
+	if !strings.Contains(text, "Written by Ursula K. Le Guin") {
+		t.Fatalf("ebook author missing: %q", text)
+	}
+	for _, unwanted := range []string{
+		"Narrated by",
+		"Narrator Should Not Apply",
+		"Cast:",
+		"Actor Should Not Apply",
+		"Writer Should Not Apply",
+	} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("ebook text should not contain %q: %q", unwanted, text)
+		}
+	}
+}
+
 func TestBuildEmbeddingTextSortsActorsBeforeTopFive(t *testing.T) {
 	item := &models.MediaItem{
 		Title: "Example",

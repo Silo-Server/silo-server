@@ -370,7 +370,14 @@ func NewRouter(deps Dependencies) chi.Router {
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
 	var autoscanHandler *handlers.AutoscanHandler
+	var ebookReaderHandler *handlers.EbookReaderHandler
+	var ebookProgressStore *handlers.PGEbookReaderProgressStore
+	var ebookConfigStore *handlers.PGEbookReaderConfigStore
+	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
 	if deps.DB != nil {
+		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
+		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
+		ebookAnnotationStore = handlers.NewPGEbookReaderAnnotationStore(deps.DB)
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
@@ -420,6 +427,25 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalWatchEventDispatcher); ok {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
+		}
+		if ebookProgressStore != nil {
+			itemsHandler.SetEbookReaderProgressStore(ebookProgressStore)
+		}
+		if deps.FileRepo != nil {
+			ebookReaderHandler = handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{
+				FileResolver:  deps.FileRepo,
+				ItemAccess:    itemRepo,
+				EpisodeLookup: episodeRepo,
+			})
+			if ebookProgressStore != nil {
+				ebookReaderHandler.ProgressStore = ebookProgressStore
+			}
+			if ebookConfigStore != nil {
+				ebookReaderHandler.ConfigStore = ebookConfigStore
+			}
+			if ebookAnnotationStore != nil {
+				ebookReaderHandler.AnnotationStore = ebookAnnotationStore
+			}
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogHandler = handlers.NewCatalogHandler(
@@ -498,6 +524,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
 		if detailSvc != nil {
 			personalDataHandler.SetDetailService(detailSvc)
+		}
+		if ebookProgressStore != nil {
+			personalDataHandler.SetEbookReaderProgressStore(ebookProgressStore)
 		}
 		personalDataHandler.SetEpisodeRepo(episodeRepo)
 		personalDataHandler.SetSeasonRepo(seasonRepo)
@@ -939,6 +968,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		sectionHandler.EpisodeRepo = episodeRepo
 		sectionHandler.DetailSvc = detailSvc
+		if ebookProgressStore != nil {
+			sectionHandler.EbookProgress = ebookProgressStore
+		}
 		if userRepo != nil {
 			sectionHandler.UserRepo = userRepo
 		}
@@ -1121,6 +1153,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		recsHandler.CalendarRepo = calendarRepo
 		recsHandler.EpisodeRepo = episodeRepo
+		if ebookProgressStore != nil {
+			recsHandler.EbookProgress = ebookProgressStore
+		}
 		if deps.PersonRepo != nil {
 			recsHandler.CastFetcher = deps.PersonRepo
 		}
@@ -1705,6 +1740,22 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/", libraryPlaybackPrefHandler.HandleListLibraryPlaybackPrefs)
 						r.Put("/{library_id}", libraryPlaybackPrefHandler.HandleSetLibraryPlaybackPref)
 						r.Delete("/{library_id}", libraryPlaybackPrefHandler.HandleDeleteLibraryPlaybackPref)
+					})
+				}
+
+				if ebookReaderHandler != nil {
+					r.Route("/ebooks", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
+						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
+						r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
+						r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
+						r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
+						r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
+						r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
+						r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
 					})
 				}
 

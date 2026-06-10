@@ -767,9 +767,9 @@ func listDistinctPeopleByKindWithSource(
 }
 
 // listDistinctAudiobookSeriesWithSource returns distinct series_name values
-// from audiobook_series joined onto the scoped result set. Names are trimmed
+// from the active book series table joined onto the scoped result set. Names are trimmed
 // and case-folded for sort so the picker doesn't show duplicates that differ
-// only by whitespace or casing — the literal trimmed series_name is still
+// only by whitespace or casing; the literal trimmed series_name is still
 // returned so existing rules continue to match.
 //
 // The DISTINCT happens in an inline subquery (rather than directly on the
@@ -791,14 +791,14 @@ func listDistinctAudiobookSeriesWithSource(
 		SELECT name FROM (
 			SELECT DISTINCT BTRIM(s.series_name) AS name
 			FROM %s
-			JOIN audiobook_series s ON s.content_id = mi.content_id
+			JOIN %s s ON s.content_id = mi.content_id
 			%s
 			  AND s.series_name IS NOT NULL
 			  AND BTRIM(s.series_name) <> ''
 		) names
 		ORDER BY LOWER(name) ASC
 		LIMIT %d
-	`, fromClause, browseFilterPrefix(whereClause), catalogFacetMaxValues)
+	`, fromClause, bookSeriesTableForMediaScope(mediaScope), browseFilterPrefix(whereClause), catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 
@@ -954,7 +954,7 @@ func searchDistinctAudiobookSeriesWithSource(
 		SELECT name FROM (
 			SELECT DISTINCT BTRIM(s.series_name) AS name
 			FROM %s
-			JOIN audiobook_series s ON s.content_id = mi.content_id
+			JOIN %s s ON s.content_id = mi.content_id
 			%s
 			  AND s.series_name IS NOT NULL
 			  AND BTRIM(s.series_name) <> ''
@@ -962,8 +962,15 @@ func searchDistinctAudiobookSeriesWithSource(
 		) names
 		ORDER BY LOWER(name) ASC
 		LIMIT %d
-	`, fromClause, browseFilterPrefix(whereClause), prefixIdx, limit+1)
+	`, fromClause, bookSeriesTableForMediaScope(mediaScope), browseFilterPrefix(whereClause), prefixIdx, limit+1)
 	return queryFacetSearchResults(ctx, pool, query, args, limit)
+}
+
+func bookSeriesTableForMediaScope(mediaScope string) string {
+	if mediaScope == "ebook" {
+		return "ebook_series"
+	}
+	return "audiobook_series"
 }
 
 // queryFacetSearchResults executes a facet search query that was built

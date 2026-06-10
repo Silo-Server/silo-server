@@ -8,6 +8,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import {
   DropdownMenu,
@@ -82,15 +83,11 @@ export function buildMediaItemMenuModel({
     entries.push({
       kind: "action",
       key: "toggleWatched",
-      label: isAudiobook
-        ? userState.played
-          ? "Mark Unlistened"
-          : "Mark Listened"
-        : userState.played
-          ? "Mark Unwatched"
-          : "Mark Watched",
+      label: getWatchedActionLabel({ type: mediaType, user_data: { played: userState.played } }),
     });
+  }
 
+  if (userState) {
     if (showCollectionActions) {
       entries.push(
         {
@@ -179,7 +176,9 @@ export default function MediaItemMenu({
     dismissAction?.surface === "continue_watching"
       ? mediaType === "audiobook"
         ? "Remove from Continue Listening"
-        : "Remove from Continue Watching"
+        : mediaType === "ebook"
+          ? "Remove from Continue Reading"
+          : "Remove from Continue Watching"
       : dismissAction?.surface === "next_up"
         ? "Remove from Next Up"
         : undefined;

@@ -24,6 +24,10 @@ type audiobookCoverCacher interface {
 	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
 }
 
+type ebookCoverCacher interface {
+	CacheEbookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
+}
+
 type audiobookCoverMetadataStore interface {
 	GetPosterPath(ctx context.Context, contentID string) (string, error)
 	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error

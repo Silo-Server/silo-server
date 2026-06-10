@@ -72,6 +72,45 @@ func TestValidate_AudiobookMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidate_EbookMediaScope(t *testing.T) {
+	qd := QueryDefinition{
+		MediaScope: "ebook",
+		Match:      "all",
+		Groups:     []QueryGroup{},
+		Sort:       QuerySort{Field: "title", Order: "asc"},
+	}
+	if err := qd.Validate(); err != nil {
+		t.Fatalf("expected ebook media scope to be valid, got %v", err)
+	}
+}
+
+func TestValidate_EbookMediaScopeRejectsNarratorRule(t *testing.T) {
+	qd := QueryDefinition{
+		MediaScope: "ebook",
+		Match:      "all",
+		Groups: []QueryGroup{{
+			Match: "all",
+			Rules: []QueryRule{{Field: "narrator", Op: "is", Value: "Narrator"}},
+		}},
+		Sort: QuerySort{Field: "title", Order: "asc"},
+	}
+	if err := qd.Validate(); err == nil {
+		t.Fatal("expected ebook narrator rule to be rejected")
+	}
+}
+
+func TestValidate_EbookMediaScopeRejectsNarratorSort(t *testing.T) {
+	qd := QueryDefinition{
+		MediaScope: "ebook",
+		Match:      "all",
+		Groups:     []QueryGroup{},
+		Sort:       QuerySort{Field: "narrator", Order: "asc"},
+	}
+	if err := qd.Validate(); err == nil {
+		t.Fatal("expected ebook narrator sort to be rejected")
+	}
+}
+
 func TestValidateWithSortScope_RejectsPersonalizedSortWithoutProfileScope(t *testing.T) {
 	qd := QueryDefinition{
 		Match:  "all",

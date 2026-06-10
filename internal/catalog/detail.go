@@ -157,6 +157,9 @@ type ItemDetail struct {
 
 	// Audiobook-specific detail. Present only when Type == "audiobook".
 	Audiobook *AudiobookDetailExtension `json:"audiobook,omitempty"`
+
+	// Ebook-specific detail. Present only when Type == "ebook".
+	Ebook *EbookDetailExtension `json:"ebook,omitempty"`
 }
 
 type AudiobookDetailExtension struct {
@@ -199,6 +202,13 @@ type AudiobookNarration struct {
 	Title     string   `json:"title"`
 	Year      int      `json:"year,omitempty"`
 	Narrators []string `json:"narrators"`
+}
+
+type EbookDetailExtension struct {
+	Authors   []AudiobookPerson       `json:"authors"`
+	Publisher string                  `json:"publisher,omitempty"`
+	Series    *AudiobookSeriesGroup   `json:"series,omitempty"`
+	Related   AudiobookRelatedContent `json:"related"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -895,6 +905,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	if item.Type == "audiobook" {
 		detail.Audiobook = s.buildAudiobookExtension(ctx, item, detail.Versions, crewCredits, filter)
 	}
+	if item.Type == "ebook" {
+		detail.Ebook = s.buildEbookExtension(ctx, item, crewCredits, filter)
+	}
 
 	// Series folder paths from confirmed claims when available, otherwise from
 	// the file links that currently belong to the item. This keeps provisional
@@ -1036,6 +1049,26 @@ func (s *DetailService) buildAudiobookExtension(
 	}
 }
 
+func (s *DetailService) buildEbookExtension(
+	ctx context.Context,
+	item *models.MediaItem,
+	crew []CrewCredit,
+	filter AccessFilter,
+) *EbookDetailExtension {
+	if item == nil {
+		return nil
+	}
+	return &EbookDetailExtension{
+		Authors:   audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
+		Publisher: firstNonEmptyString(item.Studios),
+		Series:    s.fetchEbookSeries(ctx, item.ContentID, filter),
+		Related: AudiobookRelatedContent{
+			AlsoByAuthor: s.fetchEbookAlsoByAuthor(ctx, item.ContentID, filter),
+			Similar:      s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter),
+		},
+	}
+}
+
 func audiobookPeopleFromCrew(crew []CrewCredit, job string) []AudiobookPerson {
 	out := make([]AudiobookPerson, 0)
 	for _, credit := range crew {
@@ -1107,15 +1140,23 @@ func appendAudiobookItemAccessConditions(
 }
 
 func (s *DetailService) fetchAudiobookAlsoByAuthor(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
+	return s.fetchBookAlsoByAuthor(ctx, contentID, "audiobook", filter)
+}
+
+func (s *DetailService) fetchEbookAlsoByAuthor(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
+	return s.fetchBookAlsoByAuthor(ctx, contentID, "ebook", filter)
+}
+
+func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID string, mediaType string, filter AccessFilter) []AudiobookRelatedItem {
 	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
 		return []AudiobookRelatedItem{}
 	}
-	args := []any{contentID, models.PersonKindAuthor}
-	argIdx := 3
+	args := []any{contentID, models.PersonKindAuthor, mediaType}
+	argIdx := 4
 	conditions := []string{
 		"ip1.content_id = $1",
 		"ip1.kind = $2",
-		"m2.type = 'audiobook'",
+		"m2.type = $3",
 	}
 	if !appendAudiobookItemAccessConditions("m2", filter, &conditions, &args, &argIdx) {
 		return []AudiobookRelatedItem{}
@@ -1157,13 +1198,21 @@ func (s *DetailService) fetchAudiobookAlsoByAuthor(ctx context.Context, contentI
 }
 
 func (s *DetailService) fetchAudiobookSimilarByGenres(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
+	return s.fetchBookSimilarByGenres(ctx, contentID, "audiobook", filter)
+}
+
+func (s *DetailService) fetchEbookSimilarByGenres(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
+	return s.fetchBookSimilarByGenres(ctx, contentID, "ebook", filter)
+}
+
+func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID string, mediaType string, filter AccessFilter) []AudiobookRelatedItem {
 	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
 		return []AudiobookRelatedItem{}
 	}
-	args := []any{contentID, models.PersonKindAuthor}
-	argIdx := 3
+	args := []any{contentID, models.PersonKindAuthor, mediaType}
+	argIdx := 4
 	conditions := []string{
-		"m.type = 'audiobook'",
+		"m.type = $3",
 		"m.content_id <> $1",
 		"m.genres && (SELECT array_agg(g) FROM this_genres)",
 		`NOT EXISTS (
@@ -1216,14 +1265,27 @@ func (s *DetailService) fetchAudiobookSimilarByGenres(ctx context.Context, conte
 }
 
 func (s *DetailService) fetchAudiobookSeries(ctx context.Context, contentID string, filter AccessFilter) *AudiobookSeriesGroup {
+	return s.fetchBookSeries(ctx, contentID, "audiobook", "audiobook_series", filter)
+}
+
+func (s *DetailService) fetchEbookSeries(ctx context.Context, contentID string, filter AccessFilter) *AudiobookSeriesGroup {
+	return s.fetchBookSeries(ctx, contentID, "ebook", "ebook_series", filter)
+}
+
+func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, mediaType string, tableName string, filter AccessFilter) *AudiobookSeriesGroup {
 	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
 		return nil
 	}
-	args := []any{contentID}
-	argIdx := 2
+	switch tableName {
+	case "audiobook_series", "ebook_series":
+	default:
+		return nil
+	}
+	args := []any{contentID, mediaType}
+	argIdx := 3
 	conditions := []string{
 		"root.content_id = $1",
-		"m.type = 'audiobook'",
+		"m.type = $2",
 	}
 	if !appendAudiobookItemAccessConditions("m", filter, &conditions, &args, &argIdx) {
 		return nil
@@ -1236,13 +1298,13 @@ func (s *DetailService) fetchAudiobookSeries(ctx context.Context, contentID stri
 			COALESCE(m.poster_path, ''),
 			s.series_name,
 			s.series_index
-		FROM audiobook_series root
-		JOIN audiobook_series s ON LOWER(s.series_name) = LOWER(root.series_name)
+		FROM %s root
+		JOIN %s s ON LOWER(s.series_name) = LOWER(root.series_name)
 		JOIN media_items m ON m.content_id = s.content_id
 		WHERE %s
 		ORDER BY s.series_index NULLS LAST, LOWER(m.sort_title)
 		LIMIT 30
-	`, strings.Join(conditions, " AND "))
+	`, tableName, tableName, strings.Join(conditions, " AND "))
 	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil

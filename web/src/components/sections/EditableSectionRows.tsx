@@ -79,6 +79,7 @@ export function SectionSummaryBadges({
       {queryDefinition.media_scope === "audiobook" ? (
         <Badge variant="outline">Audiobooks</Badge>
       ) : null}
+      {queryDefinition.media_scope === "ebook" ? <Badge variant="outline">Ebooks</Badge> : null}
       {libraries
         ? queryDefinition.library_ids.map((libraryId) => {
             const library = libraries.find((entry) => entry.id === libraryId);

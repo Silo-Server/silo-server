@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applySavedLibraryPageSearchParams,
+  getLibrarySortRelevanceScope,
   hasLibraryPageSearchParams,
   parseLibraryPageState,
   serializeLibraryPageSearchParams,
@@ -142,6 +143,14 @@ describe("parseLibraryPageState", () => {
     expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
   });
 
+  it("preserves ebook scope for mixed library filters", () => {
+    const state = parseLibraryPageState(params("tab=library&type=ebook&sort=author"), "mixed");
+
+    expect(state.activeTab).toBe("library");
+    expect(state.queryDefinition.media_scope).toBe("ebook");
+    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
+  });
+
   it("accepts grouped query params and canonical sorts", () => {
     const state = parseLibraryPageState(
       params(
@@ -201,6 +210,13 @@ describe("parseLibraryPageState", () => {
     );
     expect(state.queryDefinition.media_scope).toBe("audiobook");
     expect(state.queryDefinition.sort).toEqual({ field: "runtime", order: "desc" });
+  });
+
+  it("uses ebook scope for ebook libraries", () => {
+    const state = parseLibraryPageState(params("tab=library&sort=author&order=asc"), "ebooks");
+
+    expect(state.queryDefinition.media_scope).toBe("ebook");
+    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
   });
 
   it("normalizes legacy sort aliases to canonical values", () => {
@@ -428,5 +444,23 @@ describe("library page saved state helpers", () => {
       sort: "year",
       order: "desc",
     });
+  });
+});
+
+describe("getLibrarySortRelevanceScope", () => {
+  it("maps library types to sort relevance scopes", () => {
+    expect(getLibrarySortRelevanceScope("movie")).toBe("movie");
+    expect(getLibrarySortRelevanceScope("series")).toBe("series");
+    expect(getLibrarySortRelevanceScope("audiobook")).toBe("audiobook");
+    expect(getLibrarySortRelevanceScope("audiobooks")).toBe("audiobook");
+    expect(getLibrarySortRelevanceScope("ebook")).toBe("ebook");
+    expect(getLibrarySortRelevanceScope("ebooks")).toBe("ebook");
+  });
+
+  it("falls back to the media scope and then to all for mixed libraries", () => {
+    expect(getLibrarySortRelevanceScope("mixed", "episode")).toBe("episode");
+    expect(getLibrarySortRelevanceScope("mixed", "ebook")).toBe("ebook");
+    expect(getLibrarySortRelevanceScope("mixed")).toBe("all");
+    expect(getLibrarySortRelevanceScope("unknown")).toBe("all");
   });
 });

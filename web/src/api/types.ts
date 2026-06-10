@@ -569,6 +569,16 @@ export interface AudiobookDetailExtension {
   };
 }
 
+export interface EbookDetailExtension {
+  authors: AudiobookPerson[];
+  publisher?: string;
+  series?: AudiobookSeriesGroup;
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -652,7 +662,7 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -938,7 +948,7 @@ export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | 
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -1012,6 +1022,7 @@ export interface ItemDetail {
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
   audiobook?: AudiobookDetailExtension;
+  ebook?: EbookDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1191,7 +1202,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode" | "audiobook" | "video";
+  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook" | "video";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -2986,7 +2997,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -3147,6 +3158,7 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
       value?.media_scope === "series" ||
       value?.media_scope === "episode" ||
       value?.media_scope === "audiobook" ||
+      value?.media_scope === "ebook" ||
       value?.media_scope === "video"
         ? value.media_scope
         : undefined,
@@ -3209,7 +3221,9 @@ export function queryDefinitionFromSectionConfig(
           ? "episode"
           : config.media_scope === "audiobook" || config.filter_type === "audiobook"
             ? "audiobook"
-            : undefined;
+            : config.media_scope === "ebook" || config.filter_type === "ebook"
+              ? "ebook"
+              : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;

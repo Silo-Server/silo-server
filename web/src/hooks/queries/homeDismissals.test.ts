@@ -91,6 +91,27 @@ describe("home dismissal query hooks", () => {
     });
   });
 
+  it("encodes item IDs in the dismissal path", async () => {
+    useDismissHomeItem();
+    const mutation = latestMutationOptions();
+
+    await mutation.mutationFn({
+      itemId: "ebook 1/isbn:978",
+      surface: "continue_watching",
+      progressUpdatedAt: "2026-03-22T18:10:00Z",
+    });
+
+    expect(mocks.api).toHaveBeenCalledWith(
+      "/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          progress_updated_at: "2026-03-22T18:10:00Z",
+        }),
+      },
+    );
+  });
+
   it("calls the next up dismissal endpoint with series_id", async () => {
     useDismissHomeItem();
     const mutation = latestMutationOptions();
@@ -155,6 +176,29 @@ describe("home dismissal query hooks", () => {
 
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       "Removed from Continue Listening",
+      expect.objectContaining({
+        action: expect.objectContaining({
+          label: "Undo",
+        }),
+      }),
+    );
+  });
+
+  it("uses continue reading toast copy for ebook dismissals", async () => {
+    useDismissHomeItem();
+    const mutation = latestMutationOptions();
+
+    const variables: DismissHomeItemVariables = {
+      itemId: "ebook-1",
+      surface: "continue_watching",
+      mediaType: "ebook",
+      progressUpdatedAt: "2026-03-22T18:10:00Z",
+    };
+
+    await mutation.onSuccess?.(undefined, variables);
+
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Removed from Continue Reading",
       expect.objectContaining({
         action: expect.objectContaining({
           label: "Undo",

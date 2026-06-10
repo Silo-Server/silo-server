@@ -1,5 +1,5 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { Play } from "lucide-react";
+import { BookOpen, Play } from "lucide-react";
 import { useCallback } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
@@ -132,11 +132,13 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     ? premiereBadge
       ? null
       : "Next Episode"
-    : card.durationSeconds > 0
-      ? card.type === "audiobook"
-        ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
-        : `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
-      : "\u00A0";
+    : card.type === "ebook"
+      ? `${Math.round(Math.min(Math.max(progressPercent, 0), 100))}% read`
+      : card.durationSeconds > 0
+        ? card.type === "audiobook"
+          ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
+          : `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
+        : "\u00A0";
   const handleWatchClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       if (
@@ -251,10 +253,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         <ViewTransitionLink
           to={card.watchHref}
           onClick={handleWatchClick}
-          aria-label={`Play ${heading}`}
+          aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
           className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
         >
-          <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
+          {card.type === "ebook" ? (
+            <BookOpen className="h-5 w-5" />
+          ) : (
+            <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
+          )}
         </ViewTransitionLink>
         <MediaItemMenu
           contentId={

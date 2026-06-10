@@ -39,21 +39,63 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 const minHNSWEfSearch = 200
 
-const tasteSeedCandidateQuery = `
-			WITH watched_counts AS (
-				SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-				       COUNT(DISTINCT wp.user_id::text || ':' || COALESCE(wp.profile_id, '')) AS watch_count
-				FROM   user_watch_progress wp
-				LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-				WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-				  AND  wp.updated_at > NOW() - INTERVAL '180 days'
-				GROUP  BY 1
+// watchedActivityCTE unifies video watch progress and ebook reader progress
+// into one activity stream. Episodes roll up to their parent series via
+// COALESCE(e.series_id, ...). The ebook completed flag is derived from the
+// shared finished-progress threshold.
+var watchedActivityCTE = fmt.Sprintf(`
+watched_activity AS (
+	SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
+	       wp.media_item_id AS leaf_item_id,
+	       wp.user_id,
+	       wp.profile_id,
+	       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id,
+	       wp.updated_at,
+	       wp.completed AS completed
+	FROM   user_watch_progress wp
+	LEFT JOIN episodes e ON e.content_id = wp.media_item_id
+	WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
+	  AND  NOT EXISTS (
+		SELECT 1
+		FROM   user_history_hidden_items hhi
+		WHERE  hhi.user_id = wp.user_id
+		  AND  hhi.profile_id = wp.profile_id
+		  AND  hhi.media_item_id = wp.media_item_id
+		  AND  wp.updated_at <= hhi.hidden_before
+	  )
+	UNION ALL
+	SELECT erp.content_id AS item_id,
+	       erp.content_id AS leaf_item_id,
+	       erp.user_id,
+	       erp.profile_id,
+	       erp.user_id::text || ':' || COALESCE(erp.profile_id, '') AS watcher_id,
+	       erp.updated_at,
+	       erp.progress >= %s AS completed
+	FROM   ebook_reader_progress erp
+	WHERE  erp.progress >= 0.5
+	  AND  NOT EXISTS (
+		SELECT 1
+		FROM   user_history_hidden_items hhi
+		WHERE  hhi.user_id = erp.user_id
+		  AND  hhi.profile_id = erp.profile_id
+		  AND  hhi.media_item_id = erp.content_id
+		  AND  erp.updated_at <= hhi.hidden_before
+	  )
+)`, catalog.EbookFinishedProgressThresholdSQL)
+
+var tasteSeedCandidateQuery = fmt.Sprintf(`
+			WITH %s,
+			watched_counts AS (
+				SELECT item_id, COUNT(DISTINCT watcher_id) AS watch_count
+				FROM   watched_activity
+				WHERE  updated_at > NOW() - INTERVAL '180 days'
+				GROUP  BY item_id
 			)
 			SELECT mi.content_id
 			FROM   media_items mi
 			LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
-			WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
-			  AND  mi.type IN ('movie', 'series', 'audiobook')
+			WHERE  %s
+			  AND  mi.type IN ('movie', 'series', 'audiobook', 'ebook')
 			  AND  mi.poster_path IS NOT NULL
 			  AND  mi.poster_path <> ''
 			ORDER  BY COALESCE(wc.watch_count, 0) DESC,
@@ -66,7 +108,7 @@ const tasteSeedCandidateQuery = `
 			          CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END DESC NULLS LAST,
 			          mi.year DESC NULLS LAST,
 			          mi.content_id ASC
-			LIMIT  $1 OFFSET $2`
+			LIMIT  $1 OFFSET $2`, watchedActivityCTE, recommendationItemEligibilityWhereClause("mi"))
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
@@ -118,6 +160,18 @@ type EmbeddingTextCandidate struct {
 	MediaItemID   string
 	Model         string
 	CanonicalText string
+}
+
+func embeddingEligibilityWhereClause() string {
+	return recommendationItemEligibilityWhereClause("mi")
+}
+
+func recommendationItemEligibilityWhereClause(alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		alias = "media_items"
+	}
+	return fmt.Sprintf("(%s.status = 'matched' OR %s.type = 'audiobook' OR %s.type = 'ebook')", alias, alias, alias)
 }
 
 // UpsertEmbedding stores or updates an embedding for a media item.
@@ -416,18 +470,18 @@ func (r *Repo) findTasteProfileCandidates(
 
 // ItemsNeedingEmbedding returns content IDs of media items that either have no
 // embedding or whose embedding was generated with a different model.
-// Audiobooks bypass the status='matched' gate because they don't go through
-// the external-provider match pipeline; their tag-derived metadata is
-// authoritative as soon as the scan completes.
+// Books bypass the status='matched' gate because their scanner/plugin-derived
+// metadata is authoritative as soon as the scan/enrichment completes.
 func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel string, limit int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
+	query := fmt.Sprintf(`
 		SELECT mi.content_id
 		FROM   media_items mi
 		LEFT JOIN media_item_embeddings e ON e.media_item_id = mi.content_id
-		WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
+		WHERE  %s
 		  AND  (e.media_item_id IS NULL OR e.model != $1)
 		LIMIT  $2
-	`, currentModel, limit)
+	`, embeddingEligibilityWhereClause())
+	rows, err := r.pool.Query(ctx, query, currentModel, limit)
 	if err != nil {
 		return nil, fmt.Errorf("items needing embedding: %w", err)
 	}
@@ -448,11 +502,11 @@ func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel string, l
 }
 
 func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error) {
-	rows, err := r.pool.Query(ctx, `
+	query := fmt.Sprintf(`
 		-- Keep current_text in sync with embeddings.BuildEmbeddingText. This lets
 		-- the embedding job page over only missing, model-stale, or text-stale rows.
-		-- Audiobook lines map to embeddings.mediaTypeLabel + the author/narrator
-		-- branch in BuildEmbeddingText; any divergence here forces every audiobook
+		-- Book lines map to embeddings.mediaTypeLabel + the author/narrator
+		-- branch in BuildEmbeddingText; any divergence here forces book items
 		-- to re-embed every job run.
 		WITH text_candidates AS (
 			SELECT mi.content_id,
@@ -461,11 +515,11 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			       array_to_string(array_remove(ARRAY[
 			           CASE
 			               WHEN cardinality(COALESCE(mi.genres, ARRAY[]::text[])) > 0 AND COALESCE(mi.overview, '') <> ''
-			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END || ' about ' || substr(mi.overview, 1, 1000)
+			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' WHEN mi.type = 'ebook' THEN 'ebook' ELSE 'movie' END || ' about ' || substr(mi.overview, 1, 1000)
 			               WHEN cardinality(COALESCE(mi.genres, ARRAY[]::text[])) > 0
-			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END
+			                   THEN array_to_string(mi.genres, ', ') || ' ' || CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' WHEN mi.type = 'ebook' THEN 'ebook' ELSE 'movie' END
 			               WHEN COALESCE(mi.overview, '') <> ''
-			                   THEN CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' ELSE 'movie' END || '. ' || substr(mi.overview, 1, 1000)
+			                   THEN CASE WHEN mi.type = 'series' THEN 'TV series' WHEN mi.type = 'audiobook' THEN 'audiobook' WHEN mi.type = 'ebook' THEN 'ebook' ELSE 'movie' END || '. ' || substr(mi.overview, 1, 1000)
 			               ELSE NULL
 			           END,
 			           CASE WHEN COALESCE(mi.year, 0) > 0
@@ -474,11 +528,11 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			           END,
 			           CASE WHEN COALESCE(mi.content_rating, '') <> '' THEN 'Rated ' || mi.content_rating ELSE NULL END,
 			           CASE WHEN COALESCE(mi.tagline, '') <> '' THEN '"' || mi.tagline || '"' ELSE NULL END,
-			           CASE WHEN mi.type <> 'audiobook' AND actors.names <> '' THEN 'Cast: ' || actors.names ELSE NULL END,
-			           CASE WHEN mi.type <> 'audiobook' AND directors.names <> '' THEN 'Directed by ' || directors.names ELSE NULL END,
+			           CASE WHEN mi.type NOT IN ('audiobook', 'ebook') AND actors.names <> '' THEN 'Cast: ' || actors.names ELSE NULL END,
+			           CASE WHEN mi.type NOT IN ('audiobook', 'ebook') AND directors.names <> '' THEN 'Directed by ' || directors.names ELSE NULL END,
 			           CASE
-			               WHEN mi.type = 'audiobook' AND authors.names <> '' THEN 'Written by ' || authors.names
-			               WHEN mi.type <> 'audiobook' AND writers.names <> '' THEN 'Written by ' || writers.names
+			               WHEN mi.type IN ('audiobook', 'ebook') AND authors.names <> '' THEN 'Written by ' || authors.names
+			               WHEN mi.type NOT IN ('audiobook', 'ebook') AND writers.names <> '' THEN 'Written by ' || writers.names
 			               ELSE NULL
 			           END,
 			           CASE WHEN mi.type = 'audiobook' AND narrators.names <> '' THEN 'Narrated by ' || narrators.names ELSE NULL END,
@@ -536,7 +590,7 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 8
 			) narrators ON TRUE
-			WHERE  (mi.status = 'matched' OR mi.type = 'audiobook')
+			WHERE  %s
 			  AND  ($1 = '' OR mi.content_id > $1)
 		)
 		SELECT mi.content_id,
@@ -548,7 +602,8 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 		   OR  mi.canonical_text IS DISTINCT FROM mi.current_text
 		ORDER  BY mi.content_id
 		LIMIT  $3
-	`, afterID, currentModel, limit)
+	`, embeddingEligibilityWhereClause())
+	rows, err := r.pool.Query(ctx, query, afterID, currentModel, limit)
 	if err != nil {
 		return nil, fmt.Errorf("embedding text candidates: %w", err)
 	}
@@ -583,7 +638,8 @@ func (r *Repo) EmbeddingCount(ctx context.Context) (int, error) {
 // (used by the admin worker UI) lines up with what the job actually does.
 func (r *Repo) TotalMediaItemCount(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM media_items WHERE status = 'matched' OR type = 'audiobook'`).Scan(&count)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM media_items mi WHERE %s`, embeddingEligibilityWhereClause())
+	err := r.pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("total media item count: %w", err)
 	}
@@ -1137,6 +1193,46 @@ func (r *Repo) GetWatchProgressForUser(ctx context.Context, userID int, profileI
 	return result, rows.Err()
 }
 
+// ebookReaderProgressForUserQuery maps ebook reader progress onto the
+// WatchProgressRow shape (progress as position with duration 1). Rows hidden
+// via user_history_hidden_items are excluded with the same semantics as
+// GetWatchProgressForUser: hidden when updated_at <= hidden_before, visible
+// again once new reading activity lands after hidden_before.
+var ebookReaderProgressForUserQuery = fmt.Sprintf(`
+	SELECT content_id,
+	       progress::double precision AS position_seconds,
+	       1::double precision AS duration_seconds,
+	       progress >= %s AS completed,
+	       updated_at
+	FROM   ebook_reader_progress
+	WHERE  user_id = $1 AND profile_id = $2
+	  AND  NOT EXISTS (
+		SELECT 1
+		FROM   user_history_hidden_items hhi
+		WHERE  hhi.user_id = ebook_reader_progress.user_id
+		  AND  hhi.profile_id = ebook_reader_progress.profile_id
+		  AND  hhi.media_item_id = ebook_reader_progress.content_id
+		  AND  ebook_reader_progress.updated_at <= hhi.hidden_before
+	  )`, catalog.EbookFinishedProgressThresholdSQL)
+
+func (r *Repo) GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error) {
+	rows, err := r.pool.Query(ctx, ebookReaderProgressForUserQuery, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get ebook reader progress: %w", err)
+	}
+	defer rows.Close()
+
+	var result []WatchProgressRow
+	for rows.Next() {
+		var wp WatchProgressRow
+		if err := rows.Scan(&wp.MediaItemID, &wp.PositionSeconds, &wp.DurationSeconds, &wp.Completed, &wp.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan ebook reader progress: %w", err)
+		}
+		result = append(result, wp)
+	}
+	return result, rows.Err()
+}
+
 // RewatchCount holds the number of completed watches for an item.
 type RewatchCount struct {
 	MediaItemID   string
@@ -1177,33 +1273,38 @@ func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID strin
 	return result, rows.Err()
 }
 
+// itemWatchersQuery feeds co-watch matrix computation. watched_activity rolls
+// episodes up to their parent series, so a single watcher can produce many
+// rows for the same item; the GROUP BY collapses them to one row per
+// (watcher, item) before ranking and aggregation so a lone binge-watcher
+// cannot satisfy the minimum-watchers threshold ($2) by itself and the
+// per-user recency cap ($1) counts distinct items rather than raw rows.
+//
+// Watcher identity is (user_id, profile_id) for the Jaccard math — profiles of
+// one account legitimately have distinct tastes — but the minimum-watchers
+// floor ($2) is a sparsity/privacy threshold and must count distinct login
+// ACCOUNTS: one household account with N profiles must not satisfy it alone,
+// so the HAVING clause counts DISTINCT user_id rather than watcher rows.
+var itemWatchersQuery = fmt.Sprintf(`
+	WITH %s,
+	user_watches AS (
+		SELECT user_id,
+		       watcher_id,
+		       item_id AS media_item_id,
+		       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY MAX(updated_at) DESC) AS rn
+		FROM   watched_activity
+		GROUP  BY user_id, profile_id, watcher_id, item_id
+	)
+	SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
+	FROM   user_watches
+	WHERE  rn <= $1
+	GROUP  BY media_item_id
+	HAVING COUNT(DISTINCT user_id) >= $2`, watchedActivityCTE)
+
 // ItemWatchers maps item_id to profile identities that watched >= 50% progress.
 // Used for co-watch matrix computation.
 func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser int) (map[string][]string, error) {
-	// Get all watch progress entries where progress >= 50% or completed
-	rows, err := r.pool.Query(ctx, `
-		WITH user_watches AS (
-			SELECT user_id::text || ':' || COALESCE(profile_id, '') AS watcher_id,
-			       media_item_id,
-			       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY updated_at DESC) AS rn
-			FROM   user_watch_progress
-			WHERE  (completed = true
-			   OR  (duration_seconds > 0 AND position_seconds / duration_seconds >= 0.5))
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = user_watch_progress.user_id
-				  AND  hhi.profile_id = user_watch_progress.profile_id
-				  AND  hhi.media_item_id = user_watch_progress.media_item_id
-				  AND  user_watch_progress.updated_at <= hhi.hidden_before
-			  )
-		)
-		SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
-		FROM   user_watches
-		WHERE  rn <= $1
-		GROUP  BY media_item_id
-		HAVING COUNT(*) >= $2`,
-		maxPerUser, minWatchers)
+	rows, err := r.pool.Query(ctx, itemWatchersQuery, maxPerUser, minWatchers)
 	if err != nil {
 		return nil, fmt.Errorf("get item watchers: %w", err)
 	}
@@ -1226,30 +1327,20 @@ func (r *Repo) GetItemWatchers(ctx context.Context, minWatchers int, maxPerUser 
 // GetPopularItems returns the most-played media items over the given number of days.
 // Episodes are resolved to their parent series.
 func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_items AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  wp.updated_at > NOW() - ($1 || ' days')::interval
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = wp.user_id
-				  AND  hhi.profile_id = wp.profile_id
-				  AND  hhi.media_item_id = wp.media_item_id
-				  AND  wp.updated_at <= hhi.hidden_before
-			  )
+	query := fmt.Sprintf(`
+		WITH %s,
+		watched_items AS (
+			SELECT item_id, watcher_id
+			FROM   watched_activity
+			WHERE  updated_at > NOW() - ($1 || ' days')::interval
 		)
 		SELECT wi.item_id, COUNT(DISTINCT wi.watcher_id) AS watch_count
 		FROM   watched_items wi
 		JOIN   media_items mi ON mi.content_id = wi.item_id
 		GROUP  BY wi.item_id
 		ORDER  BY watch_count DESC
-		LIMIT  $2`,
-		fmt.Sprintf("%d", days), limit)
+		LIMIT  $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, fmt.Sprintf("%d", days), limit)
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
@@ -1270,17 +1361,18 @@ func (r *Repo) GetPopularItems(ctx context.Context, days, limit int) ([]ScoredIt
 }
 
 // GetRecentlyAddedItems returns items added within the given number of days.
-// Audiobooks bypass the matched-status gate because their scan-derived metadata
-// is authoritative before any external-provider match exists.
+// Audiobooks and ebooks bypass the matched-status gate because their
+// scan-derived metadata is authoritative before any external-provider match
+// exists.
 func (r *Repo) GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, created_at
-		FROM   media_items
-		WHERE  (status = 'matched' OR type = 'audiobook')
-		  AND  created_at > NOW() - ($1 || ' days')::interval
-		ORDER  BY created_at DESC
-		LIMIT  $2`,
-		fmt.Sprintf("%d", days), limit)
+	query := fmt.Sprintf(`
+		SELECT mi.content_id, mi.created_at
+		FROM   media_items mi
+		WHERE  %s
+		  AND  mi.created_at > NOW() - ($1 || ' days')::interval
+		ORDER  BY mi.created_at DESC
+		LIMIT  $2`, recommendationItemEligibilityWhereClause("mi"))
+	rows, err := r.pool.Query(ctx, query, fmt.Sprintf("%d", days), limit)
 	if err != nil {
 		return nil, fmt.Errorf("get recently added: %w", err)
 	}
@@ -1354,21 +1446,11 @@ func (r *Repo) GetTasteSeedCandidates(ctx context.Context, limit, offset int) ([
 // GetTopGenres returns the most popular genres by watch count.
 // Episodes are resolved to their parent series for genre lookup.
 func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_items AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = wp.user_id
-				  AND  hhi.profile_id = wp.profile_id
-				  AND  hhi.media_item_id = wp.media_item_id
-				  AND  wp.updated_at <= hhi.hidden_before
-			  )
+	query := fmt.Sprintf(`
+		WITH %s,
+		watched_items AS (
+			SELECT item_id, watcher_id
+			FROM   watched_activity
 		)
 		SELECT g.genre, COUNT(DISTINCT wi.watcher_id) AS watchers
 		FROM   watched_items wi
@@ -1376,8 +1458,8 @@ func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
 		CROSS JOIN LATERAL UNNEST(mi.genres) AS g(genre)
 		GROUP  BY g.genre
 		ORDER  BY watchers DESC
-		LIMIT  $1`,
-		limit)
+		LIMIT  $1`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get top genres: %w", err)
 	}
@@ -1397,21 +1479,11 @@ func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
 
 // GetGenreSamplerItems returns the most-played media items in a specific genre.
 func (r *Repo) GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error) {
-	rows, err := r.pool.Query(ctx, `
-		WITH watched_items AS (
-			SELECT COALESCE(e.series_id, wp.media_item_id) AS item_id,
-			       wp.user_id::text || ':' || COALESCE(wp.profile_id, '') AS watcher_id
-			FROM   user_watch_progress wp
-			LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-			WHERE  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-			  AND  NOT EXISTS (
-				SELECT 1
-				FROM   user_history_hidden_items hhi
-				WHERE  hhi.user_id = wp.user_id
-				  AND  hhi.profile_id = wp.profile_id
-				  AND  hhi.media_item_id = wp.media_item_id
-				  AND  wp.updated_at <= hhi.hidden_before
-			  )
+	query := fmt.Sprintf(`
+		WITH %s,
+		watched_items AS (
+			SELECT item_id, watcher_id
+			FROM   watched_activity
 		)
 		SELECT wi.item_id, COUNT(DISTINCT wi.watcher_id) AS watch_count
 		FROM   watched_items wi
@@ -1419,8 +1491,8 @@ func (r *Repo) GetGenreSamplerItems(ctx context.Context, genre string, limit int
 		WHERE  $1 = ANY(mi.genres)
 		GROUP  BY wi.item_id
 		ORDER  BY watch_count DESC
-		LIMIT  $2`,
-		genre, limit)
+		LIMIT  $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, genre, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get genre sampler items: %w", err)
 	}
@@ -1619,21 +1691,12 @@ func (r *Repo) GetAllUsersWithTasteProfiles(ctx context.Context) ([]StaleProfile
 // GetWatchedItemIDs returns content IDs of media items the user has watched
 // (>= 50% progress or completed). Episodes are resolved to their parent series.
 func (r *Repo) GetWatchedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT COALESCE(e.series_id, wp.media_item_id) AS item_id
-		FROM   user_watch_progress wp
-		LEFT JOIN episodes e ON e.content_id = wp.media_item_id
-		WHERE  wp.user_id = $1 AND wp.profile_id = $2
-		  AND  (wp.completed = true OR (wp.duration_seconds > 0 AND wp.position_seconds / wp.duration_seconds >= 0.5))
-		  AND  NOT EXISTS (
-			SELECT 1
-			FROM   user_history_hidden_items hhi
-			WHERE  hhi.user_id = wp.user_id
-			  AND  hhi.profile_id = wp.profile_id
-			  AND  hhi.media_item_id = wp.media_item_id
-			  AND  wp.updated_at <= hhi.hidden_before
-		  )`,
-		userID, profileID)
+	query := fmt.Sprintf(`
+		WITH %s
+		SELECT DISTINCT item_id
+		FROM   watched_activity
+		WHERE  user_id = $1 AND profile_id = $2`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get watched item IDs: %w", err)
 	}
@@ -1697,21 +1760,15 @@ func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profil
 		return []string{}, nil
 	}
 
-	rows, err := r.pool.Query(ctx, `
-		SELECT media_item_id
-		FROM   user_watch_progress
+	query := fmt.Sprintf(`
+		WITH %s
+		SELECT leaf_item_id
+		FROM   watched_activity
 		WHERE  user_id = $1 AND profile_id = $2 AND completed = true
-		  AND  NOT EXISTS (
-			SELECT 1
-			FROM   user_history_hidden_items hhi
-			WHERE  hhi.user_id = user_watch_progress.user_id
-			  AND  hhi.profile_id = user_watch_progress.profile_id
-			  AND  hhi.media_item_id = user_watch_progress.media_item_id
-			  AND  user_watch_progress.updated_at <= hhi.hidden_before
-		  )
-		ORDER  BY updated_at DESC, media_item_id ASC
+		ORDER  BY updated_at DESC, leaf_item_id ASC
 		LIMIT  $3
-	`, userID, profileID, limit)
+	`, watchedActivityCTE)
+	rows, err := r.pool.Query(ctx, query, userID, profileID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get recent completed item IDs: %w", err)
 	}

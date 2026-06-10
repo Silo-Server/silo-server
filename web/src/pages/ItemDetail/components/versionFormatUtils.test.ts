@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatFileSize,
+  formatPageCount,
   formatChannels,
   formatBitrate,
   formatLanguageName,
@@ -24,6 +25,18 @@ describe("formatFileSize", () => {
 
   it("returns empty string for negative values", () => {
     expect(formatFileSize(-100)).toBe("");
+  });
+});
+
+describe("formatPageCount", () => {
+  it("formats singular and plural ebook page counts", () => {
+    expect(formatPageCount(1)).toBe("1 page");
+    expect(formatPageCount(321)).toBe("321 pages");
+  });
+
+  it("returns empty string for missing page counts", () => {
+    expect(formatPageCount(0)).toBe("");
+    expect(formatPageCount(undefined)).toBe("");
   });
 });
 

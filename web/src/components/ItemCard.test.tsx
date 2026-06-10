@@ -36,6 +36,20 @@ const baseItem = {
 };
 
 describe("ItemCard SortMeta", () => {
+  it("encodes item links while preserving library context", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "ebook 1/isbn:978",
+        type: "ebook",
+        title: "A Reader",
+      },
+      libraryId: 12,
+    });
+
+    expect(markup).toContain('href="/item/ebook%201%2Fisbn%3A978?libraryId=12"');
+  });
+
   it("renders the series last air date when sorted by last_air_date", () => {
     const markup = renderCard({
       sortField: "last_air_date",

@@ -401,6 +401,20 @@ function buildApiHeaders(options: RequestInit = {}): Record<string, string> {
   return headers;
 }
 
+/**
+ * Fire-and-forget API request that survives page unload (pagehide / tab close).
+ * Sends the same auth, profile, and device headers as `api`, plus `keepalive`
+ * so the browser finishes the request after the document is gone. The response
+ * is intentionally ignored: no token refresh or error handling is possible
+ * while the page is unloading.
+ */
+export function apiKeepalive(path: string, options: RequestInit = {}): void {
+  const headers = buildApiHeaders(options);
+  void fetch(`/api/v1${path}`, { ...options, headers, keepalive: true }).catch(() => {
+    // Best-effort write during unload; nothing left to recover into.
+  });
+}
+
 /** Downloads a binary API response and triggers a browser file save. */
 export async function apiDownload(
   path: string,
@@ -435,6 +449,51 @@ export async function apiDownload(
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * apiBlob buffers the entire response body in memory, so cap what it will
+ * accept; beyond this a download is the right tool, not an in-tab blob.
+ */
+export const API_BLOB_MAX_BYTES = 512 * 1024 * 1024;
+
+export async function apiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  let headers = buildApiHeaders(options);
+  let res = await fetch(`/api/v1${path}`, { ...options, headers });
+
+  if (res.status === 401 && getRefreshToken()) {
+    if (!refreshPromise) {
+      refreshPromise = attemptRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const refreshed = await refreshPromise;
+    if (refreshed) {
+      headers = buildApiHeaders(options);
+      headers["Authorization"] = `Bearer ${accessToken}`;
+      res = await fetch(`/api/v1${path}`, { ...options, headers });
+    }
+  }
+
+  if (!res.ok) {
+    throw apiClientErrorFrom(res.status, await parseApiError(res));
+  }
+
+  // Reject oversized bodies up front instead of crashing the tab while
+  // buffering them. When the header is absent, proceed; streaming byte counts
+  // are not worth the complexity here.
+  const contentLength = Number(res.headers.get("Content-Length"));
+  if (Number.isFinite(contentLength) && contentLength > API_BLOB_MAX_BYTES) {
+    const sizeMiB = Math.round(contentLength / (1024 * 1024));
+    const limitMiB = Math.round(API_BLOB_MAX_BYTES / (1024 * 1024));
+    throw new ApiClientError(
+      res.status,
+      "response_too_large",
+      `This file is too large to open in the browser (${sizeMiB} MiB, limit ${limitMiB} MiB). Download it instead.`,
+    );
+  }
+
+  return res.blob();
 }
 
 // People API

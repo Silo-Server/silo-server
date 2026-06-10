@@ -165,6 +165,50 @@ describe("SectionRow", () => {
     expect(markup).not.toContain("aspect-video");
   });
 
+  it("renders all-ebook continue sections as upright poster cards", () => {
+    const queryClient = new QueryClient();
+    const section: ResolvedSection = {
+      id: "continue-reading",
+      section_type: "continue_watching",
+      title: "Continue Reading",
+      featured: false,
+      item_limit: 10,
+      total_count: 1,
+      is_custom: false,
+      customized: false,
+      items: [
+        {
+          content_id: "ebook-001",
+          type: "ebook",
+          title: "The Hobbit",
+          position_seconds: 250,
+          duration_seconds: 1000,
+          year: 1937,
+          genres: [],
+          status: "matched",
+          rating_imdb: null,
+          overview: "",
+          poster_url: "/ebook-cover.jpg",
+          poster_thumbhash: "",
+          backdrop_url: "",
+          backdrop_thumbhash: "",
+          logo_url: "",
+        },
+      ],
+    };
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SectionRow section={section} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain("aspect-[2/3]");
+    expect(markup).not.toContain("aspect-video");
+  });
+
   it("routes supported section view-all actions to browse destinations", () => {
     const queryClient = new QueryClient();
     const section: ResolvedSection = {

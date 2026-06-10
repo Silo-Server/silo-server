@@ -42,9 +42,12 @@ export function contentLevelsForType(libraryType: string): string[] {
     case "movies":
       return ["movie"];
     case "mixed":
-      return ["movie", "series", "season", "episode"];
+      return ["movie", "series", "season", "episode", "audiobook", "ebook"];
     case "audiobooks":
       return ["audiobook"];
+    case "ebooks":
+    case "ebook":
+      return ["ebook"];
     case "podcasts":
       return ["podcast", "podcast_episode"];
     default:

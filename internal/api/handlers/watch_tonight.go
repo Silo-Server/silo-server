@@ -362,7 +362,10 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 	if h.storeProvider != nil {
 		store, storeErr := h.storeProvider.ForUser(ctx, userID)
 		if storeErr == nil && store != nil {
-			states, stateErr := resolveItemUserStates(ctx, store, profileID, h.EpisodeRepo, mediaItems)
+			states, stateErr := resolveItemUserStatesWithOptions(ctx, store, profileID, h.EpisodeRepo, mediaItems, itemUserStateOptions{
+				UserID:             userID,
+				EbookProgressStore: h.EbookProgress,
+			})
 			if stateErr == nil {
 				stateMap = states
 			}

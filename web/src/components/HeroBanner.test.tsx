@@ -80,6 +80,38 @@ describe("HeroBanner", () => {
     expect(markup).toContain("More Info");
   });
 
+  it("routes ebook hero actions to the reader", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <HeroBanner
+          libraryId={7}
+          items={[
+            {
+              content_id: "ebook 1",
+              type: "ebook",
+              title: "Featured Ebook",
+              year: 2024,
+              genres: ["Mystery"],
+              status: "matched",
+              rating_imdb: null,
+              overview: "Overview",
+              poster_url: "",
+              poster_thumbhash: "",
+              backdrop_url: "",
+              backdrop_thumbhash: "",
+              logo_url: "",
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('href="/reader/ebook/ebook%201?libraryId=7"');
+    expect(markup).toContain('href="/item/ebook%201?libraryId=7"');
+    expect(markup).not.toContain('href="/watch/ebook');
+    expect(markup).toContain("Read");
+  });
+
   it("routes audiobook play actions to the audiobook detail player", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>

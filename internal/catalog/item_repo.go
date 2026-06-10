@@ -35,6 +35,49 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 	return &ItemRepository{pool: pool}
 }
 
+// GetPoster returns the current poster path and thumbhash for a media item.
+// Missing or NULL values are returned as empty strings.
+func (r *ItemRepository) GetPoster(ctx context.Context, contentID string) (posterPath string, posterThumbhash string, err error) {
+	if r == nil || r.pool == nil {
+		return "", "", ErrItemNotFound
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(poster_path, ''), COALESCE(poster_thumbhash, '')
+		FROM media_items
+		WHERE content_id = $1
+	`, contentID).Scan(&posterPath, &posterThumbhash); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrItemNotFound
+		}
+		return "", "", fmt.Errorf("getting media item poster: %w", err)
+	}
+	return posterPath, posterThumbhash, nil
+}
+
+// SetLocalPoster records a locally extracted poster without ever overwriting
+// provider or manually applied artwork: the row is updated only when the item
+// has no poster yet or its current poster lives under localPrefix. The
+// condition is evaluated atomically in SQL so concurrent metadata writers
+// (e.g. the ebook enrichment sweep) cannot be clobbered between a read and a
+// write. Returns true when a row was updated.
+func (r *ItemRepository) SetLocalPoster(ctx context.Context, contentID, posterPath, thumbhash, localPrefix string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, ErrItemNotFound
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_items
+		SET poster_path = $2,
+		    poster_thumbhash = NULLIF($3, ''),
+		    updated_at = NOW()
+		WHERE content_id = $1
+		  AND (poster_path IS NULL OR poster_path = '' OR poster_path LIKE $4 || '%')
+	`, contentID, posterPath, thumbhash, localPrefix)
+	if err != nil {
+		return false, fmt.Errorf("setting local poster: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // GetPosterPath returns the current poster path for a media item. Missing or
 // NULL poster values are returned as an empty string.
 func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (string, error) {

@@ -39,6 +39,13 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it("keeps ebook media scope from catalog URLs", () => {
+    const state = parseCatalogSearchParams(params("source=query&type=ebook&sort=author"));
+
+    expect(state.query_definition.media_scope).toBe("ebook");
+    expect(state.query_definition.sort).toEqual({ field: "author", order: "asc" });
+  });
+
   it("parses the video group scope and treats type=all as unscoped", () => {
     const video = parseCatalogSearchParams(params("source=query&q=heat&type=video"));
     expect(video.query_definition.media_scope).toBe("video");

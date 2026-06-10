@@ -1,6 +1,7 @@
 package sections
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,76 @@ func TestParseContinueTypeRejectsUnknownExplicitType(t *testing.T) {
 
 	if _, err := ParseContinueType([]byte(`{"continue_type":"scrolling"}`)); err == nil {
 		t.Fatal("ParseContinueType accepted unknown continue_type")
+	}
+}
+
+func TestEbookContinueWatchingProgressQueryGatesHiddenHistory(t *testing.T) {
+	t.Parallel()
+
+	query := strings.Join(strings.Fields(ebookContinueWatchingProgressQuery), " ")
+
+	// Continue Reading must honor user_history_hidden_items with the same
+	// semantics as the video path (pgstore ListProgress "in_progress"): a row
+	// is hidden while updated_at <= hidden_before and counts again once new
+	// reading activity lands after hidden_before.
+	for _, term := range []string{
+		"FROM ebook_reader_progress",
+		"NOT EXISTS",
+		"FROM user_history_hidden_items hhi",
+		"hhi.media_item_id = ebook_reader_progress.content_id",
+		"ebook_reader_progress.updated_at <= hhi.hidden_before",
+	} {
+		if !strings.Contains(query, term) {
+			t.Fatalf("ebook continue watching query missing %q:\n%s", term, query)
+		}
+	}
+}
+
+func TestAppendUniqueContinueItemsDedupesAcrossPages(t *testing.T) {
+	t.Parallel()
+
+	seen := make(map[string]struct{})
+	limit := 4
+
+	pageOne := []*models.MediaItem{
+		{ContentID: "book-a"},
+		{ContentID: "book-b"},
+	}
+	ordered := appendUniqueContinueItems(nil, pageOne, seen, limit)
+
+	// A progress write between pages shifts rows across the LIMIT/OFFSET
+	// boundary, so page two re-serves book-b.
+	pageTwo := []*models.MediaItem{
+		{ContentID: "book-b"},
+		{ContentID: "book-c"},
+	}
+	ordered = appendUniqueContinueItems(ordered, pageTwo, seen, limit)
+
+	got := contentIDs(ordered)
+	want := []string{"book-a", "book-b", "book-c"}
+	if len(got) != len(want) {
+		t.Fatalf("ordered IDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ordered IDs = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestAppendUniqueContinueItemsRespectsLimit(t *testing.T) {
+	t.Parallel()
+
+	seen := make(map[string]struct{})
+	page := []*models.MediaItem{
+		{ContentID: "a"},
+		{ContentID: "b"},
+		{ContentID: "c"},
+	}
+
+	ordered := appendUniqueContinueItems(nil, page, seen, 2)
+	if got := contentIDs(ordered); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("ordered IDs = %v, want [a b]", got)
 	}
 }
 
