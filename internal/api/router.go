@@ -175,6 +175,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// NotificationsService is the notifications domain service used to power
+	// the inbox, preferences, and announcement endpoints. May be nil; routes
+	// are not registered in that case.
+	NotificationsService *notifications.Service
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -1641,6 +1646,20 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 				}
 
+				// Notifications inbox and preferences (profile-scoped).
+				if deps.NotificationsService != nil {
+					notificationsHandler := handlers.NewNotificationsHandler(deps.NotificationsService)
+					r.Route("/notifications", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/", notificationsHandler.HandleList)
+						r.Get("/unread-count", notificationsHandler.HandleUnreadCount)
+						r.Post("/read", notificationsHandler.HandleMarkRead)
+						r.Post("/{id}/dismiss", notificationsHandler.HandleDismiss)
+						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
+						r.Put("/preferences", notificationsHandler.HandlePutPreferences)
+					})
+				}
+
 				// Progress and sync routes (profile-scoped).
 				if progressHandler != nil {
 					r.Route("/progress", func(r chi.Router) {
@@ -2395,6 +2414,15 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/logs/audit", adminLogsHandler.HandleListAuditLogs)
 								r.Get("/logs/ws", adminLogsHandler.HandleLogStreamWebSocket)
 							}
+							if deps.NotificationsService != nil {
+								notificationsHandler := handlers.NewNotificationsHandler(deps.NotificationsService)
+								r.Route("/announcements", func(r chi.Router) {
+									r.Get("/", notificationsHandler.HandleListAnnouncements)
+									r.Post("/", notificationsHandler.HandleCreateAnnouncement)
+									r.Delete("/{id}", notificationsHandler.HandleDeleteAnnouncement)
+								})
+							}
+
 							if adminPlaybackControlHandler != nil {
 								r.Post("/sessions/{session_id}/pause", adminPlaybackControlHandler.HandlePauseSession)
 								r.Post("/sessions/{session_id}/resume", adminPlaybackControlHandler.HandleResumeSession)

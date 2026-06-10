@@ -120,6 +120,76 @@ func (s *Service) DeleteAnnouncement(ctx context.Context, id int64) error {
 	return s.store.DismissUnreadByTypeAndRef(ctx, "announcement", fmt.Sprintf("announcement-%d", id))
 }
 
+// List returns non-dismissed notifications for the given filter.
+func (s *Service) List(ctx context.Context, f ListFilter) ([]*Notification, error) {
+	return s.store.List(ctx, f)
+}
+
+// UnreadCount returns the number of unread, non-dismissed notifications.
+func (s *Service) UnreadCount(ctx context.Context, userID int, profileID string, childSafe bool) (int, error) {
+	return s.store.UnreadCount(ctx, userID, profileID, childSafe)
+}
+
+// MarkRead marks the specified notifications as read for userID.
+func (s *Service) MarkRead(ctx context.Context, userID int, ids []int64) error {
+	return s.store.MarkRead(ctx, userID, ids)
+}
+
+// MarkAllRead marks all notifications for userID as read.
+func (s *Service) MarkAllRead(ctx context.Context, userID int) error {
+	return s.store.MarkAllRead(ctx, userID)
+}
+
+// Dismiss marks a single notification as dismissed. Returns ErrNotFound when
+// the notification does not exist or is already dismissed.
+func (s *Service) Dismiss(ctx context.Context, userID int, id int64) error {
+	return s.store.Dismiss(ctx, userID, id)
+}
+
+// GetPreferences returns the full preference list for userID, merging stored
+// values with per-category defaults (content_digest defaults OFF; all others ON).
+func (s *Service) GetPreferences(ctx context.Context, userID int) ([]Preference, error) {
+	stored, err := s.store.Preferences(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("notifications: load preferences: %w", err)
+	}
+	out := make([]Preference, 0, len(MutableCategories))
+	for _, cat := range MutableCategories {
+		enabled, ok := stored[cat]
+		if !ok {
+			// Apply default: content_digest is opt-in (default false); others default true.
+			enabled = cat != CategoryContentDigest
+		}
+		out = append(out, Preference{Category: cat, Enabled: enabled})
+	}
+	return out, nil
+}
+
+// SetPreferences validates and persists preferences. Returns an error (without
+// writing any row) if any category is not in MutableCategories.
+func (s *Service) SetPreferences(ctx context.Context, userID int, prefs []Preference) error {
+	mutableSet := make(map[Category]struct{}, len(MutableCategories))
+	for _, cat := range MutableCategories {
+		mutableSet[cat] = struct{}{}
+	}
+	for _, p := range prefs {
+		if _, ok := mutableSet[p.Category]; !ok {
+			return fmt.Errorf("notifications: category %q is not mutable", p.Category)
+		}
+	}
+	for _, p := range prefs {
+		if err := s.store.SetPreference(ctx, userID, p.Category, p.Enabled); err != nil {
+			return fmt.Errorf("notifications: set preference %q: %w", p.Category, err)
+		}
+	}
+	return nil
+}
+
+// ListAnnouncements returns all announcements (admin view).
+func (s *Service) ListAnnouncements(ctx context.Context) ([]*Announcement, error) {
+	return s.store.ListAnnouncements(ctx)
+}
+
 // Create validates, applies preferences, inserts (idempotent on DedupRef) and
 // publishes notification.created for live clients. A dedup conflict is not an
 // error and publishes nothing.
