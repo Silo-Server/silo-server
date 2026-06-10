@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
@@ -47,13 +48,26 @@ const onViewFailureCooldown = 15 * time.Minute
 // provenance-aware persistence. Lifecycle mechanics are delegated to the
 // shared jobrunner.
 type Service struct {
-	cfg     Config
+	// cfg is behind an atomic pointer so admin settings changes apply to
+	// subsequent enqueues/view checks without rebuilding the service.
+	cfg     atomic.Pointer[Config]
 	repo    JobRepository
 	content ContentReader
 	locs    LocalizationStore
 	chat    aitranslate.ChatFn
 	runner  *jobrunner.Runner
 	logger  *slog.Logger
+}
+
+// UpdateConfig swaps the service config. Safe for concurrent use; running
+// jobs finish with the config they started with.
+func (s *Service) UpdateConfig(cfg Config) {
+	s.cfg.Store(&cfg)
+}
+
+// config returns a snapshot of the current service config.
+func (s *Service) config() Config {
+	return *s.cfg.Load()
 }
 
 // NewService wires a metadata translation service. sem is the dispatch
@@ -71,8 +85,7 @@ func NewService(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{
-		cfg:     cfg,
+	s := &Service{
 		repo:    repo,
 		content: content,
 		locs:    locs,
@@ -80,10 +93,12 @@ func NewService(
 		runner:  jobrunner.New(appCtx, sem, repo, "metadata translation", logger),
 		logger:  logger,
 	}
+	s.UpdateConfig(cfg)
+	return s
 }
 
 // Enabled reports whether metadata translation can currently run.
-func (s *Service) Enabled() bool { return s.cfg.Ready() }
+func (s *Service) Enabled() bool { return s.config().Ready() }
 
 // Recover clears jobs orphaned by a crashed worker and starts a background
 // reaper that keeps doing so. Call once at startup.
@@ -92,7 +107,7 @@ func (s *Service) Recover() { s.runner.Recover() }
 // Enqueue validates and queues a job, returning immediately. If an identical
 // job is already pending or running, that job is returned instead of a new one.
 func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
-	if !s.cfg.Ready() {
+	if !s.config().Ready() {
 		return nil, ErrNotConfigured
 	}
 	if req.TargetKind == "" {
@@ -112,7 +127,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	req.TargetLanguage = target
 
-	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, s.cfg.ChatModel)
+	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, s.config().ChatModel)
 	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
 		return nil, err
 	} else if existing != nil {
@@ -125,7 +140,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		IncludeChildren: req.IncludeChildren,
 		TargetLanguage:  req.TargetLanguage,
 		Engine:          "openai",
-		Model:           s.cfg.ChatModel,
+		Model:           s.config().ChatModel,
 		Status:          jobrunner.StatusPending,
 		ProgressMessage: "Queued",
 		Force:           req.Force,
@@ -151,7 +166,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 // loop re-checks per field, so fully translated items never reach the model.
 // Errors are logged, never returned: a refresh must not fail on this.
 func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language string) {
-	if !s.cfg.Ready() {
+	if !s.config().Ready() {
 		return
 	}
 	target, err := subtitles.NormalizeLanguageCode(language)
@@ -179,7 +194,7 @@ func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language strin
 }
 
 // OnViewMode exposes the viewer-triggered translation mode for status probes.
-func (s *Service) OnViewMode() string { return s.cfg.OnViewMode() }
+func (s *Service) OnViewMode() string { return s.config().OnViewMode() }
 
 // RequestOnView is the viewer-triggered enqueue path (detail-page button or
 // auto-on-view). On top of the normal pipeline it suppresses retries for a
@@ -187,7 +202,7 @@ func (s *Service) OnViewMode() string { return s.cfg.OnViewMode() }
 // page views must never hammer a broken endpoint. Returns the resulting job
 // (which may be the in-flight or recently failed one).
 func (s *Service) RequestOnView(ctx context.Context, contentID, targetLanguage string, requestedBy *int) (*Job, error) {
-	if s.cfg.OnViewMode() == "off" {
+	if s.config().OnViewMode() == "off" {
 		return nil, ErrNotConfigured
 	}
 	target, err := subtitles.NormalizeLanguageCode(targetLanguage)

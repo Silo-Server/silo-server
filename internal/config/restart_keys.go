@@ -65,29 +65,12 @@ var restartRequiredKeys = map[string]bool{
 	"jellyfin_compat.session_ttl":          true,
 	"jellyfin_compat.playback_session_ttl": true,
 
-	// AI clients and job services built once at startup (the semaphore for
-	// max_concurrent_jobs is a fixed-capacity channel). Legacy subtitle_ai.*
-	// connection aliases classify identically to their ai.* counterparts.
-	"ai.base_url":                         true,
-	"ai.api_key":                          true,
-	"ai.chat_model":                       true,
-	"ai.asr_base_url":                     true,
-	"ai.asr_api_key":                      true,
-	"ai.asr_model":                        true,
-	"ai.max_concurrent_jobs":              true,
-	"subtitle_ai.base_url":                true,
-	"subtitle_ai.api_key":                 true,
-	"subtitle_ai.chat_model":              true,
-	"subtitle_ai.max_concurrent_jobs":     true,
-	"subtitle_ai.enabled":                 true,
-	"subtitle_ai.transcribe_enabled":      true,
-	"subtitle_ai.batch_size":              true,
-	"subtitle_ai.context_neighbors":       true,
-	"subtitle_ai.asr_chunk_seconds":       true,
-	"subtitle_ai.transcribe_quota_jobs":   true,
-	"subtitle_ai.transcribe_quota_period": true,
-	"metadata_ai.enabled":                 true,
-	"metadata_ai.on_view":                 true,
+	// AI: connection settings, models, toggles, and quotas hot-reload via
+	// UpdateConfig/setters wired to the config watcher. Only the dispatch
+	// semaphore (ai.max_concurrent_jobs, plus its legacy alias) is a
+	// fixed-capacity channel sized at construction.
+	"ai.max_concurrent_jobs":          true,
+	"subtitle_ai.max_concurrent_jobs": true,
 }
 
 // restartRequiredPrefixes covers whole namespaces of infrastructure settings:

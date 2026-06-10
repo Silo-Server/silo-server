@@ -18,8 +18,11 @@ func TestRestartRequired(t *testing.T) {
 		{"redis.url", true},
 		{"recommendations.enabled", true},
 		// Legacy AI aliases classify like their canonical keys.
-		{"subtitle_ai.base_url", true},
 		{"subtitle_ai.max_concurrent_jobs", true},
+		{"subtitle_ai.base_url", false}, // like ai.base_url — hot-reloaded
+		{"ai.api_key", false},
+		{"subtitle_ai.enabled", false},
+		{"metadata_ai.on_view", false},
 		// Live settings read from the settings repo per request.
 		{"branding.server_name", false},
 		{"overlays.enabled", false},

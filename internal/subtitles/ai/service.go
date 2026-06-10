@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
@@ -60,7 +61,9 @@ type SubtitleLister interface {
 // dispatch, heartbeat, stale-job reaping, cancellation) are delegated to the
 // shared jobrunner so they stay identical across Silo's AI job services.
 type Service struct {
-	cfg         Config
+	// cfg is behind an atomic pointer so admin settings changes apply to
+	// subsequent enqueues/quota checks without rebuilding the service.
+	cfg         atomic.Pointer[Config]
 	repo        JobRepository
 	translator  Translator
 	transcriber Transcriber // optional; nil disables ASR kinds
@@ -71,6 +74,17 @@ type Service struct {
 	ffmpegPath  string
 	logger      *slog.Logger
 	runner      *jobrunner.Runner
+}
+
+// UpdateConfig swaps the service config. Safe for concurrent use; running
+// jobs finish with the config they started with.
+func (s *Service) UpdateConfig(cfg Config) {
+	s.cfg.Store(&cfg)
+}
+
+// config returns a snapshot of the current service config.
+func (s *Service) config() Config {
+	return *s.cfg.Load()
 }
 
 // NewService wires a translation service. notifier may be nil. appCtx is the
@@ -96,8 +110,7 @@ func NewService(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{
-		cfg:         cfg,
+	s := &Service{
 		repo:        repo,
 		translator:  translator,
 		transcriber: transcriber,
@@ -109,14 +122,16 @@ func NewService(
 		logger:      logger,
 		runner:      jobrunner.New(appCtx, sem, repo, "subtitle ai", logger),
 	}
+	s.UpdateConfig(cfg)
+	return s
 }
 
 // Enabled reports whether translation can currently run.
-func (s *Service) Enabled() bool { return s.cfg.TranslateReady() }
+func (s *Service) Enabled() bool { return s.config().TranslateReady() }
 
 // TranscribeEnabled reports whether ASR subtitle generation can currently run.
 func (s *Service) TranscribeEnabled() bool {
-	return s.cfg.TranscribeReady() && s.transcriber != nil
+	return s.config().TranscribeReady() && s.transcriber != nil
 }
 
 // Recover clears jobs orphaned by a crashed worker and starts a background
@@ -131,22 +146,25 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	if req.Kind == "" {
 		req.Kind = JobKindTranslate
 	}
-	jobModel := s.cfg.ChatModel
+	// Snapshot once so the job's model provenance is internally consistent
+	// even if the config reloads mid-enqueue.
+	cfg := s.config()
+	jobModel := cfg.ChatModel
 	switch req.Kind {
 	case JobKindTranslate:
-		if !s.cfg.TranslateReady() {
+		if !cfg.TranslateReady() {
 			return nil, ErrEngineNotConfigured
 		}
 	case JobKindTranscribe:
-		if !s.TranscribeEnabled() {
+		if !cfg.TranscribeReady() || s.transcriber == nil {
 			return nil, ErrEngineNotConfigured
 		}
-		jobModel = s.cfg.ASRModel
+		jobModel = cfg.ASRModel
 	case JobKindTranscribeTranslate:
-		if !s.TranscribeEnabled() || !s.cfg.TranslateReady() {
+		if !cfg.TranscribeReady() || s.transcriber == nil || !cfg.TranslateReady() {
 			return nil, ErrEngineNotConfigured
 		}
-		jobModel = s.cfg.ASRModel + "+" + s.cfg.ChatModel
+		jobModel = cfg.ASRModel + "+" + cfg.ChatModel
 	default:
 		return nil, fmt.Errorf("%w: unsupported job kind %q", ErrInvalidRequest, req.Kind)
 	}

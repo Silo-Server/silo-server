@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
@@ -17,25 +18,34 @@ import (
 // untranslated context so the model can keep scene continuity across batch
 // boundaries.
 type LLMTranslator struct {
-	client           *llm.Client
-	batchSize        int
-	contextNeighbors int
+	client *llm.Client
+	// batching is atomic so admin settings changes apply to jobs started
+	// afterwards without rebuilding the translator.
+	batchSize        atomic.Int32
+	contextNeighbors atomic.Int32
 }
 
 // NewLLMTranslator builds a translator. batchSize and contextNeighbors fall
 // back to sane defaults when non-positive.
 func NewLLMTranslator(client *llm.Client, batchSize, contextNeighbors int) *LLMTranslator {
+	t := &LLMTranslator{client: client}
+	t.SetBatching(batchSize, contextNeighbors)
+	return t
+}
+
+// SetBatching updates the translation batch size and context-neighbor count.
+// Safe for concurrent use; jobs started afterwards pick the new values up.
+// Non-positive batch sizes and negative neighbor counts fall back to the
+// same defaults as construction.
+func (t *LLMTranslator) SetBatching(batchSize, contextNeighbors int) {
 	if batchSize <= 0 {
 		batchSize = 40
 	}
 	if contextNeighbors < 0 {
 		contextNeighbors = 0
 	}
-	return &LLMTranslator{
-		client:           client,
-		batchSize:        batchSize,
-		contextNeighbors: contextNeighbors,
-	}
+	t.batchSize.Store(int32(batchSize))
+	t.contextNeighbors.Store(int32(contextNeighbors))
 }
 
 // Translate implements Translator.
@@ -76,8 +86,8 @@ func (t *LLMTranslator) Translate(ctx context.Context, req TranslateRequest, onB
 		SystemPrompt:     translationSystemPrompt(srcName, tgtName),
 		TargetName:       tgtName,
 		EntryNoun:        "cues",
-		BatchSize:        t.batchSize,
-		ContextNeighbors: t.contextNeighbors,
+		BatchSize:        int(t.batchSize.Load()),
+		ContextNeighbors: int(t.contextNeighbors.Load()),
 	}, func(batch []aitranslate.Segment, done, totalSegs int) {
 		// Batches are sequential ranges, so this batch covers [done-len, done).
 		start := done - len(batch)
