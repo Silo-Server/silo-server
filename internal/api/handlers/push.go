@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	webpush "github.com/SherClockHolmes/webpush-go"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/push"
@@ -27,15 +28,22 @@ type pushConfigReader interface {
 	Status(ctx context.Context) push.Status
 }
 
-// PushHandler handles push notification registration, management, and status endpoints.
-type PushHandler struct {
-	reg    pushRegistry
-	config pushConfigReader
+// pushNotifier is the minimal interface PushHandler needs to send system notifications.
+type pushNotifier interface {
+	CreateSystem(ctx context.Context, userID int, typ, title, body string)
 }
 
-// NewPushHandler creates a new PushHandler.
-func NewPushHandler(reg pushRegistry, config pushConfigReader) *PushHandler {
-	return &PushHandler{reg: reg, config: config}
+// PushHandler handles push notification registration, management, and status endpoints.
+type PushHandler struct {
+	reg      pushRegistry
+	config   pushConfigReader
+	notifier pushNotifier
+}
+
+// NewPushHandler creates a new PushHandler. notifier may be nil (test-push endpoint
+// returns 503 when nil).
+func NewPushHandler(reg pushRegistry, config pushConfigReader, notifier pushNotifier) *PushHandler {
+	return &PushHandler{reg: reg, config: config, notifier: notifier}
 }
 
 // registerRequest is the request body for HandleRegister.
@@ -182,4 +190,34 @@ func (h *PushHandler) HandleWebPushKey(w http.ResponseWriter, r *http.Request) {
 func (h *PushHandler) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	status := h.config.Status(r.Context())
 	writeJSON(w, http.StatusOK, status)
+}
+
+// HandleGenerateVAPIDKeys handles POST /admin/push/generate-vapid-keys.
+// Generates a fresh VAPID key pair and returns it as JSON.
+// Response: {"vapid_public": "...", "vapid_private": "..."}
+func (h *PushHandler) HandleGenerateVAPIDKeys(w http.ResponseWriter, r *http.Request) {
+	// GenerateVAPIDKeys returns (privateKey, publicKey string, err error).
+	priv, pub, err := webpush.GenerateVAPIDKeys()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to generate keys")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"vapid_public": pub, "vapid_private": priv})
+}
+
+// HandleSendTestPush handles POST /admin/push/test.
+// Sends a system test push notification to the authenticated admin user.
+func (h *PushHandler) HandleSendTestPush(w http.ResponseWriter, r *http.Request) {
+	if h.notifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "notifications unavailable")
+		return
+	}
+	userID := apimw.GetUserID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "auth required")
+		return
+	}
+	h.notifier.CreateSystem(r.Context(), userID, "system.test_push", "Test push",
+		"If you can see this on a device, push delivery is working.")
+	w.WriteHeader(http.StatusAccepted)
 }

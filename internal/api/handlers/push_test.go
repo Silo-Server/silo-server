@@ -64,6 +64,21 @@ type fakePushConfig struct {
 func (f *fakePushConfig) WebPush(_ context.Context) push.WebPushConfig { return f.webPush }
 func (f *fakePushConfig) Status(_ context.Context) push.Status         { return f.status }
 
+type fakeNotifier struct {
+	calls []fakeNotifierCall
+}
+
+type fakeNotifierCall struct {
+	userID int
+	typ    string
+	title  string
+	body   string
+}
+
+func (f *fakeNotifier) CreateSystem(_ context.Context, userID int, typ, title, body string) {
+	f.calls = append(f.calls, fakeNotifierCall{userID: userID, typ: typ, title: title, body: body})
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -98,7 +113,7 @@ func pushChiRequest(r *http.Request, key, value string) *http.Request {
 
 // newPushHandler builds a PushHandler backed by the given fakes.
 func newPushHandler(reg *fakePushRegistry, cfg *fakePushConfig) *PushHandler {
-	return NewPushHandler(reg, cfg)
+	return NewPushHandler(reg, cfg, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +398,74 @@ func TestPushHandleAdminStatus_ReturnsBooleans(t *testing.T) {
 	}
 	if !resp.WebPush {
 		t.Error("webpush = false, want true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HandleGenerateVAPIDKeys
+// ---------------------------------------------------------------------------
+
+func TestPushHandleGenerateVAPIDKeys_ReturnsPair(t *testing.T) {
+	h := NewPushHandler(&fakePushRegistry{}, &fakePushConfig{}, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/admin/push/generate-vapid-keys", nil)
+	h.HandleGenerateVAPIDKeys(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		VAPIDPublic  string `json:"vapid_public"`
+		VAPIDPrivate string `json:"vapid_private"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.VAPIDPublic == "" {
+		t.Error("vapid_public is empty")
+	}
+	if resp.VAPIDPrivate == "" {
+		t.Error("vapid_private is empty")
+	}
+	if resp.VAPIDPublic == resp.VAPIDPrivate {
+		t.Errorf("vapid_public and vapid_private are identical: %q", resp.VAPIDPublic)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HandleSendTestPush
+// ---------------------------------------------------------------------------
+
+func TestPushHandleSendTestPush_CreatesForCaller(t *testing.T) {
+	n := &fakeNotifier{}
+	h := NewPushHandler(&fakePushRegistry{}, &fakePushConfig{}, n)
+	rec := httptest.NewRecorder()
+	req := pushUserRequest(http.MethodPost, "/admin/push/test", nil, 7, "", "")
+	h.HandleSendTestPush(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", rec.Code, rec.Body.String())
+	}
+	if len(n.calls) != 1 {
+		t.Fatalf("CreateSystem called %d times, want 1", len(n.calls))
+	}
+	call := n.calls[0]
+	if call.userID != 7 {
+		t.Errorf("userID = %d, want 7", call.userID)
+	}
+	if call.typ != "system.test_push" {
+		t.Errorf("typ = %q, want system.test_push", call.typ)
+	}
+}
+
+func TestPushHandleSendTestPush_NilNotifier503(t *testing.T) {
+	h := NewPushHandler(&fakePushRegistry{}, &fakePushConfig{}, nil)
+	rec := httptest.NewRecorder()
+	req := pushUserRequest(http.MethodPost, "/admin/push/test", nil, 1, "", "")
+	h.HandleSendTestPush(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rec.Code, rec.Body.String())
 	}
 }
 

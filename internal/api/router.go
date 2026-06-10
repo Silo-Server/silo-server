@@ -1684,7 +1684,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// RequireProfile is applied per-route (not via r.Use) to leave the three
 				// user-scoped endpoints (devices list, toggle, webpush-key) without it.
 				if deps.PushStore != nil {
-					pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig)
+					pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig, deps.NotificationsService)
 					r.Route("/notifications/push", func(r chi.Router) {
 						r.With(apimw.RequireProfile).Put("/device", pushHandler.HandleRegister)
 						r.With(apimw.RequireProfile).Delete("/device", pushHandler.HandleRevoke)
@@ -2458,8 +2458,10 @@ func NewRouter(deps Dependencies) chi.Router {
 							}
 
 							if deps.PushStore != nil {
-								pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig)
+								pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig, deps.NotificationsService)
 								r.Get("/push/status", pushHandler.HandleAdminStatus)
+								r.Post("/push/generate-vapid-keys", pushHandler.HandleGenerateVAPIDKeys)
+								r.Post("/push/test", pushHandler.HandleSendTestPush)
 							}
 
 							if adminPlaybackControlHandler != nil {
