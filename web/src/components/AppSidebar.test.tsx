@@ -11,6 +11,7 @@ import { getProfileMenuSide, isSidebarExpanded } from "./AppSidebar.logic";
 const mockLogout = vi.fn();
 const mockClearProfile = vi.fn();
 const mockTogglePin = vi.fn();
+const mockUnreadCount = vi.hoisted(() => ({ data: 5 as number }));
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({
@@ -56,7 +57,7 @@ vi.mock("@/hooks/queries/useRequests", () => ({
 }));
 
 vi.mock("@/hooks/queries/notifications", () => ({
-  useUnreadCount: () => ({ data: 5 }),
+  useUnreadCount: () => mockUnreadCount,
 }));
 
 vi.mock("@/hooks/useViewTransition", () => ({
@@ -111,6 +112,7 @@ describe("AppSidebar", () => {
     mockLogout.mockReset();
     mockClearProfile.mockReset();
     mockTogglePin.mockReset();
+    mockUnreadCount.data = 5;
   });
 
   it("uses the cinema highlight text color for active catalog source links", () => {
@@ -186,16 +188,12 @@ describe("AppSidebar", () => {
   });
 
   it("does not render an unread badge when the count is 0", () => {
-    // The top-level mock returns data: 5 (unreadCount > 0 → badge shows).
-    // The zero-count branch is tested by verifying the badge class only appears
-    // when the badge text is present — meaning "0" is never rendered as badge
-    // content (the JSX branch is {unreadCount > 0 && ...}).
-    // Structural verification: the badge span class is only present alongside "5".
+    mockUnreadCount.data = 0;
     const markup = renderSidebar("/");
 
-    // Badge text "0" must never appear — the guard is strictly > 0.
-    expect(markup).not.toMatch(/>0</);
-    // Badge text "5" IS present (sanity from top-level mock).
-    expect(markup).toContain(">5<");
+    // Badge classes should not be present when count is 0
+    expect(markup).not.toContain("rounded-full px-0.5");
+    // Badge should not render "0" content
+    expect(markup).not.toContain(">0<");
   });
 });
