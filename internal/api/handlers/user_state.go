@@ -146,7 +146,7 @@ func resolveItemUserStatesWithOptions(
 		case "season":
 			state.Played = allEpisodesCompleted(seasonEpisodes[item.ContentID], progressMap)
 		case "ebook":
-			state.Played = ebookProgressMap[item.ContentID].Progress >= 0.9
+			state.Played = ebookProgressMap[item.ContentID].Progress >= models.EbookFinishedProgressThreshold
 		default:
 			state.Played = progressMap[item.ContentID].Completed
 		}

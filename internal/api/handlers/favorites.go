@@ -677,7 +677,11 @@ func (h *PersonalDataHandler) resolveHistoryRemovalMediaItemIDs(
 				return nil, err
 			}
 			switch item.Type {
-			case "movie":
+			case "movie", "ebook":
+				// Hiding an ebook gates ebook_reader_progress reads via
+				// user_history_hidden_items (updated_at <= hidden_before)
+				// without deleting the progress row, so the reader position
+				// survives: hidden is not the same as unread.
 				return []string{item.ContentID}, nil
 			case "series":
 				return h.seriesEpisodeIDs(ctx, item.ContentID)

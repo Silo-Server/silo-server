@@ -67,6 +67,7 @@ type ItemsHandler struct {
 	metadataRefreshRequester MetadataRefreshRequester
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
+	ebookReadStateStore      EbookReadStateStore
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
 }
@@ -119,8 +120,9 @@ func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDi
 	h.localWatchDispatcher = dispatcher
 }
 
-func (h *ItemsHandler) SetEbookReaderProgressStore(store EbookReaderProgressLister) {
+func (h *ItemsHandler) SetEbookReaderProgressStore(store EbookReaderProgressReadWriter) {
 	h.ebookProgressStore = store
+	h.ebookReadStateStore = store
 }
 
 func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Context, detail *catalog.ItemDetail) {
@@ -441,7 +443,8 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	targetType, targets, err := h.resolveWatchedTargets(r.Context(), id, h.accessFilter(r))
+	filter := h.accessFilter(r)
+	targetType, targets, err := h.resolveWatchedTargets(r.Context(), id, filter)
 	if err != nil {
 		switch {
 		case isNotFound(err):
@@ -452,12 +455,16 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if h.watchState == nil {
+	switch {
+	case targetType == "ebook":
+		// Ebook read state lives in ebook_reader_progress, not in
+		// user_watch_progress/user_watch_history; watch providers do not sync
+		// books, so no local watch event is dispatched.
+		err = h.setEbookReadState(r.Context(), userID, profileID, id, played, filter)
+	case h.watchState == nil:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
-	}
-
-	if played {
+	case played:
 		leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
 		for _, target := range targets {
 			leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
@@ -471,7 +478,7 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		if err == nil {
 			h.dispatchLocalWatchEvent(r.Context(), watchsync.LocalWatchEventMarkedWatched, userID, profileID, result)
 		}
-	} else {
+	default:
 		targetIDs := make([]string, 0, len(targets))
 		for _, target := range targets {
 			targetIDs = append(targetIDs, target.ContentID)
@@ -483,6 +490,10 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update watched state")
 		return
 	}
@@ -1030,7 +1041,7 @@ func (h *ItemsHandler) listUserSortMetrics(
 				continue
 			}
 			ebookProgress, ok := ebookProgressMap[item.ContentID]
-			if !ok || ebookProgress.Progress <= 0 || ebookProgress.Progress >= 0.9 {
+			if !ok || ebookProgress.Progress <= 0 || ebookProgress.Progress >= models.EbookFinishedProgressThreshold {
 				continue
 			}
 			ratio := ebookProgress.Progress
@@ -1062,7 +1073,7 @@ func (h *ItemsHandler) listUserSortMetrics(
 				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
 					viewedAt = progress.UpdatedAt
 				}
-				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= 0.9 {
+				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold {
 					ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339)
 					if ebookViewedAt > viewedAt {
 						viewedAt = ebookViewedAt
@@ -1077,7 +1088,7 @@ func (h *ItemsHandler) listUserSortMetrics(
 				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
 					playCount = 1
 				}
-				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= 0.9 && playCount < 1 {
+				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold && playCount < 1 {
 					playCount = 1
 				}
 				if playCount <= 0 {
@@ -1271,10 +1282,7 @@ func (h *ItemsHandler) getEbookLeafUserData(r *http.Request, contentID string) *
 		return nil
 	}
 	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if profileID == "" {
-		profileID = r.Header.Get("X-Profile-Id")
-	}
+	profileID := requestProfileID(r)
 	if userID <= 0 || profileID == "" || contentID == "" {
 		return nil
 	}
@@ -1288,11 +1296,16 @@ func (h *ItemsHandler) getEbookLeafUserData(r *http.Request, contentID string) *
 		return nil
 	}
 
+	// Ebooks have no playback duration, so PositionSeconds/DurationSeconds
+	// encode the 0..1 reading ratio (position=ratio, duration=1). Clients can
+	// derive percent-complete from the pair as usual, but rendering them as
+	// absolute times is meaningless for ebooks. Changing the wire shape needs
+	// coordinated Android/Apple client updates.
 	return &catalog.SeasonUserData{
 		PositionSeconds: row.Progress,
 		DurationSeconds: 1,
-		IsInProgress:    row.Progress < 0.9,
-		Played:          row.Progress >= 0.9,
+		IsInProgress:    row.Progress < models.EbookFinishedProgressThreshold,
+		Played:          row.Progress >= models.EbookFinishedProgressThreshold,
 	}
 }
 
@@ -1340,6 +1353,16 @@ func (h *ItemsHandler) getAggregateUserData(r *http.Request, episodes []*models.
 	}
 }
 
+// requestProfileID resolves the active profile for a request, falling back to
+// the X-Profile-Id header when the auth context does not carry one.
+func requestProfileID(r *http.Request) string {
+	profileID := apimw.GetProfileID(r.Context())
+	if profileID == "" {
+		profileID = r.Header.Get("X-Profile-Id")
+	}
+	return profileID
+}
+
 func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore, string, bool) {
 	if h.storeProvider == nil {
 		return nil, "", false
@@ -1350,10 +1373,7 @@ func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore
 		return nil, "", false
 	}
 
-	profileID := apimw.GetProfileID(r.Context())
-	if profileID == "" {
-		profileID = r.Header.Get("X-Profile-Id")
-	}
+	profileID := requestProfileID(r)
 	if profileID == "" {
 		return nil, "", false
 	}
@@ -1547,6 +1567,10 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 				ContentID:       item.ContentID,
 				DurationSeconds: h.contentDurationSeconds(ctx, item.ContentID, "", item.Runtime),
 			}}, nil
+		case "ebook":
+			// Ebooks have no playback duration; read state is keyed off
+			// ebook_reader_progress, so the leaf target only carries the ID.
+			return "ebook", []watchedLeafTarget{{ContentID: item.ContentID}}, nil
 		case "series":
 			if h.episodeRepo == nil {
 				return "", nil, catalog.ErrItemNotFound
