@@ -912,20 +912,25 @@ func NewRouter(deps Dependencies) chi.Router {
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
 		aiClient := llm.NewClient(llm.Config{
-			BaseURL:   deps.Config.SubtitleAI.BaseURL,
-			APIKey:    deps.Config.SubtitleAI.APIKey,
-			ChatModel: deps.Config.SubtitleAI.ChatModel,
+			BaseURL:    deps.Config.AI.BaseURL,
+			APIKey:     deps.Config.AI.APIKey,
+			ChatModel:  deps.Config.AI.ChatModel,
+			ASRBaseURL: deps.Config.AI.ASRBaseURL,
+			ASRAPIKey:  deps.Config.AI.ASRAPIKey,
+			ASRModel:   deps.Config.AI.ASRModel,
 		})
 		aiCfg := subtitleai.Config{
-			Configured:       deps.Config.SubtitleAI.BaseURL != "",
-			TranslateEnabled: deps.Config.SubtitleAI.Enabled,
-			ChatModel:        deps.Config.SubtitleAI.ChatModel,
-			BatchSize:        deps.Config.SubtitleAI.BatchSize,
-			ContextNeighbors: deps.Config.SubtitleAI.ContextNeighbors,
+			Configured:        deps.Config.AI.BaseURL != "",
+			TranslateEnabled:  deps.Config.SubtitleAI.Enabled,
+			TranscribeEnabled: deps.Config.SubtitleAI.TranscribeEnabled,
+			ChatModel:         deps.Config.AI.ChatModel,
+			ASRModel:          deps.Config.AI.ASRModel,
+			BatchSize:         deps.Config.SubtitleAI.BatchSize,
+			ContextNeighbors:  deps.Config.SubtitleAI.ContextNeighbors,
 		}
 		// One semaphore for all AI job services, so the configured endpoint sees
 		// a single global concurrency bound regardless of job mix.
-		aiSem := jobrunner.NewSemaphore(deps.Config.SubtitleAI.MaxConcurrentJobs)
+		aiSem := jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
