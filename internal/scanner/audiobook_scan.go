@@ -316,6 +316,14 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := s.upsertAudiobookMediaFiles(ctx, folder, contentID, folderPath, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook files: %w", err)
 	}
+	if err := applyAudiobookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, folderPath); err != nil {
+		slog.Warn("audiobook scan: sidecar cover upload failed",
+			"folder_id", folder.ID,
+			"content_id", contentID,
+			"path", folderPath,
+			"error", err,
+		)
+	}
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
 	}

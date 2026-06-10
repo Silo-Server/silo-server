@@ -2,10 +2,8 @@ package jellycompat
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,88 +14,66 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestProxyImageDefaultsToRevalidatingCachePolicy(t *testing.T) {
-	rec := httptest.NewRecorder()
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header: http.Header{
-			"Content-Type":  []string{"image/jpeg"},
-			"ETag":          []string{`"abc"`},
-			"Last-Modified": []string{"Tue, 12 May 2026 12:00:00 GMT"},
-			"Expires":       []string{"Tue, 12 May 2026 12:05:00 GMT"},
-		},
-		Body: io.NopCloser(strings.NewReader("image-bytes")),
-	}
-
-	proxyImage(rec, resp)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Cache-Control"); got != defaultImageProxyCacheControl {
-		t.Fatalf("Cache-Control = %q, want %q", got, defaultImageProxyCacheControl)
-	}
-	if got := rec.Header().Get("ETag"); got != `"abc"` {
-		t.Fatalf("ETag = %q", got)
-	}
-	if strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
-		t.Fatalf("Cache-Control unexpectedly immutable: %q", rec.Header().Get("Cache-Control"))
-	}
-}
-
-func TestProxyImageRelaysNotModified(t *testing.T) {
-	rec := httptest.NewRecorder()
-	resp := &http.Response{
-		StatusCode: http.StatusNotModified,
-		Header: http.Header{
-			"ETag":          []string{`"abc"`},
-			"Cache-Control": []string{"public, max-age=60"},
-		},
-		Body: io.NopCloser(strings.NewReader("")),
-	}
-
-	proxyImage(rec, resp)
-
-	if rec.Code != http.StatusNotModified {
-		t.Fatalf("status = %d, want 304", rec.Code)
-	}
-	if got := rec.Header().Get("ETag"); got != `"abc"` {
-		t.Fatalf("ETag = %q", got)
-	}
-	if rec.Body.Len() != 0 {
-		t.Fatalf("304 body length = %d, want 0", rec.Body.Len())
-	}
-}
-
-func TestProxyImageURLForwardsConditionalHeaders(t *testing.T) {
+func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
+	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("If-None-Match"); got != `"abc"` {
-			t.Fatalf("If-None-Match = %q", got)
-		}
-		if got := r.Header.Get("If-Modified-Since"); got != "Tue, 12 May 2026 12:00:00 GMT" {
-			t.Fatalf("If-Modified-Since = %q", got)
-		}
-		w.Header().Set("ETag", `"abc"`)
-		w.WriteHeader(http.StatusNotModified)
+		upstreamCalled = true
+		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer upstream.Close()
 
-	h := &ImagesHandler{httpClient: upstream.Client()}
-	req := httptest.NewRequest(http.MethodGet, "/Items/1/Images/Primary", nil)
-	req.Header.Set("If-None-Match", `"abc"`)
-	req.Header.Set("If-Modified-Since", "Tue, 12 May 2026 12:00:00 GMT")
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      upstream.URL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+		itemRepo:  fakeImageItemRepo{item: item},
+		imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+tag, nil)
+	req = withImageRouteParams(req, routeID, "Primary")
 	rec := httptest.NewRecorder()
 
-	h.proxyImageURL(rec, req, upstream.URL)
+	h.HandleItemImage(rec, req)
 
-	if rec.Code != http.StatusNotModified {
-		t.Fatalf("status = %d, want 304", rec.Code)
+	assertImageRedirect(t, rec, upstream.URL)
+	if upstreamCalled {
+		t.Fatal("compat image route proxied the upstream image instead of redirecting")
+	}
+	if cached, ok := h.images.LookupSized(routeID, "Primary", "", compatRequestImageSize(req, "Primary")); !ok || cached == "" {
+		t.Fatal("signed-tag image URL was not cached after resolution")
 	}
 }
 
-func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
+func TestHandleItemImageProxiesInfuseSignedTagWithoutSessionOrCache(t *testing.T) {
+	upstreamCalled := false
+	var gotIfNoneMatch string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		gotIfNoneMatch = r.Header.Get("If-None-Match")
+		w.Header().Set("Cache-Control", "public, max-age=14400")
 		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("ETag", `"poster-v1"`)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("image-bytes"))
 	}))
 	defer upstream.Close()
@@ -124,13 +100,15 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	}, false, nil, nil).ImageTags["Primary"]
 	h := &ImagesHandler{
 		codec:      codec,
-		httpClient: upstream.Client(),
 		images:     NewImageCache(time.Hour, func() time.Time { return updatedAt }),
 		itemRepo:   fakeImageItemRepo{item: item},
 		imageTags:  newImageTagSigner(cfg.Auth.JWTSecret),
+		httpClient: upstream.Client(),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+tag, nil)
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+compatImageProxyTag(tag), nil)
+	req.Header.Set("If-None-Match", `"poster-v1"`)
+	req.Header.Set("User-Agent", "Infuse-Direct/8.4.6")
 	req = withImageRouteParams(req, routeID, "Primary")
 	rec := httptest.NewRecorder()
 
@@ -140,10 +118,90 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
 	}
 	if got := rec.Body.String(); got != "image-bytes" {
-		t.Fatalf("body = %q, want image bytes", got)
+		t.Fatalf("body = %q, want image-bytes", got)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want image/jpeg", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != compatImageRouteCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, compatImageRouteCacheControl)
+	}
+	if got := rec.Header().Get("CDN-Cache-Control"); got != "private, no-store, no-cache, max-age=0" {
+		t.Fatalf("CDN-Cache-Control = %q, want private, no-store, no-cache, max-age=0", got)
+	}
+	if got := rec.Header().Get("X-Accel-Expires"); got != "0" {
+		t.Fatalf("X-Accel-Expires = %q, want 0", got)
+	}
+	if got := gotIfNoneMatch; got != `"poster-v1"` {
+		t.Fatalf("forwarded If-None-Match = %q, want poster-v1", got)
+	}
+	if !upstreamCalled {
+		t.Fatal("Infuse compat image route did not proxy the upstream image")
+	}
+}
+
+func TestHandleItemImageProxyRouteIDUsesCanonicalItemAndProxy(t *testing.T) {
+	upstreamCalled := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.Header().Set("Content-Type", "image/webp")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("proxy-route-image"))
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	proxyRouteID := compatImageProxyRouteID(codec, routeID)
+	updatedAt := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:       contentID,
+		PosterPath:      upstream.URL,
+		PosterThumbhash: "poster-thumbhash",
+		UpdatedAt:       updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	tag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:       contentID,
+		Type:            "movie",
+		Title:           "Movie",
+		PosterURL:       item.PosterPath,
+		PosterPath:      item.PosterPath,
+		PosterThumbhash: item.PosterThumbhash,
+		UpdatedAt:       item.UpdatedAt,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:      codec,
+		images:     NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+		itemRepo:   fakeImageItemRepo{item: item},
+		imageTags:  newImageTagSigner(cfg.Auth.JWTSecret),
+		httpClient: upstream.Client(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+proxyRouteID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+compatImageProxyTag(tag), nil)
+	req = withImageRouteParams(req, proxyRouteID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "proxy-route-image" {
+		t.Fatalf("body = %q, want proxy-route-image", got)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
 	}
 	if cached, ok := h.images.LookupSized(routeID, "Primary", "", compatRequestImageSize(req, "Primary")); !ok || cached == "" {
-		t.Fatal("signed-tag image URL was not cached after resolution")
+		t.Fatal("proxy route image URL was not cached under the canonical route ID")
+	}
+	if !upstreamCalled {
+		t.Fatal("proxy route did not fetch the upstream image")
 	}
 }
 
@@ -168,10 +226,9 @@ func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
 		UpdatedAt:       item.UpdatedAt,
 	}, false, nil, nil).ImageTags["Primary"]
 	h := &ImagesHandler{
-		codec:      codec,
-		httpClient: http.DefaultClient,
-		itemRepo:   fakeImageItemRepo{item: item},
-		imageTags:  newImageTagSigner(""),
+		codec:     codec,
+		itemRepo:  fakeImageItemRepo{item: item},
+		imageTags: newImageTagSigner(""),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+tag, nil)
@@ -186,9 +243,10 @@ func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
 }
 
 func TestHandleItemImageAcceptsSignedCanonicalBackdropTagWithoutSessionOrCache(t *testing.T) {
+	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("backdrop-bytes"))
+		upstreamCalled = true
+		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer upstream.Close()
 
@@ -201,9 +259,8 @@ func TestHandleItemImageAcceptsSignedCanonicalBackdropTagWithoutSessionOrCache(t
 		upstream.URL,
 	)
 	h := &ImagesHandler{
-		codec:      codec,
-		httpClient: upstream.Client(),
-		images:     NewImageCache(time.Hour, time.Now),
+		codec:  codec,
+		images: NewImageCache(time.Hour, time.Now),
 		itemRepo: fakeImageItemRepo{item: &models.MediaItem{
 			ContentID:    contentID,
 			BackdropPath: upstream.URL,
@@ -217,18 +274,17 @@ func TestHandleItemImageAcceptsSignedCanonicalBackdropTagWithoutSessionOrCache(t
 
 	h.HandleItemImage(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != "backdrop-bytes" {
-		t.Fatalf("body = %q, want backdrop bytes", got)
+	assertImageRedirect(t, rec, upstream.URL)
+	if upstreamCalled {
+		t.Fatal("compat image route proxied the upstream image instead of redirecting")
 	}
 }
 
 func TestHandleItemImageAcceptsLibraryPosterTagWithoutSessionOrCache(t *testing.T) {
+	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("library-poster"))
+		upstreamCalled = true
+		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer upstream.Close()
 
@@ -243,7 +299,6 @@ func TestHandleItemImageAcceptsLibraryPosterTagWithoutSessionOrCache(t *testing.
 	)
 	h := &ImagesHandler{
 		codec:        codec,
-		httpClient:   upstream.Client(),
 		images:       NewImageCache(time.Hour, time.Now),
 		folderRepo:   fakeImageFolderRepo{folder: &models.MediaFolder{ID: libraryID, PosterPath: posterPath}},
 		posterSigner: fakeLibraryPosterPresigner{url: upstream.URL},
@@ -256,18 +311,17 @@ func TestHandleItemImageAcceptsLibraryPosterTagWithoutSessionOrCache(t *testing.
 
 	h.HandleItemImage(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != "library-poster" {
-		t.Fatalf("body = %q, want library poster", got)
+	assertImageRedirect(t, rec, upstream.URL)
+	if upstreamCalled {
+		t.Fatal("compat image route proxied the upstream image instead of redirecting")
 	}
 }
 
 func TestHandleItemImageAcceptsLegacyCachedURLTagWithoutRouteFallback(t *testing.T) {
+	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("cached-image"))
+		upstreamCalled = true
+		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer upstream.Close()
 
@@ -276,10 +330,9 @@ func TestHandleItemImageAcceptsLegacyCachedURLTagWithoutRouteFallback(t *testing
 	cache := NewImageCache(time.Hour, time.Now)
 	cache.RememberSized(routeID, "Primary", upstream.URL, compatCardImageSize)
 	h := &ImagesHandler{
-		codec:      codec,
-		httpClient: upstream.Client(),
-		images:     cache,
-		imageTags:  newImageTagSigner("image-secret"),
+		codec:     codec,
+		images:    cache,
+		imageTags: newImageTagSigner("image-secret"),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+tagValue(upstream.URL), nil)
@@ -288,11 +341,9 @@ func TestHandleItemImageAcceptsLegacyCachedURLTagWithoutRouteFallback(t *testing
 
 	h.HandleItemImage(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != "cached-image" {
-		t.Fatalf("body = %q, want cached image", got)
+	assertImageRedirect(t, rec, upstream.URL)
+	if upstreamCalled {
+		t.Fatal("compat image route proxied the upstream image instead of redirecting")
 	}
 }
 
@@ -328,11 +379,10 @@ func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
 		UpdatedAt:       item.UpdatedAt,
 	}, false, nil, nil).ImageTags["Primary"]
 	h := &ImagesHandler{
-		codec:      codec,
-		httpClient: upstream.Client(),
-		images:     cache,
-		itemRepo:   fakeImageItemRepo{item: item},
-		imageTags:  newImageTagSigner("new-secret"),
+		codec:     codec,
+		images:    cache,
+		itemRepo:  fakeImageItemRepo{item: item},
+		imageTags: newImageTagSigner("new-secret"),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag="+tag, nil)
@@ -346,6 +396,34 @@ func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
 	}
 	if called {
 		t.Fatal("served cached image before validating the signed tag")
+	}
+}
+
+func TestRedirectImageURLRejectsNonHTTPURL(t *testing.T) {
+	h := &ImagesHandler{}
+	req := httptest.NewRequest(http.MethodGet, "/Items/1/Images/Primary", nil)
+	rec := httptest.NewRecorder()
+
+	h.redirectImageURL(rec, req, "catalog/poster.jpg")
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s; want 502", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
+	}
+}
+
+func assertImageRedirect(t *testing.T, rec *httptest.ResponseRecorder, wantLocation string) {
+	t.Helper()
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, body = %s; want 302", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != wantLocation {
+		t.Fatalf("Location = %q, want %q", got, wantLocation)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != compatImageRouteCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, compatImageRouteCacheControl)
 	}
 }
 

@@ -46,6 +46,10 @@ type LocalWatchEventDispatcher interface {
 	HandleLocalWatchEvent(ctx context.Context, event watchsync.LocalWatchEvent) error
 }
 
+type EbookReaderProgressLister interface {
+	ListByContentIDs(ctx context.Context, userID int, profileID string, contentIDs []string) (map[string]EbookReaderProgress, error)
+}
+
 // ItemsHandler handles browse, search, item detail, and series endpoints.
 type ItemsHandler struct {
 	browseRepo               *catalog.BrowseRepository
@@ -62,6 +66,8 @@ type ItemsHandler struct {
 	profileRefreshRequester  ProfileRefreshRequester
 	metadataRefreshRequester MetadataRefreshRequester
 	localWatchDispatcher     LocalWatchEventDispatcher
+	ebookProgressStore       EbookReaderProgressLister
+	ebookReadStateStore      EbookReadStateStore
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
 }
@@ -112,6 +118,11 @@ func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequ
 
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {
 	h.localWatchDispatcher = dispatcher
+}
+
+func (h *ItemsHandler) SetEbookReaderProgressStore(store EbookReaderProgressReadWriter) {
+	h.ebookProgressStore = store
+	h.ebookReadStateStore = store
 }
 
 func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Context, detail *catalog.ItemDetail) {
@@ -225,6 +236,9 @@ type sortMetricsResponse struct {
 	ProgressRatio  *float64 `json:"progress_ratio,omitempty"`
 	ViewedAt       string   `json:"viewed_at,omitempty"`
 	PlayCount      *int     `json:"play_count,omitempty"`
+	Author         string   `json:"author,omitempty"`
+	Narrator       string   `json:"narrator,omitempty"`
+	SeriesName     string   `json:"series_name,omitempty"`
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -373,8 +387,8 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if detail.Type == "movie" || detail.Type == "episode" {
-		detail.UserData = h.getLeafUserData(r, detail.ContentID)
+	if detail.Type == "movie" || detail.Type == "episode" || detail.Type == "ebook" {
+		detail.UserData = h.getLeafUserData(r, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
 	}
 
@@ -429,7 +443,8 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	targetType, targets, err := h.resolveWatchedTargets(r.Context(), id, h.accessFilter(r))
+	filter := h.accessFilter(r)
+	targetType, targets, err := h.resolveWatchedTargets(r.Context(), id, filter)
 	if err != nil {
 		switch {
 		case isNotFound(err):
@@ -440,12 +455,16 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if h.watchState == nil {
+	switch {
+	case targetType == "ebook":
+		// Ebook read state lives in ebook_reader_progress, not in
+		// user_watch_progress/user_watch_history; watch providers do not sync
+		// books, so no local watch event is dispatched.
+		err = h.setEbookReadState(r.Context(), userID, profileID, id, played, filter)
+	case h.watchState == nil:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
-	}
-
-	if played {
+	case played:
 		leafTargets := make([]watchstate.LeafWatchTarget, 0, len(targets))
 		for _, target := range targets {
 			leafTargets = append(leafTargets, watchstate.LeafWatchTarget{
@@ -459,7 +478,7 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		if err == nil {
 			h.dispatchLocalWatchEvent(r.Context(), watchsync.LocalWatchEventMarkedWatched, userID, profileID, result)
 		}
-	} else {
+	default:
 		targetIDs := make([]string, 0, len(targets))
 		for _, target := range targets {
 			targetIDs = append(targetIDs, target.ContentID)
@@ -471,6 +490,10 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update watched state")
 		return
 	}
@@ -739,7 +762,10 @@ func (h *ItemsHandler) listItemUserStates(r *http.Request, items []*models.Media
 	if !ok {
 		return map[string]*itemUserStateResponse{}
 	}
-	states, err := resolveItemUserStates(r.Context(), store, profileID, h.episodeRepo, items)
+	states, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.episodeRepo, items, itemUserStateOptions{
+		UserID:             apimw.GetUserID(r.Context()),
+		EbookProgressStore: h.ebookProgressStore,
+	})
 	if err != nil {
 		return map[string]*itemUserStateResponse{}
 	}
@@ -850,6 +876,7 @@ func (h *ItemsHandler) listSortMetrics(
 	filter catalog.AccessFilter,
 	overlaySummaries map[string]*models.OverlaySummary,
 	store userstore.UserStore,
+	userID int,
 	profileID string,
 ) map[string]*sortMetricsResponse {
 	metrics := make(map[string]*sortMetricsResponse, len(items))
@@ -890,9 +917,89 @@ func (h *ItemsHandler) listSortMetrics(
 			}
 		}
 	case "progress", "date_viewed", "plays":
-		h.listUserSortMetrics(ctx, items, sortField, store, profileID, metrics)
+		h.listUserSortMetrics(ctx, items, sortField, store, userID, profileID, metrics)
+	case "author", "narrator", "series":
+		h.listAudiobookSortMetrics(ctx, items, sortField, metrics)
 	}
 	return metrics
+}
+
+func (h *ItemsHandler) listAudiobookSortMetrics(
+	ctx context.Context,
+	items []*models.MediaItem,
+	sortField string,
+	metrics map[string]*sortMetricsResponse,
+) {
+	if h == nil || h.browseRepo == nil || h.browseRepo.Pool() == nil || len(items) == 0 {
+		return
+	}
+	contentIDs := uniqueItemContentIDs(items)
+	if len(contentIDs) == 0 {
+		return
+	}
+
+	var query string
+	switch sortField {
+	case "author":
+		query = audiobookPersonSortMetricQuery(int(models.PersonKindAuthor))
+	case "narrator":
+		query = audiobookPersonSortMetricQuery(int(models.PersonKindNarrator))
+	case "series":
+		query = `
+			SELECT target.content_id, BTRIM(s.series_name) AS value
+			FROM unnest($1::text[]) WITH ORDINALITY AS target(content_id, ord)
+			JOIN audiobook_series s ON s.content_id = target.content_id
+			WHERE BTRIM(s.series_name) <> ''`
+	default:
+		return
+	}
+
+	rows, err := h.browseRepo.Pool().Query(ctx, query, contentIDs)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var contentID, value string
+		if err := rows.Scan(&contentID, &value); err != nil {
+			return
+		}
+		value = strings.TrimSpace(value)
+		if contentID == "" || value == "" {
+			continue
+		}
+		resp := metrics[contentID]
+		if resp == nil {
+			resp = &sortMetricsResponse{}
+			metrics[contentID] = resp
+		}
+		switch sortField {
+		case "author":
+			resp.Author = value
+		case "narrator":
+			resp.Narrator = value
+		case "series":
+			resp.SeriesName = value
+		}
+	}
+}
+
+func audiobookPersonSortMetricQuery(kind int) string {
+	return fmt.Sprintf(`
+		SELECT target.content_id, person.name AS value
+		FROM unnest($1::text[]) WITH ORDINALITY AS target(content_id, ord)
+		JOIN LATERAL (
+			SELECT BTRIM(p.name) AS name
+			FROM item_people ip
+			JOIN people p ON p.id = ip.person_id
+			WHERE ip.content_id = target.content_id
+			  AND ip.kind = %d
+			  AND p.name IS NOT NULL
+			  AND BTRIM(p.name) <> ''
+			ORDER BY p.name ASC
+			LIMIT 1
+		) person ON TRUE`, kind)
 }
 
 func (h *ItemsHandler) listUserSortMetrics(
@@ -900,6 +1007,7 @@ func (h *ItemsHandler) listUserSortMetrics(
 	items []*models.MediaItem,
 	sortField string,
 	store userstore.UserStore,
+	userID int,
 	profileID string,
 	metrics map[string]*sortMetricsResponse,
 ) {
@@ -915,6 +1023,10 @@ func (h *ItemsHandler) listUserSortMetrics(
 	if err != nil {
 		return
 	}
+	ebookProgressMap, err := h.listEbookReaderProgressByContentIDs(ctx, userID, profileID, contentIDs)
+	if err != nil {
+		return
+	}
 
 	switch sortField {
 	case "progress":
@@ -923,10 +1035,16 @@ func (h *ItemsHandler) listUserSortMetrics(
 				continue
 			}
 			progress, ok := progressMap[item.ContentID]
-			if !ok || progress.Completed || progress.PositionSeconds <= 0 || progress.DurationSeconds <= 0 {
+			if ok && !progress.Completed && progress.PositionSeconds > 0 && progress.DurationSeconds > 0 {
+				ratio := progress.PositionSeconds / progress.DurationSeconds
+				metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
 				continue
 			}
-			ratio := progress.PositionSeconds / progress.DurationSeconds
+			ebookProgress, ok := ebookProgressMap[item.ContentID]
+			if !ok || ebookProgress.Progress <= 0 || ebookProgress.Progress >= models.EbookFinishedProgressThreshold {
+				continue
+			}
+			ratio := ebookProgress.Progress
 			metrics[item.ContentID] = &sortMetricsResponse{ProgressRatio: &ratio}
 		}
 	case "date_viewed", "plays":
@@ -955,6 +1073,12 @@ func (h *ItemsHandler) listUserSortMetrics(
 				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && progress.UpdatedAt > viewedAt {
 					viewedAt = progress.UpdatedAt
 				}
+				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold {
+					ebookViewedAt := progress.UpdatedAt.UTC().Format(time.RFC3339)
+					if ebookViewedAt > viewedAt {
+						viewedAt = ebookViewedAt
+					}
+				}
 				if viewedAt == "" {
 					continue
 				}
@@ -962,6 +1086,9 @@ func (h *ItemsHandler) listUserSortMetrics(
 			} else {
 				playCount := historyCounts[item.ContentID]
 				if progress, ok := progressMap[item.ContentID]; ok && progress.Completed && playCount < 1 {
+					playCount = 1
+				}
+				if progress, ok := ebookProgressMap[item.ContentID]; ok && progress.Progress >= models.EbookFinishedProgressThreshold && playCount < 1 {
 					playCount = 1
 				}
 				if playCount <= 0 {
@@ -972,6 +1099,18 @@ func (h *ItemsHandler) listUserSortMetrics(
 			metrics[item.ContentID] = resp
 		}
 	}
+}
+
+func (h *ItemsHandler) listEbookReaderProgressByContentIDs(
+	ctx context.Context,
+	userID int,
+	profileID string,
+	contentIDs []string,
+) (map[string]EbookReaderProgress, error) {
+	if h == nil || h.ebookProgressStore == nil || userID <= 0 || profileID == "" || len(contentIDs) == 0 {
+		return nil, nil
+	}
+	return h.ebookProgressStore.ListByContentIDs(ctx, userID, profileID, contentIDs)
 }
 
 func uniqueItemContentIDs(items []*models.MediaItem) []string {
@@ -1110,7 +1249,11 @@ func (h *ItemsHandler) toSeasonResponse(r *http.Request, seriesID string, s *mod
 	return resp
 }
 
-func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string) *catalog.SeasonUserData {
+func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string, itemType ...string) *catalog.SeasonUserData {
+	if len(itemType) > 0 && itemType[0] == "ebook" {
+		return h.getEbookLeafUserData(r, contentID)
+	}
+
 	store, profileID, ok := h.userStoreForRequest(r)
 	if !ok {
 		return nil
@@ -1124,13 +1267,45 @@ func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string) *catal
 	return &catalog.SeasonUserData{
 		PositionSeconds: progress.PositionSeconds,
 		DurationSeconds: progress.DurationSeconds,
-		IsInProgress:    !progress.Completed && progress.PositionSeconds > 0,
+		IsInProgress:    progress.PositionSeconds > 0,
 		Played:          progress.Completed,
 		LastFileID:      progress.LastFileID,
 		LastResolution:  progress.LastResolution,
 		LastHDR:         progress.LastHDR,
 		LastCodecVideo:  progress.LastCodecVideo,
 		LastEditionKey:  progress.LastEditionKey,
+	}
+}
+
+func (h *ItemsHandler) getEbookLeafUserData(r *http.Request, contentID string) *catalog.SeasonUserData {
+	if h == nil || h.ebookProgressStore == nil {
+		return nil
+	}
+	userID := apimw.GetUserID(r.Context())
+	profileID := requestProfileID(r)
+	if userID <= 0 || profileID == "" || contentID == "" {
+		return nil
+	}
+
+	progress, err := h.ebookProgressStore.ListByContentIDs(r.Context(), userID, profileID, []string{contentID})
+	if err != nil {
+		return nil
+	}
+	row, ok := progress[contentID]
+	if !ok || row.Progress <= 0 {
+		return nil
+	}
+
+	// Ebooks have no playback duration, so PositionSeconds/DurationSeconds
+	// encode the 0..1 reading ratio (position=ratio, duration=1). Clients can
+	// derive percent-complete from the pair as usual, but rendering them as
+	// absolute times is meaningless for ebooks. Changing the wire shape needs
+	// coordinated Android/Apple client updates.
+	return &catalog.SeasonUserData{
+		PositionSeconds: row.Progress,
+		DurationSeconds: 1,
+		IsInProgress:    row.Progress < models.EbookFinishedProgressThreshold,
+		Played:          row.Progress >= models.EbookFinishedProgressThreshold,
 	}
 }
 
@@ -1178,6 +1353,16 @@ func (h *ItemsHandler) getAggregateUserData(r *http.Request, episodes []*models.
 	}
 }
 
+// requestProfileID resolves the active profile for a request, falling back to
+// the X-Profile-Id header when the auth context does not carry one.
+func requestProfileID(r *http.Request) string {
+	profileID := apimw.GetProfileID(r.Context())
+	if profileID == "" {
+		profileID = r.Header.Get("X-Profile-Id")
+	}
+	return profileID
+}
+
 func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore, string, bool) {
 	if h.storeProvider == nil {
 		return nil, "", false
@@ -1188,10 +1373,7 @@ func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore
 		return nil, "", false
 	}
 
-	profileID := apimw.GetProfileID(r.Context())
-	if profileID == "" {
-		profileID = r.Header.Get("X-Profile-Id")
-	}
+	profileID := requestProfileID(r)
 	if profileID == "" {
 		return nil, "", false
 	}
@@ -1385,6 +1567,10 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 				ContentID:       item.ContentID,
 				DurationSeconds: h.contentDurationSeconds(ctx, item.ContentID, "", item.Runtime),
 			}}, nil
+		case "ebook":
+			// Ebooks have no playback duration; read state is keyed off
+			// ebook_reader_progress, so the leaf target only carries the ID.
+			return "ebook", []watchedLeafTarget{{ContentID: item.ContentID}}, nil
 		case "series":
 			if h.episodeRepo == nil {
 				return "", nil, catalog.ErrItemNotFound

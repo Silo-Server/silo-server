@@ -7,6 +7,16 @@ type queryResultDTO struct {
 	StartIndex       int           `json:"StartIndex"`
 }
 
+// themeMediaResultDTO mirrors Jellyfin's ThemeMediaResult. OwnerId is required:
+// jellyfin-sdk-kotlin models it as non-nullable, so omitting it fails client
+// deserialization even for an empty result.
+type themeMediaResultDTO struct {
+	Items            []baseItemDTO `json:"Items"`
+	TotalRecordCount int           `json:"TotalRecordCount"`
+	StartIndex       int           `json:"StartIndex"`
+	OwnerID          string        `json:"OwnerId"`
+}
+
 type baseItemDTO struct {
 	ServerID                 string                       `json:"ServerId,omitempty"`
 	ID                       string                       `json:"Id"`
@@ -48,6 +58,7 @@ type baseItemDTO struct {
 	ProviderIDs              map[string]string            `json:"ProviderIds,omitempty"`
 	ProductionLocations      []string                     `json:"ProductionLocations,omitempty"`
 	ImageTags                map[string]string            `json:"ImageTags"`
+	PrimaryImageItemID       string                       `json:"PrimaryImageItemId,omitempty"`
 	BackdropImageTags        []string                     `json:"BackdropImageTags,omitempty"`
 	PrimaryImageAspectRatio  *float64                     `json:"PrimaryImageAspectRatio,omitempty"`
 	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes,omitempty"`
@@ -73,6 +84,7 @@ type baseItemDTO struct {
 	SpecialFeatureCount      int                          `json:"SpecialFeatureCount,omitempty"`
 	MovieCount               int                          `json:"MovieCount,omitempty"`
 	SeriesCount              int                          `json:"SeriesCount,omitempty"`
+	SeasonCount              int                          `json:"SeasonCount,omitempty"`
 	EpisodeCount             int                          `json:"EpisodeCount,omitempty"`
 	LockedFields             []string                     `json:"LockedFields,omitempty"`
 	LockData                 bool                         `json:"LockData,omitempty"`

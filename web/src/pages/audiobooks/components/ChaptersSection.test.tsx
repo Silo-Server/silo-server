@@ -36,11 +36,12 @@ describe("ChaptersSection", () => {
     expect(screen.getByRole("button", { name: /Memory/ })).toBeInTheDocument();
   });
 
-  it("highlights the currently-playing chapter once expanded", async () => {
+  it("highlights the currently-listening chapter once expanded", async () => {
     render(<ChaptersSection files={files} currentPositionSeconds={250} onSelect={vi.fn()} />);
     await expandChapters();
     const row = screen.getByRole("button", { name: /Memory/ });
     expect(row).toHaveAttribute("data-current", "true");
+    expect(within(row).getByText("listening")).toBeInTheDocument();
   });
 
   it("sort menu switches between position and longest-first orders", async () => {

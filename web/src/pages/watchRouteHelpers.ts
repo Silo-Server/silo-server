@@ -246,11 +246,9 @@ export function buildWatchPageProps({
   const autoSkipIntro = currentProfile?.auto_skip_intro ?? false;
   const autoSkipRecap = currentProfile?.auto_skip_recap ?? false;
   const autoPlayNextPreview = currentProfile?.auto_play_next_preview ?? false;
-  const initialPosition = request.restart
-    ? 0
-    : item.user_data?.played === true
-      ? 0
-      : (item.user_data?.position_seconds ?? 0);
+  // Watched items store position 0, so any nonzero position is a live resume
+  // point — including a rewatch in flight (played stays true).
+  const initialPosition = request.restart ? 0 : (item.user_data?.position_seconds ?? 0);
 
   const resumeHints: ResumeHints | undefined =
     item.user_data?.last_file_id != null ||

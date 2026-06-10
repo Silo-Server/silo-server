@@ -113,6 +113,55 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// HandleDownload serves the original media file for /Items/{id}/Download.
+// This route backs the CanDownload flag set in mapping.go. CanDownload is
+// load-bearing for Infuse: it refuses Direct Play (Static=true streaming)
+// for items it believes it cannot download, so the flag must stay true and
+// this route must exist.
+func (h *PlaybackHandler) HandleDownload(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+
+	contentID, err := decodeContentID(h.codec, chiURLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
+	if err != nil || detail == nil || len(detail.Versions) == 0 {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+
+	version := detail.Versions[0]
+	if mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId")); mediaSourceID != "" {
+		if fileID, decodeErr := h.codec.DecodeIntID(EncodedIDMediaSource, mediaSourceID); decodeErr == nil {
+			for _, v := range detail.Versions {
+				if int64(v.FileID) == fileID {
+					version = v
+					break
+				}
+			}
+		}
+	}
+
+	if h.fileResolver == nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
+		return
+	}
+	file, err := h.fileResolver.GetByID(r.Context(), version.FileID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
+		return
+	}
+
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filepath.Base(file.FilePath)))
+	_ = playback.ServeDirectPlay(w, r, file.FilePath)
+}
+
 // HandleMasterManifest serves the compat-owned HLS manifest route.
 // It returns a full-duration VOD manifest so clients can seek to any position.
 // Segments that haven't been transcoded yet are served on-demand by the segment handler.
@@ -123,7 +172,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID"))
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
 	if playSessionID == "" {
 		writeError(w, http.StatusBadRequest, "BadRequest", "PlaySessionId is required")
 		return
@@ -906,7 +955,7 @@ func audioSelectionChanged(session *PlaybackSession, mediaSourceID string, incom
 		return true
 	}
 	for _, source := range session.MediaSources {
-		if mediaSourceID != "" && source.ID != mediaSourceID {
+		if mediaSourceID != "" && !mediaSourceIDsEqual(source.ID, mediaSourceID) {
 			continue
 		}
 		if source.SelectedAudioStreamIndex == nil {
@@ -925,7 +974,7 @@ func (h *PlaybackHandler) setSelectedAudioStream(playSessionID, mediaSourceID st
 		if mediaSourceID != "" {
 			sourceIndex = -1
 			for index := range current.MediaSources {
-				if current.MediaSources[index].ID == mediaSourceID {
+				if mediaSourceIDsEqual(current.MediaSources[index].ID, mediaSourceID) {
 					sourceIndex = index
 					break
 				}
@@ -1061,7 +1110,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 }
 
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
-	if playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID")); playSessionID != "" {
+	if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" {
 		playSession, ok := h.playbackStore.Get(playSessionID)
 		if !ok || playSession.CompatToken != compatSession.Token {
 			return nil, nil, ErrSessionNotFound
@@ -1099,7 +1148,7 @@ func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMe
 		return nil
 	}
 	for _, source := range session.MediaSources {
-		if source.ID == mediaSourceID {
+		if mediaSourceIDsEqual(source.ID, mediaSourceID) {
 			copy := source
 			return &copy
 		}

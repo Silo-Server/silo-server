@@ -139,7 +139,7 @@ func (f *fakeRequestService) DeleteIntegration(context.Context, mediarequests.Vi
 	return nil
 }
 
-func (f *fakeRequestService) LoadIntegrationOptions(context.Context, mediarequests.Viewer, mediarequests.Integration) (*mediarequests.IntegrationOptions, error) {
+func (f *fakeRequestService) LoadIntegrationOptions(context.Context, mediarequests.Viewer, mediarequests.Integration) (map[string][]mediarequests.RouterOption, error) {
 	return nil, nil
 }
 

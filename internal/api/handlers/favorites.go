@@ -40,6 +40,7 @@ type PersonalDataHandler struct {
 	localFavoriteDispatcher LocalFavoriteEventDispatcher
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
+	ebookProgressStore      EbookReaderProgressLister
 }
 
 // NewPersonalDataHandler creates a new PersonalDataHandler.
@@ -53,6 +54,10 @@ func NewPersonalDataHandler(provider userstore.UserStoreProvider, itemRepo perso
 // SetDetailService configures the detail service for image URL resolution.
 func (h *PersonalDataHandler) SetDetailService(svc *catalog.DetailService) {
 	h.detailSvc = svc
+}
+
+func (h *PersonalDataHandler) SetEbookReaderProgressStore(store EbookReaderProgressLister) {
+	h.ebookProgressStore = store
 }
 
 // SetProfileStaler configures an optional staleness trigger for taste profiles.
@@ -552,7 +557,10 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 
 	userStates := map[string]*itemUserStateResponse{}
 	if store, profileID, ok := h.userStoreForRequest(r); ok {
-		if resolvedStates, err := resolveItemUserStates(r.Context(), store, profileID, h.episodeRepo, accessibleItems); err == nil {
+		if resolvedStates, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.episodeRepo, accessibleItems, itemUserStateOptions{
+			UserID:             apimw.GetUserID(r.Context()),
+			EbookProgressStore: h.ebookProgressStore,
+		}); err == nil {
 			userStates = resolvedStates
 		}
 	}
@@ -669,7 +677,11 @@ func (h *PersonalDataHandler) resolveHistoryRemovalMediaItemIDs(
 				return nil, err
 			}
 			switch item.Type {
-			case "movie":
+			case "movie", "ebook":
+				// Hiding an ebook gates ebook_reader_progress reads via
+				// user_history_hidden_items (updated_at <= hidden_before)
+				// without deleting the progress row, so the reader position
+				// survives: hidden is not the same as unread.
 				return []string{item.ContentID}, nil
 			case "series":
 				return h.seriesEpisodeIDs(ctx, item.ContentID)

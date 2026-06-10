@@ -1,4 +1,5 @@
 import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySortOptions";
+import type { SchemaOption } from "@/components/admin/plugins/schemaFormUtils";
 
 // Auth
 export interface LoginRequest {
@@ -568,6 +569,16 @@ export interface AudiobookDetailExtension {
   };
 }
 
+export interface EbookDetailExtension {
+  authors: AudiobookPerson[];
+  publisher?: string;
+  series?: AudiobookSeriesGroup;
+  related: {
+    also_by_author: AudiobookRelatedItem[];
+    similar: AudiobookRelatedItem[];
+  };
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -644,11 +655,14 @@ export interface BrowseItemSortMetrics {
   progress_ratio?: number;
   viewed_at?: string;
   play_count?: number;
+  author?: string;
+  narrator?: string;
+  series_name?: string;
 }
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -720,6 +734,23 @@ export interface CatalogFiltersResponse extends ItemFiltersResponse {
   authors?: string[];
   narrators?: string[];
   series?: string[];
+}
+
+// Grouped audiobook browse (Library tab Authors / Narrators / Series axes).
+// `name` round-trips into the matching catalog filter field (author /
+// narrator / series), which match case-insensitively.
+export interface AudiobookGroup {
+  name: string;
+  item_count: number;
+  total_duration_seconds: number;
+  in_progress_count: number;
+  finished_count: number;
+  poster_urls: string[];
+}
+
+export interface AudiobookGroupsResponse {
+  total: number;
+  groups: AudiobookGroup[];
 }
 
 // Item Detail
@@ -917,7 +948,7 @@ export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | 
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "podcast";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -991,6 +1022,7 @@ export interface ItemDetail {
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
   audiobook?: AudiobookDetailExtension;
+  ebook?: EbookDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1170,7 +1202,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode" | "audiobook";
+  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook" | "video";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -1716,56 +1748,43 @@ export interface RequestUserLimit {
 export interface RequestIntegration {
   id: string;
   name: string;
-  kind: string;
   enabled: boolean;
-  is_4k: boolean;
-  is_default: boolean;
-  is_default_4k: boolean;
   base_url: string;
   api_key_ref?: string;
   has_api_key?: boolean;
-  root_folder: string;
-  quality_profile_id?: number | null;
-  tags: number[];
-  anime_enabled: boolean;
-  anime_quality_profile_id?: number | null;
-  anime_root_folder?: string;
-  anime_tags: number[];
-  options: Record<string, unknown>;
+  // Two-tier plugin-driven connection model. Generic fields above are owned by
+  // the host; the arr-specific config now lives in plugin_config. Optional for
+  // backward-compatible reads of legacy rows that predate the refactor.
+  capability_id?: string;
+  installation_id?: number;
+  supported_media_types?: string[];
+  plugin_config?: Record<string, unknown>;
   last_check_at?: string | null;
   last_check_status?: string;
   last_check_error?: string;
   updated_at?: string;
 }
 
-export interface RequestIntegrationRootFolder {
-  path: string;
-  free_space?: number;
-  total_space?: number;
-  accessible: boolean;
-}
+export type RequestIntegrationOptions = Record<string, SchemaOption[]>;
 
-export interface RequestIntegrationQualityProfile {
-  id: number;
-  name: string;
-}
-
-export interface RequestIntegrationTag {
-  id: number;
-  label: string;
-}
-
-export interface RequestIntegrationOptions {
-  kind: string;
-  root_folders: RequestIntegrationRootFolder[];
-  quality_profiles: RequestIntegrationQualityProfile[];
-  tags: RequestIntegrationTag[];
+export interface RequestIntegrationValidationError {
+  error: "validation_failed";
+  field_errors?: Record<string, string>;
+  form_error?: string;
 }
 
 export interface LoadRequestIntegrationOptionsRequest {
-  kind: "radarr" | "sonarr";
+  // Vestigial: the backend resolves the plugin via installation_id +
+  // plugin_config and ignores this. Optional and no longer sent by the client.
+  kind?: "radarr" | "sonarr";
   base_url: string;
   api_key_ref?: string;
+  // For unsaved connections the host cannot backfill from a stored row, so the
+  // body must carry enough to resolve the plugin (installation + capability +
+  // arr-specific config) when testing the connection.
+  capability_id?: string;
+  installation_id?: number;
+  plugin_config?: Record<string, unknown>;
 }
 
 export interface RequestIntegrationsResponse {
@@ -2684,6 +2703,7 @@ export interface AdminSettingsConnectionCheckRequest {
 export interface PluginAdminForm {
   fields: PluginAdminFormField[];
   submit_label?: string;
+  sections?: PluginAdminFormSection[];
 }
 
 export interface PluginAdminFormFieldOption {
@@ -2692,11 +2712,36 @@ export interface PluginAdminFormFieldOption {
   description?: string;
 }
 
+export interface PluginAdminFormCondition {
+  field: string;
+  equals: string[];
+}
+
+export interface PluginAdminFormValidation {
+  has_min?: boolean;
+  min?: number;
+  has_max?: boolean;
+  max?: number;
+  pattern?: string;
+  min_length?: number;
+  max_length?: number;
+}
+
+export interface PluginAdminFormSection {
+  key: string;
+  title: string;
+  description?: string;
+  collapsible: boolean;
+  collapsed_default: boolean;
+  field_keys: string[];
+  show_when?: PluginAdminFormCondition[];
+}
+
 export interface PluginAdminFormField {
   key: string;
   label: string;
   description?: string;
-  control: "TEXT" | "TEXTAREA" | "PASSWORD" | "NUMBER" | "SWITCH" | "SELECT";
+  control: "TEXT" | "TEXTAREA" | "PASSWORD" | "NUMBER" | "SWITCH" | "SELECT" | "MULTI_SELECT";
   placeholder?: string;
   required: boolean;
   secret: boolean;
@@ -2704,6 +2749,10 @@ export interface PluginAdminFormField {
   default_value?: unknown;
   options?: PluginAdminFormFieldOption[];
   rows?: number;
+  dynamic_options?: boolean;
+  show_when?: PluginAdminFormCondition[];
+  validation?: PluginAdminFormValidation;
+  exclusive_group_field?: string;
 }
 
 export interface PluginCapability {
@@ -2948,7 +2997,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -3108,7 +3157,9 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
       value?.media_scope === "movie" ||
       value?.media_scope === "series" ||
       value?.media_scope === "episode" ||
-      value?.media_scope === "audiobook"
+      value?.media_scope === "audiobook" ||
+      value?.media_scope === "ebook" ||
+      value?.media_scope === "video"
         ? value.media_scope
         : undefined,
     match: value?.match === "any" ? "any" : "all",
@@ -3170,7 +3221,9 @@ export function queryDefinitionFromSectionConfig(
           ? "episode"
           : config.media_scope === "audiobook" || config.filter_type === "audiobook"
             ? "audiobook"
-            : undefined;
+            : config.media_scope === "ebook" || config.filter_type === "ebook"
+              ? "ebook"
+              : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;
@@ -3329,6 +3382,15 @@ export interface RateLimitConfig {
   ip_requests_per_minute: number;
   ip_burst: number;
   auth_endpoints: Record<string, RateLimitAuthEndpointConfig>;
+  /** Whether a limiter is running in this process (GET responses only). */
+  active?: boolean;
+  /** Backend the running limiter uses; may differ from `backend` until restart. */
+  active_backend?: string;
+}
+
+export interface RateLimitUpdateResponse {
+  status: string;
+  restart_required?: boolean;
 }
 
 // IP visibility

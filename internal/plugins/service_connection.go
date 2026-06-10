@@ -45,6 +45,16 @@ var runPluginConnectionCheck = func(
 	if err != nil {
 		return err
 	}
+	capability := metadataProviderConnectionCheckCapability(manifest, capabilityID)
+	if !metadataProviderSupportsConnectionProbe(capability, "movie") {
+		slog.Debug(
+			"skipping metadata provider connection check for unsupported probe type",
+			"plugin_id", manifest.GetPluginId(),
+			"capability_id", capabilityID,
+			"item_type", "movie",
+		)
+		return nil
+	}
 
 	metadataClient, err := client.MetadataProvider(capabilityID)
 	if err != nil {
@@ -223,4 +233,67 @@ func metadataProviderConnectionCheckCapabilityID(manifest *pluginv1.PluginManife
 		Message: "Connection checks are not supported for this plugin yet.",
 		Cause:   ErrConnectionTestUnsupported,
 	}
+}
+
+func metadataProviderConnectionCheckCapability(
+	manifest *pluginv1.PluginManifest,
+	capabilityID string,
+) *pluginv1.CapabilityDescriptor {
+	for _, capability := range manifest.GetCapabilities() {
+		if capability.GetType() == "metadata_provider.v1" && capability.GetId() == capabilityID {
+			return capability
+		}
+	}
+	return nil
+}
+
+func metadataProviderSupportsConnectionProbe(
+	capability *pluginv1.CapabilityDescriptor,
+	contentType string,
+) bool {
+	priorities, ok := metadataProviderDefaultPriorities(capability)
+	if !ok {
+		return true
+	}
+	return priorities[contentType] > 0
+}
+
+func metadataProviderDefaultPriorities(
+	capability *pluginv1.CapabilityDescriptor,
+) (map[string]float64, bool) {
+	if capability == nil || capability.GetMetadata() == nil {
+		return nil, false
+	}
+
+	metadataMap := capability.GetMetadata().AsMap()
+	raw, ok := metadataMap["default_priority"]
+	if !ok {
+		nested, nestedOK := metadataMap["metadata"].(map[string]any)
+		if !nestedOK {
+			return nil, false
+		}
+		raw, ok = nested["default_priority"]
+		if !ok {
+			return nil, false
+		}
+	}
+
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	priorities := make(map[string]float64, len(rawMap))
+	for key, value := range rawMap {
+		switch v := value.(type) {
+		case float64:
+			priorities[key] = v
+		case int:
+			priorities[key] = float64(v)
+		case int32:
+			priorities[key] = float64(v)
+		case int64:
+			priorities[key] = float64(v)
+		}
+	}
+	return priorities, len(priorities) > 0
 }

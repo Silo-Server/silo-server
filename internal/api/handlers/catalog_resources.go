@@ -497,8 +497,8 @@ func (h *CatalogResourceHandler) enrichItemDetail(r *http.Request, detail *catal
 				detail.SeasonUserData = h.items.getAggregateUserData(r, episodes)
 			}
 		}
-	case "movie", "episode", "audiobook":
-		detail.SeasonUserData = h.items.getLeafUserData(r, detail.ContentID)
+	case "movie", "episode", "audiobook", "ebook":
+		detail.SeasonUserData = h.items.getLeafUserData(r, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.SeasonUserData, &detail.EffectiveVersionEditionKey)
 	}
 

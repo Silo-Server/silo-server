@@ -73,6 +73,19 @@ describe("buildQualitySummary", () => {
     });
     expect(buildQualitySummary(version)).toBe("2160p · HEVC · HDR · Atmos");
   });
+
+  it("falls back to container for ebook-style files without video quality", () => {
+    const version = makeVersion({
+      resolution: "",
+      codec_video: "",
+      codec_audio: "",
+      hdr: false,
+      container: "epub",
+      file_name: "A Psalm for the Wild-Built.epub",
+    });
+
+    expect(buildQualitySummary(version)).toBe("EPUB");
+  });
 });
 
 describe("buildDetailLine", () => {

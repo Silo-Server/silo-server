@@ -114,6 +114,12 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
       return <>{formatDate(item.sort_metrics?.viewed_at) ?? defaultLabel}</>;
     case "plays":
       return <>{item.sort_metrics?.play_count ?? defaultLabel}</>;
+    case "author":
+      return <>{item.sort_metrics?.author || defaultLabel}</>;
+    case "narrator":
+      return <>{item.sort_metrics?.narrator || defaultLabel}</>;
+    case "series":
+      return <>{item.sort_metrics?.series_name || defaultLabel}</>;
     default:
       if (episodeLabels) {
         return <>{episodeLabels.episodeCode}</>;
@@ -141,7 +147,9 @@ export default function ItemCard({
 }) {
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${item.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`;
+  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
+    libraryId ? `?libraryId=${libraryId}` : ""
+  }`;
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 
@@ -228,6 +236,7 @@ export default function ItemCard({
         <MediaItemMenu
           contentId={item.content_id}
           mediaType={item.type}
+          libraryId={libraryId}
           userState={item.user_state}
           variant="poster"
         />

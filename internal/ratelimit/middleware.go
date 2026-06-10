@@ -35,6 +35,16 @@ func NewMiddleware(perKey RateLimiter, global RateLimiter, store SettingsStore, 
 	}
 }
 
+// ActiveBackend reports which limiter backend this process is actually
+// running, as opposed to the configured backend, which only takes effect
+// after a restart.
+func (mw *Middleware) ActiveBackend() string {
+	if mw.isMemory {
+		return "memory"
+	}
+	return "redis"
+}
+
 // Init loads config and seeds defaults. Call once at startup.
 func (mw *Middleware) Init(ctx context.Context) error {
 	if err := SeedDefaults(ctx, mw.store); err != nil {

@@ -35,6 +35,69 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 	return &ItemRepository{pool: pool}
 }
 
+// GetPoster returns the current poster path and thumbhash for a media item.
+// Missing or NULL values are returned as empty strings.
+func (r *ItemRepository) GetPoster(ctx context.Context, contentID string) (posterPath string, posterThumbhash string, err error) {
+	if r == nil || r.pool == nil {
+		return "", "", ErrItemNotFound
+	}
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(poster_path, ''), COALESCE(poster_thumbhash, '')
+		FROM media_items
+		WHERE content_id = $1
+	`, contentID).Scan(&posterPath, &posterThumbhash); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrItemNotFound
+		}
+		return "", "", fmt.Errorf("getting media item poster: %w", err)
+	}
+	return posterPath, posterThumbhash, nil
+}
+
+// SetLocalPoster records a locally extracted poster without ever overwriting
+// provider or manually applied artwork: the row is updated only when the item
+// has no poster yet or its current poster lives under localPrefix. The
+// condition is evaluated atomically in SQL so concurrent metadata writers
+// (e.g. the ebook enrichment sweep) cannot be clobbered between a read and a
+// write. Returns true when a row was updated.
+func (r *ItemRepository) SetLocalPoster(ctx context.Context, contentID, posterPath, thumbhash, localPrefix string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, ErrItemNotFound
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_items
+		SET poster_path = $2,
+		    poster_thumbhash = NULLIF($3, ''),
+		    updated_at = NOW()
+		WHERE content_id = $1
+		  AND (poster_path IS NULL OR poster_path = '' OR poster_path LIKE $4 || '%')
+	`, contentID, posterPath, thumbhash, localPrefix)
+	if err != nil {
+		return false, fmt.Errorf("setting local poster: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// GetPosterPath returns the current poster path for a media item. Missing or
+// NULL poster values are returned as an empty string.
+func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (string, error) {
+	if r == nil || r.pool == nil {
+		return "", ErrItemNotFound
+	}
+	var posterPath string
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(poster_path, '')
+		FROM media_items
+		WHERE content_id = $1
+	`, contentID).Scan(&posterPath); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrItemNotFound
+		}
+		return "", fmt.Errorf("getting media item poster path: %w", err)
+	}
+	return posterPath, nil
+}
+
 // overviewMatchFloor is the minimum ts_rank_cd score an overview-only match
 // must achieve to be returned when no title FTS match exists in the candidate
 // set. The overview tsvector is built without setweight(), so PostgreSQL's
@@ -45,60 +108,87 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 // incidental one-mention hits that flooded results before.
 const overviewMatchFloor = 0.15
 
+// itemColumnNames lists, in scan order, every column selected by media_items
+// item queries. Shared by itemColumns, qualifiedItemColumns,
+// qualifiedListItemColumns, and qualifiedItemColumnRefs so the select lists
+// can never drift from each other or from scanItem.
+var itemColumnNames = []string{
+	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
+	"content_rating", "runtime", "overview", "tagline",
+	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
+	"imdb_id", "tmdb_id", "tvdb_id",
+	"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
+	"metadata_s3_path", "metadata_etag", "season_count",
+	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
+	"show_status",
+	"matched_at", "last_refreshed", "refresh_failures",
+	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
+}
+
+// nullableStringItemColumns are media_items columns that may hold NULL but
+// scan into plain (non-pointer) string fields on models.MediaItem, so select
+// lists coalesce them to ”.
+var nullableStringItemColumns = map[string]bool{
+	"poster_path":        true,
+	"poster_thumbhash":   true,
+	"backdrop_path":      true,
+	"backdrop_thumbhash": true,
+	"logo_path":          true,
+	"metadata_s3_path":   true,
+	"metadata_etag":      true,
+}
+
+// itemColumnExpr renders one select-list entry for col, qualified with alias
+// when non-empty. Nullable string columns are coalesced to ” and aliased
+// back to their own name so queries that wrap the select list in a CTE or
+// subquery can still reference the column by name.
+func itemColumnExpr(alias, col string) string {
+	qualified := col
+	if alias != "" {
+		qualified = alias + "." + col
+	}
+	if nullableStringItemColumns[col] {
+		return fmt.Sprintf("COALESCE(%s, '') AS %s", qualified, col)
+	}
+	return qualified
+}
+
+func joinItemColumns(alias string) string {
+	exprs := make([]string, len(itemColumnNames))
+	for i, col := range itemColumnNames {
+		exprs[i] = itemColumnExpr(alias, col)
+	}
+	return strings.Join(exprs, ", ")
+}
+
 // itemColumns is the list of columns returned by all SELECT queries on media_items.
-const itemColumns = `content_id, type, title, sort_title, default_metadata_language, original_title, year, genres,
-	content_rating, runtime, overview, tagline,
-	rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
-	imdb_id, tmdb_id, tvdb_id,
-	poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
-	metadata_s3_path, metadata_etag, season_count,
-	studios, networks, countries, keywords, original_language, release_date::text, first_air_date, last_air_date, air_time, air_timezone,
-	show_status,
-	matched_at, last_refreshed, refresh_failures,
-	episode_metadata_incomplete, episode_metadata_last_checked_at, locked_fields, status, created_at, updated_at`
+var itemColumns = joinItemColumns("")
 
 func qualifiedItemColumns(alias string) string {
-	cols := []string{
-		"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
-		"content_rating", "runtime", "overview", "tagline",
-		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
-		"imdb_id", "tmdb_id", "tvdb_id",
-		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
-		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
-		"show_status",
-		"matched_at", "last_refreshed", "refresh_failures",
-		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
+	return joinItemColumns(alias)
+}
+
+// qualifiedItemColumnRefs renders plain alias-qualified column references
+// without COALESCE or AS aliases, for contexts like GROUP BY where output
+// aliases are invalid.
+func qualifiedItemColumnRefs(alias string) string {
+	refs := make([]string, len(itemColumnNames))
+	for i, col := range itemColumnNames {
+		refs[i] = alias + "." + col
 	}
-	prefixed := make([]string, len(cols))
-	for i, col := range cols {
-		prefixed[i] = alias + "." + col
-	}
-	return strings.Join(prefixed, ", ")
+	return strings.Join(refs, ", ")
 }
 
 func qualifiedListItemColumns(alias string) string {
-	cols := []string{
-		"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
-		"content_rating", "runtime", "overview", "tagline",
-		"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
-		"imdb_id", "tmdb_id", "tvdb_id",
-		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
-		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
-		"show_status",
-		"matched_at", "last_refreshed", "refresh_failures",
-		"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
-	}
-	prefixed := make([]string, len(cols))
-	for i, col := range cols {
+	exprs := make([]string, len(itemColumnNames))
+	for i, col := range itemColumnNames {
 		if col == "last_air_date" {
-			prefixed[i] = effectiveLastAirDateExpr(alias)
+			exprs[i] = effectiveLastAirDateExpr(alias) + " AS last_air_date"
 			continue
 		}
-		prefixed[i] = alias + "." + col
+		exprs[i] = itemColumnExpr(alias, col)
 	}
-	return strings.Join(prefixed, ", ")
+	return strings.Join(exprs, ", ")
 }
 
 // scanItem scans a single row into a *models.MediaItem.
@@ -573,9 +663,9 @@ func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access 
 		argIdx++
 	}
 
-	// Apply MaxContentRating like applyAccessFilter does.
+	// Apply MaxContentRating and type exclusions like applyAccessFilter does.
 	var ratingConditions []string
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating}, &ratingConditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, ExcludedMediaTypes: access.ExcludedMediaTypes}, &ratingConditions, &args, &argIdx)
 	for _, c := range ratingConditions {
 		sql += " AND " + c
 	}
@@ -900,7 +990,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	if needsLibJoin {
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 	}
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
@@ -956,8 +1046,12 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	)
 
 	// Use qualified column names inside the CTE to avoid ambiguity when
-	// the FROM clause includes a JOIN to media_item_libraries.
+	// the FROM clause includes a JOIN to media_item_libraries. The select
+	// list aliases coalesced columns back to their own names (poster_path
+	// etc.) so the outer query can re-reference them; GROUP BY needs the
+	// raw references because output aliases are invalid there.
 	qualifiedCols := qualifiedItemColumns("mi")
+	groupByCols := qualifiedItemColumnRefs("mi")
 	scoredCTE := fmt.Sprintf(`
 		WITH scored AS (
 			SELECT
@@ -984,7 +1078,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 			%s
 			GROUP BY %s
 		)
-	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, qualifiedCols)
+	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
 
 	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
 	// duplicates from the library JOIN, so the window count preserves the
@@ -1110,7 +1204,7 @@ func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string,
 		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating}, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf("SELECT 1 FROM %s WHERE %s LIMIT 1", fromClause, strings.Join(conditions, " AND "))
 	var found int

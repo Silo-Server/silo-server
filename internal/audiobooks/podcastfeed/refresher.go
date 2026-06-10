@@ -106,6 +106,23 @@ func (r *Refresher) WithHTTPClient(hc *http.Client) *Refresher {
 	return r
 }
 
+// HasDue reports whether RefreshDue would attempt at least one feed. The task
+// scheduler uses this to avoid recording empty maintenance runs when no podcast
+// feeds exist or every feed is still inside its refresh window.
+func (r *Refresher) HasDue(ctx context.Context, s Store) (bool, error) {
+	feeds, err := s.ListPodcastFeeds(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list podcast feeds: %w", err)
+	}
+	now := time.Now()
+	for _, f := range feeds {
+		if shouldRefreshFeed(f, now) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // RefreshDue walks every podcast_feeds row and refreshes those whose
 // last_refreshed_at + refresh_interval has elapsed. Per-feed failures are
 // logged at Warn and do not abort the walk. Returns the count of feeds
@@ -118,10 +135,7 @@ func (r *Refresher) RefreshDue(ctx context.Context, s Store) (int, error) {
 	now := time.Now()
 	attempted := 0
 	for _, f := range feeds {
-		if f.FeedURL == "" {
-			continue
-		}
-		if !isDue(f, now) {
+		if !shouldRefreshFeed(f, now) {
 			continue
 		}
 		attempted++
@@ -134,6 +148,10 @@ func (r *Refresher) RefreshDue(ctx context.Context, s Store) (int, error) {
 		}
 	}
 	return attempted, nil
+}
+
+func shouldRefreshFeed(f PodcastFeed, now time.Time) bool {
+	return f.FeedURL != "" && isDue(f, now)
 }
 
 // RefreshOne refreshes a single podcast feed. Public so the admin

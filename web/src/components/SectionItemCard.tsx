@@ -23,7 +23,9 @@ interface SectionItemCardProps {
 export default function SectionItemCard({ item, libraryId }: SectionItemCardProps) {
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${item.content_id}${libraryId ? `?libraryId=${libraryId}` : ""}`;
+  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
+    libraryId ? `?libraryId=${libraryId}` : ""
+  }`;
   const { prefs: overlayPrefs } = useOverlayPrefs();
   const upcomingEvent = item.upcoming_event;
   const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
@@ -90,6 +92,7 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
         <MediaItemMenu
           contentId={item.content_id}
           mediaType={item.type}
+          libraryId={libraryId}
           userState={item.user_state}
           variant="poster"
         />
@@ -121,6 +124,12 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
               {episodeLabels.episodeCode}
             </div>
           </>
+        ) : item.item_source === "next_in_series" && item.series_title ? (
+          <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+            {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
         ) : (
           <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
             {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}

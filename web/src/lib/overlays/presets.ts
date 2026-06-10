@@ -30,9 +30,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     badgeClass:
       "rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase leading-none",
     badgeStyle: (accent) => ({
-      background: accent
-        ? `color-mix(in srgb, ${accent} 28%, rgba(0,0,0,0.6))`
-        : "rgba(0,0,0,0.6)",
+      background: accent ? `color-mix(in srgb, ${accent} 28%, rgba(0,0,0,0.6))` : "rgba(0,0,0,0.6)",
       color: "white",
     }),
     iconSize: 11,
@@ -90,7 +88,13 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
 };
 
-export const PRESET_IDS = ["minimal", "classic", "vibrant", "pill", "square"] as const satisfies readonly PresetId[];
+export const PRESET_IDS = [
+  "minimal",
+  "classic",
+  "vibrant",
+  "pill",
+  "square",
+] as const satisfies readonly PresetId[];
 
 export function getPreset(id: PresetId): OverlayPreset {
   return OVERLAY_PRESETS[id] ?? OVERLAY_PRESETS.classic;

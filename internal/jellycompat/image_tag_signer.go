@@ -40,7 +40,7 @@ func (s *imageTagSigner) Equal(seed, fallbackURL, actual string) bool {
 	if s == nil {
 		return false
 	}
-	actual = strings.TrimSpace(actual)
+	actual = canonicalCompatImageTag(actual)
 	expected := s.Tag(seed, fallbackURL)
 	if expected == "" || actual == "" || len(expected) != len(actual) {
 		return false

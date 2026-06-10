@@ -14,6 +14,7 @@ const signalPageSize = 1000
 type signalRepo interface {
 	GetWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error)
 	GetWatchProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
+	GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
 	GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error)
 	GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error)
 	ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error)
@@ -69,6 +70,15 @@ func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profile
 	}); err != nil {
 		return nil, err
 	}
+	ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	for _, wp := range ebookProgress {
+		if wp.Completed || watchedProgressThresholdMet(wp.PositionSeconds, wp.DurationSeconds) {
+			rawIDs = append(rawIDs, wp.MediaItemID)
+		}
+	}
 
 	return s.repo.ResolveCanonicalItemIDSet(ctx, rawIDs)
 }
@@ -97,6 +107,11 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 	}); err != nil {
 		return nil, err
 	}
+	ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	rows = append(rows, ebookProgress...)
 
 	return rows, nil
 }
@@ -118,20 +133,38 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 	if err != nil {
 		return nil, fmt.Errorf("list completed progress from store: %w", err)
 	}
-	sort.SliceStable(progress, func(i, j int) bool {
-		left := parseSignalTime(progress[i].UpdatedAt, time.Time{})
-		right := parseSignalTime(progress[j].UpdatedAt, time.Time{})
-		if !left.Equal(right) {
-			return left.After(right)
-		}
-		return progress[i].MediaItemID < progress[j].MediaItemID
-	})
-
-	ids := make([]string, 0, min(limit, len(progress)))
+	completed := make([]WatchProgressRow, 0, len(progress))
 	for _, wp := range progress {
 		if !wp.Completed {
 			continue
 		}
+		completed = append(completed, WatchProgressRow{
+			MediaItemID: wp.MediaItemID,
+			Completed:   true,
+			UpdatedAt:   parseSignalTime(wp.UpdatedAt, time.Time{}),
+		})
+	}
+	ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	for _, wp := range ebookProgress {
+		if !wp.Completed {
+			continue
+		}
+		completed = append(completed, wp)
+	}
+	sort.SliceStable(completed, func(i, j int) bool {
+		left := completed[i].UpdatedAt
+		right := completed[j].UpdatedAt
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return completed[i].MediaItemID < completed[j].MediaItemID
+	})
+
+	ids := make([]string, 0, min(limit, len(completed)))
+	for _, wp := range completed {
 		ids = append(ids, wp.MediaItemID)
 		if len(ids) == limit {
 			break

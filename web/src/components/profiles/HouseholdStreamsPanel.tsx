@@ -33,11 +33,7 @@ function formatElapsed(startedAt: string): string {
 }
 
 function streamMeta(session: AdminSession): string {
-  return [
-    formatElapsed(session.started_at),
-    session.client_ip,
-    session.node_display_name,
-  ]
+  return [formatElapsed(session.started_at), session.client_ip, session.node_display_name]
     .filter(Boolean)
     .join(" · ");
 }

@@ -93,7 +93,7 @@ func (c *ImageCache) LookupSized(routeID, imageType, tag, size string) (string, 
 		return "", false
 	}
 
-	if tag = strings.TrimSpace(tag); tag != "" {
+	if tag = canonicalCompatImageTag(tag); tag != "" {
 		return c.LookupTag(tag)
 	}
 
@@ -108,7 +108,7 @@ func (c *ImageCache) LookupTag(tag string) (string, bool) {
 	if c == nil {
 		return "", false
 	}
-	return c.lookupTag(strings.TrimSpace(tag))
+	return c.lookupTag(canonicalCompatImageTag(tag))
 }
 
 // lookupTag resolves a tag without size partitioning. Tags are sha1 of the

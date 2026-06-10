@@ -63,6 +63,8 @@ export const catalogKeys = {
   itemDetail: (id: string, libraryId?: number) =>
     ["catalog", "items", id, "detail", libraryId ?? "default"] as const,
   itemVersions: (id: string) => ["catalog", "items", id, "versions"] as const,
+  audiobookGroups: (libraryId: number, groupBy: string, sort: string) =>
+    ["catalog", "audiobookGroups", libraryId, groupBy, sort] as const,
   itemEpisodes: (id: string, libraryId?: number) =>
     ["catalog", "items", id, "episodes", libraryId ?? "default"] as const,
   seriesSeasons: (seriesId: string, libraryId?: number) =>
@@ -183,6 +185,10 @@ export const episodeKeys = {
     ["episodes", "seasons", seriesId, seasonNum, "detail"] as const,
   bySeason: (seriesId: string, seasonNum: number) => ["episodes", seriesId, seasonNum] as const,
   byItem: (itemId: string) => ["episodes", "item", itemId] as const,
+};
+
+export const ebookKeys = {
+  readerProgress: (contentId: string | undefined) => ["ebook-reader-progress", contentId] as const,
 };
 
 export const libraryKeys = {

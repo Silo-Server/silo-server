@@ -22,6 +22,11 @@ export function formatFileSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+export function formatPageCount(pages?: number): string {
+  if (!pages || pages <= 0) return "";
+  return `${pages.toLocaleString()} ${pages === 1 ? "page" : "pages"}`;
+}
+
 export function formatAddedAt(value?: string): string {
   if (!value) return "";
   const date = new Date(value);

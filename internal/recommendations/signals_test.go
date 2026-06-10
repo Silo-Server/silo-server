@@ -14,6 +14,7 @@ type fakeSignalRepo struct {
 
 	fallbackWatched         map[string]struct{}
 	fallbackProgress        []WatchProgressRow
+	ebookProgress           []WatchProgressRow
 	fallbackRecentCompleted []string
 	fallbackRewatches       []RewatchCount
 }
@@ -24,6 +25,10 @@ func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[
 
 func (r *fakeSignalRepo) GetWatchProgressForUser(context.Context, int, string) ([]WatchProgressRow, error) {
 	return r.fallbackProgress, nil
+}
+
+func (r *fakeSignalRepo) GetEbookReaderProgressForUser(context.Context, int, string) ([]WatchProgressRow, error) {
+	return r.ebookProgress, nil
 }
 
 func (r *fakeSignalRepo) GetRecentCompletedItemIDs(context.Context, int, string, int) ([]string, error) {
@@ -161,6 +166,52 @@ func TestSignalReaderWatchedSetCanonicalizesStoreProgress(t *testing.T) {
 	}
 }
 
+func TestSignalReaderWatchedSetIncludesEbookReaderProgress(t *testing.T) {
+	store := &fakeSignalStore{}
+	repo := &fakeSignalRepo{
+		ebookProgress: []WatchProgressRow{
+			{MediaItemID: "ebook-half", PositionSeconds: 0.6, DurationSeconds: 1, UpdatedAt: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)},
+			{MediaItemID: "ebook-low", PositionSeconds: 0.2, DurationSeconds: 1, UpdatedAt: time.Date(2026, 6, 1, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+
+	watched, err := reader.WatchedItemIDSet(context.Background(), 7, "p1")
+	if err != nil {
+		t.Fatalf("WatchedItemIDSet returned error: %v", err)
+	}
+
+	if _, ok := watched["ebook-half"]; !ok {
+		t.Fatalf("expected ebook-half in watched set, got %#v", watched)
+	}
+	if _, ok := watched["ebook-low"]; ok {
+		t.Fatalf("did not expect low-progress ebook in watched set: %#v", watched)
+	}
+}
+
+func TestSignalReaderWatchProgressIncludesEbookReaderProgress(t *testing.T) {
+	store := &fakeSignalStore{progress: []userstore.WatchProgress{
+		{ProfileID: "p1", MediaItemID: "movie", PositionSeconds: 60, DurationSeconds: 100, UpdatedAt: "2026-06-01T10:00:00Z"},
+	}}
+	repo := &fakeSignalRepo{
+		ebookProgress: []WatchProgressRow{
+			{MediaItemID: "ebook", PositionSeconds: 0.42, DurationSeconds: 1, Completed: false, UpdatedAt: time.Date(2026, 6, 1, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+
+	progress, err := reader.WatchProgressForUser(context.Background(), 7, "p1")
+	if err != nil {
+		t.Fatalf("WatchProgressForUser returned error: %v", err)
+	}
+
+	if !slices.ContainsFunc(progress, func(row WatchProgressRow) bool {
+		return row.MediaItemID == "ebook" && row.PositionSeconds == 0.42 && row.DurationSeconds == 1
+	}) {
+		t.Fatalf("ebook progress missing from rows: %#v", progress)
+	}
+}
+
 func TestSignalReaderRecentCompletedUsesStoreUpdatedOrder(t *testing.T) {
 	store := &fakeSignalStore{progress: []userstore.WatchProgress{
 		{ProfileID: "p1", MediaItemID: "older", Completed: true, UpdatedAt: "2026-05-01T10:00:00Z"},
@@ -176,6 +227,29 @@ func TestSignalReaderRecentCompletedUsesStoreUpdatedOrder(t *testing.T) {
 	}
 
 	want := []string{"newest", "newer"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("recent completed = %#v, want %#v", ids, want)
+	}
+}
+
+func TestSignalReaderRecentCompletedIncludesEbookReaderProgress(t *testing.T) {
+	store := &fakeSignalStore{progress: []userstore.WatchProgress{
+		{ProfileID: "p1", MediaItemID: "movie", Completed: true, UpdatedAt: "2026-06-01T10:00:00Z"},
+	}}
+	repo := &fakeSignalRepo{
+		ebookProgress: []WatchProgressRow{
+			{MediaItemID: "ebook-done", PositionSeconds: 0.95, DurationSeconds: 1, Completed: true, UpdatedAt: time.Date(2026, 6, 3, 10, 0, 0, 0, time.UTC)},
+			{MediaItemID: "ebook-open", PositionSeconds: 0.4, DurationSeconds: 1, Completed: false, UpdatedAt: time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)},
+		},
+	}
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+
+	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
+	if err != nil {
+		t.Fatalf("RecentCompletedItemIDs returned error: %v", err)
+	}
+
+	want := []string{"ebook-done", "movie"}
 	if !slices.Equal(ids, want) {
 		t.Fatalf("recent completed = %#v, want %#v", ids, want)
 	}

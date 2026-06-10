@@ -188,7 +188,7 @@ describe("LibraryBrowse", () => {
       <LibraryBrowse
         libraryId={10}
         libraryType="audiobooks"
-        browseType="series"
+        browseType="books"
         queryDefinition={{
           library_ids: [],
           match: "all",
@@ -205,5 +205,52 @@ describe("LibraryBrowse", () => {
     ] as [CatalogSearchState, Record<string, unknown>];
     expect(state.library_id).toBe(10);
     expect(state.query_definition.media_scope).toBe("audiobook");
+  });
+
+  it("uses ebook media scope for ebook libraries", () => {
+    renderToStaticMarkup(
+      <LibraryBrowse
+        libraryId={11}
+        libraryType="ebooks"
+        browseType="series"
+        queryDefinition={{
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "title", order: "asc" },
+        }}
+        onBrowseTypeChange={() => {}}
+        onQueryDefinitionChange={() => {}}
+      />,
+    );
+
+    const [state] = mocks.useCatalogWindow.mock.calls[
+      mocks.useCatalogWindow.mock.calls.length - 1
+    ] as [CatalogSearchState, Record<string, unknown>];
+    expect(state.library_id).toBe(11);
+    expect(state.query_definition.media_scope).toBe("ebook");
+  });
+
+  it("normalizes video-only sorts away through the shared ebook relevance scope", () => {
+    renderToStaticMarkup(
+      <LibraryBrowse
+        libraryId={11}
+        libraryType="ebooks"
+        browseType="series"
+        queryDefinition={{
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "last_air_date", order: "desc" },
+        }}
+        onBrowseTypeChange={() => {}}
+        onQueryDefinitionChange={() => {}}
+      />,
+    );
+
+    const [state] = mocks.useCatalogWindow.mock.calls[
+      mocks.useCatalogWindow.mock.calls.length - 1
+    ] as [CatalogSearchState, Record<string, unknown>];
+    expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 });

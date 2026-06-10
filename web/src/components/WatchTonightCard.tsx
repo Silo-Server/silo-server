@@ -1,4 +1,4 @@
-import { Play } from "lucide-react";
+import { BookOpen, Play } from "lucide-react";
 import { useCallback } from "react";
 import { useLocation } from "react-router";
 import type { WatchTonightItem } from "@/hooks/queries/recommendations";
@@ -6,6 +6,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Badge } from "@/components/ui/badge";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
+import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
 
 const sourceLabels: Record<string, string> = {
   continue_watching: "Continue",
@@ -22,8 +23,8 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
 
-  const watchHref = `/watch/${item.content_id}`;
-  const itemHref = `/item/${item.content_id}`;
+  const watchHref = buildMediaPlayHref({ contentId: item.content_id, type: item.type });
+  const itemHref = buildItemHref({ contentId: item.content_id });
   const source = item.watch_tonight_source ?? "";
   const isInProgress = source === "continue_watching";
   const isNextUp = source === "next_up";
@@ -40,9 +41,12 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
 
   const subtitle = isNextUp
     ? "Next Episode"
-    : isInProgress && (item.duration_seconds ?? 0) > 0
-      ? `${Math.max(0, Math.round(((item.duration_seconds ?? 0) - (item.position_seconds ?? 0)) / 60))} min left`
-      : item.genres?.slice(0, 2).join(", ") || "\u00A0";
+    : isInProgress && item.type === "ebook"
+      ? `${Math.round(Math.min(Math.max(progressPercent, 0), 100))}% read`
+      : isInProgress && (item.duration_seconds ?? 0) > 0
+        ? `${Math.max(0, Math.round(((item.duration_seconds ?? 0) - (item.position_seconds ?? 0)) / 60))} min left`
+        : item.genres?.slice(0, 2).join(", ") || "\u00A0";
+  const playVerb = item.type === "ebook" ? "Read" : item.type === "audiobook" ? "Listen" : "Play";
 
   const handlePlayClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -54,6 +58,10 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
         event.ctrlKey ||
         event.shiftKey
       ) {
+        return;
+      }
+
+      if (!isVideoWatchHref(watchHref)) {
         return;
       }
 
@@ -81,7 +89,7 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
       <ViewTransitionLink
         to={watchHref}
         onClick={handlePlayClick}
-        aria-label={`Play ${heading}`}
+        aria-label={`${playVerb} ${heading}`}
         className="group/play relative w-44 shrink-0"
       >
         <div className="relative aspect-video overflow-hidden rounded-lg">
@@ -108,7 +116,11 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
           {/* Play overlay */}
           <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover/card:bg-black/30 group-focus-visible/play:bg-black/30">
             <div className="bg-primary text-primary-foreground flex h-10 w-10 items-center justify-center rounded-full opacity-0 shadow-lg transition-opacity group-hover/card:opacity-100 group-focus-visible/play:opacity-100">
-              <Play className="ml-0.5 h-4 w-4" fill="currentColor" />
+              {item.type === "ebook" ? (
+                <BookOpen className="h-4 w-4" />
+              ) : (
+                <Play className="ml-0.5 h-4 w-4" fill="currentColor" />
+              )}
             </div>
           </div>
 

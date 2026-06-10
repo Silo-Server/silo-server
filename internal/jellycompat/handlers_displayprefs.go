@@ -14,16 +14,18 @@ import (
 
 // displayPreferencesDTO mirrors Jellyfin's DisplayPreferences response.
 type displayPreferencesDTO struct {
-	ID               string            `json:"Id"`
-	SortBy           string            `json:"SortBy"`
-	SortOrder        string            `json:"SortOrder"`
-	RememberIndexing bool              `json:"RememberIndexing"`
-	RememberSorting  bool              `json:"RememberSorting"`
-	ScrollDirection  string            `json:"ScrollDirection"`
-	ShowBackdrop     bool              `json:"ShowBackdrop"`
-	ShowSidebar      bool              `json:"ShowSidebar"`
-	Client           string            `json:"Client"`
-	CustomPrefs      map[string]string `json:"CustomPrefs"`
+	ID                 string            `json:"Id"`
+	SortBy             string            `json:"SortBy"`
+	SortOrder          string            `json:"SortOrder"`
+	RememberIndexing   bool              `json:"RememberIndexing"`
+	RememberSorting    bool              `json:"RememberSorting"`
+	ScrollDirection    string            `json:"ScrollDirection"`
+	ShowBackdrop       bool              `json:"ShowBackdrop"`
+	ShowSidebar        bool              `json:"ShowSidebar"`
+	PrimaryImageHeight int               `json:"PrimaryImageHeight"`
+	PrimaryImageWidth  int               `json:"PrimaryImageWidth"`
+	Client             string            `json:"Client"`
+	CustomPrefs        map[string]string `json:"CustomPrefs"`
 }
 
 // DisplayPreferencesHandler serves Jellyfin display preferences endpoints,

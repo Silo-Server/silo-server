@@ -8,6 +8,7 @@ import MediaCarousel from "@/components/MediaCarousel";
 import ItemCard from "@/components/ItemCard";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import HeroBanner from "@/components/HeroBanner";
+import NowListeningHero from "@/components/NowListeningHero";
 import SectionRow from "@/components/SectionRow";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HERO_BANNER_SIZE_TALL } from "@/lib/design-system";
@@ -15,9 +16,12 @@ import { sectionKeys } from "@/hooks/queries/keys";
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
+import { isAudiobookLibraryType } from "./libraryPageSearchParams";
 
 interface LibraryRecommendedProps {
   libraryId: number;
+  /** Library type ("movies", "series", "audiobooks", ...); drives the hero style. */
+  libraryType?: string;
   /**
    * Reports whether the page is currently rendering a hero banner (i.e. a
    * featured section resolved with items). Parent uses this to decide whether
@@ -31,6 +35,7 @@ const MAX_CONCURRENT_SECTION_REQUESTS = 4;
 
 export default function LibraryRecommended({
   libraryId,
+  libraryType = "",
   onHeroStateChange,
 }: LibraryRecommendedProps) {
   const queryClient = useQueryClient();
@@ -183,7 +188,7 @@ export default function LibraryRecommended({
 
   return (
     <div className="space-y-10 sm:space-y-12">
-      {renderHeroSlot(viewModel.hero, retrySection, libraryId)}
+      {renderHeroSlot(viewModel.hero, retrySection, libraryId, libraryType)}
       {viewModel.rows.map((slot) => {
         if (slot.state === "empty") {
           return null;
@@ -213,10 +218,17 @@ function renderHeroSlot(
   hero: HomeSectionSlot | null,
   retrySection: (sectionId: string) => void,
   libraryId: number,
+  libraryType: string,
 ) {
   if (!hero) return null;
 
   if (hero.state === "ready" && hero.section) {
+    // Audiobook libraries feature their continue-listening section, rendered
+    // as a resume deck — square covers have no backdrop to feed the cinematic
+    // carousel hero.
+    if (isAudiobookLibraryType(libraryType) && hero.section.section_type === "continue_watching") {
+      return <NowListeningHero section={hero.section} libraryId={libraryId} />;
+    }
     return (
       <HeroBanner
         items={hero.section.items}

@@ -574,6 +574,11 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 		if seedErr := h.SectionRepo.SeedDefaults(r.Context(), "library", &folder.ID, sections.DefaultLibrarySectionsForType(&folder.ID, folder.Type)); seedErr != nil {
 			slog.Warn("seed default sections for new library", "library_id", folder.ID, "error", seedErr)
 		}
+		if sections.IsAudiobookLibraryType(folder.Type) {
+			if _, seedErr := h.SectionRepo.EnsureHomeContinueListeningSection(r.Context()); seedErr != nil {
+				slog.Warn("ensure home continue listening section", "library_id", folder.ID, "error", seedErr)
+			}
+		}
 		if _, seedErr := h.SectionRepo.CreateGeneratedHomeLibraryRecentSections(r.Context(), folder.ID, folder.Name, folder.Type); seedErr != nil {
 			slog.Warn("seed generated home sections for new library", "library_id", folder.ID, "error", seedErr)
 		}
@@ -2029,18 +2034,8 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 		return nil
 	}
 
-	// Determine which content levels apply.
-	var levels []string
-	switch libraryType {
-	case "series":
-		levels = []string{"series", "season", "episode"}
-	case "movies", "movie":
-		levels = []string{"movie"}
-	case "audiobooks", "audiobook":
-		levels = []string{"audiobook"}
-	case "mixed":
-		levels = []string{"movie", "series", "season", "episode", "audiobook"}
-	default:
+	levels := metadataContentLevelsForLibraryType(libraryType)
+	if len(levels) == 0 {
 		return nil
 	}
 
@@ -2055,7 +2050,7 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 		var candidates []candidate
 
 		for _, c := range caps {
-			defaultPriority := metadata.LookupDefaultPriority(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, level)
+			defaultPriority := metadata.LookupDefaultPriority(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
 			if defaultPriority > 0 {
 				candidates = append(candidates, candidate{
 					installationID: c.PluginInstallationID,
@@ -2091,6 +2086,23 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 	}
 
 	return entries
+}
+
+func metadataContentLevelsForLibraryType(libraryType string) []string {
+	switch libraryType {
+	case "series":
+		return []string{"series", "season", "episode"}
+	case "movies", "movie":
+		return []string{"movie"}
+	case "audiobooks", "audiobook":
+		return []string{"audiobook"}
+	case "ebooks", "ebook":
+		return []string{"ebook"}
+	case "mixed":
+		return []string{"movie", "series", "season", "episode", "audiobook", "ebook"}
+	default:
+		return nil
+	}
 }
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.

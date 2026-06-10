@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,7 +28,7 @@ const mocks = vi.hoisted(() => {
     useSeasons: vi.fn(),
     useItemEpisodes: vi.fn(),
     useContinueWatching: vi.fn(),
-    useRating: vi.fn(),
+    useSimilarItems: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
     setRatingMutate: vi.fn(),
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
+  useOptionalAuth: mocks.useAuth,
 }));
 
 vi.mock("@/hooks/queries/favorites", () => ({
@@ -63,8 +65,15 @@ vi.mock("@/hooks/queries/progress", () => ({
   useContinueWatching: mocks.useContinueWatching,
 }));
 
+vi.mock("@/hooks/queries/recommendations", () => ({
+  useSimilarItems: mocks.useSimilarItems,
+}));
+
+vi.mock("@/playback/watchPlaybackContext", () => ({
+  useWatchPlaybackController: () => ({ startPlayback: () => {} }),
+}));
+
 vi.mock("@/hooks/queries/ratings", () => ({
-  useRating: mocks.useRating,
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
 }));
@@ -160,6 +169,7 @@ function makeSeriesItem(
     subtitles: [],
     intro: null,
     credits: null,
+    user_rating: 4,
     ...overrides,
     release_date: overrides.release_date ?? null,
   };
@@ -182,16 +192,18 @@ describe("SeriesContent", () => {
       data: { episodes: [{ content_id: "episode-1" }] },
     });
     mocks.useContinueWatching.mockReturnValue({ items: [] });
-    mocks.useRating.mockReturnValue({ data: { rating: 4, rated_at: "2026-03-22T00:00:00Z" } });
+    mocks.useSimilarItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useSetRating.mockReturnValue({ mutate: mocks.setRatingMutate });
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
   });
 
   it("passes rating state and change handler to ActionBar", () => {
     renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/series-1"]}>
-        <SeriesContent item={makeSeriesItem()} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/series-1"]}>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
@@ -202,9 +214,11 @@ describe("SeriesContent", () => {
 
   it("sets and clears ratings through the existing mutations", () => {
     renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/series-1"]}>
-        <SeriesContent item={makeSeriesItem()} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/series-1"]}>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     const onRatingChange = mocks.capturedActionBarProps.value?.onRatingChange as

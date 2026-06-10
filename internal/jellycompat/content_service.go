@@ -26,6 +26,11 @@ type UserDataService interface {
 	AddFavorite(ctx context.Context, session *Session, contentID string) error
 	RemoveFavorite(ctx context.Context, session *Session, contentID string) error
 	ListProgress(ctx context.Context, session *Session, status string, limit, offset int) ([]upstreamProgress, error)
+	// FilterResumeProgress drops in-progress entries that Continue Watching
+	// surfaces should hide: entries the user dismissed from the row and
+	// episodes superseded by a later-completed episode in the same series.
+	// It mirrors the first-party sections fetcher so both surfaces agree.
+	FilterResumeProgress(ctx context.Context, session *Session, entries []upstreamProgress) ([]upstreamProgress, error)
 	ListProgressByMediaItems(ctx context.Context, session *Session, mediaItemIDs []string) (map[string]*upstreamProgress, error)
 	GetProgress(ctx context.Context, session *Session, contentID string) (*upstreamProgress, error)
 	MarkPlayed(ctx context.Context, session *Session, contentID string) error

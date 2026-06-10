@@ -202,6 +202,14 @@ async function refreshAccessToken(
 }
 
 export class ApiClientError extends Error {
+  /**
+   * Raw parsed JSON body of the error response, when the body parsed as JSON.
+   * Carries fields the normalized `details: ApiError` does not surface (e.g.
+   * plugin validation `field_errors` / `form_error` on a 400). Undefined for
+   * non-JSON or empty bodies.
+   */
+  public body?: unknown;
+
   constructor(
     public status: number,
     public code: string,
@@ -257,14 +265,32 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === target);
 }
 
-async function parseApiError(res: Response): Promise<ApiError> {
+interface ParsedApiError {
+  /** Normalized error with guaranteed `error`/`message` fields. */
+  apiErr: ApiError;
+  /** Raw parsed JSON body, or undefined when the body wasn't JSON/empty. */
+  raw?: unknown;
+}
+
+async function parseApiError(res: Response): Promise<ParsedApiError> {
   let apiErr: Partial<ApiError> = {};
+  let raw: unknown;
   try {
-    apiErr = await res.json();
+    raw = await res.json();
+    if (raw && typeof raw === "object") {
+      apiErr = raw as Partial<ApiError>;
+    }
   } catch {
     // response wasn't JSON
   }
-  return normalizeApiError(apiErr, res);
+  return { apiErr: normalizeApiError(apiErr, res), raw };
+}
+
+/** Builds an ApiClientError from a parsed error response, attaching the raw body. */
+function apiClientErrorFrom(status: number, parsed: ParsedApiError): ApiClientError {
+  const err = new ApiClientError(status, parsed.apiErr.error, parsed.apiErr.message, parsed.apiErr);
+  err.body = parsed.raw;
+  return err;
 }
 
 export interface RestoredUserSession<TUser> {
@@ -304,8 +330,7 @@ export async function restoreUserSession<TUser>({
   }
 
   if (!res.ok) {
-    const apiErr = await parseApiError(res);
-    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+    throw apiClientErrorFrom(res.status, await parseApiError(res));
   }
 
   return {
@@ -335,12 +360,12 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   if (!res.ok) {
-    const apiErr = await parseApiError(res);
-    if (res.status === 403 && apiErr.error === "profile_unverified") {
+    const parsed = await parseApiError(res);
+    if (res.status === 403 && parsed.apiErr.error === "profile_unverified") {
       setProfileToken(null);
       profileUnverifiedListener?.();
     }
-    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+    throw apiClientErrorFrom(res.status, parsed);
   }
 
   // Handle empty successful responses.
@@ -376,6 +401,20 @@ function buildApiHeaders(options: RequestInit = {}): Record<string, string> {
   return headers;
 }
 
+/**
+ * Fire-and-forget API request that survives page unload (pagehide / tab close).
+ * Sends the same auth, profile, and device headers as `api`, plus `keepalive`
+ * so the browser finishes the request after the document is gone. The response
+ * is intentionally ignored: no token refresh or error handling is possible
+ * while the page is unloading.
+ */
+export function apiKeepalive(path: string, options: RequestInit = {}): void {
+  const headers = buildApiHeaders(options);
+  void fetch(`/api/v1${path}`, { ...options, headers, keepalive: true }).catch(() => {
+    // Best-effort write during unload; nothing left to recover into.
+  });
+}
+
 /** Downloads a binary API response and triggers a browser file save. */
 export async function apiDownload(
   path: string,
@@ -400,8 +439,7 @@ export async function apiDownload(
   }
 
   if (!res.ok) {
-    const apiErr = await parseApiError(res);
-    throw new ApiClientError(res.status, apiErr.error, apiErr.message, apiErr);
+    throw apiClientErrorFrom(res.status, await parseApiError(res));
   }
 
   const blob = await res.blob();
@@ -411,6 +449,51 @@ export async function apiDownload(
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * apiBlob buffers the entire response body in memory, so cap what it will
+ * accept; beyond this a download is the right tool, not an in-tab blob.
+ */
+export const API_BLOB_MAX_BYTES = 512 * 1024 * 1024;
+
+export async function apiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  let headers = buildApiHeaders(options);
+  let res = await fetch(`/api/v1${path}`, { ...options, headers });
+
+  if (res.status === 401 && getRefreshToken()) {
+    if (!refreshPromise) {
+      refreshPromise = attemptRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const refreshed = await refreshPromise;
+    if (refreshed) {
+      headers = buildApiHeaders(options);
+      headers["Authorization"] = `Bearer ${accessToken}`;
+      res = await fetch(`/api/v1${path}`, { ...options, headers });
+    }
+  }
+
+  if (!res.ok) {
+    throw apiClientErrorFrom(res.status, await parseApiError(res));
+  }
+
+  // Reject oversized bodies up front instead of crashing the tab while
+  // buffering them. When the header is absent, proceed; streaming byte counts
+  // are not worth the complexity here.
+  const contentLength = Number(res.headers.get("Content-Length"));
+  if (Number.isFinite(contentLength) && contentLength > API_BLOB_MAX_BYTES) {
+    const sizeMiB = Math.round(contentLength / (1024 * 1024));
+    const limitMiB = Math.round(API_BLOB_MAX_BYTES / (1024 * 1024));
+    throw new ApiClientError(
+      res.status,
+      "response_too_large",
+      `This file is too large to open in the browser (${sizeMiB} MiB, limit ${limitMiB} MiB). Download it instead.`,
+    );
+  }
+
+  return res.blob();
 }
 
 // People API

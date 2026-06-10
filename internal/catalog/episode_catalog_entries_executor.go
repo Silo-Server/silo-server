@@ -563,7 +563,6 @@ func episodeCatalogUserStateCTE(plan episodeCatalogUserStatePlan) string {
 			   AND hhi.media_item_id = uwp.media_item_id
 			WHERE uwp.user_id = $1
 				  AND uwp.profile_id = $2
-				  AND uwp.completed = FALSE
 				  AND uwp.position_seconds > 0%s
 				  AND (hhi.media_item_id IS NULL OR uwp.updated_at > hhi.hidden_before)
 			)`, progressRatioGate)

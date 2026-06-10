@@ -48,6 +48,7 @@ type RecommendationsHandler struct {
 	EpisodeRepo         *catalog.EpisodeRepository
 	WatchTonightFetcher watchTonightSectionFetcher
 	CastFetcher         cardsCastFetcher
+	EbookProgress       EbookReaderProgressLister
 	// RecWorker enqueues asynchronous taste-profile refreshes after writes
 	// (taste seeding). Optional — when nil, refresh is simply skipped.
 	RecWorker ProfileRefreshRequester
@@ -643,7 +644,10 @@ func (h *RecommendationsHandler) loadItemEnrichment(
 	if h.storeProvider != nil {
 		store, storeErr := h.storeProvider.ForUser(ctx, userID)
 		if storeErr == nil && store != nil {
-			states, stateErr := resolveItemUserStates(ctx, store, profileID, h.EpisodeRepo, mediaItems)
+			states, stateErr := resolveItemUserStatesWithOptions(ctx, store, profileID, h.EpisodeRepo, mediaItems, itemUserStateOptions{
+				UserID:             userID,
+				EbookProgressStore: h.EbookProgress,
+			})
 			if stateErr == nil {
 				out.states = states
 			}

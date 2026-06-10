@@ -2,21 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 
 import type {
   ConnectionCheckResponse,
+  PluginAdminForm,
   PluginAdminFormField,
   PluginConfigSchema,
 } from "@/api/types";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+
+import { SchemaForm } from "./SchemaForm";
+import { buildSchemaValues } from "./schemaFormUtils";
 
 type PluginConfigValue = Record<string, unknown>;
 
@@ -124,37 +119,6 @@ function valueForField(field: SupportedField, configValue?: PluginConfigValue): 
   return defaultValueForField(field);
 }
 
-function buildPayload(fields: SupportedField[], draft: Record<string, string | boolean>) {
-  const payload: PluginConfigValue = {};
-  for (const field of fields) {
-    const value = draft[field.key];
-    if (field.control === "SWITCH") {
-      payload[field.key] = Boolean(value);
-      continue;
-    }
-    if (typeof value !== "string") {
-      continue;
-    }
-    const trimmed = value.trim();
-    if (trimmed === "") {
-      continue;
-    }
-    if (
-      field.control === "NUMBER" ||
-      field.inferredType === "number" ||
-      field.inferredType === "integer"
-    ) {
-      const numeric = Number(trimmed);
-      if (!Number.isNaN(numeric)) {
-        payload[field.key] = numeric;
-        continue;
-      }
-    }
-    payload[field.key] = value;
-  }
-  return payload;
-}
-
 export function PluginConfigForm({
   schema,
   value,
@@ -174,18 +138,23 @@ export function PluginConfigForm({
   const supported =
     fields.length > 0 && (schema.admin_form?.fields?.length ? true : parsedFallback.supported);
 
-  const [draft, setDraft] = useState<Record<string, string | boolean>>(() =>
+  const descriptor = useMemo<PluginAdminForm>(
+    () => schema.admin_form ?? { fields },
+    [schema.admin_form, fields],
+  );
+
+  const [values, setValues] = useState<PluginConfigValue>(() =>
     Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])),
   );
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
 
   useEffect(() => {
-    setDraft(Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])));
+    setValues(Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])));
   }, [fields, value]);
 
-  function setField(key: string, nextValue: string | boolean) {
+  function handleChange(next: PluginConfigValue) {
     setTestResult(null);
-    setDraft((current) => ({ ...current, [key]: nextValue }));
+    setValues(next);
   }
 
   async function handleTest() {
@@ -194,7 +163,7 @@ export function PluginConfigForm({
     }
 
     try {
-      setTestResult(await onTest(schema.key, buildPayload(fields, draft)));
+      setTestResult(await onTest(schema.key, buildSchemaValues(descriptor, values)));
     } catch (error) {
       setTestResult({
         success: false,
@@ -223,69 +192,12 @@ export function PluginConfigForm({
         ) : null}
       </div>
 
-      <div className="grid gap-4">
-        {fields.map((field) => (
-          <div key={field.key} className="space-y-2">
-            <div className="space-y-1">
-              <Label htmlFor={`${schema.key}-${field.key}`}>
-                {field.label || humanizeKey(field.key)}
-              </Label>
-              {field.description ? (
-                <p className="text-muted-foreground text-xs">{field.description}</p>
-              ) : null}
-            </div>
-
-            {field.control === "SWITCH" ? (
-              <div className="flex items-center gap-3 rounded-md border px-3 py-2">
-                <Switch
-                  checked={Boolean(draft[field.key])}
-                  onCheckedChange={(checked) => setField(field.key, checked)}
-                />
-                <span className="text-sm">{field.label || humanizeKey(field.key)}</span>
-              </div>
-            ) : field.control === "SELECT" ? (
-              <Select
-                value={String(draft[field.key] ?? "")}
-                onValueChange={(nextValue) => setField(field.key, nextValue)}
-              >
-                <SelectTrigger id={`${schema.key}-${field.key}`}>
-                  <SelectValue placeholder={field.placeholder || "Select"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(field.options ?? []).map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : field.control === "TEXTAREA" || field.multiline ? (
-              <textarea
-                id={`${schema.key}-${field.key}`}
-                className="border-border bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
-                rows={field.rows && field.rows > 0 ? field.rows : 4}
-                value={String(draft[field.key] ?? "")}
-                placeholder={field.placeholder}
-                onChange={(event) => setField(field.key, event.target.value)}
-              />
-            ) : (
-              <Input
-                id={`${schema.key}-${field.key}`}
-                type={
-                  field.control === "PASSWORD" || field.secret
-                    ? "password"
-                    : field.control === "NUMBER"
-                      ? "number"
-                      : "text"
-                }
-                value={String(draft[field.key] ?? "")}
-                placeholder={field.placeholder}
-                onChange={(event) => setField(field.key, event.target.value)}
-              />
-            )}
-          </div>
-        ))}
-      </div>
+      <SchemaForm
+        descriptor={descriptor}
+        values={values}
+        onChange={handleChange}
+        idPrefix={schema.key}
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         {onTest ? (
@@ -300,7 +212,7 @@ export function PluginConfigForm({
           size="sm"
           variant="outline"
           disabled={isSaving || isTesting}
-          onClick={() => onSave(schema.key, buildPayload(fields, draft))}
+          onClick={() => onSave(schema.key, buildSchemaValues(descriptor, values))}
         >
           {schema.admin_form?.submit_label || "Save config"}
         </Button>

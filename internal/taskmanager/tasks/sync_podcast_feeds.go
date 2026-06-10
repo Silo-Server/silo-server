@@ -39,6 +39,13 @@ func (t *SyncPodcastFeedsTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	}
 }
 
+func (t *SyncPodcastFeedsTask) ShouldRun(ctx context.Context) (bool, error) {
+	if t == nil || t.refresher == nil || t.store == nil {
+		return false, nil
+	}
+	return t.refresher.HasDue(ctx, t.store)
+}
+
 func (t *SyncPodcastFeedsTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Checking for due podcast feeds")
 

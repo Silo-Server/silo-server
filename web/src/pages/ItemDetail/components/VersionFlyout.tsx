@@ -19,6 +19,9 @@ export function buildQualitySummary(version: FileVersion): string {
   if (version.codec_video) parts.push(version.codec_video.toUpperCase());
   if (version.hdr) parts.push("HDR");
   if (version.codec_audio) parts.push(mapAudioLabel(version.codec_audio));
+  if (parts.length === 0 && version.container) {
+    parts.push(version.container.toUpperCase());
+  }
 
   return parts.join(" · ");
 }

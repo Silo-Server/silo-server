@@ -16,7 +16,7 @@ function hdrIcon(value: string | undefined): OverlayIconId | null {
 function prettyResolution(value: string | undefined): string | null {
   if (!value) return null;
   const v = value.toLowerCase().trim();
-  if (v === "" ) return null;
+  if (v === "") return null;
   if (v === "2160p" || v === "4k" || v === "uhd") return "4K";
   if (v === "4320p" || v === "8k") return "8K";
   if (/^\d+p$/.test(v)) return v;
@@ -70,7 +70,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     id: "resolution_hdr",
     category: "tech",
     label: "Resolution + HDR (combined)",
-    description: "Single badge combining resolution and dynamic range (e.g. \"4K DV\", \"1080p HDR\")",
+    description: 'Single badge combining resolution and dynamic range (e.g. "4K DV", "1080p HDR")',
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconCapable: true,

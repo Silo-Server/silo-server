@@ -16,7 +16,7 @@ function RecommendationItemCard({ itemId }: RecommendationItemCardProps) {
     return <div className="bg-surface aspect-[2/3] animate-pulse rounded-lg" />;
   }
   return (
-    <ViewTransitionLink to={`/item/${itemId}`} className="group">
+    <ViewTransitionLink to={`/item/${encodeURIComponent(itemId)}`} className="group">
       <div className="aspect-[2/3] overflow-hidden rounded-lg">
         {item.poster_url ? (
           <img

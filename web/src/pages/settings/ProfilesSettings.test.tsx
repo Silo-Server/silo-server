@@ -21,6 +21,7 @@ vi.mock("@/hooks/queries/profiles", () => ({
     isPending: false,
     mutate: (...args: unknown[]) => mocks.deleteMutate(...args),
   }),
+  useHouseholdSessions: () => ({ data: [], isLoading: false, isFetching: false }),
 }));
 
 vi.mock("@/hooks/queries/libraries", () => ({
