@@ -62,13 +62,13 @@ func (s *Service) PublishAnnouncement(ctx context.Context, a *Announcement) erro
 		return fmt.Errorf("notifications: audience must set exactly one of all/user_ids/library_ids")
 	}
 
-	if err := s.store.InsertAnnouncement(ctx, a); err != nil {
-		return fmt.Errorf("notifications: insert announcement: %w", err)
-	}
-
 	userIDs, err := s.resolveAudience(ctx, a.Audience)
 	if err != nil {
-		return err
+		return fmt.Errorf("notifications: resolve audience: %w", err)
+	}
+
+	if err := s.store.InsertAnnouncement(ctx, a); err != nil {
+		return fmt.Errorf("notifications: insert announcement: %w", err)
 	}
 	for _, uid := range userIDs {
 		in := CreateInput{
@@ -115,9 +115,9 @@ func (s *Service) resolveAudience(ctx context.Context, a Audience) ([]int, error
 // DeleteAnnouncement removes the announcement and dismisses its unread rows.
 func (s *Service) DeleteAnnouncement(ctx context.Context, id int64) error {
 	if err := s.store.DeleteAnnouncement(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("notifications: delete announcement: %w", err)
 	}
-	return s.store.DismissUnreadByTypeRef(ctx, "announcement", fmt.Sprintf("announcement-%d", id))
+	return s.store.DismissUnreadByTypeAndRef(ctx, "announcement", fmt.Sprintf("announcement-%d", id))
 }
 
 // Create validates, applies preferences, inserts (idempotent on DedupRef) and

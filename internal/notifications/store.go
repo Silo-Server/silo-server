@@ -31,7 +31,7 @@ type Store interface {
 	InsertAnnouncement(ctx context.Context, a *Announcement) error
 	ListAnnouncements(ctx context.Context) ([]*Announcement, error)
 	DeleteAnnouncement(ctx context.Context, id int64) error
-	DismissUnreadByTypeRef(ctx context.Context, typ, dedupPrefix string) error
+	DismissUnreadByTypeAndRef(ctx context.Context, typ, dedupRef string) error
 	PurgeOld(ctx context.Context, dismissedBefore, allBefore time.Time) (int64, error)
 	AdminUserIDs(ctx context.Context) ([]int, error)
 	UserIDsWithLibraryAccess(ctx context.Context, libraryID int) ([]int, error)
@@ -362,20 +362,19 @@ func (r *Repository) DeleteAnnouncement(ctx context.Context, id int64) error {
 	return nil
 }
 
-// DismissUnreadByTypeRef bulk-dismisses unread notifications whose type matches
-// typ and whose dedup_ref starts with dedupPrefix.
-func (r *Repository) DismissUnreadByTypeRef(ctx context.Context, typ, dedupPrefix string) error {
-	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(dedupPrefix)
+// DismissUnreadByTypeAndRef bulk-dismisses unread notifications whose type and
+// dedup_ref match exactly.
+func (r *Repository) DismissUnreadByTypeAndRef(ctx context.Context, typ, dedupRef string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET dismissed_at = now()
 		WHERE type = $1
-		  AND dedup_ref LIKE $2 || '%' ESCAPE '\'
+		  AND dedup_ref = $2
 		  AND read_at IS NULL
 		  AND dismissed_at IS NULL
-	`, typ, escaped)
+	`, typ, dedupRef)
 	if err != nil {
-		return fmt.Errorf("dismiss notifications by type ref: %w", err)
+		return fmt.Errorf("dismiss notifications by type and ref: %w", err)
 	}
 	return nil
 }
@@ -461,5 +460,8 @@ func (r *Repository) AllEnabledUserIDs(ctx context.Context) ([]int, error) {
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enabled user ids: %w", err)
+	}
+	return ids, nil
 }

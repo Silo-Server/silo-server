@@ -10,15 +10,16 @@ import (
 
 type fakeStore struct {
 	Store // embed for unimplemented methods (nil-panic = test failure, intended)
-	inserted []*Notification
-	prefs    map[int]map[Category]bool
-	admins   []int
-	libUsers map[int][]int
-	allUsers []int
+	inserted    []*Notification
+	nextID      int64
+	prefs       map[int]map[Category]bool
+	admins      []int
+	libUsers    map[int][]int
+	allUsers    []int
 
 	// recorded args for dismiss calls
-	dismissTyp        string
-	dismissDedupPrefix string
+	dismissTyp      string
+	dismissDedupRef string
 }
 
 func (f *fakeStore) Insert(_ context.Context, n *Notification) (bool, error) {
@@ -49,13 +50,14 @@ func (f *fakeStore) UserIDsWithLibraryAccess(_ context.Context, lib int) ([]int,
 func (f *fakeStore) AllEnabledUserIDs(context.Context) ([]int, error) { return f.allUsers, nil }
 
 func (f *fakeStore) InsertAnnouncement(_ context.Context, a *Announcement) error {
-	a.ID = 1
+	f.nextID++
+	a.ID = f.nextID
 	return nil
 }
 
-func (f *fakeStore) DismissUnreadByTypeRef(_ context.Context, typ, dedupPrefix string) error {
+func (f *fakeStore) DismissUnreadByTypeAndRef(_ context.Context, typ, dedupRef string) error {
 	f.dismissTyp = typ
-	f.dismissDedupPrefix = dedupPrefix
+	f.dismissDedupRef = dedupRef
 	return nil
 }
 
@@ -391,7 +393,7 @@ func TestDeleteAnnouncement_DismissesUnread(t *testing.T) {
 	if store.dismissTyp != "announcement" {
 		t.Errorf("expected dismissTyp %q, got %q", "announcement", store.dismissTyp)
 	}
-	if store.dismissDedupPrefix != "announcement-42" {
-		t.Errorf("expected dismissDedupPrefix %q, got %q", "announcement-42", store.dismissDedupPrefix)
+	if store.dismissDedupRef != "announcement-42" {
+		t.Errorf("expected dismissDedupRef %q, got %q", "announcement-42", store.dismissDedupRef)
 	}
 }
