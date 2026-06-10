@@ -1498,6 +1498,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.ScanRegistry,
 						deps.LibraryScanQueue,
 						historyImportSvc,
+						deps.NotificationsService,
 					)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 				}

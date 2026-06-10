@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/gorilla/websocket"
@@ -31,6 +32,11 @@ type activeScanLister interface {
 	ListActive(ctx context.Context) ([]evt.ScanRun, error)
 }
 
+// notificationUnreadCounter is the subset of notifications.Service used by EventsHandler.
+type notificationUnreadCounter interface {
+	UnreadCount(ctx context.Context, userID int, profileID string, childSafe bool) (int, error)
+}
+
 type EventsHandler struct {
 	hub            *evt.Hub
 	jobs           *AdminJobsHandler
@@ -39,6 +45,7 @@ type EventsHandler struct {
 	scans          *evt.ScanRegistry
 	persistedScans activeScanLister
 	historyImports historyImportActiveLister
+	notifications  notificationUnreadCounter
 }
 
 func NewEventsHandler(
@@ -49,6 +56,7 @@ func NewEventsHandler(
 	scans *evt.ScanRegistry,
 	persistedScans *scanqueue.Service,
 	historyImports historyImportActiveLister,
+	notificationsSvc *notifications.Service,
 ) *EventsHandler {
 	return &EventsHandler{
 		hub:            hub,
@@ -58,6 +66,7 @@ func NewEventsHandler(
 		scans:          scans,
 		persistedScans: persistedScans,
 		historyImports: historyImports,
+		notifications:  notificationsSvc,
 	}
 }
 
@@ -274,6 +283,8 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 	channels := []evt.EventChannel{
 		evt.ChannelCatalog,
 		evt.ChannelHistoryImport,
+		evt.ChannelNotifications,
+		evt.ChannelRequests,
 		evt.ChannelUserState,
 	}
 	if role == "admin" {
@@ -319,6 +330,28 @@ func (h *EventsHandler) snapshotForChannel(
 	switch channel {
 	case evt.ChannelCatalog, evt.ChannelUserState:
 		return json.RawMessage("null"), nil
+	case evt.ChannelNotifications:
+		if h == nil || h.notifications == nil {
+			return json.RawMessage(`{"unread_count":0}`), nil
+		}
+		// Profile ID is read directly from the WS upgrade request header because
+		// the events/ws route does not go through the RequireProfile middleware.
+		// childSafe is intentionally false here: the EventsHandler has no access
+		// to a profile store, so the WS snapshot is a conservative approximation.
+		// The REST GET /notifications/unread-count endpoint is authoritative for
+		// child-safe profile filtering.
+		profileID := r.Header.Get("X-Profile-Id")
+		count, err := h.notifications.UnreadCount(r.Context(), claims.UserID, profileID, false)
+		if err != nil {
+			return nil, err
+		}
+		return marshalJSON(struct {
+			UnreadCount int `json:"unread_count"`
+		}{UnreadCount: count}), nil
+	case evt.ChannelRequests:
+		// Request state is fetched via REST; the WS channel only carries
+		// lifecycle events. Return an empty object as the initial snapshot.
+		return json.RawMessage(`{}`), nil
 	case evt.ChannelJobs:
 		if h == nil || h.jobs == nil || h.jobs.repo == nil {
 			return json.RawMessage("[]"), nil
