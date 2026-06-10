@@ -113,8 +113,10 @@ type fakeContent struct {
 	missing  int
 }
 
-func (c *fakeContent) ItemText(context.Context, string) (*ItemText, error)      { return c.item, nil }
-func (c *fakeContent) SeasonTexts(context.Context, string) ([]ChildText, error) { return c.seasons, nil }
+func (c *fakeContent) ItemText(context.Context, string) (*ItemText, error) { return c.item, nil }
+func (c *fakeContent) SeasonTexts(context.Context, string) ([]ChildText, error) {
+	return c.seasons, nil
+}
 func (c *fakeContent) EpisodeTexts(context.Context, string) ([]ChildText, error) {
 	return c.episodes, nil
 }
