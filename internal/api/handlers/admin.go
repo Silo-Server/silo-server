@@ -91,6 +91,7 @@ type AdminHandler struct {
 	ItemRefreshResolver          ItemRefreshScopeResolver
 	ImpersonationService         ImpersonationService
 	RealtimeHub                  *notifications.Hub
+	NotificationsSvc             *notifications.Service
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
@@ -528,6 +529,12 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
 			return
 		}
+	}
+
+	if req.Password != nil && h.NotificationsSvc != nil {
+		h.NotificationsSvc.CreateSystem(r.Context(), id,
+			"system.password_changed", "Password changed",
+			"Your account password was changed. If this wasn't you, contact your administrator.")
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)

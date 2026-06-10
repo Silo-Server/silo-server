@@ -190,6 +190,16 @@ func (s *Service) ListAnnouncements(ctx context.Context) ([]*Announcement, error
 	return s.store.ListAnnouncements(ctx)
 }
 
+// CreateSystem records a security/account notification for userID. Failures
+// are logged, never returned — security notices must not break the calling flow.
+func (s *Service) CreateSystem(ctx context.Context, userID int, typ, title, body string) {
+	if err := s.Create(ctx, CreateInput{
+		UserID: userID, Category: CategorySystem, Type: typ, Title: title, Body: body,
+	}); err != nil {
+		slog.WarnContext(ctx, "notifications: system notification failed", "type", typ, "user_id", userID, "error", err)
+	}
+}
+
 // Create validates, applies preferences, inserts (idempotent on DedupRef) and
 // publishes notification.created for live clients. A dedup conflict is not an
 // error and publishes nothing.

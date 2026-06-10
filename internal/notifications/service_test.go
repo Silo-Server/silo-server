@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ type fakeStore struct {
 	admins      []int
 	libUsers    map[int][]int
 	allUsers    []int
+	insertErr   error // when non-nil, Insert returns this error
 
 	// recorded args for dismiss calls
 	dismissTyp      string
@@ -23,6 +25,9 @@ type fakeStore struct {
 }
 
 func (f *fakeStore) Insert(_ context.Context, n *Notification) (bool, error) {
+	if f.insertErr != nil {
+		return false, f.insertErr
+	}
 	for _, existing := range f.inserted {
 		if existing.UserID == n.UserID && existing.Type == n.Type &&
 			n.DedupRef != "" && existing.DedupRef == n.DedupRef {
@@ -395,5 +400,43 @@ func TestDeleteAnnouncement_DismissesUnread(t *testing.T) {
 	}
 	if store.dismissDedupRef != "announcement-42" {
 		t.Errorf("expected dismissDedupRef %q, got %q", "announcement-42", store.dismissDedupRef)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateSystem tests
+// ---------------------------------------------------------------------------
+
+func TestCreateSystem_InsertsSystemNotification(t *testing.T) {
+	store := &fakeStore{}
+	svc, _ := newTestService(store)
+
+	svc.CreateSystem(context.Background(), 42, "system.password_changed", "Password changed",
+		"Your account password was changed. If this wasn't you, contact your administrator.")
+
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 inserted notification, got %d", len(store.inserted))
+	}
+	n := store.inserted[0]
+	if n.Category != CategorySystem {
+		t.Errorf("expected category %q, got %q", CategorySystem, n.Category)
+	}
+	if n.Type != "system.password_changed" {
+		t.Errorf("expected type %q, got %q", "system.password_changed", n.Type)
+	}
+	if n.UserID != 42 {
+		t.Errorf("expected user_id 42, got %d", n.UserID)
+	}
+}
+
+func TestCreateSystem_StoreFailureDoesNotPanic(t *testing.T) {
+	store := &fakeStore{insertErr: errors.New("db down")}
+	svc, _ := newTestService(store)
+
+	// Must not panic; failure is logged and swallowed.
+	svc.CreateSystem(context.Background(), 7, "system.password_changed", "Password changed", "body")
+
+	if len(store.inserted) != 0 {
+		t.Errorf("expected 0 insertions on store error, got %d", len(store.inserted))
 	}
 }
