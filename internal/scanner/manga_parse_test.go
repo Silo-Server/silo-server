@@ -89,6 +89,91 @@ func TestCleanMangaSeriesName(t *testing.T) {
 	}
 }
 
+func TestMangaIndexForFile(t *testing.T) {
+	cases := []struct {
+		name       string
+		base       string
+		seriesName string
+		wantVol    string
+		wantIdx    float64
+		wantHas    bool
+	}{
+		{
+			name:       "404 Demons ch01 — series prefix stripped",
+			base:       "404 Demons 01 (Digital-Compilation) (Oak)",
+			seriesName: "404 Demons",
+			wantVol:    "",
+			wantIdx:    1,
+			wantHas:    true,
+		},
+		{
+			name:       "404 Demons ch09",
+			base:       "404 Demons 09 (Digital-Compilation) (Oak)",
+			seriesName: "404 Demons",
+			wantVol:    "",
+			wantIdx:    9,
+			wantHas:    true,
+		},
+		{
+			name:       "404 Demons v01 — volume token unambiguous",
+			base:       "404 Demons v01 (Digital-Compilation) (Oak)",
+			seriesName: "404 Demons",
+			wantVol:    "v01",
+			wantIdx:    1,
+			wantHas:    true,
+		},
+		{
+			name:       "404 Demons v10",
+			base:       "404 Demons v10 (Digital-Compilation) (Oak)",
+			seriesName: "404 Demons",
+			wantVol:    "v10",
+			wantIdx:    10,
+			wantHas:    true,
+		},
+		{
+			name:       "One-Punch Man ch178",
+			base:       "One-Punch Man 178 (2023) (Digital) (LuCaZ)",
+			seriesName: "One-Punch Man",
+			wantVol:    "",
+			wantIdx:    178,
+			wantHas:    true,
+		},
+		{
+			name:       "365 Days to the Wedding v03 — series number not grabbed",
+			base:       "365 Days to the Wedding v03 (2024)",
+			seriesName: "365 Days to the Wedding",
+			wantVol:    "v03",
+			wantIdx:    3,
+			wantHas:    true,
+		},
+		{
+			name:       "404 Demons one-shot — no number after prefix",
+			base:       "404 Demons (2025) (Digital)",
+			seriesName: "404 Demons",
+			wantVol:    "",
+			wantIdx:    0,
+			wantHas:    false,
+		},
+		{
+			name:       "fallback — base does not start with series name",
+			base:       "Random 12",
+			seriesName: "Different Series",
+			wantVol:    "",
+			wantIdx:    12,
+			wantHas:    true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vol, idx, has := mangaIndexForFile(tc.base, tc.seriesName)
+			if vol != tc.wantVol || idx != tc.wantIdx || has != tc.wantHas {
+				t.Fatalf("mangaIndexForFile(%q, %q) = (%q, %v, %v), want (%q, %v, %v)",
+					tc.base, tc.seriesName, vol, idx, has, tc.wantVol, tc.wantIdx, tc.wantHas)
+			}
+		})
+	}
+}
+
 // TestParseMangaIndexCorpus is a regression test against real-world manga
 // release filenames following common scanlation naming conventions.
 // Extensions are already stripped (as parseMangaIndex expects).

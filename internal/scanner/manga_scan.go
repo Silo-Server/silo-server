@@ -196,7 +196,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 		seriesName = ebookTitleFromPath(filePath)
 	}
 	stem := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-	vol, idx, has := parseMangaIndex(stem)
+	vol, idx, has := mangaIndexForFile(stem, seriesName)
 
 	// 1. Keep the file as a readable type='ebook' chapter item, exactly as the
 	//    ebook pipeline does (cover + page count + media file + membership).
