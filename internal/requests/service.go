@@ -459,7 +459,12 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	}
 	s.publishRequestEvent(ctx, "request.submitted", *req)
 	if req.Status == StatusApproved {
-		return s.submitApprovedRequest(ctx, *req, viewer, nil)
+		result, err := s.submitApprovedRequest(ctx, *req, viewer, nil)
+		if err != nil {
+			return nil, err
+		}
+		s.publishApprovalOutcome(ctx, result)
+		return result, nil
 	}
 	return req, nil
 }
@@ -599,7 +604,7 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
-	s.publishRequestEvent(ctx, "request.approved", *result)
+	s.publishApprovalOutcome(ctx, result)
 	return result, nil
 }
 
@@ -1624,9 +1629,8 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		}
 		switch newStatus {
 		case StatusCompleted:
-			change = reconcileCompleted
-			if updatedReq != nil {
-				s.publishRequestEvent(ctx, "request.completed", *updatedReq)
+			if change != reconcileCompleted {
+				change = reconcileCompleted
 			}
 		case StatusDownloading:
 			if change == reconcileUnchanged {
@@ -1635,9 +1639,18 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		case StatusFailed:
 			if change == reconcileUnchanged {
 				change = reconcileFailed
-				if updatedReq != nil {
-					s.publishRequestEvent(ctx, "request.failed", *updatedReq)
-				}
+			}
+		}
+		// Publish lifecycle events keyed on the AGGREGATE request state, not the
+		// individual target transition. This prevents double-publish when multiple
+		// targets change in the same cycle and avoids spurious "failed" events while
+		// sibling targets are still active.
+		if updatedReq != nil {
+			switch {
+			case updatedReq.Status == StatusCompleted:
+				s.publishRequestEvent(ctx, "request.completed", *updatedReq)
+			case updatedReq.Outcome == OutcomeFailed:
+				s.publishRequestEvent(ctx, "request.failed", *updatedReq)
 			}
 		}
 	}

@@ -23,6 +23,20 @@ type RequestEventPayload struct {
 // Call before the service handles requests; nil hub disables publishing (no-op).
 func (s *Service) SetEventsHub(hub *evt.Hub) { s.eventsHub = hub }
 
+// publishApprovalOutcome publishes either "request.approved" or "request.failed"
+// based on the aggregate state of req after submitApprovedRequest runs.
+// Callers must pass a non-nil req.
+func (s *Service) publishApprovalOutcome(ctx context.Context, req *Request) {
+	if req == nil {
+		return
+	}
+	if req.Outcome == OutcomeFailed {
+		s.publishRequestEvent(ctx, "request.failed", *req)
+	} else {
+		s.publishRequestEvent(ctx, "request.approved", *req)
+	}
+}
+
 // publishRequestEvent publishes a lifecycle event for req onto ChannelRequests.
 // It is a no-op when eventsHub is nil, and it never fails the caller — errors
 // are logged at Warn level only.

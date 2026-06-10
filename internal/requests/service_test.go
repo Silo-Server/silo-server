@@ -2653,9 +2653,10 @@ func (f *fakeRequesterIdentity) ResolveRequester(_ context.Context, userID int) 
 
 // TestApprove_PublishesRequestApproved checks that approving a pending request
 // publishes a "request.approved" event on ChannelRequests with the correct
-// request_id and user_id in the payload.
+// request_id and user_id in the payload when submission succeeds.
 func TestApprove_PublishesRequestApproved(t *testing.T) {
 	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
 	store.requests["req-1"] = &Request{
 		ID:                   "req-1",
 		MediaType:            MediaTypeMovie,
@@ -2666,9 +2667,8 @@ func TestApprove_PublishesRequestApproved(t *testing.T) {
 		RequestedByUserID:    42,
 		RequestedByProfileID: "profile-42",
 	}
-	// No router configured so submitApprovedRequest marks request failed —
-	// which is still "after" approve; we verify the event fires regardless.
 	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
 	hub := evt.NewHub("test", nil)
 	service.SetEventsHub(hub)
 
@@ -2733,5 +2733,171 @@ func TestSubmitApprovedPopulatesRequesterIdentity(t *testing.T) {
 	}
 	if router.gotRequesterEmail != "u@example.com" || router.gotRequesterUsername != "bob" {
 		t.Fatalf("descriptor identity = %q/%q, want u@example.com/bob", router.gotRequesterEmail, router.gotRequesterUsername)
+	}
+}
+
+// TestReconcile_PartialTargetFailureDoesNotPublishFailed verifies that when one
+// target fails but a sibling is still downloading, the aggregate request is NOT
+// terminal — so no "request.failed" event is published during that reconcile cycle.
+func TestReconcile_PartialTargetFailureDoesNotPublishFailed(t *testing.T) {
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["req-1"] = &Request{
+		ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550,
+		Status: StatusDownloading, Outcome: OutcomeActive,
+	}
+	// Two targets: 1080p is queued (the one that will transition to failed this
+	// cycle), 2160p is already downloading (still active — keeps the aggregate live).
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1",
+		Quality: Quality1080p, Status: StatusQueued, ExternalID: "ext-hd",
+	}); err != nil {
+		t.Fatalf("seed 1080p target: %v", err)
+	}
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1",
+		Quality: Quality2160p, Status: StatusDownloading, ExternalID: "ext-uhd",
+	}); err != nil {
+		t.Fatalf("seed 2160p target: %v", err)
+	}
+
+	// Provider reports only the 1080p target as failed; 2160p is omitted (still
+	// downloading from prior cycle — no status update from provider this cycle).
+	router := &fakeRouterProvider{statuses: []RouterTargetStatus{{
+		Quality:      Quality1080p,
+		ConnectionID: "router-1",
+		Status:       StatusFailed,
+		Message:      "indexer rejected",
+	}}}
+	service := newTestService(store)
+	service.SetRouterProvider(router)
+	hub := evt.NewHub("test", nil)
+	service.SetEventsHub(hub)
+
+	ch, unsub := hub.Subscribe()
+	defer unsub()
+
+	store.candidates = []*Request{store.requests["req-1"]}
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests: %v", err)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("failed = %d, want 1 (one target failed)", result.Failed)
+	}
+
+	// The aggregate should still be active (one target still downloading).
+	req, _ := store.GetRequest(context.Background(), "req-1")
+	if req.Outcome != OutcomeActive {
+		t.Fatalf("aggregate outcome = %q, want active (sibling still downloading)", req.Outcome)
+	}
+
+	// No "request.failed" event must have been published.
+	select {
+	case env := <-ch:
+		if env.Event == "request.failed" {
+			t.Fatalf("got spurious request.failed event while aggregate is still active")
+		}
+		// Any other event (e.g. none expected here) would also be odd, but the key
+		// invariant is that request.failed must not fire.
+	default:
+		// No event published — correct.
+	}
+}
+
+// TestApprove_SoftFailPublishesRequestFailed verifies that when the admin
+// approves a request but submitApprovedRequest soft-fails (no integrations
+// configured), the event published is "request.failed", not "request.approved".
+func TestApprove_SoftFailPublishesRequestFailed(t *testing.T) {
+	store := newFakeStore()
+	store.requests["req-fail"] = &Request{
+		ID:                   "req-fail",
+		MediaType:            MediaTypeMovie,
+		TMDBID:               550,
+		Title:                "Fight Club",
+		Status:               StatusPending,
+		Outcome:              OutcomeActive,
+		RequestedByUserID:    7,
+		RequestedByProfileID: "profile-7",
+	}
+	// No router provider and no integrations → markSubmissionFailed is called,
+	// which sets Outcome = OutcomeFailed. publishApprovalOutcome must then
+	// emit "request.failed", not "request.approved".
+	service := newTestService(store)
+	hub := evt.NewHub("test", nil)
+	service.SetEventsHub(hub)
+
+	ch, unsub := hub.Subscribe()
+	defer unsub()
+
+	_, _ = service.Approve(context.Background(), Viewer{UserID: 99, IsAdmin: true}, "req-fail")
+
+	select {
+	case env := <-ch:
+		if env.Channel != evt.ChannelRequests {
+			t.Fatalf("channel = %q, want %q", env.Channel, evt.ChannelRequests)
+		}
+		if env.Event != "request.failed" {
+			t.Fatalf("event = %q, want request.failed (soft-fail must not publish request.approved)", env.Event)
+		}
+		var payload RequestEventPayload
+		if err := json.Unmarshal(env.Data, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload.RequestID != "req-fail" {
+			t.Fatalf("request_id = %q, want req-fail", payload.RequestID)
+		}
+		if payload.UserID != 7 {
+			t.Fatalf("user_id = %d, want 7", payload.UserID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request.failed event")
+	}
+}
+
+// TestCreateRequest_AutoApprovePublishesApproved verifies that when auto-approval
+// is enabled and submission succeeds, CreateRequest publishes both
+// "request.submitted" and "request.approved" events (in that order).
+func TestCreateRequest_AutoApprovePublishesApproved(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	store.settings.GlobalAutoApprovalEnabled = true
+	store.integrations = []Integration{autoApproveRouterInst("router-1", "radarr-key")}
+	service := newTestService(store)
+	service.SetRouterProvider(&fakeRouterProvider{})
+	hub := evt.NewHub("test", nil)
+	service.SetEventsHub(hub)
+
+	ch, unsub := hub.Subscribe()
+	defer unsub()
+
+	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if req.Status != StatusQueued {
+		t.Fatalf("status = %q, want queued (auto-approved and submitted)", req.Status)
+	}
+
+	// Collect events — expect exactly two: submitted then approved.
+	var events []string
+	timeout := time.After(time.Second)
+	for len(events) < 2 {
+		select {
+		case env := <-ch:
+			events = append(events, env.Event)
+		case <-timeout:
+			t.Fatalf("timed out; got events: %v", events)
+		}
+	}
+	if events[0] != "request.submitted" {
+		t.Fatalf("events[0] = %q, want request.submitted", events[0])
+	}
+	if events[1] != "request.approved" {
+		t.Fatalf("events[1] = %q, want request.approved (auto-approve succeeded)", events[1])
 	}
 }
