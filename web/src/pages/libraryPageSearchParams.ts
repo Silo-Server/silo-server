@@ -92,6 +92,11 @@ export function getLibrarySortRelevanceScope(
   if (libraryType === "ebook" || libraryType === "ebooks") {
     return "ebook";
   }
+  // Manga is a comic-series library whose chapters are ebook items; it has no
+  // dedicated sort scope, so it reuses the ebook sort universe.
+  if (isMangaLibraryType(libraryType)) {
+    return "ebook";
+  }
   if (
     mediaScope === "movie" ||
     mediaScope === "series" ||
@@ -110,6 +115,10 @@ export function isAudiobookLibraryType(libraryType: string): boolean {
 
 export function isEbookLibraryType(libraryType: string): boolean {
   return libraryType === "ebook" || libraryType === "ebooks";
+}
+
+export function isMangaLibraryType(libraryType: string): boolean {
+  return libraryType === "manga";
 }
 
 function readString(value: string | null): string | undefined {
@@ -310,7 +319,9 @@ export function parseLibraryPageState(
         ? "audiobook"
         : isEbookLibraryType(libraryType)
           ? "ebook"
-          : undefined;
+          : isMangaLibraryType(libraryType)
+            ? "manga"
+            : undefined;
   const sortRelevanceScope =
     libraryType === "series" && browseType === "episode"
       ? "all"

@@ -662,6 +662,22 @@ export interface EbookDetailExtension {
   };
 }
 
+// MangaChapter mirrors the host catalog.MangaChapter struct. Each chapter is a
+// readable type='ebook' item; the manga reader links to the ebook reader by
+// content_id alone (file_id is optional and resolved server-side).
+export interface MangaChapter {
+  content_id: string;
+  title: string;
+  chapter_index?: number;
+  volume?: string;
+}
+
+// MangaDetailExtension mirrors the host catalog.MangaDetailExtension struct;
+// present only when ItemDetail.type === "manga".
+export interface MangaDetailExtension {
+  chapters: MangaChapter[];
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -1112,6 +1128,7 @@ export interface ItemDetail {
   effective_version_edition_key?: string;
   audiobook?: AudiobookDetailExtension;
   ebook?: EbookDetailExtension;
+  manga?: MangaDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1291,7 +1308,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook" | "video";
+  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook" | "manga" | "video";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -3490,6 +3507,7 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
       value?.media_scope === "episode" ||
       value?.media_scope === "audiobook" ||
       value?.media_scope === "ebook" ||
+      value?.media_scope === "manga" ||
       value?.media_scope === "video"
         ? value.media_scope
         : undefined,
@@ -3554,7 +3572,9 @@ export function queryDefinitionFromSectionConfig(
             ? "audiobook"
             : config.media_scope === "ebook" || config.filter_type === "ebook"
               ? "ebook"
-              : undefined;
+              : config.media_scope === "manga" || config.filter_type === "manga"
+                ? "manga"
+                : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;
