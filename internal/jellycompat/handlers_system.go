@@ -27,11 +27,13 @@ type endpointInfoResponse struct {
 
 // SystemHandler serves Jellyfin setup/system endpoints.
 type SystemHandler struct {
-	cfg *config.Config
+	cfg func() *config.Config
 }
 
-// NewSystemHandler creates a new system handler.
-func NewSystemHandler(cfg *config.Config) *SystemHandler {
+// NewSystemHandler creates a new system handler. The config provider is
+// invoked per request so public URL / server name / emulated version
+// changes apply without restart.
+func NewSystemHandler(cfg func() *config.Config) *SystemHandler {
 	return &SystemHandler{cfg: cfg}
 }
 
@@ -60,7 +62,7 @@ func (h *SystemHandler) HandleEndpoint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, endpointInfoResponse{
 		IsLocal:     true,
 		IsInNetwork: true,
-		Address:     h.cfg.JellyfinCompat.PublicURL,
+		Address:     h.cfg().JellyfinCompat.PublicURL,
 	})
 }
 
@@ -71,11 +73,11 @@ func (h *SystemHandler) HandlePing(w http.ResponseWriter, r *http.Request) {
 
 func (h *SystemHandler) systemInfo() publicSystemInfoResponse {
 	return publicSystemInfoResponse{
-		LocalAddress:           h.cfg.JellyfinCompat.PublicURL,
-		ServerName:             h.cfg.JellyfinCompat.ServerName,
-		Version:                h.cfg.JellyfinCompat.EmulatedServerVersion,
+		LocalAddress:           h.cfg().JellyfinCompat.PublicURL,
+		ServerName:             h.cfg().JellyfinCompat.ServerName,
+		Version:                h.cfg().JellyfinCompat.EmulatedServerVersion,
 		ProductName:            "Jellyfin Server",
-		ID:                     h.cfg.JellyfinCompat.ServerID,
+		ID:                     h.cfg().JellyfinCompat.ServerID,
 		StartupWizardCompleted: true,
 	}
 }
