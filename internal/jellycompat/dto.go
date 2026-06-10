@@ -7,6 +7,16 @@ type queryResultDTO struct {
 	StartIndex       int           `json:"StartIndex"`
 }
 
+// themeMediaResultDTO mirrors Jellyfin's ThemeMediaResult. OwnerId is required:
+// jellyfin-sdk-kotlin models it as non-nullable, so omitting it fails client
+// deserialization even for an empty result.
+type themeMediaResultDTO struct {
+	Items            []baseItemDTO `json:"Items"`
+	TotalRecordCount int           `json:"TotalRecordCount"`
+	StartIndex       int           `json:"StartIndex"`
+	OwnerID          string        `json:"OwnerId"`
+}
+
 type baseItemDTO struct {
 	ServerID                 string                       `json:"ServerId,omitempty"`
 	ID                       string                       `json:"Id"`
