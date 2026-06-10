@@ -744,6 +744,9 @@ func main() {
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
 		s := scanner.NewScanner(fileRepo, ffprobePath, deps.S3Public, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan)
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			s.SetWorkers(updated.Scanner.Workers)
+		})
 		deps.Scanner = s
 		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, 10*time.Second)
 		slog.Info("scanner initialized")
@@ -1081,6 +1084,9 @@ func main() {
 			imageCacher := imagecache.New(deps.S3Public)
 			metadataService.SetImageCacher(imageCacher)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
+			configWatcher.OnChange(func(_, updated *config.Config) {
+				metadataService.SetAutoCacheImages(updated.Metadata.CacheImages)
+			})
 			if deps.Scanner != nil {
 				deps.Scanner.SetImageCacher(imageCacher)
 			}
@@ -1098,6 +1104,10 @@ func main() {
 		}
 
 		matchWorker = metadata.NewMatchWorker(metadataService, deps.FileRepo, cfg.Matcher.Workers, cfg.Matcher.BatchSize, 30*time.Second)
+		mwForReload := matchWorker
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			mwForReload.SetConcurrency(updated.Matcher.Workers, updated.Matcher.BatchSize)
+		})
 		matchWorker.SetRealtimeHub(deps.RealtimeHub)
 		if movieQueueRepo != nil {
 			matchWorker.SetMovieFileClaimer(movieQueueRepo)
@@ -1532,6 +1542,10 @@ func main() {
 			deps.UserCollectionSync = userSync
 			deps.UserCollectionScheduler = userCollectionScheduler
 			deps.MDBListClient = mdblist.NewClient(cfg.MDBListAPIKey, nil)
+			mdblistForReload := deps.MDBListClient
+			configWatcher.OnChange(func(_, updated *config.Config) {
+				mdblistForReload.SetAPIKey(updated.MDBListAPIKey)
+			})
 		}
 	}
 

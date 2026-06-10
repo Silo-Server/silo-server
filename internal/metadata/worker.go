@@ -27,10 +27,30 @@ type MatchWorker struct {
 	seriesClaimer           SeriesRootClaimer
 	enableTVSeriesRootQueue bool
 	realtimeHub             *notifications.Hub
-	workers                 int
-	batchSize               int
-	interval                time.Duration
+	// workers/batchSize are atomics so admin settings changes can resize the
+	// pool while the long-running match loop reads them each cycle.
+	workers   atomic.Int32
+	batchSize atomic.Int32
+	interval  time.Duration
 }
+
+// SetConcurrency updates the worker pool size and claim batch size. Safe for
+// concurrent use; the next match cycle picks the new values up. Out-of-range
+// values are ignored.
+func (w *MatchWorker) SetConcurrency(workers, batchSize int) {
+	if w == nil {
+		return
+	}
+	if workers >= 1 {
+		w.workers.Store(int32(workers))
+	}
+	if batchSize > 0 {
+		w.batchSize.Store(int32(batchSize))
+	}
+}
+
+func (w *MatchWorker) workerCount() int    { return int(w.workers.Load()) }
+func (w *MatchWorker) claimBatchSize() int { return int(w.batchSize.Load()) }
 
 type NonSeriesFileClaimer interface {
 	ClaimUnmatchedNonSeries(ctx context.Context, limit int) ([]*models.MediaFile, error)
@@ -77,14 +97,14 @@ func NewMatchWorker(service *MetadataService, fileLister UnmatchedFileLister, wo
 	if service != nil {
 		itemLister = service.itemRepo
 	}
-	return &MatchWorker{
+	w := &MatchWorker{
 		service:    service,
 		fileLister: fileLister,
 		itemLister: itemLister,
-		workers:    workers,
-		batchSize:  batchSize,
 		interval:   interval,
 	}
+	w.SetConcurrency(workers, batchSize)
+	return w
 }
 
 // SetSeriesRootClaimer enables native TV root-backed matching when enabled is true.
@@ -130,7 +150,7 @@ func (w *MatchWorker) Run(ctx context.Context) {
 // processUnmatched fetches a batch of unmatched files and processes them.
 func (w *MatchWorker) processUnmatched(ctx context.Context) {
 	if w.enableTVSeriesRootQueue && w.seriesClaimer != nil {
-		jobs, err := w.seriesClaimer.Claim(ctx, w.batchSize)
+		jobs, err := w.seriesClaimer.Claim(ctx, w.claimBatchSize())
 		if err != nil {
 			slog.Error("metadata: failed to claim unmatched series roots", "error", err)
 		} else if len(jobs) > 0 {
@@ -142,7 +162,7 @@ func (w *MatchWorker) processUnmatched(ctx context.Context) {
 	}
 
 	if w.movieClaimer != nil {
-		files, err := w.movieClaimer.Claim(ctx, w.batchSize)
+		files, err := w.movieClaimer.Claim(ctx, w.claimBatchSize())
 		if err != nil {
 			slog.Error("metadata: failed to claim queued movie files", "error", err)
 		} else if len(files) > 0 {
@@ -350,7 +370,7 @@ func (w *MatchWorker) ProcessFile(ctx context.Context, file *models.MediaFile) {
 // number of files processed.
 func (w *MatchWorker) ProcessBatch(ctx context.Context) (processed int, err error) {
 	if w.enableTVSeriesRootQueue && w.seriesClaimer != nil {
-		jobs, err := w.seriesClaimer.Claim(ctx, w.batchSize)
+		jobs, err := w.seriesClaimer.Claim(ctx, w.claimBatchSize())
 		if err != nil {
 			return 0, err
 		}
@@ -359,7 +379,7 @@ func (w *MatchWorker) ProcessBatch(ctx context.Context) (processed int, err erro
 		}
 	}
 	if w.movieClaimer != nil {
-		files, err := w.movieClaimer.Claim(ctx, w.batchSize)
+		files, err := w.movieClaimer.Claim(ctx, w.claimBatchSize())
 		if err != nil {
 			return 0, err
 		}
@@ -387,7 +407,7 @@ func (w *MatchWorker) ProcessBatchByFolderAndPathPrefix(ctx context.Context, fol
 		return 0, err
 	}
 	if useSeriesQueue {
-		jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+		jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 		if err != nil {
 			return 0, err
 		}
@@ -400,7 +420,7 @@ func (w *MatchWorker) ProcessBatchByFolderAndPathPrefix(ctx context.Context, fol
 		return processed, nil
 	}
 	if useMovieQueue {
-		files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+		files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 		if err != nil {
 			return 0, err
 		}
@@ -442,7 +462,7 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 		}
 
 		if useSeriesQueue {
-			jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+			jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 			if err != nil {
 				return processed, err
 			}
@@ -456,7 +476,7 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 			}
 		}
 		if useMovieQueue {
-			files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+			files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 			if err != nil {
 				return processed, err
 			}
@@ -502,7 +522,7 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 		processed           atomic.Int64
 		deferredSeriesLinks sync.Map
 	)
-	for i := 0; i < w.workers; i++ {
+	for i := 0; i < w.workerCount(); i++ {
 		wg.Go(func() {
 			for file := range fileChan {
 				if ctx.Err() != nil {
@@ -578,7 +598,7 @@ func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, files []*mode
 		processed atomic.Int64
 		folders   sync.Map
 	)
-	for i := 0; i < w.workers; i++ {
+	for i := 0; i < w.workerCount(); i++ {
 		wg.Go(func() {
 			for file := range fileChan {
 				if ctx.Err() != nil {
@@ -806,7 +826,7 @@ func (w *MatchWorker) processSeriesRoots(ctx context.Context, jobs []models.Seri
 		firstErrMu sync.Mutex
 		folders    sync.Map
 	)
-	for i := 0; i < w.workers; i++ {
+	for i := 0; i < w.workerCount(); i++ {
 		wg.Go(func() {
 			for job := range jobChan {
 				if runCtx.Err() != nil {
@@ -1159,17 +1179,17 @@ func (w *MatchWorker) queueUsageForFolder(ctx context.Context, folderID int) (us
 func (w *MatchWorker) claimBackgroundFiles(ctx context.Context) ([]*models.MediaFile, error) {
 	if w.enableTVSeriesRootQueue && w.movieClaimer != nil {
 		if claimer, ok := w.fileLister.(MixedFileClaimer); ok {
-			return claimer.ClaimUnmatchedMixed(ctx, w.batchSize)
+			return claimer.ClaimUnmatchedMixed(ctx, w.claimBatchSize())
 		}
 		return nil, fmt.Errorf("mixed-library file claimer is not configured")
 	}
 	if w.enableTVSeriesRootQueue {
 		if claimer, ok := w.fileLister.(NonSeriesFileClaimer); ok {
-			return claimer.ClaimUnmatchedNonSeries(ctx, w.batchSize)
+			return claimer.ClaimUnmatchedNonSeries(ctx, w.claimBatchSize())
 		}
 		return nil, fmt.Errorf("non-series file claimer is not configured")
 	}
-	return w.fileLister.ClaimUnmatched(ctx, w.batchSize)
+	return w.fileLister.ClaimUnmatched(ctx, w.claimBatchSize())
 }
 
 type scopedFallbackClaimMode int
@@ -1195,16 +1215,16 @@ func (w *MatchWorker) claimScopedFiles(ctx context.Context, folderID int, pathPr
 	switch mode {
 	case scopedFallbackMixed:
 		if claimer, ok := w.fileLister.(MixedFileClaimer); ok {
-			return claimer.ClaimUnmatchedMixedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+			return claimer.ClaimUnmatchedMixedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 		}
 		return nil, fmt.Errorf("mixed-library file claimer is not configured")
 	case scopedFallbackNonSeries:
 		if claimer, ok := w.fileLister.(NonSeriesFileClaimer); ok {
-			return claimer.ClaimUnmatchedNonSeriesByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+			return claimer.ClaimUnmatchedNonSeriesByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 		}
 		return nil, fmt.Errorf("non-series file claimer is not configured")
 	default:
-		return w.fileLister.ClaimUnmatchedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.batchSize, attemptBefore)
+		return w.fileLister.ClaimUnmatchedByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
 	}
 }
 

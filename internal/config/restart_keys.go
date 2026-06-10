@@ -41,21 +41,17 @@ var restartRequiredKeys = map[string]bool{
 	"playback.hw_device":                 true,
 	"playback.chapter_thumbnail_workers": true,
 
-	// Scanner / matcher / metadata worker pools and toggles captured at
-	// construction.
-	"scanner.workers":                      true, // until scanner conversion lands
+	// Scanner / matcher toggles captured at construction. Worker counts,
+	// batch size, metadata.cache_images, and mdblist.api_key hot-reload via
+	// atomic setters wired to the config watcher.
 	"scanner.max_concurrent_libraries":     true,
 	"scanner.max_concurrent_scoped":        true,
 	"scanner.empty_trash_after_scan":       true,
-	"matcher.workers":                      true, // until matcher conversion lands
-	"matcher.batch_size":                   true, // until matcher conversion lands
 	"matcher.enable_tv_series_root_queue":  true,
 	"matcher.enable_tv_series_group_queue": true,
-	"metadata.cache_images":                true, // until metadata conversion lands
 
 	// External API clients built once at startup.
-	"tmdb.api_key":    true,
-	"mdblist.api_key": true, // until mdblist conversion lands
+	"tmdb.api_key": true,
 
 	// Compat listeners and session stores.
 	"audiobookshelf_compat.enabled": true,

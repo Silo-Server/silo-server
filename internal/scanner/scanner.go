@@ -118,10 +118,12 @@ type Scanner struct {
 	itemRepo            *catalog.ItemRepository
 	personRepo          *catalog.PersonRepository
 	episodeRepo         *catalog.EpisodeRepository
-	ffprobePath         string
-	s3Client            *s3client.Client // public assets bucket (may be nil)
-	imageCacher         scannerImageCacher
-	workers             int
+	ffprobePath string
+	s3Client    *s3client.Client // public assets bucket (may be nil)
+	imageCacher scannerImageCacher
+	// workers is atomic so admin settings changes can resize the per-scan
+	// worker pool while a scan is running (applies to the next scan).
+	workers             atomic.Int32
 	emptyTrashAfterScan bool
 	markerFetcher       func(context.Context, string) *IntroCreditsMarkers
 	metadataQueue       MetadataQueueProducer
@@ -138,6 +140,17 @@ func (s *Scanner) SetImageCacher(cacher scannerImageCacher) {
 	}
 	s.imageCacher = cacher
 }
+
+// SetWorkers updates the scan worker pool size. Safe for concurrent use; the
+// next scan run picks the new value up. Values below 1 are ignored.
+func (s *Scanner) SetWorkers(workers int) {
+	if s == nil || workers < 1 {
+		return
+	}
+	s.workers.Store(int32(workers))
+}
+
+func (s *Scanner) workerCount() int { return int(s.workers.Load()) }
 
 const scanProgressLogInterval = 10 * time.Second
 
@@ -167,7 +180,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 	if workers < 1 {
 		workers = 8
 	}
-	return &Scanner{
+	s := &Scanner{
 		fileRepo:            fileRepo,
 		rootSnapshotRepo:    NewScannedRootRepository(fileRepo.Pool()),
 		groupSnapshotRepo:   NewScannedGroupRepository(fileRepo.Pool()),
@@ -183,10 +196,11 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		episodeRepo:         catalog.NewEpisodeRepository(fileRepo.Pool()),
 		ffprobePath:         ffprobePath,
 		s3Client:            s3Client,
-		workers:             workers,
 		emptyTrashAfterScan: emptyTrashAfterScan,
 		markerFetcher:       nil,
 	}
+	s.SetWorkers(workers)
+	return s
 }
 
 // SetSeriesQueueSyncer installs the optional pending-series root queue synchronizer.
@@ -682,11 +696,11 @@ func (s *Scanner) scanPaths(
 
 	// Phase 2: Process files concurrently with a worker pool.
 	var wg sync.WaitGroup
-	pathCh := make(chan string, s.workers)
+	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
 	subtitleCache := newExternalSubtitleDirCache()
 
-	for range s.workers {
+	for range s.workerCount() {
 		wg.Go(func() {
 			for path := range pathCh {
 				if ctx.Err() != nil {
@@ -1159,11 +1173,11 @@ func (s *Scanner) scanScope(
 	}
 
 	var wg sync.WaitGroup
-	pathCh := make(chan string, s.workers)
+	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
 	subtitleCache := newExternalSubtitleDirCache()
 
-	for range s.workers {
+	for range s.workerCount() {
 		wg.Go(func() {
 			for path := range pathCh {
 				if ctx.Err() != nil {

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,9 +39,10 @@ type ListSummary struct {
 }
 
 // Client wraps a single MDBList apikey. Construct one per server config; it
-// is safe for concurrent use because http.Client is.
+// is safe for concurrent use because http.Client is. The apikey is atomic so
+// admin settings changes apply to subsequent requests without restart.
 type Client struct {
-	apiKey  string
+	apiKey  atomic.Pointer[string]
 	baseURL string
 	http    *http.Client
 }
@@ -51,16 +53,31 @@ func NewClient(apiKey string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Client{
-		apiKey:  strings.TrimSpace(apiKey),
+	c := &Client{
 		baseURL: defaultBaseURL,
 		http:    httpClient,
 	}
+	c.SetAPIKey(apiKey)
+	return c
+}
+
+// SetAPIKey replaces the apikey used for subsequent requests. Safe for
+// concurrent use.
+func (c *Client) SetAPIKey(apiKey string) {
+	trimmed := strings.TrimSpace(apiKey)
+	c.apiKey.Store(&trimmed)
+}
+
+func (c *Client) currentAPIKey() string {
+	if key := c.apiKey.Load(); key != nil {
+		return *key
+	}
+	return ""
 }
 
 // Configured reports whether the client has an apikey set.
 func (c *Client) Configured() bool {
-	return c.apiKey != ""
+	return c.currentAPIKey() != ""
 }
 
 // Search returns lists whose title matches query.
@@ -70,7 +87,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]ListSummary, error
 		return nil, fmt.Errorf("query is required")
 	}
 	q := url.Values{}
-	q.Set("apikey", c.apiKey)
+	q.Set("apikey", c.currentAPIKey())
 	q.Set("query", query)
 	return c.fetchLists(ctx, "/lists/search", q)
 }
@@ -78,7 +95,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]ListSummary, error
 // Top returns the public top lists ranked by Trakt likes.
 func (c *Client) Top(ctx context.Context) ([]ListSummary, error) {
 	q := url.Values{}
-	q.Set("apikey", c.apiKey)
+	q.Set("apikey", c.currentAPIKey())
 	return c.fetchLists(ctx, "/lists/top", q)
 }
 
