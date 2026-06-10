@@ -199,10 +199,16 @@ type DeviceInfo struct {
 
 func (s *Store) ListDevices(ctx context.Context, userID int) ([]DeviceInfo, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT device_id, device_name, device_platform, COALESCE(push_transport,''), push_enabled, push_token_at
+		SELECT device_id,
+		       (array_agg(device_name ORDER BY push_token_at DESC NULLS LAST))[1],
+		       (array_agg(device_platform ORDER BY push_token_at DESC NULLS LAST))[1],
+		       (array_agg(COALESCE(push_transport,'') ORDER BY push_token_at DESC NULLS LAST))[1],
+		       bool_or(push_enabled),
+		       max(push_token_at)
 		FROM user_devices
 		WHERE user_id=$1 AND push_token IS NOT NULL
-		ORDER BY last_seen_at DESC`, userID)
+		GROUP BY device_id
+		ORDER BY max(last_seen_at) DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list devices: %w", err)
 	}
