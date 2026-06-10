@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import type { AppNotification, EventsEventMessage, EventsSnapshotMessage } from "@/api/types";
 import { useEventChannel } from "@/components/realtimeEventsContext";
+import { isNotificationDropdownOpen } from "@/components/NotificationBell";
 import { notificationKeys } from "@/hooks/queries/keys";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -37,8 +38,9 @@ export function useNotificationsLive() {
           queryKey: [...notificationKeys.all, "list"],
           refetchType: "none",
         });
-        // TODO(notifications): suppress toast while the bell dropdown is open (wired in NotificationBell task)
-        toast(n.title, { description: n.body || undefined });
+        if (!isNotificationDropdownOpen()) {
+          toast(n.title, { description: n.body || undefined });
+        }
       },
       onSnapshot: (message: unknown) => {
         const f = message as EventsSnapshotMessage<{ unread_count?: number }>;

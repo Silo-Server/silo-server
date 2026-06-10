@@ -2,12 +2,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { capturedHandlers, toastMock, profileState } = vi.hoisted(() => ({
+const { capturedHandlers, toastMock, profileState, bellState } = vi.hoisted(() => ({
   capturedHandlers: {} as { onEvent?: (m: unknown) => void; onSnapshot?: (m: unknown) => void },
   toastMock: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
   profileState: { profile: { id: "p-1", is_child: false } as { id: string; is_child: boolean } | null },
+  bellState: { open: false },
 }));
 
+vi.mock("@/components/NotificationBell", () => ({
+  isNotificationDropdownOpen: () => bellState.open,
+  setNotificationDropdownOpenForTests: (v: boolean) => { bellState.open = v; },
+}));
 vi.mock("@/components/realtimeEventsContext", () => ({
   useEventChannel: (_c: string, handlers?: { onEvent?: (m: unknown) => void; onSnapshot?: (m: unknown) => void }) => {
     capturedHandlers.onEvent = handlers?.onEvent;
@@ -34,6 +39,7 @@ const frame = (data: object) => ({ type: "event", channel: "notifications", even
 beforeEach(() => {
   toastMock.mockClear();
   profileState.profile = { id: "p-1", is_child: false };
+  bellState.open = false;
 });
 
 describe("useNotificationsLive", () => {
@@ -74,5 +80,13 @@ describe("useNotificationsLive", () => {
     const qc = setup(1);
     capturedHandlers.onSnapshot?.({ type: "snapshot", channel: "notifications", data: { unread_count: 9 } });
     expect(qc.getQueryData(notificationKeys.unreadCount())).toEqual({ count: 9 });
+  });
+
+  it("suppresses toast but still bumps unread count while bell dropdown is open", () => {
+    bellState.open = true;
+    const qc = setup(1);
+    capturedHandlers.onEvent?.(frame({ id: 10, category: "content", title: "New Release", body: "Arrival", profile_id: "p-1" }));
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(qc.getQueryData(notificationKeys.unreadCount())).toEqual({ count: 2 });
   });
 });

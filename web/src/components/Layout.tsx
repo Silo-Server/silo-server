@@ -13,12 +13,15 @@ import { buildQueryCatalogHref, parseCatalogSearchParams } from "@/pages/catalog
 import type { ReactNode } from "react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
+import { useNotificationsLive } from "@/hooks/useNotificationsLive";
+import { NotificationBell } from "@/components/NotificationBell";
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 export default function Layout({ children }: LayoutProps) {
+  useNotificationsLive();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Tracks whether the mobile header should slide off-screen on scroll.
@@ -155,6 +158,7 @@ export default function Layout({ children }: LayoutProps) {
           >
             <Search className="h-5 w-5" />
           </ViewTransitionLink>
+          <NotificationBell />
           {isAdmin && <ServerActivity hideWhenEmpty />}
           <Link
             to="/settings/playback"
