@@ -594,6 +594,75 @@ describe("EbookReader", () => {
     vi.useRealTimers();
   });
 
+  it("offers reliable font choices and reading profile presets", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    const fontOptions = Array.from(font?.options ?? []).map((option) => option.textContent ?? "");
+    expect(fontOptions).toContain("Book default");
+    expect(fontOptions).toContain("System serif");
+    expect(fontOptions).toContain("System sans");
+    expect(fontOptions).not.toContain("Inter");
+    expect(fontOptions).not.toContain("Merriweather");
+
+    const comfortable = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Comfortable"),
+    );
+    await act(async () => {
+      comfortable?.click();
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+        fontSize: 112,
+        lineHeight: 1.75,
+      }),
+    );
+    expect(comfortable?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("toggles the persisted reading ruler overlay", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const ruler = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle reading ruler"]',
+    );
+    await act(async () => {
+      ruler?.click();
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ readingRuler: true }),
+    );
+    const handle = container.querySelector('[role="slider"][aria-label="Reading ruler position"]');
+    expect(handle).not.toBeNull();
+    expect(handle?.getAttribute("aria-valuenow")).toBe("50");
+  });
+
   it("constrains the reader grid so the side panel stays inside the viewport", async () => {
     await act(async () => {
       root.render(
@@ -753,9 +822,7 @@ describe("EbookReader", () => {
     expect(container.querySelector('[aria-label="Diagnostics"]')).toBeNull();
     expect(container.textContent).not.toContain("Diagnostics");
 
-    const brightness = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Brightness"]',
-    );
+    const brightness = container.querySelector<HTMLInputElement>('input[aria-label="Brightness"]');
     const hyphenation = container.querySelector<HTMLInputElement>(
       'input[aria-label="Hyphenation"]',
     );
@@ -831,9 +898,7 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const brightness = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Brightness"]',
-    );
+    const brightness = container.querySelector<HTMLInputElement>('input[aria-label="Brightness"]');
     const label = brightness?.closest("label");
     const header = label?.querySelector("[data-reader-range-header]");
     const name = label?.querySelector("[data-reader-range-name]");
