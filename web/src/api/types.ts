@@ -1047,7 +1047,7 @@ export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | 
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "podcast";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
