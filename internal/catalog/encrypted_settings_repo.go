@@ -69,7 +69,11 @@ var SensitiveSettingKeys = map[string]bool{
 	"mdblist.api_key": true,
 	"introdb.api_key": true,
 
-	// Subtitle AI (on-demand translation) API key.
+	// Shared AI endpoint API keys (+ legacy subtitle_ai alias the loader still
+	// falls back to; the legacy row is never renamed because ciphertext is
+	// GCM-bound to its key).
+	"ai.api_key":          true,
+	"ai.asr_api_key":      true,
 	"subtitle_ai.api_key": true,
 
 	// Recommendations embedding auth (+ legacy openai alias at db_loader L409).

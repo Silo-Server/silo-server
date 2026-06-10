@@ -2,30 +2,29 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
 )
 
-// LLMTranslator translates subtitle cues with an OpenAI-compatible chat model.
-//
-// Cues are translated in batches. Each batch is sent as a JSON object keyed by
-// cue number; the model must return the same keys with translated values. Only
-// the text is sent to the model — timestamps never leave the server — so timing
-// alignment is structurally guaranteed. A few preceding source cues are
-// included as untranslated context so the model can keep scene continuity
-// across batch boundaries.
+// LLMTranslator translates subtitle cues with an OpenAI-compatible chat model
+// via the shared aitranslate batch protocol. Only the text is sent to the
+// model — timestamps never leave the server — so timing alignment is
+// structurally guaranteed. A few preceding source cues are included as
+// untranslated context so the model can keep scene continuity across batch
+// boundaries.
 type LLMTranslator struct {
-	client           *Client
+	client           *llm.Client
 	batchSize        int
 	contextNeighbors int
-	maxRetries       int
 }
 
-// NewLLMTranslator builds a translator. batchSize and contextNeighbors fall back
-// to sane defaults when non-positive.
-func NewLLMTranslator(client *Client, batchSize, contextNeighbors int) *LLMTranslator {
+// NewLLMTranslator builds a translator. batchSize and contextNeighbors fall
+// back to sane defaults when non-positive.
+func NewLLMTranslator(client *llm.Client, batchSize, contextNeighbors int) *LLMTranslator {
 	if batchSize <= 0 {
 		batchSize = 40
 	}
@@ -36,7 +35,6 @@ func NewLLMTranslator(client *Client, batchSize, contextNeighbors int) *LLMTrans
 		client:           client,
 		batchSize:        batchSize,
 		contextNeighbors: contextNeighbors,
-		maxRetries:       2,
 	}
 }
 
@@ -44,9 +42,6 @@ func NewLLMTranslator(client *Client, batchSize, contextNeighbors int) *LLMTrans
 func (t *LLMTranslator) Translate(ctx context.Context, req TranslateRequest, onBatch func(batch []SubtitleCue, done, total int)) ([]SubtitleCue, error) {
 	if t.client == nil {
 		return nil, fmt.Errorf("translator client is nil")
-	}
-	if t.batchSize <= 0 {
-		return nil, fmt.Errorf("invalid batch size: %d", t.batchSize)
 	}
 	if strings.TrimSpace(req.TargetLanguage) == "" {
 		return nil, fmt.Errorf("target language is required")
@@ -60,97 +55,48 @@ func (t *LLMTranslator) Translate(ctx context.Context, req TranslateRequest, onB
 	out := make([]SubtitleCue, total)
 	copy(out, req.Cues)
 
-	srcName := languageDisplayName(req.SourceLanguage)
-	tgtName := languageDisplayName(req.TargetLanguage)
-	system := translationSystemPrompt(srcName, tgtName)
+	segments := make([]aitranslate.Segment, total)
+	for i, c := range req.Cues {
+		segments[i] = aitranslate.Segment{ID: strconv.Itoa(i + 1), Text: strings.Join(c.Lines, "\n")}
+	}
 
-	for start := 0; start < total; start += t.batchSize {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		end := min(start+t.batchSize, total)
+	srcName := aitranslate.LanguageDisplayName(req.SourceLanguage)
+	tgtName := aitranslate.LanguageDisplayName(req.TargetLanguage)
 
-		contextStart := max(0, start-t.contextNeighbors)
-		translated, err := t.translateBatch(ctx, system, tgtName, req.Cues[contextStart:start], req.Cues[start:end])
-		if err != nil {
-			return nil, fmt.Errorf("translate cues %d-%d: %w", start+1, end, err)
+	chat := func(ctx context.Context, system, user string) (string, error) {
+		messages := []llm.Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
 		}
-		for i, lines := range translated {
-			out[start+i].Lines = lines
+		return t.client.Chat(ctx, messages, true)
+	}
+
+	translated, err := aitranslate.Translate(ctx, chat, aitranslate.Request{
+		Segments:         segments,
+		SystemPrompt:     translationSystemPrompt(srcName, tgtName),
+		TargetName:       tgtName,
+		EntryNoun:        "cues",
+		BatchSize:        t.batchSize,
+		ContextNeighbors: t.contextNeighbors,
+	}, func(batch []aitranslate.Segment, done, totalSegs int) {
+		// Batches are sequential ranges, so this batch covers [done-len, done).
+		start := done - len(batch)
+		for i, seg := range batch {
+			out[start+i].Lines = splitCueLines(seg.Text)
 		}
 		if onBatch != nil {
-			onBatch(out[start:end], end, total)
+			onBatch(out[start:done], done, totalSegs)
 		}
-	}
-
-	return out, nil
-}
-
-func (t *LLMTranslator) translateBatch(ctx context.Context, system, targetName string, contextCues, batch []SubtitleCue) ([][]string, error) {
-	texts := make([]string, len(batch))
-	for i, c := range batch {
-		texts[i] = strings.Join(c.Lines, "\n")
-	}
-	payload, err := buildIndexedJSON(texts)
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	var user strings.Builder
-	if len(contextCues) > 0 {
-		user.WriteString("Preceding lines for context only — do not translate or include them in your output:\n")
-		for _, c := range contextCues {
-			user.WriteString(strings.Join(c.Lines, " "))
-			user.WriteByte('\n')
-		}
-		user.WriteByte('\n')
+	// Map the full result too: covers callers without an onBatch callback.
+	for i, seg := range translated {
+		out[i].Lines = splitCueLines(seg.Text)
 	}
-	fmt.Fprintf(&user, "Translate these %d cues into %s. Respond with only the JSON object:\n%s", len(batch), targetName, payload)
-
-	messages := []chatMessage{
-		{Role: "system", Content: system},
-		{Role: "user", Content: user.String()},
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= t.maxRetries; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		content, err := t.client.chat(ctx, messages, true)
-		if err != nil {
-			return nil, err // transport/API errors are already retried inside chat
-		}
-
-		obj, err := extractJSONObject(content)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		var m map[string]string
-		if err := json.Unmarshal([]byte(obj), &m); err != nil {
-			lastErr = fmt.Errorf("decode translation JSON: %w", err)
-			continue
-		}
-
-		out := make([][]string, len(batch))
-		complete := true
-		for i := range batch {
-			v, ok := m[strconv.Itoa(i+1)]
-			if !ok {
-				complete = false
-				break
-			}
-			out[i] = splitCueLines(v)
-		}
-		if !complete {
-			lastErr = fmt.Errorf("model omitted one or more cues")
-			continue
-		}
-		return out, nil
-	}
-
-	return nil, fmt.Errorf("invalid model response after %d attempts: %w", t.maxRetries+1, lastErr)
+	return out, nil
 }
 
 func translationSystemPrompt(srcName, tgtName string) string {
@@ -167,57 +113,6 @@ func translationSystemPrompt(srcName, tgtName string) string {
 			"and do not output anything except the JSON object.",
 		src, tgtName, tgtName,
 	)
-}
-
-// buildIndexedJSON renders texts as a JSON object {"1":..., "2":...} keyed by
-// 1-based cue number, escaping each value safely. It is built by hand rather
-// than json.Marshal'ing a map so the keys stay in numeric order — that reads
-// more naturally for the model than the lexicographic order Go emits for maps
-// ("1","10","11",...,"2"). Correctness doesn't depend on order (results are
-// mapped back by key), but ordered input gives the model better scene context.
-func buildIndexedJSON(texts []string) (string, error) {
-	var b strings.Builder
-	b.WriteByte('{')
-	for i, text := range texts {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		key, err := json.Marshal(strconv.Itoa(i + 1))
-		if err != nil {
-			return "", err
-		}
-		val, err := json.Marshal(text)
-		if err != nil {
-			return "", err
-		}
-		b.Write(key)
-		b.WriteByte(':')
-		b.Write(val)
-	}
-	b.WriteByte('}')
-	return b.String(), nil
-}
-
-// extractJSONObject pulls the first balanced-looking JSON object out of a model
-// reply, tolerating ``` code fences and surrounding prose.
-func extractJSONObject(s string) (string, error) {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```")
-		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-			s = s[nl+1:]
-		}
-		if idx := strings.LastIndex(s, "```"); idx >= 0 {
-			s = s[:idx]
-		}
-		s = strings.TrimSpace(s)
-	}
-	start := strings.IndexByte(s, '{')
-	end := strings.LastIndexByte(s, '}')
-	if start < 0 || end < 0 || end < start {
-		return "", fmt.Errorf("no JSON object found in model response")
-	}
-	return s[start : end+1], nil
 }
 
 func splitCueLines(v string) []string {

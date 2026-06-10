@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -2100,6 +2101,21 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 			return
 		} else {
 			req.Value = normalized
+		}
+	case "ai.asr_base_url":
+		if llm.IsChatOnlyGateway(req.Value) {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"This endpoint cannot produce timestamped transcriptions (chat-only gateway). "+
+					"Use a self-hosted Whisper server (faster-whisper/speaches), api.groq.com/openai, or api.openai.com.")
+			return
+		}
+	case "metadata_ai.on_view":
+		switch req.Value {
+		case "off", "button", "auto":
+		default:
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"metadata_ai.on_view must be off, button, or auto")
+			return
 		}
 	}
 

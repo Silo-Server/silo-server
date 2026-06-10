@@ -431,3 +431,81 @@ export function useApplyItemImage() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Metadata AI translation (descriptions into the localization tables)
+// ---------------------------------------------------------------------------
+
+export interface MetadataTranslationJob {
+  id: number;
+  target_kind: string;
+  content_id: string;
+  include_children: boolean;
+  source_language: string;
+  target_language: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  progress: number;
+  progress_message: string;
+  fields_done: number;
+  fields_total: number;
+  force: boolean;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Whether the server has metadata AI translation configured, and the
+ * viewer-facing on-view mode. */
+export function useMetadataAIStatus(enabled = true) {
+  return useQuery({
+    queryKey: ["metadata-ai", "status"],
+    queryFn: () =>
+      api<{ enabled: boolean; on_view?: "off" | "button" | "auto" }>("/metadata/ai/status"),
+    staleTime: 5 * 60 * 1000,
+    enabled,
+  });
+}
+
+export interface TranslateItemMetadataRequest {
+  target_language: string;
+  include_children?: boolean;
+  force?: boolean;
+}
+
+export function useTranslateItemMetadata(contentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TranslateItemMetadataRequest) =>
+      api<{ job: MetadataTranslationJob }>(
+        `/admin/items/${itemPathID(contentId)}/metadata-translation`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["metadata-translation-jobs", contentId],
+      });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to start translation");
+    },
+  });
+}
+
+/**
+ * Recent translation jobs for an item. Polls while a job is active so the
+ * metadata editor can show live progress without a websocket.
+ */
+export function useMetadataTranslationJobs(contentId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["metadata-translation-jobs", contentId],
+    queryFn: () =>
+      api<{ jobs: MetadataTranslationJob[] }>(
+        `/admin/items/${itemPathID(contentId)}/metadata-translation/jobs`,
+      ),
+    enabled,
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.jobs ?? [];
+      return jobs.some((j) => j.status === "pending" || j.status === "running") ? 1500 : false;
+    },
+  });
+}

@@ -174,6 +174,14 @@ type metadataFolderRepo interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 }
 
+// AutoTranslator is the seam to the metadata AI translation service: after a
+// refresh, libraries that opted in get missing localizations filled by AI.
+// Implemented by *translation.Service; AutoEnqueue must be cheap and must
+// never fail the refresh (it logs its own errors).
+type AutoTranslator interface {
+	AutoEnqueue(ctx context.Context, itemContentID, language string)
+}
+
 type metadataContentFileLister interface {
 	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaFile, error)
 }
@@ -280,6 +288,7 @@ type MetadataService struct {
 	itemLocalizationRepo    *catalog.MediaItemLocalizationRepository
 	seasonLocalizationRepo  *catalog.SeasonLocalizationRepository
 	episodeLocalizationRepo *catalog.EpisodeLocalizationRepository
+	autoTranslator          AutoTranslator // optional; set via SetAutoTranslator
 	personRepo              *catalog.PersonRepository
 	fileRepo                FileContentUpdater
 	skippedRootRepo         metadataSkippedRootRepo
@@ -414,6 +423,12 @@ func NewMetadataService(
 }
 
 // SetImageCacher enables S3 image caching during metadata persistence.
+// SetAutoTranslator wires the metadata AI translation fallback. Optional;
+// without it, refreshes simply skip the auto-translate hook.
+func (s *MetadataService) SetAutoTranslator(t AutoTranslator) {
+	s.autoTranslator = t
+}
+
 func (s *MetadataService) SetImageCacher(c ImageCacher) {
 	s.imageCacher = c
 }
@@ -514,7 +529,36 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 		final.Updated = final.Updated || result.Updated
 	}
 
+	s.maybeAutoTranslate(ctx, folderID, final.ContentID)
+
 	return &final, nil
+}
+
+// maybeAutoTranslate queues an AI translation for libraries that opted in,
+// when the item's default metadata language differs from the library's. The
+// translation service itself checks whether anything is actually missing, so
+// this fires cheaply on every refresh. Runs in the background — a refresh
+// never waits on (or fails because of) the translation seam.
+func (s *MetadataService) maybeAutoTranslate(ctx context.Context, folderID int, contentID string) {
+	if s.autoTranslator == nil || contentID == "" || folderID <= 0 || s.folderRepo == nil || s.itemRepo == nil {
+		return
+	}
+	folder, err := s.folderRepo.GetByID(ctx, folderID)
+	if err != nil || folder == nil || !folder.AutoTranslateMetadata {
+		return
+	}
+	library := strings.TrimSpace(folder.MetadataLanguage)
+	if library == "" {
+		return
+	}
+	item, err := s.itemRepo.GetByID(ctx, contentID)
+	if err != nil || item == nil {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(item.DefaultMetadataLanguage), library) {
+		return
+	}
+	go s.autoTranslator.AutoEnqueue(context.WithoutCancel(ctx), contentID, library)
 }
 
 func parseProcessFolderID(raw string) int {

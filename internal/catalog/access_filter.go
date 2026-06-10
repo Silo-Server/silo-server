@@ -15,7 +15,11 @@ type AccessFilter struct {
 	DisabledLibraryIDs    []int // user-disabled libraries (only set when AllowedLibraryIDs is nil)
 	PresentationLibraryID *int
 	PresentationLanguage  string
-	MaxContentRating      string
+	// ProfilePreferredLanguage is the viewer profile's preferred metadata
+	// language. Presentation language resolves: explicit PresentationLanguage
+	// → ProfilePreferredLanguage → the library's metadata_language.
+	ProfilePreferredLanguage string
+	MaxContentRating         string
 	MaxPlaybackQuality    string
 	SelectedFileID        int
 	UserID                int

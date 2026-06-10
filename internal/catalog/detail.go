@@ -74,6 +74,10 @@ type ItemDetail struct {
 	Year             int          `json:"year,omitempty"`
 	Overview         string       `json:"overview,omitempty"`
 	Tagline          string       `json:"tagline,omitempty"`
+	// PendingTranslationLanguage, when set, is the viewer's presentation
+	// language that the description is missing — the on-view AI translation
+	// affordance keys off it.
+	PendingTranslationLanguage string `json:"pending_translation_language,omitempty"`
 	Runtime          int          `json:"runtime,omitempty"`
 	ContentRating    string       `json:"content_rating,omitempty"`
 	Genres           []string     `json:"genres"`
@@ -576,9 +580,15 @@ func cloneEpisode(ep *models.Episode) *models.Episode {
 	return &cp
 }
 
+// resolvePresentationLanguage picks the display language for a request:
+// explicit request language → viewer profile preference → the presentation
+// library's metadata language.
 func (s *DetailService) resolvePresentationLanguage(ctx context.Context, filter AccessFilter) (string, error) {
 	if strings.TrimSpace(filter.PresentationLanguage) != "" {
 		return strings.TrimSpace(filter.PresentationLanguage), nil
+	}
+	if strings.TrimSpace(filter.ProfilePreferredLanguage) != "" {
+		return strings.TrimSpace(filter.ProfilePreferredLanguage), nil
 	}
 	if filter.PresentationLibraryID == nil || s.folderRepo == nil {
 		return "", nil
@@ -591,6 +601,27 @@ func (s *DetailService) resolvePresentationLanguage(ctx context.Context, filter 
 		return "", err
 	}
 	return strings.TrimSpace(folder.MetadataLanguage), nil
+}
+
+// PendingTranslationLanguage reports the presentation language the item's
+// description is missing: non-empty when the resolved language differs from
+// the item's base metadata language, the base overview has text, and no
+// localized overview exists yet. Clients use it to offer (or auto-run)
+// on-view AI translation; it is pure data, independent of whether the AI
+// feature is enabled.
+func (s *DetailService) PendingTranslationLanguage(ctx context.Context, item *models.MediaItem, filter AccessFilter) string {
+	if item == nil || strings.TrimSpace(item.Overview) == "" || s.itemLocRepo == nil {
+		return ""
+	}
+	language, err := s.resolvePresentationLanguage(ctx, filter)
+	if err != nil || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) {
+		return ""
+	}
+	loc, err := s.itemLocRepo.Get(ctx, item.ContentID, language)
+	if err != nil || (loc != nil && loc.Overview != "") {
+		return ""
+	}
+	return language
 }
 
 func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {
@@ -623,17 +654,7 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 	if err != nil || loc == nil {
 		return cloneMediaItem(item), err
 	}
-	localized := cloneMediaItem(item)
-	localized.Title = loc.Title
-	localized.SortTitle = loc.SortTitle
-	localized.Overview = loc.Overview
-	localized.Tagline = loc.Tagline
-	localized.PosterPath = loc.PosterPath
-	localized.PosterThumbhash = loc.PosterThumbhash
-	localized.BackdropPath = loc.BackdropPath
-	localized.BackdropThumbhash = loc.BackdropThumbhash
-	localized.LogoPath = loc.LogoPath
-	return localized, nil
+	return applyItemLocalization(item, loc), nil
 }
 
 func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.Season, filter AccessFilter) (*models.Season, error) {
@@ -648,12 +669,7 @@ func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.
 	if err != nil || loc == nil {
 		return cloneSeason(season), err
 	}
-	localized := cloneSeason(season)
-	localized.Title = loc.Title
-	localized.Overview = loc.Overview
-	localized.PosterPath = loc.PosterPath
-	localized.PosterThumbhash = loc.PosterThumbhash
-	return localized, nil
+	return applySeasonLocalization(season, loc), nil
 }
 
 func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *models.Episode, filter AccessFilter) (*models.Episode, error) {
@@ -668,10 +684,7 @@ func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *model
 	if err != nil || loc == nil {
 		return cloneEpisode(episode), err
 	}
-	localized := cloneEpisode(episode)
-	localized.Title = loc.Title
-	localized.Overview = loc.Overview
-	return localized, nil
+	return applyEpisodeLocalization(episode, loc), nil
 }
 
 // GetItemDetail retrieves a full item detail with presigned URLs and file versions.
@@ -828,6 +841,7 @@ func (s *DetailService) fetchCredits(ctx context.Context, contentID string) ([]C
 }
 
 func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.MediaItem, contentID string, filter AccessFilter) (*ItemDetail, error) {
+	pendingTranslation := s.PendingTranslationLanguage(ctx, item, filter)
 	localizedItem, err := s.LocalizeItemModel(ctx, item, filter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing item detail: %w", err)
@@ -843,6 +857,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		Year:              item.Year,
 		Overview:          item.Overview,
 		Tagline:           item.Tagline,
+		PendingTranslationLanguage: pendingTranslation,
 		Runtime:           item.Runtime,
 		ContentRating:     item.ContentRating,
 		Genres:            item.Genres,

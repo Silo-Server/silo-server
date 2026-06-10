@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -422,20 +423,38 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Recommendations.DiversityLambda = diversityLambda
 	cfg.Recommendations.CowatchCron = stringOr(m, "recommendations.cowatch_cron", "30 4 * * *")
 
-	// Subtitle AI (on-demand translation; Whisper ASR generation in a follow-up)
+	// Shared AI endpoint (subtitle translation, metadata translation, Whisper
+	// ASR). The connection settings read ai.* with a fallback to the legacy
+	// subtitle_ai.* rows; the legacy rows are never renamed in SQL because
+	// encrypted values are GCM-bound to their setting key.
+	cfg.AI.BaseURL = stringOr(m, "ai.base_url", stringOr(m, "subtitle_ai.base_url", "https://api.openai.com"))
+	cfg.AI.APIKey = stringOr(m, "ai.api_key", stringOr(m, "subtitle_ai.api_key", ""))
+	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))
+	cfg.AI.ASRBaseURL = stringOr(m, "ai.asr_base_url", "")
+	cfg.AI.ASRAPIKey = stringOr(m, "ai.asr_api_key", "")
+	cfg.AI.ASRModel = stringOr(m, "ai.asr_model", "whisper-1")
+	aiMaxConcurrent, err := intOr(m, "ai.max_concurrent_jobs", 0)
+	if err != nil {
+		return nil, err
+	}
+	if aiMaxConcurrent <= 0 {
+		if aiMaxConcurrent, err = intOr(m, "subtitle_ai.max_concurrent_jobs", 2); err != nil {
+			return nil, err
+		}
+	}
+	cfg.AI.MaxConcurrentJobs = aiMaxConcurrent
+
+	// Subtitle AI feature toggles and tuning.
 	subtitleAIEnabled, err := boolOr(m, "subtitle_ai.enabled", false)
 	if err != nil {
 		return nil, err
 	}
 	cfg.SubtitleAI.Enabled = subtitleAIEnabled
-	cfg.SubtitleAI.BaseURL = stringOr(m, "subtitle_ai.base_url", "https://api.openai.com")
-	cfg.SubtitleAI.APIKey = stringOr(m, "subtitle_ai.api_key", "")
-	cfg.SubtitleAI.ChatModel = stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini")
-	subtitleAIMaxConcurrent, err := intOr(m, "subtitle_ai.max_concurrent_jobs", 2)
+	subtitleAITranscribe, err := boolOr(m, "subtitle_ai.transcribe_enabled", false)
 	if err != nil {
 		return nil, err
 	}
-	cfg.SubtitleAI.MaxConcurrentJobs = subtitleAIMaxConcurrent
+	cfg.SubtitleAI.TranscribeEnabled = subtitleAITranscribe
 	subtitleAIBatchSize, err := intOr(m, "subtitle_ai.batch_size", 40)
 	if err != nil {
 		return nil, err
@@ -446,6 +465,26 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.SubtitleAI.ContextNeighbors = subtitleAIContextNeighbors
+	subtitleAIChunkSeconds, err := intOr(m, "subtitle_ai.asr_chunk_seconds", 600)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.ASRChunkSeconds = subtitleAIChunkSeconds
+
+	// Metadata AI translation feature toggles.
+	metadataAIEnabled, err := boolOr(m, "metadata_ai.enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MetadataAI.Enabled = metadataAIEnabled
+	switch onView := stringOr(m, "metadata_ai.on_view", "off"); onView {
+	case "off", "button", "auto":
+		cfg.MetadataAI.OnView = onView
+	default:
+		// A bad row must not block startup; the feature just stays off.
+		slog.Warn("invalid metadata_ai.on_view setting; using off", "value", onView)
+		cfg.MetadataAI.OnView = "off"
+	}
 
 	// Download
 	downloadEnabled, err := boolOr(m, "download.enabled", false)

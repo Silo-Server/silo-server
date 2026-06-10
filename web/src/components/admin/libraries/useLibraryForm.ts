@@ -147,6 +147,9 @@ export function useLibraryForm({
   const [type, setType] = useState(library?.type ?? "movies");
   const [enabled, setEnabled] = useState(library?.enabled ?? true);
   const [metadataLanguage, setMetadataLanguage] = useState(library?.metadata_language ?? "en");
+  const [autoTranslateMetadata, setAutoTranslateMetadata] = useState(
+    library?.auto_translate_metadata ?? false,
+  );
   const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
     library?.chapter_thumbnails_enabled ?? false,
   );
@@ -284,6 +287,7 @@ export function useLibraryForm({
       type,
       enabled,
       metadata_language: metadataLanguage,
+      auto_translate_metadata: autoTranslateMetadata,
       chapter_thumbnails_enabled: chapterThumbnailsEnabled,
       intro_detection_enabled: introDetectionEnabled,
     };
@@ -343,6 +347,8 @@ export function useLibraryForm({
     setEnabled,
     metadataLanguage,
     setMetadataLanguage,
+    autoTranslateMetadata,
+    setAutoTranslateMetadata,
     chapterThumbnailsEnabled,
     setChapterThumbnailsEnabled,
     introDetectionEnabled,
