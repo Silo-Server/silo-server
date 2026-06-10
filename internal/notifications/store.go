@@ -475,26 +475,27 @@ func NewContentResolverRepo(pool *pgxpool.Pool) *ContentResolverRepo {
 }
 
 // ItemContext resolves the display title, series id (empty for non-episodes),
-// and library id for the given content_id.
+// library id, and catalog row creation time for the given content_id.
 //
 // media_item_libraries.media_folder_id is the same integer as the library_id
 // field in catalog events.
-func (c *ContentResolverRepo) ItemContext(ctx context.Context, contentID string) (title, seriesID string, libraryID int, err error) {
+func (c *ContentResolverRepo) ItemContext(ctx context.Context, contentID string) (title, seriesID string, libraryID int, createdAt time.Time, err error) {
 	err = c.pool.QueryRow(ctx, `
 		SELECT
 			mi.title,
 			COALESCE(e.series_id, '') AS series_id,
-			COALESCE(mil.media_folder_id, 0) AS library_id
+			COALESCE(mil.media_folder_id, 0) AS library_id,
+			mi.created_at
 		FROM media_items mi
 		LEFT JOIN episodes e ON e.content_id = mi.content_id
 		LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
 		WHERE mi.content_id = $1
 		LIMIT 1
-	`, contentID).Scan(&title, &seriesID, &libraryID)
+	`, contentID).Scan(&title, &seriesID, &libraryID, &createdAt)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("item context for %s: %w", contentID, err)
+		return "", "", 0, time.Time{}, fmt.Errorf("item context for %s: %w", contentID, err)
 	}
-	return title, seriesID, libraryID, nil
+	return title, seriesID, libraryID, createdAt, nil
 }
 
 // InterestedProfiles returns (user_id, profile_id) pairs that should receive a

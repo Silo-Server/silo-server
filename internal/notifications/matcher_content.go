@@ -18,6 +18,11 @@ func changeIsAddition(change string) bool {
 
 const inProgressWindow = 21 * 24 * time.Hour
 
+// newItemWindow is the maximum age of a catalog row that is still considered a
+// new arrival.  metadata_updated events fired by periodic library refreshes on
+// older items are suppressed.
+const newItemWindow = 48 * time.Hour
+
 // ProfileRef identifies a specific user+profile pair to notify.
 type ProfileRef struct {
 	UserID    int
@@ -27,8 +32,10 @@ type ProfileRef struct {
 // ContentResolver answers "who cares about this item" from catalog state.
 type ContentResolver interface {
 	// ItemContext resolves the added item's display title, its series/parent
-	// content id (empty when standalone), and library id.
-	ItemContext(ctx context.Context, contentID string) (title string, seriesID string, libraryID int, err error)
+	// content id (empty when standalone), library id, and catalog row creation
+	// time. createdAt is the catalog row's creation time, used to distinguish
+	// new arrivals from metadata refreshes of old items.
+	ItemContext(ctx context.Context, contentID string) (title string, seriesID string, libraryID int, createdAt time.Time, err error)
 	// InterestedProfiles returns (user_id, profile_id) pairs whose watchlist
 	// or favorites contain contentID or seriesID, plus profiles with playback
 	// of the series within the in-progress window, restricted to users with
@@ -69,9 +76,15 @@ func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error
 		return nil
 	}
 
-	title, seriesID, libraryID, err := resolver.ItemContext(ctx, contentID)
+	title, seriesID, libraryID, createdAt, err := resolver.ItemContext(ctx, contentID)
 	if err != nil {
 		return fmt.Errorf("content matcher: item context for %s: %w", contentID, err)
+	}
+	// Suppress notifications for items whose catalog row is older than
+	// newItemWindow: metadata_updated also fires during periodic library
+	// refreshes of existing items, which would otherwise re-notify users.
+	if time.Since(createdAt) > newItemWindow {
+		return nil // metadata refresh of an old item, not a new arrival
 	}
 	// Fall back to the event's library_id when the resolver returns 0.
 	if libraryID == 0 {

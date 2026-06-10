@@ -260,14 +260,15 @@ func TestMaterializer_MatcherPanicIsolated(t *testing.T) {
 
 // fakeResolver satisfies ContentResolver for unit tests.
 type fakeResolver struct {
-	title    string
-	seriesID string
-	library  int
-	refs     []ProfileRef
+	title     string
+	seriesID  string
+	library   int
+	createdAt time.Time
+	refs      []ProfileRef
 }
 
-func (f *fakeResolver) ItemContext(_ context.Context, _ string) (string, string, int, error) {
-	return f.title, f.seriesID, f.library, nil
+func (f *fakeResolver) ItemContext(_ context.Context, _ string) (string, string, int, time.Time, error) {
+	return f.title, f.seriesID, f.library, f.createdAt, nil
 }
 
 func (f *fakeResolver) InterestedProfiles(_ context.Context, _, _ string, _ int, _ time.Time) ([]ProfileRef, error) {
@@ -293,9 +294,10 @@ func TestContentMatcher_NotifiesInterestedProfiles(t *testing.T) {
 	svc, hub := newTestService(store)
 
 	resolver := &fakeResolver{
-		title:    "Inception",
-		seriesID: "",
-		library:  1,
+		title:     "Inception",
+		seriesID:  "",
+		library:   1,
+		createdAt: time.Now(),
 		refs: []ProfileRef{
 			{UserID: 10, ProfileID: "profile-a"},
 			{UserID: 11, ProfileID: "profile-b"},
@@ -334,9 +336,10 @@ func TestContentMatcher_BurstCollapsesViaDedup(t *testing.T) {
 	svc, hub := newTestService(store)
 
 	resolver := &fakeResolver{
-		title:    "Episode",
-		seriesID: "series-99",
-		library:  1,
+		title:     "Episode",
+		seriesID:  "series-99",
+		library:   1,
+		createdAt: time.Now(),
 		refs: []ProfileRef{
 			{UserID: 10, ProfileID: "profile-a"},
 		},
@@ -365,9 +368,10 @@ func TestContentMatcher_NonAddedChangeIgnored(t *testing.T) {
 	svc, hub := newTestService(store)
 
 	resolver := &fakeResolver{
-		title:   "Something",
-		library: 1,
-		refs:    []ProfileRef{{UserID: 10, ProfileID: "profile-a"}},
+		title:     "Something",
+		library:   1,
+		createdAt: time.Now(),
+		refs:      []ProfileRef{{UserID: 10, ProfileID: "profile-a"}},
 	}
 
 	m := NewMaterializer(hub, svc, resolver)
@@ -410,5 +414,37 @@ func TestContentMatcher_NilResolverDisabled(t *testing.T) {
 
 	if len(store.inserted) != 0 {
 		t.Fatalf("expected 0 inserts when resolver is nil, got %d", len(store.inserted))
+	}
+}
+
+// TestContentMatcher_OldItemMetadataRefreshIgnored verifies that a
+// metadata_updated event for an item whose catalog row is older than
+// newItemWindow does not produce any notifications.  This prevents periodic
+// library refresh jobs from re-notifying users about years-old watchlist items.
+func TestContentMatcher_OldItemMetadataRefreshIgnored(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+
+	// createdAt 30 days ago — well beyond the 48-hour newItemWindow.
+	resolver := &fakeResolver{
+		title:     "Old Movie",
+		seriesID:  "",
+		library:   1,
+		createdAt: time.Now().Add(-30 * 24 * time.Hour),
+		refs:      []ProfileRef{{UserID: 10, ProfileID: "profile-a"}},
+	}
+
+	m := NewMaterializer(hub, svc, resolver)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// metadata_updated fires (e.g. from a library refresh job) but the item is old.
+	publishAndSettle(t, hub, m, catalogItemChangedEnvelope(1, "content-old", "metadata_updated"))
+
+	if len(store.inserted) != 0 {
+		t.Fatalf("expected 0 inserts for old item metadata refresh, got %d", len(store.inserted))
 	}
 }
