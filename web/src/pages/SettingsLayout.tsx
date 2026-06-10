@@ -13,6 +13,7 @@ import {
   Users,
   Server,
   Sparkles,
+  Bell,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -92,6 +93,17 @@ const NAV_SECTIONS: NavSection[] = [
         label: "Personalize",
         icon: Sparkles,
         description: "Re-tune your taste profile",
+      },
+    ],
+  },
+  {
+    label: "Notifications",
+    items: [
+      {
+        path: "notifications",
+        label: "Notifications",
+        icon: Bell,
+        description: "Choose which notifications you receive",
       },
     ],
   },

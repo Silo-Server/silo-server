@@ -85,6 +85,7 @@ import HomeScreenSettings from "@/pages/settings/HomeScreenSettings";
 import ThemeEditorSettings from "@/pages/settings/ThemeEditorSettings";
 import CardOverlaySettings from "@/pages/settings/CardOverlaySettings";
 import PersonalizeSettings from "@/pages/settings/PersonalizeSettings";
+import NotificationsSettings from "@/pages/settings/NotificationsSettings";
 import WatchTogetherJoin from "@/pages/WatchTogetherJoin";
 import WatchTogetherRoomPage from "@/pages/WatchTogetherRoomPage";
 import WatchRoute from "@/pages/WatchRoute";
@@ -440,6 +441,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>
                 <Route
