@@ -35,3 +35,39 @@ func TestItemListSortNamePrefersSortTitle(t *testing.T) {
 		t.Fatalf("SortName = %q, want %q", dto.SortName, "Matrix, The")
 	}
 }
+
+func TestSeriesListIncludesSeasonCount(t *testing.T) {
+	m := newMapper(NewResourceIDCodec(), &config.Config{})
+	seasonCount := 4
+	dto := m.itemFromList(upstreamListItem{
+		ContentID:   "series-1",
+		Type:        "series",
+		Title:       "Snowpiercer",
+		SeasonCount: &seasonCount,
+	}, false, nil, nil)
+
+	if dto.SeasonCount != 4 {
+		t.Fatalf("SeasonCount = %d, want 4", dto.SeasonCount)
+	}
+	if dto.ChildCount != 4 || dto.RecursiveItemCount != 4 {
+		t.Fatalf("ChildCount/RecursiveItemCount = %d/%d, want 4/4", dto.ChildCount, dto.RecursiveItemCount)
+	}
+}
+
+func TestSeriesDetailIncludesSeasonCount(t *testing.T) {
+	m := newMapper(NewResourceIDCodec(), &config.Config{})
+	seasonCount := 4
+	dto := m.itemFromDetail(upstreamItemDetail{
+		ContentID:   "series-1",
+		Type:        "series",
+		Title:       "Snowpiercer",
+		SeasonCount: &seasonCount,
+	}, false, nil)
+
+	if dto.SeasonCount != 4 {
+		t.Fatalf("SeasonCount = %d, want 4", dto.SeasonCount)
+	}
+	if dto.ChildCount != 4 || dto.RecursiveItemCount != 4 {
+		t.Fatalf("ChildCount/RecursiveItemCount = %d/%d, want 4/4", dto.ChildCount, dto.RecursiveItemCount)
+	}
+}

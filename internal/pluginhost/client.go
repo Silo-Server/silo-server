@@ -54,6 +54,11 @@ type ScanSourceClient struct {
 	timeout time.Duration
 }
 
+type RequestRouterClient struct {
+	client  pluginv1.RequestRouterClient
+	timeout time.Duration
+}
+
 type EventConsumerClient struct {
 	client  pluginv1.EventConsumerClient
 	timeout time.Duration
@@ -145,6 +150,16 @@ func (c *Client) ScanSource(capabilityID string) (*ScanSourceClient, error) {
 	return &ScanSourceClient{
 		client:  c.rpc.ScanSource(),
 		timeout: DefaultScanSourceTimeout,
+	}, nil
+}
+
+func (c *Client) RequestRouter(capabilityID string) (*RequestRouterClient, error) {
+	if err := c.requireCapability("request_router.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &RequestRouterClient{
+		client:  c.rpc.RequestRouter(),
+		timeout: DefaultRequestRouterTimeout,
 	}, nil
 }
 
@@ -281,6 +296,36 @@ func (c *ScanSourceClient) PollChanges(ctx context.Context, req *pluginv1.PollCh
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.PollChanges(callCtx, req)
+}
+
+func (c *RequestRouterClient) Fulfill(ctx context.Context, req *pluginv1.FulfillRequest) (*pluginv1.FulfillResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.Fulfill(callCtx, req)
+}
+
+func (c *RequestRouterClient) CheckStatus(ctx context.Context, req *pluginv1.CheckStatusRequest) (*pluginv1.CheckStatusResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.CheckStatus(callCtx, req)
+}
+
+func (c *RequestRouterClient) ListConfigOptions(ctx context.Context, req *pluginv1.ListConfigOptionsRequest) (*pluginv1.ListConfigOptionsResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ListConfigOptions(callCtx, req)
+}
+
+func (c *RequestRouterClient) TestConnection(ctx context.Context, req *pluginv1.TestConnectionRequest) (*pluginv1.TestConnectionResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.TestConnection(callCtx, req)
+}
+
+func (c *RequestRouterClient) Validate(ctx context.Context, req *pluginv1.ValidateRequest) (*pluginv1.ValidateResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.Validate(callCtx, req)
 }
 
 func (c *EventConsumerClient) HandleEvent(ctx context.Context, req *pluginv1.HandleEventRequest) (*pluginv1.HandleEventResponse, error) {

@@ -94,7 +94,7 @@ describe("profile-management", () => {
       clearKidsPreset(
         createProfileDraft(
           makeProfile({
-            avatar: avatarPresetRef("adventurer"),
+            avatar: avatarPresetRef("dicebear:identicon:swift-fox"),
             is_child: true,
             max_content_rating: "PG",
             library_restrictions_enabled: true,
@@ -104,7 +104,7 @@ describe("profile-management", () => {
         ),
       ),
     ).toMatchObject({
-      avatarPreset: "adventurer",
+      avatarPreset: "dicebear:identicon:swift-fox",
       isChild: false,
       maxContentRating: "",
       maxPlaybackQuality: "any",

@@ -56,6 +56,6 @@ describe("EpisodeRow", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("text-green-500");
+    expect(markup).toContain("text-success");
   });
 });

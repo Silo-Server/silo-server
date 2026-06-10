@@ -38,7 +38,7 @@ type RequestService interface {
 	CreateIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
 	UpdateIntegration(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.Integration, error)
 	DeleteIntegration(ctx context.Context, viewer mediarequests.Viewer, id string) error
-	LoadIntegrationOptions(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (*mediarequests.IntegrationOptions, error)
+	LoadIntegrationOptions(ctx context.Context, viewer mediarequests.Viewer, integration mediarequests.Integration) (map[string][]mediarequests.RouterOption, error)
 
 	ListStudios(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
 	ListNetworks(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)
@@ -588,62 +588,36 @@ func parsePositivePathInt(w http.ResponseWriter, r *http.Request, key string) (i
 }
 
 type requestIntegrationResponse struct {
-	ID                    string         `json:"id"`
-	Name                  string         `json:"name"`
-	Kind                  string         `json:"kind"`
-	Enabled               bool           `json:"enabled"`
-	Is4K                  bool           `json:"is_4k"`
-	IsDefault             bool           `json:"is_default"`
-	IsDefault4K           bool           `json:"is_default_4k"`
-	AnimeEnabled          bool           `json:"anime_enabled"`
-	AnimeQualityProfileID *int           `json:"anime_quality_profile_id,omitempty"`
-	AnimeRootFolder       string         `json:"anime_root_folder,omitempty"`
-	AnimeTags             []int          `json:"anime_tags"`
-	BaseURL               string         `json:"base_url"`
-	HasAPIKey             bool           `json:"has_api_key"`
-	RootFolder            string         `json:"root_folder"`
-	QualityProfileID      *int           `json:"quality_profile_id,omitempty"`
-	Tags                  []int          `json:"tags"`
-	Options               map[string]any `json:"options"`
-	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckStatus       string         `json:"last_check_status,omitempty"`
-	LastCheckError        string         `json:"last_check_error,omitempty"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	ID                  string         `json:"id"`
+	Name                string         `json:"name"`
+	CapabilityID        string         `json:"capability_id"`
+	InstallationID      *int           `json:"installation_id,omitempty"`
+	SupportedMediaTypes []string       `json:"supported_media_types"`
+	PluginConfig        map[string]any `json:"plugin_config"`
+	Enabled             bool           `json:"enabled"`
+	BaseURL             string         `json:"base_url"`
+	HasAPIKey           bool           `json:"has_api_key"`
+	LastCheckAt         *time.Time     `json:"last_check_at,omitempty"`
+	LastCheckStatus     string         `json:"last_check_status,omitempty"`
+	LastCheckError      string         `json:"last_check_error,omitempty"`
+	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
 func requestIntegrationResponseFrom(integration mediarequests.Integration) requestIntegrationResponse {
-	// Normalize nil slices so they serialize as [] (not null); the frontend
-	// types them as number[] and indexes/maps over them.
-	tags := integration.Tags
-	if tags == nil {
-		tags = []int{}
-	}
-	animeTags := integration.AnimeTags
-	if animeTags == nil {
-		animeTags = []int{}
-	}
 	return requestIntegrationResponse{
-		ID:                    integration.ID,
-		Name:                  integration.Name,
-		Kind:                  integration.Kind,
-		Enabled:               integration.Enabled,
-		Is4K:                  integration.Is4K,
-		IsDefault:             integration.IsDefault,
-		IsDefault4K:           integration.IsDefault4K,
-		AnimeEnabled:          integration.AnimeEnabled,
-		AnimeQualityProfileID: integration.AnimeQualityProfileID,
-		AnimeRootFolder:       integration.AnimeRootFolder,
-		AnimeTags:             animeTags,
-		BaseURL:               integration.BaseURL,
-		HasAPIKey:             strings.TrimSpace(integration.APIKeyRef) != "",
-		RootFolder:            integration.RootFolder,
-		QualityProfileID:      integration.QualityProfileID,
-		Tags:                  tags,
-		Options:               integration.Options,
-		LastCheckAt:           integration.LastCheckAt,
-		LastCheckStatus:       integration.LastCheckStatus,
-		LastCheckError:        integration.LastCheckError,
-		UpdatedAt:             integration.UpdatedAt,
+		ID:                  integration.ID,
+		Name:                integration.Name,
+		CapabilityID:        integration.CapabilityID,
+		InstallationID:      integration.InstallationID,
+		SupportedMediaTypes: integration.SupportedMediaTypes,
+		PluginConfig:        integration.PluginConfig,
+		Enabled:             integration.Enabled,
+		BaseURL:             integration.BaseURL,
+		HasAPIKey:           strings.TrimSpace(integration.APIKeyRef) != "",
+		LastCheckAt:         integration.LastCheckAt,
+		LastCheckStatus:     integration.LastCheckStatus,
+		LastCheckError:      integration.LastCheckError,
+		UpdatedAt:           integration.UpdatedAt,
 	}
 }
 
@@ -656,6 +630,18 @@ func toIntegrationResponses(integrations []mediarequests.Integration) []requestI
 }
 
 func writeRequestServiceError(w http.ResponseWriter, err error) {
+	// Plugin/instance validation failures carry inline field/form errors; surface
+	// them as a structured 400 so any handler routing through here renders them
+	// inline. Checked first because *ValidationError does not wrap a sentinel.
+	var verr *mediarequests.ValidationError
+	if errors.As(err, &verr) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":        "validation_failed",
+			"field_errors": verr.FieldErrors,
+			"form_error":   verr.FormError,
+		})
+		return
+	}
 	var quota mediarequests.QuotaError
 	switch {
 	case errors.As(err, &quota):

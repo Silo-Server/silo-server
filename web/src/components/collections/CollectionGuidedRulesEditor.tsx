@@ -40,7 +40,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "movie" | "series" | "episode" | "audiobook" | "ebook";
+  mediaScope: "all" | "video" | "movie" | "series" | "episode" | "audiobook" | "ebook";
   libraryIds: number[];
   genres: string[];
   decade: string;
@@ -421,15 +421,25 @@ export default function CollectionGuidedRulesEditor({
   // Backend stores book library types as plurals, while some API surfaces
   // use singular media scopes; accept both.
   const isAudiobookLibrary =
-    libraryType === "audiobook" ||
-    libraryType === "audiobooks" ||
-    state.mediaScope === "audiobook";
+    libraryType === "audiobook" || libraryType === "audiobooks" || state.mediaScope === "audiobook";
   const isEbookLibrary =
     libraryType === "ebook" || libraryType === "ebooks" || state.mediaScope === "ebook";
   const isBookLibrary = isAudiobookLibrary || isEbookLibrary;
-  const progressStatusLabel = isEbookLibrary ? "Read Status" : "Watch Status";
-  const completedProgressLabel = isEbookLibrary ? "Read" : "Watched";
-  const unstartedProgressLabel = isEbookLibrary ? "Unread" : "Unwatched";
+  const progressStatusLabel = isEbookLibrary
+    ? "Read Status"
+    : isAudiobookLibrary
+      ? "Listening Status"
+      : "Watch Status";
+  const completedProgressLabel = isEbookLibrary
+    ? "Read"
+    : isAudiobookLibrary
+      ? "Listened"
+      : "Watched";
+  const unstartedProgressLabel = isEbookLibrary
+    ? "Unread"
+    : isAudiobookLibrary
+      ? "Unlistened"
+      : "Unwatched";
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
@@ -472,7 +482,8 @@ export default function CollectionGuidedRulesEditor({
               <Select
                 value={state.mediaScope}
                 onValueChange={(v) => {
-                  const nextRelevanceScope = v === "all" ? "all" : (v as QuerySortRelevanceScope);
+                  const nextRelevanceScope =
+                    v === "all" || v === "video" ? "all" : (v as QuerySortRelevanceScope);
                   const nextSort = normalizeQuerySortForScope(
                     { field: state.sortField, order: state.sortOrder },
                     {
@@ -493,6 +504,7 @@ export default function CollectionGuidedRulesEditor({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Media</SelectItem>
+                  <SelectItem value="video">Movies & Series</SelectItem>
                   <SelectItem value="movie">Movies</SelectItem>
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>

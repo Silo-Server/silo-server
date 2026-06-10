@@ -128,11 +128,7 @@ export const MIMETYPES: Record<BookFormat, string[]> = {
   MOBI: ["application/x-mobipocket-ebook"],
   AZW: ["application/vnd.amazon.ebook"],
   AZW3: ["application/vnd.amazon.mobi8-ebook", "application/x-mobi8-ebook"],
-  CBZ: [
-    "application/vnd.comicbook+zip",
-    "application/zip",
-    "application/x-cbz",
-  ],
+  CBZ: ["application/vnd.comicbook+zip", "application/zip", "application/x-cbz"],
   CBR: [
     "application/vnd.comicbook-rar",
     "application/x-cbr",
@@ -159,11 +155,7 @@ export class DocumentLoader {
   private async isPDF(): Promise<boolean> {
     const arr = new Uint8Array(await this.file.slice(0, 5).arrayBuffer());
     return (
-      arr[0] === 0x25 &&
-      arr[1] === 0x50 &&
-      arr[2] === 0x44 &&
-      arr[3] === 0x46 &&
-      arr[4] === 0x2d
+      arr[0] === 0x25 && arr[1] === 0x50 && arr[2] === 0x44 && arr[3] === 0x46 && arr[4] === 0x2d
     );
   }
 
@@ -229,9 +221,7 @@ export class DocumentLoader {
   private async makeRarLoader() {
     const [{ createExtractorFromData }, wasmUrl] = await Promise.all([
       import("node-unrar-js/esm/index.esm"),
-      import("node-unrar-js/esm/js/unrar.wasm?url").then(
-        (module) => module.default,
-      ),
+      import("node-unrar-js/esm/js/unrar.wasm?url").then((module) => module.default),
     ]);
     const [data, wasmBinary] = await Promise.all([
       this.file.arrayBuffer(),
@@ -264,9 +254,7 @@ export class DocumentLoader {
       extracted.has(name) ? name : lowercaseMap.get(name.toLowerCase()) || name;
     const loadBlob = (name: string, type?: string) => {
       const data = extracted.get(resolveName(name));
-      return data
-        ? new Blob([new Uint8Array(data)], { type: type ?? "" })
-        : null;
+      return data ? new Blob([new Uint8Array(data)], { type: type ?? "" }) : null;
     };
     const loadText = async (name: string) => {
       const blob = loadBlob(name);
@@ -274,10 +262,7 @@ export class DocumentLoader {
     };
     const getSize = (name: string) => {
       const resolved = resolveName(name);
-      return (
-        entries.find((entry) => entry.filename === resolved)
-          ?.uncompressedSize ?? 0
-      );
+      return entries.find((entry) => entry.filename === resolved)?.uncompressedSize ?? 0;
     };
 
     return {
@@ -416,9 +401,7 @@ export class DocumentLoader {
       } else if (await (await import("foliate-js/mobi.js")).isMOBI(this.file)) {
         const fflate = await import("foliate-js/vendor/fflate.js");
         const { MOBI } = await import("foliate-js/mobi.js");
-        book = (await new MOBI({ unzlib: fflate.unzlibSync }).open(
-          this.file,
-        )) as BookDoc;
+        book = (await new MOBI({ unzlib: fflate.unzlibSync }).open(this.file)) as BookDoc;
         const ext = this.file.name.split(".").pop()?.toLowerCase();
         switch (ext) {
           case "azw":
@@ -461,19 +444,12 @@ export const getDirection = (doc: Document) => {
     const firstChild = doc.body.querySelector(":scope > :not([cfi-inert])");
     if (firstChild) {
       const childStyle = defaultView!.getComputedStyle(firstChild);
-      if (
-        childStyle.writingMode === "vertical-rl" ||
-        childStyle.writingMode === "vertical-lr"
-      ) {
+      if (childStyle.writingMode === "vertical-rl" || childStyle.writingMode === "vertical-lr") {
         writingMode = childStyle.writingMode;
       }
     }
   }
-  const vertical =
-    writingMode === "vertical-rl" || writingMode === "vertical-lr";
-  const rtl =
-    doc.body.dir === "rtl" ||
-    direction === "rtl" ||
-    doc.documentElement.dir === "rtl";
+  const vertical = writingMode === "vertical-rl" || writingMode === "vertical-lr";
+  const rtl = doc.body.dir === "rtl" || direction === "rtl" || doc.documentElement.dir === "rtl";
   return { vertical, rtl };
 };

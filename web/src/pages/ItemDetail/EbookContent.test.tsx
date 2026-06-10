@@ -50,13 +50,7 @@ vi.mock("@/components/MediaLocations", () => ({
 }));
 
 vi.mock("@/components/DownloadVersionPicker", () => ({
-  default: ({
-    versions,
-    title,
-  }: {
-    versions: FileVersion[];
-    title: string;
-  }) => (
+  default: ({ versions, title }: { versions: FileVersion[]; title: string }) => (
     <div>
       <span>download picker</span>
       <span>{title}</span>
@@ -298,7 +292,9 @@ describe("EbookContent", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain('href="/catalog?source=query&amp;type=ebook&amp;genre=Science+Fiction"');
+    expect(markup).toContain(
+      'href="/catalog?source=query&amp;type=ebook&amp;genre=Science+Fiction"',
+    );
   });
 
   it("does not show read action when ebook files are not reader-supported", () => {

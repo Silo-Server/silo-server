@@ -188,7 +188,7 @@ describe("LibraryBrowse", () => {
       <LibraryBrowse
         libraryId={10}
         libraryType="audiobooks"
-        browseType="series"
+        browseType="books"
         queryDefinition={{
           library_ids: [],
           match: "all",

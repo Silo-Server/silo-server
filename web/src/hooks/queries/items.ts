@@ -176,12 +176,9 @@ export interface RedetectEpisodeIntroResponse {
 export async function redetectEpisodeIntro(
   episodeId: string,
 ): Promise<RedetectEpisodeIntroResponse> {
-  return api<RedetectEpisodeIntroResponse>(
-    `/admin/items/${itemPathID(episodeId)}/redetect-intro`,
-    {
-      method: "POST",
-    },
-  );
+  return api<RedetectEpisodeIntroResponse>(`/admin/items/${itemPathID(episodeId)}/redetect-intro`, {
+    method: "POST",
+  });
 }
 
 export function useRedetectEpisodeIntro() {
@@ -394,13 +391,10 @@ export function useApplyItemImage() {
       item: ApplyImageItem;
       request: ApplyItemImageRequest;
     }) =>
-      api<ApplyItemImageResponse>(
-        `/admin/items/${itemPathID(item.content_id)}/images/apply`,
-        {
-          method: "POST",
-          body: JSON.stringify(request),
-        },
-      ),
+      api<ApplyItemImageResponse>(`/admin/items/${itemPathID(item.content_id)}/images/apply`, {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
     onSuccess: async (_, { item }) => {
       toast.success("Image applied successfully");
 

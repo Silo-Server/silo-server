@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { contentLevelsForType } from "./LibraryForm";
+import { contentLevelsForType } from "./useLibraryForm";
 
 describe("contentLevelsForType", () => {
   it("maps ebook libraries to the ebook metadata content level", () => {

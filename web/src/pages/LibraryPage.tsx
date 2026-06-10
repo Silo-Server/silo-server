@@ -16,6 +16,7 @@ import {
   parseLibraryPageState,
   serializeLibraryPageSearchParams,
   updateLibraryPageSearchParams,
+  type LibraryBrowseType,
 } from "./libraryPageSearchParams";
 
 export default function LibraryPage() {
@@ -205,13 +206,16 @@ export default function LibraryPage() {
     setSearchParams(nextSearchParams);
   };
 
-  const handleBrowseTypeChange = (nextBrowseType: "series" | "episode") => {
+  const handleBrowseTypeChange = (
+    nextBrowseType: LibraryBrowseType,
+    nextQueryDefinition?: QueryDefinition,
+  ) => {
     const nextSearchParams = updateLibraryPageSearchParams(
       searchParams,
       {
         activeTab: "library",
         browseType: nextBrowseType,
-        queryDefinition,
+        queryDefinition: nextQueryDefinition ?? queryDefinition,
       },
       libraryType,
     );
@@ -254,9 +258,13 @@ export default function LibraryPage() {
   return (
     <div className="relative">
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <LibraryHeader libraryName={library.name} overlay={useOverlay} />
+        <LibraryHeader libraryName={library.name} libraryType={libraryType} overlay={useOverlay} />
         <TabsContent value="recommended" className="mt-0">
-          <LibraryRecommended libraryId={id} onHeroStateChange={handleHeroStateChange} />
+          <LibraryRecommended
+            libraryId={id}
+            libraryType={libraryType}
+            onHeroStateChange={handleHeroStateChange}
+          />
         </TabsContent>
         <TabsContent value="library" className="mt-0">
           <div className="px-4 py-4 sm:px-6 sm:py-6 lg:px-10 xl:px-12">

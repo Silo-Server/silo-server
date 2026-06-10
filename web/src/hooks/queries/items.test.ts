@@ -44,11 +44,8 @@ describe("item query helpers", () => {
   it("encodes item IDs in admin item endpoints", async () => {
     await redetectEpisodeIntro("episode 1/id:abc");
 
-    expect(mocks.api).toHaveBeenCalledWith(
-      "/admin/items/episode%201%2Fid%3Aabc/redetect-intro",
-      {
-        method: "POST",
-      },
-    );
+    expect(mocks.api).toHaveBeenCalledWith("/admin/items/episode%201%2Fid%3Aabc/redetect-intro", {
+      method: "POST",
+    });
   });
 });

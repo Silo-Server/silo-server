@@ -71,4 +71,26 @@ describe("catalogFilterBadges", () => {
       clearPatch: { watchStatus: "" },
     });
   });
+
+  it("uses listening copy for audiobook watch-status badges", () => {
+    expect(
+      getActiveFilterBadges(state({ mediaScope: "audiobook", watchStatus: "watched" }), {
+        isAudiobookLibrary: true,
+      }),
+    ).toContainEqual(expect.objectContaining({ key: "watchStatus", label: "Listening: listened" }));
+
+    expect(
+      getActiveFilterBadges(state({ mediaScope: "audiobook", watchStatus: "unwatched" }), {
+        isAudiobookLibrary: true,
+      }),
+    ).toContainEqual(
+      expect.objectContaining({ key: "watchStatus", label: "Listening: unlistened" }),
+    );
+  });
+
+  it("keeps watch copy for non-audiobook badges", () => {
+    expect(getActiveFilterBadges(state({ watchStatus: "watched" }))).toContainEqual(
+      expect.objectContaining({ key: "watchStatus", label: "Watch: watched" }),
+    );
+  });
 });

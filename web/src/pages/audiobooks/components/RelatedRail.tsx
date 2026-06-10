@@ -15,7 +15,12 @@ interface RelatedRailProps {
   coverAspect?: "square" | "poster";
 }
 
-export function RelatedRail({ heading, subtitle, items, coverAspect = "square" }: RelatedRailProps) {
+export function RelatedRail({
+  heading,
+  subtitle,
+  items,
+  coverAspect = "square",
+}: RelatedRailProps) {
   if (items.length === 0) return null;
   const coverAspectClass = coverAspect === "poster" ? "aspect-[2/3]" : "aspect-square";
   return (

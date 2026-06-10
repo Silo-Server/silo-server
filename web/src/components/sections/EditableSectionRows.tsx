@@ -32,6 +32,17 @@ export function recipeLabel(catalog: RecipeCatalogResponse | undefined, type: st
   return sectionTypeLabel(type);
 }
 
+function continueTypeLabel(config?: Record<string, unknown>): string | null {
+  const value = config?.continue_type;
+  if (value === "listening") return "Listening";
+  if (value === "watching") return "Watching";
+  if (value === "reading") return "Reading";
+  if (config?.filter_type === "audiobook" || config?.media_scope === "audiobook") {
+    return "Listening";
+  }
+  return null;
+}
+
 export function SectionSummaryBadges({
   section,
   libraries,
@@ -55,10 +66,13 @@ export function SectionSummaryBadges({
         ? section.config.user_collection_id
         : undefined;
   const collectionLabel = collectionId ? collectionLabels?.get(collectionId) : undefined;
+  const resumeLabel =
+    section.sectionType === "continue_watching" ? continueTypeLabel(section.config) : null;
 
   return (
     <div className="flex flex-wrap gap-1">
       <Badge variant="secondary">{recipeLabel(catalog, section.sectionType)}</Badge>
+      {resumeLabel ? <Badge variant="outline">{resumeLabel}</Badge> : null}
       {queryDefinition.media_scope === "movie" ? <Badge variant="outline">Movies</Badge> : null}
       {queryDefinition.media_scope === "series" ? <Badge variant="outline">Series</Badge> : null}
       {queryDefinition.media_scope === "episode" ? <Badge variant="outline">Episodes</Badge> : null}

@@ -47,19 +47,28 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 		}
 	}
 
+	// Explicit structured provider IDs (e.g. {tmdb-694938}) anchor the group's
+	// identity regardless of how folder and file titles relate, so title
+	// conflicts must not mark the group ambiguous. Renamed releases inside a
+	// tagged folder ("Override (2021) {tmdb-694938}" containing "R.I.A.
+	// (2021).mkv") are the common case.
+	idAnchored := hasStructuredIDAnchor(cleanFilePath, group.ObservedRootPath)
+
 	if group.BaseType == "series" {
-		populateSeriesGroupIdentity(cleanFilePath, libraryType, assignment, &group)
+		populateSeriesGroupIdentity(cleanFilePath, libraryType, assignment, idAnchored, &group)
 	} else {
-		populateMovieGroupIdentity(cleanFilePath, assignment, &group)
+		populateMovieGroupIdentity(cleanFilePath, assignment, idAnchored, &group)
 	}
 
-	if ids := ParseFolderIDs(filepath.Base(group.ObservedRootPath), group.BaseType); ids != nil {
+	// ID persistence must mirror hasStructuredIDAnchor: any evidence strong
+	// enough to anchor identity must also reach downstream matching.
+	if ids := ParseFolderIDs(filepath.Base(group.ObservedRootPath)); ids != nil {
 		group.TmdbID = ids.TmdbID
 		group.ImdbID = ids.ImdbID
 		group.TvdbID = ids.TvdbID
 	}
 	if group.TmdbID == "" || group.ImdbID == "" || group.TvdbID == "" {
-		if ids := ParseStructuredFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath))); ids != nil {
+		if ids := ParseFolderIDs(strings.TrimSuffix(filepath.Base(cleanFilePath), filepath.Ext(cleanFilePath))); ids != nil {
 			if group.TmdbID == "" {
 				group.TmdbID = ids.TmdbID
 			}
@@ -79,7 +88,7 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 	return group
 }
 
-func populateMovieGroupIdentity(filePath string, assignment RootAssignment, group *GroupIdentity) {
+func populateMovieGroupIdentity(filePath string, assignment RootAssignment, idAnchored bool, group *GroupIdentity) {
 	parentDir := filepath.Dir(filePath)
 	parentTitle, parentYear, parentTrusted := parseInferFolderTitleYear(filepath.Base(group.ObservedRootPath))
 	parentTitle = StripComparisonSafeEditionSuffix(parentTitle)
@@ -107,8 +116,12 @@ func populateMovieGroupIdentity(filePath string, assignment RootAssignment, grou
 		case parentTrusted && relation == titleRelationSoft:
 			reasons = append(reasons, "variant_suffix")
 		case parentTrusted && relation == titleRelationHard:
-			state = "ambiguous"
-			reasons = append(reasons, "unrelated_title")
+			if idAnchored {
+				reasons = append(reasons, "unrelated_title_resolved_by_provider_ids")
+			} else {
+				state = "ambiguous"
+				reasons = append(reasons, "unrelated_title")
+			}
 		default:
 			if baseTitle == "" {
 				baseTitle = StripComparisonSafeEditionSuffix(stem.Title)
@@ -130,7 +143,7 @@ func populateMovieGroupIdentity(filePath string, assignment RootAssignment, grou
 		baseYear = parentYear
 	}
 
-	if assignment.HasEpisodePattern && !assignment.HasSeasonStructure && !parentTrusted {
+	if assignment.HasEpisodePattern && !assignment.HasSeasonStructure && !parentTrusted && !idAnchored {
 		state = "ambiguous"
 		reasons = append(reasons, "episode_pattern")
 	}
@@ -154,7 +167,7 @@ func populateMovieGroupIdentity(filePath string, assignment RootAssignment, grou
 	})
 }
 
-func populateSeriesGroupIdentity(filePath string, libraryType string, assignment RootAssignment, group *GroupIdentity) {
+func populateSeriesGroupIdentity(filePath string, libraryType string, assignment RootAssignment, idAnchored bool, group *GroupIdentity) {
 	ctx := ResolvePathContext(filePath, libraryType)
 	title := assignment.Title
 	year := assignment.Year
@@ -179,8 +192,12 @@ func populateSeriesGroupIdentity(filePath string, libraryType string, assignment
 		case titleRelationSoft:
 			reasons = append(reasons, "series_alias")
 		case titleRelationHard:
-			state = "ambiguous"
-			reasons = append(reasons, "series_title_conflict")
+			if idAnchored {
+				reasons = append(reasons, "series_title_conflict_resolved_by_provider_ids")
+			} else {
+				state = "ambiguous"
+				reasons = append(reasons, "series_title_conflict")
+			}
 		}
 		if year == 0 {
 			year = observedYear
@@ -191,8 +208,12 @@ func populateSeriesGroupIdentity(filePath string, libraryType string, assignment
 		case titleRelationSoft:
 			reasons = append(reasons, "series_assignment_soft_conflict")
 		case titleRelationHard:
-			state = "ambiguous"
-			reasons = append(reasons, "series_assignment_conflict")
+			if idAnchored {
+				reasons = append(reasons, "series_assignment_conflict_resolved_by_provider_ids")
+			} else {
+				state = "ambiguous"
+				reasons = append(reasons, "series_assignment_conflict")
+			}
 		}
 	}
 
@@ -206,7 +227,7 @@ func populateSeriesGroupIdentity(filePath string, libraryType string, assignment
 	if assignment.HasEpisodePattern && (assignment.HasSeasonStructure || (ctx != nil && ctx.HasSeasonStructure)) && state != "ambiguous" {
 		confidence = "high"
 	}
-	if title == "" && assignment.HasEpisodePattern {
+	if title == "" && assignment.HasEpisodePattern && !idAnchored {
 		state = "ambiguous"
 		reasons = append(reasons, "series_identity_missing")
 	}
@@ -227,6 +248,19 @@ func populateSeriesGroupIdentity(filePath string, libraryType string, assignment
 		"has_episode_pattern": assignment.HasEpisodePattern,
 		"reasons":             reasons,
 	})
+}
+
+// hasStructuredIDAnchor reports whether the observed root folder or the file
+// name carries explicit provider IDs — structured tags (e.g. {tmdb-694938},
+// [tvdbid-81189]) or an unambiguous tt-prefixed IMDb id ("Eggs Run (2021)
+// tt8049994"). ParseFolderIDs returns only such explicit evidence, which is
+// strong enough to anchor identity over a title conflict.
+func hasStructuredIDAnchor(filePath, observedRootPath string) bool {
+	if ParseFolderIDs(filepath.Base(observedRootPath)) != nil {
+		return true
+	}
+	baseNoExt := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	return ParseFolderIDs(baseNoExt) != nil
 }
 
 func deriveObservedRootPath(filePath, candidateRoot string) string {

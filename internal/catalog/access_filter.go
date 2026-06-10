@@ -25,6 +25,11 @@ type AccessFilter struct {
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so
 	// the predicate can use idx_media_items_sort_key.
 	NamePrefix string
+	// ExcludedMediaTypes lists media_items.type values the viewer's surface
+	// never exposes (e.g. the Jellyfin compat layer excludes "audiobook" and
+	// "podcast" — they're served by the ABS-compat API instead). Applied by
+	// every query builder that consumes an AccessFilter.
+	ExcludedMediaTypes []string
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
@@ -37,6 +42,11 @@ func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, 
 			*args = append(*args, allowedRatings)
 			*argIdx = *argIdx + 1
 		}
+	}
+	if len(filter.ExcludedMediaTypes) > 0 {
+		*conditions = append(*conditions, fmt.Sprintf("NOT (%s.type = ANY($%d))", alias, *argIdx))
+		*args = append(*args, filter.ExcludedMediaTypes)
+		*argIdx = *argIdx + 1
 	}
 }
 

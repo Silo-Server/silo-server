@@ -1,13 +1,10 @@
 package sections
 
 import (
-	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestCollapseContinueWatchingSeriesCandidatesPrefersNewestInProgressEpisode(t *testing.T) {
@@ -87,109 +84,67 @@ func TestCollapseContinueWatchingSeriesCandidatesKeepsNextUpWhenNoInProgress(t *
 	}
 }
 
-func TestFilterSupersededEpisodeProgressEntriesDropsOlderPartialsAfterLaterCompletedEpisode(t *testing.T) {
+func TestMatchesContinueWatchingFilterIncludesAudiobooks(t *testing.T) {
 	t.Parallel()
 
-	entries := []userstore.WatchProgress{
-		{MediaItemID: "boys-s1e1"},
-		{MediaItemID: "boys-s5e3"},
-		{MediaItemID: "movie-1"},
-	}
-	superseded := map[string]struct{}{
-		"boys-s1e1": {},
-		"boys-s5e3": {},
+	tests := []struct {
+		name       string
+		filterType string
+		itemType   string
+		want       bool
+	}{
+		{name: "movie keeps movie", filterType: "movie", itemType: "movie", want: true},
+		{name: "movie keeps episode through watching type", filterType: "movie", itemType: "episode", want: true},
+		{name: "series keeps episode", filterType: "series", itemType: "episode", want: true},
+		{name: "audiobook keeps audiobook", filterType: "audiobook", itemType: "audiobook", want: true},
+		{name: "audiobook rejects movie", filterType: "audiobook", itemType: "movie", want: false},
+		{name: "ebook keeps ebook", filterType: "ebook", itemType: "ebook", want: true},
+		{name: "unknown passes through audiobook", filterType: "unknown", itemType: "audiobook", want: true},
 	}
 
-	filtered := filterSupersededEpisodeProgressEntries(entries, superseded)
-
-	if len(filtered) != 1 || filtered[0].MediaItemID != "movie-1" {
-		t.Fatalf("filtered entries = %+v, want only movie-1", filtered)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesContinueWatchingFilter(tt.filterType, tt.itemType); got != tt.want {
+				t.Fatalf("matchesContinueWatchingFilter(%q, %q) = %v, want %v", tt.filterType, tt.itemType, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestMergeContinueWatchingProgressIncludesEbooksByUpdatedAt(t *testing.T) {
+func TestParseContinueType(t *testing.T) {
 	t.Parallel()
 
-	videoEntries := []userstore.WatchProgress{
-		{
-			MediaItemID:     "movie-1",
-			PositionSeconds: 240,
-			DurationSeconds: 1200,
-			UpdatedAt:       time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
-		},
-	}
-	ebookEntries := []userstore.WatchProgress{
-		{
-			MediaItemID:     "ebook-1",
-			PositionSeconds: 0.42,
-			DurationSeconds: 1,
-			UpdatedAt:       time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
-		},
+	tests := []struct {
+		name   string
+		config string
+		want   ContinueType
+	}{
+		{name: "missing defaults watching", config: `{}`, want: ContinueTypeWatching},
+		{name: "explicit watching", config: `{"continue_type":"watching"}`, want: ContinueTypeWatching},
+		{name: "explicit listening", config: `{"continue_type":"listening"}`, want: ContinueTypeListening},
+		{name: "legacy audiobook filter", config: `{"filter_type":"audiobook"}`, want: ContinueTypeListening},
+		{name: "legacy audiobook media scope", config: `{"media_scope":"audiobook"}`, want: ContinueTypeListening},
+		{name: "future reading", config: `{"continue_type":"reading"}`, want: ContinueTypeReading},
 	}
 
-	merged := mergeContinueWatchingProgress(videoEntries, ebookEntries, 10)
-
-	if got, want := progressIDs(merged), []string{"ebook-1", "movie-1"}; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("merged IDs = %v, want %v", got, want)
-	}
-	if merged[0].PositionSeconds != 0.42 || merged[0].DurationSeconds != 1 {
-		t.Fatalf("ebook progress = %+v, want normalized reader progress", merged[0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseContinueType([]byte(tt.config))
+			if err != nil {
+				t.Fatalf("ParseContinueType(%s): %v", tt.config, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseContinueType(%s) = %q, want %q", tt.config, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
+func TestParseContinueTypeRejectsUnknownExplicitType(t *testing.T) {
 	t.Parallel()
 
-	entries := make([]userstore.WatchProgress, supersededProgressPageSize+1)
-	for i := range entries {
-		entries[i] = userstore.WatchProgress{
-			MediaItemID: "done-" + time.Unix(int64(i), 0).Format("150405"),
-			UpdatedAt:   time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC).Format(time.RFC3339),
-		}
-	}
-	store := &stubProgressLister{entries: entries}
-
-	snapshots, err := completedProgressSnapshots(context.Background(), store, "p1")
-	if err != nil {
-		t.Fatalf("completedProgressSnapshots: %v", err)
-	}
-	if len(snapshots) != len(entries) {
-		t.Fatalf("completed snapshots count = %d, want %d", len(snapshots), len(entries))
-	}
-	if len(store.calls) != 2 {
-		t.Fatalf("ListProgress calls = %+v, want 2 paged calls", store.calls)
-	}
-	if store.calls[0] != (progressListCall{profileID: "p1", status: "completed", limit: supersededProgressPageSize, offset: 0}) {
-		t.Fatalf("first ListProgress call = %+v", store.calls[0])
-	}
-	if store.calls[1] != (progressListCall{profileID: "p1", status: "completed", limit: supersededProgressPageSize, offset: supersededProgressPageSize}) {
-		t.Fatalf("second ListProgress call = %+v", store.calls[1])
-	}
-}
-
-func TestBuildSupersededEpisodeProgressQueryUsesStoreSnapshotsWithFreshnessGate(t *testing.T) {
-	t.Parallel()
-
-	query := buildSupersededEpisodeProgressQuery()
-	expectedFragments := []string{
-		"unnest($1::text[], $2::timestamptz[])",
-		"unnest($3::text[], $4::timestamptz[])",
-		"FROM in_progress ip_progress",
-		"done_progress.updated_at > ip_progress.updated_at",
-	}
-	for _, fragment := range expectedFragments {
-		if !strings.Contains(query, fragment) {
-			t.Fatalf("expected superseded progress query to contain %q, got:\n%s", fragment, query)
-		}
-	}
-	unexpectedFragments := []string{
-		"user_watch_progress",
-		"user_history_hidden_items",
-	}
-	for _, fragment := range unexpectedFragments {
-		if strings.Contains(query, fragment) {
-			t.Fatalf("superseded progress query contains %q, got:\n%s", fragment, query)
-		}
+	if _, err := ParseContinueType([]byte(`{"continue_type":"scrolling"}`)); err == nil {
+		t.Fatal("ParseContinueType accepted unknown continue_type")
 	}
 }
 
@@ -201,43 +156,6 @@ func contentIDs(items []*models.MediaItem) []string {
 	return ids
 }
 
-func progressIDs(entries []userstore.WatchProgress) []string {
-	ids := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		ids = append(ids, entry.MediaItemID)
-	}
-	return ids
-}
-
 func intPtr(v int) *int {
 	return &v
-}
-
-type progressListCall struct {
-	profileID string
-	status    string
-	limit     int
-	offset    int
-}
-
-type stubProgressLister struct {
-	entries []userstore.WatchProgress
-	calls   []progressListCall
-}
-
-func (s *stubProgressLister) ListProgress(_ context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
-	s.calls = append(s.calls, progressListCall{
-		profileID: profileID,
-		status:    status,
-		limit:     limit,
-		offset:    offset,
-	})
-	if offset >= len(s.entries) {
-		return nil, nil
-	}
-	end := offset + limit
-	if end > len(s.entries) {
-		end = len(s.entries)
-	}
-	return s.entries[offset:end], nil
 }

@@ -86,7 +86,7 @@ func observationFromAssignment(assignment fileRootAssignment) RootObservation {
 }
 
 func observationFromSnapshot(snapshot models.ScannedMediaRoot) RootObservation {
-	hasFolderIDs := naming.ParseFolderIDs(filepath.Base(snapshot.RootPath), snapshot.InferredType) != nil
+	hasFolderIDs := naming.ParseFolderIDs(filepath.Base(snapshot.RootPath)) != nil
 	observation := RootObservation{
 		RootPath:       snapshot.RootPath,
 		SampleFilePath: snapshot.SampleFilePath,

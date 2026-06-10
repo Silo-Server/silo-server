@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type { RateLimitConfig } from "@/api/types";
+import type { RateLimitConfig, RateLimitUpdateResponse } from "@/api/types";
 import { adminKeys } from "../keys";
 import { toast } from "sonner";
 
@@ -18,12 +18,16 @@ export function useUpdateRateLimitConfig() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (config: RateLimitConfig) =>
-      api<{ status: string }>("/admin/rate-limits/config", {
+      api<RateLimitUpdateResponse>("/admin/rate-limits/config", {
         method: "PUT",
         body: JSON.stringify(config),
       }),
-    onSuccess: () => {
-      toast.success("Rate limit settings saved");
+    onSuccess: (data) => {
+      if (data.restart_required) {
+        toast.success("Rate limit settings saved — restart the server to apply them");
+      } else {
+        toast.success("Rate limit settings saved");
+      }
       queryClient.invalidateQueries({ queryKey: adminKeys.rateLimitConfig() });
     },
     onError: (err) => {

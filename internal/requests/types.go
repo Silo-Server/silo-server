@@ -139,6 +139,8 @@ type Request struct {
 	Outcome              Outcome    `json:"outcome"`
 	RequestedByUserID    int        `json:"requested_by_user_id,omitempty"`
 	RequestedByProfileID string     `json:"requested_by_profile_id,omitempty"`
+	RequesterEmail       string     `json:"-"`
+	RequesterUsername    string     `json:"-"`
 	IntegrationKind      string     `json:"integration_kind,omitempty"`
 	IsAnime              bool       `json:"is_anime"`
 	Targets              []Target   `json:"targets,omitempty"`
@@ -254,51 +256,19 @@ type ListFilter struct {
 }
 
 type Integration struct {
-	ID                    string         `json:"id"`
-	Name                  string         `json:"name"`
-	Kind                  string         `json:"kind"`
-	Enabled               bool           `json:"enabled"`
-	Is4K                  bool           `json:"is_4k"`
-	IsDefault             bool           `json:"is_default"`
-	IsDefault4K           bool           `json:"is_default_4k"`
-	AnimeEnabled          bool           `json:"anime_enabled"`
-	AnimeQualityProfileID *int           `json:"anime_quality_profile_id,omitempty"`
-	AnimeRootFolder       string         `json:"anime_root_folder,omitempty"`
-	AnimeTags             []int          `json:"anime_tags"`
-	BaseURL               string         `json:"base_url"`
-	APIKeyRef             string         `json:"api_key_ref,omitempty"`
-	RootFolder            string         `json:"root_folder"`
-	QualityProfileID      *int           `json:"quality_profile_id,omitempty"`
-	Tags                  []int          `json:"tags"`
-	Options               map[string]any `json:"options"`
-	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckStatus       string         `json:"last_check_status,omitempty"`
-	LastCheckError        string         `json:"last_check_error,omitempty"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-}
-
-type IntegrationRootFolder struct {
-	Path       string `json:"path"`
-	FreeSpace  int64  `json:"free_space,omitempty"`
-	TotalSpace int64  `json:"total_space,omitempty"`
-	Accessible bool   `json:"accessible"`
-}
-
-type IntegrationQualityProfile struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-}
-
-type IntegrationTag struct {
-	ID    int    `json:"id"`
-	Label string `json:"label"`
-}
-
-type IntegrationOptions struct {
-	Kind            string                      `json:"kind"`
-	RootFolders     []IntegrationRootFolder     `json:"root_folders"`
-	QualityProfiles []IntegrationQualityProfile `json:"quality_profiles"`
-	Tags            []IntegrationTag            `json:"tags"`
+	ID                  string         `json:"id"`
+	Name                string         `json:"name"`
+	Enabled             bool           `json:"enabled"`
+	BaseURL             string         `json:"base_url"`
+	APIKeyRef           string         `json:"api_key_ref,omitempty"`
+	LastCheckAt         *time.Time     `json:"last_check_at,omitempty"`
+	LastCheckStatus     string         `json:"last_check_status,omitempty"`
+	LastCheckError      string         `json:"last_check_error,omitempty"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	CapabilityID        string         `json:"capability_id"`
+	InstallationID      *int           `json:"installation_id,omitempty"`
+	SupportedMediaTypes []string       `json:"supported_media_types"`
+	PluginConfig        map[string]any `json:"plugin_config"`
 }
 
 type FulfillmentResult struct {

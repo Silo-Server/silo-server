@@ -1089,13 +1089,8 @@ func validateCatalogExactCollectionRequest(req CatalogRequest) error {
 }
 
 func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
-	if def.MediaScope != "" &&
-		def.MediaScope != "movie" &&
-		def.MediaScope != "series" &&
-		def.MediaScope != "episode" &&
-		def.MediaScope != "audiobook" &&
-		def.MediaScope != "ebook" {
-		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', or 'ebook'", ErrInvalidCatalogRequest)
+	if !IsValidMediaScope(def.MediaScope) {
+		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', or 'video'", ErrInvalidCatalogRequest)
 	}
 	if def.Match != "" && def.Match != "all" && def.Match != "any" {
 		return fmt.Errorf("%w: match must be 'all' or 'any'", ErrInvalidCatalogRequest)
@@ -1611,12 +1606,7 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 		MaxContentRating:   access.MaxContentRating,
 	}
 
-	var itemTypes []string
-	if req.Query.MediaScope != "" {
-		itemTypes = []string{req.Query.MediaScope}
-	}
-
-	return searchAccess, itemTypes, false
+	return searchAccess, MediaScopeItemTypes(req.Query.MediaScope), false
 }
 
 func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilters, bool, error) {
@@ -1626,7 +1616,9 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 	}
 
 	filters := BrowseFilters{
-		Type:               req.Query.MediaScope,
+		// BrowseFilters.Type accepts a comma-separated type list, so group
+		// scopes like "video" expand here rather than leaking downstream.
+		Type:               strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ","),
 		NamePrefix:         req.NamePrefix,
 		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(req.Query.LibraryIDs, access.DisabledLibraryIDs),
 		MaxContentRating:   access.MaxContentRating,
@@ -1767,7 +1759,7 @@ func filterCatalogItems(items []*models.MediaItem, def QueryDefinition) []*model
 		if item == nil {
 			continue
 		}
-		if def.MediaScope != "" && !strings.EqualFold(strings.TrimSpace(item.Type), def.MediaScope) {
+		if !MediaScopeMatchesItemType(def.MediaScope, item.Type) {
 			continue
 		}
 		if catalogDefinitionMatchesItem(item, def) {

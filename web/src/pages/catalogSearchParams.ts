@@ -139,7 +139,8 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
       type === "series" ||
       type === "episode" ||
       type === "audiobook" ||
-      type === "ebook"
+      type === "ebook" ||
+      type === "video"
         ? type
         : undefined,
     match: searchParams.get("match") === "any" ? "any" : "all",

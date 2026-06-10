@@ -2,6 +2,7 @@ import { useSearchParams } from "react-router";
 import {
   Settings2,
   Captions,
+  Cloud,
   PlayCircle,
   ScanSearch,
   Gauge,
@@ -13,14 +14,20 @@ import {
   ScrollText,
   Paintbrush,
   Layers,
+  Subtitles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+import { SideNavItem, SideNavSection } from "@/components/SideNav";
+import { cn } from "@/lib/utils";
 
 import GeneralSettings from "./GeneralSettings";
 import PlaybackSettings from "./PlaybackSettings";
 import ScannerSettings from "./ScannerSettings";
 import IntroSettings from "./IntroSettings";
+import SubtitlesSettings from "./SubtitlesSettings";
 import RateLimitSettings from "./RateLimitSettings";
+import WatchProvidersSettings from "./WatchProvidersSettings";
 import IntegrationsSettings from "./IntegrationsSettings";
 import CompatibilityProxiesSettings from "./CompatibilityProxiesSettings";
 import DatabaseSettings from "./DatabaseSettings";
@@ -37,31 +44,67 @@ interface SettingsNav {
   component: React.ComponentType;
 }
 
-const SETTINGS_NAV: SettingsNav[] = [
-  { id: "general", label: "General", icon: Settings2, component: GeneralSettings },
-  { id: "theming", label: "Theming", icon: Paintbrush, component: ThemeSettings },
-  { id: "playback", label: "Playback", icon: PlayCircle, component: PlaybackSettings },
-  { id: "intro", label: "Intro Markers", icon: Captions, component: IntroSettings },
-  { id: "scanner", label: "Scanner & Matcher", icon: ScanSearch, component: ScannerSettings },
-  { id: "rate-limiting", label: "Rate Limiting", icon: Gauge, component: RateLimitSettings },
-  { id: "downloads", label: "Downloads", icon: Download, component: DownloadSettings },
-  { id: "integrations", label: "Integrations", icon: Puzzle, component: IntegrationsSettings },
+interface SettingsNavGroup {
+  label: string;
+  items: SettingsNav[];
+}
+
+// Tab ids are stable URL state (?tab=...) — regroup or reorder freely, but
+// renaming an id breaks bookmarks and deep links.
+const SETTINGS_GROUPS: SettingsNavGroup[] = [
   {
-    id: "compatibility-proxies",
-    label: "Compatibility Proxies",
-    icon: Network,
-    component: CompatibilityProxiesSettings,
+    label: "Server",
+    items: [
+      { id: "general", label: "General", icon: Settings2, component: GeneralSettings },
+      { id: "theming", label: "Theming", icon: Paintbrush, component: ThemeSettings },
+      { id: "overlays", label: "Card Overlays", icon: Layers, component: OverlaySettings },
+    ],
   },
-  { id: "database", label: "Database", icon: Database, component: DatabaseSettings },
-  { id: "storage", label: "Storage", icon: HardDrive, component: StorageSettings },
   {
-    id: "log-retention",
-    label: "Log Retention",
-    icon: ScrollText,
-    component: LogRetentionSettings,
+    label: "Media",
+    items: [
+      { id: "scanner", label: "Scanner & Matcher", icon: ScanSearch, component: ScannerSettings },
+      { id: "intro", label: "Intro Markers", icon: Captions, component: IntroSettings },
+      { id: "subtitles", label: "Subtitles", icon: Subtitles, component: SubtitlesSettings },
+      { id: "playback", label: "Playback", icon: PlayCircle, component: PlaybackSettings },
+      { id: "downloads", label: "Downloads", icon: Download, component: DownloadSettings },
+    ],
   },
-  { id: "overlays", label: "Card Overlays", icon: Layers, component: OverlaySettings },
+  {
+    label: "Connections",
+    items: [
+      {
+        id: "watch-providers",
+        label: "Watch Providers",
+        icon: Cloud,
+        component: WatchProvidersSettings,
+      },
+      { id: "integrations", label: "Integrations", icon: Puzzle, component: IntegrationsSettings },
+      {
+        id: "compatibility-proxies",
+        label: "Compatibility Proxies",
+        icon: Network,
+        component: CompatibilityProxiesSettings,
+      },
+      { id: "rate-limiting", label: "Rate Limiting", icon: Gauge, component: RateLimitSettings },
+    ],
+  },
+  {
+    label: "Data",
+    items: [
+      { id: "database", label: "Database", icon: Database, component: DatabaseSettings },
+      { id: "storage", label: "Storage", icon: HardDrive, component: StorageSettings },
+      {
+        id: "log-retention",
+        label: "Log Retention",
+        icon: ScrollText,
+        component: LogRetentionSettings,
+      },
+    ],
+  },
 ];
+
+const SETTINGS_NAV: SettingsNav[] = SETTINGS_GROUPS.flatMap((group) => group.items);
 
 export default function AdminSettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -84,50 +127,58 @@ export default function AdminSettingsLayout() {
       </div>
 
       <div className="surface-panel flex min-h-[500px] flex-col overflow-hidden rounded-[1.8rem] border-0 lg:flex-row">
-        {/* Sub-nav sidebar */}
+        {/* Mobile: horizontal scrolling pill bar */}
         <nav
-          className="border-border overflow-x-auto border-b px-2 py-3 lg:w-56 lg:flex-shrink-0 lg:border-r lg:border-b-0 lg:px-0"
           aria-label="Admin settings sections"
+          className="border-border overflow-x-auto border-b p-2 lg:hidden"
+          style={{ WebkitOverflowScrolling: "touch" }}
         >
-          <div role="tablist" className="flex gap-1 lg:block lg:space-y-1">
+          <div className="flex min-w-max items-stretch gap-1">
             {SETTINGS_NAV.map((item) => {
-              const isActive = item.id === activeId;
+              const isActive = item.id === active.id;
               return (
                 <button
                   key={item.id}
                   type="button"
-                  role="tab"
-                  id={`tab-${item.id}`}
-                  aria-selected={isActive}
-                  aria-controls={`panel-${item.id}`}
                   onClick={() => setActiveId(item.id)}
-                  className={`relative flex min-w-max items-center gap-2.5 rounded-xl px-4 py-2.5 text-left text-[13px] font-medium transition-colors lg:w-full ${
+                  aria-current={isActive ? "page" : undefined}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-[1rem] px-3 py-2.5 text-[13px] font-medium whitespace-nowrap transition-colors",
                     isActive
-                      ? "text-foreground bg-accent"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                  }`}
-                >
-                  {isActive && (
-                    <span
-                      className="absolute top-auto bottom-0 left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-t-sm lg:top-1/2 lg:bottom-auto lg:left-0 lg:h-[18px] lg:w-[3px] lg:-translate-x-0 lg:-translate-y-1/2 lg:rounded-t-none lg:rounded-r-sm"
-                      style={{ background: "var(--primary)" }}
-                    />
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                   )}
-                  <item.icon className="h-4 w-4 flex-shrink-0" />
-                  <span>{item.label}</span>
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
                 </button>
               );
             })}
           </div>
         </nav>
 
-        {/* Content area */}
-        <div
-          role="tabpanel"
-          id={`panel-${activeId}`}
-          aria-labelledby={`tab-${activeId}`}
-          className="flex-1 overflow-y-auto p-4 sm:p-6"
+        {/* Desktop: grouped vertical rail */}
+        <nav
+          aria-label="Admin settings sections"
+          className="border-border hidden space-y-5 border-r px-3 py-4 lg:block lg:w-60 lg:flex-shrink-0"
         >
+          {SETTINGS_GROUPS.map((group) => (
+            <SideNavSection key={group.label} label={group.label} idPrefix="admin-settings-nav">
+              {group.items.map((item) => (
+                <SideNavItem
+                  key={item.id}
+                  label={item.label}
+                  icon={item.icon}
+                  active={item.id === active.id}
+                  onClick={() => setActiveId(item.id)}
+                />
+              ))}
+            </SideNavSection>
+          ))}
+        </nav>
+
+        {/* Content area */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <ActiveComponent />
         </div>
       </div>

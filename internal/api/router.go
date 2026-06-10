@@ -48,8 +48,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
-	"github.com/Silo-Server/silo-server/internal/requests/radarr"
-	"github.com/Silo-Server/silo-server/internal/requests/sonarr"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -467,7 +465,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			tmdb.NewClient(tmdbAPIKey, 40),
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
-		requestSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		AttachRequestRouter(requestSvc, deps.PluginService)
+		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}
@@ -953,6 +952,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
 		sectionFetcher.CollectionRepo = catalog.NewLibraryCollectionRepository(deps.DB)
 		sectionFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
+		sectionFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 		if deps.DB != nil {
 			sectionFetcher.RecommendationRepo = recommendations.NewRepo(deps.DB)
 			if ratingsRepo != nil {
@@ -1144,6 +1144,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
 			recsFetcher.NextUpRepo = catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
+			recsFetcher.AudiobookNextRepo = catalog.NewAudiobookNextRepository(deps.DB)
 			recsHandler.Fetcher = recsFetcher
 			recsHandler.WatchTonightFetcher = recsFetcher
 		}
@@ -1455,6 +1456,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/catalog", catalogHandler.HandleGetCatalog)
 					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
 					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
+					r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
 					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
@@ -2208,8 +2210,11 @@ func NewRouter(deps Dependencies) chi.Router {
 								})
 							}
 
-							// Rate limit admin routes
-							if deps.RateLimitMW != nil && settingsRepo != nil {
+							// Rate limit admin routes. Mounted even when the limiter is not
+							// running (deps.RateLimitMW == nil) so admins can always reach the
+							// config — otherwise disabling rate limiting and restarting would
+							// permanently lock the settings page out of re-enabling it.
+							if settingsRepo != nil {
 								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus)
 								r.Route("/rate-limits", func(r chi.Router) {
 									r.Get("/config", rateLimitHandler.HandleGetConfig)

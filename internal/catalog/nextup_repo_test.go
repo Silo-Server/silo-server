@@ -15,7 +15,7 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 
 	expectedFragments := []string{
 		"eligible_series AS (",
-		"uwp_ip.completed = FALSE",
+		"uwp_ip.position_seconds > 0",
 		"e_ip.series_id = ce.series_id",
 		"uwp_ip.updated_at > ce.updated_at",
 		"FROM user_history_hidden_items hhi",

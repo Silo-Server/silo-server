@@ -21,7 +21,14 @@ import {
   type QuerySortRelevanceScope,
 } from "@/lib/querySortOptions";
 
-type FilterRuleMediaScope = "all" | "movie" | "series" | "episode" | "audiobook" | "ebook";
+type FilterRuleMediaScope =
+  | "all"
+  | "video"
+  | "movie"
+  | "series"
+  | "episode"
+  | "audiobook"
+  | "ebook";
 
 interface FilterRuleEditorProps {
   value: FilterConfig;

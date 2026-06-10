@@ -52,8 +52,7 @@ function resolveBadge(
   if (!label) return null;
   const dynamicIcon = def.getIcon ? def.getIcon(data) : null;
   const candidateIcon = dynamicIcon ?? def.iconId ?? null;
-  const showIcon =
-    def.iconCapable && candidateIcon !== null && (itemShowIcon ?? preset.preferIcon);
+  const showIcon = def.iconCapable && candidateIcon !== null && (itemShowIcon ?? preset.preferIcon);
   return {
     def,
     label,

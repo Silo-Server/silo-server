@@ -6,6 +6,7 @@ import type { SwipeCard as SwipeCardType } from "@/hooks/queries/recommendations
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import SwipeCard, { CardActions } from "./SwipeCard";
+import { buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
 
 // Stack positioning for each depth level (0 = top, 1 = behind, 2 = further).
 const stackVariants = {
@@ -23,6 +24,14 @@ interface CardStackProps {
   onNeedMore: () => void;
   onClose: () => void;
   onReset: () => void;
+}
+
+export function playTargetForSwipeCard(card: SwipeCardType) {
+  const href = buildMediaPlayHref({ contentId: card.content_id, type: card.type });
+  return {
+    href,
+    isVideo: isVideoWatchHref(href),
+  };
 }
 
 export default function CardStack({
@@ -62,15 +71,16 @@ export default function CardStack({
     const card = cards[topIndex];
     if (!card) return;
     onClose();
-    if (card.type === "ebook") {
-      navigate(`/reader/ebook/${encodeURIComponent(card.content_id)}`);
+    const target = playTargetForSwipeCard(card);
+    if (!target.isVideo) {
+      navigate(target.href);
       return;
     }
     playbackController.startPlayback({
       contentId: card.content_id,
       returnHref: `${location.pathname}${location.search}`,
     });
-  }, [cards, topIndex, onClose, navigate, playbackController, location.pathname, location.search]);
+  }, [cards, topIndex, onClose, playbackController, location.pathname, location.search, navigate]);
 
   // Keyboard navigation.
   useEffect(() => {
@@ -168,7 +178,12 @@ export default function CardStack({
 
       {/* Action buttons */}
       {visibleCards.length > 0 && (
-        <CardActions onReject={advance} onAccept={handlePlay} onPlay={handlePlay} />
+        <CardActions
+          onReject={advance}
+          onAccept={handlePlay}
+          onPlay={handlePlay}
+          playLabel={visibleCards[0]?.type === "audiobook" ? "Listen now" : "Play now"}
+        />
       )}
 
       {/* Counter */}

@@ -62,7 +62,8 @@ func ExtractToken(r *http.Request) (string, bool) {
 	if token := strings.TrimSpace(r.Header.Get("X-Mediabrowser-Token")); token != "" {
 		return token, true
 	}
-	if token := strings.TrimSpace(r.URL.Query().Get("api_key")); token != "" {
+	// Case-insensitive: Jellyfin clients vary the casing (api_key / Api_Key / API_KEY).
+	if token := strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("api_key")); token != "" {
 		return token, true
 	}
 
@@ -185,7 +186,12 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionS
 			// no auth header or api_key. Resolve the negotiated session's
 			// CompatToken — which for an API-key stream is itself the sa_ key,
 			// so it must go through the same session-or-API-key resolution.
-			if playSessionID := firstNonEmpty(r.URL.Query().Get("PlaySessionId"), r.URL.Query().Get("PlaySessionID")); playSessionID != "" {
+			//
+			// The lookup must be case-insensitive: Wholphin's jellyfin-sdk-kotlin
+			// builds its own direct-play URL with a lowercase "playSessionId"
+			// (and no api_key / auth header), so a case-sensitive match would
+			// miss it and 401 the stream — forcing a needless transcode fallback.
+			if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" {
 				if playSession, found := playbackStore.Get(playSessionID); found {
 					if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
 						serveWithSession(next, w, r, session)

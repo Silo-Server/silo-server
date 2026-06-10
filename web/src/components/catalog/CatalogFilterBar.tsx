@@ -32,6 +32,7 @@ interface CatalogFilterBarProps {
 
 export const CATALOG_MEDIA_SCOPE_OPTIONS = [
   { value: "all", label: "All Media" },
+  { value: "video", label: "Movies & Series" },
   { value: "movie", label: "Movies" },
   { value: "series", label: "Series" },
   { value: "episode", label: "Episodes" },
@@ -62,7 +63,9 @@ export default function CatalogFilterBar({
         <Select
           value={state.mediaScope}
           onValueChange={(v) => {
-            const nextRelevanceScope = v === "all" ? "all" : (v as QuerySortRelevanceScope);
+            // "video" spans movie+series, so sorts valid for "all" stay valid.
+            const nextRelevanceScope =
+              v === "all" || v === "video" ? "all" : (v as QuerySortRelevanceScope);
             const nextSort = normalizeQuerySortForScope(
               { field: state.sortField, order: state.sortOrder },
               {
@@ -94,21 +97,28 @@ export default function CatalogFilterBar({
       <Select
         value={selectedSort.field}
         onValueChange={(v) => {
-          const sortOption = getQuerySortOptions({ includePersonalized: allowPersonalizedSorts })
-            .find((opt) => opt.value === v);
+          const sortOption = getQuerySortOptions({
+            includePersonalized: allowPersonalizedSorts,
+          }).find((opt) => opt.value === v);
           const patch: Partial<GuidedFormState> = {
             sortField: v,
             sortOrder: getDefaultQuerySortOrder(v),
           };
           if (showMediaScopeSelector && sortOption) {
+            const scopeTypes: Array<Exclude<QuerySortRelevanceScope, "all">> | null =
+              state.mediaScope === "all"
+                ? null
+                : state.mediaScope === "video"
+                  ? ["movie", "series"]
+                  : [state.mediaScope];
             const currentApplicable =
-              state.mediaScope === "all" ||
-              sortOption.applicableMediaScopes.includes(
-                state.mediaScope as Exclude<QuerySortRelevanceScope, "all">,
-              );
-            if (sortOption.preferredMediaScope && state.mediaScope !== sortOption.preferredMediaScope) {
-              patch.mediaScope = sortOption
-                .preferredMediaScope as GuidedFormState["mediaScope"];
+              !scopeTypes ||
+              scopeTypes.some((scope) => sortOption.applicableMediaScopes.includes(scope));
+            if (
+              sortOption.preferredMediaScope &&
+              state.mediaScope !== sortOption.preferredMediaScope
+            ) {
+              patch.mediaScope = sortOption.preferredMediaScope as GuidedFormState["mediaScope"];
             } else if (!currentApplicable) {
               patch.mediaScope = sortOption
                 .applicableMediaScopes[0] as GuidedFormState["mediaScope"];

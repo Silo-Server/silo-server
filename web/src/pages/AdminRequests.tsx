@@ -1,11 +1,9 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
-  ChevronRight,
   Library,
   Plug,
   Plus,
@@ -20,14 +18,19 @@ import type {
   MediaRequest,
   MediaRequestOutcome,
   MediaRequestStatus,
+  PluginCapability,
+  PluginInstallation,
   RequestApprovalMode,
   RequestIntegration,
   RequestIntegrationOptions,
+  RequestIntegrationValidationError,
   RequestLimitMode,
   RequestSettings,
   RequestTarget,
   RequestUserLimit,
 } from "@/api/types";
+import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
+import { buildSchemaValues, parseFieldTypes } from "@/components/admin/plugins/schemaFormUtils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +61,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useDebounce } from "@/hooks/useDebounce";
+import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminMediaRequests,
@@ -84,6 +89,8 @@ import {
   REQUEST_OUTCOMES,
   REQUEST_STATUSES,
 } from "@/lib/mediaRequests";
+import { applyExclusivity } from "./requestExclusivity";
+import { supportedMediaTypesForConfig } from "./requestIntegrationMediaTypes";
 
 type StatusFilter = MediaRequestStatus | "all";
 type OutcomeFilter = MediaRequestOutcome | "all";
@@ -559,38 +566,67 @@ function RequestSettingsForm({ settings }: { settings: RequestSettings }) {
   );
 }
 
+// Host chrome owned by Silo; everything arr-specific now lives in pluginConfig
+// and is rendered by the plugin's connection descriptor via <SchemaForm>.
 type IntegrationFormState = {
   id: string;
   name: string;
-  kind: "radarr" | "sonarr";
   enabled: boolean;
-  is_4k: boolean;
-  is_default: boolean;
-  is_default_4k: boolean;
   base_url: string;
   api_key_ref: string;
-  root_folder: string;
-  quality_profile_id: string;
-  tags: string;
-  anime_enabled: boolean;
-  anime_quality_profile_id: string;
-  anime_root_folder: string;
-  anime_tags: string;
-  search_on_add: boolean;
-  minimum_availability: string;
-  series_type: string;
-  season_folder: boolean;
   has_api_key: boolean;
+  // Selected installed plugin (which request-router plugin fulfills this connection).
+  // Empty string means "none selected"; the backend requires a non-empty value.
+  installation_id: string;
+  // The specific request_router.v1 capability sub-id on that installation. Tracked
+  // alongside installation_id because one installation can expose more than one
+  // capability, so installation_id alone can't identify the chosen backend.
+  capability_id: string;
 };
 
-const INTEGRATION_KINDS: Array<"radarr" | "sonarr"> = ["radarr", "sonarr"];
+// All request integrations are fulfilled by a plugin exposing this capability.
+const REQUEST_ROUTER_CAPABILITY = "request_router.v1";
 
-const MINIMUM_AVAILABILITY_OPTIONS = [
-  { value: "announced", label: "Announced" },
-  { value: "inCinemas", label: "In Cinemas" },
-  { value: "released", label: "Released" },
-  { value: "preDB", label: "PreDB" },
-] as const;
+type RequestRouterInstallation = {
+  installationID: number;
+  pluginID: string;
+  capability: PluginCapability;
+};
+
+// requestRouterInstallations flattens installed plugins to one entry per
+// request_router.v1 capability so the form can offer an installation selector.
+function requestRouterInstallations(
+  installations: PluginInstallation[],
+): RequestRouterInstallation[] {
+  const out: RequestRouterInstallation[] = [];
+  for (const installation of installations) {
+    for (const capability of installation.capabilities ?? []) {
+      if (
+        capability.type === REQUEST_ROUTER_CAPABILITY ||
+        capability.id === REQUEST_ROUTER_CAPABILITY
+      ) {
+        out.push({
+          installationID: installation.id,
+          pluginID: installation.plugin_id,
+          capability,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function installationOptionLabel(entry: RequestRouterInstallation): string {
+  const name = entry.capability.display_name || entry.pluginID;
+  return `${name} (${entry.capability.id})`;
+}
+
+// installationOptionValue is the <Select> option value: it encodes both the
+// installation and the capability sub-id so multiple capabilities on one
+// installation stay distinct (installation_id alone would collide).
+function installationOptionValue(entry: RequestRouterInstallation): string {
+  return `${entry.installationID}:${entry.capability.id}`;
+}
 
 function RequestIntegrationsTab() {
   const integrations = useRequestIntegrations();
@@ -614,6 +650,7 @@ function RequestIntegrationsTab() {
 type IntegrationCard = {
   key: string;
   form: IntegrationFormState;
+  pluginConfig: Record<string, unknown>;
   source: RequestIntegration | null;
 };
 
@@ -624,11 +661,130 @@ function nextCardKey(): string {
   return `card-${integrationCardCounter}`;
 }
 
+function integrationToForm(integration?: RequestIntegration): IntegrationFormState {
+  return {
+    id: integration?.id ?? "",
+    name: integration?.name ?? "",
+    enabled: integration?.enabled ?? true,
+    base_url: integration?.base_url ?? "",
+    api_key_ref: "",
+    has_api_key: integration?.has_api_key ?? false,
+    installation_id: integration?.installation_id ? String(integration.installation_id) : "",
+    capability_id: integration?.capability_id ?? "",
+  };
+}
+
+type ConnectionOptionsStatus = "idle" | "loading" | "error";
+
+// useConnectionOptions debounces a ListConfigOptions probe keyed on the connection
+// IDENTITY (base URL + key ref + installation + capability) — NOT the full
+// plugin_config, so editing a quality profile / switch doesn't re-probe the arr
+// API. It backs the dynamic SELECT options (root folders, quality profiles, tags)
+// the descriptor declares. The probe is silent (no toasts); callers surface
+// failures inline via `status`. A generation counter enforces latest-wins so a
+// slow older probe can't overwrite a newer result, and options are cleared
+// whenever a probe can't run.
+function useConnectionOptions(
+  connectionID: string,
+  draft: {
+    base_url: string;
+    api_key_ref: string;
+    has_api_key: boolean;
+    installation_id?: number;
+    capability_id: string;
+    plugin_config: Record<string, unknown>;
+  },
+) {
+  const load = useLoadRequestIntegrationOptions();
+  const [options, setOptions] = useState<RequestIntegrationOptions>({});
+  const [status, setStatus] = useState<ConnectionOptionsStatus>("idle");
+  // Latest-wins guard: each probe captures the generation it started with and
+  // only commits its result if no newer probe has begun since.
+  const genRef = useRef(0);
+
+  const canLoad =
+    draft.base_url.trim().length > 0 &&
+    Boolean(draft.installation_id) &&
+    draft.capability_id.trim().length > 0 &&
+    Boolean(draft.api_key_ref.trim() || draft.has_api_key);
+
+  // Options depend ONLY on the connection identity. plugin_config is still sent
+  // in the request body so the plugin can resolve options, but it is not part of
+  // the signature — see #2.
+  const sig = JSON.stringify({
+    u: draft.base_url,
+    k: draft.api_key_ref,
+    i: draft.installation_id,
+    c: draft.capability_id,
+  });
+  const debouncedSig = useDebounce(sig, 400);
+
+  // Snapshot the latest connection inputs so the debounced effect sends the
+  // current plugin_config without re-firing when only plugin_config changes.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  useEffect(() => {
+    if (!canLoad) {
+      // Bump the generation so any in-flight probe is invalidated, and clear any
+      // stale options from a previous/invalid connection so they never linger.
+      genRef.current += 1;
+      setOptions({});
+      setStatus("idle");
+      return;
+    }
+    const current = draftRef.current;
+    const gen = ++genRef.current;
+    setStatus("loading");
+    load
+      .mutateAsync({
+        id: connectionID || "new",
+        body: {
+          base_url: current.base_url,
+          api_key_ref: current.api_key_ref.trim() || undefined,
+          capability_id: current.capability_id,
+          installation_id: current.installation_id,
+          plugin_config: current.plugin_config,
+        },
+      })
+      .then((loaded) => {
+        if (gen === genRef.current) {
+          setOptions(loaded);
+          setStatus("idle");
+        }
+      })
+      .catch(() => {
+        if (gen === genRef.current) {
+          setOptions({});
+          setStatus("error");
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSig, canLoad]);
+  return { options, status };
+}
+
 function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegration[] }) {
+  const installationsQuery = useAdminPluginInstallations();
+  const routerInstallations = useMemo(
+    () => requestRouterInstallations(installationsQuery.data ?? []),
+    [installationsQuery.data],
+  );
+  // When exactly one request-router plugin is installed, default new/unseeded
+  // connections to it so the admin doesn't have to pick.
+  const defaultSelection: Pick<IntegrationFormState, "installation_id" | "capability_id"> =
+    routerInstallations.length === 1
+      ? {
+          installation_id: String(routerInstallations[0]?.installationID ?? ""),
+          capability_id: routerInstallations[0]?.capability.id ?? "",
+        }
+      : { installation_id: "", capability_id: "" };
+
   const [cards, setCards] = useState<IntegrationCard[]>(() =>
     integrations.map((integration) => ({
       key: integration.id || nextCardKey(),
-      form: integrationToForm(integration.kind === "sonarr" ? "sonarr" : "radarr", integration),
+      form: integrationToForm(integration),
+      pluginConfig: { ...(integration.plugin_config ?? {}) },
       source: integration,
     })),
   );
@@ -641,10 +797,34 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
     );
   }
 
-  function addCard(kind: "radarr" | "sonarr") {
+  function updateCardConfig(key: string, pluginConfig: Record<string, unknown>) {
+    setCards((current) => {
+      const mapped = current.map((card) => ({
+        key: card.key,
+        installationId: card.form.installation_id,
+        config: card.key === key ? pluginConfig : card.pluginConfig,
+      }));
+      const fieldsFor = (installationId: string) =>
+        routerInstallations.find((entry) => String(entry.installationID) === installationId)
+          ?.capability.config_schema?.[0]?.admin_form?.fields ?? [];
+      const next = applyExclusivity(mapped, key, pluginConfig, fieldsFor);
+      const byKey = new Map(next.map((entry) => [entry.key, entry.config]));
+      return current.map((card) => ({
+        ...card,
+        pluginConfig: byKey.get(card.key) ?? card.pluginConfig,
+      }));
+    });
+  }
+
+  function addCard() {
     setCards((current) => [
       ...current,
-      { key: nextCardKey(), form: integrationToForm(kind), source: null },
+      {
+        key: nextCardKey(),
+        form: { ...integrationToForm(), ...defaultSelection },
+        pluginConfig: {},
+        source: null,
+      },
     ]);
   }
 
@@ -652,117 +832,234 @@ function RequestIntegrationsForm({ integrations }: { integrations: RequestIntegr
     setCards((current) => current.filter((card) => card.key !== key));
   }
 
+  const noRouterPlugin = !installationsQuery.isLoading && routerInstallations.length === 0;
+
   return (
-    <div className="space-y-8">
-      {INTEGRATION_KINDS.map((kind) => {
-        const kindCards = cards.filter((card) => card.form.kind === kind);
-        const title = kind === "radarr" ? "Radarr" : "Sonarr";
-        return (
-          <div key={kind} className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold tracking-normal">{title} instances</h2>
-              <Button type="button" variant="outline" size="sm" onClick={() => addCard(kind)}>
-                <Plus className="h-4 w-4" />
-                Add {title} instance
-              </Button>
-            </div>
-            {kindCards.length === 0 ? (
-              <EmptyPanel
-                title={`No ${title} instances`}
-                detail={`Add a ${title} instance to route requests.`}
-              />
-            ) : (
-              <div className="grid gap-4 xl:grid-cols-2">
-                {kindCards.map((card) => (
-                  <IntegrationEditor
-                    key={card.key}
-                    form={card.form}
-                    source={card.source}
-                    onChange={(patch) => updateCard(card.key, patch)}
-                    onRemove={() => removeCard(card.key)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-normal">Connections</h2>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addCard}
+          disabled={noRouterPlugin}
+        >
+          <Plus className="h-4 w-4" />
+          Add connection
+        </Button>
+      </div>
+      {noRouterPlugin ? (
+        <EmptyPanel
+          title="No request-router plugin installed"
+          detail={`Install a plugin that exposes the ${REQUEST_ROUTER_CAPABILITY} capability before adding connections.`}
+        />
+      ) : cards.length === 0 ? (
+        <EmptyPanel
+          title="No connections"
+          detail="Add a connection and pick a plugin to route requests."
+        />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {cards.map((card) => (
+            <IntegrationEditor
+              key={card.key}
+              form={card.form}
+              pluginConfig={card.pluginConfig}
+              installations={routerInstallations}
+              installationsLoading={installationsQuery.isLoading}
+              source={card.source}
+              onChange={(patch) => updateCard(card.key, patch)}
+              onConfigChange={(config) => updateCardConfig(card.key, config)}
+              onRemove={() => removeCard(card.key)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function IntegrationEditor({
   form,
+  pluginConfig,
+  installations,
+  installationsLoading,
   source,
   onChange,
+  onConfigChange,
   onRemove,
 }: {
   form: IntegrationFormState;
+  pluginConfig: Record<string, unknown>;
+  installations: RequestRouterInstallation[];
+  installationsLoading: boolean;
   source: RequestIntegration | null;
   onChange: (patch: Partial<IntegrationFormState>) => void;
+  onConfigChange: (config: Record<string, unknown>) => void;
   onRemove: () => void;
 }) {
-  const title = form.kind === "radarr" ? "Radarr" : "Sonarr";
   const isNew = form.id === "";
   const createIntegration = useCreateRequestIntegration();
   const updateIntegration = useUpdateRequestIntegration();
   const deleteIntegration = useDeleteRequestIntegration();
-  const [animeOpen, setAnimeOpen] = useState(form.anime_enabled);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const animePanelID = useId();
-  const isDirty = !isNew && source !== null && isIntegrationDirty(form, source);
-  const loadOptions = useLoadRequestIntegrationOptions();
-  const [options, setOptions] = useState<RequestIntegrationOptions | null>(null);
-  const rootFolders = rootFolderChoices(options, form.root_folder);
-  const qualityProfiles = qualityProfileChoices(options, form.quality_profile_id);
-  const animeRootFolders = rootFolderChoices(options, form.anime_root_folder);
-  const animeQualityProfiles = qualityProfileChoices(options, form.anime_quality_profile_id);
-  const tags = options?.tags ?? [];
-  const selectedTags = parseTags(form.tags);
-  const selectedAnimeTags = parseTags(form.anime_tags);
-  const canLoadOptions =
-    form.base_url.trim().length > 0 && Boolean(form.api_key_ref.trim() || form.has_api_key);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  // SchemaForm owns config validation and reports it up; the editor consumes the
+  // result instead of re-running validateSchemaValues itself.
+  const [schemaValid, setSchemaValid] = useState(true);
 
-  async function handleLoadOptions() {
-    try {
-      const loaded = await loadOptions.mutateAsync({
-        id: form.id || "new",
-        body: {
-          kind: form.kind,
-          base_url: form.base_url,
-          api_key_ref: form.api_key_ref.trim() || undefined,
-        },
-      });
-      setOptions(loaded);
-
-      const patch: Partial<IntegrationFormState> = {};
-      if (!form.root_folder && loaded.root_folders[0]?.path) {
-        patch.root_folder = loaded.root_folders[0].path;
-      }
-      if (!form.quality_profile_id && loaded.quality_profiles[0]?.id) {
-        patch.quality_profile_id = String(loaded.quality_profiles[0].id);
-      }
-      if (Object.keys(patch).length > 0) {
-        onChange(patch);
-      }
-    } catch {
-      // Error toast is handled by useLoadRequestIntegrationOptions.onError.
-    }
+  // Any edit invalidates a prior failed save's server-side errors, so clear them
+  // wholesale on edit. A corrected field's stale "does not exist" then disappears.
+  function clearSaveErrors() {
+    setFieldErrors((current) => (Object.keys(current).length === 0 ? current : {}));
+    setFormError((current) => (current === null ? current : null));
   }
+
+  function patchForm(patch: Partial<IntegrationFormState>) {
+    clearSaveErrors();
+    onChange(patch);
+  }
+
+  function patchConfig(config: Record<string, unknown>) {
+    clearSaveErrors();
+    onConfigChange(config);
+  }
+
+  // Default-select the only installed request-router plugin once installations
+  // have loaded, when this connection has no installation set yet. Depend on a
+  // stable scalar (not the array identity) so a refetch returning the same single
+  // plugin does not re-fire and re-select after a deliberate clear.
+  const soleInstallation = installations.length === 1 ? installations[0] : undefined;
+  const soleInstallationID =
+    soleInstallation !== undefined ? String(soleInstallation.installationID) : undefined;
+  useEffect(() => {
+    if (form.installation_id || soleInstallation === undefined) return;
+    onChange({
+      installation_id: String(soleInstallation.installationID),
+      capability_id: soleInstallation.capability.id,
+    });
+    // onChange identity is stable per card; intentionally depend on the data only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.installation_id, soleInstallationID]);
+
+  const selectedInstallationID = Number(form.installation_id);
+  const hasInstallation = Number.isInteger(selectedInstallationID) && selectedInstallationID > 0;
+  // Match on both installation and capability sub-id so a multi-capability
+  // installation resolves the exact backend; fall back to installation-only for
+  // connections whose capability_id isn't set yet (adopts that installation's
+  // capability).
+  const selected =
+    installations.find(
+      (entry) =>
+        entry.installationID === selectedInstallationID &&
+        entry.capability.id === form.capability_id,
+    ) ?? installations.find((entry) => entry.installationID === selectedInstallationID);
+
+  // Switching the selected plugin must drop the previous plugin's config (so its
+  // keys never reach the new plugin's schema in the options probe or save) and
+  // clear stale save errors (handled by patchForm -> clearSaveErrors).
+  function handlePluginChange(value: string) {
+    const entry = installations.find((e) => installationOptionValue(e) === value);
+    if (!entry) return;
+    if (
+      entry.installationID === selectedInstallationID &&
+      entry.capability.id === form.capability_id
+    ) {
+      return; // no actual change; keep existing config
+    }
+    patchForm({
+      installation_id: String(entry.installationID),
+      capability_id: entry.capability.id,
+    });
+    onConfigChange({});
+  }
+  const selectedConfigSchema = selected?.capability.config_schema?.[0];
+  const descriptor = selectedConfigSchema?.admin_form;
+  const title = selected?.capability.display_name || selected?.pluginID || "Connection";
+
+  const { options, status: optionsStatus } = useConnectionOptions(form.id, {
+    base_url: form.base_url,
+    api_key_ref: form.api_key_ref,
+    has_api_key: form.has_api_key,
+    installation_id: hasInstallation ? selectedInstallationID : undefined,
+    capability_id: selected?.capability.id ?? "",
+    plugin_config: pluginConfig,
+  });
+
+  // Once dynamic options arrive, default each empty single-SELECT field to its
+  // first option (restores the old root_folder/quality_profile pre-selection
+  // generically). MULTI_SELECT (tags) is left empty; values the admin already
+  // chose are never clobbered. Read config/onChange from refs so the effect keys
+  // only on options + descriptor and doesn't re-fire on unrelated edits.
+  const configRef = useRef(pluginConfig);
+  configRef.current = pluginConfig;
+  const onConfigChangeRef = useRef(onConfigChange);
+  onConfigChangeRef.current = onConfigChange;
+  useEffect(() => {
+    if (!descriptor) return;
+    const current = configRef.current;
+    const patch: Record<string, unknown> = {};
+    for (const field of descriptor.fields) {
+      if (field.control !== "SELECT" || !field.dynamic_options) continue;
+      const first = options[field.key]?.[0];
+      if (!first) continue;
+      const value = current[field.key];
+      const empty = value === undefined || value === null || value === "";
+      if (empty) patch[field.key] = first.value;
+    }
+    if (Object.keys(patch).length > 0) {
+      onConfigChangeRef.current({ ...current, ...patch });
+    }
+  }, [options, descriptor]);
 
   const saving = createIntegration.isPending || updateIntegration.isPending;
   // New instances must carry an API key (there's no saved key to fall back on);
   // edits may leave it blank to keep the stored key (has_api_key).
   const hasApiKey = form.api_key_ref.trim().length > 0 || form.has_api_key;
-  const canSave = form.name.trim().length > 0 && form.base_url.trim().length > 0 && hasApiKey;
+  // schemaValid is reported by SchemaForm via onValidityChange. With no descriptor
+  // (no plugin form) there's nothing to validate, so the chrome checks govern.
+  const canSave =
+    form.name.trim().length > 0 &&
+    form.base_url.trim().length > 0 &&
+    hasApiKey &&
+    hasInstallation &&
+    (!descriptor || schemaValid);
 
   function handleSave() {
-    const payload = formToIntegration(form);
-    if (isNew) {
-      createIntegration.mutate(payload);
-    } else {
-      updateIntegration.mutate(payload);
-    }
+    // Coercion is driven by the plugin's declared json_schema types so e.g. a
+    // numeric string isn't sent where a string is declared (and vice versa).
+    const fieldTypes = parseFieldTypes(selectedConfigSchema?.json_schema);
+    const nextPluginConfig = descriptor
+      ? buildSchemaValues(descriptor, pluginConfig, fieldTypes)
+      : pluginConfig;
+    // plugin_config is the sole source of truth for fulfillment; the host owns
+    // only the generic connection chrome (name, base_url, api_key, installation).
+    const payload = {
+      id: form.id,
+      name: form.name.trim(),
+      enabled: form.enabled,
+      base_url: form.base_url.trim(),
+      api_key_ref: form.api_key_ref.trim() || undefined,
+      capability_id: selected?.capability.id ?? "",
+      installation_id: hasInstallation ? selectedInstallationID : undefined,
+      supported_media_types: supportedMediaTypesForConfig(nextPluginConfig, source),
+      plugin_config: nextPluginConfig,
+    } as RequestIntegration;
+
+    setFieldErrors({});
+    setFormError(null);
+    const mut = isNew ? createIntegration : updateIntegration;
+    mut.mutate(payload, {
+      onError: (err) => {
+        const body = (err as { body?: unknown })?.body as
+          | RequestIntegrationValidationError
+          | undefined;
+        if (body?.field_errors) setFieldErrors(body.field_errors);
+        if (body?.form_error) setFormError(body.form_error);
+      },
+    });
   }
 
   return (
@@ -773,325 +1070,113 @@ function IntegrationEditor({
           <h2 className="text-lg font-semibold tracking-normal">{title}</h2>
           {form.has_api_key ? <Badge variant="secondary">Key saved</Badge> : null}
           {isNew ? <Badge variant="outline">New</Badge> : null}
-          {isDirty ? <Badge variant="secondary">Unsaved changes</Badge> : null}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleLoadOptions}
-            disabled={!canLoadOptions || loadOptions.isPending}
-          >
-            <RefreshCw className="h-4 w-4" />
-            {loadOptions.isPending ? "Loading" : "Test connection"}
-          </Button>
-          <Switch checked={form.enabled} onCheckedChange={(enabled) => onChange({ enabled })} />
-        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
+          <span className="text-muted-foreground">{form.enabled ? "Enabled" : "Disabled"}</span>
+          <Switch checked={form.enabled} onCheckedChange={(enabled) => patchForm({ enabled })} />
+        </label>
       </div>
+
+      {formError ? (
+        <p className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border px-3 py-2 text-sm">
+          {formError}
+        </p>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name">
           <Input
             value={form.name}
-            onChange={(event) => onChange({ name: event.target.value })}
-            placeholder={`${title} instance`}
-          />
-        </Field>
-        <SwitchField
-          label="4K instance"
-          checked={form.is_4k}
-          onCheckedChange={(is_4k) =>
-            onChange({
-              is_4k,
-              is_default: is_4k ? false : form.is_default,
-              is_default_4k: is_4k ? form.is_default_4k : false,
-            })
-          }
-        />
-        <SwitchField
-          label="Default (HD)"
-          description={
-            form.is_4k
-              ? "Disabled because this is a 4K instance."
-              : "Default instance for 1080p requests."
-          }
-          checked={form.is_default}
-          disabled={form.is_4k}
-          onCheckedChange={(is_default) => onChange({ is_default })}
-        />
-        <SwitchField
-          label="Default 4K"
-          description={
-            form.is_4k
-              ? "Default instance for 2160p requests."
-              : "Enable the 4K instance toggle to set this."
-          }
-          checked={form.is_default_4k}
-          disabled={!form.is_4k}
-          onCheckedChange={(is_default_4k) => onChange({ is_default_4k })}
-        />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Base URL">
-          <Input
-            value={form.base_url}
-            onChange={(event) => onChange({ base_url: event.target.value })}
-            placeholder="http://localhost:7878"
+            onChange={(event) => patchForm({ name: event.target.value })}
+            placeholder="Connection name"
           />
         </Field>
         <Field label="API key or setting key">
           <Input
             value={form.api_key_ref}
-            onChange={(event) => onChange({ api_key_ref: event.target.value })}
+            onChange={(event) => patchForm({ api_key_ref: event.target.value })}
             placeholder={form.has_api_key ? "Leave blank to keep saved key" : "API key"}
           />
         </Field>
-        <Field label="Root folder">
-          {rootFolders.length > 0 ? (
-            <Select
-              value={form.root_folder}
-              onValueChange={(root_folder) => onChange({ root_folder })}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select root folder" />
-              </SelectTrigger>
-              <SelectContent>
-                {rootFolders.map((folder) => (
-                  <SelectItem key={folder.path} value={folder.path}>
-                    {rootFolderLabel(folder)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              value={form.root_folder}
-              onChange={(event) => onChange({ root_folder: event.target.value })}
-              placeholder="/media"
-            />
-          )}
-        </Field>
-        <Field label="Quality profile">
-          {qualityProfiles.length > 0 ? (
-            <Select
-              value={form.quality_profile_id}
-              onValueChange={(quality_profile_id) => onChange({ quality_profile_id })}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select quality profile" />
-              </SelectTrigger>
-              <SelectContent>
-                {qualityProfiles.map((profile) => (
-                  <SelectItem key={profile.id} value={String(profile.id)}>
-                    {profile.name} ({profile.id})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              type="number"
-              min={1}
-              value={form.quality_profile_id}
-              onChange={(event) => onChange({ quality_profile_id: event.target.value })}
-            />
-          )}
-        </Field>
-        <Field label="Tags">
-          <Input
-            value={form.tags}
-            onChange={(event) => onChange({ tags: event.target.value })}
-            placeholder="1, 2"
-          />
-          {tags.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {tags.map((tag) => {
-                const selected = selectedTags.includes(tag.id);
-                return (
-                  <Button
-                    key={tag.id}
-                    type="button"
-                    size="xs"
-                    variant={selected ? "secondary" : "outline"}
-                    onClick={() => onChange({ tags: toggleTag(form.tags, tag.id) })}
-                  >
-                    {tag.label || `Tag ${tag.id}`}
-                  </Button>
-                );
-              })}
-            </div>
-          ) : null}
-        </Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <SwitchField
-          label="Search on add"
-          checked={form.search_on_add}
-          onCheckedChange={(search_on_add) => onChange({ search_on_add })}
+      <Field label="Base URL">
+        <Input
+          value={form.base_url}
+          onChange={(event) => patchForm({ base_url: event.target.value })}
+          placeholder="http://localhost:7878"
         />
-        {form.kind === "sonarr" ? (
-          <>
-            <Field label="Series type">
-              <Input
-                value={form.series_type}
-                onChange={(event) => onChange({ series_type: event.target.value })}
-              />
-            </Field>
-            <SwitchField
-              label="Season folders"
-              checked={form.season_folder}
-              onCheckedChange={(season_folder) => onChange({ season_folder })}
-            />
-          </>
+      </Field>
+
+      <Field label="Plugin">
+        {installationsLoading ? (
+          <Skeleton className="h-9 w-full rounded-md" />
+        ) : installations.length === 0 ? (
+          <p className="text-destructive text-xs">
+            No installed plugin exposes the {REQUEST_ROUTER_CAPABILITY} capability. Install a
+            request-router plugin before adding connections.
+          </p>
         ) : (
-          <Field label="Minimum availability">
-            <Select
-              value={form.minimum_availability}
-              onValueChange={(minimum_availability) => onChange({ minimum_availability })}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select availability" />
-              </SelectTrigger>
-              <SelectContent>
-                {minimumAvailabilityChoices(form.minimum_availability).map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          <Select
+            value={selected ? installationOptionValue(selected) : ""}
+            onValueChange={handlePluginChange}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select plugin" />
+            </SelectTrigger>
+            <SelectContent>
+              {installations.map((entry) => (
+                <SelectItem
+                  key={installationOptionValue(entry)}
+                  value={installationOptionValue(entry)}
+                >
+                  {installationOptionLabel(entry)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
-      </div>
-
-      {options ? (
-        <p className="text-muted-foreground text-xs">
-          Loaded {options.root_folders.length} root folder
-          {options.root_folders.length === 1 ? "" : "s"}, {options.quality_profiles.length} quality
-          profile{options.quality_profiles.length === 1 ? "" : "s"}, and {options.tags.length} tag
-          {options.tags.length === 1 ? "" : "s"}.
-        </p>
-      ) : null}
-
-      <div className="border-border space-y-4 rounded-lg border p-3">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between gap-2 text-left"
-          onClick={() => setAnimeOpen((open) => !open)}
-          aria-expanded={animeOpen}
-          aria-controls={animePanelID}
-        >
-          <div className="flex items-center gap-2">
-            {animeOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            <span className="text-sm font-medium">Anime overrides</span>
-            {form.anime_enabled ? <Badge variant="secondary">On</Badge> : null}
-          </div>
-        </button>
-        {animeOpen ? (
-          <div id={animePanelID} className="space-y-4" role="region" aria-label="Anime overrides">
-            <SwitchField
-              label="Enable anime overrides"
-              description="Route anime requests to a dedicated profile, root folder, and tags."
-              checked={form.anime_enabled}
-              onCheckedChange={(anime_enabled) => onChange({ anime_enabled })}
-            />
-            {form.anime_enabled ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Anime quality profile">
-                  {animeQualityProfiles.length > 0 ? (
-                    <Select
-                      value={form.anime_quality_profile_id}
-                      onValueChange={(anime_quality_profile_id) =>
-                        onChange({ anime_quality_profile_id })
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select quality profile" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {animeQualityProfiles.map((profile) => (
-                          <SelectItem key={profile.id} value={String(profile.id)}>
-                            {profile.name} ({profile.id})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      type="number"
-                      min={1}
-                      value={form.anime_quality_profile_id}
-                      onChange={(event) =>
-                        onChange({ anime_quality_profile_id: event.target.value })
-                      }
-                    />
-                  )}
-                </Field>
-                <Field label="Anime root folder">
-                  {animeRootFolders.length > 0 ? (
-                    <Select
-                      value={form.anime_root_folder}
-                      onValueChange={(anime_root_folder) => onChange({ anime_root_folder })}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select root folder" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {animeRootFolders.map((folder) => (
-                          <SelectItem key={folder.path} value={folder.path}>
-                            {rootFolderLabel(folder)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      value={form.anime_root_folder}
-                      onChange={(event) => onChange({ anime_root_folder: event.target.value })}
-                      placeholder="/media/anime"
-                    />
-                  )}
-                </Field>
-                <Field label="Anime tags">
-                  <Input
-                    value={form.anime_tags}
-                    onChange={(event) => onChange({ anime_tags: event.target.value })}
-                    placeholder="1, 2"
-                  />
-                  {tags.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {tags.map((tag) => {
-                        const selected = selectedAnimeTags.includes(tag.id);
-                        return (
-                          <Button
-                            key={tag.id}
-                            type="button"
-                            size="xs"
-                            variant={selected ? "secondary" : "outline"}
-                            onClick={() =>
-                              onChange({ anime_tags: toggleTag(form.anime_tags, tag.id) })
-                            }
-                          >
-                            {tag.label || `Tag ${tag.id}`}
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </Field>
-              </div>
-            ) : null}
-          </div>
+        {!installationsLoading && installations.length > 0 && !hasInstallation ? (
+          <p className="text-destructive text-xs">Select a plugin to fulfill this connection.</p>
         ) : null}
-      </div>
+      </Field>
+
+      {descriptor ? (
+        <div className="space-y-2">
+          <SchemaForm
+            descriptor={descriptor}
+            values={pluginConfig}
+            onChange={patchConfig}
+            dynamicOptions={options}
+            optionsLoading={optionsStatus === "loading"}
+            errors={fieldErrors}
+            onValidityChange={setSchemaValid}
+            idPrefix={`conn-${form.id || form.installation_id || "new"}`}
+          />
+          {optionsStatus === "error" && form.base_url.trim().length > 0 ? (
+            <p className="border-destructive/40 bg-destructive/10 text-destructive flex items-start gap-2 rounded-md border px-3 py-2 text-xs">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Couldn&apos;t load options from the service — check the base URL and API key, then
+                edit a field to retry.
+              </span>
+            </p>
+          ) : null}
+        </div>
+      ) : hasInstallation ? (
+        <p className="text-muted-foreground text-sm">
+          This plugin does not expose a connection configuration form.
+        </p>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Select a plugin to configure this connection.
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={handleSave} disabled={!canSave || saving}>
           <Save className="h-4 w-4" />
-          {isNew ? "Create instance" : "Save"}
+          {isNew ? "Create connection" : "Save"}
         </Button>
         {isNew ? (
           <Button type="button" variant="ghost" onClick={onRemove}>
@@ -1120,9 +1205,9 @@ function IntegrationEditor({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete instance</DialogTitle>
+            <DialogTitle>Delete connection</DialogTitle>
             <DialogDescription>
-              {`"${form.name.trim() || title}" will be permanently removed. New requests will no longer route to this instance.`}
+              {`"${form.name.trim() || title}" will be permanently removed. New requests will no longer route to this connection.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1145,153 +1230,6 @@ function IntegrationEditor({
       </Dialog>
     </div>
   );
-}
-
-function integrationToForm(
-  kind: "radarr" | "sonarr",
-  integration?: RequestIntegration,
-): IntegrationFormState {
-  const options = integration?.options ?? {};
-  return {
-    id: integration?.id ?? "",
-    name: integration?.name ?? "",
-    kind,
-    enabled: integration?.enabled ?? true,
-    is_4k: integration?.is_4k ?? false,
-    is_default: integration?.is_default ?? false,
-    is_default_4k: integration?.is_default_4k ?? false,
-    base_url: integration?.base_url ?? "",
-    api_key_ref: "",
-    root_folder: integration?.root_folder ?? "",
-    quality_profile_id: integration?.quality_profile_id
-      ? String(integration.quality_profile_id)
-      : "",
-    tags: integration?.tags?.join(", ") ?? "",
-    anime_enabled: integration?.anime_enabled ?? false,
-    anime_quality_profile_id: integration?.anime_quality_profile_id
-      ? String(integration.anime_quality_profile_id)
-      : "",
-    anime_root_folder: integration?.anime_root_folder ?? "",
-    anime_tags: integration?.anime_tags?.join(", ") ?? "",
-    search_on_add: boolOption(options, "search_on_add", true),
-    minimum_availability: stringOption(options, "minimum_availability", "released"),
-    series_type: stringOption(options, "series_type", "standard"),
-    season_folder: boolOption(options, "season_folder", true),
-    has_api_key: integration?.has_api_key ?? false,
-  };
-}
-
-function formToIntegration(form: IntegrationFormState): RequestIntegration {
-  const qualityProfileID = Number(form.quality_profile_id);
-  const animeQualityProfileID = Number(form.anime_quality_profile_id);
-  const options: Record<string, unknown> = {
-    search_on_add: form.search_on_add,
-  };
-  if (form.kind === "sonarr") {
-    options.series_type = form.series_type.trim() || "standard";
-    options.season_folder = form.season_folder;
-  } else {
-    options.minimum_availability = form.minimum_availability.trim() || "released";
-  }
-
-  return {
-    id: form.id,
-    name: form.name.trim(),
-    kind: form.kind,
-    enabled: form.enabled,
-    is_4k: form.is_4k,
-    is_default: form.is_default,
-    is_default_4k: form.is_default_4k,
-    base_url: form.base_url.trim(),
-    api_key_ref: form.api_key_ref.trim() || undefined,
-    root_folder: form.root_folder.trim(),
-    quality_profile_id:
-      Number.isFinite(qualityProfileID) && qualityProfileID > 0 ? qualityProfileID : undefined,
-    tags: parseTags(form.tags),
-    anime_enabled: form.anime_enabled,
-    anime_quality_profile_id:
-      Number.isFinite(animeQualityProfileID) && animeQualityProfileID > 0
-        ? animeQualityProfileID
-        : undefined,
-    anime_root_folder: form.anime_root_folder.trim() || undefined,
-    anime_tags: parseTags(form.anime_tags),
-    options,
-  };
-}
-
-function isIntegrationDirty(form: IntegrationFormState, source: RequestIntegration): boolean {
-  // A pending API key entry always counts as an unsaved change.
-  if (form.api_key_ref.trim().length > 0) return true;
-
-  const next = formToIntegration(form);
-  const seeded = integrationToForm(form.kind, source);
-  const original = formToIntegration(seeded);
-
-  return (
-    JSON.stringify(stripIntegrationForCompare(next)) !==
-    JSON.stringify(stripIntegrationForCompare(original))
-  );
-}
-
-function stripIntegrationForCompare(integration: RequestIntegration): Record<string, unknown> {
-  // api_key_ref is write-only (never round-trips from the source) and is handled
-  // separately above, so exclude it from the structural comparison.
-  const { api_key_ref: _apiKeyRef, ...rest } = integration;
-  return rest;
-}
-
-function rootFolderChoices(options: RequestIntegrationOptions | null, currentPath: string) {
-  const folders = options?.root_folders ?? [];
-  if (!currentPath || folders.some((folder) => folder.path === currentPath)) {
-    return folders;
-  }
-  return [{ path: currentPath, accessible: true }, ...folders];
-}
-
-function qualityProfileChoices(options: RequestIntegrationOptions | null, currentID: string) {
-  const profiles = options?.quality_profiles ?? [];
-  const id = Number(currentID);
-  if (!Number.isInteger(id) || id <= 0 || profiles.some((profile) => profile.id === id)) {
-    return profiles;
-  }
-  return [{ id, name: "Current profile" }, ...profiles];
-}
-
-function minimumAvailabilityChoices(currentValue: string) {
-  if (
-    !currentValue ||
-    MINIMUM_AVAILABILITY_OPTIONS.some((option) => option.value === currentValue)
-  ) {
-    return MINIMUM_AVAILABILITY_OPTIONS;
-  }
-  return [
-    { value: currentValue, label: `Current value (${currentValue})` },
-    ...MINIMUM_AVAILABILITY_OPTIONS,
-  ];
-}
-
-function rootFolderLabel(folder: RequestIntegrationOptions["root_folders"][number]): string {
-  const freeSpace = folder.free_space ? `, ${formatBytes(folder.free_space)} free` : "";
-  const access = folder.accessible ? "" : ", inaccessible";
-  return `${folder.path}${freeSpace}${access}`;
-}
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  let size = value;
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
-}
-
-function toggleTag(current: string, tagID: number): string {
-  const tags = parseTags(current);
-  const next = tags.includes(tagID) ? tags.filter((tag) => tag !== tagID) : [...tags, tagID];
-  return next.join(", ");
 }
 
 type UserLimitFormState = {
@@ -1498,21 +1436,6 @@ function SwitchField({
       <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </div>
   );
-}
-
-function boolOption(options: Record<string, unknown>, key: string, fallback: boolean): boolean {
-  return typeof options[key] === "boolean" ? Boolean(options[key]) : fallback;
-}
-
-function stringOption(options: Record<string, unknown>, key: string, fallback: string): string {
-  return typeof options[key] === "string" ? String(options[key]) : fallback;
-}
-
-function parseTags(value: string): number[] {
-  return value
-    .split(",")
-    .map((part) => Number(part.trim()))
-    .filter((tag) => Number.isInteger(tag) && tag > 0);
 }
 
 function RowsSkeleton() {

@@ -22,8 +22,11 @@ import {
   Puzzle,
   Send,
   RefreshCw,
+  SkipForward,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SiloBrand } from "@/components/SiloBrand";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
@@ -33,7 +36,7 @@ import { pluginRouteHref } from "@/lib/pluginRouteHref";
 
 interface SidebarItem {
   label: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   href: string;
   exact?: boolean;
   badge?: ReactNode;
@@ -72,133 +75,60 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
     buildDisplay = buildInfo.data.display;
   }
 
+  // Grouped by admin intent: monitoring, curating the catalog, background
+  // processing the server runs on its own, people and their data, and the
+  // server installation itself.
   const sections: SidebarSection[] = [
     {
       label: "Overview",
       items: [
-        {
-          label: "Dashboard",
-          icon: <LayoutDashboard className="h-[18px] w-[18px]" />,
-          href: "/admin",
-          exact: true,
-        },
+        { label: "Dashboard", icon: LayoutDashboard, href: "/admin", exact: true },
         {
           label: "Activity",
-          icon: <Radio className="h-[18px] w-[18px]" />,
+          icon: Radio,
           href: "/admin/activity",
           badge:
             sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined,
         },
-        {
-          label: "Logs",
-          icon: <ScrollText className="h-[18px] w-[18px]" />,
-          href: "/admin/logs",
-        },
+        { label: "Logs", icon: ScrollText, href: "/admin/logs" },
       ],
     },
     {
       label: "Content",
       items: [
-        {
-          label: "Libraries",
-          icon: <Library className="h-[18px] w-[18px]" />,
-          href: "/admin/libraries",
-        },
-        {
-          label: "Collections",
-          icon: <LayoutPanelTop className="h-[18px] w-[18px]" />,
-          href: "/admin/collections",
-        },
-        {
-          label: "Requests",
-          icon: <Send className="h-[18px] w-[18px]" />,
-          href: "/admin/requests",
-        },
-        {
-          label: "Autoscan",
-          icon: <RefreshCw className="h-[18px] w-[18px]" />,
-          href: "/admin/autoscan",
-        },
-        {
-          label: "Sections",
-          icon: <PanelsTopLeft className="h-[18px] w-[18px]" />,
-          href: "/admin/sections",
-        },
-        {
-          label: "Subtitles",
-          icon: <Captions className="h-[18px] w-[18px]" />,
-          href: "/admin/subtitles",
-        },
+        { label: "Libraries", icon: Library, href: "/admin/libraries" },
+        { label: "Collections", icon: LayoutPanelTop, href: "/admin/collections" },
+        { label: "Sections", icon: PanelsTopLeft, href: "/admin/sections" },
+        { label: "Requests", icon: Send, href: "/admin/requests" },
+      ],
+    },
+    {
+      label: "Automation",
+      items: [
+        { label: "Autoscan", icon: RefreshCw, href: "/admin/autoscan" },
+        { label: "Scheduled Tasks", icon: CalendarClock, href: "/admin/tasks" },
+        { label: "Subtitles", icon: Captions, href: "/admin/subtitles" },
+        { label: "Markers", icon: SkipForward, href: "/admin/marker-history" },
+        { label: "Recommendations", icon: Bot, href: "/admin/recommendations" },
       ],
     },
     {
       label: "Users",
       items: [
-        {
-          label: "Users",
-          icon: <Users className="h-[18px] w-[18px]" />,
-          href: "/admin/users",
-        },
-        {
-          label: "Devices",
-          icon: <MonitorSmartphone className="h-[18px] w-[18px]" />,
-          href: "/admin/devices",
-        },
-        {
-          label: "Playback History",
-          icon: <History className="h-[18px] w-[18px]" />,
-          href: "/admin/history",
-        },
-        {
-          label: "Marker History",
-          icon: <Captions className="h-[18px] w-[18px]" />,
-          href: "/admin/marker-history",
-        },
-        {
-          label: "History Import",
-          icon: <Download className="h-[18px] w-[18px]" />,
-          href: "/admin/history-import",
-        },
+        { label: "Users", icon: Users, href: "/admin/users" },
+        { label: "Devices", icon: MonitorSmartphone, href: "/admin/devices" },
+        { label: "Playback History", icon: History, href: "/admin/history" },
+        { label: "History Import", icon: Download, href: "/admin/history-import" },
       ],
     },
     {
-      label: "Server",
+      label: "System",
       items: [
-        {
-          label: "Scheduled Tasks",
-          icon: <CalendarClock className="h-[18px] w-[18px]" />,
-          href: "/admin/tasks",
-        },
-        {
-          label: "Nodes",
-          icon: <Server className="h-[18px] w-[18px]" />,
-          href: "/admin/nodes",
-        },
-        {
-          label: "Maintenance",
-          icon: <Wrench className="h-[18px] w-[18px]" />,
-          href: "/admin/maintenance",
-        },
-        {
-          label: "Plugins",
-          icon: <Blocks className="h-[18px] w-[18px]" />,
-          href: "/admin/plugins",
-        },
-        {
-          label: "Settings",
-          icon: <SlidersHorizontal className="h-[18px] w-[18px]" />,
-          href: "/admin/settings",
-        },
-        {
-          label: "Recommendations",
-          icon: <Bot className="h-[18px] w-[18px]" />,
-          href: "/admin/recommendations",
-        },
-        {
-          label: "API Keys",
-          icon: <KeyRound className="h-[18px] w-[18px]" />,
-          href: "/admin/api-keys",
-        },
+        { label: "Settings", icon: SlidersHorizontal, href: "/admin/settings" },
+        { label: "Plugins", icon: Blocks, href: "/admin/plugins" },
+        { label: "Nodes", icon: Server, href: "/admin/nodes" },
+        { label: "API Keys", icon: KeyRound, href: "/admin/api-keys" },
+        { label: "Maintenance", icon: Wrench, href: "/admin/maintenance" },
       ],
     },
   ];
@@ -216,7 +146,7 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
       if (!route.navigable || route.navigation_kind !== "admin") continue;
       adminPluginItems.push({
         label: route.navigation_label || inst.plugin_id,
-        icon: <Puzzle className="h-[18px] w-[18px]" />,
+        icon: Puzzle,
         href: pluginRouteHref(inst.id, route.path),
         external: true,
       });
@@ -250,70 +180,36 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
         className="sidebar-scroll flex-1 space-y-5 overflow-y-auto px-3"
       >
         {sections.map((section) => (
-          <div
-            key={section.label}
-            role="group"
-            aria-labelledby={`admin-nav-${section.label.toLowerCase()}`}
-          >
-            <h3
-              id={`admin-nav-${section.label.toLowerCase()}`}
-              className="text-muted-foreground mb-2 px-2 text-[10px] font-semibold tracking-[0.18em] uppercase"
-            >
-              {section.label}
-            </h3>
-            <ul className="list-none space-y-0.5">
-              {section.items.map((item) => {
-                const active = isActive(item);
-                const className = `relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors duration-150 ${
-                  active
-                    ? "text-primary bg-accent"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/70"
-                } `;
-                const inner = (
-                  <>
-                    {active && (
-                      <span
-                        className="absolute top-1/2 left-[-12px] h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                        style={{ background: "var(--primary)" }}
-                      />
-                    )}
-                    <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
-                      {item.icon}
-                    </span>
-                    <span>{item.label}</span>
-                    {item.badge && <span className="ml-auto">{item.badge}</span>}
-                  </>
-                );
-                return (
-                  <li key={item.href}>
-                    {item.external ? (
-                      <a
-                        href={item.href}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          void navigateToPluginRoute(item.href);
-                          onNavigate?.();
-                        }}
-                        aria-current={active ? "page" : undefined}
-                        className={className}
-                      >
-                        {inner}
-                      </a>
-                    ) : (
-                      <Link
-                        to={item.href}
-                        onClick={onNavigate}
-                        aria-current={active ? "page" : undefined}
-                        className={className}
-                      >
-                        {inner}
-                      </Link>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
+          <SideNavSection key={section.label} label={section.label} idPrefix="admin-nav">
+            {section.items.map((item) =>
+              item.external ? (
+                <SideNavItem
+                  key={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  href={item.href}
+                  external
+                  active={isActive(item)}
+                  badge={item.badge}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void navigateToPluginRoute(item.href);
+                    onNavigate?.();
+                  }}
+                />
+              ) : (
+                <SideNavItem
+                  key={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  href={item.href}
+                  active={isActive(item)}
+                  badge={item.badge}
+                  onClick={onNavigate}
+                />
+              ),
+            )}
+          </SideNavSection>
         ))}
       </nav>
 

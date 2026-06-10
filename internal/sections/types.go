@@ -26,6 +26,7 @@ const (
 	SectionSimilarUsersLiked   SectionType = "similar_users_liked"
 	SectionTasteMatch          SectionType = "taste_match"
 	SectionNextUp              SectionType = "next_up"
+	SectionNextInSeries        SectionType = "next_in_series"
 	SectionHiddenGems          SectionType = "hidden_gems"
 	SectionCriticallyAcclaimed SectionType = "critically_acclaimed"
 	SectionAwardWinners        SectionType = "award_winners"
@@ -61,6 +62,7 @@ var ValidSectionTypes = map[SectionType]bool{
 	SectionSimilarUsersLiked:   true,
 	SectionTasteMatch:          true,
 	SectionNextUp:              true,
+	SectionNextInSeries:        true,
 	SectionHiddenGems:          true,
 	SectionCriticallyAcclaimed: true,
 	SectionAwardWinners:        true,
@@ -181,7 +183,7 @@ func ParseConfigFilters(config json.RawMessage) SectionConfigFilters {
 		def, err := ParseQueryDefinition(config)
 		if err == nil {
 			switch def.MediaScope {
-			case "movie", "series":
+			case "movie", "series", "audiobook":
 				f.FilterType = def.MediaScope
 			}
 			if len(def.LibraryIDs) > 0 {
