@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -402,11 +403,11 @@ func isParsableTextFormat(format string) bool {
 }
 
 func translatedReleaseName(sourceLang, targetLang string) string {
-	src := languageDisplayName(sourceLang)
+	src := aitranslate.LanguageDisplayName(sourceLang)
 	if src == "" {
 		src = "Original"
 	}
-	tgt := languageDisplayName(targetLang)
+	tgt := aitranslate.LanguageDisplayName(targetLang)
 	if tgt == "" {
 		tgt = targetLang
 	}

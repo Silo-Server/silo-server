@@ -1,4 +1,4 @@
-package ai
+package aitranslate
 
 import "strings"
 
@@ -18,9 +18,9 @@ var languageNames = map[string]string{
 	"tr": "Turkish", "uk": "Ukrainian", "vi": "Vietnamese", "zh": "Chinese",
 }
 
-// languageDisplayName returns a human-readable language name for a code, or the
-// trimmed code itself when unknown. An empty code yields an empty string.
-func languageDisplayName(code string) string {
+// LanguageDisplayName returns a human-readable language name for a code, or
+// the trimmed code itself when unknown. An empty code yields an empty string.
+func LanguageDisplayName(code string) string {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return ""

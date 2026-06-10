@@ -112,6 +112,7 @@ type UpdateFolderInput struct {
 	Name                     *string
 	Enabled                  *bool
 	MetadataLanguage         *string
+	AutoTranslateMetadata    *bool
 	ChapterThumbnailsEnabled *bool
 	IntroDetectionEnabled    *bool
 }
@@ -142,7 +143,7 @@ func (r *FolderRepository) Pool() *pgxpool.Pool {
 
 // folderColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanFolder stays in sync.
-const folderColumns = `id, type, name, enabled, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, poster_path, last_scanned_at,
+const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, poster_path, last_scanned_at,
 	scan_warning_code, scan_warning_message, scan_warning_at, allow_empty_cleanup_once, sort_order`
 
 // scanFolder scans a single row into a *models.MediaFolder.
@@ -155,6 +156,7 @@ func scanFolder(row pgx.Row) (*models.MediaFolder, error) {
 		&f.Name,
 		&f.Enabled,
 		&f.MetadataLanguage,
+		&f.AutoTranslateMetadata,
 		&f.ChapterThumbnailsEnabled,
 		&f.IntroDetectionEnabled,
 		&f.PosterPath,
@@ -187,6 +189,7 @@ func scanFolders(rows pgx.Rows) ([]*models.MediaFolder, error) {
 			&f.Name,
 			&f.Enabled,
 			&f.MetadataLanguage,
+			&f.AutoTranslateMetadata,
 			&f.ChapterThumbnailsEnabled,
 			&f.IntroDetectionEnabled,
 			&f.PosterPath,
@@ -398,6 +401,11 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 	if input.MetadataLanguage != nil {
 		setClauses = append(setClauses, fmt.Sprintf("metadata_language = $%d", argIndex))
 		args = append(args, *input.MetadataLanguage)
+		argIndex++
+	}
+	if input.AutoTranslateMetadata != nil {
+		setClauses = append(setClauses, fmt.Sprintf("auto_translate_metadata = $%d", argIndex))
+		args = append(args, *input.AutoTranslateMetadata)
 		argIndex++
 	}
 	if input.ChapterThumbnailsEnabled != nil {

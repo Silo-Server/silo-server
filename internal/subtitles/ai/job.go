@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 )
 
 // JobKind identifies what an AI subtitle job does. Only translation ships in
@@ -16,26 +18,17 @@ const (
 	JobKindTranslate JobKind = "translate"
 )
 
-// JobStatus is the lifecycle state of a job.
-type JobStatus string
+// JobStatus is the lifecycle state of a job, shared with the other AI job
+// services via jobrunner.
+type JobStatus = jobrunner.Status
 
 const (
-	JobStatusPending   JobStatus = "pending"
-	JobStatusRunning   JobStatus = "running"
-	JobStatusCompleted JobStatus = "completed"
-	JobStatusFailed    JobStatus = "failed"
-	JobStatusCancelled JobStatus = "cancelled"
+	JobStatusPending   = jobrunner.StatusPending
+	JobStatusRunning   = jobrunner.StatusRunning
+	JobStatusCompleted = jobrunner.StatusCompleted
+	JobStatusFailed    = jobrunner.StatusFailed
+	JobStatusCancelled = jobrunner.StatusCancelled
 )
-
-// Terminal reports whether a status is final.
-func (s JobStatus) Terminal() bool {
-	switch s {
-	case JobStatusCompleted, JobStatusFailed, JobStatusCancelled:
-		return true
-	default:
-		return false
-	}
-}
 
 // Job is a persisted AI subtitle job. It is serialized to the API as-is.
 type Job struct {

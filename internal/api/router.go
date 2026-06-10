@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -909,9 +910,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build the AI subtitle handler (on-demand translation). Generated tracks are
 	// stored as ordinary downloaded subtitles, so they reach every client through
 	// the existing subtitle pipeline with no client changes.
-	var subtitleAIHandler *handlers.SubtitleAIHandler
-	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
-		aiClient := llm.NewClient(llm.Config{
+	// Shared AI endpoint client + dispatch semaphore: subtitle translation/ASR
+	// and metadata translation draw from one client and one concurrency bound.
+	var aiClient *llm.Client
+	var aiSem chan struct{}
+	if deps.Config != nil {
+		aiClient = llm.NewClient(llm.Config{
 			BaseURL:    deps.Config.AI.BaseURL,
 			APIKey:     deps.Config.AI.APIKey,
 			ChatModel:  deps.Config.AI.ChatModel,
@@ -919,6 +923,11 @@ func NewRouter(deps Dependencies) chi.Router {
 			ASRAPIKey:  deps.Config.AI.ASRAPIKey,
 			ASRModel:   deps.Config.AI.ASRModel,
 		})
+		aiSem = jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
+	}
+
+	var subtitleAIHandler *handlers.SubtitleAIHandler
+	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
 		aiCfg := subtitleai.Config{
 			Configured:        deps.Config.AI.BaseURL != "",
 			TranslateEnabled:  deps.Config.SubtitleAI.Enabled,
@@ -928,9 +937,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			BatchSize:         deps.Config.SubtitleAI.BatchSize,
 			ContextNeighbors:  deps.Config.SubtitleAI.ContextNeighbors,
 		}
-		// One semaphore for all AI job services, so the configured endpoint sees
-		// a single global concurrency bound regardless of job mix.
-		aiSem := jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
@@ -950,6 +956,39 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		aiService.Recover()
 		subtitleAIHandler = handlers.NewSubtitleAIHandler(aiService)
+	}
+
+	// Metadata AI translation (descriptions into the localization tables).
+	var metadataAIHandler *handlers.MetadataAIHandler
+	if deps.DB != nil && deps.Config != nil && aiClient != nil {
+		mtRepo := metadatatranslation.NewPgRepository(deps.DB)
+		mtService := metadatatranslation.NewService(
+			deps.AppContext,
+			metadatatranslation.Config{
+				Enabled:    deps.Config.MetadataAI.Enabled,
+				Configured: deps.Config.AI.BaseURL != "",
+				ChatModel:  deps.Config.AI.ChatModel,
+			},
+			mtRepo,
+			mtRepo,
+			&metadatatranslation.CatalogLocalizationStore{
+				Items:    catalog.NewMediaItemLocalizationRepository(deps.DB),
+				Seasons:  catalog.NewSeasonLocalizationRepository(deps.DB),
+				Episodes: catalog.NewEpisodeLocalizationRepository(deps.DB),
+			},
+			aiClient.SystemUserChat,
+			aiSem,
+			slog.Default(),
+		)
+		mtService.Recover()
+		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)
+		// Wire the refresh fallback: libraries with auto_translate_metadata get
+		// missing localizations filled after each metadata refresh.
+		if mt, ok := deps.MetadataService.(interface {
+			SetAutoTranslator(metadata.AutoTranslator)
+		}); ok {
+			mt.SetAutoTranslator(mtService)
+		}
 	}
 
 	// Build section handler if DB is available.
@@ -1773,6 +1812,14 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
+				// Metadata AI translation availability probe (the metadata editor
+				// shows or hides its translate action based on this).
+				if metadataAIHandler != nil {
+					r.Get("/metadata/ai/status", metadataAIHandler.HandleStatus)
+				} else {
+					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
+				}
+
 				// Subtitle search + AI translation routes.
 				if subtitleSearchHandler != nil {
 					if deps.FileRepo != nil && itemRepo != nil {
@@ -1942,6 +1989,11 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminMatchHandler != nil {
 								r.Post("/items/{id}/match/search", adminMatchHandler.HandleSearchItemMatchCandidates)
 								r.Post("/items/{id}/match/apply", adminMatchHandler.HandleApplyItemMatch)
+							}
+							if metadataAIHandler != nil {
+								r.Post("/items/{id}/metadata-translation", metadataAIHandler.HandleTranslate)
+								r.Get("/items/{id}/metadata-translation/jobs", metadataAIHandler.HandleListJobs)
+								r.Post("/items/{id}/metadata-translation/jobs/{job_id}/cancel", metadataAIHandler.HandleCancelJob)
 							}
 						})
 

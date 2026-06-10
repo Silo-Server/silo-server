@@ -60,8 +60,8 @@ func (t *LLMTranslator) Translate(ctx context.Context, req TranslateRequest, onB
 		segments[i] = aitranslate.Segment{ID: strconv.Itoa(i + 1), Text: strings.Join(c.Lines, "\n")}
 	}
 
-	srcName := languageDisplayName(req.SourceLanguage)
-	tgtName := languageDisplayName(req.TargetLanguage)
+	srcName := aitranslate.LanguageDisplayName(req.SourceLanguage)
+	tgtName := aitranslate.LanguageDisplayName(req.TargetLanguage)
 
 	chat := func(ctx context.Context, system, user string) (string, error) {
 		messages := []llm.Message{

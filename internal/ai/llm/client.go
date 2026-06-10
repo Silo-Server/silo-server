@@ -159,6 +159,16 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 	return content, nil
 }
 
+// SystemUserChat performs one chat completion from a system + user prompt
+// pair, requesting a JSON object response. Its signature matches
+// aitranslate.ChatFn so a client method reference wires straight in.
+func (c *Client) SystemUserChat(ctx context.Context, system, user string) (string, error) {
+	return c.Chat(ctx, []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	}, true)
+}
+
 // permanentError marks a parse failure that retrying cannot fix (e.g. an
 // endpoint that structurally does not support the requested response format).
 type permanentError struct{ err error }
