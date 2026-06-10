@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -54,21 +53,28 @@ func (f *fakeEbookCoverCacher) CacheEbookCover(_ context.Context, data []byte, c
 }
 
 type fakeEbookMetadataUpdater struct {
-	items     []*models.MediaItem
-	getErr    error
-	contentID string
-	update    *catalog.MetadataUpdate
-	err       error
+	posterPath      string
+	posterThumbhash string
+	getErr          error
+	contentID       string
+	setPosterPath   string
+	setThumbhash    string
+	setPrefix       string
+	setCalls        int
+	err             error
 }
 
-func (f *fakeEbookMetadataUpdater) GetByIDs(_ context.Context, _ []string) ([]*models.MediaItem, error) {
-	return f.items, f.getErr
+func (f *fakeEbookMetadataUpdater) GetPoster(_ context.Context, _ string) (string, string, error) {
+	return f.posterPath, f.posterThumbhash, f.getErr
 }
 
-func (f *fakeEbookMetadataUpdater) UpdateMetadata(_ context.Context, contentID string, update *catalog.MetadataUpdate) error {
+func (f *fakeEbookMetadataUpdater) SetLocalPoster(_ context.Context, contentID, posterPath, thumbhash, localPrefix string) (bool, error) {
+	f.setCalls++
 	f.contentID = contentID
-	f.update = update
-	return f.err
+	f.setPosterPath = posterPath
+	f.setThumbhash = thumbhash
+	f.setPrefix = localPrefix
+	return f.err == nil, f.err
 }
 
 func TestSupportsEbookFile(t *testing.T) {
@@ -220,6 +226,135 @@ func TestParseEbookEPUBMetadataReadsISBNFromMetaTags(t *testing.T) {
 	}
 	if got.ISBN != "9780306406157" {
 		t.Fatalf("ISBN = %q, want normalized ISBN from calibre meta tag", got.ISBN)
+	}
+}
+
+func TestParseEbookEPUBMetadataHandlesLatin1OPF(t *testing.T) {
+	path := writeTestEPUBWithOPFBytes(t, []byte("<?xml version=\"1.0\" encoding=\"iso-8859-1\"?>\n"+
+		"<package xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><metadata>"+
+		"<dc:title>Caf\xe9 Society</dc:title>"+
+		"<dc:creator>Fran\xe7ois Author</dc:creator>"+
+		"<dc:publisher>Cr\xe8me Press</dc:publisher>"+
+		"</metadata></package>"))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Café Society" || strings.Join(got.Authors, ", ") != "François Author" || got.Publisher != "Crème Press" {
+		t.Fatalf("parsed latin1 metadata = title %q authors %v publisher %q", got.Title, got.Authors, got.Publisher)
+	}
+}
+
+func TestParseEbookEPUBMetadataHandlesWindows1251OPF(t *testing.T) {
+	path := writeTestEPUBWithOPFBytes(t, []byte("<?xml version=\"1.0\" encoding=\"windows-1251\"?>\n"+
+		"<package xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><metadata>"+
+		"<dc:title>\xc2\xee\xe9\xed\xe0 \xe8 \xec\xe8\xf0</dc:title>"+
+		"<dc:creator>\xd2\xee\xeb\xf1\xf2\xee\xe9</dc:creator>"+
+		"</metadata></package>"))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Война и мир" || strings.Join(got.Authors, ", ") != "Толстой" {
+		t.Fatalf("parsed windows-1251 metadata = title %q authors %v", got.Title, got.Authors)
+	}
+}
+
+func TestParseEbookEPUBMetadataAllowsXMLVersion11(t *testing.T) {
+	path := writeTestEPUBWithOPFBytes(t, []byte(`<?xml version="1.1" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>
+  <dc:title>Versioned Ebook</dc:title>
+  <dc:creator>Ada Writer</dc:creator>
+</metadata></package>`))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Versioned Ebook" || strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("parsed XML 1.1 metadata = title %q authors %v", got.Title, got.Authors)
+	}
+}
+
+func TestParseEbookEPUBExtractsManifestCover(t *testing.T) {
+	path := writeTestEPUBWithCover(t, "Images/cover.jpg", "image/jpeg", []byte("epub-cover-bytes"))
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Cover == nil {
+		t.Fatal("Cover = nil, want embedded EPUB cover")
+	}
+	if got.Cover.ContentType != "image/jpeg" {
+		t.Fatalf("Cover.ContentType = %q, want image/jpeg", got.Cover.ContentType)
+	}
+	if string(got.Cover.Bytes) != "epub-cover-bytes" {
+		t.Fatalf("Cover.Bytes = %q, want EPUB cover bytes", string(got.Cover.Bytes))
+	}
+}
+
+func TestParseEbookEPUBCoverSkipsXHTMLCoverPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.epub")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	add := func(name, body string) {
+		t.Helper()
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	add("META-INF/container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`)
+	// EPUB2-style meta cover pointing at the XHTML cover *page*, with the
+	// real image declared later via properties="cover-image".
+	add("OPS/content.opf", `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+  <metadata>
+    <dc:title>The Test Ebook</dc:title>
+    <meta name="cover" content="cover"/>
+  </metadata>
+  <manifest>
+    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover-img" href="Images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+  </manifest>
+</package>`)
+	add("OPS/cover.xhtml", "<html><body><img src='Images/cover.jpg'/></body></html>")
+	add("OPS/Images/cover.jpg", "real-cover-bytes")
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Cover == nil {
+		t.Fatal("Cover = nil, want cover-image manifest item")
+	}
+	if got.Cover.ContentType != "image/jpeg" || string(got.Cover.Bytes) != "real-cover-bytes" {
+		t.Fatalf("Cover = %q/%q, want the image item, not the XHTML cover page", got.Cover.ContentType, string(got.Cover.Bytes))
 	}
 }
 
@@ -413,6 +548,94 @@ trailer
 	}
 }
 
+func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+		"1 0 obj\n"+
+		"<< /Title (\xfe\xff\x00C\x00a\x00f\x00e)\n"+
+		"   /Author (\xfe\xff\x00T\x00h\x00o\x00m\x00a\x00s\x00 \x00D\x00 \x00S\x00e\x00e\x00l\x00e\x00y)\n"+
+		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Cafe" || strings.Join(got.Authors, ", ") != "Thomas D Seeley" {
+		t.Fatalf("PDF metadata = title %q authors %v, want decoded UTF-16BE", got.Title, got.Authors)
+	}
+}
+
+func TestParseEbookPDFInfoMetadataPreservesUTF8Literals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+		"1 0 obj\n"+
+		"<< /Title (Caf\xc3\xa9 Society)\n"+
+		"   /Author (\xef\xbb\xbfFran\xc3\xa7ois Author)\n"+
+		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Café Society" {
+		t.Fatalf("Title = %q, want UTF-8 literal preserved without Windows-1252 mojibake", got.Title)
+	}
+	if strings.Join(got.Authors, ", ") != "François Author" {
+		t.Fatalf("Authors = %v, want UTF-8 BOM stripped and bytes preserved", got.Authors)
+	}
+}
+
+func TestParseEbookPDFInfoMetadataFallsBackToWindows1252(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.7\n"+
+		"1 0 obj\n"+
+		"<< /Title (Caf\xe9 Society)\n"+
+		">>\nendobj\n%%EOF"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Café Society" {
+		t.Fatalf("Title = %q, want Windows-1252 fallback for non-UTF-8 literal", got.Title)
+	}
+}
+
+func TestParseEbookPDFInfoMetadataDecodesHexStrings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "book.pdf")
+	if err := os.WriteFile(path, []byte(`%PDF-1.7
+1 0 obj
+<< /Title <FEFF00480065007800200042006F006F006B>
+   /Author <41646120577269746572>
+   /CreationDate (0000-01-01)
+>>
+endobj
+%%EOF`), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Title != "Hex Book" || strings.Join(got.Authors, ", ") != "Ada Writer" {
+		t.Fatalf("PDF hex metadata = title %q authors %v", got.Title, got.Authors)
+	}
+	if got.Year != 0 || !got.PublishedAt.IsZero() {
+		t.Fatalf("bad PDF date produced year/date = %d/%v, want ignored", got.Year, got.PublishedAt)
+	}
+}
+
 func TestParseEbookCBZPageCount(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "comic.cbz")
 	file, err := os.Create(path)
@@ -452,6 +675,108 @@ func TestParseEbookCBZPageCount(t *testing.T) {
 	}
 	if got.PageCount != 3 {
 		t.Fatalf("PageCount = %d, want 3", got.PageCount)
+	}
+}
+
+func TestParseEbookCBZExtractsFirstReadablePageAsCover(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "comic.cbz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create cbz: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	for _, entry := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "Comic/002.png", body: []byte("second-page")},
+		{name: "Comic/001.jpg", body: []byte("first-page")},
+		{name: "Comic/notes.txt", body: []byte("ignored")},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", entry.name, err)
+		}
+		if _, err := w.Write(entry.body); err != nil {
+			t.Fatalf("write zip entry %s: %v", entry.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close cbz: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Cover == nil {
+		t.Fatal("Cover = nil, want first CBZ page as cover")
+	}
+	if got.Cover.ContentType != "image/jpeg" {
+		t.Fatalf("Cover.ContentType = %q, want image/jpeg", got.Cover.ContentType)
+	}
+	if string(got.Cover.Bytes) != "first-page" {
+		t.Fatalf("Cover.Bytes = %q, want first page bytes", string(got.Cover.Bytes))
+	}
+}
+
+func TestParseEbookCBZPicksNaturallyFirstPageAsCover(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "comic.cbz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create cbz: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	for _, entry := range []struct {
+		name string
+		body string
+	}{
+		{name: "ch10/page10.jpg", body: "chapter-ten"},
+		{name: "ch2/page2.jpg", body: "chapter-two"},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", entry.name, err)
+		}
+		if _, err := w.Write([]byte(entry.body)); err != nil {
+			t.Fatalf("write zip entry %s: %v", entry.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close cbz: %v", err)
+	}
+
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+
+	if got.Cover == nil {
+		t.Fatal("Cover = nil, want first page in natural order")
+	}
+	if string(got.Cover.Bytes) != "chapter-two" {
+		t.Fatalf("Cover.Bytes = %q, want ch2 before ch10 (natural order, not byte order)", string(got.Cover.Bytes))
+	}
+}
+
+func TestEbookTitleFromPathStripsCompoundFB2Extension(t *testing.T) {
+	cases := map[string]string{
+		"/lib/Anna Karenina.fb2.zip": "Anna Karenina",
+		"/lib/Anna Karenina.FB2.ZIP": "Anna Karenina",
+		"/lib/Book.epub":             "Book",
+		"/lib/vol.1.pdf":             "vol.1",
+	}
+	for path, want := range cases {
+		if got := ebookTitleFromPath(path); got != want {
+			t.Errorf("ebookTitleFromPath(%q) = %q, want %q", path, got, want)
+		}
 	}
 }
 
@@ -558,6 +883,57 @@ func TestEbookIdentityConfidenceReflectsMetadataCompleteness(t *testing.T) {
 	book = &parsedEbook{}
 	if got := ebookIdentityConfidence(book); got != "low" {
 		t.Fatalf("empty metadata confidence = %q, want low", got)
+	}
+}
+
+func TestEbookContentGroupKeyGroupsMultipleSiblingFormatsByTitleAuthor(t *testing.T) {
+	want := ebookContentGroupKey(&parsedEbook{
+		Format:  "epub",
+		Title:   " The Test Ebook ",
+		Authors: []string{"Ada Writer", "Ben Author"},
+	}, "/library/Ada Writer/The Test Ebook.epub")
+	if want == "" {
+		t.Fatal("ebookContentGroupKey returned blank")
+	}
+	for _, tc := range []struct {
+		format string
+		path   string
+	}{
+		{format: "mobi", path: "/library/Ada Writer/The Test Ebook.mobi"},
+		{format: "azw3", path: "/library/Ada Writer/The Test Ebook.azw3"},
+		{format: "pdf", path: "/library/Ada Writer/The Test Ebook.pdf"},
+		{format: "fb2", path: "/library/Ada Writer/The Test Ebook.fb2"},
+	} {
+		got := ebookContentGroupKey(&parsedEbook{
+			Format:  tc.format,
+			Title:   "The Test Ebook",
+			Authors: []string{"ben author", "ada writer"},
+		}, tc.path)
+		if got != want {
+			t.Fatalf("%s content group key = %q, want %q", tc.format, got, want)
+		}
+		if strings.Contains(got, tc.format) {
+			t.Fatalf("content group key should not include file format %q: %q", tc.format, got)
+		}
+	}
+}
+
+func TestEbookContentGroupKeyPrefersISBNAcrossTitleVariants(t *testing.T) {
+	first := ebookContentGroupKey(&parsedEbook{
+		Format:  "epub",
+		Title:   "The Test Ebook",
+		Authors: []string{"Ada Writer"},
+		ISBN:    "9780306406157",
+	}, "/library/Ada Writer/The Test Ebook.epub")
+	second := ebookContentGroupKey(&parsedEbook{
+		Format:  "pdf",
+		Title:   "The Test Ebook: Revised Edition",
+		Authors: []string{"Someone Else"},
+		ISBN:    "9780306406157",
+	}, "/library/Other Name.pdf")
+
+	if first != second {
+		t.Fatalf("ISBN-backed content group keys differ: %q != %q", first, second)
 	}
 }
 
@@ -737,7 +1113,7 @@ func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
 	modifiedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
 	book := &parsedEbook{Format: "epub", Title: "Book", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157", PageCount: 321}
 
-	got := buildEbookMediaFile(&models.MediaFolder{ID: 44}, "content-1", "/library/Book.epub", 1234, modifiedAt, book)
+	got := buildEbookMediaFile(&models.MediaFolder{ID: 44}, "content-1", "/library/Book.epub", 1234, modifiedAt, book, ebookContentGroupKey(book, "/library/Book.epub"))
 	if got.ContentID != "content-1" || got.MediaFolderID != 44 {
 		t.Fatalf("ids = %q/%d, want content-1/44", got.ContentID, got.MediaFolderID)
 	}
@@ -750,55 +1126,143 @@ func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
 	if got.CanonicalRootPath != "/library/Book.epub" || got.ObservedRootPath != "/library/Book.epub" || got.FilePath != "/library/Book.epub" {
 		t.Fatalf("ebook paths = canonical %q observed %q file %q", got.CanonicalRootPath, got.ObservedRootPath, got.FilePath)
 	}
+	if got.ContentGroupKey != "ebook:isbn:9780306406157" {
+		t.Fatalf("ContentGroupKey = %q, want ISBN-backed ebook group", got.ContentGroupKey)
+	}
+	if got.GroupKeyVersion != ebookGroupKeyVersion {
+		t.Fatalf("GroupKeyVersion = %d, want %d", got.GroupKeyVersion, ebookGroupKeyVersion)
+	}
 	if got.FileSize != 1234 || got.FileModifiedAt == nil || !got.FileModifiedAt.Equal(modifiedAt) {
 		t.Fatalf("file facts = size %d modified %v", got.FileSize, got.FileModifiedAt)
 	}
 }
 
-func TestApplyEbookEmbeddedCoverCachesAndUpdatesPoster(t *testing.T) {
+func TestApplyEbookLocalCoverCachesEmbeddedAndSetsPoster(t *testing.T) {
 	cacher := &fakeEbookCoverCacher{}
 	updater := &fakeEbookMetadataUpdater{}
 
-	err := applyEbookEmbeddedCover(context.Background(), updater, cacher, "content-1", &parsedEbook{
+	err := applyEbookLocalCover(context.Background(), updater, cacher, "content-1", filepath.Join(t.TempDir(), "book.epub"), &parsedEbook{
 		Cover: &parsedEbookCover{
 			ContentType: "image/jpeg",
 			Bytes:       []byte("cover-bytes"),
 		},
 	})
 	if err != nil {
-		t.Fatalf("applyEbookEmbeddedCover: %v", err)
+		t.Fatalf("applyEbookLocalCover: %v", err)
 	}
 
 	if cacher.calls != 1 || cacher.contentID != "content-1" || string(cacher.data) != "cover-bytes" {
 		t.Fatalf("cache call = calls %d content %q data %q", cacher.calls, cacher.contentID, string(cacher.data))
 	}
-	if updater.contentID != "content-1" || updater.update == nil {
-		t.Fatalf("update call = content %q update %#v", updater.contentID, updater.update)
+	if updater.setCalls != 1 || updater.contentID != "content-1" {
+		t.Fatalf("set call = calls %d content %q", updater.setCalls, updater.contentID)
 	}
-	if updater.update.PosterPath == nil || *updater.update.PosterPath != "local/ebooks/content-1/poster/original.webp" {
-		t.Fatalf("poster path = %#v", updater.update.PosterPath)
+	if updater.setPosterPath != "local/ebooks/content-1/poster/original.webp" {
+		t.Fatalf("poster path = %q", updater.setPosterPath)
 	}
-	if updater.update.PosterThumbhash == nil || *updater.update.PosterThumbhash != "thumb" {
-		t.Fatalf("poster thumbhash = %#v", updater.update.PosterThumbhash)
+	if updater.setThumbhash != "thumb" {
+		t.Fatalf("poster thumbhash = %q", updater.setThumbhash)
+	}
+	if updater.setPrefix != localEbookPosterPrefix {
+		t.Fatalf("local prefix = %q, want %q", updater.setPrefix, localEbookPosterPrefix)
 	}
 }
 
-func TestApplyEbookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
+func TestApplyEbookLocalCoverPreservesProviderPoster(t *testing.T) {
 	cacher := &fakeEbookCoverCacher{}
-	updater := &fakeEbookMetadataUpdater{items: []*models.MediaItem{{ContentID: "content-1", PosterPath: "provider/poster.webp"}}}
+	updater := &fakeEbookMetadataUpdater{posterPath: "ebook-metadata/ebooks/content-1/poster/original.webp"}
 
-	err := applyEbookEmbeddedCover(context.Background(), updater, cacher, "content-1", &parsedEbook{
+	err := applyEbookLocalCover(context.Background(), updater, cacher, "content-1", filepath.Join(t.TempDir(), "book.epub"), &parsedEbook{
 		Cover: &parsedEbookCover{Bytes: []byte("cover-bytes")},
 	})
 	if err != nil {
-		t.Fatalf("applyEbookEmbeddedCover: %v", err)
+		t.Fatalf("applyEbookLocalCover: %v", err)
 	}
 
 	if cacher.calls != 0 {
 		t.Fatalf("cache calls = %d, want 0", cacher.calls)
 	}
-	if updater.update != nil {
-		t.Fatalf("unexpected update = %#v", updater.update)
+	if updater.setCalls != 0 {
+		t.Fatalf("set calls = %d, want 0", updater.setCalls)
+	}
+}
+
+func TestApplyEbookLocalCoverRefreshesStaleLocalPoster(t *testing.T) {
+	cacher := &fakeEbookCoverCacher{}
+	updater := &fakeEbookMetadataUpdater{
+		posterPath:      "local/ebooks/content-1/poster/original.webp",
+		posterThumbhash: "stale-thumb",
+	}
+
+	err := applyEbookLocalCover(context.Background(), updater, cacher, "content-1", filepath.Join(t.TempDir(), "book.epub"), &parsedEbook{
+		Cover: &parsedEbookCover{Bytes: []byte("replacement-cover-bytes")},
+	})
+	if err != nil {
+		t.Fatalf("applyEbookLocalCover: %v", err)
+	}
+
+	if cacher.calls != 1 || string(cacher.data) != "replacement-cover-bytes" {
+		t.Fatalf("cache call = calls %d data %q, want refresh of locally owned poster", cacher.calls, string(cacher.data))
+	}
+	if updater.setCalls != 1 {
+		t.Fatalf("set calls = %d, want 1", updater.setCalls)
+	}
+}
+
+func TestApplyEbookLocalCoverPrefersSidecarOverEmbedded(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "book.epub"), []byte("book"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cover.jpg"), []byte("ebook-sidecar-cover"), 0o644); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
+	cacher := &fakeEbookCoverCacher{}
+	updater := &fakeEbookMetadataUpdater{}
+
+	err := applyEbookLocalCover(context.Background(), updater, cacher, "content-1", filepath.Join(dir, "book.epub"), &parsedEbook{
+		Cover: &parsedEbookCover{Bytes: []byte("embedded-cover")},
+	})
+	if err != nil {
+		t.Fatalf("applyEbookLocalCover: %v", err)
+	}
+
+	if cacher.calls != 1 || string(cacher.data) != "ebook-sidecar-cover" {
+		t.Fatalf("cache call = calls %d data %q, want sidecar bytes", cacher.calls, string(cacher.data))
+	}
+	if updater.setCalls != 1 || updater.setPosterPath != "local/ebooks/content-1/poster/original.webp" {
+		t.Fatalf("poster update = calls %d path %q", updater.setCalls, updater.setPosterPath)
+	}
+}
+
+func TestFindSidecarBookCoverIgnoresGenericNamesInMultiBookDirectories(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"alpha.epub", "beta.epub"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("book"), 0o644); err != nil {
+			t.Fatalf("write ebook %s: %v", name, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cover.jpg"), []byte("shared-cover"), 0o644); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "beta.jpg"), []byte("beta-cover"), 0o644); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
+
+	cover, _, err := findSidecarBookCover(filepath.Join(dir, "alpha.epub"))
+	if err != nil {
+		t.Fatalf("findSidecarBookCover(alpha): %v", err)
+	}
+	if cover != nil {
+		t.Fatalf("alpha cover = %q, want none (generic cover.jpg must not claim every book)", string(cover.Bytes))
+	}
+
+	cover, _, err = findSidecarBookCover(filepath.Join(dir, "beta.epub"))
+	if err != nil {
+		t.Fatalf("findSidecarBookCover(beta): %v", err)
+	}
+	if cover == nil || string(cover.Bytes) != "beta-cover" {
+		t.Fatalf("beta cover = %v, want filename-matched beta.jpg", cover)
 	}
 }
 
@@ -942,6 +1406,86 @@ func writeTestEPUBWithDescriptionAndMeta(t *testing.T, identifiers []string, des
 `+extraMetaXML+`
   </metadata>
 </package>`)
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
+	return path
+}
+
+func writeTestEPUBWithOPFBytes(t *testing.T, opf []byte) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "book.epub")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	add := func(name string, body []byte) {
+		t.Helper()
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write(body); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	add("META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	add("OPS/content.opf", opf)
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
+	return path
+}
+
+func writeTestEPUBWithCover(t *testing.T, coverHref string, coverType string, coverBytes []byte) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "book.epub")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create epub: %v", err)
+	}
+	zw := zip.NewWriter(file)
+	add := func(name string, body []byte) {
+		t.Helper()
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write(body); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	add("META-INF/container.xml", []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+	add("OPS/content.opf", []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+  <metadata>
+    <dc:title>The Test Ebook</dc:title>
+    <meta name="cover" content="cover-image"/>
+  </metadata>
+  <manifest>
+    <item id="cover-image" href="`+coverHref+`" media-type="`+coverType+`"/>
+  </manifest>
+</package>`))
+	add("OPS/"+coverHref, coverBytes)
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip: %v", err)
 	}

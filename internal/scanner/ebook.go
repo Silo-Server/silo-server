@@ -3,17 +3,24 @@ package scanner
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"html"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	xhtml "golang.org/x/net/html"
+	"golang.org/x/net/html/charset"
+	"golang.org/x/text/encoding/charmap"
+	textunicode "golang.org/x/text/encoding/unicode"
 )
 
 const maxEPUBMetadataEntrySize = 8 * 1024 * 1024
@@ -319,6 +326,9 @@ func parseEbookEPUB(path string) (parsedEbook, error) {
 	if err := parseEPUBOPFMetadata(opf, &book); err != nil {
 		return book, err
 	}
+	if cover, err := extractEPUBCover(&reader.Reader, opfPath, opf); err == nil {
+		book.Cover = cover
+	}
 	return book, nil
 }
 
@@ -364,16 +374,71 @@ func parseEbookCBZ(path string) (parsedEbook, error) {
 	}
 	defer reader.Close()
 
+	var coverPage *zip.File
+	var coverKey string
 	for _, file := range reader.File {
-		if isComicArchivePage(file.Name) {
-			book.PageCount++
+		if !isComicArchivePage(file.Name) {
+			continue
+		}
+		book.PageCount++
+		key := normalizedArchivePath(file.Name)
+		if coverPage == nil || naturalPathLess(key, coverKey) {
+			coverPage, coverKey = file, key
+		}
+	}
+	if coverPage != nil {
+		if cover, err := readArchiveImageCover(coverPage); err == nil {
+			book.Cover = cover
 		}
 	}
 	return book, nil
 }
 
+// naturalPathLess orders archive entry names case-insensitively with digit
+// runs compared numerically, so unpadded page numbers ("2.jpg" before
+// "10.jpg") and chapter directories ("ch2/" before "ch10/") sort in reading
+// order instead of byte order.
+func naturalPathLess(a, b string) bool {
+	for len(a) > 0 && len(b) > 0 {
+		if isASCIIDigit(a[0]) && isASCIIDigit(b[0]) {
+			aRun, aRest := splitDigitRun(a)
+			bRun, bRest := splitDigitRun(b)
+			aNum := strings.TrimLeft(aRun, "0")
+			bNum := strings.TrimLeft(bRun, "0")
+			if len(aNum) != len(bNum) {
+				return len(aNum) < len(bNum)
+			}
+			if aNum != bNum {
+				return aNum < bNum
+			}
+			a, b = aRest, bRest
+			continue
+		}
+		ar, aSize := utf8.DecodeRuneInString(a)
+		br, bSize := utf8.DecodeRuneInString(b)
+		al, bl := unicode.ToLower(ar), unicode.ToLower(br)
+		if al != bl {
+			return al < bl
+		}
+		a, b = a[aSize:], b[bSize:]
+	}
+	return len(a) < len(b)
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func splitDigitRun(s string) (run string, rest string) {
+	i := 0
+	for i < len(s) && isASCIIDigit(s[i]) {
+		i++
+	}
+	return s[:i], s[i:]
+}
+
 func isComicArchivePage(name string) bool {
-	clean := strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+	clean := normalizedArchivePath(name)
 	if clean == "" || strings.HasSuffix(clean, "/") {
 		return false
 	}
@@ -393,6 +458,38 @@ func isComicArchivePage(name string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizedArchivePath(name string) string {
+	return strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+}
+
+func readArchiveImageCover(file *zip.File) (*parsedEbookCover, error) {
+	if file == nil {
+		return nil, fmt.Errorf("nil archive image")
+	}
+	if file.UncompressedSize64 > maxEPUBMetadataEntrySize {
+		return nil, fmt.Errorf("archive cover entry too large: %s", file.Name)
+	}
+	entry, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer entry.Close()
+	data, err := io.ReadAll(io.LimitReader(entry, maxEPUBMetadataEntrySize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxEPUBMetadataEntrySize {
+		return nil, fmt.Errorf("archive cover entry too large: %s", file.Name)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("archive cover entry empty: %s", file.Name)
+	}
+	return &parsedEbookCover{
+		ContentType: ebookImageContentType(file.Name),
+		Bytes:       data,
+	}, nil
 }
 
 func parseEbookFB2Reader(reader io.Reader, format string) (parsedEbook, error) {
@@ -425,7 +522,9 @@ func parseEbookFB2Reader(reader io.Reader, format string) (parsedEbook, error) {
 			} `xml:"publish-info"`
 		} `xml:"description"`
 	}
-	if err := xml.NewDecoder(reader).Decode(&fb2); err != nil {
+	decoder := xml.NewDecoder(reader)
+	decoder.CharsetReader = ebookXMLCharsetReader
+	if err := decoder.Decode(&fb2); err != nil {
 		return book, err
 	}
 
@@ -467,10 +566,10 @@ func parsePDFInfoFields(data []byte) map[string]string {
 			continue
 		}
 		rest := bytes.TrimLeft(data[idx+len(token):], " \t\r\n")
-		if len(rest) == 0 || rest[0] != '(' {
+		if len(rest) == 0 {
 			continue
 		}
-		value, ok := readPDFLiteralString(rest)
+		value, ok := readPDFString(rest)
 		if ok {
 			fields[key] = value
 		}
@@ -478,28 +577,74 @@ func parsePDFInfoFields(data []byte) map[string]string {
 	return fields
 }
 
+func decodeEbookXML(data []byte, v any) error {
+	data = normalizeEbookXMLVersion(data)
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.CharsetReader = ebookXMLCharsetReader
+	return decoder.Decode(v)
+}
+
+func normalizeEbookXMLVersion(data []byte) []byte {
+	for _, needle := range []string{`version="1.1"`, `version='1.1'`} {
+		idx := bytes.Index(data, []byte(needle))
+		if idx < 0 || idx > 128 {
+			continue
+		}
+		out := append([]byte(nil), data...)
+		copy(out[idx:], strings.Replace(needle, "1.1", "1.0", 1))
+		return out
+	}
+	return data
+}
+
+func ebookXMLCharsetReader(label string, input io.Reader) (io.Reader, error) {
+	name := strings.ToLower(strings.TrimSpace(label))
+	if name == "" || name == "utf-8" || name == "utf8" {
+		return input, nil
+	}
+	reader, err := charset.NewReaderLabel(name, input)
+	if err != nil {
+		return nil, fmt.Errorf("unsupported ebook XML encoding %q: %w", label, err)
+	}
+	return reader, nil
+}
+
+func readPDFString(data []byte) (string, bool) {
+	switch data[0] {
+	case '(':
+		return readPDFLiteralString(data)
+	case '<':
+		if len(data) > 1 && data[1] == '<' {
+			return "", false
+		}
+		return readPDFHexString(data)
+	default:
+		return "", false
+	}
+}
+
 func readPDFLiteralString(data []byte) (string, bool) {
 	if len(data) == 0 || data[0] != '(' {
 		return "", false
 	}
-	var out strings.Builder
+	var out []byte
 	depth := 1
 	escaped := false
 	for _, b := range data[1:] {
 		if escaped {
 			switch b {
 			case 'n':
-				out.WriteByte('\n')
+				out = append(out, '\n')
 			case 'r':
-				out.WriteByte('\r')
+				out = append(out, '\r')
 			case 't':
-				out.WriteByte('\t')
+				out = append(out, '\t')
 			case 'b':
-				out.WriteByte('\b')
+				out = append(out, '\b')
 			case 'f':
-				out.WriteByte('\f')
+				out = append(out, '\f')
 			default:
-				out.WriteByte(b)
+				out = append(out, b)
 			}
 			escaped = false
 			continue
@@ -509,18 +654,76 @@ func readPDFLiteralString(data []byte) (string, bool) {
 			escaped = true
 		case '(':
 			depth++
-			out.WriteByte(b)
+			out = append(out, b)
 		case ')':
 			depth--
 			if depth == 0 {
-				return strings.TrimSpace(out.String()), true
+				return strings.TrimSpace(decodePDFLiteralBytes(out)), true
 			}
-			out.WriteByte(b)
+			out = append(out, b)
 		default:
-			out.WriteByte(b)
+			out = append(out, b)
 		}
 	}
 	return "", false
+}
+
+func readPDFHexString(data []byte) (string, bool) {
+	if len(data) == 0 || data[0] != '<' {
+		return "", false
+	}
+	end := bytes.IndexByte(data[1:], '>')
+	if end < 0 {
+		return "", false
+	}
+	raw := data[1 : end+1]
+	var cleaned []byte
+	for _, b := range raw {
+		switch {
+		case b == ' ' || b == '\t' || b == '\r' || b == '\n':
+			continue
+		case (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F'):
+			cleaned = append(cleaned, b)
+		default:
+			return "", false
+		}
+	}
+	if len(cleaned)%2 == 1 {
+		cleaned = append(cleaned, '0')
+	}
+	decoded := make([]byte, hex.DecodedLen(len(cleaned)))
+	if _, err := hex.Decode(decoded, cleaned); err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(decodePDFLiteralBytes(decoded)), true
+}
+
+func decodePDFLiteralBytes(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	switch {
+	case bytes.HasPrefix(data, []byte{0xfe, 0xff}):
+		if decoded, err := textunicode.UTF16(textunicode.BigEndian, textunicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
+			return string(decoded)
+		}
+	case bytes.HasPrefix(data, []byte{0xff, 0xfe}):
+		if decoded, err := textunicode.UTF16(textunicode.LittleEndian, textunicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
+			return string(decoded)
+		}
+	}
+	// The PDF spec says non-UTF-16 strings are PDFDocEncoding, but real-world
+	// producers commonly emit UTF-8 (PDF 2.0 even allows a UTF-8 BOM). Only
+	// fall back to the Windows-1252 approximation for non-UTF-8 bytes so
+	// UTF-8 metadata is not mojibaked.
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
+	if utf8.Valid(data) {
+		return string(data)
+	}
+	if decoded, err := charmap.Windows1252.NewDecoder().Bytes(data); err == nil {
+		return string(decoded)
+	}
+	return strings.ToValidUTF8(string(data), "")
 }
 
 func splitEbookAuthors(value string) []string {
@@ -553,17 +756,17 @@ func parsePDFDate(value string) (time.Time, bool) {
 	}
 	value = strings.TrimSuffix(value, "Z")
 	if len(value) >= 14 {
-		if t, err := time.Parse("20060102150405", value[:14]); err == nil {
+		if t, err := time.Parse("20060102150405", value[:14]); err == nil && t.Year() > 0 {
 			return t, true
 		}
 	}
 	if len(value) >= 8 {
-		if t, err := time.Parse("20060102", value[:8]); err == nil {
+		if t, err := time.Parse("20060102", value[:8]); err == nil && t.Year() > 0 {
 			return t, true
 		}
 	}
 	if len(value) >= 4 {
-		if t, err := time.Parse("2006", value[:4]); err == nil {
+		if t, err := time.Parse("2006", value[:4]); err == nil && t.Year() > 0 {
 			return t, true
 		}
 	}
@@ -599,7 +802,7 @@ func epubOPFPath(container []byte) (string, error) {
 			FullPath string `xml:"full-path,attr"`
 		} `xml:"rootfiles>rootfile"`
 	}
-	if err := xml.Unmarshal(container, &parsed); err != nil {
+	if err := decodeEbookXML(container, &parsed); err != nil {
 		return "", err
 	}
 	for _, rootfile := range parsed.Rootfiles {
@@ -629,7 +832,7 @@ func parseEPUBOPFMetadata(opf []byte, book *parsedEbook) error {
 			} `xml:"meta"`
 		} `xml:"metadata"`
 	}
-	if err := xml.Unmarshal(opf, &parsed); err != nil {
+	if err := decodeEbookXML(opf, &parsed); err != nil {
 		return err
 	}
 	book.Title = firstNonEmpty(parsed.Metadata.Titles...)
@@ -666,6 +869,149 @@ func parseEPUBOPFMetadata(opf []byte, book *parsedEbook) error {
 		}
 	}
 	return nil
+}
+
+func extractEPUBCover(reader *zip.Reader, opfPath string, opf []byte) (*parsedEbookCover, error) {
+	var parsed struct {
+		Metadata struct {
+			Meta []struct {
+				Name    string `xml:"name,attr"`
+				Content string `xml:"content,attr"`
+			} `xml:"meta"`
+		} `xml:"metadata"`
+		Manifest struct {
+			Items []struct {
+				ID         string `xml:"id,attr"`
+				Href       string `xml:"href,attr"`
+				MediaType  string `xml:"media-type,attr"`
+				Properties string `xml:"properties,attr"`
+			} `xml:"item"`
+		} `xml:"manifest"`
+	}
+	if err := decodeEbookXML(opf, &parsed); err != nil {
+		return nil, err
+	}
+
+	coverID := ""
+	for _, meta := range parsed.Metadata.Meta {
+		if strings.EqualFold(strings.TrimSpace(meta.Name), "cover") {
+			coverID = strings.TrimSpace(meta.Content)
+			break
+		}
+	}
+
+	// An EPUB3 properties="cover-image" item is authoritative; the EPUB2
+	// <meta name="cover"> id frequently points at the XHTML cover *page*
+	// rather than the image, so it ranks lower and non-image manifest items
+	// are skipped entirely instead of shadowing a later real cover image.
+	var coverHref string
+	var coverType string
+	coverRank := 0
+	for _, item := range parsed.Manifest.Items {
+		rank := 0
+		for _, prop := range strings.Fields(strings.ToLower(item.Properties)) {
+			if prop == "cover-image" {
+				rank = 2
+				break
+			}
+		}
+		if rank == 0 && coverID != "" && strings.TrimSpace(item.ID) == coverID {
+			rank = 1
+		}
+		if rank <= coverRank || !isEPUBImageManifestItem(item.MediaType, item.Href) {
+			continue
+		}
+		coverHref = strings.TrimSpace(item.Href)
+		coverType = strings.TrimSpace(item.MediaType)
+		coverRank = rank
+		if coverRank == 2 {
+			break
+		}
+	}
+	if coverHref == "" {
+		return nil, fmt.Errorf("epub cover not referenced")
+	}
+
+	coverPath := resolveEPUBRelativePath(opfPath, coverHref)
+	data, err := readEPUBZipEntry(reader, coverPath)
+	if err != nil {
+		return nil, err
+	}
+	if coverType == "" {
+		coverType = ebookImageContentType(coverPath)
+	}
+	return &parsedEbookCover{ContentType: coverType, Bytes: data}, nil
+}
+
+func isEPUBImageManifestItem(mediaType, href string) bool {
+	mt := strings.ToLower(strings.TrimSpace(mediaType))
+	if mt != "" {
+		return strings.HasPrefix(mt, "image/")
+	}
+	return ebookImageContentType(href) != "application/octet-stream"
+}
+
+func resolveEPUBRelativePath(baseFile string, href string) string {
+	cleanHref := strings.TrimSpace(href)
+	if decoded, err := urlPathUnescape(cleanHref); err == nil {
+		cleanHref = decoded
+	}
+	baseDir := path.Dir(strings.ReplaceAll(baseFile, "\\", "/"))
+	if baseDir == "." || strings.HasPrefix(cleanHref, "/") {
+		baseDir = ""
+	}
+	return strings.TrimPrefix(path.Clean(path.Join(baseDir, cleanHref)), "/")
+}
+
+func urlPathUnescape(value string) (string, error) {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '%' || i+2 >= len(value) {
+			out.WriteByte(value[i])
+			continue
+		}
+		hi := fromHex(value[i+1])
+		lo := fromHex(value[i+2])
+		if hi < 0 || lo < 0 {
+			out.WriteByte(value[i])
+			continue
+		}
+		out.WriteByte(byte(hi<<4 | lo))
+		i += 2
+	}
+	return out.String(), nil
+}
+
+func fromHex(b byte) int {
+	switch {
+	case b >= '0' && b <= '9':
+		return int(b - '0')
+	case b >= 'a' && b <= 'f':
+		return int(b-'a') + 10
+	case b >= 'A' && b <= 'F':
+		return int(b-'A') + 10
+	default:
+		return -1
+	}
+}
+
+func ebookImageContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".avif":
+		return "image/avif"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func parseEbookDate(value string) (time.Time, bool) {
