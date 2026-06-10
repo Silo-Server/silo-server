@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,11 +99,14 @@ func (s *fakeEbookReaderConfigStore) Upsert(_ context.Context, config EbookReade
 }
 
 type fakeEbookReaderAnnotationStore struct {
-	items   []EbookReaderAnnotation
-	created *EbookReaderAnnotation
-	updated *EbookReaderAnnotation
-	deleted string
-	err     error
+	items      []EbookReaderAnnotation
+	existing   *EbookReaderAnnotation
+	created    *EbookReaderAnnotation
+	updated    *EbookReaderAnnotation
+	mergedFrom *EbookReaderAnnotation
+	mergeCalls int
+	deleted    string
+	err        error
 }
 
 func (s *fakeEbookReaderAnnotationStore) List(context.Context, int, string, string) ([]EbookReaderAnnotation, error) {
@@ -118,12 +122,33 @@ func (s *fakeEbookReaderAnnotationStore) Create(_ context.Context, annotation Eb
 	return nil
 }
 
-func (s *fakeEbookReaderAnnotationStore) Update(_ context.Context, annotation EbookReaderAnnotation) (*EbookReaderAnnotation, error) {
+// Update models the PG store contract: read the stored row, invoke merge with
+// it, and persist the merged result, all as one atomic operation.
+func (s *fakeEbookReaderAnnotationStore) Update(
+	_ context.Context,
+	_ int,
+	_ string,
+	_ string,
+	annotationID string,
+	merge func(existing EbookReaderAnnotation) (EbookReaderAnnotation, error),
+) (*EbookReaderAnnotation, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	s.updated = &annotation
-	return &annotation, nil
+	if s.existing == nil || s.existing.ID != annotationID {
+		return nil, nil
+	}
+	existing := *s.existing
+	s.mergedFrom = &existing
+	s.mergeCalls++
+	merged, err := merge(existing)
+	if err != nil {
+		return nil, err
+	}
+	s.updated = &merged
+	stored := merged
+	s.existing = &stored
+	return &merged, nil
 }
 
 func (s *fakeEbookReaderAnnotationStore) Delete(_ context.Context, userID int, profileID, contentID, annotationID string) error {
@@ -166,11 +191,73 @@ func TestEbookReaderServesEbookInlineWithRangeSupport(t *testing.T) {
 	if got := rr.Header().Get("Content-Type"); got != "application/epub+zip" {
 		t.Fatalf("content-type = %q", got)
 	}
-	if got := rr.Header().Get("Content-Disposition"); got != `inline; filename="book.epub"` {
+	if got := rr.Header().Get("Content-Disposition"); got != "inline; filename=book.epub" {
 		t.Fatalf("content-disposition = %q", got)
+	}
+	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("x-content-type-options = %q, want nosniff", got)
 	}
 	if rr.Body.String() != "2345" {
 		t.Fatalf("body = %q", rr.Body.String())
+	}
+}
+
+func TestEbookReaderServesContainerMimeForMismatchedExtension(t *testing.T) {
+	filePath := writePlaybackTestMediaFile(t, "book.txt")
+	if err := os.WriteFile(filePath, []byte("<html>not really</html>"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{
+			file: &models.MediaFile{
+				ID:        42,
+				ContentID: "ebook-1",
+				FilePath:  filePath,
+				Container: "epub",
+				BaseType:  "ebook",
+			},
+		},
+		ItemAccess: stubItemAccessChecker{},
+	})
+
+	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/files/42/read")
+	req = withEbookReaderRouteParams(req, "ebook-1", "42")
+
+	rr := httptest.NewRecorder()
+	handler.HandleReadFile(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	// The file is admitted via its validated container, so the response must
+	// carry that container's MIME type, never application/octet-stream.
+	if got := rr.Header().Get("Content-Type"); got != "application/epub+zip" {
+		t.Fatalf("content-type = %q, want application/epub+zip", got)
+	}
+	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("x-content-type-options = %q, want nosniff", got)
+	}
+}
+
+func TestEbookMimeTypeNeverReturnsOctetStreamForAdmittedFiles(t *testing.T) {
+	cases := []struct {
+		path      string
+		container string
+		wantMime  string
+	}{
+		{"/library/book.txt", "epub", "application/epub+zip"},
+		{"/library/book", "pdf", "application/pdf"},
+		{"/library/book.epub", "pdf", "application/epub+zip"}, // known extension wins
+	}
+	for _, tc := range cases {
+		file := &models.MediaFile{FilePath: tc.path, Container: tc.container, BaseType: "ebook"}
+		if !isEbookFile(file) {
+			t.Fatalf("isEbookFile(%q, %q) = false, want admitted", tc.path, tc.container)
+		}
+		if got := ebookMimeType(tc.path, tc.container); got != tc.wantMime {
+			t.Fatalf("ebookMimeType(%q, %q) = %q, want %q", tc.path, tc.container, got, tc.wantMime)
+		}
 	}
 }
 
@@ -211,9 +298,10 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 		"book.fb2":     "application/x-fictionbook+xml",
 		"book.fbz":     "application/x-zip-compressed-fb2",
 		"book.fb2.zip": "application/x-zip-compressed-fb2",
-		"book.md":      "text/markdown; charset=utf-8",
+		"book.md":      "application/octet-stream",
 		"book.unknown": "application/octet-stream",
 	}
+	rejected := map[string]bool{"book.md": true, "book.unknown": true}
 
 	for name, wantMime := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -222,9 +310,13 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 				container = "fbz"
 			}
 			file := &models.MediaFile{FilePath: "/library/" + name, Container: container}
-			if name == "book.unknown" {
+			if rejected[name] {
+				file.BaseType = "ebook"
 				if isEbookFile(file) {
-					t.Fatal("unknown extension should not be treated as an ebook reader format")
+					t.Fatalf("%s should not be treated as an ebook reader format", name)
+				}
+				if got := ebookMimeType(file.FilePath, file.Container); got != wantMime {
+					t.Fatalf("ebookMimeType() = %q, want %q", got, wantMime)
 				}
 				return
 			}
@@ -588,8 +680,27 @@ func TestEbookReaderReturnsAnnotations(t *testing.T) {
 	}
 }
 
-func TestEbookReaderUpdatesAnnotation(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{}
+func existingEbookReaderAnnotation() *EbookReaderAnnotation {
+	createdAt := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	return &EbookReaderAnnotation{
+		ID:           "ann-1",
+		UserID:       1,
+		ProfileID:    "profile-1",
+		ContentID:    "ebook-1",
+		Kind:         "highlight",
+		CFIRange:     "epubcfi(/6/4,/1:0,/1:12)",
+		SelectedText: "sample text",
+		Note:         "original note",
+		Style:        "highlight",
+		Color:        "#facc15",
+		Metadata:     json.RawMessage(`{"chapter":"one"}`),
+		CreatedAt:    createdAt,
+		UpdatedAt:    createdAt,
+	}
+}
+
+func patchEbookReaderAnnotation(t *testing.T, store *fakeEbookReaderAnnotationStore, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
 		FileResolver: stubMediaFileResolver{},
 		ItemAccess:   stubItemAccessChecker{},
@@ -597,17 +708,167 @@ func TestEbookReaderUpdatesAnnotation(t *testing.T) {
 	handler.AnnotationStore = store
 
 	req := newEbookReaderAuthRequest(http.MethodPatch, "/ebooks/ebook-1/annotations/ann-1")
-	req.Body = ioNopCloser{strings.NewReader(`{"note":"updated","color":"#bfdbfe"}`)}
+	req.Body = ioNopCloser{strings.NewReader(body)}
 	req = withEbookReaderAnnotationRouteParams(req, "ebook-1", "ann-1")
 
 	rr := httptest.NewRecorder()
 	handler.HandleUpdateAnnotation(rr, req)
+	return rr
+}
+
+func TestEbookReaderPatchKeepsAbsentFields(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+
+	rr := patchEbookReaderAnnotation(t, store, `{"note":"updated","color":"#bfdbfe"}`)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 	if store.updated == nil || store.updated.ID != "ann-1" || store.updated.Note != "updated" || store.updated.Color != "#bfdbfe" {
 		t.Fatalf("updated = %+v", store.updated)
+	}
+	if string(store.updated.Metadata) != `{"chapter":"one"}` {
+		t.Fatalf("metadata should be preserved when absent, got %s", store.updated.Metadata)
+	}
+	if store.updated.Kind != "highlight" || store.updated.CFIRange != "epubcfi(/6/4,/1:0,/1:12)" {
+		t.Fatalf("absent fields should keep stored values, got %+v", store.updated)
+	}
+}
+
+func TestEbookReaderPatchClearsExplicitlyEmptyFields(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+
+	rr := patchEbookReaderAnnotation(t, store, `{"note":"","metadata":{}}`)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.updated == nil || store.updated.Note != "" {
+		t.Fatalf("note should be cleared, got %+v", store.updated)
+	}
+	if string(store.updated.Metadata) != `{}` {
+		t.Fatalf("metadata should be cleared to {}, got %s", store.updated.Metadata)
+	}
+}
+
+func TestEbookReaderPatchValidatesResultingState(t *testing.T) {
+	cases := map[string]string{
+		"kind change without location": `{"kind":"bookmark"}`,
+		"clearing required cfi_range":  `{"cfi_range":""}`,
+		"unknown kind":                 `{"kind":"doodle"}`,
+		"non-object metadata":          `{"metadata":["bad"]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+			rr := patchEbookReaderAnnotation(t, store, body)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			if store.updated != nil {
+				t.Fatalf("invalid patch must not reach the store, got %+v", store.updated)
+			}
+		})
+	}
+}
+
+func TestEbookReaderPatchAllowsKindChangeWithRequiredFields(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+
+	rr := patchEbookReaderAnnotation(t, store, `{"kind":"bookmark","location":"epubcfi(/6/8)"}`)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.updated == nil || store.updated.Kind != "bookmark" || store.updated.Location != "epubcfi(/6/8)" {
+		t.Fatalf("updated = %+v", store.updated)
+	}
+}
+
+func TestEbookReaderPatchMergesOntoRowReadInsideStoreUpdate(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+
+	rr := patchEbookReaderAnnotation(t, store, `{"note":"merged note"}`)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	// The handler must not pre-read and merge outside the store: the merge
+	// runs exactly once, on the row handed over by the (locked) store read.
+	if store.mergeCalls != 1 {
+		t.Fatalf("merge calls = %d, want 1", store.mergeCalls)
+	}
+	if store.mergedFrom == nil || store.mergedFrom.Note != "original note" {
+		t.Fatalf("merge input = %+v, want the stored row", store.mergedFrom)
+	}
+	if store.updated == nil || store.updated.Note != "merged note" {
+		t.Fatalf("written row = %+v, want merged note", store.updated)
+	}
+	if store.updated.CFIRange != store.mergedFrom.CFIRange || store.updated.Kind != store.mergedFrom.Kind {
+		t.Fatalf("written row %+v must keep unpatched fields from merge input %+v", store.updated, store.mergedFrom)
+	}
+	if !store.updated.UpdatedAt.After(store.mergedFrom.UpdatedAt) {
+		t.Fatalf("updated_at %v must advance past %v", store.updated.UpdatedAt, store.mergedFrom.UpdatedAt)
+	}
+}
+
+func TestEbookReaderPatchReturnsNotFoundForMissingAnnotation(t *testing.T) {
+	store := &fakeEbookReaderAnnotationStore{}
+
+	rr := patchEbookReaderAnnotation(t, store, `{"note":"updated"}`)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestEbookReaderRejectsOversizedProgressBody(t *testing.T) {
+	store := &fakeEbookProgressStore{}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{},
+		ItemAccess:   stubItemAccessChecker{},
+	})
+	handler.ProgressStore = store
+
+	body := `{"file_id":42,"location":"` + strings.Repeat("x", int(ebookReaderProgressMaxBodySize)) + `","progress":0.5}`
+	req := newEbookReaderAuthRequest(http.MethodPut, "/ebooks/ebook-1/progress")
+	req.Body = ioNopCloser{strings.NewReader(body)}
+	req = withEbookReaderContentRouteParam(req, "ebook-1")
+
+	rr := httptest.NewRecorder()
+	handler.HandleSaveProgress(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if store.upserted != nil {
+		t.Fatalf("oversized body must not be saved, got %+v", store.upserted)
+	}
+}
+
+func TestInlineContentDispositionProducesParseableHeaders(t *testing.T) {
+	cases := map[string]string{
+		"book.epub":            "book.epub",
+		`bo"ok\.epub`:          `bo"ok\.epub`,
+		`trailing-slash\`:      `trailing-slash\`,
+		"börk \U0001F4DA.epub": "börk \U0001F4DA.epub",
+		"":                     "ebook",
+		".":                    "ebook",
+	}
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := inlineContentDisposition(name)
+			mediaType, params, err := mime.ParseMediaType(got)
+			if err != nil {
+				t.Fatalf("header %q is malformed: %v", got, err)
+			}
+			if mediaType != "inline" {
+				t.Fatalf("media type = %q", mediaType)
+			}
+			if params["filename"] != want {
+				t.Fatalf("filename = %q, want %q", params["filename"], want)
+			}
+		})
 	}
 }
 
