@@ -221,6 +221,25 @@ func TestIsEbookLibraryType(t *testing.T) {
 	}
 }
 
+func TestIsMangaLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"manga", true},
+		{"Manga", true},
+		{"  MANGA  ", true},
+		{"ebooks", false},
+		{"movies", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isMangaLibraryType(tc.in); got != tc.want {
+			t.Errorf("isMangaLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestWalkModeForEbookLibraryTypes(t *testing.T) {
 	for _, libraryType := range []string{"ebook", "ebooks", " EBOOKS "} {
 		if got := walkModeFor(libraryType); got != walkModeEbook {
