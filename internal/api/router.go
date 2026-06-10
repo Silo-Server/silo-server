@@ -73,7 +73,13 @@ import (
 
 // Dependencies holds all shared dependencies that handlers need.
 type Dependencies struct {
-	Config                       *config.Config
+	Config *config.Config
+	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
+	// worker modes); read through CurrentConfig(), which falls back to Config.
+	LiveConfig func() *config.Config
+	// OnConfigChange registers a callback fired after a live config reload
+	// actually changes the config. May be nil when hot reload is not wired.
+	OnConfigChange               func(fn func(old, updated *config.Config))
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	AppContext                   context.Context
@@ -175,6 +181,17 @@ type Dependencies struct {
 // Using an interface avoids a direct import of the abs sub-package from router.go.
 type absHandler interface {
 	Mount(r chi.Router)
+}
+
+// CurrentConfig returns the live config when hot reload is wired, falling
+// back to the startup snapshot otherwise.
+func (d *Dependencies) CurrentConfig() *config.Config {
+	if d.LiveConfig != nil {
+		if cfg := d.LiveConfig(); cfg != nil {
+			return cfg
+		}
+	}
+	return d.Config
 }
 
 // NewRouter creates a chi.Router with all middleware and routes mounted

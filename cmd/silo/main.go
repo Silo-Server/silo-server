@@ -554,6 +554,22 @@ func main() {
 		return
 	}
 
+	// Hot-reload config watcher for integrated/api mode. Reloads on
+	// EventSettingsChanged (Redis) with a 60s poll fallback, so settings
+	// changes apply without restart even on Redis-less deployments. The
+	// watcher's config supersedes the startup snapshot from here on.
+	configWatcher := nodeconfig.NewWatcher(pool, dataCipher, eventBus, nodeconfig.BootstrapOverrides{
+		Listen:      bc.Listen,
+		Mode:        bc.Mode,
+		DatabaseURL: bc.DatabaseURL,
+		JFListen:    bc.JFListen,
+		RedisURL:    bc.RedisURL,
+	})
+	if err := configWatcher.Start(appCtx); err != nil {
+		log.Fatalf("config watcher start: %v", err)
+	}
+	cfg = configWatcher.Config()
+
 	// Determine which components to initialize based on mode.
 	needsS3 := mode == "integrated" || mode == "api"
 	needsScanner := mode == "integrated" || mode == "api"
@@ -569,6 +585,8 @@ func main() {
 
 	deps := api.Dependencies{
 		Config:                       cfg,
+		LiveConfig:                   configWatcher.Config,
+		OnConfigChange:               configWatcher.OnChange,
 		BootstrapSensitiveConfigured: bootstrapSensitiveConfigured,
 		BootstrapSensitiveValues:     bootstrapSensitiveValues,
 		AppContext:                   appCtx,
@@ -588,6 +606,12 @@ func main() {
 			}
 			restartReqCh <- struct{}{}
 			return nil
+		},
+		OnServerSettingUpdated: func(_ context.Context, _, _ string) {
+			// Nudge the hot-reload watcher so same-process settings changes
+			// apply immediately even without Redis (the event bus is a no-op
+			// then, leaving only the 60s poll).
+			configWatcher.RequestReload()
 		},
 	}
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
@@ -1896,6 +1920,7 @@ func main() {
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
 			Config:           cfg,
+			LiveConfig:       configWatcher.Config,
 			DB:               deps.DB,
 			SecretCipher:     dataCipher,
 			ClientIPResolver: ipResolver,
