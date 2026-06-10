@@ -7,6 +7,7 @@ import (
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 )
 
@@ -35,7 +36,11 @@ func (t *FCMTransport) Send(ctx context.Context, deviceToken string, p Payload) 
 		return ResultSoftFail, 0, nil
 	}
 
-	app, err := firebase.NewApp(ctx, nil, option.WithCredentialsJSON([]byte(cfg.ServiceAccountJSON)))
+	creds, err := google.CredentialsFromJSONWithType(ctx, []byte(cfg.ServiceAccountJSON), google.ServiceAccount, "https://www.googleapis.com/auth/firebase.messaging")
+	if err != nil {
+		return ResultSoftFail, 0, err
+	}
+	app, err := firebase.NewApp(ctx, nil, option.WithCredentials(creds))
 	if err != nil {
 		return ResultSoftFail, 0, err
 	}

@@ -59,7 +59,7 @@ func (t *WebPushTransport) Send(ctx context.Context, token string, payload Paylo
 	if err != nil {
 		return ResultSoftFail, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
