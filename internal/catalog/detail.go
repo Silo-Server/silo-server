@@ -68,38 +68,38 @@ type ItemDetail struct {
 	Type      string `json:"type"`
 
 	// Metadata (served inline from Postgres).
-	Title            string       `json:"title"`
-	SortTitle        string       `json:"sort_title,omitempty"`
-	OriginalTitle    string       `json:"original_title,omitempty"`
-	Year             int          `json:"year,omitempty"`
-	Overview         string       `json:"overview,omitempty"`
-	Tagline          string       `json:"tagline,omitempty"`
+	Title         string `json:"title"`
+	SortTitle     string `json:"sort_title,omitempty"`
+	OriginalTitle string `json:"original_title,omitempty"`
+	Year          int    `json:"year,omitempty"`
+	Overview      string `json:"overview,omitempty"`
+	Tagline       string `json:"tagline,omitempty"`
 	// PendingTranslationLanguage, when set, is the viewer's presentation
 	// language that the description is missing — the on-view AI translation
 	// affordance keys off it.
-	PendingTranslationLanguage string `json:"pending_translation_language,omitempty"`
-	Runtime          int          `json:"runtime,omitempty"`
-	ContentRating    string       `json:"content_rating,omitempty"`
-	Genres           []string     `json:"genres"`
-	RatingIMDB       *float64     `json:"rating_imdb,omitempty"`
-	RatingTMDB       *float64     `json:"rating_tmdb,omitempty"`
-	RatingRTCritic   *int         `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience *int         `json:"rating_rt_audience,omitempty"`
-	ImdbID           string       `json:"imdb_id,omitempty"`
-	TmdbID           string       `json:"tmdb_id,omitempty"`
-	TvdbID           string       `json:"tvdb_id,omitempty"`
-	Cast             []CastCredit `json:"cast"`
-	Crew             []CrewCredit `json:"crew"`
-	Studios          []string     `json:"studios"`
-	Networks         []string     `json:"networks"`
-	Countries        []string     `json:"countries,omitempty"`
-	LockedFields     []int        `json:"locked_fields,omitempty"`
-	FirstAirDate     *string      `json:"first_air_date,omitempty"`
-	LastAirDate      *string      `json:"last_air_date,omitempty"`
-	ReleaseDate      *string      `json:"release_date,omitempty"`
-	AirTime          *string      `json:"air_time,omitempty"`
-	AirTimezone      *string      `json:"air_timezone,omitempty"`
-	ShowStatus       string       `json:"show_status,omitempty"`
+	PendingTranslationLanguage string       `json:"pending_translation_language,omitempty"`
+	Runtime                    int          `json:"runtime,omitempty"`
+	ContentRating              string       `json:"content_rating,omitempty"`
+	Genres                     []string     `json:"genres"`
+	RatingIMDB                 *float64     `json:"rating_imdb,omitempty"`
+	RatingTMDB                 *float64     `json:"rating_tmdb,omitempty"`
+	RatingRTCritic             *int         `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience           *int         `json:"rating_rt_audience,omitempty"`
+	ImdbID                     string       `json:"imdb_id,omitempty"`
+	TmdbID                     string       `json:"tmdb_id,omitempty"`
+	TvdbID                     string       `json:"tvdb_id,omitempty"`
+	Cast                       []CastCredit `json:"cast"`
+	Crew                       []CrewCredit `json:"crew"`
+	Studios                    []string     `json:"studios"`
+	Networks                   []string     `json:"networks"`
+	Countries                  []string     `json:"countries,omitempty"`
+	LockedFields               []int        `json:"locked_fields,omitempty"`
+	FirstAirDate               *string      `json:"first_air_date,omitempty"`
+	LastAirDate                *string      `json:"last_air_date,omitempty"`
+	ReleaseDate                *string      `json:"release_date,omitempty"`
+	AirTime                    *string      `json:"air_time,omitempty"`
+	AirTimezone                *string      `json:"air_timezone,omitempty"`
+	ShowStatus                 string       `json:"show_status,omitempty"`
 
 	// Presigned image URLs.
 	PosterURL         string `json:"poster_url,omitempty"`
@@ -687,6 +687,44 @@ func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *model
 	return applyEpisodeLocalization(episode, loc), nil
 }
 
+// LocalizeEpisodeModels applies presentation-language localization to a batch
+// of episodes with a single lookup. Episodes without a localization row are
+// returned unchanged; the result preserves input order and length.
+func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*models.Episode, filter AccessFilter) ([]*models.Episode, error) {
+	if len(episodes) == 0 {
+		return episodes, nil
+	}
+	language, err := s.resolvePresentationLanguage(ctx, filter)
+	if err != nil || language == "" || s.episodeLocRepo == nil {
+		return episodes, err
+	}
+	ids := make([]string, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep == nil || sameMetadataLanguage(ep.DefaultMetadataLanguage, language) {
+			continue
+		}
+		ids = append(ids, ep.ContentID)
+	}
+	if len(ids) == 0 {
+		return episodes, nil
+	}
+	locs, err := s.episodeLocRepo.GetByEpisodeIDs(ctx, ids, language)
+	if err != nil || len(locs) == 0 {
+		return episodes, err
+	}
+	localized := make([]*models.Episode, len(episodes))
+	for i, ep := range episodes {
+		localized[i] = ep
+		if ep == nil {
+			continue
+		}
+		if loc := locs[ep.ContentID]; loc != nil {
+			localized[i] = applyEpisodeLocalization(ep, loc)
+		}
+	}
+	return localized, nil
+}
+
 // GetItemDetail retrieves a full item detail with presigned URLs and file versions.
 func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
 	item, err := s.itemRepo.GetByID(ctx, contentID)
@@ -849,43 +887,43 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	item = localizedItem
 	castCredits, crewCredits := s.fetchCredits(ctx, contentID)
 	detail := &ItemDetail{
-		ContentID:         item.ContentID,
-		Type:              item.Type,
-		Title:             item.Title,
-		SortTitle:         item.SortTitle,
-		OriginalTitle:     item.OriginalTitle,
-		Year:              item.Year,
-		Overview:          item.Overview,
-		Tagline:           item.Tagline,
+		ContentID:                  item.ContentID,
+		Type:                       item.Type,
+		Title:                      item.Title,
+		SortTitle:                  item.SortTitle,
+		OriginalTitle:              item.OriginalTitle,
+		Year:                       item.Year,
+		Overview:                   item.Overview,
+		Tagline:                    item.Tagline,
 		PendingTranslationLanguage: pendingTranslation,
-		Runtime:           item.Runtime,
-		ContentRating:     item.ContentRating,
-		Genres:            item.Genres,
-		RatingIMDB:        item.RatingIMDB,
-		RatingTMDB:        item.RatingTMDB,
-		RatingRTCritic:    item.RatingRTCritic,
-		RatingRTAudience:  item.RatingRTAudience,
-		ImdbID:            item.ImdbID,
-		TmdbID:            item.TmdbID,
-		TvdbID:            item.TvdbID,
-		Cast:              castCredits,
-		Crew:              crewCredits,
-		Studios:           item.Studios,
-		Networks:          item.Networks,
-		Countries:         item.Countries,
-		LockedFields:      item.LockedFields,
-		FirstAirDate:      item.FirstAirDate,
-		LastAirDate:       item.LastAirDate,
-		ReleaseDate:       item.ReleaseDate,
-		AirTime:           item.AirTime,
-		AirTimezone:       item.AirTimezone,
-		ShowStatus:        item.ShowStatus,
-		PosterThumbhash:   item.PosterThumbhash,
-		BackdropThumbhash: item.BackdropThumbhash,
-		SeasonCount:       item.SeasonCount,
-		Versions:          []FileVersion{},
-		PlaybackVariants:  []PlaybackVariant{},
-		Subtitles:         []SubtitleInfo{},
+		Runtime:                    item.Runtime,
+		ContentRating:              item.ContentRating,
+		Genres:                     item.Genres,
+		RatingIMDB:                 item.RatingIMDB,
+		RatingTMDB:                 item.RatingTMDB,
+		RatingRTCritic:             item.RatingRTCritic,
+		RatingRTAudience:           item.RatingRTAudience,
+		ImdbID:                     item.ImdbID,
+		TmdbID:                     item.TmdbID,
+		TvdbID:                     item.TvdbID,
+		Cast:                       castCredits,
+		Crew:                       crewCredits,
+		Studios:                    item.Studios,
+		Networks:                   item.Networks,
+		Countries:                  item.Countries,
+		LockedFields:               item.LockedFields,
+		FirstAirDate:               item.FirstAirDate,
+		LastAirDate:                item.LastAirDate,
+		ReleaseDate:                item.ReleaseDate,
+		AirTime:                    item.AirTime,
+		AirTimezone:                item.AirTimezone,
+		ShowStatus:                 item.ShowStatus,
+		PosterThumbhash:            item.PosterThumbhash,
+		BackdropThumbhash:          item.BackdropThumbhash,
+		SeasonCount:                item.SeasonCount,
+		Versions:                   []FileVersion{},
+		PlaybackVariants:           []PlaybackVariant{},
+		Subtitles:                  []SubtitleInfo{},
 	}
 
 	// Resolve image URLs: full URLs (TVDB/TMDB) pass through; S3 cached base paths get
