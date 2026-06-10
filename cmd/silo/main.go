@@ -626,6 +626,16 @@ func main() {
 			configWatcher.RequestReload()
 		},
 	}
+	// Notifications subsystem: store → service → materializer.
+	// pool is always non-nil here (proxy/transcode returned early above).
+	notificationsStore := notifications.NewRepository(pool)
+	notificationsSvc := notifications.NewService(notificationsStore, eventsHub)
+	notificationsMaterializer := notifications.NewMaterializer(eventsHub, notificationsSvc, notifications.NewContentResolverRepo(pool))
+	if err := notificationsMaterializer.Start(appCtx); err != nil {
+		log.Fatalf("notifications materializer start: %v", err)
+	}
+	deps.NotificationsService = notificationsSvc
+
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
 	absCompatEnabled, err := audiobooksService.ABSCompatEnabled(appCtx)
 	if err != nil {
@@ -1605,6 +1615,7 @@ func main() {
 			),
 		)
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		requestReconcileSvc.SetEventsHub(eventsHub)
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		if userStoreProvider != nil {
 			reconcileResolver := access.NewResolver(
@@ -1663,6 +1674,8 @@ func main() {
 				taskMgr.Register(pluginTask)
 			}
 		}
+		taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationsStore))
+		taskMgr.Register(tasks.NewNotificationsDigestTask(notificationsSvc))
 
 		taskMgr.Start(appCtx)
 		defer taskMgr.Stop()
