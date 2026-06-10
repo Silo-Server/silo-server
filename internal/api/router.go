@@ -46,10 +46,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
-	"github.com/Silo-Server/silo-server/internal/presence"
-	"github.com/Silo-Server/silo-server/internal/push"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/presence"
+	"github.com/Silo-Server/silo-server/internal/push"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
@@ -1515,8 +1515,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.LibraryScanQueue,
 						historyImportSvc,
 						deps.NotificationsService,
-					deps.PresenceRegistry,
-				)
+						deps.PresenceRegistry,
+					)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 				}
 

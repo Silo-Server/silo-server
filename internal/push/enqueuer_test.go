@@ -9,8 +9,8 @@ import (
 )
 
 type fakeDeviceSource struct {
-	devices     []Device
-	enqueued    []struct {
+	devices  []Device
+	enqueued []struct {
 		nid int64
 		dev Device
 		nb  time.Time

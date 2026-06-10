@@ -184,6 +184,7 @@ func (o *txOutcomes) Dead(id int64, userID int, deviceID, m string) {
 		return o.s.PruneTokenTx(context.Background(), o.tx, userID, deviceID)
 	})
 }
+
 // run executes one outcome op, short-circuiting once any op has errored so the
 // batch commits atomically. NOTE: if a DB op fails mid-batch, the whole tx rolls
 // back and every delivery in the batch is re-claimed next tick — including any
@@ -225,9 +226,11 @@ type PushDeliveryTask struct{ w *Worker }
 // NewPushDeliveryTask wraps Worker as a taskmanager.Task.
 func NewPushDeliveryTask(w *Worker) *PushDeliveryTask { return &PushDeliveryTask{w: w} }
 
-func (t *PushDeliveryTask) Key() string         { return "push_delivery" }
-func (t *PushDeliveryTask) Name() string        { return "Deliver push notifications" }
-func (t *PushDeliveryTask) Description() string { return "Sends queued push notifications to registered devices" }
+func (t *PushDeliveryTask) Key() string  { return "push_delivery" }
+func (t *PushDeliveryTask) Name() string { return "Deliver push notifications" }
+func (t *PushDeliveryTask) Description() string {
+	return "Sends queued push notifications to registered devices"
+}
 func (t *PushDeliveryTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
