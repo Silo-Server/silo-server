@@ -22,6 +22,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -129,11 +130,12 @@ type PlaybackHandler struct {
 	RealtimeHub             *playback.RealtimeHub
 	CommandTracker          *playback.CommandTracker
 	CommandDispatcher       *playback.CommandDispatcher
-	FFmpegPath              string
-	HWAccel                 string
-	HWDevice                string
-	TranscodeDir            string
-	FFmpegLogSink           playback.FFmpegLogSink
+	// PlaybackConfig returns the current playback config (ffmpeg path,
+	// hwaccel, transcode dir). Wired to the live config in integrated mode
+	// so admin changes apply to newly started transcodes. Read it through
+	// playbackConfig(), which falls back to defaults when unset.
+	PlaybackConfig func() config.PlaybackConfig
+	FFmpegLogSink  playback.FFmpegLogSink
 	transcodeMu             sync.RWMutex
 	transcodes              map[string]*playback.TranscodeSession
 	realtimeCommandMu       sync.Mutex
@@ -156,7 +158,6 @@ type sessionExpirationHookSetter interface {
 func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathResolver) *PlaybackHandler {
 	h := &PlaybackHandler{
 		sessionMgr:       sessionMgr,
-		TranscodeDir:     filepath.Join(os.TempDir(), "silo-transcode"),
 		transcodes:       make(map[string]*playback.TranscodeSession),
 		realtimeCommands: make(map[string]playbackCommandRecord),
 	}
@@ -179,6 +180,19 @@ func (h *PlaybackHandler) SetProfileRefreshRequester(requester ProfileRefreshReq
 	h.profileRefreshRequester = requester
 }
 
+// playbackConfig returns the current playback config, falling back to the
+// same defaults as config loading (transcode enabled, temp transcode dir)
+// when no provider is wired (tests, minimal setups).
+func (h *PlaybackHandler) playbackConfig() config.PlaybackConfig {
+	if h.PlaybackConfig != nil {
+		return h.PlaybackConfig()
+	}
+	return config.PlaybackConfig{
+		TranscodeEnabled: true,
+		TranscodeDir:     filepath.Join(os.TempDir(), "silo-transcode"),
+	}
+}
+
 // CleanupOrphanedTranscodes removes stale per-session temp directories for
 // transcodes that are no longer tracked in memory.
 func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
@@ -189,7 +203,7 @@ func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
 	}
 	h.transcodeMu.RUnlock()
 
-	return playback.CleanupOrphanedTranscodeDirs(h.TranscodeDir, active)
+	return playback.CleanupOrphanedTranscodeDirs(h.playbackConfig().TranscodeDir, active)
 }
 
 // playbackThresholds reads the playback.watched_threshold and
@@ -614,9 +628,9 @@ func normalizeAudioTrackIndex(file *models.MediaFile, audioTrackIndex int) int {
 	return directPlayAudioTrackIndex(file)
 }
 
-func playbackAdminSettingsFromRequest(ctx context.Context, repo PlaybackSettingsReader) playback.AdminSettings {
+func playbackAdminSettingsFromRequest(ctx context.Context, repo PlaybackSettingsReader, transcodeEnabled bool) playback.AdminSettings {
 	settings := playback.AdminSettings{
-		TranscodeEnabled: true,
+		TranscodeEnabled: transcodeEnabled,
 	}
 	if repo != nil {
 		if v, _ := repo.Get(ctx, "allow_4k_transcode"); v == "true" {
@@ -661,7 +675,7 @@ func (h *PlaybackHandler) resolveCapabilityPlaybackSelection(
 	}
 
 	audioTrackIndex = normalizeAudioTrackIndex(requestedFile, audioTrackIndex)
-	adminSettings := playbackAdminSettingsFromRequest(ctx, h.SettingsRepo)
+	adminSettings := playbackAdminSettingsFromRequest(ctx, h.SettingsRepo, h.playbackConfig().TranscodeEnabled)
 	method, transcodeAudio := resolvePlaybackMethodForFile(requestedFile, req, audioTrackIndex, adminSettings)
 
 	if requestedFile.Resolution == "2160p" &&
@@ -2064,7 +2078,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			TargetCodecAudio:   req.TargetCodecAudio,
 			TargetBitrateKbps:  req.TargetBitrateKbps,
 			SegmentDuration:    req.SegmentDuration,
-			HWAccel:            h.HWAccel,
+			HWAccel:            h.playbackConfig().HWAccel,
 			AudioTrackIndex:    session.AudioTrackIndex,
 			SubtitleTrackIndex: req.SubtitleTrackIndex,
 			SubtitleBurnIn:     req.SubtitleBurnIn,
@@ -2130,14 +2144,17 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			"No transcode node is available and local transcode fallback is disabled")
 		return
 	}
-	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
+	// Snapshot once so the directory, ffmpeg path, and hwaccel of this
+	// session stay consistent even if the config reloads mid-start.
+	playbackCfg := h.playbackConfig()
+	if err := os.MkdirAll(playbackCfg.TranscodeDir, 0o755); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare transcode directory")
 		return
 	}
 
 	transcodeSession, err := playback.StartTranscode(context.WithoutCancel(r.Context()), playback.TranscodeOpts{
 		InputPath:          file.FilePath,
-		OutputDir:          filepath.Join(h.TranscodeDir, req.SessionID),
+		OutputDir:          filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
 		SessionID:          req.SessionID,
 		SourceVideoCodec:   file.CodecVideo,
 		SeekSeconds:        req.SeekSeconds,
@@ -2147,9 +2164,9 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		TargetCodecAudio:   req.TargetCodecAudio,
 		TargetBitrateKbps:  req.TargetBitrateKbps,
 		SegmentDuration:    req.SegmentDuration,
-		FFmpegPath:         h.FFmpegPath,
-		HWAccel:            h.HWAccel,
-		HWDevice:           h.HWDevice,
+		FFmpegPath:         playbackCfg.FFmpegPath,
+		HWAccel:            playbackCfg.HWAccel,
+		HWDevice:           playbackCfg.HWDevice,
 		AudioTrackIndex:    session.AudioTrackIndex,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,

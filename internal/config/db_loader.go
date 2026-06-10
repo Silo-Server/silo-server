@@ -253,11 +253,6 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Scanner.MaxConcurrentScoped = maxConcurrentScoped
-	fileRemovalGrace, err := durationOr(m, "scanner.file_removal_grace", 24*time.Hour)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
 	emptyTrash, err := boolOr(m, "scanner.empty_trash_after_scan", true)
 	if err != nil {
 		return nil, err
@@ -315,21 +310,6 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Playback.TranscodeEnabled = transcodeEnabled
-	allowHEVC, err := boolOr(m, "playback.allow_hevc_encoding", false)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Playback.AllowHEVCEncoding = allowHEVC
-	transcodeAheadSegments, err := intOr(m, "playback.transcode_ahead_segments", 30)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Playback.TranscodeAheadSegments = transcodeAheadSegments
-	segmentDuration, err := intOr(m, "playback.segment_duration", 6)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Playback.SegmentDuration = segmentDuration
 
 	// Redis
 	cfg.Redis.URL = stringOr(m, "redis.url", "")

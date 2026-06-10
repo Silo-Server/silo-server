@@ -18,6 +18,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -180,6 +181,16 @@ func writePlaybackTestFFmpeg(t *testing.T) string {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	return path
+}
+
+func playbackTestConfig(ffmpegPath, transcodeDir string) func() config.PlaybackConfig {
+	return func() config.PlaybackConfig {
+		return config.PlaybackConfig{
+			FFmpegPath:       ffmpegPath,
+			TranscodeDir:     transcodeDir,
+			TranscodeEnabled: true,
+		}
+	}
 }
 
 func writePlaybackTestMediaFile(t *testing.T, name string) string {
@@ -1173,8 +1184,7 @@ func TestHandleStartTranscode_LocalPathPropagatesSelectedAudioTrack(t *testing.T
 
 	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.FFmpegPath = writePlaybackTestFFmpeg(t)
-	handler.TranscodeDir = t.TempDir()
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 
 	req := httptest.NewRequest("POST", "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","audio_track_index":1,"codecs_video":["h264"],"codecs_audio":["aac"],"containers":["mp4"],"max_resolution":"2160p","hdr":false}`))
 	req = req.WithContext(newAuthorizedPlaybackContext())
@@ -1239,8 +1249,7 @@ func TestHandleStartTranscode_MPEG2SeekedCopyRemainsCopyVideo(t *testing.T) {
 
 	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.FFmpegPath = writePlaybackTestFFmpeg(t)
-	handler.TranscodeDir = t.TempDir()
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 
 	transcodeReq := httptest.NewRequest(
 		"POST",
@@ -1403,7 +1412,7 @@ func TestHandleStartTranscode_KeepsSessionWhenStartupFailsForNonMissingReason(t 
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SessionSyncer = syncer
 	handler.AdminStore = adminStore
-	handler.TranscodeDir = writePlaybackTestMediaFile(t, "occupied-transcode-dir")
+	handler.PlaybackConfig = playbackTestConfig("", writePlaybackTestMediaFile(t, "occupied-transcode-dir"))
 
 	startReq := httptest.NewRequest("POST", "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","codecs_video":["h264"],"codecs_audio":["aac"],"containers":["mp4"],"max_resolution":"2160p","hdr":false}`))
 	startReq = startReq.WithContext(newAuthorizedPlaybackContext())

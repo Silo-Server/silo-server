@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -69,9 +70,11 @@ type audioTranscriber interface {
 // a word straddling a boundary can be clipped — accepted v1 limitation, noted
 // for a silence-aligned follow-up.
 type WhisperTranscriber struct {
-	client       audioTranscriber
-	ffmpegPath   string
-	chunkSeconds int
+	client audioTranscriber
+	// ffmpegPath/chunkSeconds are atomics so admin settings changes apply to
+	// jobs started afterwards; each job snapshots them once at start.
+	ffmpegPath   atomic.Pointer[string]
+	chunkSeconds atomic.Int32
 	// extract and probeOffset are playback helpers, injectable for tests.
 	extract     func(ctx context.Context, filePath string, audioTrackIndex int, dir, ffmpegPath string, chunkSeconds int) ([]playback.AudioChunk, error)
 	probeOffset func(ctx context.Context, filePath string, audioTrackIndex int, ffmpegPath string) float64
@@ -81,16 +84,24 @@ type WhisperTranscriber struct {
 // chunkSeconds outside [minASRChunkSeconds, defaultASRChunkSeconds] falls
 // back to the default (longer chunks would exceed upload limits).
 func NewWhisperTranscriber(client *llm.Client, ffmpegPath string, chunkSeconds int) *WhisperTranscriber {
+	t := &WhisperTranscriber{
+		client:      client,
+		extract:     playback.ExtractAudioChunks,
+		probeOffset: playback.ProbeAudioStartOffset,
+	}
+	t.SetExtraction(ffmpegPath, chunkSeconds)
+	return t
+}
+
+// SetExtraction updates the ffmpeg path and ASR chunk duration used by jobs
+// started afterwards. Safe for concurrent use; out-of-range chunk durations
+// fall back to the default, matching construction.
+func (t *WhisperTranscriber) SetExtraction(ffmpegPath string, chunkSeconds int) {
 	if chunkSeconds < minASRChunkSeconds || chunkSeconds > defaultASRChunkSeconds {
 		chunkSeconds = defaultASRChunkSeconds
 	}
-	return &WhisperTranscriber{
-		client:       client,
-		ffmpegPath:   ffmpegPath,
-		chunkSeconds: chunkSeconds,
-		extract:      playback.ExtractAudioChunks,
-		probeOffset:  playback.ProbeAudioStartOffset,
-	}
+	t.ffmpegPath.Store(&ffmpegPath)
+	t.chunkSeconds.Store(int32(chunkSeconds))
 }
 
 // Transcribe implements Transcriber. The returned cues are NOT sorted (they
@@ -105,7 +116,12 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 	}
 	defer os.RemoveAll(dir)
 
-	chunks, err := t.extract(ctx, req.FilePath, req.AudioTrackIndex, dir, t.ffmpegPath, t.chunkSeconds)
+	// Snapshot once so the whole job extracts and times chunks consistently
+	// even if the config reloads mid-job.
+	ffmpegPath := *t.ffmpegPath.Load()
+	chunkSeconds := int(t.chunkSeconds.Load())
+
+	chunks, err := t.extract(ctx, req.FilePath, req.AudioTrackIndex, dir, ffmpegPath, chunkSeconds)
 	if err != nil {
 		return nil, "", err
 	}
@@ -113,10 +129,10 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 	// Audio streams can start after the container's timeline origin (TS
 	// remuxes especially); Whisper times are relative to the first audio
 	// sample, so the delta is a constant sync error unless added back.
-	startOffset := t.probeOffset(ctx, req.FilePath, req.AudioTrackIndex, t.ffmpegPath)
+	startOffset := t.probeOffset(ctx, req.FilePath, req.AudioTrackIndex, ffmpegPath)
 
 	order := chunkOrderForPosition(chunks, req.StartPosition)
-	timeout := time.Duration(t.chunkSeconds*asrChunkTimeoutFactor) * time.Second
+	timeout := time.Duration(chunkSeconds*asrChunkTimeoutFactor) * time.Second
 
 	var all []SubtitleCue
 	detected := ""

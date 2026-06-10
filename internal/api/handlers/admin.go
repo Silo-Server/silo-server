@@ -27,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -1217,6 +1218,9 @@ func (h *AdminHandler) HandleGetSensitiveStatus(w http.ResponseWriter, r *http.R
 type adminSettingResponse struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+	// RestartRequired reports whether the saved value only takes effect
+	// after a server restart (set on update responses only).
+	RestartRequired bool `json:"restart_required,omitempty"`
 }
 
 type adminSettingsListResponse struct {
@@ -2145,9 +2149,10 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		h.OnServerSettingUpdated(r.Context(), key, req.Value)
 	}
 
+	restartRequired := config.RestartRequired(key)
 	if sensitiveSettingKeys[key] {
-		writeJSON(w, http.StatusOK, adminSettingResponse{Key: key})
+		writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, RestartRequired: restartRequired})
 		return
 	}
-	writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, Value: req.Value})
+	writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, Value: req.Value, RestartRequired: restartRequired})
 }

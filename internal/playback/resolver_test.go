@@ -19,9 +19,8 @@ func defaultCaps() playback.ClientCapabilities {
 
 func defaultSettings() playback.AdminSettings {
 	return playback.AdminSettings{
-		TranscodeEnabled:  true,
-		Allow4KTranscode:  false,
-		AllowHEVCEncoding: false,
+		TranscodeEnabled: true,
+		Allow4KTranscode: false,
 	}
 }
 

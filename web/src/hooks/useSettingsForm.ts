@@ -61,9 +61,14 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     const promises = Array.from(dirty).map((key) =>
       updateSetting.mutateAsync({ key, value: localValues[key] ?? "" }),
     );
-    await Promise.all(promises);
+    const results = await Promise.all(promises);
     setDirty(new Set());
-    setRestartRequired(true);
+    // The backend reports per key whether a restart is needed; most settings
+    // hot-reload. Once a restart-required key was saved, keep the banner up
+    // until the server actually restarts.
+    if (results.some((r) => r?.restart_required)) {
+      setRestartRequired(true);
+    }
   }, [dirty, localValues, updateSetting]);
 
   const discard = useCallback(() => {

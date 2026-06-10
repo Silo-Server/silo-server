@@ -73,7 +73,13 @@ import (
 
 // Dependencies holds all shared dependencies that handlers need.
 type Dependencies struct {
-	Config                       *config.Config
+	Config *config.Config
+	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
+	// worker modes); read through CurrentConfig(), which falls back to Config.
+	LiveConfig func() *config.Config
+	// OnConfigChange registers a callback fired after a live config reload
+	// actually changes the config. May be nil when hot reload is not wired.
+	OnConfigChange               func(fn func(old, updated *config.Config))
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	AppContext                   context.Context
@@ -177,6 +183,17 @@ type absHandler interface {
 	Mount(r chi.Router)
 }
 
+// CurrentConfig returns the live config when hot reload is wired, falling
+// back to the startup snapshot otherwise.
+func (d *Dependencies) CurrentConfig() *config.Config {
+	if d.LiveConfig != nil {
+		if cfg := d.LiveConfig(); cfg != nil {
+			return cfg
+		}
+	}
+	return d.Config
+}
+
 // NewRouter creates a chi.Router with all middleware and routes mounted
 // under /api/v1/. ABS-compat routes (/abs/*, /login, /socket.io/*) are
 // mounted at the root level when deps.ABSHandler is non-nil.
@@ -262,6 +279,12 @@ func NewRouter(deps Dependencies) chi.Router {
 			deps.Config.Auth.AccessTokenExpiry,
 			deps.Config.Auth.RefreshTokenExpiry,
 		)
+		if deps.OnConfigChange != nil {
+			jwtForReload := jwtService
+			deps.OnConfigChange(func(_, updated *config.Config) {
+				jwtForReload.SetExpiries(updated.Auth.AccessTokenExpiry, updated.Auth.RefreshTokenExpiry)
+			})
+		}
 		provider := auth.NewLocalProvider(userRepo, sessionRepo)
 		authService = auth.NewService(
 			provider,
@@ -663,13 +686,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
 		}
 		if deps.Config != nil {
-			playbackHandler.FFmpegPath = deps.Config.Playback.FFmpegPath
-			playbackHandler.HWAccel = deps.Config.Playback.HWAccel
-			playbackHandler.TranscodeDir = deps.Config.Playback.TranscodeDir
+			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
+				return deps.CurrentConfig().Playback
+			}
 			if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
-				slog.Warn("playback transcode cleanup failed", "dir", playbackHandler.TranscodeDir, "error", err)
+				slog.Warn("playback transcode cleanup failed", "dir", deps.Config.Playback.TranscodeDir, "error", err)
 			} else if cleaned > 0 {
-				slog.Info("playback transcode cleanup removed orphaned dirs", "dir", playbackHandler.TranscodeDir, "count", cleaned)
+				slog.Info("playback transcode cleanup removed orphaned dirs", "dir", deps.Config.Playback.TranscodeDir, "count", cleaned)
 			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
@@ -732,7 +755,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		streamHandler.S3Bucket = deps.S3Public.Bucket()
 	}
 	if streamHandler != nil && deps.Config != nil {
-		streamHandler.FFmpegPath = deps.Config.Playback.FFmpegPath
+		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
+			return deps.CurrentConfig().Playback
+		}
 	}
 
 	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher)
@@ -914,58 +939,40 @@ func NewRouter(deps Dependencies) chi.Router {
 	// the existing subtitle pipeline with no client changes.
 	// Shared AI endpoint client + dispatch semaphore: subtitle translation/ASR
 	// and metadata translation draw from one client and one concurrency bound.
+	// Connection settings, models, toggles, and quotas hot-reload through
+	// OnConfigChange; only the semaphore size (ai.max_concurrent_jobs) is
+	// fixed at construction.
 	var aiClient *llm.Client
 	var aiSem chan struct{}
 	if deps.Config != nil {
-		aiClient = llm.NewClient(llm.Config{
-			BaseURL:    deps.Config.AI.BaseURL,
-			APIKey:     deps.Config.AI.APIKey,
-			ChatModel:  deps.Config.AI.ChatModel,
-			ASRBaseURL: deps.Config.AI.ASRBaseURL,
-			ASRAPIKey:  deps.Config.AI.ASRAPIKey,
-			ASRModel:   deps.Config.AI.ASRModel,
-		})
+		aiClient = llm.NewClient(llmConfigFromServer(deps.Config))
 		aiSem = jobrunner.NewSemaphore(deps.Config.AI.MaxConcurrentJobs)
+		if deps.OnConfigChange != nil {
+			clientForReload := aiClient
+			deps.OnConfigChange(func(_, updated *config.Config) {
+				clientForReload.UpdateConfig(llmConfigFromServer(updated))
+			})
+		}
 	}
 
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
-		// A chat-only gateway (e.g. OpenRouter) cannot produce timestamped
-		// transcriptions; disable ASR rather than let every job fail. The
-		// settings API rejects such values for the ASR URL, but the chat base
-		// URL legitimately may be one — this catches the blank-ASR-URL
-		// fallback case.
-		transcribeEnabled := deps.Config.SubtitleAI.TranscribeEnabled
-		effectiveASRBase := deps.Config.AI.ASRBaseURL
-		if effectiveASRBase == "" {
-			effectiveASRBase = deps.Config.AI.BaseURL
-		}
-		if transcribeEnabled && llm.IsChatOnlyGateway(effectiveASRBase) {
-			slog.Warn("subtitle transcription disabled: the effective transcription endpoint is a chat-only gateway; "+
-				"set a Whisper-compatible Transcription base URL in AI Services", "endpoint", effectiveASRBase)
-			transcribeEnabled = false
-		}
-		aiCfg := subtitleai.Config{
-			Configured:            deps.Config.AI.BaseURL != "",
-			TranslateEnabled:      deps.Config.SubtitleAI.Enabled,
-			TranscribeEnabled:     transcribeEnabled,
-			ChatModel:             deps.Config.AI.ChatModel,
-			ASRModel:              deps.Config.AI.ASRModel,
-			BatchSize:             deps.Config.SubtitleAI.BatchSize,
-			ContextNeighbors:      deps.Config.SubtitleAI.ContextNeighbors,
-			TranscribeQuotaJobs:   deps.Config.SubtitleAI.TranscribeQuotaJobs,
-			TranscribeQuotaPeriod: deps.Config.SubtitleAI.TranscribeQuotaPeriod,
+		aiCfg, disabledGateway := effectiveSubtitleAIConfig(deps.Config)
+		if disabledGateway != "" {
+			warnChatOnlyGateway(disabledGateway)
 		}
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
 		}
+		aiTranslator := subtitleai.NewLLMTranslator(aiClient, aiCfg.BatchSize, aiCfg.ContextNeighbors)
+		aiTranscriber := subtitleai.NewWhisperTranscriber(aiClient, deps.Config.Playback.FFmpegPath, deps.Config.SubtitleAI.ASRChunkSeconds)
 		aiService := subtitleai.NewService(
 			deps.AppContext,
 			aiCfg,
 			subtitleai.NewPgJobRepository(deps.DB),
-			subtitleai.NewLLMTranslator(aiClient, aiCfg.BatchSize, aiCfg.ContextNeighbors),
-			subtitleai.NewWhisperTranscriber(aiClient, deps.Config.Playback.FFmpegPath, deps.Config.SubtitleAI.ASRChunkSeconds),
+			aiTranslator,
+			aiTranscriber,
 			subtitleManager,
 			subtitleRepo,
 			deps.FileRepo,
@@ -975,6 +982,21 @@ func NewRouter(deps Dependencies) chi.Router {
 			aiSem,
 		)
 		aiService.Recover()
+		if deps.OnConfigChange != nil {
+			deps.OnConfigChange(func(old, updated *config.Config) {
+				newCfg, newDisabled := effectiveSubtitleAIConfig(updated)
+				aiService.UpdateConfig(newCfg)
+				aiTranslator.SetBatching(updated.SubtitleAI.BatchSize, updated.SubtitleAI.ContextNeighbors)
+				aiTranscriber.SetExtraction(updated.Playback.FFmpegPath, updated.SubtitleAI.ASRChunkSeconds)
+				// Warn only when the gateway-disable condition newly appears,
+				// not on every unrelated settings change.
+				if newDisabled != "" && old != nil {
+					if _, oldDisabled := effectiveSubtitleAIConfig(old); oldDisabled == "" {
+						warnChatOnlyGateway(newDisabled)
+					}
+				}
+			})
+		}
 		subtitleAIHandler = handlers.NewSubtitleAIHandler(aiService)
 		subtitleAIHandler.StoreProvider = deps.UserStoreProvider
 	}
@@ -985,12 +1007,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		mtRepo := metadatatranslation.NewPgRepository(deps.DB)
 		mtService := metadatatranslation.NewService(
 			deps.AppContext,
-			metadatatranslation.Config{
-				Enabled:    deps.Config.MetadataAI.Enabled,
-				Configured: deps.Config.AI.BaseURL != "",
-				ChatModel:  deps.Config.AI.ChatModel,
-				OnView:     deps.Config.MetadataAI.OnView,
-			},
+			metadataAIConfigFromServer(deps.Config),
 			mtRepo,
 			mtRepo,
 			&metadatatranslation.CatalogLocalizationStore{
@@ -1003,6 +1020,11 @@ func NewRouter(deps Dependencies) chi.Router {
 			slog.Default(),
 		)
 		mtService.Recover()
+		if deps.OnConfigChange != nil {
+			deps.OnConfigChange(func(_, updated *config.Config) {
+				mtService.UpdateConfig(metadataAIConfigFromServer(updated))
+			})
+		}
 		metadataAIHandler = handlers.NewMetadataAIHandler(mtService)
 		// Wire the refresh fallback: libraries with auto_translate_metadata get
 		// missing localizations filled after each metadata refresh.
@@ -2660,4 +2682,64 @@ func (a *traktCollectionAdapter) GetCollectionPreset(ctx context.Context, preset
 		}
 	}
 	return entries, nil
+}
+
+// llmConfigFromServer derives the shared AI client config from the server
+// config. Used at construction and again on every config reload.
+func llmConfigFromServer(cfg *config.Config) llm.Config {
+	return llm.Config{
+		BaseURL:    cfg.AI.BaseURL,
+		APIKey:     cfg.AI.APIKey,
+		ChatModel:  cfg.AI.ChatModel,
+		ASRBaseURL: cfg.AI.ASRBaseURL,
+		ASRAPIKey:  cfg.AI.ASRAPIKey,
+		ASRModel:   cfg.AI.ASRModel,
+	}
+}
+
+// effectiveSubtitleAIConfig derives the subtitle AI service config from the
+// server config. A chat-only gateway (e.g. OpenRouter) cannot produce
+// timestamped transcriptions, so transcription is disabled rather than
+// letting every job fail; the settings API rejects such values for the ASR
+// URL, but the chat base URL legitimately may be one — this catches the
+// blank-ASR-URL fallback case. The second return is the offending endpoint
+// when that guard fired, empty otherwise.
+func effectiveSubtitleAIConfig(cfg *config.Config) (subtitleai.Config, string) {
+	transcribeEnabled := cfg.SubtitleAI.TranscribeEnabled
+	effectiveASRBase := cfg.AI.ASRBaseURL
+	if effectiveASRBase == "" {
+		effectiveASRBase = cfg.AI.BaseURL
+	}
+	disabledGateway := ""
+	if transcribeEnabled && llm.IsChatOnlyGateway(effectiveASRBase) {
+		transcribeEnabled = false
+		disabledGateway = effectiveASRBase
+	}
+	return subtitleai.Config{
+		Configured:            cfg.AI.BaseURL != "",
+		TranslateEnabled:      cfg.SubtitleAI.Enabled,
+		TranscribeEnabled:     transcribeEnabled,
+		ChatModel:             cfg.AI.ChatModel,
+		ASRModel:              cfg.AI.ASRModel,
+		BatchSize:             cfg.SubtitleAI.BatchSize,
+		ContextNeighbors:      cfg.SubtitleAI.ContextNeighbors,
+		TranscribeQuotaJobs:   cfg.SubtitleAI.TranscribeQuotaJobs,
+		TranscribeQuotaPeriod: cfg.SubtitleAI.TranscribeQuotaPeriod,
+	}, disabledGateway
+}
+
+func warnChatOnlyGateway(endpoint string) {
+	slog.Warn("subtitle transcription disabled: the effective transcription endpoint is a chat-only gateway; "+
+		"set a Whisper-compatible Transcription base URL in AI Services", "endpoint", endpoint)
+}
+
+// metadataAIConfigFromServer derives the metadata translation service config
+// from the server config. Used at construction and on every config reload.
+func metadataAIConfigFromServer(cfg *config.Config) metadatatranslation.Config {
+	return metadatatranslation.Config{
+		Enabled:    cfg.MetadataAI.Enabled,
+		Configured: cfg.AI.BaseURL != "",
+		ChatModel:  cfg.AI.ChatModel,
+		OnView:     cfg.MetadataAI.OnView,
+	}
 }

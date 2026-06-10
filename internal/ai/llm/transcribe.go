@@ -142,12 +142,13 @@ func hostMatchesAny(baseURL string, hosts []string) bool {
 // configured), using the OpenAI-compatible /v1/audio/transcriptions API with
 // response_format=verbose_json for segment timestamps.
 func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transcription, error) {
-	if !c.cfg.ASRConfigured() {
+	cfg := c.Config()
+	if !cfg.ASRConfigured() {
 		return nil, fmt.Errorf("transcription endpoint is not configured")
 	}
-	if IsChatOnlyGateway(c.cfg.asrBaseURL()) {
+	if IsChatOnlyGateway(cfg.asrBaseURL()) {
 		return nil, fmt.Errorf("the configured transcription endpoint (%s) cannot produce timestamped transcriptions; "+
-			"set a Whisper-compatible Transcription base URL under Admin Settings → AI Services", c.cfg.asrBaseURL())
+			"set a Whisper-compatible Transcription base URL under Admin Settings → AI Services", cfg.asrBaseURL())
 	}
 	if len(req.Audio) == 0 {
 		return nil, fmt.Errorf("no audio data to transcribe")
@@ -160,7 +161,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	url := endpointURL(c.cfg.asrBaseURL(), "audio/transcriptions")
+	url := endpointURL(cfg.asrBaseURL(), "audio/transcriptions")
 
 	var result *Transcription
 	doErr := c.doWithRetry(ctx, c.asrHTTP, "transcription API",
@@ -175,7 +176,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 				return nil, fmt.Errorf("write multipart audio: %w", err)
 			}
 			fields := [][2]string{
-				{"model", c.cfg.ASRModel},
+				{"model", cfg.ASRModel},
 				{"response_format", "verbose_json"},
 				{"temperature", "0"},
 				// Word timings let cue building split paragraph-length
@@ -187,7 +188,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 			if req.Language != "" {
 				fields = append(fields, [2]string{"language", req.Language})
 			}
-			if !hostMatchesAny(c.cfg.asrBaseURL(), strictHostedASRHosts) {
+			if !hostMatchesAny(cfg.asrBaseURL(), strictHostedASRHosts) {
 				fields = append(fields, [2]string{"vad_filter", "true"})
 			}
 			for _, f := range fields {
@@ -204,7 +205,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 				return nil, fmt.Errorf("create request: %w", err)
 			}
 			httpReq.Header.Set("Content-Type", w.FormDataContentType())
-			if key := c.cfg.asrAPIKey(); key != "" {
+			if key := cfg.asrAPIKey(); key != "" {
 				httpReq.Header.Set("Authorization", "Bearer "+key)
 			}
 			return httpReq, nil
@@ -219,7 +220,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 			}
 			if parsed.Segments == nil {
 				return &permanentError{err: fmt.Errorf(
-					"transcription endpoint did not return verbose_json segments (model %q); a verbose_json-capable Whisper endpoint is required", c.cfg.ASRModel)}
+					"transcription endpoint did not return verbose_json segments (model %q); a verbose_json-capable Whisper endpoint is required", cfg.ASRModel)}
 			}
 			out := &Transcription{Language: parsed.Language}
 			for _, s := range *parsed.Segments {
