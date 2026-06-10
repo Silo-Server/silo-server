@@ -48,6 +48,8 @@ export function contentLevelsForType(libraryType: string): string[] {
     case "ebooks":
     case "ebook":
       return ["ebook"];
+    case "manga":
+      return ["manga"];
     case "podcasts":
       return ["podcast", "podcast_episode"];
     default:
