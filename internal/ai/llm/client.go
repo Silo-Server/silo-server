@@ -121,7 +121,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 		return "", fmt.Errorf("marshal chat request: %w", err)
 	}
 
-	url := strings.TrimRight(c.cfg.BaseURL, "/") + "/v1/chat/completions"
+	url := endpointURL(c.cfg.BaseURL, "chat/completions")
 
 	var content string
 	err = c.doWithRetry(ctx, c.chatHTTP, "chat API",
@@ -249,6 +249,18 @@ func (c *Client) doWithRetry(ctx context.Context, httpClient *http.Client, label
 		lastErr = fmt.Errorf("%s: retries exhausted", label)
 	}
 	return lastErr
+}
+
+// endpointURL joins a configured base URL with an OpenAI API path,
+// tolerating bases that already include the version segment (e.g.
+// DeepInfra's https://api.deepinfra.com/v1/openai) alongside bare hosts
+// (https://api.openai.com) and prefixed hosts (https://api.groq.com/openai).
+func endpointURL(base, path string) string {
+	base = strings.TrimRight(base, "/")
+	if strings.Contains(base, "/v1") {
+		return base + "/" + path
+	}
+	return base + "/v1/" + path
 }
 
 // Truncate caps a string for inclusion in an error or log line.

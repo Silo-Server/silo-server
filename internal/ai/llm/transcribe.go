@@ -118,7 +118,7 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	url := strings.TrimRight(c.cfg.asrBaseURL(), "/") + "/v1/audio/transcriptions"
+	url := endpointURL(c.cfg.asrBaseURL(), "audio/transcriptions")
 
 	var result *Transcription
 	doErr := c.doWithRetry(ctx, c.asrHTTP, "transcription API",

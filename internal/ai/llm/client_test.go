@@ -259,3 +259,19 @@ func TestTranscribeRefusesChatOnlyGateway(t *testing.T) {
 		t.Fatalf("err = %v, want chat-only refusal", err)
 	}
 }
+
+func TestEndpointURLToleratesVersionedBases(t *testing.T) {
+	cases := map[string]string{
+		"https://api.openai.com":              "https://api.openai.com/v1/chat/completions",
+		"https://api.groq.com/openai":         "https://api.groq.com/openai/v1/chat/completions",
+		"https://api.deepinfra.com/v1/openai": "https://api.deepinfra.com/v1/openai/chat/completions",
+		"http://localhost:8969":               "http://localhost:8969/v1/chat/completions",
+		"http://localhost:8969/v1":            "http://localhost:8969/v1/chat/completions",
+		"https://api.openai.com/":             "https://api.openai.com/v1/chat/completions",
+	}
+	for base, want := range cases {
+		if got := endpointURL(base, "chat/completions"); got != want {
+			t.Errorf("endpointURL(%q) = %q, want %q", base, got, want)
+		}
+	}
+}
