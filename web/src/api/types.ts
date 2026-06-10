@@ -2364,6 +2364,7 @@ export interface Library {
   name: string;
   enabled: boolean;
   metadata_language: string;
+  auto_translate_metadata: boolean;
   chapter_thumbnails_enabled: boolean;
   chapter_thumbnails_supported: boolean;
   intro_detection_enabled: boolean;
@@ -2534,6 +2535,7 @@ export interface CreateLibraryRequest {
   name: string;
   enabled?: boolean;
   metadata_language?: string;
+  auto_translate_metadata?: boolean;
   chapter_thumbnails_enabled?: boolean;
   intro_detection_enabled?: boolean;
 }

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
-import type { PlayerSubtitleInfo } from "../types";
+import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerFetch } from "../player-fetch";
 import { LANGUAGES, getLanguageName } from "../utils/languageNames";
 
@@ -28,6 +28,9 @@ interface SubtitleTranslateModalProps {
   mediaFileId: number;
   playerConfig: PlayerConfig;
   tracks: PlayerSubtitleInfo[];
+  audioTracks?: PlayerAudioTrack[];
+  translateEnabled?: boolean;
+  transcribeEnabled?: boolean;
   isOpen: boolean;
   sessionId?: string;
   getStartPosition?: () => number;
@@ -40,10 +43,19 @@ function sourceLabel(track: PlayerSubtitleInfo): string {
   return `${lang}${origin}`;
 }
 
+function audioLabel(track: PlayerAudioTrack, i: number): string {
+  const lang = getLanguageName(track.language ?? "") || track.language || `Track ${i + 1}`;
+  const layout = track.layout ? ` · ${track.layout}` : "";
+  return `${lang}${layout}${track.default ? " · default" : ""}`;
+}
+
 export function SubtitleTranslateModal({
   mediaFileId,
   playerConfig,
   tracks,
+  audioTracks,
+  translateEnabled = true,
+  transcribeEnabled = false,
   isOpen,
   sessionId,
   getStartPosition,
@@ -52,7 +64,13 @@ export function SubtitleTranslateModal({
   // Only offer sources the server can actually translate (excludes live tracks,
   // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
   const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
+  const canTranslate = translateEnabled && sourceTracks.length > 0;
+  const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
+  // Subtitle translation is the default; generating from audio takes over when
+  // it's the only possible path (e.g. bitmap-only files).
+  const [mode, setMode] = useState<"subtitles" | "audio">(canTranslate ? "subtitles" : "audio");
   const [sourceIndex, setSourceIndex] = useState<number | null>(null);
+  const [audioIndex, setAudioIndex] = useState(0);
   const [targetLang, setTargetLang] = useState("en");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,45 +87,68 @@ export function SubtitleTranslateModal({
   }, [isOpen, onClose]);
 
   const handleTranslate = useCallback(async () => {
-    if (effectiveSourceIndex === null) return;
-    const source = sourceTracks.find((t) => t.index === effectiveSourceIndex);
+    const fromAudio = mode === "audio";
+    if (!fromAudio && effectiveSourceIndex === null) return;
     setSubmitting(true);
     setError(null);
     try {
+      let body: Record<string, unknown>;
+      if (fromAudio) {
+        const audio = audioTracks?.[audioIndex];
+        // Same target as the audio language -> plain transcription; otherwise
+        // transcribe then translate.
+        const sameLanguage = (audio?.language ?? "") === targetLang;
+        body = {
+          media_file_id: mediaFileId,
+          kind: sameLanguage ? "transcribe" : "transcribe_translate",
+          source_index: audioIndex,
+          source_language: audio?.language ?? "",
+          target_language: sameLanguage ? "" : targetLang,
+          session_id: sessionId ?? "",
+          start_position: getStartPosition?.() ?? 0,
+        };
+      } else {
+        const source = sourceTracks.find((t) => t.index === effectiveSourceIndex);
+        body = {
+          media_file_id: mediaFileId,
+          source_index: effectiveSourceIndex,
+          source_language: source?.language ?? "",
+          target_language: targetLang,
+          session_id: sessionId ?? "",
+          start_position: getStartPosition?.() ?? 0,
+        };
+      }
       const res = await playerFetch<{ job?: { status?: string } }>(
         playerConfig,
         "/subtitles/ai/translate",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            media_file_id: mediaFileId,
-            source_index: effectiveSourceIndex,
-            source_language: source?.language ?? "",
-            target_language: targetLang,
-            session_id: sessionId ?? "",
-            start_position: getStartPosition?.() ?? 0,
-          }),
-        },
+        { method: "POST", body: JSON.stringify(body) },
       );
       // A request that collapses onto an already-running job (e.g. after a
       // reload, or a second viewer) won't get its own live stream — tell the
       // user it's underway; it'll appear via the subtitle-ready refresh.
       if (res?.job?.status === "running") {
-        toast.info(
-          "A translation for this track is already in progress — it'll appear when it's ready.",
-        );
+        toast.info("A job for this track is already in progress — it'll appear when it's ready.");
       }
       // Otherwise the player takes over: it pauses, streams cues in as they're
-      // translated, then resumes once your position is covered.
+      // generated, then resumes once your position is covered.
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't start translation.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : mode === "audio"
+            ? "Couldn't start subtitle generation."
+            : "Couldn't start translation.",
+      );
     } finally {
       setSubmitting(false);
     }
   }, [
+    mode,
     effectiveSourceIndex,
     sourceTracks,
+    audioTracks,
+    audioIndex,
     mediaFileId,
     targetLang,
     sessionId,
@@ -131,7 +172,9 @@ export function SubtitleTranslateModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 className="text-sm font-semibold">Translate subtitles with AI</h2>
+          <h2 className="text-sm font-semibold">
+            {mode === "audio" ? "Generate subtitles with AI" : "Translate subtitles with AI"}
+          </h2>
           <button
             type="button"
             className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
@@ -143,30 +186,77 @@ export function SubtitleTranslateModal({
         </div>
 
         <div className="space-y-3 px-4 py-4">
-          {sourceTracks.length === 0 ? (
+          {canTranslate && canTranscribe && (
+            <div className="flex gap-1 rounded bg-neutral-800 p-1" role="tablist">
+              {(
+                [
+                  ["subtitles", "From subtitles"],
+                  ["audio", "From audio"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === value}
+                  className={`flex-1 rounded px-2 py-1 text-xs font-medium focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                    mode === value ? "bg-white/15 text-white" : "text-white/50 hover:text-white/80"
+                  }`}
+                  onClick={() => setMode(value)}
+                  disabled={submitting}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!canTranslate && !canTranscribe ? (
             <p className="py-4 text-center text-xs text-white/50">
               No text subtitle track is available to translate. Add or download one first.
             </p>
           ) : (
             <>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-white/60">Translate from</span>
-                <select
-                  className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
-                  value={effectiveSourceIndex ?? ""}
-                  onChange={(e) => setSourceIndex(Number(e.target.value))}
-                  disabled={submitting}
-                >
-                  {sourceTracks.map((track) => (
-                    <option key={track.index} value={track.index}>
-                      {sourceLabel(track)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {mode === "subtitles" ? (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-white/60">
+                    Translate from
+                  </span>
+                  <select
+                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                    value={effectiveSourceIndex ?? ""}
+                    onChange={(e) => setSourceIndex(Number(e.target.value))}
+                    disabled={submitting}
+                  >
+                    {sourceTracks.map((track) => (
+                      <option key={track.index} value={track.index}>
+                        {sourceLabel(track)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-white/60">Audio track</span>
+                  <select
+                    className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                    value={audioIndex}
+                    onChange={(e) => setAudioIndex(Number(e.target.value))}
+                    disabled={submitting}
+                  >
+                    {(audioTracks ?? []).map((track, i) => (
+                      <option key={i} value={i}>
+                        {audioLabel(track, i)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-white/60">Translate to</span>
+                <span className="mb-1 block text-xs font-medium text-white/60">
+                  {mode === "audio" ? "Subtitle language" : "Translate to"}
+                </span>
                 <select
                   className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                   value={targetLang}
@@ -199,15 +289,16 @@ export function SubtitleTranslateModal({
                   type="button"
                   className="rounded bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                   onClick={handleTranslate}
-                  disabled={submitting || effectiveSourceIndex === null}
+                  disabled={submitting || (mode === "subtitles" && effectiveSourceIndex === null)}
                 >
-                  {submitting ? "Starting…" : "Translate"}
+                  {submitting ? "Starting…" : mode === "audio" ? "Generate" : "Translate"}
                 </button>
               </div>
 
               <p className="text-[11px] leading-relaxed text-white/35">
-                Playback pauses while the first lines are translated, then resumes with subtitles
-                streaming in. The finished track is saved for everyone.
+                {mode === "audio"
+                  ? "The audio is transcribed on the server (and translated if the language differs) — longer files take a while. The finished track is saved for everyone."
+                  : "Playback pauses while the first lines are translated, then resumes with subtitles streaming in. The finished track is saved for everyone."}
               </p>
             </>
           )}

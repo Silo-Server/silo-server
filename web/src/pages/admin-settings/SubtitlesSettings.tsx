@@ -1,15 +1,9 @@
 import { useState, useEffect } from "react";
-import { toast } from "sonner";
 import {
   useSubtitleProviders,
   useUpdateSubtitleProvider,
   useTestSubtitleProvider,
 } from "@/hooks/queries/admin/subtitles";
-import {
-  useAdminSensitiveStatus,
-  useAdminServerSettings,
-  useUpdateServerSetting,
-} from "@/hooks/queries/admin/settings";
 import type { SubtitleProviderConfig } from "@/api/types";
 
 import { Button } from "@/components/ui/button";
@@ -19,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Eye, EyeOff } from "lucide-react";
 import { CredentialStatus } from "./CredentialStatus";
-import { SettingField } from "./SettingField";
 
 // ============================================================================
 // Search providers
@@ -252,138 +245,19 @@ function SearchProvidersContent() {
   );
 }
 
-// ============================================================================
-// AI translation
-// ============================================================================
-
-function AISubtitleTranslationCard() {
-  const { data: settings } = useAdminServerSettings();
-  const { data: sensitive } = useAdminSensitiveStatus();
-  const updateSetting = useUpdateServerSetting();
-
-  const apiKeyConfigured = new Set(sensitive?.configured ?? []).has("subtitle_ai.api_key");
-
-  const [enabled, setEnabled] = useState("false");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [chatModel, setChatModel] = useState("");
-  const [maxConcurrent, setMaxConcurrent] = useState("2");
-  const [apiKey, setApiKey] = useState("");
-
-  // Hydrate the form from current server settings once loaded.
-  useEffect(() => {
-    if (!settings) return;
-    setEnabled(settings["subtitle_ai.enabled"] ?? "false");
-    setBaseUrl(settings["subtitle_ai.base_url"] ?? "https://api.openai.com");
-    setChatModel(settings["subtitle_ai.chat_model"] ?? "gpt-4o-mini");
-    setMaxConcurrent(settings["subtitle_ai.max_concurrent_jobs"] ?? "2");
-  }, [settings]);
-
-  function save() {
-    const trimmedBaseUrl = baseUrl.trim();
-    const trimmedChatModel = chatModel.trim();
-    const parsedMaxConcurrent = Number.parseInt(maxConcurrent, 10);
-
-    // Don't let an admin persist a config that would break translation for
-    // everyone (a blank endpoint/model when enabled, or a bad concurrency value).
-    if (enabled === "true" && (trimmedBaseUrl === "" || trimmedChatModel === "")) {
-      toast.error("Base URL and chat model are required to enable AI translation.");
-      return;
-    }
-    if (!Number.isInteger(parsedMaxConcurrent) || parsedMaxConcurrent < 1) {
-      toast.error("Max concurrent jobs must be a positive whole number.");
-      return;
-    }
-
-    const updates = [
-      updateSetting.mutateAsync({ key: "subtitle_ai.enabled", value: enabled }),
-      updateSetting.mutateAsync({ key: "subtitle_ai.base_url", value: trimmedBaseUrl }),
-      updateSetting.mutateAsync({ key: "subtitle_ai.chat_model", value: trimmedChatModel }),
-      updateSetting.mutateAsync({
-        key: "subtitle_ai.max_concurrent_jobs",
-        value: String(parsedMaxConcurrent),
-      }),
-    ];
-    if (apiKey.trim() !== "") {
-      updates.push(updateSetting.mutateAsync({ key: "subtitle_ai.api_key", value: apiKey }));
-    }
-    void Promise.all(updates).then(() => setApiKey(""));
-  }
-
-  return (
-    <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">AI Subtitle Translation</h3>
-          <p className="text-muted-foreground text-xs">
-            On-demand subtitle translation via any OpenAI-compatible chat API (OpenAI, Groq, a local
-            Ollama server, …). Translated tracks are generated once on the server and served to
-            every client.
-          </p>
-        </div>
-        <CredentialStatus configured={apiKeyConfigured} />
-      </div>
-      <SettingField
-        label="Enabled"
-        type="toggle"
-        value={enabled}
-        onChange={setEnabled}
-        hint="Show the “Translate with AI” action in the player."
-      />
-      <SettingField
-        label="Base URL"
-        type="text"
-        value={baseUrl}
-        onChange={setBaseUrl}
-        hint="https://api.openai.com"
-      />
-      <SettingField
-        label="Chat model"
-        type="text"
-        value={chatModel}
-        onChange={setChatModel}
-        hint="e.g. gpt-4o-mini, llama3.1"
-      />
-      <SettingField
-        label="API Key"
-        type="password"
-        value={apiKey}
-        onChange={setApiKey}
-        sensitiveConfigured={apiKeyConfigured}
-        hint="Leave blank to keep current. Empty is fine for keyless local servers."
-      />
-      <SettingField
-        label="Max concurrent jobs"
-        type="number"
-        value={maxConcurrent}
-        onChange={setMaxConcurrent}
-        hint="Caps simultaneous translations so they don't starve transcodes."
-      />
-      <div className="pt-2">
-        <Button type="button" onClick={save} disabled={updateSetting.isPending}>
-          {updateSetting.isPending ? "Saving..." : "Save AI Translation Settings"}
-        </Button>
-        <p className="text-muted-foreground mt-2 text-xs">
-          Changes take effect after a server restart.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export default function SubtitlesSettings() {
   return (
     <div className="flex h-full flex-col">
       <div className="mb-6 space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">Subtitles</h2>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Search providers for downloading subtitles and AI translation for generating new language
-          tracks.
+          Search providers for downloading subtitles. AI translation and transcription live under AI
+          Services.
         </p>
       </div>
 
       <div className="space-y-8">
         <SearchProvidersContent />
-        <AISubtitleTranslationCard />
       </div>
     </div>
   );

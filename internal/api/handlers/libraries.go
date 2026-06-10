@@ -192,6 +192,7 @@ type updateLibraryRequest struct {
 	Name                     *string   `json:"name,omitempty"`
 	Enabled                  *bool     `json:"enabled,omitempty"`
 	MetadataLanguage         *string   `json:"metadata_language,omitempty"`
+	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty"`
 }
@@ -226,6 +227,7 @@ type libraryResponse struct {
 	Name                       string     `json:"name"`
 	Enabled                    bool       `json:"enabled"`
 	MetadataLanguage           string     `json:"metadata_language"`
+	AutoTranslateMetadata      bool       `json:"auto_translate_metadata"`
 	ChapterThumbnailsEnabled   bool       `json:"chapter_thumbnails_enabled"`
 	ChapterThumbnailsSupported bool       `json:"chapter_thumbnails_supported"`
 	IntroDetectionEnabled      bool       `json:"intro_detection_enabled"`
@@ -348,6 +350,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		Name:                       f.Name,
 		Enabled:                    f.Enabled,
 		MetadataLanguage:           f.MetadataLanguage,
+		AutoTranslateMetadata:      f.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled:   f.ChapterThumbnailsEnabled,
 		ChapterThumbnailsSupported: false,
 		IntroDetectionEnabled:      f.IntroDetectionEnabled,
@@ -652,6 +655,7 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 		Name:                     req.Name,
 		Enabled:                  req.Enabled,
 		MetadataLanguage:         req.MetadataLanguage,
+		AutoTranslateMetadata:    req.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 	})

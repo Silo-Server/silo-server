@@ -15,6 +15,7 @@ import {
   Paintbrush,
   Layers,
   Subtitles,
+  Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -26,6 +27,7 @@ import PlaybackSettings from "./PlaybackSettings";
 import ScannerSettings from "./ScannerSettings";
 import IntroSettings from "./IntroSettings";
 import SubtitlesSettings from "./SubtitlesSettings";
+import AIServicesSettings from "./AIServicesSettings";
 import RateLimitSettings from "./RateLimitSettings";
 import WatchProvidersSettings from "./WatchProvidersSettings";
 import IntegrationsSettings from "./IntegrationsSettings";
@@ -66,6 +68,7 @@ const SETTINGS_GROUPS: SettingsNavGroup[] = [
       { id: "scanner", label: "Scanner & Matcher", icon: ScanSearch, component: ScannerSettings },
       { id: "intro", label: "Intro Markers", icon: Captions, component: IntroSettings },
       { id: "subtitles", label: "Subtitles", icon: Subtitles, component: SubtitlesSettings },
+      { id: "ai", label: "AI Services", icon: Sparkles, component: AIServicesSettings },
       { id: "playback", label: "Playback", icon: PlayCircle, component: PlaybackSettings },
       { id: "downloads", label: "Downloads", icon: Download, component: DownloadSettings },
     ],
