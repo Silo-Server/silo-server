@@ -11,11 +11,11 @@ import (
 )
 
 type fakeNotificationPurger struct {
-	calls           int
-	lastDismissed   time.Time
-	lastAll         time.Time
-	returnCount     int64
-	err             error
+	calls         int
+	lastDismissed time.Time
+	lastAll       time.Time
+	returnCount   int64
+	err           error
 }
 
 func (f *fakeNotificationPurger) PurgeOld(_ context.Context, dismissedBefore, allBefore time.Time) (int64, error) {

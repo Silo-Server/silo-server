@@ -11,14 +11,14 @@ import (
 )
 
 type fakeStore struct {
-	Store // embed for unimplemented methods (nil-panic = test failure, intended)
-	inserted    []*Notification
-	nextID      int64
-	prefs       map[int]map[Category]bool
-	admins      []int
-	libUsers    map[int][]int
-	allUsers    []int
-	insertErr   error // when non-nil, Insert returns this error
+	Store     // embed for unimplemented methods (nil-panic = test failure, intended)
+	inserted  []*Notification
+	nextID    int64
+	prefs     map[int]map[Category]bool
+	admins    []int
+	libUsers  map[int][]int
+	allUsers  []int
+	insertErr error // when non-nil, Insert returns this error
 
 	// recorded args for dismiss calls
 	dismissTyp      string
@@ -26,8 +26,8 @@ type fakeStore struct {
 
 	// digest support
 	digestSubs  []int
-	addedCounts map[int]int           // userID → count
-	addedErrors map[int]error         // userID → error (optional per-user error)
+	addedCounts map[int]int   // userID → count
+	addedErrors map[int]error // userID → error (optional per-user error)
 }
 
 func (f *fakeStore) Insert(_ context.Context, n *Notification) (bool, error) {

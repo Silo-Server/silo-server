@@ -13,7 +13,7 @@ import (
 // catalog item. All callers in this codebase use "metadata_updated" for both
 // new and re-scanned items; there is no separate "item_added" value.
 func changeIsAddition(change string) bool {
-	return change == "metadata_updated" || change == "item_added"
+	return change == metadataUpdated || change == "item_added"
 }
 
 const inProgressWindow = 21 * 24 * time.Hour
@@ -22,6 +22,8 @@ const inProgressWindow = 21 * 24 * time.Hour
 // new arrival.  metadata_updated events fired by periodic library refreshes on
 // older items are suppressed.
 const newItemWindow = 48 * time.Hour
+
+const metadataUpdated = "metadata_updated"
 
 // ProfileRef identifies a specific user+profile pair to notify.
 type ProfileRef struct {
@@ -54,7 +56,7 @@ type catalogItemPayload struct {
 // matchContent handles catalog-channel catalog.item.changed events and creates
 // content.added notifications for every interested profile.
 func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error {
-	if env.Channel != evt.ChannelCatalog || env.Event != "catalog.item.changed" {
+	if env.Channel != evt.ChannelCatalog || env.Event != string(TypeCatalogItemChanged) {
 		return nil
 	}
 
@@ -72,12 +74,11 @@ func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error
 		return nil
 	}
 
-	resolver, _ := m.content.(ContentResolver)
-	if resolver == nil {
+	if m.content == nil {
 		return nil
 	}
 
-	title, seriesID, libraryID, createdAt, err := resolver.ItemContext(ctx, contentID)
+	title, seriesID, libraryID, createdAt, err := m.content.ItemContext(ctx, contentID)
 	if err != nil {
 		return fmt.Errorf("content matcher: item context for %s: %w", contentID, err)
 	}
@@ -94,7 +95,7 @@ func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error
 	}
 
 	inProgressSince := time.Now().UTC().Add(-inProgressWindow)
-	refs, err := resolver.InterestedProfiles(ctx, contentID, seriesID, libraryID, inProgressSince)
+	refs, err := m.content.InterestedProfiles(ctx, contentID, seriesID, libraryID, inProgressSince)
 	if err != nil {
 		return fmt.Errorf("content matcher: interested profiles for %s: %w", contentID, err)
 	}

@@ -9,6 +9,11 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 )
 
+const (
+	eventScanFailed = "scan.failed"
+	adminTasksLink  = "/admin/tasks"
+)
+
 // adminAlertEvents maps failure event names to their notification titles.
 // Keys are verified against real publishers:
 //   - "job.failed"  → hub.go PublishJob on ChannelJobs (models.AdminJob payload)
@@ -16,8 +21,8 @@ import (
 //
 // Absent (no real event): task.failed (only task.updated exists), plugin failure events.
 var adminAlertEvents = map[string]string{
-	"job.failed":  "Background job failed",
-	"scan.failed": "Library scan failed",
+	string(TypeJobFailed): "Background job failed",
+	eventScanFailed:       "Library scan failed",
 }
 
 // adminAlertChannels lists the only channels whose envelopes the admin matcher
@@ -67,7 +72,7 @@ func (m *Materializer) matchAdmin(ctx context.Context, env evt.Envelope) error {
 		body = fmt.Sprintf("%s (%s)", source, payload.ID)
 	}
 
-	link := "/admin/tasks"
+	link := adminTasksLink
 
 	// Hourly dedup bucket: one alert per (event, source) per clock-hour.
 	dedupBucket := time.Now().UTC().Format("2006010215")
