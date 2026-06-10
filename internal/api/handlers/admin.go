@@ -2106,7 +2106,7 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		if llm.IsChatOnlyGateway(req.Value) {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"This endpoint cannot produce timestamped transcriptions (chat-only gateway). "+
-					"Use api.groq.com/openai, api.openai.com, or a local Whisper server (faster-whisper/speaches).")
+					"Use a self-hosted Whisper server (faster-whisper/speaches), api.groq.com/openai, or api.openai.com.")
 			return
 		}
 	case "metadata_ai.on_view":

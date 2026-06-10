@@ -42,10 +42,18 @@ const TRANSCRIPTION_PRESETS: {
   model: string;
 }[] = [
   {
-    id: "groq-turbo",
-    label: "Groq · fast & cheap",
+    id: "local",
+    label: "Self-hosted · recommended",
     description:
-      "whisper-large-v3-turbo on Groq — fastest hosted option, very low cost. Needs a Groq API key in the transcription key field.",
+      "A speaches/faster-whisper server on your own hardware — private, free, and no rate limits. Adjust the URL to where it runs; no API key needed.",
+    baseUrl: "http://localhost:8000",
+    model: "deepdml/faster-whisper-large-v3-turbo-ct2",
+  },
+  {
+    id: "groq-turbo",
+    label: "Groq · hosted fallback",
+    description:
+      "whisper-large-v3-turbo on Groq — fastest hosted option, very low cost (free tier covers ~2 audio-hours per hour). Needs a Groq API key in the transcription key field.",
     baseUrl: "https://api.groq.com/openai",
     model: "whisper-large-v3-turbo",
   },
@@ -64,14 +72,6 @@ const TRANSCRIPTION_PRESETS: {
       "whisper-1 on OpenAI — solid quality, higher cost than Groq. Uses the main API key if the transcription key is blank.",
     baseUrl: "https://api.openai.com",
     model: "whisper-1",
-  },
-  {
-    id: "local",
-    label: "Self-hosted · private & free",
-    description:
-      "A speaches/faster-whisper server on your own hardware — no per-minute cost, audio never leaves your network. Adjust the URL to where it runs.",
-    baseUrl: "http://localhost:8000",
-    model: "Systran/faster-whisper-large-v3",
   },
 ];
 
@@ -224,7 +224,7 @@ function AIConnectionCard() {
         type="text"
         value={asrBaseUrl}
         onChange={setAsrBaseUrl}
-        hint="Whisper-capable endpoint with segment timestamps: api.groq.com/openai, api.openai.com, or a local faster-whisper/speaches server. Blank uses the base URL — note that chat-only gateways (e.g. OpenRouter) cannot transcribe."
+        hint="Whisper-capable endpoint with segment timestamps: a self-hosted faster-whisper/speaches server (recommended), api.groq.com/openai, or api.openai.com. Blank uses the base URL — note that chat-only gateways (e.g. OpenRouter) cannot transcribe."
       />
       <SettingField
         label="Transcription API key"

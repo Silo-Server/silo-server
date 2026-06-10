@@ -199,5 +199,5 @@ func decorateTranscribeError(err error) error {
 	}
 	return fmt.Errorf("%w — the configured endpoint likely does not support audio transcription; "+
 		"set a Whisper-compatible Transcription base URL (and model) under Admin Settings → AI Services "+
-		"(e.g. api.openai.com with whisper-1, api.groq.com/openai with whisper-large-v3, or a local faster-whisper server)", err)
+		"(e.g. a self-hosted faster-whisper/speaches server, api.groq.com/openai with whisper-large-v3-turbo, or api.openai.com with whisper-1)", err)
 }
