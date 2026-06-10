@@ -84,6 +84,18 @@ func TestValidate_EbookMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidate_MangaMediaScope(t *testing.T) {
+	qd := QueryDefinition{
+		MediaScope: "manga",
+		Match:      "all",
+		Groups:     []QueryGroup{},
+		Sort:       QuerySort{Field: "title", Order: "asc"},
+	}
+	if err := qd.Validate(); err != nil {
+		t.Fatalf("expected manga media scope to be valid, got %v", err)
+	}
+}
+
 func TestValidate_EbookMediaScopeRejectsNarratorRule(t *testing.T) {
 	qd := QueryDefinition{
 		MediaScope: "ebook",

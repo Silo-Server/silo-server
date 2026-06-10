@@ -1090,7 +1090,7 @@ func validateCatalogExactCollectionRequest(req CatalogRequest) error {
 
 func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
 	if !IsValidMediaScope(def.MediaScope) {
-		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', or 'video'", ErrInvalidCatalogRequest)
+		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', 'manga', or 'video'", ErrInvalidCatalogRequest)
 	}
 	if def.Match != "" && def.Match != "all" && def.Match != "any" {
 		return fmt.Errorf("%w: match must be 'all' or 'any'", ErrInvalidCatalogRequest)

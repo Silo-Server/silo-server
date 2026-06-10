@@ -386,6 +386,60 @@ func TestDefaultLibrarySectionsForTypeEbooks(t *testing.T) {
 	})
 }
 
+func TestDefaultLibrarySectionsForTypeManga(t *testing.T) {
+	libraryID := 13
+	got := DefaultLibrarySectionsForType(&libraryID, "manga")
+
+	if len(got) != 5 {
+		t.Fatalf("expected 5 manga default sections, got %d", len(got))
+	}
+
+	tests := []struct {
+		index       int
+		id          string
+		sectionType SectionType
+		title       string
+		position    int
+	}{
+		{index: 0, id: "default-continue-reading", sectionType: SectionContinueWatching, title: "Continue Reading", position: 0},
+		{index: 1, id: "default-recently-added-manga", sectionType: SectionRecentlyAdded, title: "Recently Added Manga", position: 1},
+		{index: 2, id: "default-recently-released-manga", sectionType: SectionRecentlyReleased, title: "Recently Released Manga", position: 2},
+		{index: 3, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 3},
+		{index: 4, id: "default-random-manga", sectionType: SectionRandom, title: "Random Picks", position: 4},
+	}
+
+	for _, tt := range tests {
+		section := got[tt.index]
+		if section.ID != tt.id {
+			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
+		}
+		if section.SectionType != tt.sectionType {
+			t.Fatalf("section %d type = %q, want %q", tt.index, section.SectionType, tt.sectionType)
+		}
+		if section.Title != tt.title {
+			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
+		}
+		if section.Position != tt.position {
+			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
+		}
+	}
+
+	// The manga library browses only its series items: every query section is
+	// scoped to media_items.type='manga', so the per-chapter ebook items are
+	// excluded from the library feed.
+	assertContinueType(t, got[0].Config, ContinueTypeReading)
+	mangaScope := catalog.QueryDefinition{
+		MediaScope: "manga",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	}
+	assertQueryDefinition(t, got[1].Config, mangaScope)
+	assertQueryDefinition(t, got[2].Config, mangaScope)
+	assertEmptyJSON(t, got[3].Config)
+	assertQueryDefinition(t, got[4].Config, mangaScope)
+}
+
 func TestDefaultLibrarySectionsForTypeMixed(t *testing.T) {
 	libraryID := 99
 	got := DefaultLibrarySectionsForType(&libraryID, "mixed")

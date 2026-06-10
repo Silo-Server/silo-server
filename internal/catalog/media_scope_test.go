@@ -18,6 +18,9 @@ func TestMediaScopeItemTypes(t *testing.T) {
 		{"", nil},
 		{"movie", []string{"movie"}},
 		{"audiobook", []string{"audiobook"}},
+		// A manga library browses only its series items; the per-chapter ebook
+		// items are excluded because the manga scope expands to type=manga only.
+		{"manga", []string{"manga"}},
 		{"video", []string{"movie", "series"}},
 		{" Video ", []string{"movie", "series"}},
 	}
@@ -39,6 +42,8 @@ func TestMediaScopeMatchesItemType(t *testing.T) {
 		{"video", "series", true},
 		{"video", "audiobook", false},
 		{"audiobook", "audiobook", true},
+		{"manga", "manga", true},
+		{"manga", "ebook", false},
 		{"movie", "series", false},
 	}
 	for _, tc := range cases {

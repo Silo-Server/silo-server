@@ -113,7 +113,7 @@ const MediaScopeVideo = "video"
 // is an accepted media_scope value. Empty means unscoped and is valid.
 func IsValidMediaScope(scope string) bool {
 	switch scope {
-	case "", "movie", "series", "episode", "audiobook", "ebook", MediaScopeVideo:
+	case "", "movie", "series", "episode", "audiobook", "ebook", "manga", MediaScopeVideo:
 		return true
 	default:
 		return false
@@ -230,7 +230,7 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 	}
 
 	if !IsValidMediaScope(normalized.MediaScope) {
-		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', or 'video'")
+		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', 'manga', or 'video'")
 	}
 
 	if normalized.Match != "all" && normalized.Match != "any" {

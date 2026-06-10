@@ -54,6 +54,21 @@ func TestValidateCatalogQueryRequest_AllowsEbookMediaScope(t *testing.T) {
 	}
 }
 
+func TestValidateCatalogQueryRequest_AllowsMangaMediaScope(t *testing.T) {
+	req := CatalogRequest{
+		Source: CatalogSourceQuery,
+		Query: QueryDefinition{
+			MediaScope: "manga",
+			Match:      "all",
+			Sort:       QuerySort{Field: "title", Order: "asc"},
+		},
+	}
+
+	if err := validateCatalogQueryRequest(req, true); err != nil {
+		t.Fatalf("expected manga media scope to be accepted, got %v", err)
+	}
+}
+
 func TestValidateCatalogQueryRequest_AllowsAddedAtFilter(t *testing.T) {
 	req := CatalogRequest{
 		Source: CatalogSourceQuery,
