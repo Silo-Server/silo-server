@@ -12,6 +12,7 @@ import {
   formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
+  READER_FONT_STACKS,
   readerRendererAttributes,
   readerStyles,
   restoreProgressTarget,
@@ -175,6 +176,22 @@ describe("FoliateBookReader helpers", () => {
     expect(normalizeReaderSettings({ fontFamily: "" }).fontFamily).toBe("inherit");
   });
 
+  it("migrates font choices persisted before the generic stacks existed", () => {
+    expect(
+      normalizeReaderSettings({ fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" })
+        .fontFamily,
+    ).toBe(READER_FONT_STACKS.sans);
+    expect(normalizeReaderSettings({ fontFamily: "Georgia, serif" }).fontFamily).toBe(
+      READER_FONT_STACKS.serif,
+    );
+    expect(normalizeReaderSettings({ fontFamily: "Merriweather, Georgia, serif" }).fontFamily).toBe(
+      READER_FONT_STACKS.serif,
+    );
+    expect(
+      normalizeReaderSettings({ fontFamily: "ui-serif, Georgia, Cambria, serif" }).fontFamily,
+    ).toBe(READER_FONT_STACKS.serif);
+  });
+
   it("normalizes persisted reading ruler settings", () => {
     expect(
       normalizeReaderSettings({
@@ -195,7 +212,7 @@ describe("FoliateBookReader helpers", () => {
     const styles = readerStyles(
       normalizeReaderSettings({
         theme: "dark",
-        fontFamily: "Georgia, serif",
+        fontFamily: READER_FONT_STACKS.serif,
         fontSize: 128,
         fontWeight: 500,
         lineHeight: 1.8,
@@ -208,7 +225,7 @@ describe("FoliateBookReader helpers", () => {
 
     expect(styles).toContain("color-scheme: dark");
     expect(styles).toContain("background: #111827 !important");
-    expect(styles).toContain("font-family: Georgia, serif !important");
+    expect(styles).toContain(`font-family: ${READER_FONT_STACKS.serif} !important`);
     expect(styles).toContain("font-size: 128% !important");
     expect(styles).toContain("font-weight: 500 !important");
     expect(styles).toContain("hyphens: none !important");

@@ -620,8 +620,8 @@ describe("EbookReader", () => {
     expect(fontOptions).not.toContain("Inter");
     expect(fontOptions).not.toContain("Merriweather");
 
-    const comfortable = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Apply comfortable reading profile"]',
+    const comfortable = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Comfortable"),
     );
     await act(async () => {
       comfortable?.click();
@@ -629,11 +629,12 @@ describe("EbookReader", () => {
 
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        fontFamily: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
+        fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
         fontSize: 112,
         lineHeight: 1.75,
       }),
     );
+    expect(comfortable?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("toggles the persisted reading ruler overlay", async () => {
@@ -657,9 +658,9 @@ describe("EbookReader", () => {
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ readingRuler: true }),
     );
-    expect(
-      container.querySelector('[aria-label="Reading ruler - drag vertically to reposition"]'),
-    ).not.toBeNull();
+    const handle = container.querySelector('[role="slider"][aria-label="Reading ruler position"]');
+    expect(handle).not.toBeNull();
+    expect(handle?.getAttribute("aria-valuenow")).toBe("50");
   });
 
   it("constrains the reader grid so the side panel stays inside the viewport", async () => {
@@ -821,9 +822,7 @@ describe("EbookReader", () => {
     expect(container.querySelector('[aria-label="Diagnostics"]')).toBeNull();
     expect(container.textContent).not.toContain("Diagnostics");
 
-    const brightness = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Brightness"]',
-    );
+    const brightness = container.querySelector<HTMLInputElement>('input[aria-label="Brightness"]');
     const hyphenation = container.querySelector<HTMLInputElement>(
       'input[aria-label="Hyphenation"]',
     );
@@ -899,9 +898,7 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const brightness = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Brightness"]',
-    );
+    const brightness = container.querySelector<HTMLInputElement>('input[aria-label="Brightness"]');
     const label = brightness?.closest("label");
     const header = label?.querySelector("[data-reader-range-header]");
     const name = label?.querySelector("[data-reader-range-name]");

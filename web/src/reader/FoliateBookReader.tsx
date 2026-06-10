@@ -148,9 +148,25 @@ const READEST_FORMATS = new Set([
   "md",
 ]);
 
+export const READER_FONT_STACKS = {
+  inherit: "inherit",
+  serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+} as const;
+
+// Font values persisted before the reader switched to generic stacks; without this
+// mapping the font select renders blank for settings saved by older builds.
+const LEGACY_READER_FONT_ALIASES: Record<string, string> = {
+  "Inter, ui-sans-serif, system-ui, sans-serif": READER_FONT_STACKS.sans,
+  "Georgia, serif": READER_FONT_STACKS.serif,
+  "Merriweather, Georgia, serif": READER_FONT_STACKS.serif,
+  "ui-serif, Georgia, Cambria, serif": READER_FONT_STACKS.serif,
+};
+
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   theme: "light",
-  fontFamily: "inherit",
+  fontFamily: READER_FONT_STACKS.inherit,
   fontSize: 112,
   fontWeight: 400,
   hyphenation: true,
@@ -289,13 +305,16 @@ function isReaderWritingMode(value: unknown): value is ReaderWritingMode {
   return value === "auto" || value === "horizontal-tb" || value === "vertical-rl";
 }
 
+function normalizeReaderFontFamily(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return DEFAULT_READER_SETTINGS.fontFamily;
+  const trimmed = value.trim();
+  return LEGACY_READER_FONT_ALIASES[trimmed] ?? trimmed;
+}
+
 export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): ReaderSettings {
   return {
     theme: isReaderTheme(settings?.theme) ? settings.theme : DEFAULT_READER_SETTINGS.theme,
-    fontFamily:
-      typeof settings?.fontFamily === "string" && settings.fontFamily.trim()
-        ? settings.fontFamily.trim()
-        : DEFAULT_READER_SETTINGS.fontFamily,
+    fontFamily: normalizeReaderFontFamily(settings?.fontFamily),
     fontSize: clampNumber(settings?.fontSize, DEFAULT_READER_SETTINGS.fontSize, 80, 180),
     fontWeight: clampNumber(settings?.fontWeight, DEFAULT_READER_SETTINGS.fontWeight, 300, 800),
     hyphenation:
@@ -490,6 +509,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const saveTimerRef = useRef<number | null>(null);
     const pendingProgressRef = useRef<EbookReaderProgressPayload | null>(null);
     const settingsRef = useRef(normalizeReaderSettings(settings));
+    const appliedRendererKeyRef = useRef("");
     const annotationsRef = useRef<EbookReaderAnnotation[]>(annotations);
     const drawnCfisRef = useRef<Set<string>>(new Set());
     const selectionCleanupRef = useRef<(() => void)[]>([]);
@@ -500,18 +520,25 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       const normalized = normalizeReaderSettings(nextSettings);
       settingsRef.current = normalized;
       const renderer = viewRef.current?.renderer;
+      if (!renderer) return;
+      const styles = readerStyles(normalized);
       const attributes = readerRendererAttributes(normalized);
-      renderer?.setStyles?.(readerStyles(normalized));
-      renderer?.setAttribute("gap", attributes.gap);
-      renderer?.setAttribute("margin", attributes.margin);
-      renderer?.setAttribute("max-inline-size", attributes.maxInlineSize);
-      renderer?.setAttribute("max-column-count", attributes.maxColumnCount);
+      // Settings such as the reading ruler never reach the renderer; re-styling and
+      // re-rendering the book for those (or for any no-op update) causes visible jank.
+      const rendererKey = JSON.stringify([styles, attributes]);
+      if (rendererKey === appliedRendererKeyRef.current) return;
+      appliedRendererKeyRef.current = rendererKey;
+      renderer.setStyles?.(styles);
+      renderer.setAttribute("gap", attributes.gap);
+      renderer.setAttribute("margin", attributes.margin);
+      renderer.setAttribute("max-inline-size", attributes.maxInlineSize);
+      renderer.setAttribute("max-column-count", attributes.maxColumnCount);
       if (attributes.flow) {
-        renderer?.setAttribute("flow", attributes.flow);
+        renderer.setAttribute("flow", attributes.flow);
       } else {
-        renderer?.removeAttribute("flow");
+        renderer.removeAttribute("flow");
       }
-      void renderer?.render?.();
+      void renderer.render?.();
     }, []);
 
     const drawAnnotations = useCallback(() => {
@@ -762,6 +789,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         viewRef.current?.close?.();
         viewRef.current?.remove();
         viewRef.current = null;
+        appliedRendererKeyRef.current = "";
         for (const cleanup of selectionCleanupRef.current) cleanup();
         selectionCleanupRef.current = [];
         drawnCfis.clear();
