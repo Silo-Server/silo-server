@@ -54,6 +54,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subdl"
@@ -909,15 +911,21 @@ func NewRouter(deps Dependencies) chi.Router {
 	// the existing subtitle pipeline with no client changes.
 	var subtitleAIHandler *handlers.SubtitleAIHandler
 	if subtitleManager != nil && subtitleRepo != nil && deps.FileRepo != nil && deps.DB != nil && deps.Config != nil {
+		aiClient := llm.NewClient(llm.Config{
+			BaseURL:   deps.Config.SubtitleAI.BaseURL,
+			APIKey:    deps.Config.SubtitleAI.APIKey,
+			ChatModel: deps.Config.SubtitleAI.ChatModel,
+		})
 		aiCfg := subtitleai.Config{
-			Enabled:           deps.Config.SubtitleAI.Enabled,
-			BaseURL:           deps.Config.SubtitleAI.BaseURL,
-			APIKey:            deps.Config.SubtitleAI.APIKey,
-			ChatModel:         deps.Config.SubtitleAI.ChatModel,
-			MaxConcurrentJobs: deps.Config.SubtitleAI.MaxConcurrentJobs,
-			BatchSize:         deps.Config.SubtitleAI.BatchSize,
-			ContextNeighbors:  deps.Config.SubtitleAI.ContextNeighbors,
+			Configured:       deps.Config.SubtitleAI.BaseURL != "",
+			TranslateEnabled: deps.Config.SubtitleAI.Enabled,
+			ChatModel:        deps.Config.SubtitleAI.ChatModel,
+			BatchSize:        deps.Config.SubtitleAI.BatchSize,
+			ContextNeighbors: deps.Config.SubtitleAI.ContextNeighbors,
 		}
+		// One semaphore for all AI job services, so the configured endpoint sees
+		// a single global concurrency bound regardless of job mix.
+		aiSem := jobrunner.NewSemaphore(deps.Config.SubtitleAI.MaxConcurrentJobs)
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
 			aiNotifier = subtitleAINotifier
@@ -926,13 +934,14 @@ func NewRouter(deps Dependencies) chi.Router {
 			deps.AppContext,
 			aiCfg,
 			subtitleai.NewPgJobRepository(deps.DB),
-			subtitleai.NewLLMTranslator(subtitleai.NewClient(aiCfg), aiCfg.BatchSize, aiCfg.ContextNeighbors),
+			subtitleai.NewLLMTranslator(aiClient, aiCfg.BatchSize, aiCfg.ContextNeighbors),
 			subtitleManager,
 			subtitleRepo,
 			deps.FileRepo,
 			aiNotifier,
 			deps.Config.Playback.FFmpegPath,
 			slog.Default(),
+			aiSem,
 		)
 		aiService.Recover()
 		subtitleAIHandler = handlers.NewSubtitleAIHandler(aiService)

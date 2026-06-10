@@ -8,26 +8,16 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const providerTranslated = "translated"
-
-const (
-	// A running job refreshes its heartbeat every heartbeatInterval; one whose
-	// heartbeat has not advanced for staleJobThreshold is treated as orphaned by
-	// a crashed worker and reaped. The margin over heartbeatInterval avoids
-	// reaping a job that is merely mid–LLM-call.
-	heartbeatInterval = 30 * time.Second
-	staleJobThreshold = 2 * time.Minute
-	// How often the background reaper scans for orphaned jobs.
-	reaperInterval = time.Minute
-)
 
 var (
 	// ErrEngineNotConfigured is returned when translation is requested but the
@@ -61,12 +51,11 @@ type SubtitleLister interface {
 	ListDownloadedSubtitles(ctx context.Context, mediaFileID int) ([]subtitles.DownloadedSubtitle, error)
 }
 
-// Service owns the AI subtitle job lifecycle: enqueue, bounded concurrent
-// execution, progress/heartbeat, cancellation, and restart recovery.
+// Service owns the AI subtitle job semantics: enqueue validation, source
+// resolution, translation, and result storage. Lifecycle mechanics (bounded
+// dispatch, heartbeat, stale-job reaping, cancellation) are delegated to the
+// shared jobrunner so they stay identical across Silo's AI job services.
 type Service struct {
-	// baseCtx is the application context; dispatched jobs and the reaper derive
-	// from it so they stop when the server shuts down.
-	baseCtx    context.Context
 	cfg        Config
 	repo       JobRepository
 	translator Translator
@@ -76,16 +65,15 @@ type Service struct {
 	notifier   Notifier // optional
 	ffmpegPath string
 	logger     *slog.Logger
-
-	sem     chan struct{}
-	mu      sync.Mutex
-	cancels map[int64]context.CancelFunc
-	wg      sync.WaitGroup
+	runner     *jobrunner.Runner
 }
 
 // NewService wires a translation service. notifier may be nil. appCtx is the
 // application lifecycle context; jobs and the reaper derive from it so they stop
-// on shutdown. A nil appCtx falls back to context.Background().
+// on shutdown. A nil appCtx falls back to context.Background(). sem is the
+// dispatch semaphore, normally shared with the other AI job services so the
+// configured endpoint sees one global concurrency bound; nil gets a private
+// default-size semaphore.
 func NewService(
 	appCtx context.Context,
 	cfg Config,
@@ -97,19 +85,12 @@ func NewService(
 	notifier Notifier,
 	ffmpegPath string,
 	logger *slog.Logger,
+	sem chan struct{},
 ) *Service {
-	maxConcurrent := cfg.MaxConcurrentJobs
-	if maxConcurrent <= 0 {
-		maxConcurrent = 2
-	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if appCtx == nil {
-		appCtx = context.Background()
-	}
 	return &Service{
-		baseCtx:    appCtx,
 		cfg:        cfg,
 		repo:       repo,
 		translator: translator,
@@ -119,62 +100,32 @@ func NewService(
 		notifier:   notifier,
 		ffmpegPath: ffmpegPath,
 		logger:     logger,
-		sem:        make(chan struct{}, maxConcurrent),
-		cancels:    make(map[int64]context.CancelFunc),
+		runner:     jobrunner.New(appCtx, sem, repo, "subtitle ai", logger),
 	}
 }
 
 // Enabled reports whether translation can currently run.
-func (s *Service) Enabled() bool { return s.cfg.Ready() }
+func (s *Service) Enabled() bool { return s.cfg.TranslateReady() }
 
 // Recover clears jobs orphaned by a crashed worker and starts a background
-// reaper that keeps doing so. Reaping is heartbeat-based (not "every active
-// job"), so it is safe when multiple instances share one database: a job still
-// being heartbeat-updated by a live worker is never reset. Call once at startup;
-// jobs and the reaper derive from the application context passed to NewService,
-// so they stop on shutdown.
+// reaper that keeps doing so. Call once at startup.
 func (s *Service) Recover() {
-	s.reapStaleJobs()
-	go s.reaperLoop()
-}
-
-// reaperLoop periodically reaps orphaned jobs until the application context is
-// cancelled (server shutdown).
-func (s *Service) reaperLoop() {
-	ticker := time.NewTicker(reaperInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.baseCtx.Done():
-			return
-		case <-ticker.C:
-			s.reapStaleJobs()
-		}
-	}
-}
-
-// reapStaleJobs fails any pending/running job whose heartbeat has not advanced
-// within staleJobThreshold.
-func (s *Service) reapStaleJobs() {
-	before := time.Now().Add(-staleJobThreshold)
-	n, err := s.repo.ResetStaleJobs(context.WithoutCancel(s.baseCtx), before, "interrupted by server restart")
-	if err != nil {
-		s.logger.Warn("failed to reset stale subtitle ai jobs", "error", err)
-		return
-	}
-	if n > 0 {
-		s.logger.Info("reset stale subtitle ai jobs", "count", n)
-	}
+	s.runner.Recover()
 }
 
 // Enqueue validates and queues a job, returning immediately. If an identical
 // job is already pending or running, that job is returned instead of a new one.
 func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
-	if !s.cfg.Ready() {
-		return nil, ErrEngineNotConfigured
-	}
 	if req.Kind == "" {
 		req.Kind = JobKindTranslate
+	}
+	switch req.Kind {
+	case JobKindTranslate:
+		if !s.cfg.TranslateReady() {
+			return nil, ErrEngineNotConfigured
+		}
+	default:
+		return nil, fmt.Errorf("%w: unsupported job kind %q", ErrInvalidRequest, req.Kind)
 	}
 
 	target, err := subtitles.NormalizeLanguageCode(req.TargetLanguage)
@@ -244,12 +195,7 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 		return ErrJobNotFound
 	}
 
-	s.mu.Lock()
-	cancel := s.cancels[id]
-	s.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
+	if s.runner.Cancel(id) {
 		return nil
 	}
 	// No in-flight goroutine (e.g. another node, or never started): best-effort
@@ -262,60 +208,11 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 
 // dispatch launches a bounded background goroutine to run the job.
 func (s *Service) dispatch(job Job) {
-	// Derive from the application context so a server shutdown cancels in-flight
-	// translations (the per-job cancel still allows user-initiated cancellation).
-	runCtx, cancel := context.WithCancel(s.baseCtx)
-	s.mu.Lock()
-	s.cancels[job.ID] = cancel
-	s.mu.Unlock()
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer func() {
-			s.mu.Lock()
-			delete(s.cancels, job.ID)
-			s.mu.Unlock()
-			cancel()
-		}()
-
-		// Heartbeat for the whole lifetime — crucially including while queued
-		// behind the semaphore — so the stale-job reaper never reaps a job that is
-		// alive but merely waiting for a slot (which would otherwise mark it failed
-		// and let it resurrect itself on acquire, or admit a duplicate).
-		stopHeartbeat := make(chan struct{})
-		defer close(stopHeartbeat)
-		go s.heartbeatLoop(runCtx, job.ID, stopHeartbeat)
-
-		// Bound concurrency so translation never starves transcodes.
-		select {
-		case s.sem <- struct{}{}:
-		case <-runCtx.Done():
-			_ = s.repo.FailJob(context.Background(), job.ID, JobStatusCancelled, "cancelled before start")
-			return
-		}
-		defer func() { <-s.sem }()
-
-		s.run(runCtx, &job)
-	}()
-}
-
-// heartbeatLoop keeps a job's heartbeat_at fresh until the job ends or the
-// context is cancelled, so the stale-job reaper only ever reaps jobs orphaned by
-// a crashed worker.
-func (s *Service) heartbeatLoop(ctx context.Context, jobID int64, stop <-chan struct{}) {
-	ticker := time.NewTicker(heartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = s.repo.Heartbeat(context.WithoutCancel(ctx), jobID)
-		}
-	}
+	s.runner.Dispatch(job.ID, func(ctx context.Context) {
+		s.run(ctx, &job)
+	}, func(ctx context.Context) {
+		_ = s.repo.FailJob(ctx, job.ID, JobStatusCancelled, "cancelled before start")
+	})
 }
 
 func (s *Service) run(ctx context.Context, job *Job) {
@@ -399,7 +296,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 
 func (s *Service) finishWithError(ctx context.Context, job *Job, err error) {
 	status := JobStatusFailed
-	msg := truncate(err.Error(), 500)
+	msg := llm.Truncate(err.Error(), 500)
 	// Only a genuine cancellation (user cancel, or shutdown via cancel) becomes
 	// "cancelled". A deadline/timeout (context.DeadlineExceeded) stays "failed".
 	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
