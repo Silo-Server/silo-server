@@ -58,7 +58,18 @@ func (r *fakeRepo) GetActiveJobByIdempotencyKey(_ context.Context, key string) (
 	return nil, nil
 }
 
-func (r *fakeRepo) ListJobsByContent(context.Context, string) ([]Job, error) { return nil, nil }
+func (r *fakeRepo) ListJobsByContent(_ context.Context, contentID string) ([]Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Job
+	// Newest first, matching the SQL implementation's ORDER BY created_at DESC.
+	for id := r.nextID; id >= 1; id-- {
+		if j, ok := r.jobs[id]; ok && j.ContentID == contentID {
+			out = append(out, *j)
+		}
+	}
+	return out, nil
+}
 
 func (r *fakeRepo) UpdateProgress(_ context.Context, id int64, status JobStatus, progress float64, message string, done, total int) error {
 	r.mu.Lock()
@@ -249,7 +260,7 @@ func testService(t *testing.T, repo *fakeRepo, content *fakeContent, locs *fakeL
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
+	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model", OnView: "auto"}
 	return NewService(ctx, cfg, repo, content, locs, chat.fn, jobrunner.NewSemaphore(1), nil)
 }
 
@@ -477,5 +488,57 @@ func TestEnqueueValidatesInput(t *testing.T) {
 	disabled := NewService(context.Background(), Config{}, repo, content, locs, chat.fn, nil, nil)
 	if _, err := disabled.Enqueue(context.Background(), JobRequest{ContentID: "x", TargetLanguage: "fr"}); err != ErrNotConfigured {
 		t.Errorf("disabled service err = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestRequestOnViewCooldownAndGating(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	svc := testService(t, repo, content, locs, chat)
+
+	// A recently failed job for the same target+language suppresses re-enqueue.
+	failed := &Job{
+		ContentID: "series1", TargetKind: TargetItem, TargetLanguage: "fr",
+		Status: jobrunner.StatusFailed, UpdatedAt: time.Now().Add(-time.Minute),
+	}
+	if err := repo.InsertJob(context.Background(), failed); err != nil {
+		t.Fatalf("seed failed job: %v", err)
+	}
+	repo.mu.Lock()
+	repo.jobs[failed.ID].Status = jobrunner.StatusFailed
+	repo.jobs[failed.ID].UpdatedAt = time.Now().Add(-time.Minute)
+	repo.mu.Unlock()
+
+	job, err := svc.RequestOnView(context.Background(), "series1", "fr", nil)
+	if err != nil {
+		t.Fatalf("RequestOnView: %v", err)
+	}
+	if job.ID != failed.ID || job.Status != jobrunner.StatusFailed {
+		t.Fatalf("cooldown not applied: got job %d status %s", job.ID, job.Status)
+	}
+
+	// Once the failure has aged past the cooldown, a new job is enqueued.
+	repo.mu.Lock()
+	repo.jobs[failed.ID].UpdatedAt = time.Now().Add(-2 * onViewFailureCooldown)
+	repo.mu.Unlock()
+	job, err = svc.RequestOnView(context.Background(), "series1", "fr", nil)
+	if err != nil {
+		t.Fatalf("RequestOnView after cooldown: %v", err)
+	}
+	if job.ID == failed.ID {
+		t.Fatal("stale failed job returned after cooldown expired")
+	}
+	waitDone(t, repo)
+
+	// A different language is unaffected by the failure.
+	job2, err := svc.RequestOnView(context.Background(), "series1", "de", nil)
+	if err != nil || job2.ID == failed.ID {
+		t.Fatalf("other-language request blocked: job=%v err=%v", job2, err)
+	}
+	waitDone(t, repo)
+
+	// OnView off (zero-value config) refuses viewer requests outright.
+	off := NewService(context.Background(), Config{Enabled: true, Configured: true, ChatModel: "m"}, repo, content, locs, chat.fn, nil, nil)
+	if _, err := off.RequestOnView(context.Background(), "series1", "fr", nil); err != ErrNotConfigured {
+		t.Errorf("on_view=off err = %v, want ErrNotConfigured", err)
 	}
 }

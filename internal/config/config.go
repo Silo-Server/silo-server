@@ -271,10 +271,14 @@ type SubtitleAIConfig struct {
 	ContextNeighbors  int  `yaml:"-"`
 }
 
-// MetadataAIConfig holds the metadata translation feature toggle. The endpoint
-// connection lives in AIConfig.
+// MetadataAIConfig holds the metadata translation feature toggles. The
+// endpoint connection lives in AIConfig.
 type MetadataAIConfig struct {
 	Enabled bool `yaml:"-"`
+	// OnView controls viewer-triggered description translation on detail
+	// pages: "off" (default), "button" (explicit chip), or "auto" (translate
+	// on view with a loading animation).
+	OnView string `yaml:"-"`
 }
 
 // DownloadConfig holds server-wide download policy settings.

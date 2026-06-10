@@ -465,12 +465,18 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.SubtitleAI.ContextNeighbors = subtitleAIContextNeighbors
 
-	// Metadata AI translation feature toggle.
+	// Metadata AI translation feature toggles.
 	metadataAIEnabled, err := boolOr(m, "metadata_ai.enabled", false)
 	if err != nil {
 		return nil, err
 	}
 	cfg.MetadataAI.Enabled = metadataAIEnabled
+	switch onView := stringOr(m, "metadata_ai.on_view", "off"); onView {
+	case "off", "button", "auto":
+		cfg.MetadataAI.OnView = onView
+	default:
+		return nil, fmt.Errorf("invalid metadata_ai.on_view %q (must be off, button, or auto)", onView)
+	}
 
 	// Download
 	downloadEnabled, err := boolOr(m, "download.enabled", false)

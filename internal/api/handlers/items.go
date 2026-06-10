@@ -1497,14 +1497,15 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 
 	if scope, ok := access.GetScope(r.Context()); ok {
 		return catalog.AccessFilter{
-			AllowedLibraryIDs:     scope.AllowedLibraryIDs,
-			DisabledLibraryIDs:    scope.DisabledLibraryIDs,
-			MaxContentRating:      scope.MaxContentRating,
-			MaxPlaybackQuality:    scope.MaxPlaybackQuality,
-			PresentationLibraryID: presentationLibraryID,
-			SelectedFileID:        selectedFileID,
-			UserID:                apimw.GetUserID(r.Context()),
-			ProfileID:             apimw.GetProfileID(r.Context()),
+			AllowedLibraryIDs:        scope.AllowedLibraryIDs,
+			DisabledLibraryIDs:       scope.DisabledLibraryIDs,
+			MaxContentRating:         scope.MaxContentRating,
+			MaxPlaybackQuality:       scope.MaxPlaybackQuality,
+			PresentationLibraryID:    presentationLibraryID,
+			ProfilePreferredLanguage: scope.PreferredMetadataLanguage,
+			SelectedFileID:           selectedFileID,
+			UserID:                   apimw.GetUserID(r.Context()),
+			ProfileID:                apimw.GetProfileID(r.Context()),
 		}
 	}
 

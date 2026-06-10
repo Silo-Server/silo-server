@@ -73,6 +73,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
+		scope.PreferredMetadataLanguage = profile.PreferredMetadataLanguage
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(user.LibraryIDs, profile)
 		scope.ProfileVerified = profile.PINHash == "" || input.SkipPINVerification
 

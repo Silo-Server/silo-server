@@ -969,6 +969,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				Enabled:    deps.Config.MetadataAI.Enabled,
 				Configured: deps.Config.AI.BaseURL != "",
 				ChatModel:  deps.Config.AI.ChatModel,
+				OnView:     deps.Config.MetadataAI.OnView,
 			},
 			mtRepo,
 			mtRepo,
@@ -1814,9 +1815,14 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 
 				// Metadata AI translation availability probe (the metadata editor
-				// shows or hides its translate action based on this).
+				// and detail pages show or hide their translate actions based on
+				// this) plus the viewer-facing on-view translation trigger.
 				if metadataAIHandler != nil {
 					r.Get("/metadata/ai/status", metadataAIHandler.HandleStatus)
+					if itemRepo != nil {
+						metadataAIHandler.ItemAccess = itemRepo
+						r.Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
+					}
 				} else {
 					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
 				}

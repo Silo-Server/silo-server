@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
@@ -20,10 +21,26 @@ type Config struct {
 	Enabled    bool
 	Configured bool   // shared AI endpoint has a base URL
 	ChatModel  string // for job provenance and idempotency
+	// OnView controls viewer-triggered translation: "off" | "button" | "auto".
+	OnView string
 }
 
 // Ready reports whether metadata translation can currently run.
 func (c Config) Ready() bool { return c.Enabled && c.Configured && c.ChatModel != "" }
+
+// OnViewMode reports the viewer-triggered translation mode ("off" when the
+// feature itself is not ready).
+func (c Config) OnViewMode() string {
+	if !c.Ready() || c.OnView == "" {
+		return "off"
+	}
+	return c.OnView
+}
+
+// onViewFailureCooldown suppresses re-enqueueing after a failed job for the
+// same target+language, so a broken endpoint is not retried on every page
+// view. Admin-triggered jobs are unaffected.
+const onViewFailureCooldown = 15 * time.Minute
 
 // Service owns the metadata translation job semantics: enqueue validation,
 // field collection with skip-if-filled, batched translation, and
@@ -159,6 +176,47 @@ func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language strin
 		s.logger.Warn("metadata translation: auto-enqueue failed",
 			"content_id", itemContentID, "language", target, "error", err)
 	}
+}
+
+// OnViewMode exposes the viewer-triggered translation mode for status probes.
+func (s *Service) OnViewMode() string { return s.cfg.OnViewMode() }
+
+// RequestOnView is the viewer-triggered enqueue path (detail-page button or
+// auto-on-view). On top of the normal pipeline it suppresses retries for a
+// cooldown window after a failed job for the same target+language: ordinary
+// page views must never hammer a broken endpoint. Returns the resulting job
+// (which may be the in-flight or recently failed one).
+func (s *Service) RequestOnView(ctx context.Context, contentID, targetLanguage string, requestedBy *int) (*Job, error) {
+	if s.cfg.OnViewMode() == "off" {
+		return nil, ErrNotConfigured
+	}
+	target, err := subtitles.NormalizeLanguageCode(targetLanguage)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid target language %q", ErrInvalidRequest, targetLanguage)
+	}
+
+	jobs, err := s.repo.ListJobsByContent(ctx, contentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range jobs {
+		if job.TargetLanguage != target {
+			continue
+		}
+		if job.Status == jobrunner.StatusFailed && time.Since(job.UpdatedAt) < onViewFailureCooldown {
+			cooled := job
+			return &cooled, nil
+		}
+		break // most recent job for this language decides; older history is irrelevant
+	}
+
+	return s.Enqueue(ctx, JobRequest{
+		TargetKind:      TargetItem,
+		ContentID:       contentID,
+		TargetLanguage:  target,
+		IncludeChildren: true,
+		RequestedBy:     requestedBy,
+	})
 }
 
 // GetJob returns a job by ID.
