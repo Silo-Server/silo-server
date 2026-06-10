@@ -360,6 +360,15 @@ func isEbookLibraryType(libraryType string) bool {
 	}
 }
 
+func isMangaLibraryType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "manga":
+		return true
+	default:
+		return false
+	}
+}
+
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
 // to apply.
