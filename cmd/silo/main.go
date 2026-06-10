@@ -1674,7 +1674,7 @@ func main() {
 				taskMgr.Register(pluginTask)
 			}
 		}
-		taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationsStore))
+		taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationsStore, nil))
 		taskMgr.Register(tasks.NewNotificationsDigestTask(notificationsSvc))
 
 		taskMgr.Start(appCtx)

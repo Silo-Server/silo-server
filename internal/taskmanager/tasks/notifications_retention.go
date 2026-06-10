@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -13,14 +14,21 @@ type NotificationPurger interface {
 	PurgeOld(ctx context.Context, dismissedBefore, allBefore time.Time) (int64, error)
 }
 
+// PushPurger deletes terminal push deliveries older than a cutoff.
+type PushPurger interface {
+	PurgeTerminal(ctx context.Context, before time.Time) (int64, error)
+}
+
 // NotificationsRetentionTask removes old notification rows on a daily schedule.
 type NotificationsRetentionTask struct {
-	store NotificationPurger
+	store      NotificationPurger
+	pushPurger PushPurger
 }
 
 // NewNotificationsRetentionTask creates a retention task backed by store.
-func NewNotificationsRetentionTask(store NotificationPurger) *NotificationsRetentionTask {
-	return &NotificationsRetentionTask{store: store}
+// pushPurger may be nil, in which case push delivery purging is skipped.
+func NewNotificationsRetentionTask(store NotificationPurger, pushPurger PushPurger) *NotificationsRetentionTask {
+	return &NotificationsRetentionTask{store: store, pushPurger: pushPurger}
 }
 
 func (t *NotificationsRetentionTask) Key() string  { return "notifications_retention" }
@@ -50,6 +58,15 @@ func (t *NotificationsRetentionTask) Execute(ctx context.Context, progress taskm
 	if err != nil {
 		return fmt.Errorf("notifications retention: %w", err)
 	}
-	progress.Report(100, fmt.Sprintf("Purged %d old notification rows", deleted))
+	pushDeleted := int64(0)
+	if t.pushPurger != nil {
+		if n, err := t.pushPurger.PurgeTerminal(ctx, time.Now().AddDate(0, 0, -7)); err != nil {
+			slog.WarnContext(ctx, "push: purge terminal deliveries failed", "error", err)
+		} else if n > 0 {
+			slog.InfoContext(ctx, "push: purged terminal deliveries", "count", n)
+			pushDeleted = n
+		}
+	}
+	progress.Report(100, fmt.Sprintf("Purged %d old notification rows, %d push deliveries", deleted, pushDeleted))
 	return nil
 }
