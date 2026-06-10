@@ -46,6 +46,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/push"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -180,6 +181,14 @@ type Dependencies struct {
 	// the inbox, preferences, and announcement endpoints. May be nil; routes
 	// are not registered in that case.
 	NotificationsService *notifications.Service
+
+	// PushStore is the push token/device registry. May be nil; push routes
+	// are not registered in that case.
+	PushStore *push.Store
+
+	// PushConfig reads push provider configuration from the settings repo.
+	// May be nil; push routes are not registered when PushStore is nil.
+	PushConfig *push.Config
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -1664,6 +1673,18 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
+				// Push registration, device management, and VAPID key (user-scoped).
+				if deps.PushStore != nil {
+					pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig)
+					r.Route("/notifications/push", func(r chi.Router) {
+						r.Put("/device", pushHandler.HandleRegister)
+						r.Delete("/device", pushHandler.HandleRevoke)
+						r.Get("/devices", pushHandler.HandleListDevices)
+						r.Put("/devices/{device_id}", pushHandler.HandleToggleDevice)
+						r.Get("/webpush-key", pushHandler.HandleWebPushKey)
+					})
+				}
+
 				// Progress and sync routes (profile-scoped).
 				if progressHandler != nil {
 					r.Route("/progress", func(r chi.Router) {
@@ -2425,6 +2446,11 @@ func NewRouter(deps Dependencies) chi.Router {
 									r.Post("/", notificationsHandler.HandleCreateAnnouncement)
 									r.Delete("/{id}", notificationsHandler.HandleDeleteAnnouncement)
 								})
+							}
+
+							if deps.PushStore != nil {
+								pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig)
+								r.Get("/push/status", pushHandler.HandleAdminStatus)
 							}
 
 							if adminPlaybackControlHandler != nil {
