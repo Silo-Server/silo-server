@@ -30,11 +30,27 @@ type Server struct {
 // NewServer creates a new proxy server backed by a config watcher and session tracker.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	return &Server{
-		watcher:    watcher,
-		tracker:    tracker,
-		httpClient: &http.Client{}, // no timeout for long streams
+		watcher: watcher,
+		tracker: tracker,
+		// No overall timeout — stream bodies are long-lived. Hung nodes are
+		// bounded by the transport's response-header timeout instead.
+		httpClient: &http.Client{Transport: newStreamTransport()},
 		egress:     newEgressMeter(),
 	}
+}
+
+// newStreamTransport tunes the proxy→transcode-node connection pool. Many
+// concurrent viewers fan their segment fetches through one proxy→node pair,
+// and Go's default of 2 idle connections per host causes constant connection
+// churn (and TLS re-handshakes) under load. The response-header timeout
+// bounds requests to a hung node; the longest legitimate server-side wait is
+// the 30s manifest-readiness poll on the transcode node.
+func newStreamTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 128
+	t.MaxIdleConnsPerHost = 32
+	t.ResponseHeaderTimeout = 60 * time.Second
+	return t
 }
 
 // Handler returns the chi.Router with all proxy routes mounted.

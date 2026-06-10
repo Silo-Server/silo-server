@@ -328,6 +328,11 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	if err != nil {
 		return fmt.Errorf("marshal transcode request: %w", err)
 	}
+	// Bound the dispatch like the native path does (playback.go) — without
+	// this, an unreachable transcode node hangs the compat manifest request
+	// until the OS gives up on the connection.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, transcodeNodeURL+"/transcode/start", strings.NewReader(string(body)))
 	if err != nil {
 		return fmt.Errorf("build transcode request: %w", err)
