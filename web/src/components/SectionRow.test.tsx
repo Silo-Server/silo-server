@@ -121,6 +121,50 @@ describe("SectionRow", () => {
     expect(markup).toContain("More actions");
   });
 
+  it("renders all-audiobook continue sections as square poster cards", () => {
+    const queryClient = new QueryClient();
+    const section: ResolvedSection = {
+      id: "continue-listening",
+      section_type: "continue_watching",
+      title: "Continue Listening",
+      featured: false,
+      item_limit: 10,
+      total_count: 1,
+      is_custom: false,
+      customized: false,
+      items: [
+        {
+          content_id: "book-001",
+          type: "audiobook",
+          title: "Project Hail Mary",
+          position_seconds: 600,
+          duration_seconds: 58000,
+          year: 2021,
+          genres: [],
+          status: "matched",
+          rating_imdb: null,
+          overview: "",
+          poster_url: "/book-cover.jpg",
+          poster_thumbhash: "",
+          backdrop_url: "",
+          backdrop_thumbhash: "",
+          logo_url: "",
+        },
+      ],
+    };
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SectionRow section={section} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain("aspect-square");
+    expect(markup).not.toContain("aspect-video");
+  });
+
   it("routes supported section view-all actions to browse destinations", () => {
     const queryClient = new QueryClient();
     const section: ResolvedSection = {
