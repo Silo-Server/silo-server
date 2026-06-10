@@ -61,12 +61,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(requestLoggerMiddleware)
 	r.Use(middleware.Recoverer)
 
-	systemHandler := NewSystemHandler(deps.Config)
+	systemHandler := NewSystemHandler(deps.CurrentConfig)
 	webFS, err := resolveCompatWebFS(deps)
 	if err != nil {
 		slog.Error("jellycompat web bundle unavailable", "error", err)
 	}
-	authHandler := NewAuthHandler(deps.Config, deps.LoginResolver, deps.Authenticator)
+	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator)
 	nextUpRepo := catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 	var subtitleRepo subtitles.Repository
 	if deps.SubtitleRepo != nil {

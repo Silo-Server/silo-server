@@ -23,7 +23,10 @@ import (
 
 // Dependencies holds the pluggable pieces used by the compat server.
 type Dependencies struct {
-	Config           *config.Config
+	Config *config.Config
+	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
+	// worker modes); read through CurrentConfig(), which falls back to Config.
+	LiveConfig       func() *config.Config
 	DB               *pgxpool.Pool
 	SecretCipher     *secret.Cipher // at-rest credential cipher (required when DB is set)
 	ClientIPResolver *clientip.Resolver
@@ -82,6 +85,17 @@ type Dependencies struct {
 	SubtitleRepo subtitles.Repository // optional; downloaded subtitle support
 	S3Client     subtitles.S3Client   // optional
 	S3Bucket     string               // optional
+}
+
+// CurrentConfig returns the live config when hot reload is wired, falling
+// back to the startup snapshot otherwise.
+func (d *Dependencies) CurrentConfig() *config.Config {
+	if d.LiveConfig != nil {
+		if cfg := d.LiveConfig(); cfg != nil {
+			return cfg
+		}
+	}
+	return d.Config
 }
 
 // Server wraps the compat HTTP handler.

@@ -5,13 +5,7 @@ import { SaveBar } from "./SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const KEYS = [
-  "scanner.workers",
-  "scanner.file_removal_grace",
-  "matcher.workers",
-  "matcher.batch_size",
-  "metadata.cache_images",
-];
+const KEYS = ["scanner.workers", "matcher.workers", "matcher.batch_size", "metadata.cache_images"];
 
 export default function ScannerSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -52,13 +46,6 @@ export default function ScannerSettings() {
             type="number"
             value={form.getValue("scanner.workers")}
             onChange={(v) => form.setValue("scanner.workers", v)}
-          />
-          <SettingField
-            label="File Removal Grace"
-            type="duration"
-            hint="e.g. 24h"
-            value={form.getValue("scanner.file_removal_grace")}
-            onChange={(v) => form.setValue("scanner.file_removal_grace", v)}
           />
         </FieldGroup>
 

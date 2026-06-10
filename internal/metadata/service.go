@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -308,7 +309,7 @@ type MetadataService struct {
 	seriesWork      map[string]*seriesEpisodeWork
 	hooks           metadataServiceHooks
 	imageCacher     ImageCacher
-	autoCacheImages bool
+	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
 	imageResolver   interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
@@ -435,9 +436,9 @@ func (s *MetadataService) SetImageCacher(c ImageCacher) {
 
 // SetAutoCacheImages controls whether refresh pipelines automatically cache
 // provider images into object storage. Explicit admin image applies still use
-// the configured image cacher when available.
+// the configured image cacher when available. Safe for concurrent use.
 func (s *MetadataService) SetAutoCacheImages(enabled bool) {
-	s.autoCacheImages = enabled
+	s.autoCacheImages.Store(enabled)
 }
 
 // SetImageResolver sets the resolver used to convert plugin-prefixed image
@@ -1479,7 +1480,7 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	// Cache images to S3 if enabled.
-	if s.autoCacheImages && s.imageCacher != nil && isCanonicalWrite {
+	if s.autoCacheImages.Load() && s.imageCacher != nil && isCanonicalWrite {
 		s.cacheItemImages(ctx, item, images)
 	}
 
@@ -2461,7 +2462,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 // provider primaryProviderID happens to prefer. Failures are logged and
 // the original path is kept.
 func (s *MetadataService) cacheSeriesChildImages(ctx context.Context, series *models.MediaItem, providerIDs map[string]string, seasons []SeasonResult, episodes []EpisodeResult) {
-	if s == nil || !s.autoCacheImages || s.imageCacher == nil || series == nil {
+	if s == nil || !s.autoCacheImages.Load() || s.imageCacher == nil || series == nil {
 		return
 	}
 	fallbackProvider := primaryProviderID(providerIDs)

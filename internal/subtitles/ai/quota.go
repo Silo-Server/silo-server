@@ -83,23 +83,24 @@ type QuotaStatus struct {
 // insert-time enforcement runs, so the number shown always matches the
 // number enforced.
 func (s *Service) TranscribeQuota(ctx context.Context, userID int, exempt bool) (QuotaStatus, error) {
-	if exempt || s.cfg.TranscribeQuotaJobs <= 0 {
+	cfg := s.config()
+	if exempt || cfg.TranscribeQuotaJobs <= 0 {
 		return QuotaStatus{}, nil
 	}
-	used, err := s.repo.CountTranscribeJobsByUserSince(ctx, userID, s.quotaWindowStart())
+	used, err := s.repo.CountTranscribeJobsByUserSince(ctx, userID, quotaWindowStart(cfg))
 	if err != nil {
 		return QuotaStatus{}, err
 	}
-	remaining := s.cfg.TranscribeQuotaJobs - used
+	remaining := cfg.TranscribeQuotaJobs - used
 	if remaining < 0 {
 		remaining = 0
 	}
 	return QuotaStatus{
 		Limited:   true,
-		Limit:     s.cfg.TranscribeQuotaJobs,
+		Limit:     cfg.TranscribeQuotaJobs,
 		Used:      used,
 		Remaining: remaining,
-		Period:    s.cfg.TranscribeQuotaPeriod,
+		Period:    cfg.TranscribeQuotaPeriod,
 	}, nil
 }
 
@@ -111,17 +112,18 @@ func (s *Service) transcribeQuotaSpec(req JobRequest) *JobQuota {
 	if !req.Kind.IsTranscribe() || req.QuotaExempt || req.RequestedBy == nil {
 		return nil
 	}
-	if s.cfg.TranscribeQuotaJobs <= 0 {
+	cfg := s.config()
+	if cfg.TranscribeQuotaJobs <= 0 {
 		return nil
 	}
 	return &JobQuota{
 		UserID: *req.RequestedBy,
-		Limit:  s.cfg.TranscribeQuotaJobs,
-		Since:  s.quotaWindowStart(),
-		Period: s.cfg.TranscribeQuotaPeriod,
+		Limit:  cfg.TranscribeQuotaJobs,
+		Since:  quotaWindowStart(cfg),
+		Period: cfg.TranscribeQuotaPeriod,
 	}
 }
 
-func (s *Service) quotaWindowStart() time.Time {
-	return time.Now().Add(-QuotaPeriodWindow(s.cfg.TranscribeQuotaPeriod))
+func quotaWindowStart(cfg Config) time.Time {
+	return time.Now().Add(-QuotaPeriodWindow(cfg.TranscribeQuotaPeriod))
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type BootstrapOverrides struct {
 	Mode        string // from MODE env
 	DatabaseURL string // from DATABASE_URL env
 	JFListen    string // from JF_PORT env
+	RedisURL    string // from REDIS_URL env
 }
 
 // Watcher watches for configuration changes in the database and
@@ -59,8 +61,10 @@ func (w *Watcher) Config() *config.Config {
 	return w.cfg
 }
 
-// OnChange registers a callback invoked after a config swap.
-// The callback receives the old and new config. Must be called before Start.
+// OnChange registers a callback invoked after a config swap whose new value
+// differs from the old one. The callback receives the old and new config.
+// Safe to call before or after Start; callbacks registered after Start only
+// see reloads that happen after registration.
 func (w *Watcher) OnChange(fn func(old, updated *config.Config)) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -97,6 +101,18 @@ func (w *Watcher) ForceReload(ctx context.Context) error {
 	return w.reload(ctx)
 }
 
+// RequestReload asks the poll goroutine to reload soon. Non-blocking and
+// coalescing — safe to call from request handlers. Unlike ForceReload, the
+// reload runs on the poll goroutine, so concurrent requests can never swap a
+// stale snapshot over a newer one.
+func (w *Watcher) RequestReload() {
+	select {
+	case w.reloadCh <- struct{}{}:
+	default:
+		// Already pending — coalesce.
+	}
+}
+
 // SetConfigForTest sets the config directly without loading from DB.
 // This is intended for use in tests only.
 func (w *Watcher) SetConfigForTest(cfg *config.Config) {
@@ -108,9 +124,18 @@ func (w *Watcher) SetConfigForTest(cfg *config.Config) {
 // reload fetches all settings from the database, builds a new Config,
 // applies bootstrap overrides, and atomically swaps the config pointer.
 func (w *Watcher) reload(ctx context.Context) error {
+	m, err := w.fetchSettings(ctx)
+	if err != nil {
+		return err
+	}
+	return w.applySettings(m)
+}
+
+// fetchSettings reads all server_settings rows and decrypts sensitive values.
+func (w *Watcher) fetchSettings(ctx context.Context) (map[string]string, error) {
 	rows, err := w.pool.Query(ctx, "SELECT key, value FROM server_settings")
 	if err != nil {
-		return fmt.Errorf("query server_settings: %w", err)
+		return nil, fmt.Errorf("query server_settings: %w", err)
 	}
 	defer rows.Close()
 
@@ -118,21 +143,27 @@ func (w *Watcher) reload(ctx context.Context) error {
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
-			return fmt.Errorf("scan server_settings row: %w", err)
+			return nil, fmt.Errorf("scan server_settings row: %w", err)
 		}
 		// Decrypt sensitive keys (read-path contract: legacy plaintext passes
 		// through, enc:v1: values decrypt, corrupt ciphertext errors) so
 		// LoadFromDB always sees plaintext.
 		decrypted, derr := w.cipher.DecryptIfEncrypted(v, secret.SettingsAAD(k))
 		if derr != nil {
-			return fmt.Errorf("decrypt server_settings %q: %w", k, derr)
+			return nil, fmt.Errorf("decrypt server_settings %q: %w", k, derr)
 		}
 		m[k] = decrypted
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate server_settings: %w", err)
+		return nil, fmt.Errorf("iterate server_settings: %w", err)
 	}
+	return m, nil
+}
 
+// applySettings builds a Config from a plaintext settings map, re-applies
+// bootstrap overrides, swaps the config pointer, and notifies OnChange
+// callbacks when the config actually changed.
+func (w *Watcher) applySettings(m map[string]string) error {
 	newCfg, err := config.LoadFromDB(m)
 	if err != nil {
 		return fmt.Errorf("parse config: %w", err)
@@ -151,6 +182,9 @@ func (w *Watcher) reload(ctx context.Context) error {
 	if w.bootstrap.JFListen != "" {
 		newCfg.JellyfinCompat.Listen = w.bootstrap.JFListen
 	}
+	if w.bootstrap.RedisURL != "" {
+		newCfg.Redis.URL = w.bootstrap.RedisURL
+	}
 
 	w.mu.Lock()
 	old := w.cfg
@@ -158,6 +192,12 @@ func (w *Watcher) reload(ctx context.Context) error {
 	callbacks := make([]func(old, updated *config.Config), len(w.onChange))
 	copy(callbacks, w.onChange)
 	w.mu.Unlock()
+
+	// The poll path reloads every 60s regardless of whether anything changed;
+	// don't fire callbacks (which may rebuild clients or log) on no-op swaps.
+	if old != nil && reflect.DeepEqual(*old, *newCfg) {
+		return nil
+	}
 
 	for _, fn := range callbacks {
 		fn(old, newCfg)

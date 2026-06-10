@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,8 +57,11 @@ func (c Config) ASRConfigured() bool { return c.asrBaseURL() != "" && c.ASRModel
 // Client is a minimal OpenAI-compatible API client with shared retry/backoff
 // conventions (429 with Retry-After, 5xx, transport errors, and gateway "200
 // with embedded error object" responses are retried; other 4xx fail fast).
+// The config is held behind an atomic pointer so admin settings changes apply
+// to subsequent requests without rebuilding the client; each request snapshots
+// the config once so its URL, key, and model stay consistent.
 type Client struct {
-	cfg Config
+	cfg atomic.Pointer[Config]
 	// chatHTTP caps a single chat completion at 10 minutes. asrHTTP has no
 	// client-level timeout: a transcription upload's deadline is set per request
 	// (sized to the chunk duration), which a client timeout would silently cap.
@@ -67,11 +71,23 @@ type Client struct {
 
 // NewClient builds a client from the endpoint config.
 func NewClient(cfg Config) *Client {
-	return &Client{
-		cfg:      cfg,
+	c := &Client{
 		chatHTTP: &http.Client{Timeout: 10 * time.Minute},
 		asrHTTP:  &http.Client{},
 	}
+	c.UpdateConfig(cfg)
+	return c
+}
+
+// UpdateConfig swaps the endpoint config. Safe for concurrent use; in-flight
+// requests finish with the config they started with.
+func (c *Client) UpdateConfig(cfg Config) {
+	c.cfg.Store(&cfg)
+}
+
+// Config returns a snapshot of the current endpoint config.
+func (c *Client) Config() Config {
+	return *c.cfg.Load()
 }
 
 // Message is one chat-completions message.
@@ -107,8 +123,9 @@ type chatCompletionResponse struct {
 // When jsonObject is true it requests response_format=json_object; providers
 // that ignore the field still work because the prompt itself demands JSON.
 func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) (string, error) {
+	cfg := c.Config()
 	reqBody := chatCompletionRequest{
-		Model:       c.cfg.ChatModel,
+		Model:       cfg.ChatModel,
 		Messages:    messages,
 		Temperature: 0.2,
 	}
@@ -121,7 +138,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 		return "", fmt.Errorf("marshal chat request: %w", err)
 	}
 
-	url := endpointURL(c.cfg.BaseURL, "chat/completions")
+	url := endpointURL(cfg.BaseURL, "chat/completions")
 
 	var content string
 	err = c.doWithRetry(ctx, c.chatHTTP, "chat API",
@@ -131,8 +148,8 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 				return nil, fmt.Errorf("create request: %w", reqErr)
 			}
 			httpReq.Header.Set("Content-Type", "application/json")
-			if c.cfg.APIKey != "" {
-				httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+			if cfg.APIKey != "" {
+				httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 			}
 			return httpReq, nil
 		},
@@ -147,7 +164,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 				slog.Warn("AI chat returned no choices, retrying",
-					"model", c.cfg.ChatModel, "response_bytes", len(respBody))
+					"model", cfg.ChatModel, "response_bytes", len(respBody))
 				return fmt.Errorf("chat API returned no choices")
 			}
 			content = parsed.Choices[0].Message.Content

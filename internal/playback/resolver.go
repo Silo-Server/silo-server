@@ -36,9 +36,8 @@ type ClientCapabilities struct {
 
 // AdminSettings controls server-side playback constraints.
 type AdminSettings struct {
-	TranscodeEnabled  bool
-	Allow4KTranscode  bool
-	AllowHEVCEncoding bool
+	TranscodeEnabled bool
+	Allow4KTranscode bool
 }
 
 // PlayDecision is the result of resolving how to play a file.

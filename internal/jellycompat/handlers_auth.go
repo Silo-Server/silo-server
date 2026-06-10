@@ -115,13 +115,14 @@ type loginResolver interface {
 
 // AuthHandler serves Jellyfin login/current-user routes.
 type AuthHandler struct {
-	cfg           *config.Config
+	cfg           func() *config.Config
 	loginResolver loginResolver
 	authenticator *Authenticator
 }
 
-// NewAuthHandler creates a new auth handler.
-func NewAuthHandler(cfg *config.Config, loginResolver loginResolver, authenticator *Authenticator) *AuthHandler {
+// NewAuthHandler creates a new auth handler. The config provider is invoked
+// per request so compat setting changes apply without restart.
+func NewAuthHandler(cfg func() *config.Config, loginResolver loginResolver, authenticator *Authenticator) *AuthHandler {
 	return &AuthHandler{
 		cfg:           cfg,
 		loginResolver: loginResolver,
@@ -160,7 +161,7 @@ func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Re
 
 	writeJSON(w, http.StatusOK, authenticateByNameResponse{
 		AccessToken: session.Token,
-		ServerID:    h.cfg.JellyfinCompat.ServerID,
+		ServerID:    h.cfg().JellyfinCompat.ServerID,
 		User:        h.userDTO(session),
 		SessionInfo: h.sessionInfo(session),
 	})
@@ -225,7 +226,7 @@ func (h *AuthHandler) userDTO(session *Session) userDTOResponse {
 	return userDTOResponse{
 		ID:                        session.PseudoUserID.String(),
 		Name:                      name,
-		ServerID:                  h.cfg.JellyfinCompat.ServerID,
+		ServerID:                  h.cfg().JellyfinCompat.ServerID,
 		HasPassword:               true,
 		HasConfiguredPassword:     true,
 		HasConfiguredEasyPassword: false,
@@ -299,6 +300,6 @@ func (h *AuthHandler) sessionInfo(session *Session) *sessionInfoResponse {
 		SupportsRemoteControl: true,
 		HasCustomDeviceName:   false,
 		SupportedCommands:     []string{},
-		ServerID:              h.cfg.JellyfinCompat.ServerID,
+		ServerID:              h.cfg().JellyfinCompat.ServerID,
 	}
 }

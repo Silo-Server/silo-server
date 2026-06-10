@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -31,10 +32,20 @@ type StreamHandler struct {
 	EventsHub     *evt.Hub
 	AdminStore    PlaybackAdminStore
 	SessionSyncer PlaybackSessionSyncer
-	FFmpegPath    string
-	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client      subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket      string               // bucket for subtitle storage
+	// PlaybackConfig returns the current playback config; read it through
+	// ffmpegPath(). May be nil (tests).
+	PlaybackConfig func() config.PlaybackConfig
+	SubtitleRepo   subtitles.Repository // optional; enables S3-sourced subtitles
+	S3Client       subtitles.S3Client   // optional; needed for fetching S3 subtitles
+	S3Bucket       string               // bucket for subtitle storage
+}
+
+// ffmpegPath returns the currently configured ffmpeg binary path.
+func (h *StreamHandler) ffmpegPath() string {
+	if h.PlaybackConfig != nil {
+		return h.PlaybackConfig().FFmpegPath
+	}
+	return ""
 }
 
 // NewStreamHandler creates a new StreamHandler backed by the given session
@@ -193,7 +204,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
+		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.ffmpegPath())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error",
 				"Failed to load external subtitle")
@@ -324,7 +335,7 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.FFmpegPath)
+	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.ffmpegPath())
 	if err != nil {
 		slog.WarnContext(r.Context(), "subtitle font extraction failed",
 			"file_id", file.ID,
@@ -437,7 +448,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		SourceCodec:     track.Codec,
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
-		FFmpegPath:      h.FFmpegPath,
+		FFmpegPath:      h.ffmpegPath(),
 		Writer:          w,
 	})
 	if err != nil {

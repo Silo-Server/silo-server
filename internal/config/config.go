@@ -127,16 +127,15 @@ type userDBConfigRaw struct {
 
 // ScannerConfig holds media scanner settings.
 type ScannerConfig struct {
-	FileRemovalGrace       time.Duration `yaml:"-"`
-	Workers                int           `yaml:"workers"`
-	MaxConcurrentLibraries int           `yaml:"max_concurrent_libraries"`
-	MaxConcurrentScoped    int           `yaml:"max_concurrent_scoped"`
-	EmptyTrashAfterScan    bool          `yaml:"-"`
+	Workers                int  `yaml:"workers"`
+	MaxConcurrentLibraries int  `yaml:"max_concurrent_libraries"`
+	MaxConcurrentScoped    int  `yaml:"max_concurrent_scoped"`
+	EmptyTrashAfterScan    bool `yaml:"-"`
 }
 
 // scannerConfigRaw is the raw YAML representation with duration strings.
 type scannerConfigRaw struct {
-	FileRemovalGrace       string `yaml:"file_removal_grace"`
+	FileRemovalGrace       string `yaml:"file_removal_grace"` // legacy; preserved on YAML import only
 	Workers                int    `yaml:"workers"`
 	MaxConcurrentLibraries int    `yaml:"max_concurrent_libraries"`
 	MaxConcurrentScoped    int    `yaml:"max_concurrent_scoped"`
@@ -165,9 +164,6 @@ type PlaybackConfig struct {
 	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`
 	ChapterThumbnailNodeCapacity int    `yaml:"chapter_thumbnail_node_capacity"`
 	TranscodeEnabled             bool   `yaml:"transcode_enabled"`
-	AllowHEVCEncoding            bool   `yaml:"allow_hevc_encoding"`
-	TranscodeAheadSegments       int    `yaml:"transcode_ahead_segments"`
-	SegmentDuration              int    `yaml:"segment_duration"`
 }
 
 // RedisConfig holds Redis connection settings.
@@ -414,7 +410,6 @@ func setDefaults() *configRaw {
 			StaleGraceSeconds: 120,
 		},
 		Scanner: scannerConfigRaw{
-			FileRemovalGrace:       "24h",
 			Workers:                8,
 			MaxConcurrentLibraries: 1,
 			MaxConcurrentScoped:    2,
@@ -432,9 +427,6 @@ func setDefaults() *configRaw {
 			ChapterThumbnailExecution:    "local",
 			ChapterThumbnailNodeCapacity: 1,
 			TranscodeEnabled:             true,
-			AllowHEVCEncoding:            false,
-			TranscodeAheadSegments:       30,
-			SegmentDuration:              6,
 		},
 		RateLimit: RateLimitConfig{
 			Enabled: true,

@@ -80,7 +80,7 @@ export default function DownloadSettings() {
         onSave={form.save}
         onDiscard={form.discard}
         isSaving={form.isSaving}
-        restartRequired={false}
+        restartRequired={form.restartRequired}
       />
     </div>
   );

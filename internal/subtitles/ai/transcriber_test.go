@@ -57,12 +57,13 @@ func evenStarts(n int) []float64 {
 }
 
 func newTestTranscriber(client *fakeASRClient, chunks int, recordDir *string) *WhisperTranscriber {
-	return &WhisperTranscriber{
-		client:       client,
-		chunkSeconds: 600,
-		extract:      stubExtract(evenStarts(chunks), recordDir),
-		probeOffset:  func(context.Context, string, int, string) float64 { return 0 },
+	tr := &WhisperTranscriber{
+		client:      client,
+		extract:     stubExtract(evenStarts(chunks), recordDir),
+		probeOffset: func(context.Context, string, int, string) float64 { return 0 },
 	}
+	tr.SetExtraction("", 600)
+	return tr
 }
 
 func TestTranscribeOffsetsTimestampsByChunkStart(t *testing.T) {
@@ -338,12 +339,12 @@ func TestTranscribeUsesExactChunkStartsAndAudioOffset(t *testing.T) {
 		},
 	}
 	tr := &WhisperTranscriber{
-		client:       client,
-		chunkSeconds: 600,
+		client: client,
 		// The second chunk really starts at 600.5s, not 600s.
 		extract:     stubExtract([]float64{0, 600.5}, &dir),
 		probeOffset: func(context.Context, string, int, string) float64 { return 1.25 },
 	}
+	tr.SetExtraction("", 600)
 
 	cues, _, err := tr.Transcribe(context.Background(), TranscribeJobRequest{FilePath: "/x.mkv"}, nil)
 	if err != nil {
