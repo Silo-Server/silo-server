@@ -239,6 +239,14 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 		return fmt.Errorf("find-or-create manga series: %w", err)
 	}
 	if seriesID != "" {
+		// The series item carries no media file of its own, so it must be given a
+		// library membership explicitly (the chapter path gets this via its file
+		// reconcile). Without it the library-scoped catalog browse, which joins
+		// media_item_libraries, would never surface the series card. The insert is
+		// ON CONFLICT DO NOTHING, so re-scans never duplicate the membership.
+		if err := insertEbookLibraryMembership(ctx, s.fileRepo.Pool(), seriesID, folder.ID); err != nil {
+			return fmt.Errorf("upsert manga series library membership: %w", err)
+		}
 		idxPtr, volOut := mangaChapterWrite(vol, idx, has)
 		if err := upsertMangaChapter(ctx, s.fileRepo.Pool(), chapterID, seriesID, idxPtr, volOut); err != nil {
 			return fmt.Errorf("link manga chapter to series: %w", err)
