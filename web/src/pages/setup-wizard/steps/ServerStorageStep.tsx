@@ -257,7 +257,7 @@ export function ServerStorageStep() {
     }
   }
 
-  if (form.isLoading) {
+  if (form.isLoading || jellyfinStatusQuery.isLoading) {
     return (
       <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -268,8 +268,12 @@ export function ServerStorageStep() {
   }
 
   const publicURLAuth = form.getValue("s3.public_url_auth") || "presigned";
-  const jellyfinAPIEnabled = form.getValue("jellyfin_compat.enabled") === "true";
+  const jellyfinEnabledValue = form.getValue("jellyfin_compat.enabled");
   const jellyfinStatus = jellyfinStatusQuery.data;
+  const jellyfinAPIEnabled =
+    jellyfinEnabledValue === ""
+      ? Boolean(jellyfinStatus?.enabled)
+      : jellyfinEnabledValue === "true";
   const jellyfinOperationRunning =
     jellyfinStatus?.operation?.state === "running" ||
     jellyfinStatus?.web_state === "installing" ||

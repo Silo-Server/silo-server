@@ -41,6 +41,7 @@ interface MockStepOptions {
   dirtyCount?: number;
   dirtyKeys?: string[];
   installMutateAsync?: ReturnType<typeof vi.fn>;
+  jellyfinStatus?: Record<string, unknown>;
   markDone?: ReturnType<typeof vi.fn>;
   save?: ReturnType<typeof vi.fn>;
   values?: Record<string, string>;
@@ -50,6 +51,11 @@ function mockStep({
   dirtyCount = 0,
   dirtyKeys = [],
   installMutateAsync = vi.fn().mockResolvedValue({}),
+  jellyfinStatus = {
+    web_state: "missing",
+    installer_ready: true,
+    prerequisites: [],
+  },
   markDone = vi.fn(),
   save = vi.fn().mockResolvedValue(undefined),
   values = {},
@@ -63,11 +69,7 @@ function mockStep({
     mutateAsync: vi.fn(),
   });
   useJellyfinCompatStatusMock.mockReturnValue({
-    data: {
-      web_state: "missing",
-      installer_ready: true,
-      prerequisites: [],
-    },
+    data: jellyfinStatus,
   });
   useInstallJellyfinCompatWebMock.mockReturnValue({
     isPending: false,
@@ -110,6 +112,26 @@ describe("ServerStorageStep", () => {
     expect(markup).toContain("Pinned Web version");
     expect(markup).toContain("Web install directory");
     expect(markup).toContain("/var/lib/silo/compat/jellyfin-web");
+  });
+
+  it("uses Jellyfin runtime status when the explicit enabled setting is missing", () => {
+    mockStep({
+      values: { "jellyfin_compat.enabled": "" },
+      jellyfinStatus: {
+        enabled: true,
+        web_state: "missing",
+        installer_ready: true,
+        prerequisites: [],
+      },
+    });
+
+    render(<ServerStorageStep />);
+
+    expect(screen.getByRole("switch", { name: "Enable Jellyfin-compatible API" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Install Web UI" })).toBeEnabled();
   });
 
   it("waits for the queued Jellyfin Web install request to be accepted before continuing", async () => {
