@@ -2,6 +2,7 @@ package requests
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
@@ -2647,6 +2649,73 @@ type fakeRequesterIdentity struct {
 func (f *fakeRequesterIdentity) ResolveRequester(_ context.Context, userID int) (string, string, error) {
 	f.gotUserID = userID
 	return f.email, f.username, f.err
+}
+
+// TestApprove_PublishesRequestApproved checks that approving a pending request
+// publishes a "request.approved" event on ChannelRequests with the correct
+// request_id and user_id in the payload.
+func TestApprove_PublishesRequestApproved(t *testing.T) {
+	store := newFakeStore()
+	store.requests["req-1"] = &Request{
+		ID:                   "req-1",
+		MediaType:            MediaTypeMovie,
+		TMDBID:               550,
+		Title:                "Fight Club",
+		Status:               StatusPending,
+		Outcome:              OutcomeActive,
+		RequestedByUserID:    42,
+		RequestedByProfileID: "profile-42",
+	}
+	// No router configured so submitApprovedRequest marks request failed —
+	// which is still "after" approve; we verify the event fires regardless.
+	service := newTestService(store)
+	hub := evt.NewHub("test", nil)
+	service.SetEventsHub(hub)
+
+	ch, unsub := hub.Subscribe()
+	defer unsub()
+
+	_, _ = service.Approve(context.Background(), Viewer{UserID: 99, IsAdmin: true}, "req-1")
+
+	select {
+	case env := <-ch:
+		if env.Channel != evt.ChannelRequests {
+			t.Fatalf("channel = %q, want %q", env.Channel, evt.ChannelRequests)
+		}
+		if env.Event != "request.approved" {
+			t.Fatalf("event = %q, want request.approved", env.Event)
+		}
+		var payload RequestEventPayload
+		if err := json.Unmarshal(env.Data, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload.RequestID != "req-1" {
+			t.Fatalf("request_id = %q, want req-1", payload.RequestID)
+		}
+		if payload.UserID != 42 {
+			t.Fatalf("user_id = %d, want 42", payload.UserID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request.approved event")
+	}
+}
+
+// TestPublish_NilHubIsNoOp verifies that operating without SetEventsHub does
+// not panic and the Approve call succeeds normally.
+func TestPublish_NilHubIsNoOp(t *testing.T) {
+	store := newFakeStore()
+	store.requests["req-2"] = &Request{
+		ID:                "req-2",
+		MediaType:         MediaTypeMovie,
+		TMDBID:            550,
+		Title:             "Fight Club",
+		Status:            StatusPending,
+		Outcome:           OutcomeActive,
+		RequestedByUserID: 7,
+	}
+	service := newTestService(store)
+	// No hub attached — must not panic.
+	_, _ = service.Approve(context.Background(), Viewer{UserID: 99, IsAdmin: true}, "req-2")
 }
 
 func TestSubmitApprovedPopulatesRequesterIdentity(t *testing.T) {

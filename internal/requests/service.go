@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"golang.org/x/sync/errgroup"
@@ -47,6 +48,7 @@ type Service struct {
 	router            RequestRouterProvider
 	entitlements      EntitlementResolver
 	requesterIdentity RequesterIdentityResolver
+	eventsHub         *evt.Hub
 	Now               func() time.Time
 }
 
@@ -455,6 +457,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		}
 		return nil, err
 	}
+	s.publishRequestEvent(ctx, "request.submitted", *req)
 	if req.Status == StatusApproved {
 		return s.submitApprovedRequest(ctx, *req, viewer, nil)
 	}
@@ -592,7 +595,12 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
-	return s.submitApprovedRequest(ctx, *approved, viewer, nil)
+	result, err := s.submitApprovedRequest(ctx, *approved, viewer, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.publishRequestEvent(ctx, "request.approved", *result)
+	return result, nil
 }
 
 func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
@@ -614,7 +622,12 @@ func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string)
 		strings.TrimSpace(req.IntegrationKind) != "" {
 		return nil, ErrInvalidState
 	}
-	return s.store.SetOutcome(ctx, req.ID, OutcomeDeclined, viewer, reason)
+	declined, err := s.store.SetOutcome(ctx, req.ID, OutcomeDeclined, viewer, reason)
+	if err != nil {
+		return nil, err
+	}
+	s.publishRequestEvent(ctx, "request.declined", *declined)
+	return declined, nil
 }
 
 // Cancel withdraws a request that has not yet been submitted to a downstream
@@ -647,7 +660,12 @@ func (s *Service) Cancel(ctx context.Context, viewer Viewer, id, reason string) 
 		strings.TrimSpace(req.IntegrationKind) != "" {
 		return nil, ErrInvalidState
 	}
-	return s.store.SetOutcome(ctx, req.ID, OutcomeCancelled, viewer, reason)
+	cancelled, err := s.store.SetOutcome(ctx, req.ID, OutcomeCancelled, viewer, reason)
+	if err != nil {
+		return nil, err
+	}
+	s.publishRequestEvent(ctx, "request.cancelled", *cancelled)
+	return cancelled, nil
 }
 
 func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request, error) {
@@ -1529,6 +1547,9 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 			if _, err := s.store.SetStatus(ctx, req.ID, StatusCompleted, Viewer{}); err != nil {
 				return reconcileUnchanged, err
 			}
+			completed := req
+			completed.Status = StatusCompleted
+			s.publishRequestEvent(ctx, "request.completed", completed)
 			return reconcileCompleted, nil
 		}
 	}
@@ -1540,6 +1561,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		}
 		switch {
 		case updated.Outcome == OutcomeFailed:
+			s.publishRequestEvent(ctx, "request.failed", *updated)
 			return reconcileFailed, nil
 		case updated.Status == StatusQueued:
 			return reconcileSubmitted, nil
@@ -1596,12 +1618,16 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		if newStatus == "" || newStatus == target.Status {
 			continue
 		}
-		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
+		updatedReq, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{})
+		if err != nil {
 			return reconcileUnchanged, err
 		}
 		switch newStatus {
 		case StatusCompleted:
 			change = reconcileCompleted
+			if updatedReq != nil {
+				s.publishRequestEvent(ctx, "request.completed", *updatedReq)
+			}
 		case StatusDownloading:
 			if change == reconcileUnchanged {
 				change = reconcileDownloading
@@ -1609,6 +1635,9 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		case StatusFailed:
 			if change == reconcileUnchanged {
 				change = reconcileFailed
+				if updatedReq != nil {
+					s.publishRequestEvent(ctx, "request.failed", *updatedReq)
+				}
 			}
 		}
 	}
