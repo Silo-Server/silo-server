@@ -100,6 +100,24 @@ func TestSendContract_IgnoresUnrelatedPluginEvents(t *testing.T) {
 	}
 }
 
+func TestSendContract_IgnoresNonPluginChannel(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	data, _ := json.Marshal(map[string]any{"user_id": 5, "category": "request", "type": "t", "title": "x"})
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelTasks, Event: "notifications.send", Data: data,
+	})
+	if len(store.inserted) != 0 {
+		t.Fatalf("notifications.send honored off the plugins channel")
+	}
+}
+
 func TestRequestMatcher_ApprovedCreatesNotification(t *testing.T) {
 	store := &fakeStore{}
 	svc, hub := newTestService(store)

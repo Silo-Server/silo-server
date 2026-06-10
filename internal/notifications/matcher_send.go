@@ -23,9 +23,14 @@ type sendPayload struct {
 
 // matchSend consumes "notifications.send" events. Plugin-published events
 // arrive prefixed ("plugin.<id>.notifications.send"); both forms accepted.
+// Only ChannelPlugins envelopes are considered — the contract is plugin-facing;
+// core code calls Service.Create directly.
 // Malformed payloads are dropped with a warning — plugin bugs must not error
 // core paths. Plugins may not create announcements.
 func (m *Materializer) matchSend(ctx context.Context, env evt.Envelope) error {
+	if env.Channel != evt.ChannelPlugins {
+		return nil
+	}
 	if env.Event != "notifications.send" && !strings.HasSuffix(env.Event, ".notifications.send") {
 		return nil
 	}
