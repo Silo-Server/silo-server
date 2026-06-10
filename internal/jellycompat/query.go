@@ -150,9 +150,16 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	}
 
 	// Fields — parse requested fields and track if explicitly present.
-	fieldsRaw := q.Get("Fields")
+	// Clients send Fields two ways: comma-separated in a single param (VidHub:
+	// Fields=A,B,C) OR as repeated params (Wholphin / jellyfin-sdk-kotlin:
+	// Fields=A&Fields=B&Fields=C). q.Get returns only the FIRST repeated value,
+	// which silently dropped every field after the first — so a Wholphin
+	// playlist request (Fields=PrimaryImageAspectRatio&...&Fields=MediaSources)
+	// never triggered the detail path and came back without MediaSources,
+	// breaking next-episode playback. Join all values, then split on commas.
+	fieldsRaw := strings.Join(q.Values("Fields"), ",")
 	result.requestedFields = parseRequestedFields(fieldsRaw)
-	result.fieldsExplicit = fieldsRaw != ""
+	result.fieldsExplicit = strings.TrimSpace(fieldsRaw) != ""
 	result.needsDetailFields = requestedFieldsNeedDetail(result.requestedFields)
 
 	// Diagnostic: when the request stays on the list path, emit a Debug log

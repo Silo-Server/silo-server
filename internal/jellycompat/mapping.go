@@ -382,7 +382,9 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 			dto.RunTimeTicks = secondsToTicks(float64(firstVersion.Duration))
 		}
 		dto.DateCreated = formatCompatTime(firstVersion.AddedAt)
-		dto.CanDownload = true
+		// No /Items/{id}/Download route exists; advertising download support
+		// sends clients (e.g. Wholphin's screensaver) into 404s.
+		dto.CanDownload = false
 		dto.HasSubtitles = versionsHaveSubtitles(item.Versions)
 		dto.SupportsSync = false
 		dto.Container = strings.ToLower(firstVersion.Container)

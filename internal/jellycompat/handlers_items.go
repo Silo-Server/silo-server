@@ -593,6 +593,23 @@ func (h *ItemsHandler) HandleItemStub(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleThemeSongsStub serves an empty ThemeMediaResult for
+// /Items/{id}/ThemeSongs. It cannot share HandleItemStub because this
+// response shape additionally requires OwnerId (see themeMediaResultDTO).
+func (h *ItemsHandler) HandleThemeSongsStub(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	writeJSON(w, http.StatusOK, themeMediaResultDTO{
+		Items:            []baseItemDTO{},
+		TotalRecordCount: 0,
+		StartIndex:       0,
+		OwnerID:          chi.URLParam(r, "id"),
+	})
+}
+
 // mediaSegmentDTO mirrors Jellyfin's MediaSegmentDto shape. Times are
 // expressed in 100-nanosecond ticks (the convention shared with RunTimeTicks
 // and chapter position fields).
