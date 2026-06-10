@@ -48,7 +48,12 @@ func authorizeMediaFileAccess(w http.ResponseWriter, r *http.Request, authorizer
 }
 
 type translateSubtitleRequest struct {
-	MediaFileID    int     `json:"media_file_id"`
+	MediaFileID int `json:"media_file_id"`
+	// Kind selects the job: "translate" (default), "transcribe", or
+	// "transcribe_translate". For ASR kinds, source_index is the audio track
+	// index (-1 = default track) and target_language is optional for plain
+	// transcribe (acts as a language hint).
+	Kind           string  `json:"kind"`
 	SourceIndex    int     `json:"source_index"`
 	SourceLanguage string  `json:"source_language"`
 	TargetLanguage string  `json:"target_language"`
@@ -56,10 +61,14 @@ type translateSubtitleRequest struct {
 	StartPosition  float64 `json:"start_position"`
 }
 
-// HandleStatus reports whether AI subtitle translation is available, so the
-// player can show or hide the entry point. GET /api/v1/subtitles/ai/status
+// HandleStatus reports whether AI subtitle translation / ASR generation are
+// available, so the player can show or hide the entry points.
+// GET /api/v1/subtitles/ai/status
 func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": h.service.Enabled()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":            h.service.Enabled(),
+		"transcribe_enabled": h.service.TranscribeEnabled(),
+	})
 }
 
 // WriteSubtitleAIDisabledStatus answers the AI status capability probe with a
@@ -67,7 +76,7 @@ func (h *SubtitleAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request)
 // negative instead of a 404 (the 2-segment /ai/status path is not shadowed by the
 // 1-segment /{media_file_id} route — they never compete in chi's router).
 func WriteSubtitleAIDisabledStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "transcribe_enabled": false})
 }
 
 // HandleTranslate enqueues a translation job. POST /api/v1/subtitles/ai/translate
@@ -81,7 +90,13 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "media_file_id is required")
 		return
 	}
-	if req.TargetLanguage == "" {
+	kind := ai.JobKind(req.Kind)
+	if kind == "" {
+		kind = ai.JobKindTranslate
+	}
+	// A plain transcribe produces a track in the spoken language, so the
+	// target is optional; every other kind needs one.
+	if req.TargetLanguage == "" && kind != ai.JobKindTranscribe {
 		writeError(w, http.StatusBadRequest, "bad_request", "target_language is required")
 		return
 	}
@@ -97,7 +112,7 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 
 	job, err := h.service.Enqueue(r.Context(), ai.JobRequest{
 		MediaFileID:    req.MediaFileID,
-		Kind:           ai.JobKindTranslate,
+		Kind:           kind,
 		SourceIndex:    req.SourceIndex,
 		SourceLanguage: req.SourceLanguage,
 		TargetLanguage: req.TargetLanguage,

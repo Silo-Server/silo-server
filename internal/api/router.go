@@ -946,6 +946,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			aiCfg,
 			subtitleai.NewPgJobRepository(deps.DB),
 			subtitleai.NewLLMTranslator(aiClient, aiCfg.BatchSize, aiCfg.ContextNeighbors),
+			subtitleai.NewWhisperTranscriber(aiClient, deps.Config.Playback.FFmpegPath),
 			subtitleManager,
 			subtitleRepo,
 			deps.FileRepo,

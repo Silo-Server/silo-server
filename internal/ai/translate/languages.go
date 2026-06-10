@@ -18,6 +18,22 @@ var languageNames = map[string]string{
 	"tr": "Turkish", "uk": "Ukrainian", "vi": "Vietnamese", "zh": "Chinese",
 }
 
+// LanguageCodeFromName maps an English language name back to its ISO 639-1
+// code — Whisper endpoints report detected languages as names ("english")
+// while local servers report codes. Returns "" when unknown.
+func LanguageCodeFromName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return ""
+	}
+	for code, display := range languageNames {
+		if strings.ToLower(display) == name {
+			return code
+		}
+	}
+	return ""
+}
+
 // LanguageDisplayName returns a human-readable language name for a code, or
 // the trimmed code itself when unknown. An empty code yields an empty string.
 func LanguageDisplayName(code string) string {

@@ -9,14 +9,26 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 )
 
-// JobKind identifies what an AI subtitle job does. Only translation ships in
-// the first iteration; transcription kinds are reserved for the Whisper ASR
-// follow-up so the schema and API do not change again.
+// JobKind identifies what an AI subtitle job does.
 type JobKind string
 
 const (
+	// JobKindTranslate translates an existing text subtitle track. SourceIndex
+	// is the combined player subtitle index of the source track.
 	JobKindTranslate JobKind = "translate"
+	// JobKindTranscribe generates a subtitle track from an audio track via
+	// Whisper ASR. SourceIndex is the 0-based audio track index (-1 = default
+	// track); TargetLanguage is optional and acts as a language hint.
+	JobKindTranscribe JobKind = "transcribe"
+	// JobKindTranscribeTranslate chains transcription with LLM translation to
+	// TargetLanguage, storing both the transcript and the translated track.
+	JobKindTranscribeTranslate JobKind = "transcribe_translate"
 )
+
+// IsTranscribe reports whether the kind starts from audio.
+func (k JobKind) IsTranscribe() bool {
+	return k == JobKindTranscribe || k == JobKindTranscribeTranslate
+}
 
 // JobStatus is the lifecycle state of a job, shared with the other AI job
 // services via jobrunner.

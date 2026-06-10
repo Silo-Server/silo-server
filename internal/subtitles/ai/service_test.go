@@ -51,7 +51,7 @@ func TestRecoverReapsStaleJobsImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // stops the reaper goroutine started by Recover
 
-	svc := NewService(ctx, Config{}, repo, nil, nil, nil, nil, nil, "", nil, nil)
+	svc := NewService(ctx, Config{}, repo, nil, nil, nil, nil, nil, nil, "", nil, nil)
 
 	approxNow := time.Now()
 	svc.Recover()

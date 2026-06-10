@@ -18,7 +18,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
-const providerTranslated = "translated"
+const (
+	providerTranslated  = "translated"
+	providerTranscribed = "transcribed"
+)
 
 var (
 	// ErrEngineNotConfigured is returned when translation is requested but the
@@ -57,16 +60,17 @@ type SubtitleLister interface {
 // dispatch, heartbeat, stale-job reaping, cancellation) are delegated to the
 // shared jobrunner so they stay identical across Silo's AI job services.
 type Service struct {
-	cfg        Config
-	repo       JobRepository
-	translator Translator
-	store      SubtitleStore
-	lister     SubtitleLister
-	files      MediaFileResolver
-	notifier   Notifier // optional
-	ffmpegPath string
-	logger     *slog.Logger
-	runner     *jobrunner.Runner
+	cfg         Config
+	repo        JobRepository
+	translator  Translator
+	transcriber Transcriber // optional; nil disables ASR kinds
+	store       SubtitleStore
+	lister      SubtitleLister
+	files       MediaFileResolver
+	notifier    Notifier // optional
+	ffmpegPath  string
+	logger      *slog.Logger
+	runner      *jobrunner.Runner
 }
 
 // NewService wires a translation service. notifier may be nil. appCtx is the
@@ -80,6 +84,7 @@ func NewService(
 	cfg Config,
 	repo JobRepository,
 	translator Translator,
+	transcriber Transcriber,
 	store SubtitleStore,
 	lister SubtitleLister,
 	files MediaFileResolver,
@@ -92,21 +97,27 @@ func NewService(
 		logger = slog.Default()
 	}
 	return &Service{
-		cfg:        cfg,
-		repo:       repo,
-		translator: translator,
-		store:      store,
-		lister:     lister,
-		files:      files,
-		notifier:   notifier,
-		ffmpegPath: ffmpegPath,
-		logger:     logger,
-		runner:     jobrunner.New(appCtx, sem, repo, "subtitle ai", logger),
+		cfg:         cfg,
+		repo:        repo,
+		translator:  translator,
+		transcriber: transcriber,
+		store:       store,
+		lister:      lister,
+		files:       files,
+		notifier:    notifier,
+		ffmpegPath:  ffmpegPath,
+		logger:      logger,
+		runner:      jobrunner.New(appCtx, sem, repo, "subtitle ai", logger),
 	}
 }
 
 // Enabled reports whether translation can currently run.
 func (s *Service) Enabled() bool { return s.cfg.TranslateReady() }
+
+// TranscribeEnabled reports whether ASR subtitle generation can currently run.
+func (s *Service) TranscribeEnabled() bool {
+	return s.cfg.TranscribeReady() && s.transcriber != nil
+}
 
 // Recover clears jobs orphaned by a crashed worker and starts a background
 // reaper that keeps doing so. Call once at startup.
@@ -120,22 +131,40 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	if req.Kind == "" {
 		req.Kind = JobKindTranslate
 	}
+	jobModel := s.cfg.ChatModel
 	switch req.Kind {
 	case JobKindTranslate:
 		if !s.cfg.TranslateReady() {
 			return nil, ErrEngineNotConfigured
 		}
+	case JobKindTranscribe:
+		if !s.TranscribeEnabled() {
+			return nil, ErrEngineNotConfigured
+		}
+		jobModel = s.cfg.ASRModel
+	case JobKindTranscribeTranslate:
+		if !s.TranscribeEnabled() || !s.cfg.TranslateReady() {
+			return nil, ErrEngineNotConfigured
+		}
+		jobModel = s.cfg.ASRModel + "+" + s.cfg.ChatModel
 	default:
 		return nil, fmt.Errorf("%w: unsupported job kind %q", ErrInvalidRequest, req.Kind)
 	}
 
-	target, err := subtitles.NormalizeLanguageCode(req.TargetLanguage)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid target language %q", ErrInvalidRequest, req.TargetLanguage)
+	// A plain transcribe has no target language (the track comes out in the
+	// spoken language); when provided it acts as a language hint. Every other
+	// kind requires a valid target.
+	if req.Kind == JobKindTranscribe && strings.TrimSpace(req.TargetLanguage) == "" {
+		req.TargetLanguage = ""
+	} else {
+		target, err := subtitles.NormalizeLanguageCode(req.TargetLanguage)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid target language %q", ErrInvalidRequest, req.TargetLanguage)
+		}
+		req.TargetLanguage = target
 	}
-	req.TargetLanguage = target
 
-	key := idempotencyKey(req.MediaFileID, req.Kind, req.SourceIndex, req.TargetLanguage, s.cfg.ChatModel)
+	key := idempotencyKey(req.MediaFileID, req.Kind, req.SourceIndex, req.TargetLanguage, jobModel)
 	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
 		return nil, err
 	} else if existing != nil {
@@ -149,7 +178,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		SourceLanguage:  req.SourceLanguage,
 		TargetLanguage:  req.TargetLanguage,
 		Engine:          "openai",
-		Model:           s.cfg.ChatModel,
+		Model:           jobModel,
 		Status:          JobStatusPending,
 		ProgressMessage: "Queued",
 		IdempotencyKey:  key,
@@ -217,6 +246,10 @@ func (s *Service) dispatch(job Job) {
 }
 
 func (s *Service) run(ctx context.Context, job *Job) {
+	if job.Kind.IsTranscribe() {
+		s.runTranscribe(ctx, job)
+		return
+	}
 	if err := s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0, "Loading subtitle"); err != nil {
 		s.logger.Warn("failed to mark subtitle ai job running", "job", job.ID, "error", err)
 	}
@@ -293,6 +326,196 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		// streaming requester, which already tracks its live track).
 		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, releaseName)
 	}
+}
+
+// runTranscribe executes transcribe / transcribe_translate jobs: extract the
+// audio track, transcribe it chunk by chunk (playhead-first), store the
+// transcript as an ordinary downloaded subtitle, and for the chained kind run
+// the regular translator over the transcript and store the translated track
+// too. The transcript doubles as a cache: a later translation to another
+// language can use it as a plain text source without re-running ASR.
+func (s *Service) runTranscribe(ctx context.Context, job *Job) {
+	if err := s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0, "Preparing audio"); err != nil {
+		s.logger.Warn("failed to mark subtitle ai job running", "job", job.ID, "error", err)
+	}
+
+	file, err := s.files.GetByID(ctx, job.MediaFileID)
+	if err != nil {
+		s.finishWithError(ctx, job, fmt.Errorf("load media file: %w", err))
+		return
+	}
+	if file == nil {
+		s.finishWithError(ctx, job, fmt.Errorf("media file not found"))
+		return
+	}
+	if len(file.AudioTracks) == 0 {
+		s.finishWithError(ctx, job, fmt.Errorf("%w: file has no audio tracks", ErrSourceUnsupported))
+		return
+	}
+
+	audioIdx := job.SourceIndex
+	if audioIdx < 0 {
+		audioIdx = defaultAudioTrackIndex(file.AudioTracks)
+	}
+	if audioIdx >= len(file.AudioTracks) {
+		s.finishWithError(ctx, job, fmt.Errorf("%w: audio track index out of range", ErrInvalidRequest))
+		return
+	}
+
+	// Language hint: an explicit source language wins; otherwise the track's
+	// tagged language, when it normalizes to an ISO code.
+	hint := job.SourceLanguage
+	if hint == "" {
+		if code, err := subtitles.NormalizeLanguageCode(file.AudioTracks[audioIdx].Language); err == nil {
+			hint = code
+		}
+	}
+	if job.Kind == JobKindTranscribe && hint == "" && job.TargetLanguage != "" {
+		hint = job.TargetLanguage
+	}
+
+	streaming := job.SessionID != "" && s.notifier != nil
+	trackKey := liveTrackKey(job.ID)
+	if streaming {
+		liveLang, liveLabel := job.TargetLanguage, transcribedReleaseName(hint)
+		if job.Kind == JobKindTranscribeTranslate {
+			liveLabel = translatedReleaseName(hint, job.TargetLanguage)
+		} else {
+			liveLang = hint
+		}
+		// Cue total is unknown before transcription; 0 means indeterminate.
+		s.notifier.TranslationStarted(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey, liveLang, liveLabel, 0)
+	}
+
+	// Only a plain transcribe streams transcript cues — the chained kind
+	// streams the translated cues from its translation stage instead.
+	streamTranscript := streaming && job.Kind == JobKindTranscribe
+	cues, detected, err := s.transcriber.Transcribe(ctx, TranscribeJobRequest{
+		FilePath:        file.FilePath,
+		AudioTrackIndex: audioIdx,
+		LanguageHint:    hint,
+		StartPosition:   job.StartPosition,
+	}, func(chunk []SubtitleCue, done, total int) {
+		// Transcription occupies the 5%..70% progress band (chunk granularity).
+		_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0.05+0.65*float64(done)/float64(total), "Transcribing")
+		if streamTranscript {
+			s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+				toStreamCues(chunk), done, total)
+		}
+	})
+	if err != nil {
+		s.finishWithError(ctx, job, err)
+		return
+	}
+
+	language := hint
+	if language == "" {
+		language = detected
+	}
+	if job.SourceLanguage == "" {
+		job.SourceLanguage = language
+	}
+
+	// A finished transcription should not be thrown away by a last-moment cancel.
+	storeCtx := context.WithoutCancel(ctx)
+
+	transcriptCues := make([]SubtitleCue, len(cues))
+	copy(transcriptCues, cues)
+	sortCuesByStart(transcriptCues)
+	transcriptLabel := transcribedReleaseName(language)
+	transcript, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
+		MediaFileID: job.MediaFileID,
+		UserID:      job.RequestedBy,
+		Provider:    providerTranscribed,
+		Language:    language,
+		Format:      subtitles.FormatSRT,
+		ReleaseName: transcriptLabel,
+		Data:        SerializeSRT(transcriptCues),
+	})
+	if err != nil {
+		s.finishWithError(ctx, job, fmt.Errorf("store transcribed subtitle: %w", err))
+		return
+	}
+	if s.notifier != nil {
+		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, transcript.ID, language, transcriptLabel)
+	}
+
+	if job.Kind == JobKindTranscribe {
+		if err := s.repo.CompleteJob(storeCtx, job.ID, transcript.ID); err != nil {
+			s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
+		}
+		if streaming {
+			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+				transcript.ID, language, transcriptLabel)
+		}
+		return
+	}
+
+	// transcribe_translate: run the transcript through the regular translator.
+	// Cues already arrive playhead-first from chunk ordering, so the viewer's
+	// region translates (and streams) first here too.
+	translated, err := s.translator.Translate(ctx, TranslateRequest{
+		Cues:           cues,
+		SourceLanguage: language,
+		TargetLanguage: job.TargetLanguage,
+	}, func(batch []SubtitleCue, done, total int) {
+		// Translation occupies the 70%..95% band.
+		_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0.7+0.25*float64(done)/float64(total), "Translating")
+		if streaming {
+			s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+				toStreamCues(batch), done, total)
+		}
+	})
+	if err != nil {
+		s.finishWithError(ctx, job, err)
+		return
+	}
+
+	storeCtx = context.WithoutCancel(ctx)
+	sortCuesByStart(translated)
+	translatedLabel := translatedReleaseName(language, job.TargetLanguage)
+	sub, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
+		MediaFileID: job.MediaFileID,
+		UserID:      job.RequestedBy,
+		Provider:    providerTranslated,
+		Language:    job.TargetLanguage,
+		Format:      subtitles.FormatSRT,
+		ReleaseName: translatedLabel,
+		Data:        SerializeSRT(translated),
+	})
+	if err != nil {
+		s.finishWithError(ctx, job, fmt.Errorf("store translated subtitle: %w", err))
+		return
+	}
+	if err := s.repo.CompleteJob(storeCtx, job.ID, sub.ID); err != nil {
+		s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
+	}
+	if s.notifier != nil {
+		if streaming {
+			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+				sub.ID, job.TargetLanguage, translatedLabel)
+		}
+		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, translatedLabel)
+	}
+}
+
+// defaultAudioTrackIndex returns the index of the default-flagged audio
+// track, falling back to the first track.
+func defaultAudioTrackIndex(tracks []models.AudioTrack) int {
+	for i, t := range tracks {
+		if t.Default {
+			return i
+		}
+	}
+	return 0
+}
+
+func transcribedReleaseName(lang string) string {
+	name := aitranslate.LanguageDisplayName(lang)
+	if name == "" {
+		name = "Audio"
+	}
+	return fmt.Sprintf("%s (AI transcribed)", name)
 }
 
 func (s *Service) finishWithError(ctx context.Context, job *Job, err error) {
