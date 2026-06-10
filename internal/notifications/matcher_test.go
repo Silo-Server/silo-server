@@ -417,6 +417,123 @@ func TestContentMatcher_NilResolverDisabled(t *testing.T) {
 	}
 }
 
+// ---- Admin matcher tests ----
+
+// jobFailedEnvelope builds a raw evt.Envelope simulating job.failed on ChannelJobs.
+// The payload mirrors models.AdminJob JSON tags (id, job_type, status).
+func jobFailedEnvelope(jobID, jobType string) evt.Envelope {
+	data, _ := json.Marshal(map[string]any{
+		"id":       jobID,
+		"job_type": jobType,
+		"status":   "failed",
+	})
+	return evt.Envelope{
+		Channel:   evt.ChannelJobs,
+		Event:     "job.failed",
+		Data:      data,
+		AdminOnly: true,
+	}
+}
+
+func TestAdminMatcher_JobFailedNotifiesAdmins(t *testing.T) {
+	store := &fakeStore{admins: []int{1, 2}}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	publishAndSettle(t, hub, m, jobFailedEnvelope("job-abc", "export"))
+
+	if len(store.inserted) != 2 {
+		t.Fatalf("expected 2 inserts (one per admin), got %d", len(store.inserted))
+	}
+	for _, n := range store.inserted {
+		if n.Category != CategoryAdmin {
+			t.Errorf("category = %q, want %q", n.Category, CategoryAdmin)
+		}
+		if n.Type != "job.failed" {
+			t.Errorf("type = %q, want %q", n.Type, "job.failed")
+		}
+	}
+	// Both admin users must be covered.
+	seen := map[int]bool{}
+	for _, n := range store.inserted {
+		seen[n.UserID] = true
+	}
+	if !seen[1] || !seen[2] {
+		t.Errorf("expected both admins (1, 2) notified; got %v", seen)
+	}
+}
+
+func TestAdminMatcher_RepeatFailureThrottled(t *testing.T) {
+	store := &fakeStore{admins: []int{1}}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Publish the same job.failed event 3 times; dedup_ref is hourly-bucketed
+	// so all three fall in the same bucket → only 1 insert per admin.
+	env := jobFailedEnvelope("job-xyz", "scan")
+	for range 3 {
+		publishAndSettle(t, hub, m, env)
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 insert after dedup throttle, got %d", len(store.inserted))
+	}
+}
+
+func TestAdminMatcher_NonFailureIgnored(t *testing.T) {
+	store := &fakeStore{admins: []int{1, 2}}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	data, _ := json.Marshal(map[string]any{"id": "job-1", "job_type": "export", "status": "completed"})
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelJobs,
+		Event:   "job.completed",
+		Data:    data,
+	})
+
+	if len(store.inserted) != 0 {
+		t.Fatalf("non-failure event should produce 0 inserts, got %d", len(store.inserted))
+	}
+}
+
+func TestAdminMatcher_WrongChannelIgnored(t *testing.T) {
+	store := &fakeStore{admins: []int{1, 2}}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// job.failed arriving on ChannelCatalog must be ignored.
+	data, _ := json.Marshal(map[string]any{"id": "job-1", "job_type": "export", "status": "failed"})
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelCatalog,
+		Event:   "job.failed",
+		Data:    data,
+	})
+
+	if len(store.inserted) != 0 {
+		t.Fatalf("wrong channel should produce 0 inserts, got %d", len(store.inserted))
+	}
+}
+
 // TestContentMatcher_OldItemMetadataRefreshIgnored verifies that a
 // metadata_updated event for an item whose catalog row is older than
 // newItemWindow does not produce any notifications.  This prevents periodic
