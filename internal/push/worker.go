@@ -184,6 +184,12 @@ func (o *txOutcomes) Dead(id int64, userID int, deviceID, m string) {
 		return o.s.PruneTokenTx(context.Background(), o.tx, userID, deviceID)
 	})
 }
+// run executes one outcome op, short-circuiting once any op has errored so the
+// batch commits atomically. NOTE: if a DB op fails mid-batch, the whole tx rolls
+// back and every delivery in the batch is re-claimed next tick — including any
+// that already hit the transport, which re-sends them. Duplicate banners are
+// mitigated by the per-notification collapse/thread key the transports set.
+// If duplicates prove unacceptable, switch to per-delivery commits.
 func (o *txOutcomes) run(fn func() error) {
 	if o.err != nil {
 		return
