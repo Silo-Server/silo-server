@@ -623,17 +623,7 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 	if err != nil || loc == nil {
 		return cloneMediaItem(item), err
 	}
-	localized := cloneMediaItem(item)
-	localized.Title = loc.Title
-	localized.SortTitle = loc.SortTitle
-	localized.Overview = loc.Overview
-	localized.Tagline = loc.Tagline
-	localized.PosterPath = loc.PosterPath
-	localized.PosterThumbhash = loc.PosterThumbhash
-	localized.BackdropPath = loc.BackdropPath
-	localized.BackdropThumbhash = loc.BackdropThumbhash
-	localized.LogoPath = loc.LogoPath
-	return localized, nil
+	return applyItemLocalization(item, loc), nil
 }
 
 func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.Season, filter AccessFilter) (*models.Season, error) {
@@ -648,12 +638,7 @@ func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.
 	if err != nil || loc == nil {
 		return cloneSeason(season), err
 	}
-	localized := cloneSeason(season)
-	localized.Title = loc.Title
-	localized.Overview = loc.Overview
-	localized.PosterPath = loc.PosterPath
-	localized.PosterThumbhash = loc.PosterThumbhash
-	return localized, nil
+	return applySeasonLocalization(season, loc), nil
 }
 
 func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *models.Episode, filter AccessFilter) (*models.Episode, error) {
@@ -668,10 +653,7 @@ func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *model
 	if err != nil || loc == nil {
 		return cloneEpisode(episode), err
 	}
-	localized := cloneEpisode(episode)
-	localized.Title = loc.Title
-	localized.Overview = loc.Overview
-	return localized, nil
+	return applyEpisodeLocalization(episode, loc), nil
 }
 
 // GetItemDetail retrieves a full item detail with presigned URLs and file versions.

@@ -10,6 +10,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// The localization tables carry per-field provenance (provider | ai | manual)
+// on their AI-writable fields (overview, tagline) so writes from different
+// origins can never regress quality: manual beats provider beats ai. The
+// precedence is enforced here, in single-statement upserts, so concurrent
+// writers (a metadata refresh racing an AI translation job) cannot interleave
+// a read-modify-write.
+
 type MediaItemLocalizationRepository struct {
 	pool *pgxpool.Pool
 }
@@ -18,6 +25,11 @@ func NewMediaItemLocalizationRepository(pool *pgxpool.Pool) *MediaItemLocalizati
 	return &MediaItemLocalizationRepository{pool: pool}
 }
 
+// Upsert writes a provider localization. Title/sort-title/artwork fields are
+// taken wholesale (provider data is authoritative for them); overview and
+// tagline respect provenance — a manual value is never overwritten, and an
+// empty incoming value never blanks an existing one (so a provider with no
+// translated overview does not erase an AI or manual translation).
 func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *models.MediaItemLocalization) error {
 	if loc == nil || loc.ContentID == "" || loc.Language == "" {
 		return fmt.Errorf("invalid media item localization")
@@ -34,8 +46,22 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 		ON CONFLICT (content_id, language) DO UPDATE SET
 			title = EXCLUDED.title,
 			sort_title = EXCLUDED.sort_title,
-			overview = EXCLUDED.overview,
-			tagline = EXCLUDED.tagline,
+			overview = CASE
+				WHEN media_item_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN media_item_localizations.overview
+				ELSE EXCLUDED.overview END,
+			overview_source = CASE
+				WHEN media_item_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN media_item_localizations.overview_source
+				ELSE 'provider' END,
+			tagline = CASE
+				WHEN media_item_localizations.tagline_source = 'manual' OR EXCLUDED.tagline = ''
+					THEN media_item_localizations.tagline
+				ELSE EXCLUDED.tagline END,
+			tagline_source = CASE
+				WHEN media_item_localizations.tagline_source = 'manual' OR EXCLUDED.tagline = ''
+					THEN media_item_localizations.tagline_source
+				ELSE 'provider' END,
 			poster_path = EXCLUDED.poster_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			backdrop_path = EXCLUDED.backdrop_path,
@@ -50,10 +76,69 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 	return nil
 }
 
+// UpsertAITranslation writes AI-translated overview/tagline values. A nil
+// pointer leaves that field untouched. Per field, the write lands when the
+// existing value is empty or already AI-sourced; force additionally overwrites
+// provider values (the admin explicitly asked to re-translate). Manual values
+// are never overwritten. Rows created here carry empty titles/artwork — the
+// serving layer falls back to the base item for empty localized fields.
+func (r *MediaItemLocalizationRepository) UpsertAITranslation(ctx context.Context, contentID, language string, overview, tagline *string, force bool) error {
+	if contentID == "" || language == "" {
+		return fmt.Errorf("invalid media item AI localization")
+	}
+	if overview == nil && tagline == nil {
+		return nil
+	}
+
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO media_item_localizations (
+			content_id, language, title, sort_title, overview, tagline,
+			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+			overview_source, tagline_source
+		) VALUES (
+			$1, $2, '', '', COALESCE($3, ''), COALESCE($4, ''),
+			'', '', '', '', '',
+			CASE WHEN $3::text IS NULL THEN 'provider' ELSE 'ai' END,
+			CASE WHEN $4::text IS NULL THEN 'provider' ELSE 'ai' END
+		)
+		ON CONFLICT (content_id, language) DO UPDATE SET
+			overview = CASE
+				WHEN $3::text IS NULL OR media_item_localizations.overview_source = 'manual'
+					THEN media_item_localizations.overview
+				WHEN $5 OR media_item_localizations.overview_source = 'ai' OR media_item_localizations.overview = ''
+					THEN EXCLUDED.overview
+				ELSE media_item_localizations.overview END,
+			overview_source = CASE
+				WHEN $3::text IS NULL OR media_item_localizations.overview_source = 'manual'
+					THEN media_item_localizations.overview_source
+				WHEN $5 OR media_item_localizations.overview_source = 'ai' OR media_item_localizations.overview = ''
+					THEN 'ai'
+				ELSE media_item_localizations.overview_source END,
+			tagline = CASE
+				WHEN $4::text IS NULL OR media_item_localizations.tagline_source = 'manual'
+					THEN media_item_localizations.tagline
+				WHEN $5 OR media_item_localizations.tagline_source = 'ai' OR media_item_localizations.tagline = ''
+					THEN EXCLUDED.tagline
+				ELSE media_item_localizations.tagline END,
+			tagline_source = CASE
+				WHEN $4::text IS NULL OR media_item_localizations.tagline_source = 'manual'
+					THEN media_item_localizations.tagline_source
+				WHEN $5 OR media_item_localizations.tagline_source = 'ai' OR media_item_localizations.tagline = ''
+					THEN 'ai'
+				ELSE media_item_localizations.tagline_source END,
+			updated_at = NOW()
+	`, contentID, language, overview, tagline, force)
+	if err != nil {
+		return fmt.Errorf("upserting media item AI localization: %w", err)
+	}
+	return nil
+}
+
 func (r *MediaItemLocalizationRepository) Get(ctx context.Context, contentID, language string) (*models.MediaItemLocalization, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT content_id, language, title, sort_title, overview, tagline,
 		       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+		       overview_source, tagline_source,
 		       created_at, updated_at
 		FROM media_item_localizations
 		WHERE content_id = $1 AND language = $2
@@ -69,6 +154,7 @@ func (r *MediaItemLocalizationRepository) GetByContentIDs(ctx context.Context, c
 	rows, err := r.pool.Query(ctx, `
 		SELECT content_id, language, title, sort_title, overview, tagline,
 		       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+		       overview_source, tagline_source,
 		       created_at, updated_at
 		FROM media_item_localizations
 		WHERE language = $1 AND content_id = ANY($2)
@@ -98,6 +184,8 @@ func NewSeasonLocalizationRepository(pool *pgxpool.Pool) *SeasonLocalizationRepo
 	return &SeasonLocalizationRepository{pool: pool}
 }
 
+// Upsert writes a provider localization; overview respects provenance (see
+// MediaItemLocalizationRepository.Upsert).
 func (r *SeasonLocalizationRepository) Upsert(ctx context.Context, loc *models.SeasonLocalization) error {
 	if loc == nil || loc.SeasonContentID == "" || loc.Language == "" {
 		return fmt.Errorf("invalid season localization")
@@ -108,7 +196,14 @@ func (r *SeasonLocalizationRepository) Upsert(ctx context.Context, loc *models.S
 		) VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (season_content_id, language) DO UPDATE SET
 			title = EXCLUDED.title,
-			overview = EXCLUDED.overview,
+			overview = CASE
+				WHEN season_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN season_localizations.overview
+				ELSE EXCLUDED.overview END,
+			overview_source = CASE
+				WHEN season_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN season_localizations.overview_source
+				ELSE 'provider' END,
 			poster_path = EXCLUDED.poster_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			updated_at = NOW()
@@ -119,9 +214,41 @@ func (r *SeasonLocalizationRepository) Upsert(ctx context.Context, loc *models.S
 	return nil
 }
 
+// UpsertAIOverview writes an AI-translated season overview (see
+// MediaItemLocalizationRepository.UpsertAITranslation for the precedence).
+func (r *SeasonLocalizationRepository) UpsertAIOverview(ctx context.Context, seasonContentID, language, overview string, force bool) error {
+	if seasonContentID == "" || language == "" {
+		return fmt.Errorf("invalid season AI localization")
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO season_localizations (
+			season_content_id, language, title, overview, poster_path, poster_thumbhash, overview_source
+		) VALUES ($1, $2, '', $3, '', '', 'ai')
+		ON CONFLICT (season_content_id, language) DO UPDATE SET
+			overview = CASE
+				WHEN season_localizations.overview_source = 'manual'
+					THEN season_localizations.overview
+				WHEN $4 OR season_localizations.overview_source = 'ai' OR season_localizations.overview = ''
+					THEN EXCLUDED.overview
+				ELSE season_localizations.overview END,
+			overview_source = CASE
+				WHEN season_localizations.overview_source = 'manual'
+					THEN season_localizations.overview_source
+				WHEN $4 OR season_localizations.overview_source = 'ai' OR season_localizations.overview = ''
+					THEN 'ai'
+				ELSE season_localizations.overview_source END,
+			updated_at = NOW()
+	`, seasonContentID, language, overview, force)
+	if err != nil {
+		return fmt.Errorf("upserting season AI localization: %w", err)
+	}
+	return nil
+}
+
 func (r *SeasonLocalizationRepository) Get(ctx context.Context, seasonContentID, language string) (*models.SeasonLocalization, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT season_content_id, language, title, overview, poster_path, poster_thumbhash, created_at, updated_at
+		SELECT season_content_id, language, title, overview, poster_path, poster_thumbhash,
+		       overview_source, created_at, updated_at
 		FROM season_localizations
 		WHERE season_content_id = $1 AND language = $2
 	`, seasonContentID, language)
@@ -134,7 +261,8 @@ func (r *SeasonLocalizationRepository) GetBySeasonIDs(ctx context.Context, seaso
 		return result, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT season_content_id, language, title, overview, poster_path, poster_thumbhash, created_at, updated_at
+		SELECT season_content_id, language, title, overview, poster_path, poster_thumbhash,
+		       overview_source, created_at, updated_at
 		FROM season_localizations
 		WHERE language = $1 AND season_content_id = ANY($2)
 	`, language, seasonIDs)
@@ -163,6 +291,8 @@ func NewEpisodeLocalizationRepository(pool *pgxpool.Pool) *EpisodeLocalizationRe
 	return &EpisodeLocalizationRepository{pool: pool}
 }
 
+// Upsert writes a provider localization; overview respects provenance (see
+// MediaItemLocalizationRepository.Upsert).
 func (r *EpisodeLocalizationRepository) Upsert(ctx context.Context, loc *models.EpisodeLocalization) error {
 	if loc == nil || loc.EpisodeContentID == "" || loc.Language == "" {
 		return fmt.Errorf("invalid episode localization")
@@ -172,7 +302,14 @@ func (r *EpisodeLocalizationRepository) Upsert(ctx context.Context, loc *models.
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (episode_content_id, language) DO UPDATE SET
 			title = EXCLUDED.title,
-			overview = EXCLUDED.overview,
+			overview = CASE
+				WHEN episode_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN episode_localizations.overview
+				ELSE EXCLUDED.overview END,
+			overview_source = CASE
+				WHEN episode_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN episode_localizations.overview_source
+				ELSE 'provider' END,
 			updated_at = NOW()
 	`, loc.EpisodeContentID, loc.Language, loc.Title, loc.Overview)
 	if err != nil {
@@ -181,9 +318,39 @@ func (r *EpisodeLocalizationRepository) Upsert(ctx context.Context, loc *models.
 	return nil
 }
 
+// UpsertAIOverview writes an AI-translated episode overview (see
+// MediaItemLocalizationRepository.UpsertAITranslation for the precedence).
+func (r *EpisodeLocalizationRepository) UpsertAIOverview(ctx context.Context, episodeContentID, language, overview string, force bool) error {
+	if episodeContentID == "" || language == "" {
+		return fmt.Errorf("invalid episode AI localization")
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO episode_localizations (episode_content_id, language, title, overview, overview_source)
+		VALUES ($1, $2, '', $3, 'ai')
+		ON CONFLICT (episode_content_id, language) DO UPDATE SET
+			overview = CASE
+				WHEN episode_localizations.overview_source = 'manual'
+					THEN episode_localizations.overview
+				WHEN $4 OR episode_localizations.overview_source = 'ai' OR episode_localizations.overview = ''
+					THEN EXCLUDED.overview
+				ELSE episode_localizations.overview END,
+			overview_source = CASE
+				WHEN episode_localizations.overview_source = 'manual'
+					THEN episode_localizations.overview_source
+				WHEN $4 OR episode_localizations.overview_source = 'ai' OR episode_localizations.overview = ''
+					THEN 'ai'
+				ELSE episode_localizations.overview_source END,
+			updated_at = NOW()
+	`, episodeContentID, language, overview, force)
+	if err != nil {
+		return fmt.Errorf("upserting episode AI localization: %w", err)
+	}
+	return nil
+}
+
 func (r *EpisodeLocalizationRepository) Get(ctx context.Context, episodeContentID, language string) (*models.EpisodeLocalization, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT episode_content_id, language, title, overview, created_at, updated_at
+		SELECT episode_content_id, language, title, overview, overview_source, created_at, updated_at
 		FROM episode_localizations
 		WHERE episode_content_id = $1 AND language = $2
 	`, episodeContentID, language)
@@ -196,7 +363,7 @@ func (r *EpisodeLocalizationRepository) GetByEpisodeIDs(ctx context.Context, epi
 		return result, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT episode_content_id, language, title, overview, created_at, updated_at
+		SELECT episode_content_id, language, title, overview, overview_source, created_at, updated_at
 		FROM episode_localizations
 		WHERE language = $1 AND episode_content_id = ANY($2)
 	`, language, episodeIDs)
@@ -231,6 +398,8 @@ func scanMediaItemLocalization(row pgx.Row) (*models.MediaItemLocalization, erro
 		&loc.BackdropPath,
 		&loc.BackdropThumbhash,
 		&loc.LogoPath,
+		&loc.OverviewSource,
+		&loc.TaglineSource,
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
@@ -251,6 +420,7 @@ func scanSeasonLocalization(row pgx.Row) (*models.SeasonLocalization, error) {
 		&loc.Overview,
 		&loc.PosterPath,
 		&loc.PosterThumbhash,
+		&loc.OverviewSource,
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
@@ -269,6 +439,7 @@ func scanEpisodeLocalization(row pgx.Row) (*models.EpisodeLocalization, error) {
 		&loc.Language,
 		&loc.Title,
 		&loc.Overview,
+		&loc.OverviewSource,
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
 	); err != nil {
