@@ -60,6 +60,35 @@ func TestParseMangaIndex(t *testing.T) {
 	}
 }
 
+func TestCleanMangaSeriesName(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		// Trailing parentheticals stripped.
+		{"404 Demons (Digital) (Oak)", "404 Demons"},
+		{"Arifureta - From Commonplace to World's Strongest (Digital) (1r0n)", "Arifureta - From Commonplace to World's Strongest"},
+		{"Angels of Death Episode.0 (2019-2024) (Digital) (LuCaZ)", "Angels of Death Episode.0"},
+		{"Angel of the Night - Lucian - One-shot (2026) (Digital)", "Angel of the Night - Lucian - One-shot"},
+		{"'Tis Time for 'Torture,' Princess (2019-2026) (Digital) (Antrill-Oak)", "'Tis Time for 'Torture,' Princess"},
+		{"A Certain Scientific Railgun - Astral Buddy (2019)", "A Certain Scientific Railgun - Astral Buddy"},
+		// No junk — must be returned unchanged.
+		{"Amefurashi", "Amefurashi"},
+		// Guardrail: folder that is ONLY parentheticals — return original trimmed input.
+		{"(2025) (Digital)", "(2025) (Digital)"},
+		// Middle parentheticals must be preserved.
+		{"JoJo's Bizarre Adventure - Part 8 - JoJolion (something) extra", "JoJo's Bizarre Adventure - Part 8 - JoJolion (something) extra"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got := cleanMangaSeriesName(tc.input)
+			if got != tc.want {
+				t.Fatalf("cleanMangaSeriesName(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestParseMangaIndexCorpus is a regression test against real-world manga
 // release filenames following common scanlation naming conventions.
 // Extensions are already stripped (as parseMangaIndex expects).
