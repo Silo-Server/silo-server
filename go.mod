@@ -31,6 +31,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/sideshow/apns2 v0.25.0
 	github.com/zishang520/socket.io/v2 v2.5.0
 	go.n16f.net/thumbhash v1.1.0
 	golang.org/x/image v0.41.0
@@ -45,6 +46,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/fatih/color v1.13.0 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/gookit/color v1.5.4 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
