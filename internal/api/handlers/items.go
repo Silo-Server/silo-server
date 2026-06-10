@@ -783,6 +783,14 @@ func (h *ItemsHandler) toEpisodeResponseWithFallback(r *http.Request, ep *models
 			ep = localized
 		}
 	}
+	resp, stillPath := episodeResponseShell(ep, fallback)
+	resp.StillURL = h.presignURL(r, stillPath, "card")
+	return resp
+}
+
+// episodeResponseShell maps an already-localized episode onto the response
+// shape, returning the card-variant still path for the caller to presign.
+func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (episodeResponse, string) {
 	stillPath := ep.StillPath
 	stillThumbhash := ep.StillThumbhash
 	if strings.TrimSpace(stillPath) == "" && strings.TrimSpace(fallback.Path) != "" {
@@ -806,8 +814,94 @@ func (h *ItemsHandler) toEpisodeResponseWithFallback(r *http.Request, ep *models
 		resp.AirDate = ep.AirDate.Format("2006-01-02")
 	}
 
-	resp.StillURL = h.presignURL(r, cardThumbnailPath(stillPath), "card")
+	return resp, cardThumbnailPath(stillPath)
+}
 
+// buildEpisodeResponses converts episodes to API responses using batched
+// lookups — localization, media files, watch progress, and image presigning
+// each resolve in one round-trip for the whole list instead of per episode.
+func (h *ItemsHandler) buildEpisodeResponses(r *http.Request, episodes []*models.Episode) []episodeResponse {
+	ctx := r.Context()
+	filter := h.accessFilter(r)
+
+	if h.detailSvc != nil {
+		if localized, err := h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter); err == nil && len(localized) == len(episodes) {
+			episodes = localized
+		}
+	}
+
+	fallbacks := h.episodeImageFallbacks(ctx, episodes)
+
+	episodeIDs := make([]string, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep != nil && ep.ContentID != "" {
+			episodeIDs = append(episodeIDs, ep.ContentID)
+		}
+	}
+	filesByEpisode := h.listEpisodeFiles(ctx, episodeIDs)
+	userData := h.listLeafUserData(r, episodeIDs)
+
+	resp := make([]episodeResponse, 0, len(episodes))
+	stillPaths := make([]string, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep == nil {
+			continue
+		}
+		shell, stillPath := episodeResponseShell(ep, fallbacks[ep.SeriesID])
+		resp = append(resp, shell)
+		stillPaths = append(stillPaths, stillPath)
+	}
+
+	stillURLs := map[string]catalog.ResolvedImageURL{}
+	if h.detailSvc != nil {
+		stillURLs = h.detailSvc.PresignURLsWithExpiry(ctx, stillPaths, "card")
+	}
+	for i := range resp {
+		resp[i].StillURL = stillURLs[stillPaths[i]].URL
+		resp[i].Files = episodeFileResponses(filesByEpisode[resp[i].ContentID], filter)
+		resp[i].UserData = userData[resp[i].ContentID]
+	}
+	return resp
+}
+
+// listEpisodeFiles batch-fetches media files keyed by episode ID, falling back
+// to per-episode lookups when the repository lacks batch support.
+func (h *ItemsHandler) listEpisodeFiles(ctx context.Context, episodeIDs []string) map[string][]*models.MediaFile {
+	if h.fileRepo == nil || len(episodeIDs) == 0 {
+		return nil
+	}
+	if batchProvider, ok := h.fileRepo.(batchEpisodeFileProvider); ok {
+		files, err := batchProvider.ListByEpisodeIDs(ctx, episodeIDs)
+		if err != nil {
+			return nil
+		}
+		return files
+	}
+	files := make(map[string][]*models.MediaFile, len(episodeIDs))
+	for _, id := range episodeIDs {
+		if list, err := h.fileRepo.GetByEpisodeID(ctx, id); err == nil {
+			files[id] = list
+		}
+	}
+	return files
+}
+
+func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter) []episodeFileResponse {
+	var resp []episodeFileResponse
+	for _, f := range files {
+		if !catalog.FileAllowedByAccess(f, filter) {
+			continue
+		}
+		resp = append(resp, episodeFileResponse{
+			FileID:        f.ID,
+			Resolution:    f.Resolution,
+			CodecVideo:    f.CodecVideo,
+			HDR:           f.HDR,
+			AudioChannels: f.AudioChannels,
+			Container:     f.Container,
+			FileSize:      f.FileSize,
+		})
+	}
 	return resp
 }
 
@@ -1264,6 +1358,30 @@ func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string, itemTy
 		return nil
 	}
 
+	return leafUserDataFromProgress(*progress)
+}
+
+// listLeafUserData batch-fetches watch progress for the given content IDs in a
+// single query; the result only holds entries for items with progress rows.
+func (h *ItemsHandler) listLeafUserData(r *http.Request, contentIDs []string) map[string]*catalog.SeasonUserData {
+	store, profileID, ok := h.userStoreForRequest(r)
+	if !ok || len(contentIDs) == 0 {
+		return nil
+	}
+
+	progressMap, err := store.ListProgressByMediaItems(r.Context(), profileID, contentIDs)
+	if err != nil {
+		return nil
+	}
+
+	result := make(map[string]*catalog.SeasonUserData, len(progressMap))
+	for contentID, progress := range progressMap {
+		result[contentID] = leafUserDataFromProgress(progress)
+	}
+	return result
+}
+
+func leafUserDataFromProgress(progress userstore.WatchProgress) *catalog.SeasonUserData {
 	return &catalog.SeasonUserData{
 		PositionSeconds: progress.PositionSeconds,
 		DurationSeconds: progress.DurationSeconds,

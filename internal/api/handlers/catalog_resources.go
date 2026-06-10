@@ -161,35 +161,7 @@ func (h *CatalogResourceHandler) HandleGetItemEpisodes(w http.ResponseWriter, r 
 		return
 	}
 	h.items.maybeRequestStaleSeasonMetadataRefresh(r.Context(), season.ContentID, episodes)
-
-	resp := make([]episodeResponse, 0, len(episodes))
-	fallbacks := h.items.episodeImageFallbacks(r.Context(), episodes)
-	for _, ep := range episodes {
-		epResp := h.items.toEpisodeResponseWithFallback(r, ep, fallbacks[ep.SeriesID])
-		if h.items.fileRepo != nil {
-			files, fileErr := h.items.fileRepo.GetByEpisodeID(r.Context(), ep.ContentID)
-			if fileErr == nil {
-				for _, f := range files {
-					if !catalog.FileAllowedByAccess(f, filter) {
-						continue
-					}
-					epResp.Files = append(epResp.Files, episodeFileResponse{
-						FileID:        f.ID,
-						Resolution:    f.Resolution,
-						CodecVideo:    f.CodecVideo,
-						HDR:           f.HDR,
-						AudioChannels: f.AudioChannels,
-						Container:     f.Container,
-						FileSize:      f.FileSize,
-					})
-				}
-			}
-		}
-		epResp.UserData = h.items.getLeafUserData(r, ep.ContentID)
-		resp = append(resp, epResp)
-	}
-
-	writeJSON(w, http.StatusOK, episodesListResponse{Episodes: resp})
+	h.writeEpisodeResponses(w, r, episodes)
 }
 
 func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http.Request) {
@@ -439,34 +411,7 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 }
 
 func (h *CatalogResourceHandler) writeEpisodeResponses(w http.ResponseWriter, r *http.Request, episodes []*models.Episode) {
-	filter := h.items.accessFilter(r)
-	resp := make([]episodeResponse, 0, len(episodes))
-	fallbacks := h.items.episodeImageFallbacks(r.Context(), episodes)
-	for _, ep := range episodes {
-		epResp := h.items.toEpisodeResponseWithFallback(r, ep, fallbacks[ep.SeriesID])
-		if h.items.fileRepo != nil {
-			files, fileErr := h.items.fileRepo.GetByEpisodeID(r.Context(), ep.ContentID)
-			if fileErr == nil {
-				for _, f := range files {
-					if !catalog.FileAllowedByAccess(f, filter) {
-						continue
-					}
-					epResp.Files = append(epResp.Files, episodeFileResponse{
-						FileID:        f.ID,
-						Resolution:    f.Resolution,
-						CodecVideo:    f.CodecVideo,
-						HDR:           f.HDR,
-						AudioChannels: f.AudioChannels,
-						Container:     f.Container,
-						FileSize:      f.FileSize,
-					})
-				}
-			}
-		}
-		epResp.UserData = h.items.getLeafUserData(r, ep.ContentID)
-		resp = append(resp, epResp)
-	}
-	writeJSON(w, http.StatusOK, episodesListResponse{Episodes: resp})
+	writeJSON(w, http.StatusOK, episodesListResponse{Episodes: h.items.buildEpisodeResponses(r, episodes)})
 }
 
 func parseSyntheticSeasonID(contentID string) (string, int, bool) {
