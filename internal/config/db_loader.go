@@ -355,9 +355,9 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Auth.RefreshTokenExpiry = refreshTokenExpiry
 
-	// AudiobookshelfCompat — dedicated listener for ABS client apps. Keep the
-	// listener off unless ABS compatibility is explicitly enabled.
-	absCompatEnabled, err := boolOr(m, "audiobookshelf_compat.enabled", false)
+	// AudiobookshelfCompat — dedicated listener for ABS client apps. Docker
+	// deployments publish :13378, so listen by default unless disabled.
+	absCompatEnabled, err := boolOr(m, "audiobookshelf_compat.enabled", true)
 	if err != nil {
 		return nil, err
 	}

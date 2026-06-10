@@ -97,9 +97,12 @@ func shouldSkipMovieSupplementalFile(path string) bool {
 }
 
 // Scanner discovers and indexes media files in media folders.
-// scannerImageCacher is the slice of imagecache.Cacher the audiobook
-// branch uses. Wired via SetImageCacher; nil-safe when absent.
-type scannerImageCacher = audiobookCoverCacher
+// scannerImageCacher is the slice of imagecache.Cacher the book scanners use.
+// Wired via SetImageCacher; nil-safe when absent.
+type scannerImageCacher interface {
+	audiobookCoverCacher
+	ebookCoverCacher
+}
 
 type Scanner struct {
 	fileRepo            *FileRepository
@@ -126,9 +129,9 @@ type Scanner struct {
 	seriesQueueSyncer   SeriesQueueSyncer
 }
 
-// SetImageCacher installs the imagecache.Cacher used by the audiobook
-// branch to push embedded M4B cover art into the public assets bucket.
-// Optional; if unset, audiobook covers are not extracted.
+// SetImageCacher installs the imagecache.Cacher used by book scanners to push
+// embedded cover art into the public assets bucket. Optional; if unset, local
+// covers are not extracted.
 func (s *Scanner) SetImageCacher(cacher scannerImageCacher) {
 	if s == nil {
 		return
@@ -241,6 +244,13 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
+	if isEbookLibraryType(folder.Type) {
+		if err := s.ScanEbookFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+
 	return s.scanPaths(watchCtx, folder, folder.Paths, folder.Paths, true)
 }
 
@@ -250,7 +260,44 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	cleanSubtree := filepath.Clean(subtreePath)
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
+	if isAudiobookLibraryType(folder.Type) {
+		scanRoot, err := cleanScopedAudiobookScanRoot(subtreePath)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.ScanAudiobookFolder(watchCtx, scopedFolderPaths(folder, []string{scanRoot})); err != nil {
+			return nil, err
+		}
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+	if isEbookLibraryType(folder.Type) {
+		if err := s.scanEbookPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
 	return s.scanPaths(watchCtx, folder, []string{cleanSubtree}, []string{cleanSubtree}, false)
+}
+
+func cleanScopedAudiobookScanRoot(path string) (string, error) {
+	clean := filepath.Clean(path)
+	if clean == "" || clean == "." || clean == ".." || clean == string(filepath.Separator) ||
+		strings.HasPrefix(clean, ".."+string(filepath.Separator)) || !filepath.IsAbs(clean) {
+		return "", fmt.Errorf("invalid audiobook scan root: %s", path)
+	}
+	return clean, nil
+}
+
+func scopedFolderPaths(folder *models.MediaFolder, paths []string) *models.MediaFolder {
+	if folder == nil {
+		return nil
+	}
+	clone := *folder
+	clone.Paths = paths
+	return &clone
 }
 
 func isMovieLibraryType(libraryType string) bool {
@@ -278,6 +325,15 @@ func isPodcastLibraryType(libraryType string) bool {
 	}
 }
 
+func isEbookLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "ebook", "ebooks":
+		return true
+	default:
+		return false
+	}
+}
+
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
 // to apply.
@@ -288,6 +344,7 @@ const (
 	walkModeMovie                     // movie library: video extensions + sample/extra skipping
 	walkModeAudiobook                 // audiobook library: audio extensions, no skipping
 	walkModePodcast                   // podcast library: audio extensions, no skipping
+	walkModeEbook                     // ebook library: ebook extensions, no skipping
 )
 
 // walkModeFor derives a walkMode from a media_folders.type string.
@@ -301,6 +358,8 @@ func walkModeFor(folderType string) walkMode {
 		return walkModeAudiobook
 	case isPodcastLibraryType(folderType):
 		return walkModePodcast
+	case isEbookLibraryType(folderType):
+		return walkModeEbook
 	default:
 		return walkModeVideo
 	}
@@ -312,6 +371,8 @@ func (m walkMode) acceptsExt(ext string) bool {
 	switch m {
 	case walkModeAudiobook, walkModePodcast:
 		return audioExtensions[ext]
+	case walkModeEbook:
+		return ebookExtensions[ext]
 	default:
 		return videoExtensions[ext]
 	}
@@ -333,6 +394,16 @@ func isIgnoredDirectoryPath(path string) bool {
 	return ignoredDirNames[strings.ToLower(filepath.Base(path))]
 }
 
+// recordWalkFailure counts an entry the walk could not read or resolve.
+// Callers that pass a non-nil counter (the book scanners) use it to exclude
+// incompletely walked roots from missing-file reconciliation; the video walk
+// passes nil and keeps its historical log-and-continue behavior.
+func recordWalkFailure(failures *int) {
+	if failures != nil {
+		*failures++
+	}
+}
+
 func walkLogicalTree(
 	ctx context.Context,
 	logicalPath string,
@@ -340,6 +411,7 @@ func walkLogicalTree(
 	mode walkMode,
 	visitedPhysicalDirs map[string]struct{},
 	filePaths *[]string,
+	walkFailures *int,
 ) error {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -350,6 +422,7 @@ func walkLogicalTree(
 	info, err := os.Lstat(physicalPath)
 	if err != nil {
 		slog.Warn("scanner: walk lstat failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures)
 		return nil
 	}
 
@@ -357,15 +430,17 @@ func walkLogicalTree(
 		resolved, err := filepath.EvalSymlinks(physicalPath)
 		if err != nil {
 			slog.Warn("scanner: symlink resolve failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+			recordWalkFailure(walkFailures)
 			return nil
 		}
 		targetInfo, err := os.Stat(resolved)
 		if err != nil {
 			slog.Warn("scanner: symlink stat failed", "path", logicalPath, "resolved_path", resolved, "error", err)
+			recordWalkFailure(walkFailures)
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, filePaths)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, filePaths, walkFailures)
 		}
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
@@ -389,6 +464,7 @@ func walkLogicalTree(
 	canonicalDir, err := canonicalWalkPath(physicalPath)
 	if err != nil {
 		slog.Warn("scanner: canonical path resolution failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures)
 		return nil
 	}
 	if _, seen := visitedPhysicalDirs[canonicalDir]; seen {
@@ -406,6 +482,7 @@ func walkLogicalTree(
 	entries, err := os.ReadDir(physicalPath)
 	if err != nil {
 		slog.Warn("scanner: directory read failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures)
 		return nil
 	}
 	for _, entry := range entries {
@@ -422,15 +499,17 @@ func walkLogicalTree(
 			resolved, err := filepath.EvalSymlinks(physicalChild)
 			if err != nil {
 				slog.Warn("scanner: symlink resolve failed", "path", logicalChild, "physical_path", physicalChild, "error", err)
+				recordWalkFailure(walkFailures)
 				continue
 			}
 			targetInfo, err := os.Stat(resolved)
 			if err != nil {
 				slog.Warn("scanner: symlink stat failed", "path", logicalChild, "resolved_path", resolved, "error", err)
+				recordWalkFailure(walkFailures)
 				continue
 			}
 			if targetInfo.IsDir() {
-				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, filePaths); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, filePaths, walkFailures); err != nil {
 					return err
 				}
 				continue
@@ -445,7 +524,7 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, filePaths); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, filePaths, walkFailures); err != nil {
 				return err
 			}
 			continue
@@ -477,7 +556,7 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if cleanRoot == "" || cleanRoot == "." {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths); err != nil {
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -1454,8 +1533,23 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return err
 	}
 
+	cleanFile := filepath.Clean(filePath)
+	if isAudiobookLibraryType(folder.Type) {
+		if !SupportsAudioFile(cleanFile) {
+			return fmt.Errorf("unrecognized audio extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
+		}
+		scanRoot, err := cleanScopedAudiobookScanRoot(filepath.Dir(cleanFile))
+		if err != nil {
+			return err
+		}
+		if err := s.ScanAudiobookFolder(ctx, scopedFolderPaths(folder, []string{scanRoot})); err != nil {
+			return err
+		}
+		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)
+	}
+
 	// Verify the file extension is recognized.
-	ext := strings.ToLower(filepath.Ext(filePath))
+	ext := strings.ToLower(filepath.Ext(cleanFile))
 	if !videoExtensions[ext] {
 		return fmt.Errorf("unrecognized video extension: %s", ext)
 	}

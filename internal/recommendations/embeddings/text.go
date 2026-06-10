@@ -63,17 +63,20 @@ func BuildEmbeddingText(item *models.MediaItem) string {
 		parts = append(parts, fmt.Sprintf(`"%s"`, item.Tagline))
 	}
 
-	if item.Type == "audiobook" {
-		// Audiobooks credit author (kind=7) and narrator (kind=8). Cast/
-		// director/writer don't apply. Keep the SQL canonical_text builder
-		// in recommendations/repo.go in sync with this shape.
+	if item.Type == "audiobook" || item.Type == "ebook" {
+		// Books credit authors (kind=7). Audiobooks also credit narrators
+		// (kind=8); ebooks do not. Cast/director/writer don't apply. Keep
+		// the SQL canonical_text builder in recommendations/repo.go in sync
+		// with this shape.
 		var authors, narrators []models.ItemPerson
 		for _, p := range item.People {
 			switch p.Kind {
 			case models.PersonKindAuthor:
 				authors = append(authors, p)
 			case models.PersonKindNarrator:
-				narrators = append(narrators, p)
+				if item.Type == "audiobook" {
+					narrators = append(narrators, p)
+				}
 			}
 		}
 		sortItemPeople(authors)
@@ -174,6 +177,8 @@ func mediaTypeLabel(t string) string {
 		return "TV series"
 	case "audiobook":
 		return "audiobook"
+	case "ebook":
+		return "ebook"
 	default:
 		return "movie"
 	}

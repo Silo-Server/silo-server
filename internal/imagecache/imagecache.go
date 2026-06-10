@@ -114,6 +114,22 @@ func (c *Cacher) CacheAudiobookCover(ctx context.Context, data []byte, contentID
 	return res.BasePath, res.Ext, res.Thumbhash, nil
 }
 
+// CacheEbookCover stores an embedded ebook cover under
+// "local/ebooks/{contentID}/poster/..." using the same poster variants as
+// provider-hosted book artwork.
+func (c *Cacher) CacheEbookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error) {
+	res, err := c.CacheBytes(ctx, data, CacheRequest{
+		ProviderID:  "local",
+		ContentType: "ebooks",
+		ContentID:   contentID,
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	return res.BasePath, res.Ext, res.Thumbhash, nil
+}
+
 // CacheBytes performs the same variant generation, thumbhash, and S3 upload as
 // Cache but starts from raw image bytes already in hand. Used by the
 // audiobook scanner to push embedded M4B cover art into S3 without round-

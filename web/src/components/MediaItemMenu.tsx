@@ -8,6 +8,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import {
   DropdownMenu,
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
+import { buildMediaPlayHref } from "@/lib/mediaNavigation";
 
 type MediaItemType = ItemDetail["type"];
 
@@ -48,6 +50,7 @@ interface BuildMediaItemMenuModelOptions {
 interface MediaItemMenuProps {
   contentId: string;
   mediaType: MediaItemType;
+  libraryId?: number;
   userState?: MediaItemUserState;
   variant?: "poster" | "wide";
   /** When false, hides favorites and watchlist actions (e.g. for episodes). Defaults to true. */
@@ -65,13 +68,14 @@ export function buildMediaItemMenuModel({
   dismissLabel,
 }: BuildMediaItemMenuModelOptions): MediaItemMenuEntry[] {
   const entries: MediaItemMenuEntry[] = [];
-  const isLeaf = mediaType === "movie" || mediaType === "episode";
+  const isAudiobook = mediaType === "audiobook";
+  const isLeaf = mediaType === "movie" || mediaType === "episode" || isAudiobook;
 
   if (isLeaf && (hasPartialProgress || userState?.played === true)) {
     entries.push({
       kind: "action",
       key: "playFromBeginning",
-      label: "Play from Beginning",
+      label: isAudiobook ? "Listen from Beginning" : "Play from Beginning",
     });
   }
 
@@ -79,9 +83,11 @@ export function buildMediaItemMenuModel({
     entries.push({
       kind: "action",
       key: "toggleWatched",
-      label: userState.played ? "Mark Unwatched" : "Mark Watched",
+      label: getWatchedActionLabel({ type: mediaType, user_data: { played: userState.played } }),
     });
+  }
 
+  if (userState) {
     if (showCollectionActions) {
       entries.push(
         {
@@ -138,6 +144,7 @@ function stopMenuEvent(event: Pick<Event, "preventDefault" | "stopPropagation">)
 export default function MediaItemMenu({
   contentId,
   mediaType,
+  libraryId,
   userState,
   variant = "poster",
   showCollectionActions = true,
@@ -167,7 +174,11 @@ export default function MediaItemMenu({
   const dismissHomeItemMutation = useDismissHomeItem();
   const dismissLabel =
     dismissAction?.surface === "continue_watching"
-      ? "Remove from Continue Watching"
+      ? mediaType === "audiobook"
+        ? "Remove from Continue Listening"
+        : mediaType === "ebook"
+          ? "Remove from Continue Reading"
+          : "Remove from Continue Watching"
       : dismissAction?.surface === "next_up"
         ? "Remove from Next Up"
         : undefined;
@@ -201,6 +212,10 @@ export default function MediaItemMenu({
   async function handleAction(actionKey: Extract<MediaItemMenuEntry, { kind: "action" }>["key"]) {
     switch (actionKey) {
       case "playFromBeginning": {
+        if (mediaType === "audiobook") {
+          navigate(buildMediaPlayHref({ contentId, type: mediaType, libraryId, restart: true }));
+          return;
+        }
         playbackController.startPlayback({
           contentId,
           restart: true,

@@ -8,6 +8,7 @@ import {
   matchByTraits,
   getPlaybackEnvironmentSnapshot,
 } from "./useCodecDetection";
+import { buildPlayerStreamUrl } from "../stream-url";
 import type {
   ChangeAudioResponse,
   PlaybackSessionPlaybackInfo,
@@ -110,32 +111,6 @@ export function buildStartPlaybackRequestPayload({
   }
 
   return payload;
-}
-
-function buildStreamUrl(
-  apiBaseUrl: string,
-  streamPath: string,
-  token: string | null,
-  playMethod: PlayMethod,
-  initialPosition: number,
-): string {
-  const params = new URLSearchParams();
-
-  if (token) {
-    params.set("token", token);
-  }
-
-  if (playMethod === "remux" && initialPosition > 0) {
-    params.set("seek", initialPosition.toFixed(3));
-  }
-
-  const query = params.toString();
-  // If the backend returned an absolute URL (proxy mode), use it directly.
-  const base =
-    streamPath.startsWith("http://") || streamPath.startsWith("https://")
-      ? streamPath
-      : `${apiBaseUrl}${streamPath}`;
-  return `${base}${query ? `?${query}` : ""}`;
 }
 
 function describePlaybackSessionError(
@@ -300,7 +275,7 @@ export function usePlaybackSession(
       const restoredPosition = session.position ?? 0;
 
       return {
-        streamUrl: buildStreamUrl(
+        streamUrl: buildPlayerStreamUrl(
           config.apiBaseUrl,
           session.stream_url,
           token,
@@ -315,9 +290,9 @@ export function usePlaybackSession(
         durationSeconds: session.duration_seconds ?? null,
         subtitleUrls: (session.subtitle_urls ?? []).map((s) => ({
           ...s,
-          url: buildStreamUrl(config.apiBaseUrl, s.url, token, "direct", 0),
+          url: buildPlayerStreamUrl(config.apiBaseUrl, s.url, token, "direct", 0),
           font_bundle_url: s.font_bundle_url
-            ? buildStreamUrl(config.apiBaseUrl, s.font_bundle_url, token, "direct", 0)
+            ? buildPlayerStreamUrl(config.apiBaseUrl, s.font_bundle_url, token, "direct", 0)
             : undefined,
         })),
         playbackInfo: session.playback_info ?? null,
@@ -522,7 +497,7 @@ export function usePlaybackSession(
             label: `${dl.release_name} (${dl.provider})`,
             source: "downloaded" as const,
             hearing_impaired: dl.hearing_impaired,
-            url: buildStreamUrl(
+            url: buildPlayerStreamUrl(
               config.apiBaseUrl,
               `/stream/${sid}/subtitles/${baseIndex + i}`,
               token,
@@ -556,7 +531,7 @@ export function usePlaybackSession(
           const token = config.getAccessToken();
           setState((prev) => ({
             ...prev,
-            streamUrl: buildStreamUrl(
+            streamUrl: buildPlayerStreamUrl(
               config.apiBaseUrl,
               resp.stream_url,
               token,

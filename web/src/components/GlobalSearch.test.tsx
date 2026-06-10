@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  navigate: vi.fn(),
   useQuery: vi.fn(),
   useCanRequest: vi.fn(),
   useRequestSearch: vi.fn(),
@@ -25,6 +28,10 @@ vi.mock("@/hooks/useDebounce", () => ({
 
 vi.mock("@/hooks/useCanRequest", () => ({
   useCanRequest: () => mocks.useCanRequest(),
+}));
+
+vi.mock("@/hooks/useViewTransition", () => ({
+  useViewTransitionNavigate: () => mocks.navigate,
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => ({
@@ -91,6 +98,7 @@ function renderSearchMarkup(props: Partial<Parameters<typeof GlobalSearch>[0]> =
 
 describe("GlobalSearch", () => {
   beforeEach(() => {
+    mocks.navigate.mockReset();
     mocks.useQuery.mockReset();
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();
@@ -119,9 +127,32 @@ describe("GlobalSearch", () => {
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
 
     expect(markup).toContain('data-testid="dialog"');
+    expect(markup).toContain('placeholder="Search library..."');
     expect(markup).toContain("Test Movie");
     expect(markup).toContain("Showing top 8 of 50");
     expect(markup).toContain("Press Enter for all results");
+  });
+
+  it("labels ebook preview rows with title case media type", () => {
+    mocks.useQuery.mockReturnValue({
+      data: {
+        total: 1,
+        has_more: false,
+        items: [
+          {
+            ...browseFixture,
+            type: "ebook",
+            title: "A Reader",
+          },
+        ],
+      },
+      isFetching: false,
+      isError: false,
+    });
+
+    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Reader" });
+
+    expect(markup).toContain("2020 · Ebook");
   });
 
   it("disables the preview query when the dialog is closed", () => {
@@ -142,10 +173,44 @@ describe("GlobalSearch", () => {
     };
     expect(lastCall.enabled).toBe(false);
   });
+
+  it("encodes picked item IDs before navigating", async () => {
+    mocks.useQuery.mockReturnValue({
+      data: {
+        total: 1,
+        has_more: false,
+        items: [
+          {
+            ...browseFixture,
+            content_id: "ebook 1",
+            type: "ebook",
+            title: "A Reader",
+          },
+        ],
+      },
+      isFetching: false,
+      isError: false,
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GlobalSearch defaultOpen initialQuery="Reader" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("option", { name: /A Reader/i }));
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/item/ebook%201");
+  });
 });
 
 describe("GlobalSearch + RequestToAddSection wiring", () => {
   beforeEach(() => {
+    mocks.navigate.mockReset();
     mocks.useQuery.mockReset();
     mocks.useCanRequest.mockReset();
     mocks.useRequestSearch.mockReset();

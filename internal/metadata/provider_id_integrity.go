@@ -722,6 +722,19 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    last_codec_video = CASE WHEN EXCLUDED.updated_at >= user_watch_progress.updated_at THEN EXCLUDED.last_codec_video ELSE user_watch_progress.last_codec_video END,
 			    last_edition_key = CASE WHEN EXCLUDED.updated_at >= user_watch_progress.updated_at THEN EXCLUDED.last_edition_key ELSE user_watch_progress.last_edition_key END`},
 	{"delete source progress", `DELETE FROM user_watch_progress WHERE media_item_id = $1`},
+	{"merge ebook reader progress", `
+			INSERT INTO ebook_reader_progress (
+				user_id, profile_id, content_id, file_id, location, progress, updated_at
+			)
+			SELECT user_id, profile_id, $2, file_id, location, progress, updated_at
+			FROM ebook_reader_progress
+			WHERE content_id = $1
+			ON CONFLICT (user_id, profile_id, content_id) DO UPDATE
+			SET file_id = CASE WHEN EXCLUDED.updated_at >= ebook_reader_progress.updated_at THEN EXCLUDED.file_id ELSE ebook_reader_progress.file_id END,
+			    location = CASE WHEN EXCLUDED.updated_at >= ebook_reader_progress.updated_at THEN EXCLUDED.location ELSE ebook_reader_progress.location END,
+			    progress = CASE WHEN EXCLUDED.updated_at >= ebook_reader_progress.updated_at THEN EXCLUDED.progress ELSE ebook_reader_progress.progress END,
+			    updated_at = GREATEST(ebook_reader_progress.updated_at, EXCLUDED.updated_at)`},
+	{"delete source ebook reader progress", `DELETE FROM ebook_reader_progress WHERE content_id = $1`},
 	{"move history", `UPDATE user_watch_history SET media_item_id = $2 WHERE media_item_id = $1`},
 	{"merge hidden history", `
 			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, updated_at)

@@ -70,7 +70,7 @@ export default function CollectionRulesEditor({
                     media_scope:
                       next === "all"
                         ? undefined
-                        : (next as "movie" | "series" | "episode" | "audiobook"),
+                        : (next as "movie" | "series" | "episode" | "audiobook" | "ebook"),
                     sort: nextSort,
                   });
                 }}
@@ -85,6 +85,7 @@ export default function CollectionRulesEditor({
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>
                   <SelectItem value="audiobook">Audiobooks</SelectItem>
+                  <SelectItem value="ebook">Ebooks</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -110,6 +111,7 @@ export default function CollectionRulesEditor({
           allowPersonalizedFilters={allowPersonalizedFilters}
           allowPersonalizedSorts={allowPersonalizedSorts}
           sortRelevanceScope={sortRelevanceScope}
+          mediaScope={value.media_scope ?? "all"}
           onChange={(next) =>
             onChange({
               ...value,

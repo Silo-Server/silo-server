@@ -94,8 +94,16 @@ function connectionKindLabel(kind: string): string {
   return kind;
 }
 
+// integrationKind reads the arr service kind from plugin_config, which is now
+// the sole source of truth (the legacy top-level `kind` column was dropped).
+function integrationKind(integration: RequestIntegration): string {
+  const kind = integration.plugin_config?.["service_kind"];
+  return typeof kind === "string" ? kind : "";
+}
+
 function isArrKind(integration: RequestIntegration): boolean {
-  return integration.kind === "sonarr" || integration.kind === "radarr";
+  const kind = integrationKind(integration);
+  return kind === "sonarr" || kind === "radarr";
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +219,7 @@ export default function ConnectionsPanel() {
       const linked = arrIntegrations.find((i) => i.id === dialog.requestIntegrationId);
       body = {
         name: linked?.name ?? dialog.requestIntegrationId,
-        kind: linked?.kind ?? "sonarr",
+        kind: (linked && integrationKind(linked)) || "sonarr",
         request_integration_id: dialog.requestIntegrationId,
       };
     } else {
@@ -377,7 +385,7 @@ export default function ConnectionsPanel() {
                     <SelectContent>
                       {arrIntegrations.map((integration) => (
                         <SelectItem key={integration.id} value={integration.id}>
-                          {integration.name} ({connectionKindLabel(integration.kind)})
+                          {integration.name} ({connectionKindLabel(integrationKind(integration))})
                         </SelectItem>
                       ))}
                     </SelectContent>

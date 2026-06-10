@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useRateLimitConfig, useUpdateRateLimitConfig } from "@/hooks/queries/admin/rateLimits";
 import type {
   RateLimitConfig,
@@ -16,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RestartServerButton } from "./RestartServerButton";
 
 const DEFAULT_TIER: RateLimitTierConfig = {
   requests_per_second: 10,
@@ -144,6 +146,15 @@ export default function RateLimitSettings() {
     updateConfig.mutate(config);
   }
 
+  // The limiter only starts (and only switches backend) at boot, so the saved
+  // config can disagree with what this process is actually enforcing.
+  const pendingRestart =
+    !!serverConfig &&
+    ((serverConfig.enabled && serverConfig.active === false) ||
+      (serverConfig.active === true &&
+        !!serverConfig.active_backend &&
+        serverConfig.backend !== serverConfig.active_backend));
+
   if (isLoading) return <div>Loading...</div>;
 
   return (
@@ -156,6 +167,15 @@ export default function RateLimitSettings() {
       </div>
 
       <div className="max-w-2xl space-y-4">
+        {pendingRestart && (
+          <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-foreground/80 flex items-center gap-2 text-xs">
+              <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>Saved changes require a server restart to take effect.</span>
+            </div>
+            <RestartServerButton />
+          </div>
+        )}
         <div className="surface-panel rounded-2xl border-0 px-5 py-4">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div className="space-y-0.5">

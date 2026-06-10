@@ -110,6 +110,25 @@ func TestMergeStepPlaceholdersAreBounded(t *testing.T) {
 	}
 }
 
+func TestMergeStepsPreserveEbookReaderProgress(t *testing.T) {
+	var hasMerge bool
+	var hasDelete bool
+	for _, step := range mediaItemMergeSteps {
+		if strings.Contains(step.sql, "ebook_reader_progress") && strings.Contains(step.sql, "INSERT INTO") {
+			hasMerge = true
+		}
+		if strings.Contains(step.sql, "ebook_reader_progress") && strings.Contains(step.sql, "DELETE FROM") {
+			hasDelete = true
+		}
+	}
+	if !hasMerge {
+		t.Fatal("media item merge steps should merge ebook_reader_progress rows")
+	}
+	if !hasDelete {
+		t.Fatal("media item merge steps should delete source ebook_reader_progress rows")
+	}
+}
+
 func TestBothCandidatesHaveContentDetectsRealUserData(t *testing.T) {
 	withFiles := canonicalCandidate{ContentID: "a", ActiveFiles: 2}
 	withLibraries := canonicalCandidate{ContentID: "b", LibraryCount: 1}

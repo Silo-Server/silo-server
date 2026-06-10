@@ -104,6 +104,53 @@ type QueryDefinition struct {
 	Limit      *int         `json:"limit,omitempty"`
 }
 
+// MediaScopeVideo is the group scope covering all video-side item types. It
+// is accepted anywhere a single-type media scope is and expands to the
+// underlying media_items.type values via MediaScopeItemTypes.
+const MediaScopeVideo = "video"
+
+// IsValidMediaScope reports whether scope (already normalized to lowercase)
+// is an accepted media_scope value. Empty means unscoped and is valid.
+func IsValidMediaScope(scope string) bool {
+	switch scope {
+	case "", "movie", "series", "episode", "audiobook", "ebook", MediaScopeVideo:
+		return true
+	default:
+		return false
+	}
+}
+
+// MediaScopeItemTypes expands a media scope into the media_items.type values
+// it covers. Single-type scopes map to themselves; the empty scope returns
+// nil (unscoped).
+func MediaScopeItemTypes(scope string) []string {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	switch scope {
+	case "":
+		return nil
+	case MediaScopeVideo:
+		return []string{"movie", "series"}
+	default:
+		return []string{scope}
+	}
+}
+
+// MediaScopeMatchesItemType reports whether an item type falls inside scope.
+// An empty scope matches every type.
+func MediaScopeMatchesItemType(scope, itemType string) bool {
+	types := MediaScopeItemTypes(scope)
+	if len(types) == 0 {
+		return true
+	}
+	itemType = strings.ToLower(strings.TrimSpace(itemType))
+	for _, t := range types {
+		if t == itemType {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	DefaultSmartCollectionItemLimit = 100
 	MaxSmartCollectionItemLimit     = 500
@@ -182,12 +229,8 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 		}
 	}
 
-	if normalized.MediaScope != "" &&
-		normalized.MediaScope != "movie" &&
-		normalized.MediaScope != "series" &&
-		normalized.MediaScope != "episode" &&
-		normalized.MediaScope != "audiobook" {
-		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', or 'audiobook'")
+	if !IsValidMediaScope(normalized.MediaScope) {
+		return fmt.Errorf("media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', or 'video'")
 	}
 
 	if normalized.Match != "all" && normalized.Match != "any" {
@@ -206,6 +249,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 			if def.personalized && !allowPersonalizedFields {
 				return fmt.Errorf("groups[%d].rules[%d].field %q requires profile scope", i, j, rule.Field)
 			}
+			if normalized.MediaScope == "ebook" && rule.Field == "narrator" {
+				return fmt.Errorf("groups[%d].rules[%d].field %q is not supported for ebook media_scope", i, j, rule.Field)
+			}
 			if !def.validOps[rule.Op] {
 				return fmt.Errorf("groups[%d].rules[%d].op %q is not supported for field %q", i, j, rule.Op, rule.Field)
 			}
@@ -219,6 +265,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 		}
 		if def.personalized && !allowPersonalizedSorts {
 			return fmt.Errorf("sort.field %q requires profile scope", normalized.Sort.Field)
+		}
+		if normalized.MediaScope == "ebook" && normalized.Sort.Field == "narrator" {
+			return fmt.Errorf("sort.field %q is not supported for ebook media_scope", normalized.Sort.Field)
 		}
 	}
 	if normalized.Sort.Order != "" && normalized.Sort.Order != "asc" && normalized.Sort.Order != "desc" {

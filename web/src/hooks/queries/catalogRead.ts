@@ -10,20 +10,24 @@ import type {
 } from "@/api/types";
 import { catalogKeys } from "./keys";
 
+function catalogPathID(id: string): string {
+  return encodeURIComponent(id);
+}
+
 export async function fetchCatalogItemDetail(
   id: string,
   libraryId?: number,
   options?: RequestInit,
 ): Promise<ItemDetail> {
   const query = libraryId ? `?library_id=${libraryId}` : "";
-  return api<ItemDetail>(`/catalog/items/${id}${query}`, options);
+  return api<ItemDetail>(`/catalog/items/${catalogPathID(id)}${query}`, options);
 }
 
 export async function fetchCatalogItemVersions(
   id: string,
   options?: RequestInit,
 ): Promise<FileVersion[]> {
-  return api<FileVersion[]>(`/catalog/items/${id}/versions`, options);
+  return api<FileVersion[]>(`/catalog/items/${catalogPathID(id)}/versions`, options);
 }
 
 export async function fetchCatalogItemEpisodes(
@@ -32,7 +36,7 @@ export async function fetchCatalogItemEpisodes(
   options?: RequestInit,
 ): Promise<EpisodesResponse> {
   const query = libraryId ? `?library_id=${libraryId}` : "";
-  return api<EpisodesResponse>(`/catalog/items/${id}/episodes${query}`, options);
+  return api<EpisodesResponse>(`/catalog/items/${catalogPathID(id)}/episodes${query}`, options);
 }
 
 export async function fetchCatalogSeriesSeasons(
@@ -41,7 +45,10 @@ export async function fetchCatalogSeriesSeasons(
   options?: RequestInit,
 ): Promise<SeasonsResponse> {
   const query = libraryId ? `?library_id=${libraryId}` : "";
-  return api<SeasonsResponse>(`/catalog/series/${seriesId}/seasons${query}`, options);
+  return api<SeasonsResponse>(
+    `/catalog/series/${catalogPathID(seriesId)}/seasons${query}`,
+    options,
+  );
 }
 
 export async function fetchCatalogSeasonDetail(
@@ -52,7 +59,7 @@ export async function fetchCatalogSeasonDetail(
 ): Promise<SeasonDetailResponse> {
   const query = libraryId ? `?library_id=${libraryId}` : "";
   return api<SeasonDetailResponse>(
-    `/catalog/series/${seriesId}/seasons/${seasonNum}${query}`,
+    `/catalog/series/${catalogPathID(seriesId)}/seasons/${seasonNum}${query}`,
     options,
   );
 }
@@ -65,7 +72,7 @@ export async function fetchCatalogSeasonEpisodes(
 ): Promise<EpisodesResponse> {
   const query = libraryId ? `?library_id=${libraryId}` : "";
   return api<EpisodesResponse>(
-    `/catalog/series/${seriesId}/seasons/${seasonNum}/episodes${query}`,
+    `/catalog/series/${catalogPathID(seriesId)}/seasons/${seasonNum}/episodes${query}`,
     options,
   );
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -106,7 +106,35 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 11 {
+		if err := migrateToV11(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 11"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 11: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV11 resets legacy completed watch_progress rows to
+// position_seconds = 0. The watch-progress model keeps `completed` as a
+// one-way watched latch with no resume point; the Continue Watching
+// predicate is position_seconds > 0, so legacy rows (position pinned to the
+// duration) would otherwise surface as phantom resume entries. Running this
+// as a versioned migration (rather than a predicate-only data fix) matters:
+// re-running the UPDATE on every boot would wipe the resume point of any
+// rewatch in flight.
+func migrateToV11(tx *sql.Tx) error {
+	if _, err := tx.Exec(`
+		UPDATE watch_progress
+		SET position_seconds = 0
+		WHERE completed = 1
+		  AND position_seconds <> 0`); err != nil {
+		return fmt.Errorf("resetting completed watch_progress positions: %w", err)
+	}
+	return nil
 }
 
 func migrateToV10(tx *sql.Tx) error {

@@ -47,6 +47,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -72,8 +73,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
-	"github.com/Silo-Server/silo-server/internal/requests/radarr"
-	"github.com/Silo-Server/silo-server/internal/requests/sonarr"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
@@ -943,6 +942,7 @@ func main() {
 	var seasonRepo *catalog.SeasonRepository
 	var episodeRepo *catalog.EpisodeRepository
 	var audiobookEnricher *audiobooks.Enricher
+	var ebookEnricher *ebooks.Enricher
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
@@ -1024,6 +1024,14 @@ func main() {
 			personRepo,
 			providerIDRepo,
 		)
+		ebookEnricher = ebooks.NewEnricher(
+			deps.DB,
+			chainRepo,
+			pluginResolver,
+			itemRepo,
+			personRepo,
+			providerIDRepo,
+		)
 
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
@@ -1045,6 +1053,9 @@ func main() {
 			if audiobookEnricher != nil {
 				audiobookEnricher.SetImageCacher(imageCacher)
 				audiobookEnricher.SetFFmpegPath(scanner.FFmpegPathFromFFprobe(scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)))
+			}
+			if ebookEnricher != nil {
+				ebookEnricher.SetImageCacher(imageCacher)
 			}
 		}
 
@@ -1541,7 +1552,8 @@ func main() {
 				catalog.NewProviderIDRepository(deps.DB),
 			),
 		)
-		requestReconcileSvc.SetFulfillmentAdapters(radarr.NewClient(nil), sonarr.NewClient(nil))
+		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
+		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		if userStoreProvider != nil {
 			reconcileResolver := access.NewResolver(
 				auth.NewUserRepository(deps.DB),
@@ -1586,6 +1598,9 @@ func main() {
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
 		if audiobookEnricher != nil {
 			taskMgr.Register(tasks.NewSyncAudiobookMetadataTask(audiobookEnricher))
+		}
+		if ebookEnricher != nil {
+			taskMgr.Register(tasks.NewSyncEbookMetadataTask(ebookEnricher))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)

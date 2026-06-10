@@ -24,51 +24,31 @@ type TagResource struct {
 	Label string `json:"label"`
 }
 
-func ListRootFolders(ctx context.Context, client *Client) ([]mediarequests.IntegrationRootFolder, error) {
+// ListRootFolders returns the arr root folders. It yields the local
+// RootFolderResource shape directly; the schema-driven config form consumes
+// generic RouterOptions from the plugin instead of arr-specific option types.
+func ListRootFolders(ctx context.Context, client *Client) ([]RootFolderResource, error) {
 	var resources []RootFolderResource
 	if err := client.GetJSON(ctx, "/api/v3/rootfolder", &resources); err != nil {
 		return nil, err
 	}
-	out := make([]mediarequests.IntegrationRootFolder, 0, len(resources))
-	for _, resource := range resources {
-		out = append(out, mediarequests.IntegrationRootFolder{
-			Path:       resource.Path,
-			FreeSpace:  resource.FreeSpace,
-			TotalSpace: resource.TotalSpace,
-			Accessible: resource.Accessible,
-		})
-	}
-	return out, nil
+	return resources, nil
 }
 
-func ListQualityProfiles(ctx context.Context, client *Client) ([]mediarequests.IntegrationQualityProfile, error) {
+func ListQualityProfiles(ctx context.Context, client *Client) ([]QualityProfileResource, error) {
 	var resources []QualityProfileResource
 	if err := client.GetJSON(ctx, "/api/v3/qualityprofile", &resources); err != nil {
 		return nil, err
 	}
-	out := make([]mediarequests.IntegrationQualityProfile, 0, len(resources))
-	for _, resource := range resources {
-		out = append(out, mediarequests.IntegrationQualityProfile{
-			ID:   resource.ID,
-			Name: resource.Name,
-		})
-	}
-	return out, nil
+	return resources, nil
 }
 
-func ListTags(ctx context.Context, client *Client) ([]mediarequests.IntegrationTag, error) {
+func ListTags(ctx context.Context, client *Client) ([]TagResource, error) {
 	var resources []TagResource
 	if err := client.GetJSON(ctx, "/api/v3/tag", &resources); err != nil {
 		return nil, err
 	}
-	out := make([]mediarequests.IntegrationTag, 0, len(resources))
-	for _, resource := range resources {
-		out = append(out, mediarequests.IntegrationTag{
-			ID:    resource.ID,
-			Label: resource.Label,
-		})
-	}
-	return out, nil
+	return resources, nil
 }
 
 // AcceptedWithoutResponse returns a FulfillmentResult marking the submission

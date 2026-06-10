@@ -132,7 +132,7 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
           )}
           {showConnectionProblem && (
             <span
-              className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-background"
+              className="ring-background absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2"
               aria-hidden="true"
             />
           )}

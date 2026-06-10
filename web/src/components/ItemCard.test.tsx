@@ -36,6 +36,20 @@ const baseItem = {
 };
 
 describe("ItemCard SortMeta", () => {
+  it("encodes item links while preserving library context", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "ebook 1/isbn:978",
+        type: "ebook",
+        title: "A Reader",
+      },
+      libraryId: 12,
+    });
+
+    expect(markup).toContain('href="/item/ebook%201%2Fisbn%3A978?libraryId=12"');
+  });
+
   it("renders the series last air date when sorted by last_air_date", () => {
     const markup = renderCard({
       sortField: "last_air_date",
@@ -114,6 +128,28 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("2160p");
+  });
+
+  it("renders audiobook-native sort metadata", () => {
+    const audiobook = {
+      ...baseItem,
+      content_id: "audiobook-1",
+      type: "audiobook" as const,
+      title: "The Way of Kings",
+      year: 2010,
+      content_rating: "",
+      sort_metrics: {
+        author: "Brandon Sanderson",
+        narrator: "Michael Kramer",
+        series_name: "The Stormlight Archive",
+      },
+    };
+
+    expect(renderCard({ sortField: "author", item: audiobook })).toContain("Brandon Sanderson");
+    expect(renderCard({ sortField: "narrator", item: audiobook })).toContain("Michael Kramer");
+    expect(renderCard({ sortField: "series", item: audiobook })).toContain(
+      "The Stormlight Archive",
+    );
   });
 
   it("renders episode sort metadata when an active sort has a value", () => {

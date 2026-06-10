@@ -27,7 +27,7 @@ export function OverlayPreviewCard({
     <div
       className={`bg-muted/40 relative mx-auto aspect-[2/3] ${sizeClass} overflow-hidden rounded-xl border`}
     >
-      <div className="text-muted-foreground/30 flex h-full items-center justify-center text-xs font-medium uppercase tracking-wider">
+      <div className="text-muted-foreground/30 flex h-full items-center justify-center text-xs font-medium tracking-wider uppercase">
         {variant === "show" ? "Show preview" : "Movie preview"}
       </div>
       <CardOverlays data={data} prefs={prefs} />

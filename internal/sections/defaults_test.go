@@ -17,6 +17,7 @@ func TestDefaultHomeSectionsWithoutLibraries(t *testing.T) {
 	if sections[0].SectionType != SectionContinueWatching {
 		t.Fatalf("expected continue watching, got %s", sections[0].SectionType)
 	}
+	assertContinueType(t, sections[0].Config, ContinueTypeWatching)
 }
 
 func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
@@ -61,6 +62,7 @@ func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
 		}
 		if tt.libraryID == 0 {
+			assertContinueType(t, section.Config, ContinueTypeWatching)
 			continue
 		}
 		libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(section.Config)
@@ -79,6 +81,46 @@ func TestDefaultHomeSectionsWithLibraries(t *testing.T) {
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "release_date", Order: "desc"},
 	})
+}
+
+func TestDefaultHomeSectionsWithAudiobookLibrary(t *testing.T) {
+	libraries := []*models.MediaFolder{
+		{ID: 7, Name: "Movies", Type: "movies", SortOrder: 1},
+		{ID: 10, Name: "Books", Type: "audiobooks", SortOrder: 2},
+	}
+
+	got := DefaultHomeSections(libraries)
+	if len(got) != 9 {
+		t.Fatalf("expected 9 default home sections, got %d", len(got))
+	}
+
+	tests := []struct {
+		index        int
+		id           string
+		title        string
+		position     int
+		continueType ContinueType
+	}{
+		{index: 0, id: "default-continue-watching", title: "Continue Watching", position: 0, continueType: ContinueTypeWatching},
+		{index: 1, id: "default-continue-listening", title: "Continue Listening", position: 1, continueType: ContinueTypeListening},
+	}
+	for _, tt := range tests {
+		section := got[tt.index]
+		if section.ID != tt.id {
+			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
+		}
+		if section.Title != tt.title {
+			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
+		}
+		if section.Position != tt.position {
+			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
+		}
+		assertContinueType(t, section.Config, tt.continueType)
+	}
+
+	if got[2].Position != 2 || got[2].Title != "Recently Added in Movies" {
+		t.Fatalf("first generated library row = position %d title %q", got[2].Position, got[2].Title)
+	}
 }
 
 func TestDefaultLibrarySectionsForTypeMovies(t *testing.T) {
@@ -122,6 +164,7 @@ func TestDefaultLibrarySectionsForTypeMovies(t *testing.T) {
 			t.Fatalf("section %d featured = true, want false", tt.index)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
 
 	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
 		MediaScope: "movie",
@@ -185,6 +228,7 @@ func TestDefaultLibrarySectionsForTypeSeries(t *testing.T) {
 			t.Fatalf("section %d featured = true, want false", tt.index)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
 
 	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
 		MediaScope: "series",
@@ -217,8 +261,74 @@ func TestDefaultLibrarySectionsForTypeAudiobooks(t *testing.T) {
 	libraryID := 10
 	got := DefaultLibrarySectionsForType(&libraryID, "audiobooks")
 
+	if len(got) != 6 {
+		t.Fatalf("expected 6 audiobook default sections, got %d", len(got))
+	}
+
+	tests := []struct {
+		index       int
+		id          string
+		sectionType SectionType
+		title       string
+		position    int
+		featured    bool
+	}{
+		{index: 0, id: "default-continue-listening", sectionType: SectionContinueWatching, title: "Continue Listening", position: 0, featured: true},
+		{index: 1, id: "default-next-in-series", sectionType: SectionNextInSeries, title: "Next in Your Series", position: 1},
+		{index: 2, id: "default-recently-added-audiobooks", sectionType: SectionRecentlyAdded, title: "Recently Added Audiobooks", position: 2},
+		{index: 3, id: "default-recently-released-audiobooks", sectionType: SectionRecentlyReleased, title: "Recently Released Audiobooks", position: 3},
+		{index: 4, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 4},
+		{index: 5, id: "default-random-audiobooks", sectionType: SectionRandom, title: "Random Picks", position: 5},
+	}
+
+	for _, tt := range tests {
+		section := got[tt.index]
+		if section.ID != tt.id {
+			t.Fatalf("section %d id = %q, want %q", tt.index, section.ID, tt.id)
+		}
+		if section.SectionType != tt.sectionType {
+			t.Fatalf("section %d type = %q, want %q", tt.index, section.SectionType, tt.sectionType)
+		}
+		if section.Title != tt.title {
+			t.Fatalf("section %d title = %q, want %q", tt.index, section.Title, tt.title)
+		}
+		if section.Position != tt.position {
+			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
+		}
+		if section.Featured != tt.featured {
+			t.Fatalf("section %d featured = %v, want %v", tt.index, section.Featured, tt.featured)
+		}
+	}
+	assertContinueType(t, got[0].Config, ContinueTypeListening)
+
+	assertEmptyJSON(t, got[1].Config)
+	assertQueryDefinition(t, got[2].Config, catalog.QueryDefinition{
+		MediaScope: "audiobook",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	})
+	assertQueryDefinition(t, got[3].Config, catalog.QueryDefinition{
+		MediaScope: "audiobook",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	})
+	assertEmptyJSON(t, got[4].Config)
+	assertQueryDefinition(t, got[5].Config, catalog.QueryDefinition{
+		MediaScope: "audiobook",
+		Match:      "all",
+		Groups:     []catalog.QueryGroup{},
+		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+	})
+}
+
+func TestDefaultLibrarySectionsForTypeEbooks(t *testing.T) {
+	libraryID := 11
+	got := DefaultLibrarySectionsForType(&libraryID, "ebooks")
+
 	if len(got) != 5 {
-		t.Fatalf("expected 5 audiobook default sections, got %d", len(got))
+		t.Fatalf("expected 5 ebook default sections, got %d", len(got))
 	}
 
 	tests := []struct {
@@ -228,11 +338,11 @@ func TestDefaultLibrarySectionsForTypeAudiobooks(t *testing.T) {
 		title       string
 		position    int
 	}{
-		{index: 0, id: "default-continue-listening", sectionType: SectionContinueWatching, title: "Continue Listening", position: 0},
-		{index: 1, id: "default-recently-added-audiobooks", sectionType: SectionRecentlyAdded, title: "Recently Added Audiobooks", position: 1},
-		{index: 2, id: "default-recently-released-audiobooks", sectionType: SectionRecentlyReleased, title: "Recently Released Audiobooks", position: 2},
+		{index: 0, id: "default-continue-reading", sectionType: SectionContinueWatching, title: "Continue Reading", position: 0},
+		{index: 1, id: "default-recently-added-ebooks", sectionType: SectionRecentlyAdded, title: "Recently Added Ebooks", position: 1},
+		{index: 2, id: "default-recently-released-ebooks", sectionType: SectionRecentlyReleased, title: "Recently Released Ebooks", position: 2},
 		{index: 3, id: "default-recommended-for-you", sectionType: SectionRecommendedForYou, title: "Recommended for You", position: 3},
-		{index: 4, id: "default-random-audiobooks", sectionType: SectionRandom, title: "Random Picks", position: 4},
+		{index: 4, id: "default-random-ebooks", sectionType: SectionRandom, title: "Random Picks", position: 4},
 	}
 
 	for _, tt := range tests {
@@ -254,21 +364,22 @@ func TestDefaultLibrarySectionsForTypeAudiobooks(t *testing.T) {
 		}
 	}
 
+	assertContinueType(t, got[0].Config, ContinueTypeReading)
 	assertQueryDefinition(t, got[1].Config, catalog.QueryDefinition{
-		MediaScope: "audiobook",
+		MediaScope: "ebook",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
 	})
 	assertQueryDefinition(t, got[2].Config, catalog.QueryDefinition{
-		MediaScope: "audiobook",
+		MediaScope: "ebook",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
 	})
 	assertEmptyJSON(t, got[3].Config)
 	assertQueryDefinition(t, got[4].Config, catalog.QueryDefinition{
-		MediaScope: "audiobook",
+		MediaScope: "ebook",
 		Match:      "all",
 		Groups:     []catalog.QueryGroup{},
 		Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
@@ -310,6 +421,7 @@ func TestDefaultLibrarySectionsForTypeMixed(t *testing.T) {
 			t.Fatalf("section %d position = %d, want %d", tt.index, section.Position, tt.position)
 		}
 	}
+	assertContinueType(t, got[0].Config, ContinueTypeWatching)
 }
 
 func assertQueryDefinition(t *testing.T, raw json.RawMessage, want catalog.QueryDefinition) {
@@ -354,6 +466,17 @@ func assertEmptyJSON(t *testing.T, raw json.RawMessage) {
 	t.Helper()
 	if string(raw) != "{}" {
 		t.Fatalf("config = %s, want {}", string(raw))
+	}
+}
+
+func assertContinueType(t *testing.T, raw json.RawMessage, want ContinueType) {
+	t.Helper()
+	got, err := ParseContinueType(raw)
+	if err != nil {
+		t.Fatalf("ParseContinueType(%s): %v", string(raw), err)
+	}
+	if got != want {
+		t.Fatalf("continue_type = %q, want %q (config %s)", got, want, string(raw))
 	}
 }
 

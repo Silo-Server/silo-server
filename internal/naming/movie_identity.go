@@ -157,7 +157,7 @@ func parseInferFolderTitleYear(name string) (string, int, bool) {
 		year, _ := strconv.Atoi(match[2])
 		return strings.TrimSpace(match[1]), year, true
 	}
-	if ids := ParseFolderIDs(name, "movie"); ids != nil || ParseFolderIDs(name, "series") != nil {
+	if ParseFolderIDs(name) != nil {
 		return strings.TrimSpace(surface), 0, true
 	}
 	return strings.TrimSpace(surface), 0, false

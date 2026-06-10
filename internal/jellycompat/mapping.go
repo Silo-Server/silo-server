@@ -65,6 +65,21 @@ func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 	}
 }
 
+// applyPlayableLocation stamps location fields for a movie/episode based on
+// whether any media file backs it. Fileless (provider-metadata-only) items are
+// Jellyfin "Virtual" and carry no VideoType, so clients exclude them from
+// playback queues. Items whose file went missing are currently also reported
+// as Virtual rather than Jellyfin's "Offline".
+func applyPlayableLocation(dto *baseItemDTO, hasFile bool) {
+	if hasFile {
+		dto.LocationType = "FileSystem"
+		dto.VideoType = "VideoFile"
+	} else {
+		dto.LocationType = "Virtual"
+		dto.VideoType = ""
+	}
+}
+
 func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *upstreamProgress, fields map[string]bool) baseItemDTO {
 	_, allFields := fields["*"] // detail views pass allDetailFields sentinel
 
@@ -88,8 +103,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.RunTimeTicks = minutesToTicks(item.Runtime)
 	}
 	if item.Type == "movie" || item.Type == "episode" {
-		dto.LocationType = "FileSystem"
-		dto.VideoType = "VideoFile"
+		applyPlayableLocation(&dto, item.HasMediaFiles == nil || *item.HasMediaFiles)
 	}
 	if item.SeriesID != "" {
 		dto.SeriesID = m.codec.EncodeStringID(EncodedIDItem, item.SeriesID)
@@ -106,8 +120,10 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.RecursiveItemCount = *item.EpisodeCount
 	}
 	if item.SeasonCount != nil {
-		dto.ChildCount = *item.SeasonCount
-		dto.RecursiveItemCount = *item.SeasonCount
+		seasonCount := *item.SeasonCount
+		dto.ChildCount = seasonCount
+		dto.RecursiveItemCount = seasonCount
+		dto.SeasonCount = seasonCount
 	}
 	primaryPath, primaryThumbhash := listItemPrimaryImageSeedParts(item)
 	if tags := imageTagsWithSeed(m.imageTagSigner,
@@ -366,12 +382,14 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 			dto.RunTimeTicks = secondsToTicks(float64(firstVersion.Duration))
 		}
 		dto.DateCreated = formatCompatTime(firstVersion.AddedAt)
+		// CanDownload is load-bearing for Infuse: it refuses Direct Play
+		// (Static=true streaming) of items it believes it cannot download.
+		// The flag is backed by the /Items/{id}/Download route (streams.go).
 		dto.CanDownload = true
 		dto.HasSubtitles = versionsHaveSubtitles(item.Versions)
 		dto.SupportsSync = false
 		dto.Container = strings.ToLower(firstVersion.Container)
-		dto.LocationType = "FileSystem"
-		dto.VideoType = "VideoFile"
+		applyPlayableLocation(&dto, true)
 		dto.Path = compatMediaPath(firstVersion)
 		if len(firstVersion.VideoTracks) > 0 {
 			dto.Width = firstVersion.VideoTracks[0].Width
@@ -406,6 +424,11 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if wantField("chapters") {
 			dto.Chapters = compatChapters(firstVersion.Chapters, firstVersion.AddedAt)
 		}
+	} else if isPlayableItemType(item.Type) {
+		// Provider-metadata-only (unaired/missing) item: version data is
+		// authoritative here, so override the FileSystem default set by
+		// itemFromList with Jellyfin's Virtual contract.
+		applyPlayableLocation(&dto, false)
 	}
 	slog.Info("jellycompat item detail mapped",
 		"content_id", item.ContentID,
@@ -450,13 +473,12 @@ func (m *mapper) episodeFromUpstream(ep upstreamEpisode, isFavorite bool, progre
 		Name:         ep.Title,
 		ServerID:     m.serverID,
 		Overview:     ep.Overview,
-		LocationType: "FileSystem",
-		VideoType:    "VideoFile",
 		RunTimeTicks: minutesToTicks(ep.Runtime),
 		ImageTags:    map[string]string{},
 		SeriesName:   ep.SeriesTitle,
 		UserData:     userDataDTO(m.codec.EncodeStringID(EncodedIDItem, ep.ContentID), ep.UserData, isFavorite, progress),
 	}
+	applyPlayableLocation(&dto, ep.HasMediaFiles == nil || *ep.HasMediaFiles)
 	dto.IndexNumber = &ep.EpisodeNumber
 	dto.ParentIndexNumber = &ep.SeasonNumber
 	if ep.SeriesID != "" {
@@ -514,10 +536,9 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	dto := &itemUserDataDTO{IsFavorite: isFavorite, ItemID: itemID, Key: itemID}
 
 	if data != nil {
-		dto.PlaybackPositionTicks = resumePositionTicks(data.PositionSeconds, data.DurationSeconds, data.Played)
-		if data.DurationSeconds > 0 {
-			dto.PlayedPercentage = (data.PositionSeconds / data.DurationSeconds) * 100
-		}
+		pos := clampResumeSeconds(data.PositionSeconds, data.DurationSeconds)
+		dto.PlaybackPositionTicks = secondsToTicks(pos)
+		dto.PlayedPercentage = playedPercentage(pos, data.DurationSeconds, data.Played)
 		dto.Played = data.Played
 		dto.UnplayedItemCount = data.UnplayedCount
 		if data.Played {
@@ -526,10 +547,9 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	}
 
 	if progress != nil {
-		dto.PlaybackPositionTicks = resumePositionTicks(progress.PositionSeconds, progress.DurationSeconds, progress.Completed)
-		if progress.DurationSeconds > 0 {
-			dto.PlayedPercentage = (progress.PositionSeconds / progress.DurationSeconds) * 100
-		}
+		pos := clampResumeSeconds(progress.PositionSeconds, progress.DurationSeconds)
+		dto.PlaybackPositionTicks = secondsToTicks(pos)
+		dto.PlayedPercentage = playedPercentage(pos, progress.DurationSeconds, progress.Completed)
 		dto.Played = progress.Completed
 		if progress.Completed {
 			dto.PlayCount = 1
@@ -538,6 +558,21 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 	}
 
 	return dto
+}
+
+// playedPercentage derives PlayedPercentage from the same clamped position
+// used for PlaybackPositionTicks so the two fields can never disagree. A
+// played item at rest (position 0, no resume point) reports 100 so clients
+// rendering progress from the DTO show it fully watched; a rewatch in flight
+// reports its live fraction.
+func playedPercentage(clampedPos, duration float64, played bool) float64 {
+	if played && clampedPos == 0 {
+		return 100
+	}
+	if duration <= 0 {
+		return 0
+	}
+	return (clampedPos / duration) * 100
 }
 
 func jellyfinItemType(native string) string {
@@ -674,22 +709,21 @@ func secondsToTicks(seconds float64) int64 {
 	return int64(seconds * 10_000_000)
 }
 
-// resumePositionTicks returns the PlaybackPositionTicks value for a UserData
-// DTO. When the item is fully watched the position is reported as 0 so clients
-// start fresh on the next play; otherwise the position is clamped to the item
-// duration so a stale/overflowed stored position cannot drive the player past
-// end-of-file (which stalls the HLS transcoder on resume).
-func resumePositionTicks(position, duration float64, played bool) int64 {
-	if played {
-		return 0
-	}
+// clampResumeSeconds normalizes a stored resume position for client-facing
+// user data. Completed rows store position 0, so fully watched items report 0
+// (clients start fresh) while a rewatch in flight reports its live resume
+// point alongside Played=true — matching real Jellyfin. The position is
+// clamped to the item duration so a stale/overflowed stored position cannot
+// drive the player past end-of-file (which stalls the HLS transcoder on
+// resume).
+func clampResumeSeconds(position, duration float64) float64 {
 	if duration > 0 && position > duration {
 		position = duration
 	}
 	if position < 0 {
 		position = 0
 	}
-	return secondsToTicks(position)
+	return position
 }
 
 func imageTagsWithSeed(signer *imageTagSigner, seed, imageURL string) map[string]string {

@@ -5,8 +5,9 @@ import { VisuallyHidden } from "radix-ui";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useDebounce } from "@/hooks/useDebounce";
 import { buildQueryCatalogHref } from "@/pages/catalogSearchParams";
-import type { BrowseItem } from "@/api/types";
+import { createEmptyQueryDefinition, type BrowseItem } from "@/api/types";
 import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/catalog";
+import { useSearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRequestSearch } from "@/hooks/queries/useRequests";
 import { useCanRequest } from "@/hooks/useCanRequest";
 import { catalogKeys } from "@/hooks/queries/keys";
@@ -29,6 +30,10 @@ function typeLabel(type: BrowseItem["type"]): string {
       return "Season";
     case "episode":
       return "Episode";
+    case "ebook":
+      return "Ebook";
+    case "audiobook":
+      return "Audiobook";
     default:
       return type;
   }
@@ -123,9 +128,19 @@ export function GlobalSearch({
   const tmdbDebounceCatchingUp =
     canRequest.discoveryEnabled && tmdbDebouncedQuery !== debouncedQuery;
 
+  // Preview results follow the user's preferred search scope (Media vs
+  // Audiobooks vs All); the full results page applies the same default.
+  const { scope: searchScope } = useSearchMediaScope();
   const searchState = useMemo(
-    () => createCatalogSearchState("query", { q: debouncedQuery || undefined }),
-    [debouncedQuery],
+    () =>
+      createCatalogSearchState("query", {
+        q: debouncedQuery || undefined,
+        query_definition: {
+          ...createEmptyQueryDefinition(),
+          media_scope: searchScope === "all" ? undefined : searchScope,
+        },
+      }),
+    [debouncedQuery, searchScope],
   );
 
   const previewQuery = useQuery({
@@ -172,7 +187,7 @@ export function GlobalSearch({
 
   const handlePickItem = useCallback(
     (contentId: string) => {
-      navigate(`/item/${contentId}`);
+      navigate(`/item/${encodeURIComponent(contentId)}`);
       setOpen(false);
       setQuery("");
     },
@@ -229,7 +244,7 @@ export function GlobalSearch({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search movies, series..."
+              placeholder="Search library..."
               className="placeholder:text-muted-foreground flex h-12 w-full bg-transparent text-sm outline-none"
               autoFocus
               aria-label="Search"

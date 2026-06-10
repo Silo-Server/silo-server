@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { EpisodesResponse, ItemDetail, SeasonsResponse } from "@/api/types";
-import { catalogKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
+import { catalogKeys, ebookKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
 
 type WatchedStateItem = Pick<
   ItemDetail,
@@ -20,7 +20,7 @@ function appendUniqueKey(keys: Array<readonly unknown[]>, nextKey: readonly unkn
   keys.push(nextKey);
 }
 
-export function getWatchedActionLabel(item: WatchedStateItem): string {
+export function getWatchedActionLabel(item: Pick<ItemDetail, "type" | "user_data">): string {
   const played = item.user_data?.played === true;
 
   switch (item.type) {
@@ -28,10 +28,25 @@ export function getWatchedActionLabel(item: WatchedStateItem): string {
       return played ? "Mark Series Unwatched" : "Mark Series Watched";
     case "season":
       return played ? "Mark Season Unwatched" : "Mark Season Watched";
+    case "audiobook":
+      return played ? "Mark Unlistened" : "Mark Listened";
+    case "ebook":
+      return played ? "Mark Unread" : "Mark Read";
     case "episode":
       return played ? "Mark Unwatched" : "Mark Watched";
     default:
       return played ? "Mark Unwatched" : "Mark Watched";
+  }
+}
+
+export function getWatchedToastMessage(item: Pick<ItemDetail, "type">, played: boolean): string {
+  switch (item.type) {
+    case "audiobook":
+      return played ? "Marked as listened" : "Marked as unlistened";
+    case "ebook":
+      return played ? "Marked as read" : "Marked as unread";
+    default:
+      return played ? "Marked as watched" : "Marked as unwatched";
   }
 }
 
@@ -72,6 +87,10 @@ export function getWatchedInvalidationKeys(item: WatchedStateItem) {
   if (item.type === "season") {
     keys.push(catalogKeys.itemEpisodes(item.content_id));
     keys.push(episodeKeys.byItem(item.content_id));
+  }
+
+  if (item.type === "ebook") {
+    keys.push(ebookKeys.readerProgress(item.content_id));
   }
 
   return keys;

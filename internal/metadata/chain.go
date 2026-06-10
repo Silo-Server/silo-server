@@ -303,9 +303,21 @@ func resolveEnabledProvidersByPriority(
 		priority int
 	}
 
-	items := make([]ranked, len(caps))
-	for i, c := range caps {
-		items[i] = ranked{cap: c, priority: LookupDefaultPriority(ctx, pool, c.PluginInstallationID, contentLevel)}
+	// Only providers that support contentLevel participate in the chain-less
+	// fallback. A provider declaring a non-empty default_priority map that omits
+	// this level is excluded outright (not merely ranked last), so a
+	// single-purpose provider is never invoked for content it does not handle.
+	items := make([]ranked, 0, len(caps))
+	for _, c := range caps {
+		metadataJSON := lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)
+		if !providerSupportsLevel(metadataJSON, contentLevel) {
+			slog.Debug("skipping metadata provider: does not declare support for content level",
+				"installation_id", c.PluginInstallationID,
+				"capability_id", c.CapabilityID,
+				"content_level", contentLevel)
+			continue
+		}
+		items = append(items, ranked{cap: c, priority: extractDefaultPriority(metadataJSON, contentLevel)})
 	}
 
 	sort.SliceStable(items, func(i, j int) bool {
@@ -326,32 +338,68 @@ func resolveEnabledProvidersByPriority(
 	return buildProviders(ctx, sorted, resolver, pool), nil
 }
 
-// LookupDefaultPriority queries plugin_capabilities for a provider's declared
-// default_priority at the given content level. Returns 0 if not found.
-func LookupDefaultPriority(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, contentLevel string) int {
+// providerSupportsLevel reports whether a metadata provider should participate
+// in the chain-less global fallback for contentLevel. A provider that declares
+// a non-empty default_priority map is treated as enumerating the content levels
+// it supports: it is eligible only for levels present in that map with a
+// positive priority. A provider that declares no default_priority makes no
+// claim and stays eligible for every level (legacy behavior), ranked last.
+//
+// This is what keeps a single-purpose provider (e.g. an audiobook metadata
+// provider declaring only {"audiobook": N}) from being pulled into video
+// content levels when a library has no enabled chain entry for that level.
+func providerSupportsLevel(metadataJSON []byte, contentLevel string) bool {
+	levels, declared := declaredPriorityLevels(metadataJSON)
+	if !declared {
+		return true
+	}
+	return levels[contentLevel] > 0
+}
+
+// lookupCapabilityMetadata returns the raw plugin_capabilities.metadata JSON for
+// a provider's exact metadata_provider.v1 capability, or nil if absent.
+func lookupCapabilityMetadata(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID string) []byte {
 	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
 		`SELECT metadata FROM plugin_capabilities
-		 WHERE plugin_installation_id = $1 AND capability_type = 'metadata_provider.v1'
-		 LIMIT 1`,
+		 WHERE plugin_installation_id = $1
+		   AND capability_id = $2
+		   AND capability_type = 'metadata_provider.v1'`,
 		pluginInstallationID,
+		capabilityID,
 	).Scan(&metadataJSON)
 	if err != nil {
-		return 0
+		return nil
 	}
+	return metadataJSON
+}
 
-	return extractDefaultPriority(metadataJSON, contentLevel)
+// LookupDefaultPriority queries plugin_capabilities for a provider's declared
+// default_priority at the given content level. Returns 0 if not found.
+func LookupDefaultPriority(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) int {
+	return extractDefaultPriority(lookupCapabilityMetadata(ctx, pool, pluginInstallationID, capabilityID), contentLevel)
 }
 
 // extractDefaultPriority parses the default_priority for a content level from
 // capability metadata JSON.
 func extractDefaultPriority(metadataJSON []byte, contentLevel string) int {
+	levels, _ := declaredPriorityLevels(metadataJSON)
+	if v, ok := levels[contentLevel]; ok && v > 0 {
+		return int(v)
+	}
+	return 0
+}
+
+// declaredPriorityLevels parses a capability's default_priority map. The map may
+// sit at the top level or inside a "metadata" envelope (plugin capability
+// metadata wraps plugin-declared fields in a "metadata" sub-object). The second
+// return value is true only when a non-empty map was found, i.e. the provider
+// explicitly enumerates the content levels it supports.
+func declaredPriorityLevels(metadataJSON []byte) (map[string]float64, bool) {
 	var meta map[string]json.RawMessage
 	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
-		return 0
+		return nil, false
 	}
-	// default_priority may be at the top level or nested inside a "metadata" sub-object
-	// (plugin capability metadata wraps plugin-declared fields in a "metadata" envelope).
 	dpRaw, ok := meta["default_priority"]
 	if !ok {
 		if innerRaw, innerOK := meta["metadata"]; innerOK {
@@ -360,18 +408,15 @@ func extractDefaultPriority(metadataJSON []byte, contentLevel string) int {
 				dpRaw, ok = inner["default_priority"]
 			}
 		}
-		if !ok {
-			return 0
-		}
+	}
+	if !ok {
+		return nil, false
 	}
 	var dpMap map[string]float64
 	if err := json.Unmarshal(dpRaw, &dpMap); err != nil {
-		return 0
+		return nil, false
 	}
-	if v, ok := dpMap[contentLevel]; ok && v > 0 {
-		return int(v)
-	}
-	return 0
+	return dpMap, len(dpMap) > 0
 }
 
 // ListEnabledMetadataCapabilities returns all metadata_provider.v1 capabilities

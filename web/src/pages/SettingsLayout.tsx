@@ -3,6 +3,7 @@ import {
   Play,
   Library,
   Clock,
+  Cloud,
   Subtitles,
   LayoutDashboard,
   Palette,
@@ -16,6 +17,7 @@ import {
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
 import PageBack from "@/components/PageBack";
+import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useAuth } from "@/hooks/useAuth";
 import { resolveSettingsDocumentTitle } from "@/lib/documentTitle";
@@ -117,7 +119,7 @@ const NAV_SECTIONS: NavSection[] = [
       {
         path: "watch-providers",
         label: "Watch Providers",
-        icon: Clock,
+        icon: Cloud,
         description: "Trakt watch history and scrobbling",
       },
     ],
@@ -206,48 +208,19 @@ export default function SettingsLayout() {
         <div className="mt-8 min-w-0 flex-1 lg:mt-10 lg:flex lg:gap-10">
           <aside className="hidden lg:block lg:w-[220px] lg:shrink-0">
             <nav aria-label="Settings sections" className="sticky top-6 space-y-5 pl-3">
-              {visibleSections.map((section) => {
-                const sectionId = `settings-nav-${section.label.toLowerCase().replace(/\s+/g, "-")}`;
-                return (
-                  <div key={section.label} role="group" aria-labelledby={sectionId}>
-                    <h3
-                      id={sectionId}
-                      className="text-muted-foreground mb-2 px-2 text-[10px] font-semibold tracking-[0.18em] uppercase"
-                    >
-                      {section.label}
-                    </h3>
-                    <ul className="list-none space-y-0.5">
-                      {section.items.map((item) => {
-                        const isActive = item.path === activeSegment;
-                        const Icon = item.icon;
-                        return (
-                          <li key={item.path}>
-                            <Link
-                              to={`/settings/${item.path}`}
-                              aria-current={isActive ? "page" : undefined}
-                              className={cn(
-                                "relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors duration-150",
-                                isActive
-                                  ? "text-primary bg-accent"
-                                  : "text-muted-foreground hover:text-foreground hover:bg-accent/70",
-                              )}
-                            >
-                              {isActive && (
-                                <span
-                                  className="absolute top-1/2 left-[-12px] h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                                  style={{ background: "var(--primary)" }}
-                                />
-                              )}
-                              <Icon className="h-[18px] w-[18px] flex-shrink-0" />
-                              <span>{item.label}</span>
-                            </Link>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
+              {visibleSections.map((section) => (
+                <SideNavSection key={section.label} label={section.label} idPrefix="settings-nav">
+                  {section.items.map((item) => (
+                    <SideNavItem
+                      key={item.path}
+                      label={item.label}
+                      icon={item.icon}
+                      href={`/settings/${item.path}`}
+                      active={item.path === activeSegment}
+                    />
+                  ))}
+                </SideNavSection>
+              ))}
             </nav>
           </aside>
 

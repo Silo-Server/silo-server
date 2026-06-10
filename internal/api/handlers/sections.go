@@ -34,6 +34,7 @@ type SectionHandler struct {
 	DetailSvc      *catalog.DetailService
 	Settings       catalog.SettingsStore
 	CollectionRepo *catalog.LibraryCollectionRepository
+	EbookProgress  EbookReaderProgressLister
 }
 
 // NewSectionHandler creates a new SectionHandler.
@@ -157,8 +158,11 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 	}
 
 	cfg := sections.ParseConfigFilters(config)
-	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" {
-		return "filter_type must be 'movie' or 'series'", false
+	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" && cfg.FilterType != "audiobook" {
+		return "filter_type must be 'movie', 'series', or 'audiobook'", false
+	}
+	if _, err := sections.ParseContinueType(config); err != nil {
+		return err.Error(), false
 	}
 
 	var rawLibraryConfig struct {
@@ -1377,7 +1381,10 @@ func (h *SectionHandler) listSectionItemUserStates(r *http.Request, items []*mod
 	if err != nil || store == nil {
 		return map[string]*itemUserStateResponse{}
 	}
-	states, err := resolveItemUserStates(r.Context(), store, profileID, h.EpisodeRepo, items)
+	states, err := resolveItemUserStatesWithOptions(r.Context(), store, profileID, h.EpisodeRepo, items, itemUserStateOptions{
+		UserID:             userID,
+		EbookProgressStore: h.EbookProgress,
+	})
 	if err != nil {
 		return map[string]*itemUserStateResponse{}
 	}
@@ -1408,14 +1415,28 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 	return resolved
 }
 
-// injectNextUpSection inserts a synthetic SectionNextUp entry immediately after
-// SectionContinueWatching in the resolved sections list.
+// injectNextUpSection inserts a synthetic SectionNextUp entry after the
+// contiguous continue rows that start with the video Continue Watching row.
 func injectNextUpSection(resolved []sections.ResolvedSection) []sections.ResolvedSection {
 	nextUp := sections.ResolvedSection{
 		ID:          "system-next-up",
 		SectionType: sections.SectionNextUp,
 		Title:       "Next Up",
 		ItemLimit:   20,
+	}
+
+	for i, s := range resolved {
+		if s.SectionType == sections.SectionContinueWatching && sections.ContinueTypeFromConfig(s.Config) == sections.ContinueTypeWatching {
+			insertAt := i + 1
+			for insertAt < len(resolved) && resolved[insertAt].SectionType == sections.SectionContinueWatching {
+				insertAt++
+			}
+			result := make([]sections.ResolvedSection, 0, len(resolved)+1)
+			result = append(result, resolved[:insertAt]...)
+			result = append(result, nextUp)
+			result = append(result, resolved[insertAt:]...)
+			return result
+		}
 	}
 
 	for i, s := range resolved {
@@ -1428,7 +1449,7 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 		}
 	}
 
-	// If no continue_watching found, prepend
+	// If no resume row is found, prepend.
 	return append([]sections.ResolvedSection{nextUp}, resolved...)
 }
 

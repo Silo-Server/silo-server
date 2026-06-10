@@ -12,12 +12,13 @@ export type HomeDismissalSurface = "continue_watching" | "next_up";
 export interface DismissHomeItemVariables {
   itemId: string;
   surface: HomeDismissalSurface;
+  mediaType?: string;
   seriesId?: string;
   progressUpdatedAt?: string;
 }
 
 function dismissalPath({ itemId, surface }: DismissHomeItemVariables) {
-  return `/home/dismissals/${surface}/${itemId}`;
+  return `/home/dismissals/${surface}/${encodeURIComponent(itemId)}`;
 }
 
 function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItemVariables) {
@@ -26,10 +27,11 @@ function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItem
     : { series_id: seriesId };
 }
 
-function dismissalSuccessLabel(surface: HomeDismissalSurface) {
-  return surface === "continue_watching"
-    ? "Removed from Continue Watching"
-    : "Removed from Next Up";
+function dismissalSuccessLabel({ mediaType, surface }: DismissHomeItemVariables) {
+  if (surface === "next_up") return "Removed from Next Up";
+  if (mediaType === "audiobook") return "Removed from Continue Listening";
+  if (mediaType === "ebook") return "Removed from Continue Reading";
+  return "Removed from Continue Watching";
 }
 
 export function useDismissHomeItem() {
@@ -62,7 +64,7 @@ export function useDismissHomeItem() {
       removeItemFromHomeSectionCaches(queryClient, variables.itemId, variables.surface);
       await invalidateMediaSurfaceQueries(queryClient, { itemId: variables.itemId });
       bumpHomeRefreshSignal(queryClient);
-      toast.success(dismissalSuccessLabel(variables.surface), {
+      toast.success(dismissalSuccessLabel(variables), {
         action: {
           label: "Undo",
           onClick: () => undoMutation.mutate(variables),

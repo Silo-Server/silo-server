@@ -31,6 +31,7 @@ import Profiles from "@/pages/Profiles";
 import Catalog from "@/pages/Catalog";
 import LibraryPage from "@/pages/LibraryPage";
 import ItemDetail from "@/pages/ItemDetail/index";
+import EbookReader from "@/pages/EbookReader";
 import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
@@ -92,6 +93,7 @@ import {
   WatchPlaybackHost,
   WatchPlaybackProvider,
 } from "@/playback/WatchPlaybackChrome";
+import { AudiobookPlaybackProvider } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 import type { ReactNode } from "react";
 import {
   buildLegacyBrowseCatalogHref,
@@ -358,6 +360,14 @@ function AppRoutes() {
                     </RequireProfile>
                   }
                 />
+                <Route
+                  path="/reader/ebook/:contentId"
+                  element={
+                    <RequireProfile>
+                      <EbookReader />
+                    </RequireProfile>
+                  }
+                />
                 {/* Admin area — own layout, no profile required */}
                 <Route
                   path="/admin/*"
@@ -567,17 +577,19 @@ export default function App() {
             <ThemeProvider>
               <CustomThemeProvider>
                 <WatchPlaybackProvider>
-                  <RealtimeEventsProvider>
-                    <RealtimeEventChannels />
-                    <ScrollRestorationManager />
-                    <RouteAnnouncer />
-                    <QueryCacheManager />
-                    <AppChrome />
-                    <AppRoutes />
-                    <WatchPlaybackHost />
-                    <WatchPlaybackBar />
-                    <Toaster />
-                  </RealtimeEventsProvider>
+                  <AudiobookPlaybackProvider>
+                    <RealtimeEventsProvider>
+                      <RealtimeEventChannels />
+                      <ScrollRestorationManager />
+                      <RouteAnnouncer />
+                      <QueryCacheManager />
+                      <AppChrome />
+                      <AppRoutes />
+                      <WatchPlaybackHost />
+                      <WatchPlaybackBar />
+                      <Toaster />
+                    </RealtimeEventsProvider>
+                  </AudiobookPlaybackProvider>
                 </WatchPlaybackProvider>
               </CustomThemeProvider>
             </ThemeProvider>

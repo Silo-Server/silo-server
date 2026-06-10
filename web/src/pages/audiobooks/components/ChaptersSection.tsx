@@ -155,7 +155,7 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
                   </span>
                   {isCurrent && (
                     <span className="text-primary flex shrink-0 items-center gap-1 text-xs">
-                      <Play className="h-3 w-3 fill-current" /> playing
+                      <Play className="h-3 w-3 fill-current" /> listening
                     </span>
                   )}
                 </button>

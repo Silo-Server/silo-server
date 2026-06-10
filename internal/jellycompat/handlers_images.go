@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 type ImagesHandler struct {
 	content      ContentService
 	codec        *ResourceIDCodec
-	httpClient   *http.Client
 	sessions     *SessionStore
 	images       *ImageCache
 	personRepo   *catalog.PersonRepository
@@ -29,6 +29,10 @@ type ImagesHandler struct {
 	posterSigner LibraryPosterPresigner
 	presignTTL   time.Duration
 	imageTags    *imageTagSigner
+	httpClient   *http.Client
+	// collections is optional; when set, BoxSet (library collection) artwork
+	// resolves durably instead of depending on the in-memory image cache.
+	collections collectionSource
 }
 
 type imageItemRepository interface {
@@ -48,15 +52,14 @@ type imageFolderRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 }
 
-// NewImagesHandler creates an image proxy handler.
-func NewImagesHandler(content ContentService, codec *ResourceIDCodec, httpClient *http.Client, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, folderRepo *catalog.FolderRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, posterSigner LibraryPosterPresigner, presignTTL time.Duration, imageTagSecret string) *ImagesHandler {
+// NewImagesHandler creates a Jellyfin-compatible image route handler.
+func NewImagesHandler(content ContentService, codec *ResourceIDCodec, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, folderRepo *catalog.FolderRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, posterSigner LibraryPosterPresigner, presignTTL time.Duration, imageTagSecret string, httpClient *http.Client) *ImagesHandler {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	return &ImagesHandler{
 		content:      content,
 		codec:        codec,
-		httpClient:   httpClient,
 		sessions:     sessions,
 		images:       images,
 		personRepo:   personRepo,
@@ -69,6 +72,7 @@ func NewImagesHandler(content ContentService, codec *ResourceIDCodec, httpClient
 		posterSigner: posterSigner,
 		presignTTL:   presignTTL,
 		imageTags:    newImageTagSigner(imageTagSecret),
+		httpClient:   httpClient,
 	}
 }
 
@@ -80,6 +84,10 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	imageType := chiURLParam(r, "imageType")
 	imageSize := compatRequestImageSize(r, imageType)
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	if canonicalRouteID, ok := canonicalCompatImageRouteID(h.codec, routeID); ok {
+		routeID = canonicalRouteID
+		r = withCompatImageProxyRouteRequest(r)
+	}
 	if tag != "" {
 		imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, imageSize, tag)
 		if err != nil {
@@ -88,15 +96,15 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		}
 		if ok {
 			h.images.RememberSizedUntil(routeID, imageType, imageURL.URL, imageSize, imageURL.ExpiresAt)
-			h.proxyImageURL(w, r, imageURL.URL)
+			h.serveImageURL(w, r, imageURL.URL)
 			return
 		}
 		if imageURL, ok := h.images.LookupTag(tag); ok {
-			h.proxyImageURL(w, r, imageURL)
+			h.serveImageURL(w, r, imageURL)
 			return
 		}
 	} else if imageURL, ok := h.images.LookupSized(routeID, imageType, "", imageSize); ok {
-		h.proxyImageURL(w, r, imageURL)
+		h.serveImageURL(w, r, imageURL)
 		return
 	}
 
@@ -113,6 +121,11 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	// Try decoding as a person ID first.
 	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
 		h.handlePersonImage(w, r, routeID, imageType, personID)
+		return
+	}
+
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
+		h.handleCollectionImage(w, r, session, routeID, imageType, imageSize, collectionID)
 		return
 	}
 
@@ -133,7 +146,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.images.RememberSizedUntil(routeID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
-	h.proxyImageURL(w, r, imageURL)
+	h.serveImageURL(w, r, imageURL)
 }
 
 // handlePersonImage serves person photo images.
@@ -159,7 +172,7 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.images.RememberSizedUntil(routeID, imageType, imageURL, imageSize, resolvedImage.ExpiresAt)
-	h.proxyImageURL(w, r, imageURL)
+	h.serveImageURL(w, r, imageURL)
 }
 
 func (h *ImagesHandler) resolveItemImageURL(ctx context.Context, session *Session, contentID, imageType string, r *http.Request) (catalog.ResolvedImageURL, error) {
@@ -253,11 +266,103 @@ func (h *ImagesHandler) resolveItemImageURLFromTag(ctx context.Context, routeID,
 	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, routeID); err == nil {
 		return h.resolveLibraryImageURLFromTag(ctx, routeID, int(libraryID), imageType, imageSize, tag)
 	}
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
+		return h.resolveCollectionImageURLFromTag(ctx, routeID, collectionID, imageType, tag)
+	}
 	contentID, err := decodeContentID(h.codec, routeID)
 	if err != nil {
 		return catalog.ResolvedImageURL{}, false, nil
 	}
 	return h.resolveItemImageURLFromReposWithoutSession(ctx, routeID, contentID, imageType, imageSize, tag)
+}
+
+// collectionArtworkKey returns the stored artwork reference for the requested
+// compat image type ("" when the collection has none of that type).
+func collectionArtworkKey(c *models.LibraryCollection, imageType string) string {
+	switch imageType {
+	case "Primary":
+		return c.PosterURL
+	case "Backdrop":
+		return c.BackdropURL
+	}
+	return ""
+}
+
+// presignCollectionArtwork resolves a collection artwork reference like the
+// main API's presignGPURL: absolute and app-relative references pass through,
+// bare keys presign against the general-purpose bucket.
+func (h *ImagesHandler) presignCollectionArtwork(ctx context.Context, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return path
+	}
+	return h.presignLibraryPosterURL(ctx, path)
+}
+
+// resolveCollectionImageURLFromTag serves tag-authenticated BoxSet artwork.
+// The tag must match the stable seed boxSetFromCollection signs.
+func (h *ImagesHandler) resolveCollectionImageURLFromTag(ctx context.Context, routeID, collectionID, imageType, tag string) (catalog.ResolvedImageURL, bool, error) {
+	if h.collections == nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	collection, err := h.collections.GetByID(ctx, collectionID)
+	if err != nil || collection == nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	key := collectionArtworkKey(collection, imageType)
+	if key == "" || !h.imageTags.Equal(
+		imageTagSeed(routeID, imageType, compatCardImageSize, key, "", time.Time{}),
+		"",
+		tag,
+	) {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	imageURL := h.presignCollectionArtwork(ctx, key)
+	if imageURL == "" {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	return catalog.ResolvedImageURL{URL: imageURL}, true, nil
+}
+
+// handleCollectionImage serves session-authenticated BoxSet artwork, applying
+// the same visibility rules as the BoxSet item endpoints.
+func (h *ImagesHandler) handleCollectionImage(w http.ResponseWriter, r *http.Request, session *Session, routeID, imageType, imageSize, collectionID string) {
+	if h.collections == nil {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	collection, err := h.collections.GetByID(r.Context(), collectionID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+			return
+		}
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if collection == nil || !strings.EqualFold(collection.Visibility, "visible") {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	if !collectionVisible(collection, visible) {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	imageURL := h.presignCollectionArtwork(r.Context(), collectionArtworkKey(collection, imageType))
+	if imageURL == "" {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	h.images.RememberSized(routeID, imageType, imageURL, imageSize)
+	h.serveImageURL(w, r, imageURL)
 }
 
 func (h *ImagesHandler) resolveLibraryImageURLFromTag(ctx context.Context, routeID string, libraryID int, imageType, _ string, tag string) (catalog.ResolvedImageURL, bool, error) {
@@ -414,23 +519,59 @@ func firstResolvedImageURL(values ...catalog.ResolvedImageURL) catalog.ResolvedI
 	return catalog.ResolvedImageURL{}
 }
 
+func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
+	if shouldProxyCompatImageRequest(r) {
+		h.proxyImageURL(w, r, imageURL)
+		return
+	}
+	h.redirectImageURL(w, r, imageURL)
+}
+
+func (h *ImagesHandler) redirectImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
+	if _, err := parseRemoteImageURL(imageURL); err != nil {
+		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+		return
+	}
+
+	// Do not let clients cache the temporary redirect itself. The object-store
+	// response can still carry its own cache headers after the client follows it.
+	setCompatImageRouteNoStore(w.Header())
+	http.Redirect(w, r, imageURL, http.StatusFound)
+}
+
 func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imageURL, nil)
+	target, err := parseRemoteImageURL(imageURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
 		return
 	}
-	for _, header := range []string{"If-None-Match", "If-Modified-Since"} {
-		if value := r.Header.Get(header); value != "" {
-			req.Header.Set(header, value)
-		}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target.String(), nil)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+		return
 	}
-	resp, err := h.httpClient.Do(req)
+	copyConditionalImageRequestHeaders(req.Header, r.Header)
+
+	client := h.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
 		return
 	}
 	proxyImage(w, resp)
+}
+
+func parseRemoteImageURL(imageURL string) (*url.URL, error) {
+	target, err := url.Parse(imageURL)
+	if err != nil || target.Scheme == "" || target.Host == "" ||
+		(target.Scheme != "http" && target.Scheme != "https") {
+		return nil, errors.New("invalid remote image URL")
+	}
+	return target, nil
 }
 
 // HandleUserImage returns a deterministic placeholder avatar.

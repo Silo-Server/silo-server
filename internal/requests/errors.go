@@ -28,3 +28,16 @@ func (e QuotaError) Error() string {
 func (e QuotaError) Unwrap() error {
 	return ErrQuotaExceeded
 }
+
+// ValidationError carries plugin Validate results back to the API layer.
+type ValidationError struct {
+	FieldErrors map[string]string
+	FormError   string
+}
+
+func (e *ValidationError) Error() string {
+	if e.FormError != "" {
+		return e.FormError
+	}
+	return "validation failed"
+}

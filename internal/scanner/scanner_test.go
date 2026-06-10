@@ -200,3 +200,76 @@ func TestIsPodcastLibraryType(t *testing.T) {
 		}
 	}
 }
+
+func TestIsEbookLibraryType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"ebooks", true},
+		{"ebook", true},
+		{"Ebook", true},
+		{"  EBOOKS  ", true},
+		{"audiobooks", false},
+		{"movies", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isEbookLibraryType(tc.in); got != tc.want {
+			t.Errorf("isEbookLibraryType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWalkModeForEbookLibraryTypes(t *testing.T) {
+	for _, libraryType := range []string{"ebook", "ebooks", " EBOOKS "} {
+		if got := walkModeFor(libraryType); got != walkModeEbook {
+			t.Fatalf("walkModeFor(%q) = %v, want %v", libraryType, got, walkModeEbook)
+		}
+	}
+}
+
+func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
+	for _, ext := range []string{".epub", ".pdf", ".mobi", ".azw", ".azw3", ".fb2", ".fbz", ".cbz", ".cbr"} {
+		if !walkModeEbook.acceptsExt(ext) {
+			t.Fatalf("walkModeEbook should accept %s", ext)
+		}
+	}
+	for _, ext := range []string{".txt", ".md", ".mp4", ".mp3", ".mkv"} {
+		if walkModeEbook.acceptsExt(ext) {
+			t.Fatalf("walkModeEbook should reject %s", ext)
+		}
+	}
+}
+
+func TestScanFolderEbookLibraryRoutesToEbookScanner(t *testing.T) {
+	scanner := &Scanner{}
+	result, err := scanner.ScanFolder(context.Background(), &models.MediaFolder{
+		ID:    0,
+		Type:  " ebooks ",
+		Paths: []string{t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("ScanFolder ebook error = %v, want nil", err)
+	}
+	if result == nil {
+		t.Fatal("ScanFolder ebook result = nil, want empty result")
+	}
+}
+
+func TestScanSubtreeEbookLibraryRoutesToEbookScanner(t *testing.T) {
+	subtree := t.TempDir()
+
+	scanner := &Scanner{}
+	result, err := scanner.ScanSubtree(context.Background(), &models.MediaFolder{
+		ID:    0,
+		Type:  "ebook",
+		Paths: []string{subtree},
+	}, subtree)
+	if err != nil {
+		t.Fatalf("ScanSubtree ebook error = %v, want nil", err)
+	}
+	if result == nil {
+		t.Fatal("ScanSubtree ebook result = nil, want empty result")
+	}
+}

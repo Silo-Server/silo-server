@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -56,6 +57,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		slog.Info("jellycompat debug logging enabled", logAttrs...)
 	}
+	r.Use(compatImageProxyTagVariantMiddleware(deps.IDCodec))
 	r.Use(requestLoggerMiddleware)
 	r.Use(middleware.Recoverer)
 
@@ -74,6 +76,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.recommender = deps.Recommender
+	if deps.DB != nil {
+		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+	}
+	itemsHandler.posterPresigner = deps.PosterPresigner
+	itemsHandler.presignTTL = deps.PresignTTL
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
@@ -99,7 +106,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Client = deps.S3Client
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
-	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.HTTPClient, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret)
+	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
+	imagesHandler.collections = itemsHandler.collections
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -146,15 +154,18 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Movies/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Shows/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
+			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
+			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/SpecialFeatures", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Genres", itemsHandler.HandleGenres)
+			r.Get("/Genres/{name}", itemsHandler.HandleGenreByName)
 			r.Get("/Shows/{id}/Seasons", itemsHandler.HandleSeasons)
 			r.Get("/Shows/{id}/Episodes", itemsHandler.HandleEpisodes)
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
@@ -207,6 +218,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	// (e.g. libmpv) that don't forward auth headers or query parameters.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
+		r.Method(http.MethodHead, "/Items/{id}/Download", http.HandlerFunc(playbackHandler.HandleDownload))
+		r.Get("/Items/{id}/Download", playbackHandler.HandleDownload)
 		r.Method(http.MethodHead, "/Videos/{id}/stream", http.HandlerFunc(playbackHandler.HandleVideoStream))
 		r.Get("/Videos/{id}/stream", playbackHandler.HandleVideoStream)
 		r.Method(http.MethodHead, "/Videos/{id}/stream.{container}", http.HandlerFunc(playbackHandler.HandleVideoStream))
@@ -230,6 +243,10 @@ func withDefaults(deps Dependencies) Dependencies {
 	if deps.Now == nil {
 		deps.Now = timeNow
 	}
+	// Stamp the compat surface's media-type exclusions onto every resolved
+	// access filter so all consumers (content service, items/images handlers,
+	// recommendations) inherit them without per-call-site guards.
+	deps.AccessFilterFn = compatAccessFilterResolver(deps.AccessFilterFn)
 	if deps.JWTSecret == "" && deps.Config != nil {
 		deps.JWTSecret = deps.Config.Auth.JWTSecret
 	}
@@ -261,14 +278,14 @@ func withDefaults(deps Dependencies) Dependencies {
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
 	}
-	if deps.HTTPClient == nil {
-		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
-	}
 	if deps.DeviceProfiles == nil {
 		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now)
 	}
 	if deps.PlaybackStore == nil {
 		deps.PlaybackStore = NewPlaybackSessionStore(playbackTTL, deps.Now)
+	}
+	if deps.HTTPClient == nil {
+		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 
 	// Build ContentService from repos if not provided
@@ -296,12 +313,17 @@ func withDefaults(deps Dependencies) Dependencies {
 		if deps.DB != nil {
 			staler = recommendations.NewRepo(deps.DB)
 		}
+		var pool *pgxpool.Pool
+		if deps.BrowseRepo != nil {
+			pool = deps.BrowseRepo.Pool()
+		}
 		deps.UserDataService = newDirectUserDataService(
 			deps.UserStoreProvider,
 			deps.ItemRepo,
 			deps.EpisodeRepo,
 			deps.ProviderIDRepo,
 			deps.DetailSvc,
+			catalog.NewContinueWatchingProgressFilter(pool),
 			staler,
 			deps.RecWorker,
 		)

@@ -19,12 +19,18 @@ type itemsQuery struct {
 	namePrefix             string
 	maxOfficialRating      string
 	parentLibraryID        int
+	parentItemID           string
+	parentCollectionID     string
 	specificIDs            []string
+	specificCollectionIDs  []string
 	itemTypes              []string
 	genreName              string
 	isFavorite             bool
 	isResumable            bool
 	hasItemTypeFilter      bool // true when IncludeItemTypes was present in the request
+	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
+	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
+	sortExplicit           bool // true when SortBy was present in the request
 	needsDetailFields      bool // true when requested Fields include detail-level data (e.g. MediaSources)
 	itemType               string
 	sort                   string
@@ -32,6 +38,7 @@ type itemsQuery struct {
 	personID               int64
 	isPlayed               *bool // nil = not specified
 	imageTypeLimit         *int  // nil = not specified
+	requireBackdrop        bool  // true when ImageTypes includes Backdrop (filter, not just a hint)
 	mediaTypes             []string
 	mediaTypesSet          map[string]bool
 	mediaTypesExplicit     bool
@@ -55,14 +62,21 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
 		if libraryID, err := codec.DecodeIntID(EncodedIDLibrary, parentID); err == nil {
 			result.parentLibraryID = int(libraryID)
+		} else if collectionID, collErr := codec.DecodeStringID(EncodedIDCollection, parentID); collErr == nil && collectionID != "" {
+			result.parentCollectionID = collectionID
+		} else if contentID, itemErr := decodeItemID(codec, parentID); itemErr == nil && contentID != "" {
+			result.parentItemID = contentID
 		}
 	}
 
 	if ids := strings.TrimSpace(q.Get("Ids")); ids != "" {
 		parts := strings.SplitSeq(ids, ",")
 		for part := range parts {
-			if decoded, err := decodeItemID(codec, strings.TrimSpace(part)); err == nil && decoded != "" {
+			raw := strings.TrimSpace(part)
+			if decoded, err := decodeItemID(codec, raw); err == nil && decoded != "" {
 				result.specificIDs = append(result.specificIDs, decoded)
+			} else if collectionID, collErr := codec.DecodeStringID(EncodedIDCollection, raw); collErr == nil && collectionID != "" {
+				result.specificCollectionIDs = append(result.specificCollectionIDs, collectionID)
 			}
 		}
 	}
@@ -92,6 +106,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	rawItemTypes := q.Values("IncludeItemTypes")
 	result.hasItemTypeFilter = len(rawItemTypes) > 0 && strings.TrimSpace(strings.Join(rawItemTypes, "")) != ""
 	result.itemTypes = mapIncludeItemTypes(rawItemTypes)
+	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
+	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
+	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
 	if len(result.itemTypes) > 0 {
 		result.itemType = result.itemTypes[0]
 	}
@@ -111,6 +128,17 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		}
 	}
 
+	// ImageTypes acts as a filter: clients (e.g. Wholphin genre cards) request
+	// ImageTypes=Backdrop and assume every returned item has a backdrop. Only
+	// Backdrop is enforced — the catalog browse path can filter on backdrop_path.
+	for _, raw := range q.Values("ImageTypes") {
+		for part := range strings.SplitSeq(raw, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), "Backdrop") {
+				result.requireBackdrop = true
+			}
+		}
+	}
+
 	mediaTypesRaw := q.Values("MediaTypes")
 	result.mediaTypes = parseMediaTypes(mediaTypesRaw)
 	result.mediaTypesExplicit = len(mediaTypesRaw) > 0 && strings.TrimSpace(strings.Join(mediaTypesRaw, "")) != ""
@@ -122,9 +150,16 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	}
 
 	// Fields — parse requested fields and track if explicitly present.
-	fieldsRaw := q.Get("Fields")
+	// Clients send Fields two ways: comma-separated in a single param (VidHub:
+	// Fields=A,B,C) OR as repeated params (Wholphin / jellyfin-sdk-kotlin:
+	// Fields=A&Fields=B&Fields=C). q.Get returns only the FIRST repeated value,
+	// which silently dropped every field after the first — so a Wholphin
+	// playlist request (Fields=PrimaryImageAspectRatio&...&Fields=MediaSources)
+	// never triggered the detail path and came back without MediaSources,
+	// breaking next-episode playback. Join all values, then split on commas.
+	fieldsRaw := strings.Join(q.Values("Fields"), ",")
 	result.requestedFields = parseRequestedFields(fieldsRaw)
-	result.fieldsExplicit = fieldsRaw != ""
+	result.fieldsExplicit = strings.TrimSpace(fieldsRaw) != ""
 	result.needsDetailFields = requestedFieldsNeedDetail(result.requestedFields)
 
 	// Diagnostic: when the request stays on the list path, emit a Debug log
@@ -211,6 +246,9 @@ func buildBrowseParams(query itemsQuery) url.Values {
 			params.Set("is_played", "false")
 		}
 	}
+	if query.requireBackdrop {
+		params.Set("require_backdrop", "true")
+	}
 	return params
 }
 
@@ -296,6 +334,20 @@ func mapIncludeItemTypes(rawValues []string) []string {
 		}
 	}
 	return result
+}
+
+// includeItemTypesContain reports whether a raw IncludeItemTypes value list
+// contains the given (lowercase) type, before mapIncludeItemTypes drops
+// entries it cannot map to catalog types (e.g. BoxSet).
+func includeItemTypesContain(rawValues []string, target string) bool {
+	for _, raw := range rawValues {
+		for part := range strings.SplitSeq(raw, ",") {
+			if strings.ToLower(strings.TrimSpace(part)) == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func parseMediaTypes(rawValues []string) []string {

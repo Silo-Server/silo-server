@@ -29,6 +29,13 @@ type rateLimitConfigResponse struct {
 	IPReqPerMinute     float64                               `json:"ip_requests_per_minute"`
 	IPBurst            int                                   `json:"ip_burst"`
 	AuthEndpoints      map[string]authEndpointConfigResponse `json:"auth_endpoints"`
+	// Active reports whether a limiter is running in this process. The
+	// limiter is constructed at startup, so config saved while it is absent
+	// (or a backend change while it is running) needs a restart to apply.
+	Active bool `json:"active"`
+	// ActiveBackend is the backend the running limiter actually uses, which
+	// can differ from Backend until the server restarts.
+	ActiveBackend string `json:"active_backend,omitempty"`
 }
 
 type tierConfigResponse struct {
@@ -64,6 +71,10 @@ func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Reques
 		IPReqPerMinute:     cfg.IPReqPerMinute,
 		IPBurst:            cfg.IPBurst,
 		AuthEndpoints:      make(map[string]authEndpointConfigResponse),
+		Active:             h.mw != nil,
+	}
+	if h.mw != nil {
+		resp.ActiveBackend = h.mw.ActiveBackend()
 	}
 	for name, tier := range cfg.Tiers {
 		resp.Tiers[name] = tierConfigResponse{
@@ -151,10 +162,21 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// Hot-reload: apply new config immediately on this instance
-	if err := h.mw.Reload(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
-		return
+	// The limiter is constructed at startup, so enabling while it is absent
+	// or switching backend while it runs only takes effect after a restart.
+	// Everything else hot-reloads below.
+	restartRequired := false
+	if h.mw == nil {
+		restartRequired = req.Enabled
+	} else {
+		if (req.Backend == "memory" || req.Backend == "redis") && req.Backend != h.mw.ActiveBackend() {
+			restartRequired = true
+		}
+		// Hot-reload: apply new config immediately on this instance
+		if err := h.mw.Reload(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
+			return
+		}
 	}
 
 	// Publish for multi-instance reload (if EventBus is available/backed by Redis)
@@ -165,5 +187,5 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "restart_required": restartRequired})
 }

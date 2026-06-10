@@ -44,7 +44,8 @@ const (
 
 	// defaultEnrichBatchSize is the maximum number of audiobook items processed
 	// per sweep invocation. Keeps latency bounded for large libraries.
-	defaultEnrichBatchSize = 50
+	// Override with SILO_AUDIOBOOK_ENRICH_BATCH_SIZE.
+	defaultEnrichBatchSize = 250
 	// defaultEnrichWorkers is the default fan-out used by Enricher.Run.
 	// Network-bound: each worker holds one provider HTTP call at a time, so
 	// 4 is enough to mask single-request latency without hammering plugins.
@@ -52,18 +53,28 @@ const (
 	defaultEnrichWorkers = 4
 )
 
+// audiobookEnrichBatchSize returns the configured maximum sweep size.
+func audiobookEnrichBatchSize() int {
+	if v := os.Getenv("SILO_AUDIOBOOK_ENRICH_BATCH_SIZE"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultEnrichBatchSize
+}
+
 // audiobookEnrichWorkers returns the configured number of parallel enrichment
-// workers, capped to defaultEnrichBatchSize so workers never outnumber the
-// batch they drain.
-func audiobookEnrichWorkers() int {
+// workers, capped to the active batch size so workers never outnumber the batch
+// they drain.
+func audiobookEnrichWorkers(batchSize int) int {
 	n := defaultEnrichWorkers
 	if v := os.Getenv("SILO_AUDIOBOOK_ENRICH_WORKERS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
 			n = parsed
 		}
 	}
-	if n > defaultEnrichBatchSize {
-		n = defaultEnrichBatchSize
+	if batchSize > 0 && n > batchSize {
+		n = batchSize
 	}
 	return n
 }
@@ -105,6 +116,7 @@ func NewEnricher(
 	personRepo *catalog.PersonRepository,
 	providerIDs *catalog.ProviderIDRepository,
 ) *Enricher {
+	batchSize := audiobookEnrichBatchSize()
 	return &Enricher{
 		pool:        pool,
 		chainRepo:   chainRepo,
@@ -112,8 +124,8 @@ func NewEnricher(
 		itemRepo:    itemRepo,
 		personRepo:  personRepo,
 		providerIDs: providerIDs,
-		batchSize:   defaultEnrichBatchSize,
-		workers:     audiobookEnrichWorkers(),
+		batchSize:   batchSize,
+		workers:     audiobookEnrichWorkers(batchSize),
 	}
 }
 
@@ -164,6 +176,32 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		"enriched", enriched,
 	)
 	return enriched, nil
+}
+
+// HasPendingItems reports whether a scheduled sweep has any audiobook rows to
+// process. It mirrors claimBatch's eligibility predicate without loading rows
+// or provider IDs, so the scheduler can skip no-op executions without adding
+// task-history noise.
+func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
+	if e == nil || e.pool == nil || e.chainRepo == nil {
+		return false, nil
+	}
+
+	var exists bool
+	err := e.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM media_items mi
+			WHERE mi.type = 'audiobook'
+			  AND (mi.poster_path IS NULL OR mi.poster_path = '')
+			  AND mi.last_refreshed IS NULL
+			LIMIT 1
+		)
+	`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking pending audiobook enrichment: %w", err)
+	}
+	return exists, nil
 }
 
 // runBatch processes items in parallel using e.workers goroutines. The

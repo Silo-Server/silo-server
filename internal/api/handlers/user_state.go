@@ -14,12 +14,28 @@ type itemUserStateResponse struct {
 	InWatchlist bool `json:"in_watchlist"`
 }
 
+type itemUserStateOptions struct {
+	UserID             int
+	EbookProgressStore EbookReaderProgressLister
+}
+
 func resolveItemUserStates(
 	ctx context.Context,
 	store userstore.UserStore,
 	profileID string,
 	episodeRepo *catalog.EpisodeRepository,
 	items []*models.MediaItem,
+) (map[string]*itemUserStateResponse, error) {
+	return resolveItemUserStatesWithOptions(ctx, store, profileID, episodeRepo, items, itemUserStateOptions{})
+}
+
+func resolveItemUserStatesWithOptions(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID string,
+	episodeRepo *catalog.EpisodeRepository,
+	items []*models.MediaItem,
+	options itemUserStateOptions,
 ) (map[string]*itemUserStateResponse, error) {
 	result := make(map[string]*itemUserStateResponse, len(items))
 	if store == nil || profileID == "" || len(items) == 0 {
@@ -111,6 +127,10 @@ func resolveItemUserStates(
 	if err != nil {
 		return nil, err
 	}
+	ebookProgressMap, err := resolveEbookProgressForUserStates(ctx, options, profileID, contentIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, item := range items {
 		if item == nil || item.ContentID == "" {
@@ -125,6 +145,8 @@ func resolveItemUserStates(
 			state.Played = allEpisodesCompleted(seriesEpisodes[item.ContentID], progressMap)
 		case "season":
 			state.Played = allEpisodesCompleted(seasonEpisodes[item.ContentID], progressMap)
+		case "ebook":
+			state.Played = ebookProgressMap[item.ContentID].Progress >= models.EbookFinishedProgressThreshold
 		default:
 			state.Played = progressMap[item.ContentID].Completed
 		}
@@ -132,6 +154,18 @@ func resolveItemUserStates(
 	}
 
 	return result, nil
+}
+
+func resolveEbookProgressForUserStates(
+	ctx context.Context,
+	options itemUserStateOptions,
+	profileID string,
+	contentIDs []string,
+) (map[string]EbookReaderProgress, error) {
+	if options.EbookProgressStore == nil || options.UserID <= 0 || profileID == "" || len(contentIDs) == 0 {
+		return nil, nil
+	}
+	return options.EbookProgressStore.ListByContentIDs(ctx, options.UserID, profileID, contentIDs)
 }
 
 func allEpisodesCompleted(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) bool {

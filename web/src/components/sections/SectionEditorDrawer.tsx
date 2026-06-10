@@ -479,7 +479,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                         media_scope:
                           value === "all"
                             ? undefined
-                            : (value as "movie" | "series" | "episode" | "audiobook"),
+                            : (value as "movie" | "series" | "episode" | "audiobook" | "ebook"),
                       })
                     }
                   >
@@ -492,6 +492,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
                       <SelectItem value="series">Series</SelectItem>
                       <SelectItem value="episode">Episodes</SelectItem>
                       <SelectItem value="audiobook">Audiobooks</SelectItem>
+                      <SelectItem value="ebook">Ebooks</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
