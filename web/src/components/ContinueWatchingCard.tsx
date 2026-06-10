@@ -252,7 +252,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           to={card.watchHref}
           onClick={handleWatchClick}
           aria-label={`Play ${heading}`}
-          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
+          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
         >
           <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
         </ViewTransitionLink>
@@ -283,7 +283,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         >
           {heading}
         </ViewTransitionLink>
-        {episodeMeta && <div className="text-muted-foreground truncate text-xs">{episodeMeta}</div>}
+        {episodeMeta && (
+          <ViewTransitionLink
+            to={card.itemHref}
+            className="text-muted-foreground block truncate text-xs hover:underline"
+          >
+            {episodeMeta}
+          </ViewTransitionLink>
+        )}
         {premiereBadge && (
           <div className="mt-1">
             <span
@@ -295,7 +302,17 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             </span>
           </div>
         )}
-        {timeLeftLabel && <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>}
+        {timeLeftLabel &&
+          (timeLeftLabel === "\u00A0" ? (
+            <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
+          ) : (
+            <ViewTransitionLink
+              to={card.itemHref}
+              className="text-muted-foreground block w-fit text-xs hover:underline"
+            >
+              {timeLeftLabel}
+            </ViewTransitionLink>
+          ))}
       </div>
     </div>
   );
