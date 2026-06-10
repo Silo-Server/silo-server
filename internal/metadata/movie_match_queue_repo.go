@@ -67,6 +67,31 @@ func requirePositiveMovieQueueID(label string, value int) error {
 	return nil
 }
 
+// movieQueueFileEligibleCond is the predicate deciding whether a media file
+// belongs in the movie match queue. Queries embedding it must alias
+// media_files as mf, media_folders as folders, and media_items as mi.
+//
+// Files beneath a root skipped as misplaced series are excluded durably:
+// their content_id is never set, so without the exclusion every library sync
+// would re-enqueue them only for the worker to skip them again.
+const movieQueueFileEligibleCond = `folders.enabled = true
+	  AND (
+		lower(trim(folders.type)) IN ('movie', 'movies') OR
+		(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
+	  )
+	  AND mf.missing_since IS NULL
+	  AND (
+		mf.content_id IS NULL OR mf.content_id = '' OR
+		lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
+	  )
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM skipped_media_roots sr
+		WHERE sr.media_folder_id = mf.media_folder_id
+		  AND sr.reason = '` + skippedReasonSeriesInMovieLibrary + `'
+		  AND strpos(mf.file_path, sr.root_path || '/') = 1
+	  )`
+
 func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID int) error {
 	if err := r.requireConfigured(); err != nil {
 		return err
@@ -97,16 +122,7 @@ func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.id = $1
-		  AND folders.enabled = true
-		  AND (
-			lower(trim(folders.type)) IN ('movie', 'movies') OR
-			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-		  )
-		  AND mf.missing_since IS NULL
-		  AND (
-			mf.content_id IS NULL OR mf.content_id = '' OR
-			lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
-		  )
+		  AND `+movieQueueFileEligibleCond+`
 		ON CONFLICT (media_file_id) DO UPDATE
 		SET media_folder_id = EXCLUDED.media_folder_id,
 			available_at = GREATEST(movie_match_queue.available_at, EXCLUDED.available_at),
@@ -124,16 +140,7 @@ func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.id = q.media_file_id
-			  AND folders.enabled = true
-			  AND (
-				lower(trim(folders.type)) IN ('movie', 'movies') OR
-				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-			  )
-			  AND mf.missing_since IS NULL
-			  AND (
-				mf.content_id IS NULL OR mf.content_id = '' OR
-				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
-			  )
+			  AND `+movieQueueFileEligibleCond+`
 		  )
 	`, fileID); err != nil {
 		return fmt.Errorf("deleting stale movie queue row: %w", err)
@@ -175,16 +182,7 @@ func (r *MovieMatchQueueRepository) SyncForFolder(ctx context.Context, folderID 
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
-		  AND folders.enabled = true
-		  AND (
-			lower(trim(folders.type)) IN ('movie', 'movies') OR
-			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-		  )
-		  AND mf.missing_since IS NULL
-		  AND (
-			mf.content_id IS NULL OR mf.content_id = '' OR
-			lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
-		  )
+		  AND `+movieQueueFileEligibleCond+`
 		ON CONFLICT (media_file_id) DO UPDATE
 		SET media_folder_id = EXCLUDED.media_folder_id,
 			available_at = GREATEST(movie_match_queue.available_at, EXCLUDED.available_at),
@@ -202,16 +200,7 @@ func (r *MovieMatchQueueRepository) SyncForFolder(ctx context.Context, folderID 
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.id = q.media_file_id
-			  AND folders.enabled = true
-			  AND (
-				lower(trim(folders.type)) IN ('movie', 'movies') OR
-				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-			  )
-			  AND mf.missing_since IS NULL
-			  AND (
-				mf.content_id IS NULL OR mf.content_id = '' OR
-				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
-			  )
+			  AND `+movieQueueFileEligibleCond+`
 		  )
 	`, folderID); err != nil {
 		return fmt.Errorf("deleting stale movie queue rows for folder: %w", err)
@@ -258,19 +247,10 @@ func (r *MovieMatchQueueRepository) SyncInScope(ctx context.Context, folderID in
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
-		  AND folders.enabled = true
-		  AND (
-			lower(trim(folders.type)) IN ('movie', 'movies') OR
-			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-		  )
-		  AND mf.missing_since IS NULL
+		  AND `+movieQueueFileEligibleCond+`
 		  AND (
 			mf.file_path = $2 OR
 			mf.file_path LIKE $3 ESCAPE '\'
-		  )
-		  AND (
-			mf.content_id IS NULL OR mf.content_id = '' OR
-			lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
 		  )
 		ON CONFLICT (media_file_id) DO UPDATE
 		SET media_folder_id = EXCLUDED.media_folder_id,
@@ -305,16 +285,7 @@ func (r *MovieMatchQueueRepository) SyncInScope(ctx context.Context, folderID in
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE mf.id = q.media_file_id
-			  AND folders.enabled = true
-			  AND (
-				lower(trim(folders.type)) IN ('movie', 'movies') OR
-				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-			  )
-			  AND mf.missing_since IS NULL
-			  AND (
-				mf.content_id IS NULL OR mf.content_id = '' OR
-				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
-			  )
+			  AND `+movieQueueFileEligibleCond+`
 		  )
 	`, folderID, scopePath, scopeLike); err != nil {
 		return fmt.Errorf("deleting stale movie queue rows in scope: %w", err)
@@ -342,16 +313,7 @@ func (r *MovieMatchQueueRepository) Claim(ctx context.Context, limit int) ([]*mo
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE q.available_at <= NOW()
-			  AND folders.enabled = true
-			  AND (
-				lower(trim(folders.type)) IN ('movie', 'movies') OR
-				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-			  )
-			  AND mf.missing_since IS NULL
-			  AND (
-				mf.content_id IS NULL OR mf.content_id = '' OR
-				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
-			  )
+			  AND `+movieQueueFileEligibleCond+`
 			ORDER BY q.available_at ASC, q.last_attempted_at ASC NULLS FIRST, q.media_file_id ASC
 			LIMIT $1
 			FOR UPDATE OF q SKIP LOCKED
@@ -413,19 +375,10 @@ func (r *MovieMatchQueueRepository) ClaimByFolderAndPathPrefix(
 			LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 			WHERE q.media_folder_id = $1
 			  AND q.available_at <= NOW()
-			  AND folders.enabled = true
-			  AND (
-				lower(trim(folders.type)) IN ('movie', 'movies') OR
-				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
-			  )
-			  AND mf.missing_since IS NULL
+			  AND `+movieQueueFileEligibleCond+`
 			  AND (
 				mf.file_path = $2 OR
 				mf.file_path LIKE $3 ESCAPE '\'
-			  )
-			  AND (
-				mf.content_id IS NULL OR mf.content_id = '' OR
-				lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')
 			  )
 			  AND ($4::timestamptz IS NULL OR q.last_attempted_at IS NULL OR q.last_attempted_at < $4)
 			ORDER BY q.available_at ASC, q.last_attempted_at ASC NULLS FIRST, q.media_file_id ASC

@@ -143,7 +143,7 @@ type metadataObservedLocationRepo interface {
 // creation for legacy diagnostics. The concrete *SkippedRootRepository
 // satisfies this interface.
 type metadataSkippedRootRepo interface {
-	Upsert(ctx context.Context, root models.SkippedMediaRoot) error
+	UpsertObservedFile(ctx context.Context, folderID int, rootPath, reason, sampleFilePath string) error
 	Delete(ctx context.Context, folderID int, rootPath string) error
 }
 
@@ -3793,6 +3793,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if err != nil {
 		return nil, err
 	}
+	libraryTypeNorm := strings.ToLower(strings.TrimSpace(libraryType))
 
 	contentRootPath := filepath.Dir(file.FilePath)
 	if file.CanonicalRootPath != "" {
@@ -3886,7 +3887,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		}
 	}
 	if res.Type == "" {
-		switch strings.ToLower(strings.TrimSpace(libraryType)) {
+		switch libraryTypeNorm {
 		case "series", "tv", "show", "tvshows":
 			res.Type = "series"
 		case "movie", "movies":
@@ -3937,22 +3938,29 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			}
 		}
 	}
+	// Misplaced-TV guard: a strict movie-type library should never turn a TV
+	// episode living inside a "Season NN/" (or "Specials") directory into a
+	// per-episode "Season NN" movie item. Such trees are series dropped into a
+	// movie library (e.g. fan supercut packs) and never match a movie provider;
+	// creating an item per episode just pollutes the catalog. Record the root
+	// for admin visibility and skip skeleton creation; the movie match queue
+	// excludes files beneath such roots so they are not re-enqueued on every
+	// sync (see movieQueueFileEligibleCond). "mixed" libraries are left
+	// untouched because they legitimately host series.
+	//
+	// This fires on the structural signal alone (season dir + SxxExx), even when
+	// a provider id was parsed — a "Season NN" folder otherwise yields a bogus
+	// id (the season number, e.g. tmdb="01"), so effectiveExternalIDs must NOT
+	// gate the skip.
+	if (libraryTypeNorm == "movie" || libraryTypeNorm == "movies") &&
+		naming.IsMisplacedSeriesFile(file.FilePath) {
+		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonSeriesInMovieLibrary, file.FilePath)
+		res.ItemStatus = "skipped"
+		return res, nil
+	}
 	if effectiveExternalIDs == nil {
 		// Record for admin diagnostics only — no longer bail out.
-		if s != nil && s.skippedRootRepo != nil {
-			if err := s.skippedRootRepo.Upsert(ctx, models.SkippedMediaRoot{
-				MediaFolderID:  folderID,
-				RootPath:       observedRootPath,
-				Reason:         "missing_folder_ids",
-				SampleFilePath: file.FilePath,
-				FileCount:      1,
-			}); err != nil {
-				slog.Warn("metadata: failed to record skipped root",
-					"folder_id", folderID,
-					"root_path", observedRootPath,
-					"error", err)
-			}
-		}
+		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonMissingFolderIDs, file.FilePath)
 	}
 
 	unlockDedup := s.lockDedupKey(dedupKeyForSkeleton(
@@ -4164,6 +4172,22 @@ func (s *MetadataService) folderTypeForSkeleton(ctx context.Context, folderID in
 		return "", fmt.Errorf("folder %d is disabled for skeleton creation", folderID)
 	}
 	return folder.Type, nil
+}
+
+// recordSkippedRoot records the root of file for admin diagnostics in
+// skipped_media_roots. Failures are logged and swallowed: diagnostics must
+// never block skeleton creation.
+func (s *MetadataService) recordSkippedRoot(ctx context.Context, folderID int, rootPath, reason, sampleFilePath string) {
+	if s == nil || s.skippedRootRepo == nil {
+		return
+	}
+	if err := s.skippedRootRepo.UpsertObservedFile(ctx, folderID, rootPath, reason, sampleFilePath); err != nil {
+		slog.Warn("metadata: failed to record skipped root",
+			"folder_id", folderID,
+			"root_path", rootPath,
+			"reason", reason,
+			"error", err)
+	}
 }
 
 func (s *MetadataService) deleteCreatedSkeleton(ctx context.Context, contentID string) error {
