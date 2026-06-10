@@ -12,6 +12,39 @@ import (
 // series name keys identically regardless of incidental spacing.
 var mangaSeriesWhitespace = regexp.MustCompile(`\s+`)
 
+// mangaTrailingParen matches a single trailing parenthetical group, allowing
+// optional whitespace before it.  Applied repeatedly to strip all trailing
+// groups (year, year-range, "Digital", release-group names, etc.).
+var mangaTrailingParen = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
+
+// cleanMangaSeriesName removes all trailing parenthetical groups (scene-release
+// metadata such as years, "Digital", and release-group tags) from a manga
+// folder name, then trims any dangling whitespace or trailing " -".
+//
+// Parentheticals in the middle of the name are left untouched so titles like
+// "JoJo's Bizarre Adventure - Part 8 - JoJolion (something) extra" are
+// preserved.  The function is pure and idempotent.  If stripping would produce
+// an empty string the original trimmed input is returned unchanged so a series
+// name is never empty.
+func cleanMangaSeriesName(name string) string {
+	s := strings.TrimSpace(name)
+	for {
+		stripped := mangaTrailingParen.ReplaceAllString(s, "")
+		if stripped == s {
+			break
+		}
+		s = stripped
+	}
+	// Trim any trailing dash (with optional surrounding spaces) left after
+	// stripping, e.g. "Series Name - (Digital)" → "Series Name -" → "Series Name".
+	s = strings.TrimRight(s, " -")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return strings.TrimSpace(name)
+	}
+	return s
+}
+
 // mangaSeriesGroupKey is the stable, library-scoped content-group key that all
 // chapters of one series resolve their series item by. It lowercases, trims,
 // and collapses internal whitespace so cosmetic variations of the same folder
@@ -46,7 +79,7 @@ func mangaSeriesFromPath(filePath string) string {
 	for dir != "" && dir != "." && dir != string(filepath.Separator) {
 		base := filepath.Base(dir)
 		if !mangaVolumeFolder.MatchString(strings.TrimSpace(base)) {
-			return strings.TrimSpace(base)
+			return cleanMangaSeriesName(base)
 		}
 		dir = filepath.Dir(dir)
 	}
