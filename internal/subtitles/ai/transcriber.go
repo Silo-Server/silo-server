@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
@@ -179,8 +180,9 @@ func cuesFromSegments(segments []llm.TranscriptionSegment, offsetSeconds float64
 }
 
 // wrapCueText greedily wraps text into at most maxLines lines of roughly
-// maxLen characters. The last line absorbs any overflow — text is never
-// dropped.
+// maxLen characters (counted in runes, so multi-byte scripts like Arabic or
+// Cyrillic wrap at the same visual width as Latin). The last line absorbs any
+// overflow — text is never dropped.
 func wrapCueText(text string, maxLen, maxLines int) []string {
 	words := strings.Fields(text)
 	if len(words) == 0 {
@@ -190,7 +192,7 @@ func wrapCueText(text string, maxLen, maxLines int) []string {
 	for _, w := range words[1:] {
 		last := len(lines) - 1
 		switch {
-		case len(lines[last])+1+len(w) <= maxLen:
+		case utf8.RuneCountInString(lines[last])+1+utf8.RuneCountInString(w) <= maxLen:
 			lines[last] += " " + w
 		case len(lines) < maxLines:
 			lines = append(lines, w)
