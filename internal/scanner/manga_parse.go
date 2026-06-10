@@ -1,11 +1,29 @@
 package scanner
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// mangaSeriesWhitespace collapses any run of whitespace to a single space so a
+// series name keys identically regardless of incidental spacing.
+var mangaSeriesWhitespace = regexp.MustCompile(`\s+`)
+
+// mangaSeriesGroupKey is the stable, library-scoped content-group key that all
+// chapters of one series resolve their series item by. It lowercases, trims,
+// and collapses internal whitespace so cosmetic variations of the same folder
+// name yield the same key. Returns "" for an empty name (caller must skip).
+func mangaSeriesGroupKey(folderID int, name string) string {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	normalized = strings.TrimSpace(mangaSeriesWhitespace.ReplaceAllString(normalized, " "))
+	if normalized == "" {
+		return ""
+	}
+	return fmt.Sprintf("manga:series:%d:%s", folderID, normalized)
+}
 
 // mangaVolumeFolder matches directory names that are volume markers, not series.
 var mangaVolumeFolder = regexp.MustCompile(`(?i)^v(?:ol(?:ume)?\.?)?\s*\d+$`)

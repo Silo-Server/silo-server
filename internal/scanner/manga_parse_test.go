@@ -20,6 +20,19 @@ func TestMangaSeriesFromPath(t *testing.T) {
 	}
 }
 
+func TestMangaSeriesGroupKey(t *testing.T) {
+	a := mangaSeriesGroupKey(8, "One-Punch Man")
+	b := mangaSeriesGroupKey(8, "  one-punch man ")
+	c := mangaSeriesGroupKey(8, "Bakuman")
+	d := mangaSeriesGroupKey(9, "One-Punch Man")
+	if a == "" || a != b {
+		t.Fatalf("same series must yield same key: %q vs %q", a, b)
+	}
+	if a == c || a == d {
+		t.Fatalf("different series/library must differ: a=%q c=%q d=%q", a, c, d)
+	}
+}
+
 func TestParseMangaIndex(t *testing.T) {
 	cases := []struct {
 		name    string
