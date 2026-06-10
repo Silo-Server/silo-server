@@ -86,6 +86,21 @@ func mangaSeriesFromPath(filePath string) string {
 	return ""
 }
 
+// mangaIndexForFile parses the volume/chapter index from a manga file's base
+// name (extension already stripped), first removing the series-name prefix so
+// numbers inside the series title (e.g. "404 Demons", "365 Days") are not
+// mistaken for the chapter/volume number. Falls back to the full base name when
+// the file does not start with the series name.
+func mangaIndexForFile(base, seriesName string) (volume string, index float64, has bool) {
+	trimmedBase := strings.TrimSpace(base)
+	trimmedSeries := strings.TrimSpace(seriesName)
+	if trimmedSeries != "" && strings.HasPrefix(strings.ToLower(trimmedBase), strings.ToLower(trimmedSeries)) {
+		remainder := trimmedBase[len(trimmedSeries):]
+		return parseMangaIndex(remainder)
+	}
+	return parseMangaIndex(trimmedBase)
+}
+
 // parseMangaIndex extracts the ordering index (volume or chapter number) and the
 // raw volume token from a manga release filename (extension already stripped).
 // Returns has=false when no number is present (e.g. a one-shot).
