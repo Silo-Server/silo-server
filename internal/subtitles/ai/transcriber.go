@@ -29,6 +29,14 @@ const (
 	// Cue text wrapping: standard subtitle conventions.
 	cueMaxLineLength = 42
 	cueMaxLines      = 2
+	// Cue timing conventions. When word timings are available a cue closes
+	// at a speech pause, at text capacity, at the maximum duration, or after
+	// a sentence ends; without them a segment becomes one duration-capped
+	// cue. Sub-second cues are stretched to the minimum so short
+	// interjections ("What?") stay readable.
+	maxCueSeconds        = 7.0
+	minCueSeconds        = 1.0
+	cueSplitPauseSeconds = 1.0
 )
 
 // TranscribeJobRequest is the input to a Transcriber.
@@ -176,7 +184,10 @@ func chunkOrderForPosition(chunks []playback.AudioChunk, startSeconds float64) [
 
 // cuesFromSegments converts transcription segments (timestamps relative to
 // their chunk) to absolute-time cues, dropping speech-free segments and
-// wrapping text to subtitle conventions.
+// wrapping text to subtitle conventions. Segments with word timings are
+// re-split into readable cues that end when speech stops; segments without
+// them become single cues capped at the maximum duration, because Whisper
+// segment end times otherwise stretch across silence to the next segment.
 func cuesFromSegments(segments []llm.TranscriptionSegment, offsetSeconds float64) []SubtitleCue {
 	var out []SubtitleCue
 	for _, seg := range segments {
@@ -184,18 +195,97 @@ func cuesFromSegments(segments []llm.TranscriptionSegment, offsetSeconds float64
 		if text == "" {
 			continue
 		}
+		if cues := cuesFromWords(seg.Words, offsetSeconds); len(cues) > 0 {
+			out = append(out, cues...)
+			continue
+		}
 		start := offsetSeconds + seg.Start
 		end := offsetSeconds + seg.End
-		if end <= start {
-			end = start + 0.5
+		if maxEnd := start + maxCueSeconds; end > maxEnd {
+			end = maxEnd
 		}
-		out = append(out, SubtitleCue{
-			Start: time.Duration(start * float64(time.Second)),
-			End:   time.Duration(end * float64(time.Second)),
-			Lines: wrapCueText(text, cueMaxLineLength, cueMaxLines),
-		})
+		out = append(out, newCue(start, end, text))
 	}
+	enforceMinCueDurations(out)
 	return out
+}
+
+// cuesFromWords groups word timings into cues: a cue closes at a speech
+// pause, when the text would exceed the wrap capacity, when it would exceed
+// the maximum duration, or after a sentence ends once a full line is
+// accumulated. Cue end times come from the last word, so cues disappear when
+// speech stops instead of lingering through silence.
+func cuesFromWords(words []llm.TranscriptionWord, offsetSeconds float64) []SubtitleCue {
+	maxRunes := cueMaxLineLength * cueMaxLines
+	var out []SubtitleCue
+	var texts []string
+	var start, end float64
+	runes := 0
+	flush := func() {
+		if len(texts) > 0 {
+			out = append(out, newCue(offsetSeconds+start, offsetSeconds+end, strings.Join(texts, " ")))
+		}
+		texts, runes = nil, 0
+	}
+	for _, w := range words {
+		text := strings.TrimSpace(w.Text)
+		if text == "" {
+			continue
+		}
+		n := utf8.RuneCountInString(text)
+		if len(texts) > 0 &&
+			(w.Start-end >= cueSplitPauseSeconds || runes+1+n > maxRunes || w.End-start > maxCueSeconds) {
+			flush()
+		}
+		if len(texts) == 0 {
+			start = w.Start
+		}
+		texts = append(texts, text)
+		runes += n + 1
+		end = w.End
+		if runes >= cueMaxLineLength && endsSentence(text) {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+// endsSentence reports whether a word closes a sentence, tolerating a
+// trailing quote or bracket after the punctuation.
+func endsSentence(word string) bool {
+	word = strings.TrimRight(word, `"')]”’`)
+	return strings.HasSuffix(word, ".") || strings.HasSuffix(word, "?") ||
+		strings.HasSuffix(word, "!") || strings.HasSuffix(word, "…")
+}
+
+// newCue builds a wrapped cue, guarding degenerate timestamps with a minimal
+// visible duration.
+func newCue(startSec, endSec float64, text string) SubtitleCue {
+	if endSec <= startSec {
+		endSec = startSec + 0.5
+	}
+	return SubtitleCue{
+		Start: time.Duration(startSec * float64(time.Second)),
+		End:   time.Duration(endSec * float64(time.Second)),
+		Lines: wrapCueText(text, cueMaxLineLength, cueMaxLines),
+	}
+}
+
+// enforceMinCueDurations stretches sub-minimum cues (word-accurate timing can
+// produce a 0.2s "What?") up to the readable minimum, without overlapping the
+// next cue. Cues are chronological within a chunk.
+func enforceMinCueDurations(cues []SubtitleCue) {
+	minDur := time.Duration(minCueSeconds * float64(time.Second))
+	for i := range cues {
+		minEnd := cues[i].Start + minDur
+		if i+1 < len(cues) && minEnd > cues[i+1].Start {
+			minEnd = cues[i+1].Start
+		}
+		if cues[i].End < minEnd {
+			cues[i].End = minEnd
+		}
+	}
 }
 
 // wrapCueText greedily wraps text into at most maxLines lines of roughly

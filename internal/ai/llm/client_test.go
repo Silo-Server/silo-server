@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -111,7 +112,8 @@ func TestChatFailsFastOnNon429ClientError(t *testing.T) {
 const verboseJSON = `{"language":"english","text":"hi there","segments":[{"start":0.0,"end":1.5,"text":" hi"},{"start":1.5,"end":3.0,"text":" there"}]}`
 
 func TestTranscribeParsesSegmentsAndMultipart(t *testing.T) {
-	var gotModel, gotFormat, gotLang, gotAuth string
+	var gotModel, gotFormat, gotLang, gotAuth, gotVAD string
+	var gotGranularities []string
 	var gotFile []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -121,6 +123,8 @@ func TestTranscribeParsesSegmentsAndMultipart(t *testing.T) {
 		gotModel = r.FormValue("model")
 		gotFormat = r.FormValue("response_format")
 		gotLang = r.FormValue("language")
+		gotVAD = r.FormValue("vad_filter")
+		gotGranularities = r.MultipartForm.Value["timestamp_granularities[]"]
 		f, _, err := r.FormFile("file")
 		if err == nil {
 			buf := make([]byte, 64)
@@ -144,6 +148,14 @@ func TestTranscribeParsesSegmentsAndMultipart(t *testing.T) {
 	if gotModel != "whisper-test" || gotFormat != "verbose_json" || gotLang != "ja" {
 		t.Errorf("fields model=%q format=%q lang=%q", gotModel, gotFormat, gotLang)
 	}
+	// Local (non-hosted) endpoint: faster-whisper VAD must be requested or
+	// segment timestamps stretch wall-to-wall across silence.
+	if gotVAD != "true" {
+		t.Errorf("vad_filter = %q, want true for a self-hosted endpoint", gotVAD)
+	}
+	if fmt.Sprint(gotGranularities) != "[segment word]" {
+		t.Errorf("timestamp_granularities[] = %v, want [segment word]", gotGranularities)
+	}
 	if gotAuth != "Bearer test-key" {
 		t.Errorf("auth = %q (should fall back to chat key)", gotAuth)
 	}
@@ -152,6 +164,67 @@ func TestTranscribeParsesSegmentsAndMultipart(t *testing.T) {
 	}
 	if tr.Language != "english" || len(tr.Segments) != 2 || tr.Segments[1].Text != " there" || tr.Segments[1].End != 3.0 {
 		t.Errorf("unexpected transcription: %+v", tr)
+	}
+}
+
+func TestTranscribeOmitsVADFilterForStrictHostedEndpoints(t *testing.T) {
+	for url, wantVAD := range map[string]bool{
+		"https://api.openai.com":              false,
+		"https://myorg.openai.azure.com":      false,
+		"https://api.groq.com/openai":         false,
+		"http://192.168.1.10:8000":            true,
+		"https://whisper.example.com":         true,
+		"https://api.deepinfra.com/v1/openai": true,
+	} {
+		got := !hostMatchesAny(url, strictHostedASRHosts)
+		if got != wantVAD {
+			t.Errorf("vad_filter for %s = %v, want %v", url, got, wantVAD)
+		}
+	}
+}
+
+func TestTranscribeParsesPerSegmentWords(t *testing.T) {
+	// speaches/faster-whisper shape: words nested inside each segment.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"language":"en","text":"hi there","segments":[
+			{"start":0.0,"end":3.0,"text":" hi there","words":[
+				{"start":0.2,"end":0.5,"word":" hi"},{"start":0.6,"end":1.0,"word":" there"}]}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := chatConfig(srv.URL)
+	cfg.ASRModel = "whisper-test"
+	tr, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	words := tr.Segments[0].Words
+	if len(words) != 2 || words[1].Text != " there" || words[1].Start != 0.6 || words[1].End != 1.0 {
+		t.Errorf("segment words = %+v", words)
+	}
+}
+
+func TestTranscribeAttachesTopLevelWordsBySegmentTime(t *testing.T) {
+	// OpenAI shape: words in a top-level array, segments without words.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"language":"en","text":"hi there friend","segments":[
+			{"start":0.0,"end":1.5,"text":" hi there"},{"start":1.5,"end":3.0,"text":" friend"}],
+			"words":[{"start":0.2,"end":0.5,"word":"hi"},{"start":0.6,"end":1.0,"word":"there"},
+			{"start":1.8,"end":2.2,"word":"friend"}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := chatConfig(srv.URL)
+	cfg.ASRModel = "whisper-test"
+	tr, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	if len(tr.Segments[0].Words) != 2 || len(tr.Segments[1].Words) != 1 {
+		t.Errorf("word distribution = %d/%d, want 2/1", len(tr.Segments[0].Words), len(tr.Segments[1].Words))
+	}
+	if tr.Segments[1].Words[0].Text != "friend" {
+		t.Errorf("segment 1 word = %+v", tr.Segments[1].Words[0])
 	}
 }
 

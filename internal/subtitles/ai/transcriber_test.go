@@ -200,6 +200,105 @@ func TestWrapCueText(t *testing.T) {
 	}
 }
 
+func TestCuesFromSegmentsCapsWordlessSegmentDuration(t *testing.T) {
+	// Without word timings, Whisper segment ends stretch wall-to-wall across
+	// silence (a 0.8s line reported as 30s); cap rather than linger.
+	cues := cuesFromSegments([]llm.TranscriptionSegment{
+		{Start: 10, End: 40, Text: "Days like today."},
+	}, 0)
+	if len(cues) != 1 {
+		t.Fatalf("cues = %d, want 1", len(cues))
+	}
+	if want := time.Duration(maxCueSeconds * float64(time.Second)); cues[0].End-cues[0].Start != want {
+		t.Errorf("capped duration = %v, want %v", cues[0].End-cues[0].Start, want)
+	}
+}
+
+func wordSeq(startAt, dur, gap float64, words ...string) []llm.TranscriptionWord {
+	out := make([]llm.TranscriptionWord, 0, len(words))
+	at := startAt
+	for _, w := range words {
+		out = append(out, llm.TranscriptionWord{Start: at, End: at + dur, Text: " " + w})
+		at += dur + gap
+	}
+	return out
+}
+
+func TestCuesFromWordsEndsCueWhenSpeechStops(t *testing.T) {
+	// One segment whose reported end (60s) is far past the last word (12.4s):
+	// the cue must end at the words, not the segment.
+	words := wordSeq(10, 0.4, 0.1, "Are", "you", "okay?")
+	cues := cuesFromSegments([]llm.TranscriptionSegment{
+		{Start: 10, End: 60, Text: " Are you okay?", Words: words},
+	}, 0)
+	if len(cues) != 1 {
+		t.Fatalf("cues = %d, want 1", len(cues))
+	}
+	if cues[0].Start != 10*time.Second {
+		t.Errorf("start = %v, want 10s", cues[0].Start)
+	}
+	// Last word ends at 11.3s; the minimum-duration stretch may pad slightly,
+	// but nothing close to the segment's reported 60s.
+	if cues[0].End > 12*time.Second {
+		t.Errorf("end = %v, want ~11.3s (last word), not segment end", cues[0].End)
+	}
+}
+
+func TestCuesFromWordsSplitsAtPause(t *testing.T) {
+	words := append(wordSeq(0, 0.4, 0.1, "First", "thought"),
+		wordSeq(5, 0.4, 0.1, "second", "thought")...)
+	cues := cuesFromWords(words, 0)
+	if len(cues) != 2 {
+		t.Fatalf("cues = %d, want 2 (split at 4s pause)", len(cues))
+	}
+	if cues[1].Start != 5*time.Second {
+		t.Errorf("second cue start = %v, want 5s", cues[1].Start)
+	}
+}
+
+func TestCuesFromWordsSplitsParagraphAtSentencesAndCapacity(t *testing.T) {
+	// A paragraph-length segment (the "465-char single cue" failure) must
+	// split into readable cues. Sentence ends close a cue once a line's worth
+	// of text has accumulated; capacity closes one regardless.
+	var words []llm.TranscriptionWord
+	for i := 0; i < 6; i++ {
+		words = append(words, wordSeq(float64(i)*3, 0.3, 0.1,
+			"this", "sentence", "keeps", "going", "and", "going", "until", "it", "stops.")...)
+	}
+	cues := cuesFromWords(words, 0)
+	if len(cues) < 4 {
+		t.Fatalf("cues = %d, want the paragraph split into several", len(cues))
+	}
+	maxRunes := cueMaxLineLength * cueMaxLines
+	for i, c := range cues {
+		text := strings.Join(c.Lines, " ")
+		if got := len([]rune(text)); got > maxRunes {
+			t.Errorf("cue %d has %d runes, over capacity %d: %q", i, got, maxRunes, text)
+		}
+		if dur := c.End - c.Start; dur > time.Duration(maxCueSeconds*float64(time.Second))+time.Second {
+			t.Errorf("cue %d duration %v exceeds max", i, dur)
+		}
+	}
+}
+
+func TestEnforceMinCueDurationsClampsToNextCue(t *testing.T) {
+	cues := []SubtitleCue{
+		{Start: 0, End: 200 * time.Millisecond, Lines: []string{"What?"}},
+		{Start: 600 * time.Millisecond, End: 2 * time.Second, Lines: []string{"LSD."}},
+		{Start: 3 * time.Second, End: 3200 * time.Millisecond, Lines: []string{"Oh."}},
+	}
+	enforceMinCueDurations(cues)
+	if cues[0].End != 600*time.Millisecond {
+		t.Errorf("cue 0 end = %v, want clamped to next cue start (600ms)", cues[0].End)
+	}
+	if cues[1].End != 2*time.Second {
+		t.Errorf("cue 1 end = %v, want unchanged", cues[1].End)
+	}
+	if cues[2].End != 4*time.Second {
+		t.Errorf("cue 2 end = %v, want stretched to 1s minimum", cues[2].End)
+	}
+}
+
 func TestCuesFromSegmentsGuardsDegenerateTimes(t *testing.T) {
 	cues := cuesFromSegments([]llm.TranscriptionSegment{
 		{Start: 5, End: 5, Text: "zero duration"},
