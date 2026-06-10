@@ -1,10 +1,14 @@
 package scanner
 
 import (
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// mangaVolumeFolder matches directory names that are volume markers, not series.
+var mangaVolumeFolder = regexp.MustCompile(`(?i)^v(?:ol(?:ume)?\.?)?\s*\d+$`)
 
 var (
 	mangaVolYearIssue = regexp.MustCompile(`(?i)\b(Vol\.?\s*\d{4})\b.*?#\s*(\d+(?:\.\d+)?)`)
@@ -16,6 +20,20 @@ var (
 	mangaBareNumber = regexp.MustCompile(`\b(\d+(?:\.\d+)?)\b`)
 	mangaParenNoise = regexp.MustCompile(`\([^)]*\)`) // (year) (Digital) (group) (Month, Year)
 )
+
+// mangaSeriesFromPath returns the series name: the nearest ancestor directory of
+// the file whose name is not a volume marker.
+func mangaSeriesFromPath(filePath string) string {
+	dir := filepath.Dir(filePath)
+	for dir != "" && dir != "." && dir != string(filepath.Separator) {
+		base := filepath.Base(dir)
+		if !mangaVolumeFolder.MatchString(strings.TrimSpace(base)) {
+			return strings.TrimSpace(base)
+		}
+		dir = filepath.Dir(dir)
+	}
+	return ""
+}
 
 // parseMangaIndex extracts the ordering index (volume or chapter number) and the
 // raw volume token from a manga release filename (extension already stripped).

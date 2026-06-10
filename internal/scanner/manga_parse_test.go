@@ -2,6 +2,24 @@ package scanner
 
 import "testing"
 
+func TestMangaSeriesFromPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/m/manga/Official/Kurosagi Corpse Delivery Service/V2006/Kurosagi 10.cbz", "Kurosagi Corpse Delivery Service"},
+		{"/m/manga/One-Punch Man/One-Punch Man 178 (2023) (Digital) (LuCaZ).cbz", "One-Punch Man"},
+		{"/m/manga/Bakuman/v13/Bakuman v13 (2012).cbz", "Bakuman"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			if got := mangaSeriesFromPath(tc.path); got != tc.want {
+				t.Fatalf("mangaSeriesFromPath(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseMangaIndex(t *testing.T) {
 	cases := []struct {
 		name    string
