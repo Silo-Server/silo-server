@@ -2938,6 +2938,8 @@ export interface StreamNode {
   enabled: boolean;
   healthy: boolean;
   active_jobs: number;
+  group: string | null;
+  max_jobs: number | null;
   last_health_check: string | null;
   created_at: string;
 }
@@ -2946,12 +2948,17 @@ export interface CreateNodeRequest {
   name: string;
   type: string;
   url: string;
+  group?: string;
+  max_jobs?: number;
 }
 
 export interface UpdateNodeRequest {
   name?: string;
   url?: string;
   enabled?: boolean;
+  // Empty string clears the group; 0 clears the cap (unlimited).
+  group?: string;
+  max_jobs?: number;
 }
 
 export interface CheckNodeResponse {

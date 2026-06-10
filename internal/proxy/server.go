@@ -67,12 +67,17 @@ func (s *Server) Handler() http.Handler {
 }
 
 type healthResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	ActiveJobs int    `json:"active_jobs"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	activeJobs := 0
+	if s.tracker != nil {
+		activeJobs = s.tracker.ActiveCount()
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(healthResponse{Status: "ok"})
+	json.NewEncoder(w).Encode(healthResponse{Status: "ok", ActiveJobs: activeJobs})
 }
 
 // requireBearer checks Authorization: Bearer {secret} for admin endpoints.
@@ -149,6 +154,7 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 	if claims == nil {
 		return
 	}
+	s.touchTranscodeSession(r, claims)
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/master.m3u8")
 }
 
@@ -157,8 +163,23 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 	if claims == nil {
 		return
 	}
+	s.touchTranscodeSession(r, claims)
 	name := chi.URLParam(r, "name")
 	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/segment/"+name)
+}
+
+// touchTranscodeSession keeps HLS sessions visible in the active stream count.
+// Unlike direct play and remux, transcode playback reaches the proxy as many
+// short manifest/segment requests, so the session is tracked by recent
+// activity instead of request lifetime.
+func (s *Server) touchTranscodeSession(r *http.Request, claims *streamtoken.Claims) {
+	s.tracker.Touch(r.Context(), nodesessions.SessionInfo{
+		SessionID: claims.SessionID,
+		NodeURL:   s.tracker.NodeURL(),
+		NodeName:  s.tracker.NodeName(),
+		Type:      "transcode",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {

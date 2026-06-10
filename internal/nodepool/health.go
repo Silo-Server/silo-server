@@ -82,24 +82,18 @@ func (hc *HealthChecker) Start(ctx context.Context) {
 }
 
 func (hc *HealthChecker) checkAll(ctx context.Context) {
-	var allNodes []*Node
-	allNodes = append(allNodes, hc.proxyPool.Nodes()...)
-	allNodes = append(allNodes, hc.transcodePool.Nodes()...)
-
 	var wg sync.WaitGroup
-	for _, n := range allNodes {
+	check := func(n *Node, applyHealth func(int, bool, int, time.Time)) {
 		wg.Go(func() {
 			healthy, activeJobs := CheckNode(ctx, n)
 
-			wasHealthy := n.Healthy
-			n.Healthy = healthy
-			n.ActiveJobs = activeJobs
-			now := time.Now()
-			n.LastHealthCheck = &now
+			// Publish the result through the pool lock so readers never see
+			// a Node struct mutated in place (the pool swaps in a copy).
+			applyHealth(n.ID, healthy, activeJobs, time.Now())
 
-			if wasHealthy && !healthy {
+			if n.Healthy && !healthy {
 				slog.Warn("stream node unhealthy", "id", n.ID, "name", n.Name, "url", n.URL)
-			} else if !wasHealthy && healthy {
+			} else if !n.Healthy && healthy {
 				slog.Info("stream node recovered", "id", n.ID, "name", n.Name, "url", n.URL)
 			}
 
@@ -109,6 +103,12 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 				}
 			}
 		})
+	}
+	for _, n := range hc.proxyPool.Nodes() {
+		check(n, hc.proxyPool.ApplyHealth)
+	}
+	for _, n := range hc.transcodePool.Nodes() {
+		check(n, hc.transcodePool.ApplyHealth)
 	}
 	wg.Wait()
 }

@@ -96,8 +96,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		playbackHandler.profileStaler = recommendations.NewRepo(deps.DB)
 	}
-	playbackHandler.ProxyPool = deps.ProxyPool
-	playbackHandler.TranscodePool = deps.TranscodePool
+	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo

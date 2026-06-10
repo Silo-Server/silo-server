@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,15 +27,19 @@ type Node struct {
 	Enabled         bool       `json:"enabled"`
 	Healthy         bool       `json:"healthy"`
 	ActiveJobs      int        `json:"active_jobs"`
+	Group           *string    `json:"group"`    // co-location group; nil = ungrouped
+	MaxJobs         *int       `json:"max_jobs"` // concurrent job cap; nil = unlimited
 	LastHealthCheck *time.Time `json:"last_health_check"`
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // CreateNodeInput holds the fields for creating a new node.
 type CreateNodeInput struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	URL  string `json:"url"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	URL     string `json:"url"`
+	Group   string `json:"group"`    // empty = ungrouped
+	MaxJobs *int   `json:"max_jobs"` // nil or <= 0 = unlimited
 }
 
 // Validate checks required fields and allowed values.
@@ -52,10 +57,31 @@ func (i CreateNodeInput) Validate() error {
 }
 
 // UpdateNodeInput holds the fields for updating a node.
+// Group and MaxJobs distinguish "leave unchanged" (nil) from "clear":
+// an empty-string Group clears the group, and a MaxJobs <= 0 clears the cap.
 type UpdateNodeInput struct {
 	Name    *string `json:"name,omitempty"`
 	URL     *string `json:"url,omitempty"`
 	Enabled *bool   `json:"enabled,omitempty"`
+	Group   *string `json:"group,omitempty"`
+	MaxJobs *int    `json:"max_jobs,omitempty"`
+}
+
+// normalizeGroup trims a group label and converts empty to NULL.
+func normalizeGroup(group string) *string {
+	g := strings.TrimSpace(group)
+	if g == "" {
+		return nil
+	}
+	return &g
+}
+
+// normalizeMaxJobs converts non-positive caps to NULL (unlimited).
+func normalizeMaxJobs(maxJobs *int) *int {
+	if maxJobs == nil || *maxJobs <= 0 {
+		return nil
+	}
+	return maxJobs
 }
 
 // Repository provides CRUD operations for stream nodes.
@@ -68,13 +94,14 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, enabled, healthy, active_jobs, last_health_check, created_at`
+const nodeColumns = `id, name, type, url, enabled, healthy, active_jobs, node_group, max_jobs, last_health_check, created_at`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Type, &n.URL,
 		&n.Enabled, &n.Healthy, &n.ActiveJobs,
+		&n.Group, &n.MaxJobs,
 		&n.LastHealthCheck, &n.CreatedAt,
 	)
 	if err != nil {
@@ -90,6 +117,7 @@ func scanNodes(rows pgx.Rows) ([]*Node, error) {
 		if err := rows.Scan(
 			&n.ID, &n.Name, &n.Type, &n.URL,
 			&n.Enabled, &n.Healthy, &n.ActiveJobs,
+			&n.Group, &n.MaxJobs,
 			&n.LastHealthCheck, &n.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -142,22 +170,36 @@ func (r *Repository) Create(ctx context.Context, input CreateNodeInput) (*Node, 
 		return nil, err
 	}
 	row := r.pool.QueryRow(ctx,
-		`INSERT INTO stream_nodes (name, type, url) VALUES ($1, $2, $3)
+		`INSERT INTO stream_nodes (name, type, url, node_group, max_jobs) VALUES ($1, $2, $3, $4, $5)
 		 RETURNING `+nodeColumns,
-		input.Name, input.Type, input.URL)
+		input.Name, input.Type, input.URL, normalizeGroup(input.Group), normalizeMaxJobs(input.MaxJobs))
 	return scanNode(row)
 }
 
-// Update modifies a node's mutable fields.
+// Update modifies a node's mutable fields. Group and MaxJobs use sentinel
+// values to clear: an empty-string group and a non-positive max_jobs both
+// set the column to NULL (see UpdateNodeInput).
 func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) (*Node, error) {
+	var group *string
+	if input.Group != nil {
+		group = normalizeGroup(*input.Group)
+	}
+	var maxJobs *int
+	if input.MaxJobs != nil {
+		maxJobs = normalizeMaxJobs(input.MaxJobs)
+	}
 	row := r.pool.QueryRow(ctx,
 		`UPDATE stream_nodes SET
 			name = COALESCE($2, name),
 			url = COALESCE($3, url),
-			enabled = COALESCE($4, enabled)
+			enabled = COALESCE($4, enabled),
+			node_group = CASE WHEN $5::boolean THEN $6::text ELSE node_group END,
+			max_jobs = CASE WHEN $7::boolean THEN $8::integer ELSE max_jobs END
 		 WHERE id = $1
 		 RETURNING `+nodeColumns,
-		id, input.Name, input.URL, input.Enabled)
+		id, input.Name, input.URL, input.Enabled,
+		input.Group != nil, group,
+		input.MaxJobs != nil, maxJobs)
 	n, err := scanNode(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNodeNotFound
