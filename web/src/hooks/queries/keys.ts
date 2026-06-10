@@ -322,6 +322,13 @@ export const notificationKeys = {
   announcements: () => ["admin", "announcements"] as const,
 };
 
+export const pushKeys = {
+  all: ["push"] as const,
+  webpushKey: () => [...pushKeys.all, "webpush-key"] as const,
+  devices: () => [...pushKeys.all, "devices"] as const,
+  status: () => [...pushKeys.all, "status"] as const,
+};
+
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
   userDetail: (userId: number) => ["admin", "users", userId] as const,
