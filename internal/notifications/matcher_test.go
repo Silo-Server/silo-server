@@ -353,7 +353,7 @@ func TestContentMatcher_BurstCollapsesViaDedup(t *testing.T) {
 	defer m.Stop()
 
 	// Three episodes from the same series published sequentially.
-	// All share the same (series_id, profile_id, hourBucket) → same dedup_ref → only 1 insert.
+	// All share the same (series_id, profile_id, dayBucket) → same dedup_ref → only 1 insert.
 	for _, epID := range []string{"ep-1", "ep-2", "ep-3"} {
 		publishAndSettle(t, hub, m, catalogItemChangedEnvelope(1, epID, "metadata_updated"))
 	}

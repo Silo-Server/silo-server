@@ -32,9 +32,10 @@ type ProfileRef struct {
 // ContentResolver answers "who cares about this item" from catalog state.
 type ContentResolver interface {
 	// ItemContext resolves the added item's display title, its series/parent
-	// content id (empty when standalone), library id, and catalog row creation
-	// time. createdAt is the catalog row's creation time, used to distinguish
-	// new arrivals from metadata refreshes of old items.
+	// content id (empty when standalone), library id (fallback when the event
+	// lacks one), and catalog row creation time. createdAt is the catalog row's
+	// creation time, used to distinguish new arrivals from metadata refreshes of
+	// old items.
 	ItemContext(ctx context.Context, contentID string) (title string, seriesID string, libraryID int, createdAt time.Time, err error)
 	// InterestedProfiles returns (user_id, profile_id) pairs whose watchlist
 	// or favorites contain contentID or seriesID, plus profiles with playback
@@ -86,8 +87,9 @@ func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error
 	if time.Since(createdAt) > newItemWindow {
 		return nil // metadata refresh of an old item, not a new arrival
 	}
-	// Fall back to the event's library_id when the resolver returns 0.
-	if libraryID == 0 {
+	// payload.LibraryID is authoritative; only fall back to the resolver's
+	// libraryID when the event omits one (payload.LibraryID == 0).
+	if payload.LibraryID != 0 {
 		libraryID = payload.LibraryID
 	}
 
@@ -97,7 +99,10 @@ func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error
 		return fmt.Errorf("content matcher: interested profiles for %s: %w", contentID, err)
 	}
 
-	hourBucket := time.Now().UTC().Format("2006010215")
+	// dayBucket caps refresh-driven repeats at 1 per day (within the 48h recency
+	// window a midnight crossing produces a new key, but next week's episode
+	// always gets a new date = new dedup key, so ongoing series still notify).
+	dayBucket := time.Now().UTC().Format("20060102")
 	// groupID collapses all episodes of a series into a single burst group.
 	groupID := contentID
 	if seriesID != "" {
@@ -105,7 +110,7 @@ func (m *Materializer) matchContent(ctx context.Context, env evt.Envelope) error
 	}
 
 	for _, ref := range refs {
-		dedupRef := fmt.Sprintf("%s:%s:%s", groupID, ref.ProfileID, hourBucket)
+		dedupRef := fmt.Sprintf("%s:%s:%s", groupID, ref.ProfileID, dayBucket)
 		if err := m.svc.Create(ctx, CreateInput{
 			UserID:      ref.UserID,
 			ProfileID:   ref.ProfileID,

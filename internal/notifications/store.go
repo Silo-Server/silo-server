@@ -516,6 +516,16 @@ func (c *ContentResolverRepo) InterestedProfiles(
 	// Build the query with optional in-progress leg.
 	// The in-progress leg requires seriesID to be non-empty: it joins episodes
 	// on series_id to find profiles that watched any episode of the series.
+	//
+	// Parameters:
+	//   $1  libraryID
+	//   $2  contentID   – matched directly in watchlist/favorites IN-clause
+	//   $3  seriesArg   – seriesID when non-empty, otherwise contentID so the
+	//                     IN-clause degrades to IN (contentID, contentID)
+	//   $4  seriesID    – raw series id used only for the in-progress guard
+	//                     ($4 <> '') and join; never the degraded contentID so a
+	//                     standalone item cannot accidentally join episode rows
+	//   $5  inProgressSince
 	query := `
 		WITH eligible_users AS (
 			SELECT id AS user_id
@@ -537,9 +547,9 @@ func (c *ContentResolverRepo) InterestedProfiles(
 			SELECT uwp.user_id, uwp.profile_id
 			FROM user_watch_progress uwp
 			JOIN episodes e ON e.content_id = uwp.media_item_id
-			WHERE $3 <> ''
-			  AND e.series_id = $3
-			  AND uwp.updated_at >= $4
+			WHERE $4 <> ''
+			  AND e.series_id = $4
+			  AND uwp.updated_at >= $5
 		),
 		all_interests AS (
 			SELECT user_id, profile_id FROM watchlist_leg
@@ -554,14 +564,16 @@ func (c *ContentResolverRepo) InterestedProfiles(
 		ORDER BY ai.user_id, ai.profile_id
 	`
 
-	// When seriesID is empty we pass contentID for both the $2 and $3 slots.
-	// The in-progress leg's "$3 <> ''" guard makes it a no-op in that case.
+	// seriesArg degrades to contentID for standalone items so the IN-clause
+	// in watchlist/favorites remains valid: IN (contentID, contentID) = IN (contentID).
+	// The in-progress leg uses the raw seriesID ($4) separately so a standalone
+	// item (seriesID == "") can never join episode rows via its own content id.
 	seriesArg := seriesID
 	if seriesArg == "" {
-		seriesArg = contentID // harmless: IN (contentID, contentID) = IN (contentID)
+		seriesArg = contentID
 	}
 
-	rows, err := c.pool.Query(ctx, query, libraryID, contentID, seriesArg, inProgressSince)
+	rows, err := c.pool.Query(ctx, query, libraryID, contentID, seriesArg, seriesID, inProgressSince)
 	if err != nil {
 		return nil, fmt.Errorf("interested profiles for %s: %w", contentID, err)
 	}
