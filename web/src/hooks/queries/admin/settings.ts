@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type { AdminSettingsConnectionCheckRequest, ConnectionCheckResponse } from "@/api/types";
+import type {
+  AdminSettingUpdateResponse,
+  AdminSettingsConnectionCheckRequest,
+  ConnectionCheckResponse,
+} from "@/api/types";
 import { adminKeys } from "../keys";
 import { toast } from "sonner";
 
@@ -23,7 +27,7 @@ export function useUpdateServerSetting() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) =>
-      api(`/admin/settings/${key}`, {
+      api<AdminSettingUpdateResponse>(`/admin/settings/${key}`, {
         method: "PUT",
         body: JSON.stringify({ value }),
       }),

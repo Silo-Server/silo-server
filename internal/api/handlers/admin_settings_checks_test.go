@@ -326,6 +326,47 @@ func TestAdminUpdateSettingRedactsSensitiveSetting(t *testing.T) {
 	}
 }
 
+func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
+	cases := []struct {
+		key             string
+		value           string
+		restartRequired bool
+	}{
+		// Infrastructure settings are captured at startup.
+		{key: "database.max_connections", value: "40", restartRequired: true},
+		{key: "s3.public_bucket", value: "assets", restartRequired: true},
+		// Branding is read live from the settings repo per request.
+		{key: "branding.server_name", value: "Casa", restartRequired: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			settings := &fakeServerSettingsStore{}
+			handler := &AdminHandler{SettingsRepo: settings}
+
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/admin/settings/"+tc.key,
+				strings.NewReader(`{"value":"`+tc.value+`"}`),
+			)
+			req = withChiParam(req, "key", tc.key)
+			rec := httptest.NewRecorder()
+
+			handler.HandleUpdateSetting(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			var resp adminSettingResponse
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.RestartRequired != tc.restartRequired {
+				t.Fatalf("restart_required = %v, want %v", resp.RestartRequired, tc.restartRequired)
+			}
+		})
+	}
+}
+
 func performSettingsCheckRequest(
 	t *testing.T,
 	handler *AdminHandler,

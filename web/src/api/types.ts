@@ -3415,6 +3415,15 @@ export interface RateLimitUpdateResponse {
   restart_required?: boolean;
 }
 
+/** Response of PUT /admin/settings/{key}. */
+export interface AdminSettingUpdateResponse {
+  key: string;
+  /** Empty for sensitive keys. */
+  value?: string;
+  /** True when the saved value only takes effect after a server restart. */
+  restart_required?: boolean;
+}
+
 // IP visibility
 export interface UserIPEntry {
   client_ip: string;
