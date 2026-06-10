@@ -28,7 +28,8 @@ type FilterRuleMediaScope =
   | "series"
   | "episode"
   | "audiobook"
-  | "ebook";
+  | "ebook"
+  | "manga";
 
 interface FilterRuleEditorProps {
   value: FilterConfig;
@@ -46,7 +47,8 @@ export function getFilterRuleFieldOptions(
   return COLLECTION_FIELD_OPTIONS.filter(
     (option) => allowPersonalizedFilters || !option.personalized,
   ).map((option) => {
-    if (mediaScope !== "ebook") {
+    // Ebook and manga are read rather than watched, so relabel "watched".
+    if (mediaScope !== "ebook" && mediaScope !== "manga") {
       return option;
     }
     switch (option.value) {
