@@ -6,6 +6,7 @@ package ebooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,7 +29,20 @@ const (
 
 	defaultEnrichBatchSize = 50
 	defaultEnrichWorkers   = 4
+
+	// enrichFailureCap is the ebook_enrichment_state.failures count at which
+	// an ebook stops being claimed for enrichment. Combined with the
+	// failure-count-first claim ordering this prevents a head-of-line block
+	// of permanently failing items from starving newer items and hammering
+	// providers.
+	enrichFailureCap = 5
 )
+
+// errEnrichmentSkipped marks an item that could not be attempted at all (no
+// library folder linked yet, no providers configured). Skipped items are
+// neither stamped as refreshed nor counted against the failure cap, so they
+// are retried on every sweep until the missing prerequisite appears.
+var errEnrichmentSkipped = errors.New("ebook enrichment skipped")
 
 func ebookContentType() string {
 	return "ebook"
@@ -115,7 +129,7 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		"workers", e.workers,
 	)
 
-	enriched := e.runBatch(ctx, items, e.enrichItem)
+	enriched := e.runBatch(ctx, items, e.enrichItem, e.recordEnrichFailure)
 
 	slog.Info("ebook enrichment: sweep complete",
 		"attempted", len(items),
@@ -124,7 +138,12 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 	return enriched, nil
 }
 
-func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enrichFn func(context.Context, enrichmentItemRow) error) int {
+func (e *Enricher) runBatch(
+	ctx context.Context,
+	items []enrichmentItemRow,
+	enrichFn func(context.Context, enrichmentItemRow) error,
+	recordFailure func(context.Context, enrichmentItemRow),
+) int {
 	workers := e.workers
 	if workers <= 0 {
 		workers = 1
@@ -147,11 +166,24 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 					continue
 				}
 				if err := enrichFn(ctx, item); err != nil {
+					if errors.Is(err, errEnrichmentSkipped) {
+						slog.Debug("ebook enrichment: item skipped",
+							"content_id", item.ContentID,
+							"title", item.Title,
+							"reason", err,
+						)
+						continue
+					}
 					slog.Warn("ebook enrichment: item failed",
 						"content_id", item.ContentID,
 						"title", item.Title,
 						"error", err,
 					)
+					// A cancelled sweep says nothing about the item itself,
+					// so it does not count against the failure cap.
+					if recordFailure != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+						recordFailure(ctx, item)
+					}
 					continue
 				}
 				atomic.AddInt64(&enriched, 1)
@@ -169,33 +201,40 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 	return int(enriched)
 }
 
+// claimBatchQuery selects unenriched ebooks. Items with fewer prior failures
+// are claimed first and items at/above enrichFailureCap are skipped entirely,
+// so a block of permanently failing items cannot occupy every sweep.
+const claimBatchQuery = `
+	SELECT
+		mi.content_id,
+		mi.title,
+		mi.year,
+		COALESCE(mil.media_folder_id, 0) AS folder_id,
+		COALESCE(mf.metadata_language, 'en') AS language,
+		COALESCE(
+			(SELECT p.name
+			 FROM item_people ip
+			 JOIN people p ON p.id = ip.person_id
+			 WHERE ip.content_id = mi.content_id
+			   AND ip.kind = 7
+			 ORDER BY ip.sort_order, ip.id
+			 LIMIT 1),
+			''
+		) AS author
+	FROM media_items mi
+	LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
+	LEFT JOIN media_folders mf ON mf.id = mil.media_folder_id
+	LEFT JOIN ebook_enrichment_state ees ON ees.content_id = mi.content_id
+	WHERE mi.type = 'ebook'
+	  AND (mi.poster_path IS NULL OR mi.poster_path = '')
+	  AND mi.last_refreshed IS NULL
+	  AND COALESCE(ees.failures, 0) < $2
+	ORDER BY COALESCE(ees.failures, 0) ASC, mi.created_at ASC
+	LIMIT $1
+`
+
 func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) {
-	rows, err := e.pool.Query(ctx, `
-		SELECT
-			mi.content_id,
-			mi.title,
-			mi.year,
-			COALESCE(mil.media_folder_id, 0) AS folder_id,
-			COALESCE(mf.metadata_language, 'en') AS language,
-			COALESCE(
-				(SELECT p.name
-				 FROM item_people ip
-				 JOIN people p ON p.id = ip.person_id
-				 WHERE ip.content_id = mi.content_id
-				   AND ip.kind = 7
-				 ORDER BY ip.sort_order, ip.id
-				 LIMIT 1),
-				''
-			) AS author
-		FROM media_items mi
-		LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
-		LEFT JOIN media_folders mf ON mf.id = mil.media_folder_id
-		WHERE mi.type = 'ebook'
-		  AND (mi.poster_path IS NULL OR mi.poster_path = '')
-		  AND mi.last_refreshed IS NULL
-		ORDER BY mi.created_at ASC
-		LIMIT $1
-	`, e.batchSize)
+	rows, err := e.pool.Query(ctx, claimBatchQuery, e.batchSize, enrichFailureCap)
 	if err != nil {
 		return nil, fmt.Errorf("querying unenriched ebooks: %w", err)
 	}
@@ -239,26 +278,77 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 
 func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error {
 	if item.FolderID == 0 {
-		slog.Debug("ebook enrichment: item has no library folder, skipping",
-			"content_id", item.ContentID,
-			"title", item.Title,
-		)
-		return e.stampLastRefreshed(ctx, item.ContentID)
+		// The scanner inserts the library membership after the item upsert, so
+		// a freshly indexed ebook can be claimed inside that window. Skip it:
+		// stamping here would terminally mark the item refreshed before any
+		// provider ever saw it.
+		return fmt.Errorf("%w: item %s has no library folder yet", errEnrichmentSkipped, item.ContentID)
 	}
 
 	providers, err := metadata.ResolveChain(ctx, item.FolderID, ebookContentType(), e.chainRepo, e.resolver)
 	if err != nil {
 		return fmt.Errorf("resolving ebook chain for folder %d: %w", item.FolderID, err)
 	}
+	return e.enrichWithProviders(ctx, item, providers)
+}
+
+// enrichWithProviders runs the provider chain for one claimed item. Outcomes:
+//   - metadata obtained: persist it and stamp last_refreshed (nil error);
+//   - providers answered but nothing matched: stamp last_refreshed so the
+//     item is not re-claimed every sweep (nil error);
+//   - one or more providers errored and no metadata was obtained: return an
+//     error so the failure cap/backoff engages, without stamping;
+//   - no providers configured: skip (no stamp, no failure) so the item is
+//     retried once a chain exists.
+func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) error {
 	if len(providers) == 0 {
-		slog.Debug("ebook enrichment: no providers in chain",
+		return fmt.Errorf("%w: no metadata providers configured for folder %d", errEnrichmentSkipped, item.FolderID)
+	}
+
+	accumulator, accumulatedIDs, providerErrs := collectEbookMetadata(ctx, item, providers)
+
+	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
+		if err := ctx.Err(); err != nil {
+			// A cancelled sweep says nothing about the item or the providers.
+			return err
+		}
+		if len(providerErrs) > 0 {
+			// Transient provider trouble must not stamp the item terminally;
+			// surfacing an error engages the failure cap and backoff instead.
+			return fmt.Errorf("no metadata obtained, %d provider error(s): %w",
+				len(providerErrs), errors.Join(providerErrs...))
+		}
+		slog.Info("ebook enrichment: no metadata found",
 			"content_id", item.ContentID,
-			"folder_id", item.FolderID,
+			"title", item.Title,
 		)
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
+	e.cacheRemotePoster(ctx, item.ContentID, accumulator)
+
+	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
+		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
+	}
+
+	slog.Info("ebook enrichment: enriched",
+		"content_id", item.ContentID,
+		"title", item.Title,
+		"poster", accumulator.PosterPath != "",
+		"overview", accumulator.Overview != "",
+		"people", len(filterEbookPeople(accumulator.People)),
+	)
+
+	return nil
+}
+
+// collectEbookMetadata queries every provider in the chain and accumulates
+// IDs and metadata. Individual provider failures are collected (not fatal) so
+// the caller can distinguish "providers answered, no match" from "providers
+// were unreachable".
+func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) (*metadata.MetadataResult, map[string]string, []error) {
 	searchQuery, accumulatedIDs := buildEbookSearchQuery(item)
+	var providerErrs []error
 
 	for _, p := range providers {
 		sp, ok := p.(metadata.SearchProvider)
@@ -272,6 +362,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 				"content_id", item.ContentID,
 				"error", searchErr,
 			)
+			providerErrs = append(providerErrs, fmt.Errorf("%s search: %w", p.Slug(), searchErr))
 			continue
 		}
 		if len(results) == 0 {
@@ -300,20 +391,20 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		if !ok {
 			continue
 		}
-		result, getErr := mp.GetMetadata(ctx, buildEbookMetadataRequest(accumulatedIDs, item.Language))
+		result, getErr := mp.GetMetadata(ctx, buildEbookMetadataRequest(accumulator.ProviderIDs, item.Language))
 		if getErr != nil {
 			slog.Warn("ebook enrichment: GetMetadata error",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", getErr,
 			)
+			providerErrs = append(providerErrs, fmt.Errorf("%s metadata: %w", p.Slug(), getErr))
 			continue
 		}
 		if result == nil || !result.HasMetadata {
 			continue
 		}
 		mergeEnrichmentProviderIDs(accumulator, result)
-		accumulatedIDs = accumulator.ProviderIDs
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
 
 		slog.Debug("ebook enrichment: metadata received",
@@ -324,29 +415,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		)
 	}
 
-	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
-		slog.Info("ebook enrichment: no metadata found",
-			"content_id", item.ContentID,
-			"title", item.Title,
-		)
-		return e.stampLastRefreshed(ctx, item.ContentID)
-	}
-
-	e.cacheRemotePoster(ctx, item.ContentID, accumulator)
-
-	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
-		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
-	}
-
-	slog.Info("ebook enrichment: enriched",
-		"content_id", item.ContentID,
-		"title", item.Title,
-		"poster", accumulator.PosterPath != "",
-		"overview", accumulator.Overview != "",
-		"people", len(filterEbookPeople(accumulator.People)),
-	)
-
-	return nil
+	return accumulator, accumulator.ProviderIDs, providerErrs
 }
 
 func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, result *metadata.MetadataResult) {
@@ -504,14 +573,44 @@ func (e *Enricher) stampLastRefreshed(ctx context.Context, contentID string) err
 		return nil
 	}
 	now := time.Now().UTC()
-	_, err := e.pool.Exec(ctx, `
+	if _, err := e.pool.Exec(ctx, `
 		UPDATE media_items
 		SET last_refreshed = $1,
 		    matched_at = COALESCE(matched_at, $1),
 		    status = CASE WHEN status = 'pending' THEN 'matched' ELSE status END
 		WHERE content_id = $2
-	`, now, contentID)
+	`, now, contentID); err != nil {
+		return err
+	}
+	// Success clears the enrichment failure backlog. media_items.refresh_failures
+	// is intentionally left alone: it belongs to the metadata refresh-debt system.
+	_, err := e.pool.Exec(ctx, `
+		DELETE FROM ebook_enrichment_state WHERE content_id = $1
+	`, contentID)
 	return err
+}
+
+// recordEnrichFailure increments the item's ebook_enrichment_state failure
+// counter so claimBatch deprioritizes it on the next sweep and stops claiming
+// it at enrichFailureCap. The state is dedicated to ebook enrichment;
+// media_items.refresh_failures is owned by the metadata refresh-debt system
+// and is never touched here.
+func (e *Enricher) recordEnrichFailure(ctx context.Context, item enrichmentItemRow) {
+	if e == nil || e.pool == nil {
+		return
+	}
+	if _, err := e.pool.Exec(ctx, `
+		INSERT INTO ebook_enrichment_state (content_id, failures, updated_at)
+		VALUES ($1, 1, NOW())
+		ON CONFLICT (content_id) DO UPDATE SET
+			failures   = ebook_enrichment_state.failures + 1,
+			updated_at = NOW()
+	`, item.ContentID); err != nil {
+		slog.Warn("ebook enrichment: failed to record enrichment failure",
+			"content_id", item.ContentID,
+			"error", err,
+		)
+	}
 }
 
 func (e *Enricher) persistPeople(ctx context.Context, contentID string, people []models.ItemPerson) error {
@@ -543,7 +642,31 @@ func (e *Enricher) persistPeople(ctx context.Context, contentID string, people [
 	if len(linked) == 0 {
 		return nil
 	}
-	return e.itemRepo.ReplacePeople(ctx, contentID, linked)
+
+	existing, err := e.itemRepo.GetPeople(ctx, contentID)
+	if err != nil {
+		return fmt.Errorf("get existing people: %w", err)
+	}
+	return e.itemRepo.ReplacePeople(ctx, contentID, mergeEbookAuthorCredits(existing, linked))
+}
+
+// mergeEbookAuthorCredits mirrors the scanner's mergeEbookPeople semantics:
+// the provider authors replace existing author (and stale narrator) credits,
+// while every other curated people kind on the item is preserved.
+func mergeEbookAuthorCredits(existing []models.ItemPerson, authors []models.ItemPerson) []models.ItemPerson {
+	merged := make([]models.ItemPerson, 0, len(existing)+len(authors))
+	for _, p := range existing {
+		if p.Kind == models.PersonKindAuthor || p.Kind == models.PersonKindNarrator {
+			continue
+		}
+		p.SortOrder = len(merged)
+		merged = append(merged, p)
+	}
+	for _, a := range authors {
+		a.SortOrder = len(merged)
+		merged = append(merged, a)
+	}
+	return merged
 }
 
 func filterEbookPeople(people []models.ItemPerson) []models.ItemPerson {

@@ -3,6 +3,9 @@ package ebooks
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -102,10 +105,222 @@ func TestEnricherRunFansOut(t *testing.T) {
 	}()
 
 	e := &Enricher{workers: wantWorkers, batchSize: itemCount}
-	e.runBatch(context.Background(), items, enrich)
+	e.runBatch(context.Background(), items, enrich, nil)
 
 	if got := atomic.LoadInt32(&maxInFlight); got < wantWorkers {
 		t.Errorf("max in-flight = %d, want >= %d", got, wantWorkers)
+	}
+}
+
+func TestRunBatchRecordsFailuresForFailedItemsOnly(t *testing.T) {
+	items := []enrichmentItemRow{
+		{ContentID: "ok-1"},
+		{ContentID: "bad-1"},
+		{ContentID: "ok-2"},
+		{ContentID: "bad-2"},
+	}
+
+	enrich := func(_ context.Context, item enrichmentItemRow) error {
+		if strings.HasPrefix(item.ContentID, "bad") {
+			return errors.New("provider exploded")
+		}
+		return nil
+	}
+
+	var mu sync.Mutex
+	var recorded []string
+	record := func(_ context.Context, item enrichmentItemRow) {
+		mu.Lock()
+		defer mu.Unlock()
+		recorded = append(recorded, item.ContentID)
+	}
+
+	e := &Enricher{workers: 2, batchSize: len(items)}
+	enriched := e.runBatch(context.Background(), items, enrich, record)
+
+	if enriched != 2 {
+		t.Fatalf("enriched = %d, want 2", enriched)
+	}
+	sort.Strings(recorded)
+	if strings.Join(recorded, ",") != "bad-1,bad-2" {
+		t.Fatalf("recorded failures = %v, want exactly the failing items", recorded)
+	}
+}
+
+func TestRunBatchSkipsFailureRecordingOnCancellation(t *testing.T) {
+	items := []enrichmentItemRow{{ContentID: "cancelled-1"}}
+
+	enrich := func(context.Context, enrichmentItemRow) error {
+		return fmt.Errorf("search aborted: %w", context.Canceled)
+	}
+
+	var recorded int32
+	record := func(context.Context, enrichmentItemRow) {
+		atomic.AddInt32(&recorded, 1)
+	}
+
+	e := &Enricher{workers: 1, batchSize: len(items)}
+	if enriched := e.runBatch(context.Background(), items, enrich, record); enriched != 0 {
+		t.Fatalf("enriched = %d, want 0", enriched)
+	}
+	if got := atomic.LoadInt32(&recorded); got != 0 {
+		t.Fatalf("failure recordings = %d, want 0: cancellation must not count against the cap", got)
+	}
+}
+
+func TestClaimBatchQueryAppliesFailureBackoffAndCap(t *testing.T) {
+	// Pin the starvation guard: failing items are deprioritized, not retried
+	// at the head of every sweep, and capped items are never re-claimed.
+	if !strings.Contains(claimBatchQuery, "LEFT JOIN ebook_enrichment_state ees ON ees.content_id = mi.content_id") {
+		t.Fatalf("claimBatchQuery must read dedicated ebook enrichment failure state:\n%s", claimBatchQuery)
+	}
+	if !strings.Contains(claimBatchQuery, "COALESCE(ees.failures, 0) < $2") {
+		t.Fatalf("claimBatchQuery must exclude items at the failure cap:\n%s", claimBatchQuery)
+	}
+	if !strings.Contains(claimBatchQuery, "ORDER BY COALESCE(ees.failures, 0) ASC, mi.created_at ASC") {
+		t.Fatalf("claimBatchQuery must claim least-failed items first:\n%s", claimBatchQuery)
+	}
+	if strings.Contains(claimBatchQuery, "refresh_failures") {
+		t.Fatalf("claimBatchQuery must not read media_items.refresh_failures (owned by the metadata refresh-debt system):\n%s", claimBatchQuery)
+	}
+	if enrichFailureCap < 1 {
+		t.Fatalf("enrichFailureCap = %d, want >= 1", enrichFailureCap)
+	}
+}
+
+func TestEnrichItemSkipsItemWithoutLibraryFolder(t *testing.T) {
+	// Membership rows are inserted after the item upsert, so a scan-window
+	// race can claim an item before its folder link exists. The item must be
+	// skipped (retried next sweep), never stamped or counted as a failure.
+	e := &Enricher{}
+	err := e.enrichItem(context.Background(), enrichmentItemRow{ContentID: "no-folder", Title: "t"})
+	if !errors.Is(err, errEnrichmentSkipped) {
+		t.Fatalf("enrichItem error = %v, want errEnrichmentSkipped", err)
+	}
+}
+
+func TestEnrichWithProvidersSkipsWhenNoProvidersConfigured(t *testing.T) {
+	e := &Enricher{}
+	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7}, nil)
+	if !errors.Is(err, errEnrichmentSkipped) {
+		t.Fatalf("enrichWithProviders error = %v, want errEnrichmentSkipped", err)
+	}
+}
+
+func TestEnrichWithProvidersReturnsFailureWhenAllProvidersError(t *testing.T) {
+	providerErr := errors.New("provider exploded")
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{slug: "p1", searchErr: providerErr, getErr: providerErr},
+		&fakeEbookMetadataProvider{slug: "p2", searchErr: providerErr, getErr: providerErr},
+	}
+
+	e := &Enricher{}
+	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7, Title: "t"}, providers)
+	if err == nil {
+		t.Fatal("enrichWithProviders = nil, want error so the failure cap engages instead of stamping")
+	}
+	if errors.Is(err, errEnrichmentSkipped) {
+		t.Fatalf("enrichWithProviders error = %v, want a recordable failure, not a skip", err)
+	}
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("enrichWithProviders error = %v, want wrapped provider error", err)
+	}
+}
+
+func TestEnrichWithProvidersStampsWhenProvidersAnswerWithNoMatch(t *testing.T) {
+	// Providers reachable, genuinely nothing found: nil means the no-match
+	// path ran and the item was stamped so it is not re-claimed every sweep.
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{slug: "p1"},
+	}
+
+	e := &Enricher{}
+	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7, Title: "t"}, providers)
+	if err != nil {
+		t.Fatalf("enrichWithProviders = %v, want nil for a genuine no-match", err)
+	}
+}
+
+func TestEnrichWithProvidersReturnsContextErrorOverProviderFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{slug: "p1", searchErr: ctx.Err(), getErr: ctx.Err()},
+	}
+
+	e := &Enricher{}
+	err := e.enrichWithProviders(ctx, enrichmentItemRow{ContentID: "c1", FolderID: 7}, providers)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("enrichWithProviders error = %v, want context.Canceled so cancellation never counts against the cap", err)
+	}
+}
+
+func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
+	searchErr := errors.New("search down")
+	getErr := errors.New("metadata down")
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{slug: "broken", searchErr: searchErr, getErr: getErr},
+		&fakeEbookMetadataProvider{
+			slug:    "working",
+			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"openlibrary": "OL1M"}}},
+			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "found"},
+		},
+	}
+
+	accumulator, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers)
+
+	if len(errs) != 2 || !errors.Is(errs[0], searchErr) || !errors.Is(errs[1], getErr) {
+		t.Fatalf("provider errors = %v, want both broken-provider errors", errs)
+	}
+	if accumulator.Overview != "found" {
+		t.Fatalf("accumulator overview = %q, want metadata from the working provider", accumulator.Overview)
+	}
+	if ids["openlibrary"] != "OL1M" {
+		t.Fatalf("accumulated IDs = %v, want search-result openlibrary ID", ids)
+	}
+}
+
+func TestRunBatchDoesNotRecordFailuresForSkippedItems(t *testing.T) {
+	items := []enrichmentItemRow{{ContentID: "skipped-1"}}
+
+	enrich := func(context.Context, enrichmentItemRow) error {
+		return fmt.Errorf("%w: no providers", errEnrichmentSkipped)
+	}
+
+	var recorded int32
+	record := func(context.Context, enrichmentItemRow) {
+		atomic.AddInt32(&recorded, 1)
+	}
+
+	e := &Enricher{workers: 1, batchSize: len(items)}
+	if enriched := e.runBatch(context.Background(), items, enrich, record); enriched != 0 {
+		t.Fatalf("enriched = %d, want 0", enriched)
+	}
+	if got := atomic.LoadInt32(&recorded); got != 0 {
+		t.Fatalf("failure recordings = %d, want 0: skips must not count against the cap", got)
+	}
+}
+
+func TestMergeEbookAuthorCreditsPreservesOtherPeopleKinds(t *testing.T) {
+	existing := []models.ItemPerson{
+		{Person: models.Person{ID: 10, Name: "Old Author"}, Kind: models.PersonKindAuthor, SortOrder: 0},
+		{Person: models.Person{ID: 20, Name: "Manual Writer"}, Kind: models.PersonKindWriter, SortOrder: 1, Character: "essay"},
+		{Person: models.Person{ID: 30, Name: "Stale Narrator"}, Kind: models.PersonKindNarrator, SortOrder: 2},
+	}
+	authors := []models.ItemPerson{
+		{Person: models.Person{ID: 40, Name: "Provider Author"}, Kind: models.PersonKindAuthor},
+	}
+
+	got := mergeEbookAuthorCredits(existing, authors)
+
+	if len(got) != 2 {
+		t.Fatalf("merged people len = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].Person.ID != 20 || got[0].Kind != models.PersonKindWriter || got[0].Character != "essay" || got[0].SortOrder != 0 {
+		t.Fatalf("preserved non-author credit = %+v", got[0])
+	}
+	if got[1].Person.ID != 40 || got[1].Kind != models.PersonKindAuthor || got[1].SortOrder != 1 {
+		t.Fatalf("provider author credit = %+v", got[1])
 	}
 }
 
@@ -314,6 +529,24 @@ func TestBuildEbookMetadataRequestCarriesAccumulatedISBN(t *testing.T) {
 	if got := req.ProviderIDs["openlibrary"]; got != "OL1M" {
 		t.Fatalf("request openlibrary = %q, want OL1M", got)
 	}
+}
+
+type fakeEbookMetadataProvider struct {
+	slug      string
+	searchErr error
+	results   []metadata.SearchResult
+	getErr    error
+	result    *metadata.MetadataResult
+}
+
+func (f *fakeEbookMetadataProvider) Slug() string       { return f.slug }
+func (f *fakeEbookMetadataProvider) Name() string       { return f.slug }
+func (f *fakeEbookMetadataProvider) ForTypes() []string { return []string{"ebook"} }
+func (f *fakeEbookMetadataProvider) Search(context.Context, metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	return f.results, f.searchErr
+}
+func (f *fakeEbookMetadataProvider) GetMetadata(context.Context, metadata.MetadataRequest) (*metadata.MetadataResult, error) {
+	return f.result, f.getErr
 }
 
 type fakeEbookImageCacher struct {
