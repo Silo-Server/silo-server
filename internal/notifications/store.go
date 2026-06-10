@@ -54,6 +54,7 @@ func nullableString(s string) *string {
 // Insert writes n to the notifications table.  If dedup_ref is non-empty and a
 // row with the same (user_id, type, dedup_ref) already exists, the INSERT is
 // silently dropped and (false, nil) is returned.
+// When created is false (dedup conflict), n.ID and n.CreatedAt are left unchanged.
 func (r *Repository) Insert(ctx context.Context, n *Notification) (bool, error) {
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO notifications
@@ -202,6 +203,9 @@ func (r *Repository) UnreadCount(ctx context.Context, userID int, profileID stri
 
 // MarkRead sets read_at = now() for the given notification IDs belonging to userID.
 func (r *Repository) MarkRead(ctx context.Context, userID int, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET read_at = now()
@@ -306,6 +310,7 @@ func (r *Repository) InsertAnnouncement(ctx context.Context, a *Announcement) er
 }
 
 // ListAnnouncements returns all announcements ordered newest-first.
+// Returns all announcements including expired ones — this is the admin management view.
 func (r *Repository) ListAnnouncements(ctx context.Context) ([]*Announcement, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, title, body, audience, created_by, created_at, expires_at
@@ -359,14 +364,15 @@ func (r *Repository) DeleteAnnouncement(ctx context.Context, id int64) error {
 // DismissUnreadByTypeRef bulk-dismisses unread notifications whose type matches
 // typ and whose dedup_ref starts with dedupPrefix.
 func (r *Repository) DismissUnreadByTypeRef(ctx context.Context, typ, dedupPrefix string) error {
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(dedupPrefix)
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET dismissed_at = now()
 		WHERE type = $1
-		  AND dedup_ref LIKE $2 || '%'
+		  AND dedup_ref LIKE $2 || '%' ESCAPE '\'
 		  AND read_at IS NULL
 		  AND dismissed_at IS NULL
-	`, typ, dedupPrefix)
+	`, typ, escaped)
 	if err != nil {
 		return fmt.Errorf("dismiss notifications by type ref: %w", err)
 	}
