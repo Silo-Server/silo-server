@@ -17,6 +17,13 @@ type Config struct {
 	ASRModel          string // audio-transcription model used for ASR
 	BatchSize         int    // cues per translation request
 	ContextNeighbors  int    // preceding source cues sent as untranslated context
+	// TranscribeQuotaJobs caps how many transcription jobs (transcribe /
+	// transcribe_translate) each non-admin user may start per rolling quota
+	// period; 0 means unlimited.
+	TranscribeQuotaJobs int
+	// TranscribeQuotaPeriod is the rolling window the quota counts against:
+	// "day", "week", or "month".
+	TranscribeQuotaPeriod string
 }
 
 // TranslateReady reports whether subtitle translation can currently run.

@@ -194,6 +194,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.Metrics)
 
+	// Compress text-like responses (JSON, SVG, …); media content types are
+	// not in the middleware's allowlist and stream through untouched.
+	r.Use(middleware.Compress(5))
+
 	// Activity logging (before auth — captures all requests including failed auth).
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID))
@@ -944,13 +948,15 @@ func NewRouter(deps Dependencies) chi.Router {
 			transcribeEnabled = false
 		}
 		aiCfg := subtitleai.Config{
-			Configured:        deps.Config.AI.BaseURL != "",
-			TranslateEnabled:  deps.Config.SubtitleAI.Enabled,
-			TranscribeEnabled: transcribeEnabled,
-			ChatModel:         deps.Config.AI.ChatModel,
-			ASRModel:          deps.Config.AI.ASRModel,
-			BatchSize:         deps.Config.SubtitleAI.BatchSize,
-			ContextNeighbors:  deps.Config.SubtitleAI.ContextNeighbors,
+			Configured:            deps.Config.AI.BaseURL != "",
+			TranslateEnabled:      deps.Config.SubtitleAI.Enabled,
+			TranscribeEnabled:     transcribeEnabled,
+			ChatModel:             deps.Config.AI.ChatModel,
+			ASRModel:              deps.Config.AI.ASRModel,
+			BatchSize:             deps.Config.SubtitleAI.BatchSize,
+			ContextNeighbors:      deps.Config.SubtitleAI.ContextNeighbors,
+			TranscribeQuotaJobs:   deps.Config.SubtitleAI.TranscribeQuotaJobs,
+			TranscribeQuotaPeriod: deps.Config.SubtitleAI.TranscribeQuotaPeriod,
 		}
 		var aiNotifier subtitleai.Notifier
 		if subtitleAINotifier != nil {
@@ -972,6 +978,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		aiService.Recover()
 		subtitleAIHandler = handlers.NewSubtitleAIHandler(aiService)
+		subtitleAIHandler.StoreProvider = deps.UserStoreProvider
 	}
 
 	// Metadata AI translation (descriptions into the localization tables).
@@ -1862,6 +1869,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
 						if subtitleAIHandler != nil {
 							r.Get("/ai/status", subtitleAIHandler.HandleStatus)
+							r.Get("/ai/quota", subtitleAIHandler.HandleQuota)
 							r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
 							r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
 							r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)

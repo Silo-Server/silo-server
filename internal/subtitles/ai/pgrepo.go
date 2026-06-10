@@ -37,14 +37,69 @@ func scanJob(row pgx.Row) (*Job, error) {
 	return &j, nil
 }
 
-func (r *PgJobRepository) InsertJob(ctx context.Context, job *Job) error {
+// transcribeQuotaCountSQL counts a user's quota-consuming transcription jobs.
+// Failed/cancelled rows with zero progress never did ASR work (engine
+// unreachable, bad media file, cancelled before start) and are excluded so
+// server-side faults don't lock the user out; terminal rows with progress > 0
+// consumed compute and still count. Shared by the quota status endpoint and
+// the insert-time guard so the number shown always matches the one enforced.
+const transcribeQuotaCountSQL = `SELECT count(*) FROM subtitle_ai_jobs
+	WHERE requested_by = $1 AND created_at >= $2
+	AND kind IN ('transcribe', 'transcribe_translate')
+	AND NOT (status IN ('failed', 'cancelled') AND progress = 0)`
+
+// transcribeQuotaLockNamespace partitions advisory locks so the transcription
+// quota's per-user lock cannot collide with advisory locks held elsewhere in
+// the database (media requests use 139, autoscan 900173). The value is
+// arbitrary; what matters is that it is stable.
+const transcribeQuotaLockNamespace = 412
+
+func (r *PgJobRepository) InsertJob(ctx context.Context, job *Job, quota *JobQuota) error {
 	if job.Engine == "" {
 		job.Engine = "openai"
 	}
 	if job.Status == "" {
 		job.Status = JobStatusPending
 	}
-	return r.pool.QueryRow(ctx,
+	if quota == nil {
+		return r.insertJob(ctx, r.pool, job)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin insert subtitle ai job: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	// Serialize check-and-insert per user so concurrent requests cannot race
+	// past the limit (same pattern as the media-request quota).
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int4, $2::int4)`,
+		transcribeQuotaLockNamespace, quota.UserID); err != nil {
+		return fmt.Errorf("acquire transcription quota lock: %w", err)
+	}
+	var used int
+	if err := tx.QueryRow(ctx, transcribeQuotaCountSQL, quota.UserID, quota.Since).Scan(&used); err != nil {
+		return fmt.Errorf("count transcribe jobs for quota: %w", err)
+	}
+	if used >= quota.Limit {
+		return &QuotaExceededError{Limit: quota.Limit, Used: used, Period: quota.Period}
+	}
+	if err := r.insertJob(ctx, tx, job); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit insert subtitle ai job: %w", err)
+	}
+	return nil
+}
+
+// rowQuerier abstracts pool vs transaction for insertJob.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (r *PgJobRepository) insertJob(ctx context.Context, q rowQuerier, job *Job) error {
+	return q.QueryRow(ctx,
 		`INSERT INTO subtitle_ai_jobs
 			(media_file_id, kind, source_index, source_language, target_language,
 			 engine, model, status, progress, progress_message, idempotency_key, requested_by)
@@ -99,6 +154,15 @@ func (r *PgJobRepository) ListJobsByMediaFile(ctx context.Context, mediaFileID i
 		jobs = append(jobs, *job)
 	}
 	return jobs, rows.Err()
+}
+
+func (r *PgJobRepository) CountTranscribeJobsByUserSince(ctx context.Context, userID int, since time.Time) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, transcribeQuotaCountSQL, userID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count transcribe jobs by user: %w", err)
+	}
+	return count, nil
 }
 
 // UpdateProgress, CompleteJob, and FailJob only transition a job that is still

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles/ai"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // SubtitleAIHandler exposes on-demand AI subtitle translation backed by the
@@ -21,6 +23,9 @@ import (
 type SubtitleAIHandler struct {
 	service        *ai.Service
 	FileAuthorizer *MediaFileAuthorizer
+	// StoreProvider resolves household profiles for the transcription quota
+	// exemption check; when nil the whole admin account is exempt.
+	StoreProvider userstore.UserStoreProvider
 }
 
 // NewSubtitleAIHandler creates a handler backed by the given service.
@@ -117,6 +122,7 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 		SourceLanguage: req.SourceLanguage,
 		TargetLanguage: req.TargetLanguage,
 		RequestedBy:    requestedBy,
+		QuotaExempt:    h.quotaExempt(r),
 		SessionID:      req.SessionID,
 		StartPosition:  req.StartPosition,
 	})
@@ -125,6 +131,8 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 		case errors.Is(err, ai.ErrEngineNotConfigured):
 			writeError(w, http.StatusServiceUnavailable, "not_configured",
 				"AI subtitle translation is not configured on this server")
+		case errors.Is(err, ai.ErrQuotaExceeded):
+			writeError(w, http.StatusTooManyRequests, "quota_exceeded", quotaExceededMessage(err))
 		case errors.Is(err, ai.ErrInvalidRequest):
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		default:
@@ -136,6 +144,60 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
+}
+
+// quotaExempt reports whether the caller is exempt from the transcription
+// quota: an admin account acting as itself (no profile context) or through
+// its primary (household parent) profile. Other profiles on an admin account
+// — e.g. a kid's profile — stay subject to the quota even though the account
+// holds the admin role. X-Profile-Id is client-asserted, so this is a
+// budgeting gate, not a security boundary; the quota itself is account-scoped.
+func (h *SubtitleAIHandler) quotaExempt(r *http.Request) bool {
+	ctx := r.Context()
+	if !apimw.IsAdmin(ctx) {
+		return false
+	}
+	profileID := apimw.GetProfileID(ctx)
+	if profileID == "" {
+		profileID = r.Header.Get("X-Profile-Id")
+	}
+	if profileID == "" || h.StoreProvider == nil {
+		return true
+	}
+	store, err := h.StoreProvider.ForUser(ctx, apimw.GetUserID(ctx))
+	if err != nil {
+		return false // fail closed: the quota still applies
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return false
+	}
+	return profile.IsPrimary
+}
+
+// quotaExceededMessage turns a quota error into a user-facing message with the
+// limit and window when available.
+func quotaExceededMessage(err error) string {
+	var qe *ai.QuotaExceededError
+	if errors.As(err, &qe) {
+		return fmt.Sprintf(
+			"You've reached your transcription limit (%d per %s). Try again later or ask an admin to raise it.",
+			qe.Limit, qe.Period)
+	}
+	return "You've reached your transcription limit. Try again later or ask an admin to raise it."
+}
+
+// HandleQuota reports the calling user's transcription quota usage, so the
+// player can show how many jobs they have left before they start one.
+// GET /api/v1/subtitles/ai/quota
+func (h *SubtitleAIHandler) HandleQuota(w http.ResponseWriter, r *http.Request) {
+	quota, err := h.service.TranscribeQuota(r.Context(), apimw.GetUserID(r.Context()), h.quotaExempt(r))
+	if err != nil {
+		slog.Error("failed to load transcription quota", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load transcription quota")
+		return
+	}
+	writeJSON(w, http.StatusOK, quota)
 }
 
 // HandleGetJob returns a job's current state. GET /api/v1/subtitles/ai/jobs/{job_id}

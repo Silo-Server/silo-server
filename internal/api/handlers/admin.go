@@ -20,8 +20,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -2115,6 +2116,18 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		default:
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"metadata_ai.on_view must be off, button, or auto")
+			return
+		}
+	case "subtitle_ai.transcribe_quota_jobs":
+		if n, err := strconv.Atoi(req.Value); err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"subtitle_ai.transcribe_quota_jobs must be an integer >= 0 (0 = unlimited)")
+			return
+		}
+	case "subtitle_ai.transcribe_quota_period":
+		if !subtitleai.ValidQuotaPeriod(req.Value) {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"subtitle_ai.transcribe_quota_period must be day, week, or month")
 			return
 		}
 	}

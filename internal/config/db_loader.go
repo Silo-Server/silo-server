@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 )
 
 // stringOr returns the value from the map for the given key, or the fallback if absent/empty.
@@ -470,6 +472,21 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.SubtitleAI.ASRChunkSeconds = subtitleAIChunkSeconds
+	// A bad quota row must not block startup: fall back to "no quota" /
+	// the daily window with a warning instead of failing the config load.
+	transcribeQuotaJobs, err := intOr(m, "subtitle_ai.transcribe_quota_jobs", 0)
+	if err != nil || transcribeQuotaJobs < 0 {
+		slog.Warn("invalid subtitle_ai.transcribe_quota_jobs setting; quota disabled",
+			"value", m["subtitle_ai.transcribe_quota_jobs"], "error", err)
+		transcribeQuotaJobs = 0
+	}
+	cfg.SubtitleAI.TranscribeQuotaJobs = transcribeQuotaJobs
+	period := stringOr(m, "subtitle_ai.transcribe_quota_period", subtitleai.QuotaPeriodDay)
+	if !subtitleai.ValidQuotaPeriod(period) {
+		slog.Warn("invalid subtitle_ai.transcribe_quota_period setting; using day", "value", period)
+		period = subtitleai.QuotaPeriodDay
+	}
+	cfg.SubtitleAI.TranscribeQuotaPeriod = period
 
 	// Metadata AI translation feature toggles.
 	metadataAIEnabled, err := boolOr(m, "metadata_ai.enabled", false)

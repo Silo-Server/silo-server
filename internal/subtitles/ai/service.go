@@ -171,6 +171,12 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		return existing, nil
 	}
 
+	// Quota gates only the creation of a new job: collapsing onto an existing
+	// in-flight job above costs nothing, so it stays allowed at the limit.
+	// Enforcement happens inside InsertJob, atomically with the insert, so
+	// concurrent requests cannot race past the limit.
+	quota := s.transcribeQuotaSpec(req)
+
 	job := &Job{
 		MediaFileID:     req.MediaFileID,
 		Kind:            req.Kind,
@@ -186,8 +192,10 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		SessionID:       req.SessionID,
 		StartPosition:   req.StartPosition,
 	}
-	if err := s.repo.InsertJob(ctx, job); err != nil {
+	if err := s.repo.InsertJob(ctx, job, quota); err != nil {
 		// A racing duplicate trips the partial unique index; return the winner.
+		// The same lookup also covers a quota rejection that raced an identical
+		// request: collapsing onto the winner is free, so it stays allowed.
 		if existing, lookupErr := s.repo.GetActiveJobByIdempotencyKey(ctx, key); lookupErr == nil && existing != nil {
 			return existing, nil
 		}
