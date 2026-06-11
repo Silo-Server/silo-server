@@ -91,6 +91,11 @@ type enrichmentItemRow struct {
 	Language    string
 	Author      string
 	ProviderIDs map[string]string
+
+	// HasPoster marks an already-enriched item claimed only because its
+	// backdrop is missing; the sweep then fetches by stored provider ID and
+	// touches nothing but the backdrop.
+	HasPoster bool
 }
 
 // Enricher drives the manga metadata enrichment sweep.
@@ -238,9 +243,12 @@ func (e *Enricher) runBatch(
 	return stats
 }
 
-// claimBatchQuery selects unenriched manga. Items with fewer prior failures
-// are claimed first and items at/above enrichFailureCap are skipped entirely,
-// so a block of permanently failing items cannot occupy every sweep.
+// claimBatchQuery selects manga needing enrichment: unenriched items (no
+// poster) and enriched items whose backdrop is still missing (claimed for a
+// backdrop-only pass; stamping after the attempt keeps banner-less series
+// from being re-claimed forever). Items with fewer prior failures are claimed
+// first and items at/above enrichFailureCap are skipped entirely, so a block
+// of permanently failing items cannot occupy every sweep.
 const claimBatchQuery = `
 	SELECT
 		mi.content_id,
@@ -257,13 +265,15 @@ const claimBatchQuery = `
 			 ORDER BY ip.sort_order, ip.id
 			 LIMIT 1),
 			''
-		) AS author
+		) AS author,
+		(mi.poster_path IS NOT NULL AND mi.poster_path <> '') AS has_poster
 	FROM media_items mi
 	LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
 	LEFT JOIN media_folders mf ON mf.id = mil.media_folder_id
 	LEFT JOIN manga_enrichment_state ees ON ees.content_id = mi.content_id
 	WHERE mi.type = 'manga'
-	  AND (mi.poster_path IS NULL OR mi.poster_path = '')
+	  AND ((mi.poster_path IS NULL OR mi.poster_path = '')
+	    OR (mi.backdrop_path IS NULL OR mi.backdrop_path = ''))
 	  AND mi.last_refreshed IS NULL
 	  AND COALESCE(ees.failures, 0) < $2
 	ORDER BY COALESCE(ees.failures, 0) ASC, mi.created_at ASC
@@ -288,6 +298,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			&item.FolderID,
 			&item.Language,
 			&item.Author,
+			&item.HasPoster,
 		); err != nil {
 			return nil, fmt.Errorf("scanning manga enrichment row: %w", err)
 		}
@@ -344,6 +355,10 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 
 	accumulator, accumulatedIDs, providerErrs := collectMangaMetadata(ctx, item, providers)
 
+	if item.HasPoster {
+		return e.enrichBackdropOnly(ctx, item, accumulator, providerErrs)
+	}
+
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
 		if err := ctx.Err(); err != nil {
 			// A cancelled sweep says nothing about the item or the providers.
@@ -365,7 +380,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		return errEnrichmentNoMatch
 	}
 
-	e.cacheRemotePoster(ctx, item.ContentID, accumulator)
+	e.cacheRemoteImages(ctx, item.ContentID, accumulator)
 
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
@@ -375,6 +390,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		"content_id", item.ContentID,
 		"title", item.Title,
 		"poster", accumulator.PosterPath != "",
+		"backdrop", accumulator.BackdropPath != "",
 		"overview", accumulator.Overview != "",
 		"people", len(filterMangaPeople(accumulator.People)),
 	)
@@ -382,15 +398,65 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	return nil
 }
 
+// enrichBackdropOnly finishes a backdrop-only claim: an already-enriched item
+// whose backdrop is missing. Only the backdrop is written — the existing
+// poster, overview, people, and provider IDs stay untouched. Whatever the
+// outcome (banner cached, provider has no banner), the item is stamped so it
+// is not re-claimed every sweep; provider errors engage the failure cap
+// without stamping, like the full path.
+func (e *Enricher) enrichBackdropOnly(ctx context.Context, item enrichmentItemRow, result *metadata.MetadataResult, providerErrs []error) error {
+	if result == nil || result.BackdropPath == "" {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(providerErrs) > 0 {
+			return fmt.Errorf("no backdrop obtained, %d provider error(s): %w",
+				len(providerErrs), errors.Join(providerErrs...))
+		}
+		slog.Info("manga enrichment: no banner available",
+			"content_id", item.ContentID,
+			"title", item.Title,
+		)
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return err
+		}
+		return errEnrichmentNoMatch
+	}
+
+	path, thumbhash := e.cacheRemoteImage(ctx, item.ContentID, result.BackdropPath, metadata.ImageBackdrop)
+	upd := &catalog.MetadataUpdate{BackdropPath: &path}
+	if thumbhash != "" {
+		upd.BackdropThumbhash = &thumbhash
+	}
+	if err := e.updateMetadataAndTimestamps(ctx, item.ContentID, upd); err != nil {
+		return fmt.Errorf("persisting backdrop for %s: %w", item.ContentID, err)
+	}
+
+	slog.Info("manga enrichment: backdrop added",
+		"content_id", item.ContentID,
+		"title", item.Title,
+	)
+	return nil
+}
+
 // collectMangaMetadata queries every provider in the chain and accumulates
 // IDs and metadata. Individual provider failures are collected (not fatal) so
 // the caller can distinguish "providers answered, no match" from "providers
-// were unreachable".
+// were unreachable". The search pass is skipped when the item already carries
+// provider IDs (a previously matched item only needs the by-ID fetch).
 func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) (*metadata.MetadataResult, map[string]string, []error) {
 	searchQuery, accumulatedIDs := buildMangaSearchQuery(item)
 	var providerErrs []error
 
-	for _, p := range providers {
+	// An item that already carries provider IDs was matched before; the by-ID
+	// fetch below is enough and re-searching would spend a rate-limited
+	// request (and risk re-matching differently).
+	searchProviders := providers
+	if len(accumulatedIDs) > 0 {
+		searchProviders = nil
+	}
+
+	for _, p := range searchProviders {
 		sp, ok := p.(metadata.SearchProvider)
 		if !ok {
 			continue
@@ -458,46 +524,69 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 	return accumulator, accumulator.ProviderIDs, providerErrs
 }
 
-func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, result *metadata.MetadataResult) {
-	if e == nil || result == nil || result.PosterPath == "" {
+// cacheRemoteImages localizes the remote poster and backdrop URLs on a full
+// enrichment result, replacing each with the cached path + thumbhash when
+// caching succeeds (the provider URL is kept as a fallback otherwise).
+func (e *Enricher) cacheRemoteImages(ctx context.Context, contentID string, result *metadata.MetadataResult) {
+	if e == nil || result == nil {
 		return
 	}
-	if !strings.HasPrefix(result.PosterPath, "http://") && !strings.HasPrefix(result.PosterPath, "https://") {
-		return
+	if path, thumbhash := e.cacheRemoteImage(ctx, contentID, result.PosterPath, metadata.ImagePoster); path != "" {
+		result.PosterPath = path
+		if thumbhash != "" {
+			result.PosterThumbhash = thumbhash
+		}
+	}
+	if path, thumbhash := e.cacheRemoteImage(ctx, contentID, result.BackdropPath, metadata.ImageBackdrop); path != "" {
+		result.BackdropPath = path
+		if thumbhash != "" {
+			result.BackdropThumbhash = thumbhash
+		}
+	}
+}
+
+// cacheRemoteImage downloads and caches one remote image, returning the
+// stored path and thumbhash. On any failure it returns the original URL (a
+// remote URL in the column still renders; the cache is an optimization).
+func (e *Enricher) cacheRemoteImage(ctx context.Context, contentID, url string, imageType metadata.ImageType) (string, string) {
+	if e == nil || url == "" {
+		return url, ""
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return url, ""
 	}
 	if isNilImageCacher(e.imageCacher) {
-		return
+		return url, ""
 	}
 
 	cached, err := e.imageCacher.CacheImage(ctx, metadata.CacheImageRequest{
-		SourceURL:   result.PosterPath,
+		SourceURL:   url,
 		ProviderID:  mangaMetadataImageProviderID,
 		ContentType: "manga",
 		ContentID:   contentID,
-		ImageType:   metadata.ImagePoster,
+		ImageType:   imageType,
 	})
 	if err != nil {
-		slog.Warn("manga enrichment: poster cache failed, keeping provider URL",
+		slog.Warn("manga enrichment: image cache failed, keeping provider URL",
 			"content_id", contentID,
-			"url", result.PosterPath,
+			"url", url,
 			"error", err,
 		)
-		return
+		return url, ""
 	}
 	if cached == nil {
-		slog.Warn("manga enrichment: poster cache returned no result, keeping provider URL",
+		slog.Warn("manga enrichment: image cache returned no result, keeping provider URL",
 			"content_id", contentID,
-			"url", result.PosterPath,
+			"url", url,
 		)
-		return
+		return url, ""
 	}
 
-	if storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext); storedPath != "" {
-		result.PosterPath = storedPath
+	storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext)
+	if storedPath == "" {
+		return url, ""
 	}
-	if cached.Thumbhash != "" {
-		result.PosterThumbhash = cached.Thumbhash
-	}
+	return storedPath, cached.Thumbhash
 }
 
 func isNilImageCacher(cacher metadata.ImageCacher) bool {
