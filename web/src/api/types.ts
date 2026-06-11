@@ -177,15 +177,6 @@ export interface JellyfinCompatStatus {
   restart_required: boolean;
 }
 
-export interface AdminServerStatus {
-  started_at: string;
-  restart_required: boolean;
-  restart_required_at?: string;
-  restart_required_reason?: string;
-  restart_requested: boolean;
-  restart_requested_at?: string;
-}
-
 export interface JellyfinCompatSettingsPatch {
   enabled?: boolean;
   public_url?: string;

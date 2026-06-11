@@ -40,7 +40,6 @@ export function useUpdateServerSetting() {
         queryClient.invalidateQueries({
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
       ];
       if (variables.key.startsWith("jellyfin_compat.")) {
         invalidations.push(
@@ -93,7 +92,6 @@ export function useUpdateJellyfinCompatSettings() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
       ]);
     },
     onError: (err) => {

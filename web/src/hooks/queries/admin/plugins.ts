@@ -349,10 +349,7 @@ export function useSavePluginTaskBinding() {
           body: JSON.stringify(body),
         },
       ),
-    onSuccess: (response) => {
-      if (response.restart_required) {
-        queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() });
-      }
+    onSuccess: () => {
       toast.success("Task binding saved");
       invalidatePluginQueries(queryClient);
     },

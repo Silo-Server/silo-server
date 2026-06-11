@@ -29,7 +29,6 @@ export function useUpdateRateLimitConfig() {
         toast.success("Rate limit settings saved");
       }
       queryClient.invalidateQueries({ queryKey: adminKeys.rateLimitConfig() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save rate limit settings");

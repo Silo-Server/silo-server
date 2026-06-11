@@ -348,7 +348,6 @@ export const adminKeys = {
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
-  serverStatus: () => ["admin", "serverStatus"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
   requestsRoot: () => ["admin", "requests"] as const,
