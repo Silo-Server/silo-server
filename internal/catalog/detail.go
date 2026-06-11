@@ -981,6 +981,13 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	}
 	if item.Type == "ebook" {
 		detail.Ebook = s.buildEbookExtension(ctx, item, crewCredits, filter)
+		// A manga chapter is an ebook item linked to its series; exposing the
+		// linkage lets the reader navigate back/next within the series and
+		// continue-reading cards show the series instead of the chapter.
+		if seriesID, seriesTitle, ok := s.lookupMangaSeriesForChapter(ctx, item.ContentID); ok {
+			detail.SeriesID = seriesID
+			detail.SeriesTitle = seriesTitle
+		}
 	}
 	if item.Type == "manga" {
 		detail.Manga = s.buildMangaExtension(ctx, item, filter)

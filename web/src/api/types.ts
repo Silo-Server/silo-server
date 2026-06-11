@@ -594,6 +594,25 @@ export interface MangaChapter {
   read?: boolean;
 }
 
+// MangaChapterFile is one local file backing a chapter, for the series
+// "View Details" dialog. file_path/folder paths are stripped server-side for
+// viewers without file-path visibility.
+export interface MangaChapterFile {
+  content_id: string;
+  title: string;
+  chapter_index?: number;
+  volume?: string;
+  file_path?: string;
+  file_name: string;
+  file_size: number;
+  container?: string;
+}
+
+export interface MangaSeriesFiles {
+  folder_paths?: string[];
+  files: MangaChapterFile[];
+}
+
 // MangaDetailExtension mirrors the host catalog.MangaDetailExtension struct;
 // present only when ItemDetail.type === "manga".
 export interface MangaDetailExtension {

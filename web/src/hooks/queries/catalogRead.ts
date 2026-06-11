@@ -6,6 +6,7 @@ import type {
   EpisodesResponse,
   FileVersion,
   ItemDetail,
+  MangaSeriesFiles,
   SeasonDetailResponse,
   SeasonsResponse,
 } from "@/api/types";
@@ -93,6 +94,23 @@ export function useCatalogItemVersions(id: string | undefined) {
     queryFn: () => fetchCatalogItemVersions(id!),
     enabled: !!id,
     placeholderData: keepPreviousData,
+  });
+}
+
+export async function fetchMangaSeriesFiles(
+  id: string,
+  options?: RequestInit,
+): Promise<MangaSeriesFiles> {
+  return api<MangaSeriesFiles>(`/catalog/items/${catalogPathID(id)}/manga-files`, options);
+}
+
+// useMangaSeriesFiles backs the series "View Details" dialog; enabled defers
+// the fetch until the dialog actually opens.
+export function useMangaSeriesFiles(id: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: [...catalogKeys.itemDetail(id!), "manga-files"],
+    queryFn: () => fetchMangaSeriesFiles(id!),
+    enabled: !!id && enabled,
   });
 }
 

@@ -1,17 +1,35 @@
-import { useMemo, useState } from "react";
-import { BookOpen, Check, Download, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  BookOpen,
+  Check,
+  Download,
+  FileText,
+  Loader2,
+  MoreVertical,
+  RefreshCw,
+} from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import type { FileVersion, ItemDetail, MangaChapter } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
+import MangaFilesDialog from "@/components/MangaFilesDialog";
 import PageBack from "@/components/PageBack";
+import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { fetchCatalogItemVersions } from "@/hooks/queries/catalogRead";
-import { useWatchedStateMutation } from "@/hooks/queries/items";
+import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
-import { buildMangaList } from "@/lib/mangaChapters";
+import { buildMangaList, chapterLabel, firstUnreadChapter } from "@/lib/mangaChapters";
+import { cn } from "@/lib/utils";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
@@ -30,21 +48,27 @@ function genreHref(genre: string, libraryId?: number): string {
   return `/catalog?${params.toString()}`;
 }
 
-// chapterLabel prefers a "Chapter <n>" form derived from the index, falling
-// back to the chapter's own title when no index is available.
-function chapterLabel(chapter: MangaChapter): string {
-  if (typeof chapter.chapter_index === "number") {
-    return `Chapter ${chapter.chapter_index}`;
-  }
-  return chapter.title || "Chapter";
-}
-
 function chapterVersionSummary(version: FileVersion): string {
   return metadataLine([
     version.container ? version.container.toUpperCase() : undefined,
     formatFileSize(version.file_size),
     formatPageCount(version.duration),
   ]);
+}
+
+// chapterReaderHref builds the reader link for a chapter with the series page
+// as the explicit back target (avoids the chapter→reader→chapter loop).
+function chapterReaderHref(
+  chapterContentId: string,
+  seriesContentId: string,
+  libraryId?: number,
+): string {
+  const backTo = buildItemHref({ contentId: seriesContentId, libraryId });
+  return `${buildMediaPlayHref({
+    contentId: chapterContentId,
+    type: "ebook",
+    libraryId,
+  })}&backTo=${encodeURIComponent(backTo)}`;
 }
 
 // MangaRow is a single reader row used for volume units, loose chapters, and
@@ -64,23 +88,22 @@ function MangaRow({
   libraryId?: number;
 }) {
   const { user } = useAuth();
-  // The series detail is where "back" should land from the reader; passing it
-  // explicitly avoids the chapter→reader→chapter loop. Only manga rows set this.
-  const backTo = buildItemHref({ contentId: seriesContentId, libraryId });
-  const readerHref = `${buildMediaPlayHref({
-    contentId: chapter.content_id,
-    type: "ebook",
-    libraryId,
-  })}&backTo=${encodeURIComponent(backTo)}`;
+  const readerHref = chapterReaderHref(chapter.content_id, seriesContentId, libraryId);
 
-  // Seed the toggle from the chapter's server-resolved read state, then track
-  // the user's mark-read action locally and fire the shared watched mutation
-  // against this chapter's id.
+  // The mutation carries series_id so the series detail (this page's payload,
+  // including every chapter's read flag) is invalidated and refetched after a
+  // toggle. The local override only bridges the optimistic gap until the
+  // refreshed chapter.read arrives.
   const watchedMutation = useWatchedStateMutation({
     content_id: chapter.content_id,
     type: "ebook",
+    series_id: seriesContentId,
   });
-  const [markedRead, setMarkedRead] = useState(chapter.read ?? false);
+  const [readOverride, setReadOverride] = useState<boolean | null>(null);
+  useEffect(() => {
+    setReadOverride(null);
+  }, [chapter.read]);
+  const markedRead = readOverride ?? chapter.read ?? false;
 
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [downloadVersions, setDownloadVersions] = useState<FileVersion[] | null>(null);
@@ -113,7 +136,20 @@ function MangaRow({
     <div className="hover:bg-muted/40 flex items-center gap-3 px-4 py-3 transition-colors">
       <Link to={readerHref} className="flex min-w-0 flex-1 items-center gap-3">
         <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
-        <span className="text-foreground/90 truncate text-[15px] font-medium">{label}</span>
+        <span
+          className={cn(
+            "truncate text-[15px] font-medium",
+            markedRead ? "text-muted-foreground" : "text-foreground/90",
+          )}
+        >
+          {label}
+        </span>
+        {markedRead && (
+          <span className="text-success flex-shrink-0" title="Read">
+            <Check className="size-4" />
+            <span className="sr-only">Read</span>
+          </span>
+        )}
       </Link>
       <div className="flex flex-shrink-0 items-center gap-1">
         <Button
@@ -126,9 +162,9 @@ function MangaRow({
           disabled={watchedMutation.isPending}
           onClick={() => {
             const next = !markedRead;
-            setMarkedRead(next);
+            setReadOverride(next);
             watchedMutation.mutate(next, {
-              onError: () => setMarkedRead(!next),
+              onError: () => setReadOverride(!next),
             });
           }}
         >
@@ -173,9 +209,28 @@ export default function MangaContent({
   libraryId?: number;
 }) {
   useAmbientColor(item.poster_thumbhash);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const entries = useMemo(() => buildMangaList(item.manga?.chapters ?? []), [item.manga?.chapters]);
   const year = item.year ? String(item.year) : "";
   const publisher = item.studios?.[0];
+
+  // The resume target is the first unfinished chapter in reading order. Any
+  // finished chapter before it means the viewer is mid-series ("Continue");
+  // a fully read series restarts from the beginning.
+  const chapters = item.manga?.chapters ?? [];
+  const anyRead = chapters.some((chapter) => chapter.read === true);
+  const resume = useMemo(() => firstUnreadChapter(entries), [entries]);
+  const fallbackStart = entries.length > 0 ? flattenFirst(entries) : null;
+  const cta = resume
+    ? { ...resume, verb: anyRead ? "Continue" : "Start Reading" }
+    : fallbackStart
+      ? { ...fallbackStart, verb: "Read Again" }
+      : null;
+
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
+  const refreshMetadataMutation = useRefreshItemMetadata();
 
   return (
     <div>
@@ -204,6 +259,57 @@ export default function MangaContent({
         overview={item.overview}
         genres={item.genres}
         genreHref={(genre) => genreHref(genre, libraryId)}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            {cta && (
+              <Button
+                asChild
+                className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
+              >
+                <Link to={chapterReaderHref(cta.chapter.content_id, item.content_id, libraryId)}>
+                  <BookOpen className="size-[18px]" />
+                  {cta.verb}
+                  <span className="text-primary-foreground/75 text-xs font-semibold">
+                    {cta.label}
+                  </span>
+                </Link>
+              </Button>
+            )}
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="glass"
+                  size="icon-lg"
+                  title="More"
+                  aria-label="More actions"
+                  className="size-11 rounded-full"
+                >
+                  <MoreVertical className="size-[18px]" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem onSelect={() => setFilesOpen(true)}>
+                  <FileText className="size-4" />
+                  View Details
+                </DropdownMenuItem>
+                {isAdmin && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={refreshMetadataMutation.isPending}
+                      onSelect={() => setRefreshOpen(true)}
+                    >
+                      {refreshMetadataMutation.isPending && (
+                        <RefreshCw className="size-4 animate-spin" />
+                      )}
+                      Refresh Metadata
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        }
       />
 
       <div className="page-shell space-y-6 py-10">
@@ -244,6 +350,34 @@ export default function MangaContent({
           </ul>
         )}
       </div>
+
+      <MangaFilesDialog
+        contentId={item.content_id}
+        title={item.title}
+        open={filesOpen}
+        onOpenChange={setFilesOpen}
+      />
+      <RefreshMetadataDialog
+        open={refreshOpen}
+        onOpenChange={setRefreshOpen}
+        onConfirm={(mode) => {
+          setRefreshOpen(false);
+          refreshMetadataMutation.mutate({ item, mode });
+        }}
+        isPending={refreshMetadataMutation.isPending}
+      />
     </div>
   );
+}
+
+// flattenFirst returns the first readable unit of the series (used as the
+// re-read target once everything is read).
+function flattenFirst(entries: ReturnType<typeof buildMangaList>) {
+  const [first] = entries;
+  if (!first) return null;
+  if (first.kind === "section") {
+    const [chapter] = first.chapters;
+    return chapter ? { chapter, label: `${first.label} · ${chapterLabel(chapter)}` } : null;
+  }
+  return { chapter: first.chapter, label: first.label };
 }

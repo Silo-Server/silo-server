@@ -108,7 +108,11 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     card.durationSeconds > 0 ? (card.positionSeconds / card.durationSeconds) * 100 : 0;
   const hasPartialProgress = progressPercent > 0 && progressPercent < 100;
   const hasEpisodeMeta = card.seasonNumber != null && card.episodeNumber != null;
-  const headingIsSeries = hasEpisodeMeta && !!card.seriesTitle;
+  // A manga chapter is an ebook item that carries its owning series; the card
+  // presents the series (heading, links) since the chapter's own item detail
+  // is an internal page that loops back into the reader.
+  const isMangaChapter = card.type === "ebook" && !!card.seriesId && !!card.seriesTitle;
+  const headingIsSeries = (hasEpisodeMeta && !!card.seriesTitle) || isMangaChapter;
   const heading = headingIsSeries ? card.seriesTitle : card.title;
   // The heading shows the series title for episodes, so it should navigate to
   // the series page; everything else heads to the item's own page.
@@ -116,6 +120,9 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     headingIsSeries && card.seriesId
       ? buildItemHref({ contentId: card.seriesId, libraryId: props.libraryId })
       : card.itemHref;
+  // Detail-page link target for the card's image and meta lines: manga
+  // chapters head to the series page like the heading does.
+  const detailHref = isMangaChapter ? headingHref : card.itemHref;
   const episodeLabel = hasEpisodeMeta
     ? `Season ${card.seasonNumber} Episode ${card.episodeNumber}`
     : null;
@@ -123,7 +130,9 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
     ? card.seriesTitle && card.title
       ? `${episodeLabel} • ${card.title}`
       : episodeLabel
-    : null;
+    : isMangaChapter
+      ? card.title
+      : null;
   const premiereBadge =
     "sectionItem" in props && props.sectionItem
       ? props.sectionItem.badges?.find((badge) => badge === "season_premiere")
@@ -210,7 +219,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   return (
     <div className={`group/card ${containerWidth}`}>
       <div className="group/media relative">
-        <ViewTransitionLink to={card.itemHref} className="block">
+        <ViewTransitionLink to={detailHref} className="block">
           <div className={`media-card-image relative ${imageAspect} overflow-hidden rounded-xl`}>
             {imageSrc ? (
               <img
@@ -291,7 +300,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         </ViewTransitionLink>
         {episodeMeta && (
           <ViewTransitionLink
-            to={card.itemHref}
+            to={isMangaChapter ? card.watchHref : card.itemHref}
             className="text-muted-foreground block truncate text-xs hover:underline"
           >
             {episodeMeta}
@@ -313,7 +322,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
           ) : (
             <ViewTransitionLink
-              to={card.itemHref}
+              to={isMangaChapter ? card.watchHref : card.itemHref}
               className="text-muted-foreground block w-fit text-xs hover:underline"
             >
               {timeLeftLabel}

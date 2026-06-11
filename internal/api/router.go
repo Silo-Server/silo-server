@@ -1587,6 +1587,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
 						r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
 						r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
+						r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
 						r.Get("/catalog/series/{id}/seasons", catalogResourceHandler.HandleGetSeasons)
 						r.Get("/catalog/series/{id}/seasons/{num}", catalogResourceHandler.HandleGetSeason)
 						r.Get("/catalog/series/{id}/seasons/{num}/episodes", catalogResourceHandler.HandleGetEpisodes)

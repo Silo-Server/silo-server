@@ -1179,6 +1179,7 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 	userStates := h.listSectionItemUserStates(r, allItems)
 	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems)
 	episodeMeta := h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r))
+	mangaChapterMeta := h.listSectionMangaChapterItemMeta(r.Context(), allItems)
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
 		for _, item := range s.Items {
@@ -1192,6 +1193,17 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 				if value, ok := episodeMeta[item.ContentID]; ok {
 					meta = &value
 				}
+			}
+			// Manga chapters carry their series linkage on top of whatever
+			// meta (e.g. reading progress) the section already resolved, so
+			// continue-reading cards can head to the series.
+			if value, ok := mangaChapterMeta[item.ContentID]; ok {
+				if meta == nil {
+					empty := sections.SectionItemMeta{}
+					meta = &empty
+				}
+				meta.SeriesID = value.SeriesID
+				meta.SeriesTitle = value.SeriesTitle
 			}
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
 			items = append(items, h.toSectionItemResponse(s.SectionType, item, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey]))
@@ -1209,6 +1221,33 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 		})
 	}
 	return resp
+}
+
+// listSectionMangaChapterItemMeta resolves series linkage for every manga
+// chapter (type='ebook' linked via manga_chapters) among the section items.
+// Non-chapter ebooks simply get no entry.
+func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, items []*models.MediaItem) map[string]sections.SectionItemMeta {
+	if h == nil || h.fetcher == nil {
+		return map[string]sections.SectionItemMeta{}
+	}
+	ids := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		if item == nil || item.Type != "ebook" || strings.TrimSpace(item.ContentID) == "" {
+			continue
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		ids = append(ids, item.ContentID)
+	}
+	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
+	if err != nil {
+		slog.Warn("loading section manga chapter metadata", "error", err)
+		return map[string]sections.SectionItemMeta{}
+	}
+	return meta
 }
 
 func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withItems []sections.SectionWithItems, filter catalog.AccessFilter) map[string]sections.SectionItemMeta {
