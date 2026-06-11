@@ -31,6 +31,7 @@ export function getWatchedActionLabel(item: Pick<ItemDetail, "type" | "user_data
     case "audiobook":
       return played ? "Mark Unlistened" : "Mark Listened";
     case "ebook":
+    case "manga":
       return played ? "Mark Unread" : "Mark Read";
     case "episode":
       return played ? "Mark Unwatched" : "Mark Watched";
@@ -44,6 +45,7 @@ export function getWatchedToastMessage(item: Pick<ItemDetail, "type">, played: b
     case "audiobook":
       return played ? "Marked as listened" : "Marked as unlistened";
     case "ebook":
+    case "manga":
       return played ? "Marked as read" : "Marked as unread";
     default:
       return played ? "Marked as watched" : "Marked as unwatched";

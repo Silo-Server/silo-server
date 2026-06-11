@@ -7,26 +7,29 @@ import (
 
 // TestMangaCountColumns pins the browse-card manga count contract: two
 // index-backed correlated subqueries over manga_chapters, scoped to the series
-// content ID and aliased so scanBrowseItems can read them positionally. The
-// volume count must filter out NULL/empty volume tokens so the frontend can
-// pick a volume-based vs chapter-based chip.
+// content ID and aliased so the scan paths can read them positionally. The
+// card chip reads "X Volumes · X Chapters", so manga_volume_count must count
+// DISTINCT volume tokens (many chapter rows can share one volume) and
+// manga_chapter_count must count only loose rows without a volume token.
 func TestMangaCountColumns(t *testing.T) {
 	cols := mangaCountColumns("mi")
 
 	for _, want := range []string{
 		"FROM manga_chapters mc",
 		"mc.series_content_id = mi.content_id",
-		"AS manga_chapter_count",
+		"count(DISTINCT mc.volume)",
 		"mc.volume IS NOT NULL AND mc.volume <> ''",
 		"AS manga_volume_count",
+		"(mc.volume IS NULL OR mc.volume = '')",
+		"AS manga_chapter_count",
 	} {
 		if !strings.Contains(cols, want) {
 			t.Fatalf("manga count columns missing %q\ngot: %s", want, cols)
 		}
 	}
 
-	// Both counts must be present (two SELECT count(*) subqueries).
-	if got := strings.Count(cols, "SELECT count(*) FROM manga_chapters mc"); got != 2 {
+	// Both counts must be present (two correlated subqueries).
+	if got := strings.Count(cols, "FROM manga_chapters mc"); got != 2 {
 		t.Fatalf("expected 2 manga count subqueries, got %d\ngot: %s", got, cols)
 	}
 }

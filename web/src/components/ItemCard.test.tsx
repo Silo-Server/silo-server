@@ -189,22 +189,23 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain("S01E03");
   });
 
-  it("renders a manga count chip with the volume label when volumes dominate", () => {
+  it("renders a volumes-only manga count chip", () => {
     const markup = renderCard({
       item: {
         ...baseItem,
         content_id: "manga-1",
         type: "manga",
         title: "Railgun",
-        manga_chapter_count: 12,
+        manga_chapter_count: 0,
         manga_volume_count: 12,
       },
     });
 
-    expect(markup).toContain("Vols 12");
+    expect(markup).toContain("12 Volumes");
+    expect(markup).not.toContain("Chapter");
   });
 
-  it("renders a manga count chip with the chapter label when loose chapters dominate", () => {
+  it("renders a chapters-only manga count chip", () => {
     const markup = renderCard({
       item: {
         ...baseItem,
@@ -216,7 +217,40 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).toContain("Ch 100");
+    expect(markup).toContain("100 Chapters");
+    expect(markup).not.toContain("Volume");
+  });
+
+  it("renders both counts when a series has volumes and loose chapters", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-4",
+        type: "manga",
+        title: "Mixed Manga",
+        manga_chapter_count: 3,
+        manga_volume_count: 12,
+      },
+    });
+
+    expect(markup).toContain("12 Volumes · 3 Chapters");
+  });
+
+  it("uses singular labels for single counts", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-5",
+        type: "manga",
+        title: "One Shot",
+        manga_chapter_count: 1,
+        manga_volume_count: 1,
+      },
+    });
+
+    expect(markup).toContain("1 Volume · 1 Chapter");
+    expect(markup).not.toContain("Volumes");
+    expect(markup).not.toContain("Chapters");
   });
 
   it("does not render a manga count chip on non-manga cards", () => {
@@ -232,11 +266,11 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).not.toContain("Vols");
-    expect(markup).not.toContain("Ch 99");
+    expect(markup).not.toContain("Volume");
+    expect(markup).not.toContain("Chapter");
   });
 
-  it("does not render a manga count chip when the chapter count is missing or zero", () => {
+  it("does not render a manga count chip when both counts are missing or zero", () => {
     const markup = renderCard({
       item: {
         ...baseItem,
@@ -247,8 +281,8 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).not.toContain("Vols");
-    expect(markup).not.toContain("Ch ");
+    expect(markup).not.toContain("Volume");
+    expect(markup).not.toContain("Chapter");
   });
 
   it("renders episode cards with series context when available", () => {

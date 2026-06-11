@@ -108,6 +108,15 @@ describe("getWatchedActionLabel", () => {
       "Mark Unread",
     );
   });
+
+  it("returns reading labels for manga series", () => {
+    expect(getWatchedActionLabel(makeItem({ type: "manga", user_data: { played: false } }))).toBe(
+      "Mark Read",
+    );
+    expect(getWatchedActionLabel(makeItem({ type: "manga", user_data: { played: true } }))).toBe(
+      "Mark Unread",
+    );
+  });
 });
 
 describe("getWatchedToastMessage", () => {
@@ -128,6 +137,11 @@ describe("getWatchedToastMessage", () => {
   it("uses read copy for ebooks", () => {
     expect(getWatchedToastMessage(makeItem({ type: "ebook" }), true)).toBe("Marked as read");
     expect(getWatchedToastMessage(makeItem({ type: "ebook" }), false)).toBe("Marked as unread");
+  });
+
+  it("uses read copy for manga", () => {
+    expect(getWatchedToastMessage(makeItem({ type: "manga" }), true)).toBe("Marked as read");
+    expect(getWatchedToastMessage(makeItem({ type: "manga" }), false)).toBe("Marked as unread");
   });
 });
 
