@@ -140,11 +140,11 @@ describe("volume token normalization", () => {
     // duplicate top-level entries.
     expect(entries).toHaveLength(1);
     const [entry] = entries;
-    expect(entry.kind).toBe("section");
-    if (entry.kind === "section") {
-      expect(entry.label).toBe("Volume 1");
-      expect(entry.chapters.map((c) => c.content_id)).toEqual(["a", "b"]);
+    if (!entry || entry.kind !== "section") {
+      throw new Error(`expected a section entry, got ${JSON.stringify(entry)}`);
     }
+    expect(entry.label).toBe("Volume 1");
+    expect(entry.chapters.map((c) => c.content_id)).toEqual(["a", "b"]);
   });
 
   it("keeps non-numeric tokens distinct", () => {

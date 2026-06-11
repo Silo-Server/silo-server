@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          else
+            # Auto-increment patch from latest tag.
+            latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+            if [ -z "$latest" ]; then
+              version="0.1.0"
+            else
+              base="${latest#v}"
+              IFS='.' read -r major minor patch <<< "$base"
+              patch=$((patch + 1))
+              version="${major}.${minor}.${patch}"
+            fi
+            tag="v${version}"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$tag"
+            git push origin --tags
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build example plugin
+        run: go build ./examples/hello-scheduled-task
+
+      - name: Verify tagged module can be consumed externally
+        env:
+          GOPROXY: direct
+          GOPRIVATE: github.com/Silo-Server/*
+          GONOSUMDB: github.com/Silo-Server/*
+        run: |
+          tmpdir="$(mktemp -d)"
+          cd "$tmpdir"
+          go mod init sdk-smoke-test
+          cat <<'EOF' > main.go
+          package main
+
+          import (
+            _ "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/config"
+            _ "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/convert"
+            _ "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
+            _ "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
+          )
+
+          func main() {}
+          EOF
+          go get "github.com/Silo-Server/silo-plugin-sdk@${{ needs.version.outputs.tag }}"
+          go build ./...
+
+  release:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          generate_release_notes: true

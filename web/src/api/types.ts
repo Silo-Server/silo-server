@@ -1113,6 +1113,8 @@ export interface ItemDetail {
   locked_fields?: number[];
   release_date: string | null;
   first_air_date: string | null;
+  // Publication/airing status ("Ongoing", "Completed", "Continuing", "Ended").
+  show_status?: string;
   last_air_date: string | null;
   air_time?: string | null;
   air_timezone?: string | null;

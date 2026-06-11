@@ -108,3 +108,7 @@ require (
 )
 
 replace github.com/zishang520/webtransport-go => ./internal/compat/zishang520-webtransport-go
+
+// Vendored unpublished SDK (adds MetadataItem.status); swap to the published
+// module version before opening the upstream PR.
+replace github.com/Silo-Server/silo-plugin-sdk => ./internal/compat/silo-plugin-sdk

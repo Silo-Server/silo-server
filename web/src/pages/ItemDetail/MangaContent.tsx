@@ -296,6 +296,7 @@ export default function MangaContent({
             contentRating={item.content_rating || undefined}
             volumeCount={volumeCount}
             chapterCount={looseChapterCount}
+            status={item.show_status || undefined}
           />
         }
         scoreRow={

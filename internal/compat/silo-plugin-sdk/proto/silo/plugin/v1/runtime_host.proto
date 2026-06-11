@@ -1,0 +1,282 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+import "silo/plugin/v1/common.proto";
+
+// RuntimeHost is implemented by the silo host. Plugins dial it via the
+// go-plugin gRPC broker. See pkg/pluginsdk/runtimehost for a typed client.
+service RuntimeHost {
+  // PublishEvent publishes an event onto the host's event bus.
+  // The host server stamps the calling plugin's ID server-side and
+  // auto-prefixes event_name with "plugin.<plugin_id>." so that plugins
+  // cannot forge core event names.
+  rpc PublishEvent(PublishEventRequest) returns (PublishEventResponse);
+
+  // PublishEventTo publishes an event addressed to one target plugin_id.
+  rpc PublishEventTo(PublishEventToRequest) returns (PublishEventToResponse);
+
+  // PublishEventToInstallation publishes an event addressed to one specific
+  // plugin installation. Use this when the caller discovered a peer through
+  // ListInstalledPlugins and needs to avoid plugin_id ambiguity.
+  rpc PublishEventToInstallation(PublishEventToInstallationRequest) returns (PublishEventToInstallationResponse);
+
+  // GetHostInfo returns public-safe host URLs and identity metadata plugins can
+  // use when constructing callback URLs or external-facing links.
+  rpc GetHostInfo(GetHostInfoRequest) returns (GetHostInfoResponse);
+
+  // ListLibraries returns libraries visible in the host catalog.
+  // If user_id is empty, all libraries are returned (admin context).
+  rpc ListLibraries(ListLibrariesRequest) returns (ListLibrariesResponse);
+
+  // CheckMediaPresence reports which of the requested external IDs already
+  // exist in the host catalog. v1 supports provider="tmdb" only.
+  rpc CheckMediaPresence(CheckMediaPresenceRequest) returns (CheckMediaPresenceResponse);
+
+  // ListInstalledPlugins returns installed plugins and their advertised
+  // capabilities so plugins can discover peers by capability.
+  rpc ListInstalledPlugins(ListInstalledPluginsRequest) returns (ListInstalledPluginsResponse);
+
+  // SetGlobalConfigEntry persists a plugin-owned global config entry for the
+  // calling plugin installation.
+  rpc SetGlobalConfigEntry(SetGlobalConfigEntryRequest) returns (SetGlobalConfigEntryResponse);
+
+  // ListLibraryMedia returns public-safe catalog metadata from the host
+  // libraries. It is intended for browse/search surfaces; it must not include
+  // filesystem paths, stream URLs, or other playback grants.
+  rpc ListLibraryMedia(ListLibraryMediaRequest) returns (ListLibraryMediaResponse);
+
+  // GetCatalogStats returns aggregate public-safe counts for host libraries.
+  rpc GetCatalogStats(GetCatalogStatsRequest) returns (GetCatalogStatsResponse);
+
+  // ResolveCatalogImageURLs resolves stored catalog image paths using the
+  // host's configured image resolver, returning browser-usable URLs.
+  rpc ResolveCatalogImageURLs(ResolveCatalogImageURLsRequest) returns (ResolveCatalogImageURLsResponse);
+
+  // MintScopedStream mints a short-lived, narrowly scoped stream URL for a
+  // plugin-owned public access workflow such as guest passes.
+  rpc MintScopedStream(MintScopedStreamRequest) returns (MintScopedStreamResponse);
+
+  // CallPluginHTTP invokes another installed plugin's HttpRoutes handler
+  // through the host control plane. Calls are treated as authenticated
+  // service-to-service traffic, but never as admin traffic.
+  rpc CallPluginHTTP(CallPluginHTTPRequest) returns (CallPluginHTTPResponse);
+}
+
+message PublishEventRequest {
+  // Unprefixed event name in the plugin's namespace, e.g. "approved".
+  string event_name = 1;
+  // Arbitrary JSON-shaped payload.
+  google.protobuf.Struct payload = 2;
+}
+
+message PublishEventResponse {}
+
+message PublishEventToRequest {
+  // Target plugin_id, e.g. "silo.requests".
+  string target_plugin_id = 1;
+  // Unprefixed event name in the calling plugin's namespace.
+  string event_name = 2;
+  // Arbitrary JSON-shaped payload.
+  google.protobuf.Struct payload = 3;
+}
+
+message PublishEventToResponse {}
+
+message PublishEventToInstallationRequest {
+  int64 target_installation_id = 1;
+  // Unprefixed event name in the calling plugin's namespace.
+  string event_name = 2;
+  // Arbitrary JSON-shaped payload.
+  google.protobuf.Struct payload = 3;
+}
+
+message PublishEventToInstallationResponse {}
+
+message GetHostInfoRequest {}
+
+message GetHostInfoResponse {
+  string public_base_url = 1;
+  string internal_base_url = 2;
+  string plugin_proxy_base_url = 3;
+}
+
+message ListLibrariesRequest {
+  // Optional: scope results to libraries this user is allowed to see.
+  string user_id = 1;
+}
+
+message ListLibrariesResponse {
+  repeated Library libraries = 1;
+}
+
+message Library {
+  string id = 1;
+  string name = 2;
+  // One of: "movie", "tv", "mixed".
+  string media_type = 3;
+}
+
+message CheckMediaPresenceRequest {
+  // External provider identifier. Only "tmdb" is supported in v1.
+  string provider = 1;
+  // One of: "movie", "tv". Use "mixed" only for Library.media_type.
+  string media_type = 2;
+  // External IDs to check. Capped at 100 per call (server returns
+  // InvalidArgument otherwise).
+  repeated string ids = 3;
+}
+
+message CheckMediaPresenceResponse {
+  // One entry per ID that was found. IDs absent from this list are not
+  // present in the host catalog.
+  repeated MediaPresence present = 1;
+}
+
+message MediaPresence {
+  string external_id = 1;
+  string media_id = 2;
+  string library_id = 3;
+  string title = 4;
+}
+
+message ListInstalledPluginsRequest {}
+
+message ListInstalledPluginsResponse {
+  repeated InstalledPlugin plugins = 1;
+}
+
+message InstalledPlugin {
+  int64 installation_id = 1;
+  string plugin_id = 2;
+  string version = 3;
+  bool enabled = 4;
+  repeated CapabilityDescriptor capabilities = 5;
+}
+
+message SetGlobalConfigEntryRequest {
+  string key = 1;
+  google.protobuf.Struct value = 2;
+}
+
+message SetGlobalConfigEntryResponse {}
+
+message ListLibraryMediaRequest {
+  // Empty means all libraries visible to the plugin/host policy.
+  repeated string library_ids = 1;
+  // Empty means all supported media types.
+  repeated string media_types = 2;
+  string query = 3;
+  string genre = 4;
+  int32 year_min = 5;
+  int32 year_max = 6;
+  // Stable sort keys: "title", "year", "added_at", "runtime", "rating".
+  string sort = 7;
+  bool descending = 8;
+  int32 page_size = 9;
+  string page_token = 10;
+}
+
+message ListLibraryMediaResponse {
+  repeated CatalogMediaItem items = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message CatalogMediaItem {
+  string media_id = 1;
+  string library_id = 2;
+  string media_type = 3;
+  string title = 4;
+  int32 year = 5;
+  string overview = 6;
+  string poster_url = 7;
+  string backdrop_url = 8;
+  repeated string genres = 9;
+  int32 runtime_minutes = 10;
+  double rating = 11;
+  string content_rating = 12;
+  string added_at = 13;
+  string external_provider = 14;
+  string external_id = 15;
+}
+
+message GetCatalogStatsRequest {
+  // Empty means all libraries visible to the plugin/host policy.
+  repeated string library_ids = 1;
+}
+
+message GetCatalogStatsResponse {
+  int32 total_items = 1;
+  repeated CatalogTypeCount media_type_counts = 2;
+  repeated CatalogLibraryCount library_counts = 3;
+}
+
+message CatalogTypeCount {
+  string media_type = 1;
+  int32 count = 2;
+}
+
+message CatalogLibraryCount {
+  string library_id = 1;
+  string library_name = 2;
+  string media_type = 3;
+  int32 count = 4;
+}
+
+message ResolveCatalogImageURLsRequest {
+  // Stored catalog image paths from catalog metadata, such as poster_url or
+  // backdrop_url values returned by ListLibraryMedia. Paths are host-owned
+  // opaque strings; plugins should pass them back unchanged.
+  repeated string paths = 1;
+  // Optional image variant name understood by the host resolver. Empty uses the
+  // host default. Common values include "thumbnail" and "original"; unsupported
+  // variants are handled host-side.
+  string variant = 2;
+}
+
+message ResolveCatalogImageURLsResponse {
+  // Browser-usable URLs keyed by the original input path. Paths that cannot be
+  // resolved are omitted. URLs are host-generated browser targets and should be
+  // treated as opaque by plugins.
+  map<string, string> urls = 1;
+}
+
+message MintScopedStreamRequest {
+  int64 media_file_id = 1;
+  string play_method = 2; // "direct" or "remux"; "auto" chooses from policy.
+  int64 expires_at_unix = 3;
+  int32 max_watch_minutes = 4;
+  int32 max_resolution_height = 5;
+  bool allow_direct_play = 6;
+  bool allow_downloads = 7;
+  bool disable_seeking = 8;
+  string audit_subject = 9;
+  string watermark_mode = 10;
+  string watermark_text = 11;
+  string watermark_logo_url = 12;
+}
+
+message MintScopedStreamResponse {
+  string stream_url = 1;
+  string play_method = 2;
+  int64 expires_at_unix = 3;
+}
+
+message CallPluginHTTPRequest {
+  int32 installation_id = 1;
+  string method = 2;
+  string path = 3;
+  map<string, string> headers = 4;
+  bytes body = 5;
+  google.protobuf.Struct query = 6;
+}
+
+message CallPluginHTTPResponse {
+  int32 status_code = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
+}

@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+
+// RequestRouter lets the host delegate whole-request fulfillment to a backend
+// plugin (e.g. multi-instance Sonarr/Radarr, Seerr). The host owns the request
+// lifecycle, quota/policy, the allowed-quality governance, and the target
+// records; the plugin owns instance routing, submission, and status semantics.
+// Connections are passed per call; the plugin stores no credentials.
+service RequestRouter {
+  rpc Fulfill(FulfillRequest) returns (FulfillResponse);
+  rpc CheckStatus(CheckStatusRequest) returns (CheckStatusResponse);
+  rpc ListConfigOptions(ListConfigOptionsRequest) returns (ListConfigOptionsResponse);
+  rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+}
+
+message RequestDescriptor {
+  string media_type = 1; // "movie" | "series"
+  string title = 2;
+  int32 year = 3;
+  map<string, string> external_ids = 4;
+  bool is_anime = 5;
+  int64 requester_user_id = 6;
+  string requester_profile_id = 7;
+  // requester identity for plugins that attribute requests to a per-user account
+  // on the downstream service (e.g. Seerr). Empty when the host cannot resolve it.
+  string requester_email = 8;
+  string requester_username = 9;
+}
+
+message RouterConnection {
+  string id = 1;
+  string base_url = 2;
+  string api_key = 3;
+  // plugin-declared config blob (e.g. service_kind, root_folder,
+  // quality_profile_id)
+  google.protobuf.Struct config = 4;
+}
+
+// RequestedQuality is one quality tier the host wants fulfilled. The host owns
+// quality governance, so it stamps is4k rather than each plugin re-deriving it
+// from the id string. id is the tier identity echoed back as
+// FulfillmentTarget.quality (e.g. "1080p" / "2160p").
+message RequestedQuality {
+  string id = 1;
+  bool is4k = 2;
+}
+
+message FulfillRequest {
+  string capability_id = 1;
+  RequestDescriptor request = 2;
+  repeated RequestedQuality qualities = 3;
+  repeated RouterConnection connections = 4;
+}
+
+message FulfillmentTarget {
+  string quality = 1;
+  string connection_id = 2;
+  string external_id = 3; // upstream id, e.g. arr movie/series id
+  // raw upstream status passed through for display; status is the
+  // host-normalized value
+  string external_status = 4;
+  // host-normalized: "queued" | "downloading" | "completed" | "failed"
+  string status = 5;
+  string message = 6;
+}
+
+message FulfillResponse {
+  repeated FulfillmentTarget targets = 1;
+  // set when zero targets, e.g. "no radarr instance configured"
+  string message = 2;
+}
+
+message TargetRef {
+  string quality = 1;
+  string connection_id = 2;
+  string external_id = 3;
+}
+
+message CheckStatusRequest {
+  string capability_id = 1;
+  RequestDescriptor request = 2;
+  repeated TargetRef targets = 3;
+  repeated RouterConnection connections = 4;
+}
+
+message TargetStatus {
+  string quality = 1;
+  string connection_id = 2;
+  // host-normalized: "queued" | "downloading" | "completed" | "failed"
+  string status = 3;
+  string external_status = 4; // raw upstream status passed through for display
+  string message = 5;
+}
+
+message CheckStatusResponse {
+  repeated TargetStatus statuses = 1;
+}
+
+message ConfigOption {
+  string value = 1;
+  string label = 2;
+}
+
+message ConfigOptionList {
+  repeated ConfigOption options = 1;
+}
+
+message ListConfigOptionsRequest {
+  string capability_id = 1;
+  RouterConnection connection = 2;
+}
+
+message ListConfigOptionsResponse {
+  // keyed by config field, e.g. "root_folder"
+  map<string, ConfigOptionList> options_by_field = 1;
+}
+
+message TestConnectionRequest {
+  string capability_id = 1;
+  RouterConnection connection = 2;
+}
+
+message TestConnectionResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message ValidateRequest {
+  string capability_id = 1;
+  RouterConnection connection = 2;
+  // siblings are the other connections bound to this installation+capability, so
+  // a plugin can enforce cross-connection rules (e.g. one default per service
+  // type). They carry id + config only — no base_url/api_key (validation reads
+  // flags, not credentials).
+  repeated RouterConnection siblings = 3;
+}
+
+message ValidateResponse {
+  map<string, string> field_errors = 1; // keyed by config field; empty = no field errors
+  string form_error = 2;                 // form-level error; empty = none
+}
