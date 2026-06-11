@@ -90,14 +90,6 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 		return nil, "", err
 	}
 
-	count, err := s.repo.CountByProfile(ctx, profileID)
-	if err != nil {
-		return nil, "", err
-	}
-	if count >= s.settings.WebhooksMaxPerProfile(ctx) {
-		return nil, "", ErrWebhookLimit
-	}
-
 	rawURL := strings.TrimSpace(*input.URL)
 	host, err := ValidateWebhookURL(rawURL, s.settings.WebhooksAllowPrivateDestinations(ctx))
 	if err != nil {
@@ -108,15 +100,24 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 	if input.Type != nil {
 		hookType = strings.TrimSpace(*input.Type)
 	}
+	isDiscordURL := discordWebhookURL(rawURL)
 	switch hookType {
 	case "":
 		hookType = WebhookTypeGeneric
-		if discordWebhookURL(rawURL) {
+		if isDiscordURL {
 			hookType = WebhookTypeDiscord
 		}
 	case WebhookTypeDiscord, WebhookTypeGeneric:
 	default:
 		return nil, "", fmt.Errorf("%w: type must be discord or generic", ErrWebhookInvalid)
+	}
+	// An explicit type must match the destination, or the sender would apply
+	// the wrong payload/signing behavior from the first delivery.
+	if hookType == WebhookTypeDiscord && !isDiscordURL {
+		return nil, "", fmt.Errorf("%w: type discord requires a Discord webhook URL", ErrWebhookInvalid)
+	}
+	if hookType == WebhookTypeGeneric && isDiscordURL {
+		return nil, "", fmt.Errorf("%w: Discord webhook URLs must use type discord", ErrWebhookInvalid)
 	}
 
 	hook := Webhook{
@@ -151,7 +152,9 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 		hook.SigningSecretCiphertext = &ciphertext
 	}
 
-	if err := s.repo.Insert(ctx, hook); err != nil {
+	// The per-profile cap is enforced inside the insert (advisory-locked
+	// count + insert), so concurrent creates cannot both slip past it.
+	if err := s.repo.InsertWithLimit(ctx, hook, s.settings.WebhooksMaxPerProfile(ctx)); err != nil {
 		if errors.Is(err, ErrWebhookNameTaken) {
 			return nil, "", fmt.Errorf("%w: %s", ErrWebhookInvalid, err.Error())
 		}

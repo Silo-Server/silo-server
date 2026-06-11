@@ -76,7 +76,7 @@ func ValidateWebhookURL(rawURL string, allowPrivate bool) (host string, err erro
 	if err != nil {
 		return "", fmt.Errorf("invalid URL")
 	}
-	if parsed.Scheme != "https" {
+	if parsed.Scheme != schemeHTTPS {
 		return "", fmt.Errorf("webhook URLs must use https")
 	}
 	host = parsed.Hostname()

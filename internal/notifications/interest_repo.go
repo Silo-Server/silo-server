@@ -121,6 +121,29 @@ func (r *InterestRepository) DeleteStaleForProfileSeries(ctx context.Context, pr
 	return nil
 }
 
+// ListSeriesForProfile returns the distinct series that currently have
+// interest rows for the profile. The rebuild pass recomputes these alongside
+// the series resolved from live sources so rows whose sources were removed
+// while the live updater was down get cleaned up instead of lingering.
+func (r *InterestRepository) ListSeriesForProfile(ctx context.Context, profileID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT series_id FROM profile_series_interest WHERE profile_id = $1`,
+		profileID)
+	if err != nil {
+		return nil, fmt.Errorf("list profile interest series: %w", err)
+	}
+	defer rows.Close()
+	seriesIDs := make([]string, 0, 16)
+	for rows.Next() {
+		var seriesID string
+		if err := rows.Scan(&seriesID); err != nil {
+			return nil, fmt.Errorf("scan profile interest series: %w", err)
+		}
+		seriesIDs = append(seriesIDs, seriesID)
+	}
+	return seriesIDs, rows.Err()
+}
+
 // GuardedSetLastNotified raises last_notified_episode_key for the given
 // profiles. The < guard makes concurrent workers handling adjacent release
 // events safe: the higher key wins regardless of commit order.

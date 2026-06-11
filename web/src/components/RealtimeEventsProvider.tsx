@@ -739,10 +739,15 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               (entry) => entry.channel === "notifications" && entry.code === "profile_required",
             );
             if (profileRequired && activeProfileIDRef.current) {
+              // Rebinding requires a fresh handshake (tickets are consumed at
+              // upgrade time), so the shared socket must close. The backoff
+              // grows to 5 minutes so a persistent notifications-only outage
+              // costs the catalog/user_state channels one brief flap per
+              // cycle instead of a permanent fast reconnect loop.
               profileRebindAttemptsRef.current += 1;
               nextReconnectDelayRef.current = Math.min(
-                30_000,
-                1_000 * 2 ** Math.min(profileRebindAttemptsRef.current, 5),
+                300_000,
+                1_000 * 2 ** Math.min(profileRebindAttemptsRef.current, 9),
               );
               socket.close();
             } else {

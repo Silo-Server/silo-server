@@ -106,11 +106,22 @@ func (s *SMTPSender) loadConfig(ctx context.Context) (*smtpConfig, error) {
 	if s == nil || s.settings == nil {
 		return nil, ErrNotConfigured
 	}
+	// A settings-store failure must surface as an error, never be mistaken
+	// for "email is not configured" — that would silently hide real backend
+	// problems behind a graceful-degradation path.
+	var readErr error
 	get := func(key string) string {
-		value, _ := s.settings.Get(ctx, key)
+		value, err := s.settings.Get(ctx, key)
+		if err != nil && readErr == nil {
+			readErr = fmt.Errorf("read setting %s: %w", key, err)
+		}
 		return strings.TrimSpace(value)
 	}
-	if !truthy(get(SettingEnabled)) {
+	enabled := truthy(get(SettingEnabled))
+	if readErr != nil {
+		return nil, readErr
+	}
+	if !enabled {
 		return nil, ErrNotConfigured
 	}
 	cfg := &smtpConfig{
@@ -122,10 +133,14 @@ func (s *SMTPSender) loadConfig(ctx context.Context) (*smtpConfig, error) {
 		fromAddress: get(SettingFromAddress),
 		fromName:    get(SettingFromName),
 	}
+	portRaw := get(SettingSMTPPort)
+	if readErr != nil {
+		return nil, readErr
+	}
 	if cfg.host == "" || cfg.fromAddress == "" {
 		return nil, ErrNotConfigured
 	}
-	if raw := get(SettingSMTPPort); raw != "" {
+	if raw := portRaw; raw != "" {
 		port, err := strconv.Atoi(raw)
 		if err != nil || port < 1 || port > 65535 {
 			return nil, fmt.Errorf("invalid email.smtp_port %q", raw)

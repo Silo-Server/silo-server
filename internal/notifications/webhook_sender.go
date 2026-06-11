@@ -162,7 +162,19 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	}
 
 	row, err := s.deliveries.GetRowByID(ctx, attempt.NotificationDeliveryID)
-	if err != nil || row == nil {
+	if err != nil {
+		// Transient lookup failure: leave the claimed attempt alone so the
+		// lease expires and the retry worker reclaims it, instead of
+		// permanently failing the delivery over a database blip.
+		if ctx.Err() == nil {
+			s.logger.Warn("webhook delivery lookup failed",
+				"attempt_id", attempt.ID,
+				"delivery_id", attempt.NotificationDeliveryID,
+				"error", err)
+		}
+		return
+	}
+	if row == nil {
 		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "delivery row missing", nil)
 		return

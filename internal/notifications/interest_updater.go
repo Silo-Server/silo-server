@@ -25,6 +25,10 @@ const (
 	interestFlushInterval = 2 * time.Second
 	interestQueryChunk    = 500
 	interestRecomputeTime = 30 * time.Second
+	// interestMaxFlushAttempts bounds requeues of a failing mutation so a
+	// poisoned item cannot retry every flush forever; the periodic rebuild
+	// task repairs whatever gets dropped.
+	interestMaxFlushAttempts = 5
 )
 
 type interestMutation struct {
@@ -48,8 +52,10 @@ type InterestUpdater struct {
 	scopes    ScopeResolver
 	logger    *slog.Logger
 
-	mu      sync.Mutex
-	pending map[interestMutation]struct{}
+	mu sync.Mutex
+	// pending maps each queued mutation to how many flushes have already
+	// failed it (transient failures requeue instead of dropping).
+	pending map[interestMutation]int
 }
 
 // NewInterestUpdater creates an InterestUpdater.
@@ -65,7 +71,7 @@ func NewInterestUpdater(
 		stores:    stores,
 		scopes:    scopes,
 		logger:    slog.Default().With("component", "notifications.interest"),
-		pending:   make(map[interestMutation]struct{}),
+		pending:   make(map[interestMutation]int),
 	}
 }
 
@@ -77,8 +83,11 @@ func (u *InterestUpdater) QueueItemMutation(userID int, profileID, itemID string
 	if u == nil || userID <= 0 || profileID == "" || itemID == "" {
 		return
 	}
+	mutation := interestMutation{userID: userID, profileID: profileID, itemID: itemID}
 	u.mu.Lock()
-	u.pending[interestMutation{userID: userID, profileID: profileID, itemID: itemID}] = struct{}{}
+	if _, queued := u.pending[mutation]; !queued {
+		u.pending[mutation] = 0
+	}
 	u.mu.Unlock()
 }
 
@@ -103,8 +112,13 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 		return
 	}
 	batch := u.pending
-	u.pending = make(map[interestMutation]struct{})
+	u.pending = make(map[interestMutation]int)
 	u.mu.Unlock()
+
+	// Transient failures requeue for the next flush instead of dropping the
+	// mutation, which would leave profile_series_interest stale until some
+	// later mutation or the rebuild task happened to touch the series.
+	requeue := make(map[interestMutation]int)
 
 	// Resolve items to series and dedupe to one recompute per
 	// (user, profile, series).
@@ -114,14 +128,15 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 		seriesID  string
 	}
 	seen := make(map[recomputeKey]struct{}, len(batch))
-	for mutation := range batch {
+	for mutation, failures := range batch {
 		if ctx.Err() != nil {
-			return
+			return // shutting down; the rebuild task repairs anything dropped
 		}
 		seriesID, ok, err := u.resolveSeriesID(ctx, mutation.itemID)
 		if err != nil {
 			u.logger.Warn("interest series resolution failed",
 				"item_id", mutation.itemID, "error", err)
+			requeue[mutation] = failures + 1
 			continue
 		}
 		if !ok {
@@ -140,8 +155,27 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 			u.logger.Warn("interest recompute failed",
 				"user_id", mutation.userID, "profile_id", mutation.profileID,
 				"series_id", seriesID, "error", err)
+			requeue[mutation] = failures + 1
 		}
 	}
+
+	if len(requeue) == 0 {
+		return
+	}
+	u.mu.Lock()
+	for mutation, failures := range requeue {
+		if failures >= interestMaxFlushAttempts {
+			u.logger.Warn("interest mutation dropped after repeated failures",
+				"item_id", mutation.itemID, "profile_id", mutation.profileID)
+			continue
+		}
+		// A fresh queue of the same mutation (failure count 0) wins; it will
+		// be recomputed either way.
+		if _, queued := u.pending[mutation]; !queued {
+			u.pending[mutation] = failures
+		}
+	}
+	u.mu.Unlock()
 }
 
 // resolveSeriesID maps a media item ID (series, season, or episode) to its
@@ -208,6 +242,13 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
+	markCompleted := func(episodeID string) {
+		hasProgression = true
+		if key, ok := episodeKeys[episodeID]; ok && (!hasCompleted || key > lastCompletedKey) {
+			lastCompletedKey = key
+			hasCompleted = true
+		}
+	}
 	for start := 0; start < len(episodeIDs); start += interestQueryChunk {
 		end := min(start+interestQueryChunk, len(episodeIDs))
 		progress, err := store.ListProgressByMediaItems(ctx, profileID, episodeIDs[start:end])
@@ -220,11 +261,34 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 				continueWatching = true
 			}
 			if entry.Completed {
-				if key, ok := episodeKeys[episodeID]; ok && (!hasCompleted || key > lastCompletedKey) {
-					lastCompletedKey = key
-					hasCompleted = true
-				}
+				markCompleted(episodeID)
 			}
+		}
+	}
+
+	// Completed watch history counts too: history imports and watch-provider
+	// syncs may record a watched-at fact without ever writing a progress row,
+	// and those episodes must still advance the progression cursor.
+	for start := 0; start < len(episodeIDs); start += interestQueryChunk {
+		end := min(start+interestQueryChunk, len(episodeIDs))
+		chunk := episodeIDs[start:end]
+		for offset := 0; ; {
+			entries, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
+				ProfileID:    profileID,
+				MediaItemIDs: chunk,
+				Limit:        interestQueryChunk,
+				Offset:       offset,
+			})
+			if err != nil {
+				return fmt.Errorf("load completed history: %w", err)
+			}
+			for _, entry := range entries {
+				markCompleted(entry.MediaItemID)
+			}
+			if len(entries) < interestQueryChunk {
+				break
+			}
+			offset += len(entries)
 		}
 	}
 

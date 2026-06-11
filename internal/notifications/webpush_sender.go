@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -152,9 +151,27 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		return
 	}
 	row, err := s.deliveries.GetRowByID(ctx, attempt.NotificationDeliveryID)
-	if err != nil || row == nil {
+	if err != nil {
+		// Transient lookup failure: let the claim lease expire and the retry
+		// worker reclaim, instead of permanently failing the delivery.
+		if ctx.Err() == nil {
+			s.logger.Warn("web push delivery lookup failed",
+				"attempt_id", attempt.ID,
+				"delivery_id", attempt.NotificationDeliveryID,
+				"error", err)
+		}
+		return
+	}
+	if row == nil {
 		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "delivery row missing", nil)
+		return
+	}
+	if row.ProfileID != sub.ProfileID {
+		// The endpoint was reassigned to a different profile between enqueue
+		// and dispatch; this delivery belongs to the previous owner.
+		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+			attempt.AttemptNumber+1, nil, "subscription reassigned", nil)
 		return
 	}
 
@@ -241,9 +258,7 @@ func (s *webPushSender) send(ctx context.Context, sub *WebPushSubscription, mess
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 16<<10))
 	if resp.StatusCode == http.StatusTooManyRequests {
-		if seconds, parseErr := strconv.Atoi(resp.Header.Get("Retry-After")); parseErr == nil && seconds > 0 {
-			retryAfter = time.Duration(seconds) * time.Second
-		}
+		retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 	}
 	return resp.StatusCode, retryAfter, nil
 }

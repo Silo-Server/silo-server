@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -121,22 +122,47 @@ func (r *WebhookRepository) getByIDUnscoped(ctx context.Context, id string) (*We
 	return hook, nil
 }
 
-// CountByProfile returns the profile's webhook count (for the per-profile cap).
-func (r *WebhookRepository) CountByProfile(ctx context.Context, profileID string) (int, error) {
-	var count int
-	err := r.pool.QueryRow(ctx,
-		`SELECT count(*) FROM notification_webhooks WHERE profile_id = $1`, profileID,
-	).Scan(&count)
-	return count, err
-}
-
 // ErrWebhookNameTaken is returned when a profile already has a webhook with
 // the requested name.
 var ErrWebhookNameTaken = errors.New("a webhook with this name already exists")
 
-// Insert persists a new webhook.
-func (r *WebhookRepository) Insert(ctx context.Context, hook Webhook) error {
-	_, err := r.pool.Exec(ctx, `
+// isWebhookNameViolation reports whether err is the unique violation on the
+// per-profile webhook name constraint, via the typed pgx error (string
+// matching on error text would break if message formatting changes).
+func isWebhookNameViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "notification_webhooks_profile_name_key"
+}
+
+// InsertWithLimit persists a new webhook unless the profile is already at
+// maxPerProfile. The count and insert run under a per-profile advisory
+// transaction lock so concurrent creates cannot both pass the check and push
+// the profile past its cap.
+func (r *WebhookRepository) InsertWithLimit(ctx context.Context, hook Webhook, maxPerProfile int) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin webhook insert: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('notification_webhooks:' || $1, 0))`,
+		hook.ProfileID); err != nil {
+		return fmt.Errorf("lock webhook quota: %w", err)
+	}
+	var count int
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM notification_webhooks WHERE profile_id = $1`, hook.ProfileID,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("count webhooks: %w", err)
+	}
+	if count >= maxPerProfile {
+		return ErrWebhookLimit
+	}
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO notification_webhooks
 			(id, user_id, profile_id, name, type, url_ciphertext, url_host,
 			 signing_secret_ciphertext, enabled,
@@ -146,12 +172,14 @@ func (r *WebhookRepository) Insert(ctx context.Context, hook Webhook) error {
 		hook.ID, hook.UserID, hook.ProfileID, hook.Name, hook.Type,
 		hook.URLCiphertext, hook.URLHost, hook.SigningSecretCiphertext, hook.Enabled,
 		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching, hook.NotifyNextUp,
-		hook.NotifyRequests)
-	if err != nil {
-		if strings.Contains(err.Error(), "notification_webhooks_profile_name_key") {
+		hook.NotifyRequests); err != nil {
+		if isWebhookNameViolation(err) {
 			return ErrWebhookNameTaken
 		}
 		return fmt.Errorf("insert webhook: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit webhook insert: %w", err)
 	}
 	return nil
 }
@@ -175,7 +203,7 @@ func (r *WebhookRepository) Update(ctx context.Context, hook Webhook) error {
 		hook.NotifyRequests,
 		hook.ConsecutiveFailures, hook.DisabledReason)
 	if err != nil {
-		if strings.Contains(err.Error(), "notification_webhooks_profile_name_key") {
+		if isWebhookNameViolation(err) {
 			return ErrWebhookNameTaken
 		}
 		return fmt.Errorf("update webhook: %w", err)

@@ -32,7 +32,18 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/notifications";
+  // Notifications navigate same-origin only: payload data is server-built,
+  // but a notification surface must never become an open redirect.
+  const rawUrl = (event.notification.data && event.notification.data.url) || "/notifications";
+  let url = "/notifications";
+  try {
+    const parsed = new URL(rawUrl, self.location.origin);
+    if (parsed.origin === self.location.origin) {
+      url = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // keep the safe default
+  }
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

@@ -13,10 +13,11 @@ import (
 )
 
 // VAPID key settings. The keypair is stored as a single JSON value (encrypted
-// at rest via SensitiveSettingKeys) so both halves persist atomically: two
-// concurrent provisioners can each lose the race wholesale but can never
-// strand a mismatched public/private pair. Clients receive the public half
-// from the capability endpoint, never from the settings store directly.
+// at rest via SensitiveSettingKeys) so both halves persist atomically, and it
+// is written with SetIfAbsent so exactly one concurrent provisioner's pair can
+// ever land — a mismatched public/private pair or split-brain identity across
+// nodes is impossible. Clients receive the public half from the capability
+// endpoint, never from the settings store directly.
 const (
 	SettingWebPushEnabled      = "notifications.web_push_enabled"
 	SettingWebPushVAPIDKeypair = "notifications.web_push.vapid_keypair" //nolint:gosec // setting key name, not a credential
@@ -37,6 +38,10 @@ func (s *Settings) WebPushEnabled(ctx context.Context) bool {
 // catalog.EncryptedSettingsRepo, which encrypts sensitive keys on write.
 type SettingWriter interface {
 	Set(ctx context.Context, key, value string) error
+	// SetIfAbsent writes only when the key has no value yet, reporting whether
+	// this writer won. Generated credentials must be provisioned single-writer:
+	// concurrent nodes may race to generate, but exactly one value can land.
+	SetIfAbsent(ctx context.Context, key, value string) (bool, error)
 }
 
 // ErrWebPushInvalid marks rejected subscription input.
@@ -70,8 +75,13 @@ func (s *WebPushService) vapidKeys(ctx context.Context) (publicKey, privateKey s
 		return s.publicKey, s.privateKey, nil
 	}
 
-	stored := s.loadKeypair(ctx)
-	if stored.Public == "" || stored.Private == "" {
+	stored, found, err := s.loadKeypair(ctx)
+	if err != nil {
+		// Never reprovision over a read or decode failure: rotating the VAPID
+		// identity silently invalidates every existing browser subscription.
+		return "", "", err
+	}
+	if !found {
 		if s.writer == nil {
 			return "", "", errors.New("web push requires a writable settings store")
 		}
@@ -83,15 +93,24 @@ func (s *WebPushService) vapidKeys(ctx context.Context) (publicKey, privateKey s
 		if marshalErr != nil {
 			return "", "", fmt.Errorf("encode VAPID keypair: %w", marshalErr)
 		}
-		if err := s.writer.Set(ctx, SettingWebPushVAPIDKeypair, string(data)); err != nil {
-			return "", "", fmt.Errorf("persist VAPID keypair: %w", err)
+		// Conditional write: with concurrent provisioners exactly one generated
+		// pair can ever land, so no node can cache a pair another node's write
+		// later overwrites (split-brain VAPID identities).
+		won, setErr := s.writer.SetIfAbsent(ctx, SettingWebPushVAPIDKeypair, string(data))
+		if setErr != nil {
+			return "", "", fmt.Errorf("persist VAPID keypair: %w", setErr)
 		}
-		// Re-read and adopt whatever the store now holds: if another process
-		// provisioned concurrently, the last write won and every node must
-		// converge on that pair rather than caching its own loser.
-		stored = s.loadKeypair(ctx)
-		if stored.Public == "" || stored.Private == "" {
+		if won {
 			stored = vapidKeypair{Public: public, Private: private}
+		} else {
+			// Another node provisioned first: adopt its pair.
+			stored, found, err = s.loadKeypair(ctx)
+			if err != nil {
+				return "", "", err
+			}
+			if !found {
+				return "", "", errors.New("VAPID keypair disappeared during provisioning")
+			}
 		}
 	}
 	s.publicKey = stored.Public
@@ -101,21 +120,27 @@ func (s *WebPushService) vapidKeys(ctx context.Context) (publicKey, privateKey s
 
 // loadKeypair reads the persisted keypair directly from the settings reader,
 // bypassing the Settings facade cache: provisioning must observe the latest
-// stored value, not a seconds-old cached miss. A corrupt value reads as
-// unprovisioned and is overwritten with a fresh pair.
-func (s *WebPushService) loadKeypair(ctx context.Context) vapidKeypair {
-	var keys vapidKeypair
+// stored value, not a seconds-old cached miss. found is true only for a
+// complete stored pair; read and decode failures surface as errors so callers
+// never mistake them for "not provisioned yet".
+func (s *WebPushService) loadKeypair(ctx context.Context) (keys vapidKeypair, found bool, err error) {
 	if s.settings == nil || s.settings.reader == nil {
-		return keys
+		return vapidKeypair{}, false, nil
 	}
 	raw, err := s.settings.reader.Get(ctx, SettingWebPushVAPIDKeypair)
-	if err != nil || strings.TrimSpace(raw) == "" {
-		return vapidKeypair{}
+	if err != nil {
+		return vapidKeypair{}, false, fmt.Errorf("read VAPID keypair: %w", err)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return vapidKeypair{}, false, nil
 	}
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
-		return vapidKeypair{}
+		return vapidKeypair{}, false, fmt.Errorf("decode stored VAPID keypair: %w", err)
 	}
-	return keys
+	if keys.Public == "" || keys.Private == "" {
+		return vapidKeypair{}, false, errors.New("stored VAPID keypair is incomplete")
+	}
+	return keys, true, nil
 }
 
 // PublicKey returns the VAPID application server key clients subscribe with.

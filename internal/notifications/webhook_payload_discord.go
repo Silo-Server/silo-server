@@ -137,7 +137,7 @@ func discordEmbedTitle(row DeliveryRow) string {
 	}
 	series := row.SeriesTitle
 	if series == "" {
-		series = "New episode"
+		series = genericEpisodeTitle
 	}
 	var code string
 	if row.SeasonNumber != nil && row.EpisodeNumber != nil {

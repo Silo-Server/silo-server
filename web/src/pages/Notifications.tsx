@@ -203,7 +203,7 @@ function NotificationRow({
 }
 
 function NotificationPreferencesPopover() {
-  const { data: prefs, isLoading } = useNotificationPreferences();
+  const { data: prefs, isLoading, refetch } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
 
   const toggles: Array<{
@@ -252,11 +252,18 @@ function NotificationPreferencesPopover() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80">
-        {isLoading || !prefs ? (
+        {isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-6 w-full" />
             <Skeleton className="h-6 w-full" />
             <Skeleton className="h-6 w-full" />
+          </div>
+        ) : !prefs ? (
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-sm">Couldn’t load preferences.</p>
+            <Button size="sm" variant="outline" onClick={() => void refetch()}>
+              Retry
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">

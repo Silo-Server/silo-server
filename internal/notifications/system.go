@@ -227,7 +227,9 @@ func (s *System) Start(ctx context.Context) {
 		// Provision the VAPID keypair eagerly so a broken settings store
 		// surfaces at startup instead of on the first subscribe, and the
 		// capability endpoint never pays the generation latency.
+		s.wg.Add(1)
 		go func() {
+			defer s.wg.Done()
 			if _, err := s.WebPush.PublicKey(ctx); err != nil && ctx.Err() == nil {
 				s.logger.Error("web push VAPID provisioning failed", "error", err)
 			}
@@ -419,7 +421,10 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 }
 
 // rebuildProfileInterest recomputes every series the profile has any
-// relationship with (favorites, watchlist, progress).
+// relationship with (favorites, watchlist, progress, completed watch
+// history), plus every series that already has interest rows in Postgres —
+// rows whose sources were all removed must be recomputed too, or the
+// drift-repair pass would keep notifying about unfollowed shows forever.
 func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.UserStore, userID int, profileID string) error {
 	const pageSize = 500
 	itemIDs := make(map[string]struct{}, 64)
@@ -460,13 +465,36 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 			break
 		}
 	}
-	if len(itemIDs) == 0 {
-		return nil
+	// History imports (watch providers, history import runs) may record
+	// watched episodes without any progress row; they are watch relationships
+	// all the same.
+	for offset := 0; ; offset += pageSize {
+		history, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
+			ProfileID: profileID,
+			Limit:     pageSize,
+			Offset:    offset,
+		})
+		if err != nil {
+			return fmt.Errorf("list completed history: %w", err)
+		}
+		for _, entry := range history {
+			itemIDs[entry.MediaItemID] = struct{}{}
+		}
+		if len(history) < pageSize {
+			break
+		}
 	}
 
 	seriesIDs, err := s.batchResolveSeries(ctx, itemIDs)
 	if err != nil {
 		return err
+	}
+	existing, err := s.Interests.ListSeriesForProfile(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	for _, seriesID := range existing {
+		seriesIDs[seriesID] = struct{}{}
 	}
 	for seriesID := range seriesIDs {
 		if ctx.Err() != nil {

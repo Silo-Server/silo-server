@@ -1219,8 +1219,10 @@ func main() {
 				cfg.Scanner.MaxConcurrentLibraries,
 				cfg.Scanner.MaxConcurrentScoped,
 			)
-			libraryScanQueue.Start()
-			defer libraryScanQueue.Stop()
+			// Started below, after the notification system has attached its
+			// availability detector to the executor: a scan resumed by the
+			// workers before that wiring would complete without recording
+			// episode availability, silently losing release notifications.
 			deps.LibraryScanQueue = libraryScanQueue
 		}
 		if deps.DB != nil && deps.FileRepo != nil && metadataService != nil {
@@ -1313,6 +1315,14 @@ func main() {
 			notificationSystem.Start(appCtx)
 			defer notificationSystem.Wait()
 		}
+	}
+
+	// Start the scan queue only now that the availability detector (when
+	// notifications are enabled) is attached to the ingest executor, so scans
+	// resumed at startup cannot complete before the detector exists.
+	if libraryScanQueue != nil {
+		libraryScanQueue.Start()
+		defer libraryScanQueue.Stop()
 	}
 
 	if userStoreProvider != nil && pluginService != nil {

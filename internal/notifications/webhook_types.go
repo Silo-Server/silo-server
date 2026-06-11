@@ -30,6 +30,13 @@ const DeliveryTypeWebhookAutoDisabled = "webhook.auto_disabled"
 // build does not know (the type registry is extensible).
 const genericNotificationTitle = "Silo notification"
 
+// genericEpisodeTitle is the display fallback for episode.available rows
+// whose catalog metadata is missing or was deleted.
+const genericEpisodeTitle = "New episode"
+
+// schemeHTTPS is the only scheme outbound notification HTTP traffic may use.
+const schemeHTTPS = "https"
+
 // Webhook is a profile-scoped outbound destination. URL and signing secret
 // are stored as enc:v1: envelopes and never leave the server.
 type Webhook struct {

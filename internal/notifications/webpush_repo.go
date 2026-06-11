@@ -76,7 +76,27 @@ func scanWebPushSubscriptions(rows pgx.Rows) ([]WebPushSubscription, error) {
 // caller's (user, profile): one browser endpoint notifies exactly one
 // profile, the one that subscribed most recently.
 func (r *WebPushRepository) Upsert(ctx context.Context, sub WebPushSubscription) (*WebPushSubscription, error) {
-	row := r.pool.QueryRow(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin web push upsert: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Reassignment keeps the row id, so undelivered attempts enqueued for the
+	// previous owner would otherwise be sent to the new owner's browser once
+	// the retry worker reclaims them. Cancel them before the ownership flips.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM web_push_delivery_attempts
+		WHERE outcome IN ('pending', 'retrying')
+		  AND subscription_id IN (
+			SELECT id FROM web_push_subscriptions
+			WHERE endpoint = $1 AND profile_id <> $2
+		  )`,
+		sub.Endpoint, sub.ProfileID); err != nil {
+		return nil, fmt.Errorf("purge reassigned web push attempts: %w", err)
+	}
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO web_push_subscriptions
 			(id, user_id, profile_id, endpoint, p256dh, auth, device_name)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -94,6 +114,9 @@ func (r *WebPushRepository) Upsert(ctx context.Context, sub WebPushSubscription)
 	saved, err := scanWebPushSubscription(row)
 	if err != nil {
 		return nil, fmt.Errorf("upsert web push subscription: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit web push upsert: %w", err)
 	}
 	return saved, nil
 }

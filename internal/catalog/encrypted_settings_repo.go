@@ -135,6 +135,30 @@ func (r *EncryptedSettingsRepo) Set(ctx context.Context, key, value string) erro
 	return r.inner.Set(ctx, key, value)
 }
 
+// settingsConditionalWriter is the optional conditional-write capability of a
+// raw settings store (satisfied by *ServerSettingsRepo).
+type settingsConditionalWriter interface {
+	SetIfAbsent(ctx context.Context, key, value string) (bool, error)
+}
+
+// SetIfAbsent applies Set's encryption contract to a conditional write: the
+// value lands only when the key currently has no value, so concurrent
+// provisioners of generated secrets cannot overwrite each other.
+func (r *EncryptedSettingsRepo) SetIfAbsent(ctx context.Context, key, value string) (bool, error) {
+	inner, ok := r.inner.(settingsConditionalWriter)
+	if !ok {
+		return false, fmt.Errorf("settings store does not support conditional writes")
+	}
+	if SensitiveSettingKeys[key] && value != "" {
+		ct, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			return false, fmt.Errorf("encrypt setting %q: %w", key, err)
+		}
+		value = ct
+	}
+	return inner.SetIfAbsent(ctx, key, value)
+}
+
 // Get reads a value and applies the read-path contract: legacy plaintext passes
 // through, an enc:v1: value is decrypted, and a corrupt ciphertext errors.
 func (r *EncryptedSettingsRepo) Get(ctx context.Context, key string) (string, error) {

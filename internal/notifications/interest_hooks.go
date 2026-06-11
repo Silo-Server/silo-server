@@ -9,10 +9,11 @@ import (
 )
 
 // WrapUserStoreProvider decorates the shared user-store provider so every
-// favorites, watchlist, and watch-progress mutation — regardless of which
-// path performed it (REST handlers, jellycompat, history imports, playback
-// stop, watch sync) — queues an interest recompute. Hooking the lowest shared
-// layer keeps the seven-plus mutation call sites hook-free and drift-free.
+// favorites, watchlist, watch-progress, and watch-history mutation —
+// regardless of which path performed it (REST handlers, jellycompat, history
+// imports, playback stop, watch sync) — queues an interest recompute. Hooking
+// the lowest shared layer keeps the seven-plus mutation call sites hook-free
+// and drift-free.
 //
 // Progress writes queue only on state *transitions* (a row appearing, the
 // in-progress flag flipping, completion crossing, rows being cleared):
@@ -211,6 +212,40 @@ func (s *interestTrackingStore) ClearProgress(ctx context.Context, profileID, me
 
 func (s *interestTrackingStore) ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
 	err := s.UserStore.ClearProgressBatch(ctx, profileID, mediaItemIDs, updatedAt)
+	if err == nil {
+		for _, mediaItemID := range mediaItemIDs {
+			s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+		}
+	}
+	return err
+}
+
+// --- Watch history: history imports and watch-provider syncs may record a
+// completed watch without any progress write, so the progress hooks alone
+// would never see them. AddHistory (the live playback path) is deliberately
+// not hooked: playback always writes progress alongside it, and those writes
+// already queue on transitions.
+
+func (s *interestTrackingStore) AddHistoryIfMissing(ctx context.Context, entry userstore.WatchHistoryEntry) (bool, error) {
+	created, err := s.UserStore.AddHistoryIfMissing(ctx, entry)
+	if err == nil && created && entry.Completed {
+		s.updater.QueueItemMutation(s.userID, entry.ProfileID, entry.MediaItemID)
+	}
+	return created, err
+}
+
+func (s *interestTrackingStore) RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error {
+	err := s.UserStore.RemoveHistoryItems(ctx, profileID, mediaItemIDs, removedAt)
+	if err == nil {
+		for _, mediaItemID := range mediaItemIDs {
+			s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+		}
+	}
+	return err
+}
+
+func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source userstore.WatchHistorySource) error {
+	err := s.UserStore.DeleteHistoryBySource(ctx, profileID, mediaItemIDs, source)
 	if err == nil {
 		for _, mediaItemID := range mediaItemIDs {
 			s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)

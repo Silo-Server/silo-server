@@ -70,7 +70,7 @@ func newWebhookHTTPClient(allowPrivate func() bool) *http.Client {
 			if len(via) >= webhookMaxRedirects {
 				return errors.New("too many redirects")
 			}
-			if req.URL.Scheme != "https" {
+			if req.URL.Scheme != schemeHTTPS {
 				return errors.New("redirect to non-https destination")
 			}
 			return nil
@@ -100,6 +100,12 @@ func sendWebhook(ctx context.Context, client *http.Client, url string, body []by
 	if err != nil {
 		return result(false, 0, "invalid webhook URL")
 	}
+	// HTTPS is enforced at registration; re-check at the last layer before
+	// the wire so delivery never depends on upstream validation staying
+	// perfect (webhook URLs are credentials and must not travel cleartext).
+	if req.URL.Scheme != schemeHTTPS {
+		return result(false, 0, "invalid webhook URL")
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", webhookUserAgent)
 	for key, value := range headers {
@@ -123,11 +129,33 @@ func sendWebhook(ctx context.Context, client *http.Client, url string, body []by
 		out.Message = fmt.Sprintf("%d %s", resp.StatusCode, out.Message)
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
-		if seconds, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && seconds > 0 {
-			out.RetryAfter = time.Duration(seconds) * time.Second
-		}
+		out.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 	}
 	return out
+}
+
+// maxRetryAfter caps how far a destination's Retry-After header can push the
+// next attempt; the longest scheduled backoff is 24h and a buggy or hostile
+// header must not park deliveries beyond it.
+const maxRetryAfter = 24 * time.Hour
+
+// parseRetryAfter interprets a Retry-After header in both RFC 9110 forms —
+// delta-seconds and HTTP-date — returning 0 when absent or unusable.
+func parseRetryAfter(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	delay := time.Duration(0)
+	if seconds, err := strconv.Atoi(header); err == nil {
+		delay = time.Duration(seconds) * time.Second
+	} else if when, err := http.ParseTime(header); err == nil {
+		delay = when.Sub(now)
+	}
+	if delay <= 0 {
+		return 0
+	}
+	return min(delay, maxRetryAfter)
 }
 
 // classifyWebhookError maps transport errors to short diagnostic classes.

@@ -179,7 +179,7 @@ func (h *NotificationsHandler) HandleDeleteWebhook(w http.ResponseWriter, r *htt
 	}
 	profileID := apimw.GetProfileID(r.Context())
 	if err := service.Delete(r.Context(), profileID, chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete webhook")
+		writeWebhookError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
