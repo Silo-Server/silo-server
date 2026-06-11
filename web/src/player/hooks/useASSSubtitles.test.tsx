@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useASSSubtitles } from "./useASSSubtitles";
 import type { PlayerSubtitleInfo } from "../types";
 
-// Capture the options every JASSUB instance is constructed with.
+// Capture the options every JASSUB instance is constructed with, plus the
+// instances themselves so tests can observe later timeOffset updates.
 const constructorOpts: Array<Record<string, unknown>> = [];
+const instances: Array<{ timeOffset: number }> = [];
 
 vi.mock("jassub", () => {
   class MockJASSUB {
@@ -14,6 +16,8 @@ vi.mock("jassub", () => {
     renderer = { setTrackByUrl: vi.fn().mockResolvedValue(undefined) };
     constructor(opts: Record<string, unknown>) {
       constructorOpts.push(opts);
+      this.timeOffset = (opts.timeOffset as number) ?? 0;
+      instances.push(this);
     }
     resize = vi.fn().mockResolvedValue(undefined);
     destroy = vi.fn();
@@ -80,6 +84,7 @@ function mockFontBundleResponse(bytes: string): Response {
 
 beforeEach(() => {
   constructorOpts.length = 0;
+  instances.length = 0;
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockFetchResponse("")));
 });
 
@@ -174,5 +179,46 @@ describe("useASSSubtitles font fallback", () => {
     await waitFor(() => expect(constructorOpts).toHaveLength(1));
 
     expect(constructorOpts[0]!.queryFonts).toBe(false);
+  });
+});
+
+describe("useASSSubtitles time offset", () => {
+  // JASSUB renders the ASS event matching `video.currentTime + timeOffset`,
+  // so an event at source time S appears at video time S - timeOffset.
+  // Positive user delay means "show subtitles later" (VTTCue semantics in
+  // useSubtitleTracks shifts cues by `start - origin + delay`), which for
+  // JASSUB requires SUBTRACTING the delay from the stream origin.
+
+  it("subtracts a positive user delay from the constructed timeOffset", async () => {
+    renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 30, 2000));
+
+    await waitFor(() => expect(constructorOpts).toHaveLength(1));
+
+    // origin 30s, +2000ms delay → event at source time S renders at video
+    // time S - 28 = (S - 30) + 2, i.e. 2s later than the undelayed position.
+    expect(constructorOpts[0]!.timeOffset).toBe(28);
+  });
+
+  it("adds a negative user delay to the constructed timeOffset", async () => {
+    renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 30, -2000));
+
+    await waitFor(() => expect(constructorOpts).toHaveLength(1));
+
+    expect(constructorOpts[0]!.timeOffset).toBe(32);
+  });
+
+  it("updates the live instance's timeOffset when the delay changes", async () => {
+    const videoRef = makeVideoRef();
+    const { rerender } = renderHook(
+      ({ delay }) => useASSSubtitles(videoRef, [germanTrack], 6, false, 30, delay),
+      { initialProps: { delay: 0 } },
+    );
+
+    await waitFor(() => expect(instances).toHaveLength(1));
+    expect(instances[0]!.timeOffset).toBe(30);
+
+    rerender({ delay: 2000 });
+
+    await waitFor(() => expect(instances[0]!.timeOffset).toBe(28));
   });
 });
