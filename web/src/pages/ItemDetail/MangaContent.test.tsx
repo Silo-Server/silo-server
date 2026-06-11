@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import type { ItemDetail, MangaChapter } from "@/api/types";
 
@@ -249,6 +250,86 @@ describe("MangaContent", () => {
       .map((link) => within(link).queryByText(/Chapter \d/)?.textContent)
       .filter(Boolean);
     expect(order.indexOf("Chapter 1")).toBeLessThan(order.indexOf("Chapter 2"));
+  });
+
+  it("shows an inline progress indicator for a part-read chapter", () => {
+    render(
+      <MemoryRouter>
+        <MangaContent
+          item={mangaItem([
+            {
+              content_id: "v01",
+              title: "Railgun v01",
+              chapter_index: 1,
+              volume: "v01",
+              progress: 0.42,
+            },
+          ])}
+          libraryId={7}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTitle("42% read")).toBeInTheDocument();
+  });
+
+  it("collapses a fully read volume section by default and expands on toggle", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <MangaContent
+          item={mangaItem([
+            {
+              content_id: "v1-c1",
+              title: "Chapter 1",
+              chapter_index: 1,
+              volume: "v01",
+              read: true,
+            },
+            {
+              content_id: "v1-c2",
+              title: "Chapter 2",
+              chapter_index: 2,
+              volume: "v01",
+              read: true,
+            },
+          ])}
+          libraryId={7}
+        />
+      </MemoryRouter>,
+    );
+
+    const header = screen.getByRole("button", { name: /Volume 1/i });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: /^Chapter 1/i })).not.toBeInTheDocument();
+
+    await user.click(header);
+    expect(screen.getByRole("link", { name: /^Chapter 1/i })).toBeInTheDocument();
+  });
+
+  it("renders chapter cover thumbnails when the payload carries them", () => {
+    render(
+      <MemoryRouter>
+        <MangaContent
+          item={mangaItem([
+            {
+              content_id: "v01",
+              title: "Railgun v01",
+              chapter_index: 1,
+              volume: "v01",
+              poster_url: "https://img.test/v01.jpg",
+            },
+          ])}
+          libraryId={7}
+        />
+      </MemoryRouter>,
+    );
+
+    const row = screen.getByRole("link", { name: /^Volume 1$/i });
+    expect(within(row).getByRole("presentation")).toHaveAttribute(
+      "src",
+      "https://img.test/v01.jpg",
+    );
   });
 
   it("offers a View Details action in the series menu", () => {

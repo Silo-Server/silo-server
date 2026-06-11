@@ -92,10 +92,10 @@ export function getLibrarySortRelevanceScope(
   if (libraryType === "ebook" || libraryType === "ebooks") {
     return "ebook";
   }
-  // Manga is a comic-series library whose chapters are ebook items; it has no
-  // dedicated sort scope, so it reuses the ebook sort universe.
+  // Manga series rows are file-less containers with their own sort universe
+  // (no Duration/Bitrate, reading-verb labels).
   if (isMangaLibraryType(libraryType)) {
-    return "ebook";
+    return "manga";
   }
   if (
     mediaScope === "movie" ||

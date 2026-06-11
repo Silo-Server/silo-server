@@ -673,6 +673,10 @@ export interface MangaChapter {
   // True when the current viewer has finished this chapter (ebook read state).
   // Seeds the row's mark-read toggle on load.
   read?: boolean;
+  // Viewer reading position as a 0..1 fraction (absent when never opened).
+  progress?: number;
+  // Presigned cover thumbnail extracted from the chapter file.
+  poster_url?: string;
 }
 
 // MangaChapterFile is one local file backing a chapter, for the series

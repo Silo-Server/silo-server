@@ -5,6 +5,7 @@ export type QuerySortRelevanceScope =
   | "episode"
   | "audiobook"
   | "ebook"
+  | "manga"
   | "all";
 export type QuerySortField =
   | "title"
@@ -64,6 +65,9 @@ interface QuerySortLike {
 // applicableMediaScopes to be eligible for book-only libraries.
 const ALL_VIDEO_SCOPES: ApplicableMediaScope[] = ["movie", "series", "episode"];
 const ALL_MEDIA_SCOPES: ApplicableMediaScope[] = [...ALL_VIDEO_SCOPES, "audiobook", "ebook"];
+// Manga series rows are file-less containers: technical sorts (Duration,
+// Bitrate) are meaningless there, so manga is opt-in per sort field instead
+// of being part of ALL_MEDIA_SCOPES.
 
 export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
   {
@@ -71,21 +75,21 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "Title",
     defaultOrder: "asc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   {
     value: "added_at",
     label: "Date Added",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   {
     value: "release_date",
     label: "Release Date",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   {
     value: "last_air_date",
@@ -100,7 +104,7 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "Year",
     defaultOrder: "desc",
     personalized: false,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   {
     value: "content_rating",
@@ -163,21 +167,21 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "Progress",
     defaultOrder: "desc",
     personalized: true,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   {
     value: "date_viewed",
     label: "Date Viewed",
     defaultOrder: "desc",
     personalized: true,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   {
     value: "plays",
     label: "Plays",
     defaultOrder: "desc",
     personalized: true,
-    applicableMediaScopes: ALL_MEDIA_SCOPES,
+    applicableMediaScopes: [...ALL_MEDIA_SCOPES, "manga"],
   },
   // Book-native sorts. Author is shared by audiobooks and ebooks; narrator
   // remains audiobook-only. Series is shared by the audiobook_series and
@@ -187,7 +191,7 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     label: "Author",
     defaultOrder: "asc",
     personalized: false,
-    applicableMediaScopes: ["audiobook", "ebook"],
+    applicableMediaScopes: ["audiobook", "ebook", "manga"],
   },
   {
     value: "narrator",
@@ -246,7 +250,10 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
       (includePersonalized || !option.personalized) &&
       optionMatchesRelevanceScope(option, relevanceScope),
   ).map((option) => {
-    const ebookLabel = relevanceScope === "ebook" ? EBOOK_SORT_LABELS[option.value] : undefined;
+    const ebookLabel =
+      relevanceScope === "ebook" || relevanceScope === "manga"
+        ? EBOOK_SORT_LABELS[option.value]
+        : undefined;
     return ebookLabel ? { ...option, label: ebookLabel } : option;
   });
 }

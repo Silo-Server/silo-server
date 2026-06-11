@@ -201,8 +201,8 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).toContain("12 Volumes");
-    expect(markup).not.toContain("Chapter");
+    expect(markup).toContain("12 Vol");
+    expect(markup).not.toContain("Ch");
   });
 
   it("renders a chapters-only manga count chip", () => {
@@ -217,8 +217,8 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).toContain("100 Chapters");
-    expect(markup).not.toContain("Volume");
+    expect(markup).toContain("100 Ch");
+    expect(markup).not.toContain("Vol");
   });
 
   it("renders both counts when a series has volumes and loose chapters", () => {
@@ -233,7 +233,7 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).toContain("12 Volumes · 3 Chapters");
+    expect(markup).toContain("12 Vol · 3 Ch");
   });
 
   it("uses singular labels for single counts", () => {
@@ -248,9 +248,7 @@ describe("ItemCard SortMeta", () => {
       },
     });
 
-    expect(markup).toContain("1 Volume · 1 Chapter");
-    expect(markup).not.toContain("Volumes");
-    expect(markup).not.toContain("Chapters");
+    expect(markup).toContain("1 Vol · 1 Ch");
   });
 
   it("does not render a manga count chip on non-manga cards", () => {

@@ -259,6 +259,11 @@ type MangaChapter struct {
 	// Read is true when the current viewer has finished this chapter, mirroring
 	// ebook read state: ebook_reader_progress.progress >= the finished threshold.
 	Read bool `json:"read"`
+	// Progress is the viewer's reading position as a 0..1 fraction, present
+	// only when a progress row exists. The row progress bar uses it.
+	Progress *float64 `json:"progress,omitempty"`
+	// PosterURL is the chapter's extracted cover (presigned), for row thumbnails.
+	PosterURL string `json:"poster_url,omitempty"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -1221,7 +1226,9 @@ func (s *DetailService) buildMangaExtension(ctx context.Context, item *models.Me
 // viewer's user_id + profile_id ($2/$3) and yields false when no row exists.
 var mangaChaptersQuery = fmt.Sprintf(`
 	SELECT m.content_id, m.title, mc.chapter_index, mc.volume,
-	       COALESCE(erp.progress >= %s, false) AS read
+	       COALESCE(erp.progress >= %s, false) AS read,
+	       erp.progress::double precision,
+	       COALESCE(m.poster_path, '') AS poster_path
 	FROM manga_chapters mc
 	JOIN media_items m ON m.content_id = mc.chapter_content_id
 	LEFT JOIN ebook_reader_progress erp
@@ -1249,16 +1256,22 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 
 	for rows.Next() {
 		var (
-			ch     MangaChapter
-			index  *float64
-			volume *string
+			ch         MangaChapter
+			index      *float64
+			volume     *string
+			progress   *float64
+			posterPath string
 		)
-		if err := rows.Scan(&ch.ContentID, &ch.Title, &index, &volume, &ch.Read); err != nil {
+		if err := rows.Scan(&ch.ContentID, &ch.Title, &index, &volume, &ch.Read, &progress, &posterPath); err != nil {
 			return chapters
 		}
 		ch.ChapterIndex = index
 		if volume != nil {
 			ch.Volume = *volume
+		}
+		ch.Progress = progress
+		if posterPath != "" {
+			ch.PosterURL = s.PresignImageURL(ctx, posterPath, "poster", "")
 		}
 		chapters = append(chapters, ch)
 	}

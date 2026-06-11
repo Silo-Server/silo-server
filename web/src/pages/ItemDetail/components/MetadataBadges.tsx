@@ -4,6 +4,8 @@ interface MetadataBadgesProps {
   duration?: string;
   seasonCount?: number;
   episodeCount?: number;
+  volumeCount?: number;
+  chapterCount?: number;
   status?: string;
 }
 
@@ -13,6 +15,8 @@ export default function MetadataBadges({
   duration,
   seasonCount,
   episodeCount,
+  volumeCount,
+  chapterCount,
   status,
 }: MetadataBadgesProps) {
   return (
@@ -28,6 +32,16 @@ export default function MetadataBadges({
       {episodeCount != null && (
         <span className="metadata-badge">
           {episodeCount} {episodeCount === 1 ? "Episode" : "Episodes"}
+        </span>
+      )}
+      {volumeCount != null && volumeCount > 0 && (
+        <span className="metadata-badge">
+          {volumeCount} {volumeCount === 1 ? "Volume" : "Volumes"}
+        </span>
+      )}
+      {chapterCount != null && chapterCount > 0 && (
+        <span className="metadata-badge">
+          {chapterCount} {chapterCount === 1 ? "Chapter" : "Chapters"}
         </span>
       )}
       {status && (
