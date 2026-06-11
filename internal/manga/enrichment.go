@@ -246,13 +246,22 @@ func (e *Enricher) runBatch(
 	return stats
 }
 
-// claimBatchQuery selects manga needing enrichment: unenriched items (no
-// poster) and enriched items missing a secondary field (backdrop, publication
-// status), claimed for a secondary-only pass. Stamping after the attempt
-// keeps items whose provider has no banner/status from being re-claimed
-// forever. Items with fewer prior failures are claimed first and items
-// at/above enrichFailureCap are skipped entirely, so a block of permanently
-// failing items cannot occupy every sweep.
+// claimBatchQuery selects manga needing enrichment. Both arms require
+// last_refreshed IS NULL:
+//   - the common arm is unenriched items (no poster);
+//   - the secondary arm (poster present, backdrop or show_status empty) only
+//     becomes reachable when an operator resets last_refreshed to backfill a
+//     newly-added field across an already-enriched library — exactly how the
+//     banner and publication-status backfills were rolled out. It is an
+//     efficient fast-path for that admin action (fetch by stored provider id,
+//     write only the missing secondary field) and is intentionally NOT an
+//     automatic periodic re-check: a series whose provider simply has no
+//     banner would otherwise be re-fetched every sweep.
+//
+// Stamping after the attempt keeps items whose provider has no banner/status
+// from being re-claimed within the same backfill. Items with fewer prior
+// failures are claimed first and items at/above enrichFailureCap are skipped
+// entirely, so a block of permanently failing items cannot occupy every sweep.
 const claimBatchQuery = `
 	SELECT
 		mi.content_id,
