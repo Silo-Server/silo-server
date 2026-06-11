@@ -5,7 +5,16 @@ import { Button } from "@/components/ui/button";
 import { useMarkRead, useNotificationsList } from "@/hooks/queries/notifications";
 import { timeAgo } from "@/lib/timeAgo";
 
-export function AnnouncementBar() {
+interface AnnouncementBarProps {
+  /**
+   * When true, shift the dismiss button left on large screens so it clears the
+   * admin-only ServerActivity widget pinned at `fixed top-5 right-5` (which
+   * floats over the top-right corner of the page content).
+   */
+  reserveActivityWidget?: boolean;
+}
+
+export function AnnouncementBar({ reserveActivityWidget }: AnnouncementBarProps = {}) {
   const list = useNotificationsList({ unread: true, category: "announcement" });
   const markRead = useMarkRead();
 
@@ -35,7 +44,7 @@ export function AnnouncementBar() {
         variant="ghost"
         size="icon-xs"
         aria-label="Dismiss"
-        className="text-primary hover:text-primary"
+        className={`text-primary hover:text-primary ${reserveActivityWidget ? "lg:mr-10" : ""}`}
         onClick={(e) => {
           e.stopPropagation();
           markRead.mutate({ ids: [item.id] });

@@ -23,6 +23,10 @@ vi.mock("@/hooks/useDocumentTitle", () => ({
   useDocumentTitle: vi.fn(),
 }));
 
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ user: { role: "user" } }),
+}));
+
 vi.mock("react-router", () => ({
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));

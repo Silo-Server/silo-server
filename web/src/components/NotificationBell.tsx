@@ -1,10 +1,15 @@
-import { Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useMarkRead, useNotificationsList, useUnreadCount } from "@/hooks/queries/notifications";
+import {
+  useDismissNotification,
+  useMarkRead,
+  useNotificationsList,
+  useUnreadCount,
+} from "@/hooks/queries/notifications";
 
 let bellOpenFlag = false;
 
@@ -23,6 +28,7 @@ export function NotificationBell() {
   const { data: count = 0 } = useUnreadCount();
   const list = useNotificationsList({});
   const markRead = useMarkRead();
+  const dismiss = useDismissNotification();
   const items = (list.data?.pages ?? []).flatMap((p) => p.items ?? []).slice(0, 10);
 
   return (
@@ -60,11 +66,22 @@ export function NotificationBell() {
             </li>
           )}
           {items.map((n) => (
-            <li key={n.id} className={n.read_at ? "opacity-60" : ""}>
-              <Link to={n.link ?? "/notifications"} className="hover:bg-accent block px-3 py-2">
-                <div className="text-sm font-medium">{n.title}</div>
+            <li key={n.id} className={`flex items-start ${n.read_at ? "opacity-60" : ""}`}>
+              <Link
+                to={n.link ?? "/notifications"}
+                className="hover:bg-accent block min-w-0 flex-1 px-3 py-2"
+              >
+                <div className="truncate text-sm font-medium">{n.title}</div>
                 {n.body && <div className="text-muted-foreground truncate text-xs">{n.body}</div>}
               </Link>
+              <button
+                type="button"
+                aria-label="Dismiss notification"
+                className="text-muted-foreground hover:text-foreground mt-1.5 mr-1 shrink-0 rounded-md p-1.5"
+                onClick={() => dismiss.mutate(n.id)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </li>
           ))}
         </ul>

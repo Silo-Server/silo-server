@@ -5,11 +5,13 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockMarkReadMutate = vi.fn();
+const mockDismissMutate = vi.fn();
 
 vi.mock("@/hooks/queries/notifications", () => ({
   useUnreadCount: vi.fn(() => ({ data: 0 })),
   useNotificationsList: vi.fn(() => ({ data: undefined })),
   useMarkRead: vi.fn(() => ({ mutate: mockMarkReadMutate })),
+  useDismissNotification: vi.fn(() => ({ mutate: mockDismissMutate })),
 }));
 
 // Radix Popover needs a pointer-events-capable env; jsdom provides enough.
@@ -97,6 +99,27 @@ describe("NotificationBell", () => {
       expect(screen.getByText("Movie Released")).toBeInTheDocument();
       expect(screen.getByText("Request Approved")).toBeInTheDocument();
       expect(screen.getByText("View all")).toBeInTheDocument();
+    });
+
+    it("dismiss X calls dismiss.mutate with the notification id", async () => {
+      mockedList.mockReturnValue({
+        data: {
+          pages: [
+            {
+              items: [{ id: 7, title: "Movie Released", body: "", link: "/item/x", read_at: null }],
+              next_cursor: null,
+            },
+          ],
+        },
+      } as unknown as ReturnType<typeof useNotificationsList>);
+
+      const user = userEvent.setup();
+      renderBell();
+
+      await user.click(screen.getByRole("button", { name: "Notifications" }));
+      await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
+
+      expect(mockDismissMutate).toHaveBeenCalledWith(7);
     });
 
     it("shows empty state when no items", async () => {

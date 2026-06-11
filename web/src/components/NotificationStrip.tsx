@@ -5,7 +5,15 @@ import { Button } from "@/components/ui/button";
 import { useMarkRead, useNotificationsList } from "@/hooks/queries/notifications";
 import { timeAgo } from "@/lib/timeAgo";
 
-export function NotificationStrip() {
+interface NotificationStripProps {
+  /**
+   * When true, shift the dismiss button left on large screens so it clears the
+   * admin-only ServerActivity widget pinned at `fixed top-5 right-5`.
+   */
+  reserveActivityWidget?: boolean;
+}
+
+export function NotificationStrip({ reserveActivityWidget }: NotificationStripProps = {}) {
   const list = useNotificationsList({ unread: true });
   const markRead = useMarkRead();
 
@@ -34,6 +42,7 @@ export function NotificationStrip() {
         variant="ghost"
         size="icon-xs"
         aria-label="Dismiss"
+        className={reserveActivityWidget ? "lg:mr-10" : undefined}
         onClick={(e) => {
           e.stopPropagation();
           markRead.mutate({ ids: [item.id] });

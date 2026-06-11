@@ -10,6 +10,7 @@ import SectionRow from "@/components/SectionRow";
 import TasteSeedBanner from "@/components/TasteSeedBanner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
+import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { sectionKeys } from "@/hooks/queries/keys";
@@ -34,6 +35,8 @@ function useHomeRefreshSignal() {
 
 export default function Home() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { data, isLoading, isError, refetch } = useHomeLayout();
   const { data: homeRefreshSignal = 0 } = useHomeRefreshSignal();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
@@ -196,8 +199,8 @@ export default function Home() {
     <>
       <h1 className="sr-only">Home</h1>
       <div className={`space-y-10 ${hasHeroSlot ? "pb-2" : "pt-6 pb-2"}`}>
-        <AnnouncementBar />
-        <NotificationStrip />
+        <AnnouncementBar reserveActivityWidget={isAdmin} />
+        <NotificationStrip reserveActivityWidget={isAdmin} />
         {heroSlot}
         <TasteSeedBanner />
 
