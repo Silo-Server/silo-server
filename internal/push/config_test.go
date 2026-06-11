@@ -13,6 +13,7 @@ func TestConfig_Status(t *testing.T) {
 	s := fakeSettings{
 		"push.webpush.vapid_public":  "pub",
 		"push.webpush.vapid_private": "priv",
+		"push.webpush.subject":       "mailto:a@b.com",
 	}
 	c := NewConfig(s)
 	st := c.Status(context.Background())

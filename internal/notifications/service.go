@@ -215,13 +215,13 @@ func (s *Service) SetPreferences(ctx context.Context, userID int, prefs []Prefer
 	}
 	for _, p := range prefs {
 		if _, ok := mutableSet[p.Category]; !ok {
-			return fmt.Errorf("notifications: category %q is not mutable", p.Category)
+			return fmt.Errorf("notifications: category %q: %w", p.Category, ErrInvalidCategory)
 		}
 	}
-	for _, p := range prefs {
-		if err := s.store.SetPreference(ctx, userID, p.Category, p.Enabled); err != nil {
-			return fmt.Errorf("notifications: set preference %q: %w", p.Category, err)
-		}
+	// Persist the whole validated set atomically so a store error never leaves a
+	// partially applied preference set.
+	if err := s.store.SetPreferences(ctx, userID, prefs); err != nil {
+		return fmt.Errorf("notifications: set preferences: %w", err)
 	}
 	return nil
 }

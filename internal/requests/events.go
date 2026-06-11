@@ -52,6 +52,12 @@ func (s *Service) publishRequestEvent(ctx context.Context, event string, req Req
 		MediaType: req.MediaType,
 		Status:    req.Status,
 	}
+	// Quality lives per-target (a request fans out to one Target per resolved
+	// quality); surface the first target's quality so the payload field is
+	// populated rather than always empty.
+	if len(req.Targets) > 0 {
+		payload.Quality = req.Targets[0].Quality
+	}
 	opts := evt.PublishOptions{
 		UserID:    req.RequestedByUserID,
 		ProfileID: req.RequestedByProfileID,

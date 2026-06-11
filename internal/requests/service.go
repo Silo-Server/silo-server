@@ -461,6 +461,10 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if req.Status == StatusApproved {
 		result, err := s.submitApprovedRequest(ctx, *req, viewer, nil)
 		if err != nil {
+			// Submission hard-failed: still signal the persisted approval so
+			// consumers aren't left with only request.submitted for an approved
+			// row. (Soft-fails return no error and are handled below.)
+			s.publishRequestEvent(ctx, "request.approved", *req)
 			return nil, err
 		}
 		s.publishApprovalOutcome(ctx, result)
@@ -602,6 +606,9 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	}
 	result, err := s.submitApprovedRequest(ctx, *approved, viewer, nil)
 	if err != nil {
+		// Submission hard-failed: still signal the persisted approval (soft-fails
+		// return no error and are handled by publishApprovalOutcome below).
+		s.publishRequestEvent(ctx, "request.approved", *approved)
 		return nil, err
 	}
 	s.publishApprovalOutcome(ctx, result)

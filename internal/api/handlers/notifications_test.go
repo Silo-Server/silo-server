@@ -110,7 +110,7 @@ func (f *fakeNotificationsStore) Preferences(_ context.Context, _ int) (map[noti
 	return map[notifications.Category]bool{}, nil
 }
 
-func (f *fakeNotificationsStore) SetPreference(_ context.Context, _ int, _ notifications.Category, _ bool) error {
+func (f *fakeNotificationsStore) SetPreferences(_ context.Context, _ int, _ []notifications.Preference) error {
 	return f.setPrefErr
 }
 

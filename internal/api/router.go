@@ -1682,7 +1682,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// push token so that notifications are delivered to the correct profile.
 				// RequireProfile is applied per-route (not via r.Use) to leave the three
 				// user-scoped endpoints (devices list, toggle, webpush-key) without it.
-				if deps.PushStore != nil {
+				if deps.PushStore != nil && deps.PushConfig != nil {
 					pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig, deps.NotificationsService)
 					r.Route("/notifications/push", func(r chi.Router) {
 						r.With(apimw.RequireProfile).Put("/device", pushHandler.HandleRegister)
@@ -2456,7 +2456,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								})
 							}
 
-							if deps.PushStore != nil {
+							if deps.PushStore != nil && deps.PushConfig != nil {
 								pushHandler := handlers.NewPushHandler(deps.PushStore, deps.PushConfig, deps.NotificationsService)
 								r.Get("/push/status", pushHandler.HandleAdminStatus)
 								r.Post("/push/generate-vapid-keys", pushHandler.HandleGenerateVAPIDKeys)

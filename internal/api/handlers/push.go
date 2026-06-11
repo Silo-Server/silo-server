@@ -156,7 +156,7 @@ func (h *PushHandler) HandleListDevices(w http.ResponseWriter, r *http.Request) 
 
 // toggleDeviceRequest is the request body for HandleToggleDevice.
 type toggleDeviceRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled"`
 }
 
 // HandleToggleDevice handles PUT /notifications/push/devices/{device_id}.
@@ -171,8 +171,12 @@ func (h *PushHandler) HandleToggleDevice(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	if req.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "enabled is required")
+		return
+	}
 
-	if err := h.reg.SetDeviceEnabled(r.Context(), userID, deviceID, req.Enabled); err != nil {
+	if err := h.reg.SetDeviceEnabled(r.Context(), userID, deviceID, *req.Enabled); err != nil {
 		if errors.Is(err, push.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Device not found")
 			return

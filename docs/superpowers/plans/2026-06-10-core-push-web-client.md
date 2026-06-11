@@ -806,11 +806,12 @@ GOWORK=off go build ./... && GOWORK=off go test ./internal/api/handlers/ -run Te
 
 - [ ] **Step 3: Manual browser smoke (documented; requires a real browser over HTTPS or localhost)**
 
-Service workers + Push require a secure context — `localhost` qualifies. Build the server with the web assets and run on a localhost port:
+Service workers + Push require a secure context — `localhost` qualifies. Build the server with the web assets and run on a localhost port.
+Commands assume the repository root is the cwd.
 
 ```bash
 cd web && pnpm run build && cd ..
-GOWORK=off go build -o /tmp/silo-pushweb ./cmd/silo && (PORT=18080 JF_PORT=18096 /tmp/silo-pushweb > /tmp/silo-pushweb.log 2>&1 &)
+GOWORK=off go build -o ./bin/silo-pushweb ./cmd/silo && (PORT=18080 JF_PORT=18096 ./bin/silo-pushweb > ./silo-pushweb.log 2>&1 &)
 ```
 
 Then in a Chromium browser at `http://localhost:18080`:

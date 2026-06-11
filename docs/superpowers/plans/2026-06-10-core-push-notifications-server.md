@@ -2136,12 +2136,13 @@ taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationsStore, pushSto
 GOWORK=off go build ./... && GOWORK=off go vet ./internal/push/ ./internal/presence/ ./cmd/...
 ```
 
-Boot (port 18080 to avoid the 8080 SSH tunnel; fresh scratch DB if needed):
+Boot (port 18080 to avoid the 8080 SSH tunnel; fresh scratch DB if needed).
+Commands assume the repository root is the cwd.
 
 ```bash
 docker compose up -d postgres redis
-GOWORK=off go build -o /tmp/silo-push ./cmd/silo && (PORT=18080 JF_PORT=18096 /tmp/silo-push > /tmp/silo-push.log 2>&1 &)
-sleep 8 && grep -iE 'listening|fatal|push' /tmp/silo-push.log | head
+GOWORK=off go build -o ./bin/silo-push ./cmd/silo && (PORT=18080 JF_PORT=18096 ./bin/silo-push > ./silo-push.log 2>&1 &)
+sleep 8 && grep -iE 'listening|fatal|push' ./silo-push.log | head
 ```
 
 Expected: listening, task manager started (push_delivery registered), no fatal.

@@ -43,6 +43,9 @@ func (m *Materializer) matchRequest(ctx context.Context, env evt.Envelope) error
 	if data.UserID <= 0 {
 		return fmt.Errorf("%s without user_id", env.Event)
 	}
+	if data.RequestID == "" {
+		return fmt.Errorf("%s without request_id", env.Event)
+	}
 	return m.svc.Create(ctx, CreateInput{
 		UserID:      data.UserID,
 		ProfileID:   data.ProfileID,

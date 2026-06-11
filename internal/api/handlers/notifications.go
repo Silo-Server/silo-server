@@ -236,7 +236,11 @@ func (h *NotificationsHandler) HandlePutPreferences(w http.ResponseWriter, r *ht
 	}
 
 	if err := h.svc.SetPreferences(r.Context(), userID, req.Preferences); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		if errors.Is(err, notifications.ErrInvalidCategory) {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save preferences")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

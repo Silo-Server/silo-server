@@ -20,8 +20,10 @@ type WebPushConfig struct {
 func (c APNsConfig) Configured() bool {
 	return c.P8Key != "" && c.KeyID != "" && c.TeamID != "" && c.BundleID != ""
 }
-func (c FCMConfig) Configured() bool     { return c.ServiceAccountJSON != "" }
-func (c WebPushConfig) Configured() bool { return c.VAPIDPublic != "" && c.VAPIDPrivate != "" }
+func (c FCMConfig) Configured() bool { return c.ServiceAccountJSON != "" }
+func (c WebPushConfig) Configured() bool {
+	return c.VAPIDPublic != "" && c.VAPIDPrivate != "" && c.Subject != ""
+}
 
 // Config loads provider config from the (encrypted) settings repo on demand.
 type Config struct{ s settingsReader }

@@ -502,6 +502,8 @@ func main() {
 	if cfg.Redis.URL != "" {
 		if rc, err := cache.NewRedisClient(cfg.Redis); err == nil {
 			presenceRegistry = presence.NewRedisRegistry(rc, 60*time.Second)
+		} else {
+			slog.Warn("presence: redis unavailable, falling back to in-memory registry", "error", err)
 		}
 	}
 	if presenceRegistry == nil {

@@ -93,7 +93,7 @@ func (s *Store) ClaimDue(ctx context.Context, now time.Time, limit int) (*pgxpoo
 		SELECT pd.id, pd.notification_id, pd.user_id, pd.profile_id, pd.device_id, pd.transport, pd.status, pd.attempts, pd.not_before,
 		       d.push_token, n.title, n.body, COALESCE(n.link,''), n.category
 		FROM push_deliveries pd
-		JOIN user_devices d ON d.user_id = pd.user_id AND d.device_id = pd.device_id AND d.profile_id = pd.profile_id
+		JOIN user_devices d ON d.user_id = pd.user_id AND d.device_id = pd.device_id AND d.profile_id = pd.profile_id AND d.push_enabled = true AND d.push_token IS NOT NULL
 		JOIN notifications n ON n.id = pd.notification_id
 		WHERE pd.status IN ('pending','failed') AND pd.not_before <= $1
 		ORDER BY pd.not_before

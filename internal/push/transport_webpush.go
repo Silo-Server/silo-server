@@ -74,14 +74,20 @@ func (t *WebPushTransport) Send(ctx context.Context, token string, payload Paylo
 	}
 }
 
-// parseRetryAfter parses the Retry-After header value (seconds integer form).
-// Returns 0 for empty or unparseable values.
+// parseRetryAfter parses the Retry-After header value, supporting both the
+// delta-seconds integer form and the HTTP-date form. Returns 0 for empty,
+// unparseable, or past-dated values.
 func parseRetryAfter(h string) time.Duration {
 	if h == "" {
 		return 0
 	}
 	if secs, err := strconv.Atoi(h); err == nil {
 		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(h); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
 	}
 	return 0
 }

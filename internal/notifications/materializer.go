@@ -49,6 +49,9 @@ func (m *Materializer) register(name string, fn matcherFunc) {
 func (m *Materializer) Processed() int64 { return m.processed.Load() }
 
 func (m *Materializer) Start(ctx context.Context) error {
+	if m.unsub != nil {
+		return nil // already started; single-shot
+	}
 	ch, unsub := m.hub.Subscribe()
 	m.unsub = unsub
 	go func() {

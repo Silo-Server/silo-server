@@ -18,6 +18,10 @@ var _ Store = (*Repository)(nil)
 
 var ErrNotFound = errors.New("notification not found")
 
+// ErrInvalidCategory indicates a preference update referenced a non-mutable
+// category. Callers should map it to a 400 (client error) rather than a 500.
+var ErrInvalidCategory = errors.New("notification preference category is not mutable")
+
 // Store is the data-access interface for the notifications subsystem.
 type Store interface {
 	Insert(ctx context.Context, n *Notification) (created bool, err error)
@@ -27,7 +31,7 @@ type Store interface {
 	MarkAllRead(ctx context.Context, userID int, profileID string) error
 	Dismiss(ctx context.Context, userID int, profileID string, id int64) error
 	Preferences(ctx context.Context, userID int) (map[Category]bool, error)
-	SetPreference(ctx context.Context, userID int, c Category, enabled bool) error
+	SetPreferences(ctx context.Context, userID int, prefs []Preference) error
 	InsertAnnouncement(ctx context.Context, a *Announcement) error
 	ListAnnouncements(ctx context.Context) ([]*Announcement, error)
 	DeleteAnnouncement(ctx context.Context, id int64) error
@@ -293,15 +297,29 @@ func (r *Repository) Preferences(ctx context.Context, userID int) (map[Category]
 	return out, nil
 }
 
-// SetPreference upserts a notification preference for the user.
-func (r *Repository) SetPreference(ctx context.Context, userID int, c Category, enabled bool) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO notification_preferences (user_id, category, enabled)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, category) DO UPDATE SET enabled = EXCLUDED.enabled
-	`, userID, c, enabled)
+// SetPreferences upserts the given preferences for the user in a single
+// transaction, so a mid-batch failure never leaves a partially applied set.
+func (r *Repository) SetPreferences(ctx context.Context, userID int, prefs []Preference) error {
+	if len(prefs) == 0 {
+		return nil
+	}
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("set notification preference: %w", err)
+		return fmt.Errorf("set notification preferences: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, p := range prefs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO notification_preferences (user_id, category, enabled)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (user_id, category) DO UPDATE SET enabled = EXCLUDED.enabled
+		`, userID, p.Category, p.Enabled); err != nil {
+			return fmt.Errorf("set notification preference %q: %w", p.Category, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("set notification preferences: commit: %w", err)
 	}
 	return nil
 }
