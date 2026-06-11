@@ -31,10 +31,13 @@ export function useASSSubtitles(
 ): { isActive: boolean } {
   const jassubRef = useRef<JASSUB | null>(null);
   const jassubImportRef = useRef<Promise<typeof JASSUB> | null>(null);
-  // Effective JASSUB time offset. `streamOriginSeconds` accounts for HLS
-  // PTS rebasing; the user-facing delay (ms → s) adds on top. Positive
-  // delay = subtitles shown later, matching VTTCue semantics.
-  const effectiveOffset = streamOriginSeconds + subtitleDelayMs / 1000;
+  // Effective JASSUB time offset. JASSUB renders the ASS event matching
+  // `video.currentTime + timeOffset`, so an event at source time S appears
+  // at video time S - timeOffset. `streamOriginSeconds` accounts for HLS
+  // PTS rebasing; the user-facing delay (ms → s) must be SUBTRACTED so that
+  // positive delay = subtitles shown later, matching the VTT path's
+  // `start - origin + delay` cue shift.
+  const effectiveOffset = streamOriginSeconds - subtitleDelayMs / 1000;
   const streamOriginRef = useRef(effectiveOffset);
   streamOriginRef.current = effectiveOffset;
 
