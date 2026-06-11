@@ -680,7 +680,7 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -709,6 +709,10 @@ export interface BrowseItem {
   overlay_summary?: OverlaySummary | null;
   sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
+  // Manga-only count chips. The host populates these only for type='manga'
+  // browse items; they are absent (undefined) for every other media type.
+  manga_chapter_count?: number;
+  manga_volume_count?: number;
 }
 
 export interface BrowseResponse {

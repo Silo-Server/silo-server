@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { BrowseItem } from "@/api/types";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -55,6 +55,23 @@ function formatProgress(ratio?: number | null) {
     return null;
   }
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+}
+
+// mangaCountChipLabel returns the top-right poster chip label for a manga
+// browse item, or null when the item is not manga or has no positive chapter
+// count. When the volume count dominates (volumes >= loose chapters) the label
+// reads "Vols N", otherwise "Ch N". This is strictly manga-gated so no other
+// card type renders it.
+function mangaCountChipLabel(item: BrowseItem): string | null {
+  if (item.type !== "manga") {
+    return null;
+  }
+  const chapters = item.manga_chapter_count;
+  if (typeof chapters !== "number" || chapters <= 0) {
+    return null;
+  }
+  const volumes = item.manga_volume_count ?? 0;
+  return volumes >= chapters - volumes ? `Vols ${chapters}` : `Ch ${chapters}`;
 }
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
@@ -152,6 +169,7 @@ export default function ItemCard({
   }`;
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
+  const mangaCountLabel = mangaCountChipLabel(item);
 
   return (
     <div className="media-card group/card">
@@ -205,6 +223,12 @@ export default function ItemCard({
             )}
             {item.status === "matched" && overlayPrefs && (
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
+            )}
+            {mangaCountLabel && (
+              <span className="glass-subtle text-foreground absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+                <Layers className="size-3" />
+                {mangaCountLabel}
+              </span>
             )}
           </div>
         </ViewTransitionLink>
