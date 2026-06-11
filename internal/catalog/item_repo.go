@@ -253,61 +253,91 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 }
 
 // scanItems scans multiple rows into a []*models.MediaItem slice.
+// listItemScanDests returns the scan destinations matching
+// qualifiedListItemColumns, in column order. Every scan over that select list
+// must use this so the column list and destinations cannot drift apart.
+func listItemScanDests(item *models.MediaItem) []any {
+	return []any{
+		&item.ContentID,
+		&item.Type,
+		&item.Title,
+		&item.SortTitle,
+		&item.DefaultMetadataLanguage,
+		&item.OriginalTitle,
+		&item.Year,
+		&item.Genres,
+		&item.ContentRating,
+		&item.Runtime,
+		&item.Overview,
+		&item.Tagline,
+		&item.RatingIMDB,
+		&item.RatingTMDB,
+		&item.RatingRTCritic,
+		&item.RatingRTAudience,
+		&item.ImdbID,
+		&item.TmdbID,
+		&item.TvdbID,
+		&item.PosterPath,
+		&item.PosterThumbhash,
+		&item.BackdropPath,
+		&item.BackdropThumbhash,
+		&item.LogoPath,
+		&item.MetadataS3Path,
+		&item.MetadataEtag,
+		&item.SeasonCount,
+		&item.Studios,
+		&item.Networks,
+		&item.Countries,
+		&item.Keywords,
+		&item.OriginalLanguage,
+		&item.ReleaseDate,
+		&item.FirstAirDate,
+		&item.LastAirDate,
+		&item.AirTime,
+		&item.AirTimezone,
+		&item.ShowStatus,
+		&item.MatchedAt,
+		&item.LastRefreshed,
+		&item.RefreshFailures,
+		&item.EpisodeMetadataIncomplete,
+		&item.EpisodeMetadataLastCheckedAt,
+		&item.LockedFields,
+		&item.Status,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	}
+}
+
 func scanItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 	var items []*models.MediaItem
 	for rows.Next() {
 		var item models.MediaItem
-		err := rows.Scan(
-			&item.ContentID,
-			&item.Type,
-			&item.Title,
-			&item.SortTitle,
-			&item.DefaultMetadataLanguage,
-			&item.OriginalTitle,
-			&item.Year,
-			&item.Genres,
-			&item.ContentRating,
-			&item.Runtime,
-			&item.Overview,
-			&item.Tagline,
-			&item.RatingIMDB,
-			&item.RatingTMDB,
-			&item.RatingRTCritic,
-			&item.RatingRTAudience,
-			&item.ImdbID,
-			&item.TmdbID,
-			&item.TvdbID,
-			&item.PosterPath,
-			&item.PosterThumbhash,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
-			&item.MetadataS3Path,
-			&item.MetadataEtag,
-			&item.SeasonCount,
-			&item.Studios,
-			&item.Networks,
-			&item.Countries,
-			&item.Keywords,
-			&item.OriginalLanguage,
-			&item.ReleaseDate,
-			&item.FirstAirDate,
-			&item.LastAirDate,
-			&item.AirTime,
-			&item.AirTimezone,
-			&item.ShowStatus,
-			&item.MatchedAt,
-			&item.LastRefreshed,
-			&item.RefreshFailures,
-			&item.EpisodeMetadataIncomplete,
-			&item.EpisodeMetadataLastCheckedAt,
-			&item.LockedFields,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		)
-		if err != nil {
+		if err := rows.Scan(listItemScanDests(&item)...); err != nil {
 			return nil, fmt.Errorf("scanning media item row: %w", err)
+		}
+		items = append(items, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating media item rows: %w", err)
+	}
+	return items, nil
+}
+
+// scanItemsWithMangaCounts scans rows selected with qualifiedListItemColumns
+// followed by mangaCountColumns. The count subqueries return 0 for non-manga
+// rows; they are nilled out so only manga cards carry the counts (mirrors
+// scanBrowseItems).
+func scanItemsWithMangaCounts(rows pgx.Rows) ([]*models.MediaItem, error) {
+	var items []*models.MediaItem
+	for rows.Next() {
+		var item models.MediaItem
+		dests := append(listItemScanDests(&item), &item.MangaChapterCount, &item.MangaVolumeCount)
+		if err := rows.Scan(dests...); err != nil {
+			return nil, fmt.Errorf("scanning media item row with manga counts: %w", err)
+		}
+		if item.Type != "manga" {
+			item.MangaChapterCount = nil
+			item.MangaVolumeCount = nil
 		}
 		items = append(items, &item)
 	}
@@ -330,57 +360,8 @@ func scanItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
 	for rows.Next() {
 		var item models.MediaItem
 		var rowTotal int
-		err := rows.Scan(
-			&item.ContentID,
-			&item.Type,
-			&item.Title,
-			&item.SortTitle,
-			&item.DefaultMetadataLanguage,
-			&item.OriginalTitle,
-			&item.Year,
-			&item.Genres,
-			&item.ContentRating,
-			&item.Runtime,
-			&item.Overview,
-			&item.Tagline,
-			&item.RatingIMDB,
-			&item.RatingTMDB,
-			&item.RatingRTCritic,
-			&item.RatingRTAudience,
-			&item.ImdbID,
-			&item.TmdbID,
-			&item.TvdbID,
-			&item.PosterPath,
-			&item.PosterThumbhash,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
-			&item.MetadataS3Path,
-			&item.MetadataEtag,
-			&item.SeasonCount,
-			&item.Studios,
-			&item.Networks,
-			&item.Countries,
-			&item.Keywords,
-			&item.OriginalLanguage,
-			&item.ReleaseDate,
-			&item.FirstAirDate,
-			&item.LastAirDate,
-			&item.AirTime,
-			&item.AirTimezone,
-			&item.ShowStatus,
-			&item.MatchedAt,
-			&item.LastRefreshed,
-			&item.RefreshFailures,
-			&item.EpisodeMetadataIncomplete,
-			&item.EpisodeMetadataLastCheckedAt,
-			&item.LockedFields,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-			&rowTotal,
-		)
-		if err != nil {
+		dests := append(listItemScanDests(&item), &rowTotal)
+		if err := rows.Scan(dests...); err != nil {
 			return nil, 0, fmt.Errorf("scanning media item row with total: %w", err)
 		}
 		items = append(items, &item)
