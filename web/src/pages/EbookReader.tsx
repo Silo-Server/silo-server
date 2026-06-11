@@ -235,11 +235,22 @@ export default function EbookReader() {
     [item?.versions],
   );
   const format = readerFileFormat(selectedFile);
+  // Comic archives are image books: prose chrome (TTS, typography, reading
+  // ruler) is meaningless and the side panel steals width the pages need, so
+  // it starts closed (the toggle still opens it).
+  const isComicFormat = format === "cbz" || format === "cbr";
   const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
   const [readerProgress, setReaderProgress] = useState<number | null>(null);
   const [toc, setToc] = useState<TOCItem[]>([]);
   const [panelOpen, setPanelOpen] = useState(true);
+  const comicPanelInitRef = useRef(false);
+  useEffect(() => {
+    if (isComicFormat && !comicPanelInitRef.current) {
+      comicPanelInitRef.current = true;
+      setPanelOpen(false);
+    }
+  }, [isComicFormat]);
   const [panel, setPanel] = useState<ReaderPanel>("toc");
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(() =>
     loadStoredReaderSettings(),
@@ -649,15 +660,17 @@ export default function EbookReader() {
             >
               <Bookmark className="size-4" />
             </Button>
-            <Button
-              variant={readerSettings.readingRuler ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label="Toggle reading ruler"
-              title="Reading ruler"
-              onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
-            >
-              <Ruler className="size-4" />
-            </Button>
+            {!isComicFormat && (
+              <Button
+                variant={readerSettings.readingRuler ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="Toggle reading ruler"
+                title="Reading ruler"
+                onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
+              >
+                <Ruler className="size-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -957,90 +970,96 @@ export default function EbookReader() {
                     Reset
                   </Button>
                   <div className="space-y-3">
-                    <div className="border-border space-y-2 border-b pb-3">
-                      <div className="text-muted-foreground text-xs font-medium">
-                        Reading profile
-                      </div>
-                      <div className="grid gap-2">
-                        {READER_PROFILES.map((profile) => {
-                          const active = profileIsActive(profile, readerSettings);
-                          return (
-                            <Button
-                              key={profile.id}
-                              type="button"
-                              variant={active ? "secondary" : "outline"}
-                              size="sm"
-                              aria-pressed={active}
-                              onClick={() => updateReaderSettings(profile.settings)}
-                              className="h-auto min-h-11 w-full justify-between px-3 py-2 text-left"
-                            >
-                              <span className="min-w-0">
-                                <span className="block text-sm font-medium">{profile.label}</span>
-                                <span className="text-muted-foreground block text-xs">
-                                  {profile.description}
+                    {!isComicFormat && (
+                      <div className="border-border space-y-2 border-b pb-3">
+                        <div className="text-muted-foreground text-xs font-medium">
+                          Reading profile
+                        </div>
+                        <div className="grid gap-2">
+                          {READER_PROFILES.map((profile) => {
+                            const active = profileIsActive(profile, readerSettings);
+                            return (
+                              <Button
+                                key={profile.id}
+                                type="button"
+                                variant={active ? "secondary" : "outline"}
+                                size="sm"
+                                aria-pressed={active}
+                                onClick={() => updateReaderSettings(profile.settings)}
+                                className="h-auto min-h-11 w-full justify-between px-3 py-2 text-left"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block text-sm font-medium">{profile.label}</span>
+                                  <span className="text-muted-foreground block text-xs">
+                                    {profile.description}
+                                  </span>
                                 </span>
-                              </span>
-                              {active && <Check className="size-4 shrink-0" />}
-                            </Button>
-                          );
-                        })}
+                                {active && <Check className="size-4 shrink-0" />}
+                              </Button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Volume2 className="size-4" />
-                      Read aloud
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        aria-label="Speak text"
-                        onClick={handleSpeak}
-                      >
-                        <Play className="size-4" />
-                        Speak
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={tts.state === "paused" ? "Resume speech" : "Pause speech"}
-                        onClick={tts.state === "paused" ? tts.resume : tts.pause}
-                      >
-                        <Pause className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Stop speech"
-                        onClick={tts.stop}
-                      >
-                        <Square className="size-4" />
-                      </Button>
-                    </div>
-                    <ReaderRange
-                      label="Speech rate"
-                      value={ttsRate}
-                      min={0.5}
-                      max={2}
-                      step={0.1}
-                      onChange={setTtsRate}
-                    />
-                    <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground text-xs font-medium">Voice</span>
-                      <select
-                        aria-label="Voice"
-                        value={ttsVoiceURI}
-                        onChange={(event) => setTtsVoiceURI(event.target.value)}
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                      >
-                        <option value="">Default</option>
-                        {tts.voices.map((voice) => (
-                          <option key={voice.voiceURI} value={voice.voiceURI}>
-                            {voice.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    )}
+                    {!isComicFormat && (
+                      <>
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Volume2 className="size-4" />
+                          Read aloud
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            aria-label="Speak text"
+                            onClick={handleSpeak}
+                          >
+                            <Play className="size-4" />
+                            Speak
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={tts.state === "paused" ? "Resume speech" : "Pause speech"}
+                            onClick={tts.state === "paused" ? tts.resume : tts.pause}
+                          >
+                            <Pause className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Stop speech"
+                            onClick={tts.stop}
+                          >
+                            <Square className="size-4" />
+                          </Button>
+                        </div>
+                        <ReaderRange
+                          label="Speech rate"
+                          value={ttsRate}
+                          min={0.5}
+                          max={2}
+                          step={0.1}
+                          onChange={setTtsRate}
+                        />
+                        <label className="block space-y-1 text-sm">
+                          <span className="text-muted-foreground text-xs font-medium">Voice</span>
+                          <select
+                            aria-label="Voice"
+                            value={ttsVoiceURI}
+                            onChange={(event) => setTtsVoiceURI(event.target.value)}
+                            className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                          >
+                            <option value="">Default</option>
+                            {tts.voices.map((voice) => (
+                              <option key={voice.voiceURI} value={voice.voiceURI}>
+                                {voice.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    )}
                   </div>
                   <div className="border-border space-y-2 border-t pt-3">
                     <label className="flex items-center justify-between gap-3 text-sm">
@@ -1074,33 +1093,39 @@ export default function EbookReader() {
                       <option value="dark">Dark</option>
                     </select>
                   </label>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Font</span>
-                    <select
-                      aria-label="Font family"
-                      value={readerSettings.fontFamily}
-                      onChange={(event) => updateReaderSettings({ fontFamily: event.target.value })}
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      {READER_FONT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                      {!READER_FONT_OPTIONS.some(
-                        (option) => option.value === readerSettings.fontFamily,
-                      ) && <option value={readerSettings.fontFamily}>Custom</option>}
-                    </select>
-                  </label>
-                  <ReaderRange
-                    label="Font size"
-                    value={readerSettings.fontSize}
-                    min={80}
-                    max={180}
-                    step={1}
-                    suffix="%"
-                    onChange={(fontSize) => updateReaderSettings({ fontSize })}
-                  />
+                  {!isComicFormat && (
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs font-medium">Font</span>
+                      <select
+                        aria-label="Font family"
+                        value={readerSettings.fontFamily}
+                        onChange={(event) =>
+                          updateReaderSettings({ fontFamily: event.target.value })
+                        }
+                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      >
+                        {READER_FONT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                        {!READER_FONT_OPTIONS.some(
+                          (option) => option.value === readerSettings.fontFamily,
+                        ) && <option value={readerSettings.fontFamily}>Custom</option>}
+                      </select>
+                    </label>
+                  )}
+                  {!isComicFormat && (
+                    <ReaderRange
+                      label="Font size"
+                      value={readerSettings.fontSize}
+                      min={80}
+                      max={180}
+                      step={1}
+                      suffix="%"
+                      onChange={(fontSize) => updateReaderSettings({ fontSize })}
+                    />
+                  )}
                   <ReaderRange
                     label="Brightness"
                     value={readerSettings.fontBrightness}
@@ -1110,14 +1135,16 @@ export default function EbookReader() {
                     suffix="%"
                     onChange={(fontBrightness) => updateReaderSettings({ fontBrightness })}
                   />
-                  <ReaderRange
-                    label="Line height"
-                    value={readerSettings.lineHeight}
-                    min={1.1}
-                    max={2.4}
-                    step={0.05}
-                    onChange={(lineHeight) => updateReaderSettings({ lineHeight })}
-                  />
+                  {!isComicFormat && (
+                    <ReaderRange
+                      label="Line height"
+                      value={readerSettings.lineHeight}
+                      min={1.1}
+                      max={2.4}
+                      step={0.05}
+                      onChange={(lineHeight) => updateReaderSettings({ lineHeight })}
+                    />
+                  )}
                   <ReaderRange
                     label="Margin"
                     value={readerSettings.margin}
@@ -1127,7 +1154,7 @@ export default function EbookReader() {
                     suffix="px"
                     onChange={(margin) => updateReaderSettings({ margin })}
                   />
-                  {readerSettings.flow !== "scrolled" && (
+                  {!isComicFormat && readerSettings.flow !== "scrolled" && (
                     <ReaderRange
                       label="Width"
                       value={readerSettings.maxWidth}
@@ -1139,17 +1166,19 @@ export default function EbookReader() {
                     />
                   )}
                   <div className="border-border space-y-2 border-t pt-3">
-                    <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>Hyphenation</span>
-                      <input
-                        aria-label="Hyphenation"
-                        type="checkbox"
-                        checked={readerSettings.hyphenation}
-                        onChange={(event) =>
-                          updateReaderSettings({ hyphenation: event.target.checked })
-                        }
-                      />
-                    </label>
+                    {!isComicFormat && (
+                      <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Hyphenation</span>
+                        <input
+                          aria-label="Hyphenation"
+                          type="checkbox"
+                          checked={readerSettings.hyphenation}
+                          onChange={(event) =>
+                            updateReaderSettings({ hyphenation: event.target.checked })
+                          }
+                        />
+                      </label>
+                    )}
                     <label className="flex items-center justify-between gap-3 text-sm">
                       <span>Right to left</span>
                       <input
@@ -1159,17 +1188,19 @@ export default function EbookReader() {
                         onChange={(event) => updateReaderSettings({ rtl: event.target.checked })}
                       />
                     </label>
-                    <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>Reading ruler</span>
-                      <input
-                        aria-label="Reading ruler"
-                        type="checkbox"
-                        checked={readerSettings.readingRuler}
-                        onChange={(event) =>
-                          updateReaderSettings({ readingRuler: event.target.checked })
-                        }
-                      />
-                    </label>
+                    {!isComicFormat && (
+                      <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Reading ruler</span>
+                        <input
+                          aria-label="Reading ruler"
+                          type="checkbox"
+                          checked={readerSettings.readingRuler}
+                          onChange={(event) =>
+                            updateReaderSettings({ readingRuler: event.target.checked })
+                          }
+                        />
+                      </label>
+                    )}
                     {readerSettings.readingRuler && (
                       <ReaderRange
                         label="Ruler position"
@@ -1182,23 +1213,27 @@ export default function EbookReader() {
                       />
                     )}
                   </div>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Writing mode</span>
-                    <select
-                      aria-label="Writing mode"
-                      value={readerSettings.writingMode}
-                      onChange={(event) =>
-                        updateReaderSettings({
-                          writingMode: event.target.value as ReaderSettings["writingMode"],
-                        })
-                      }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="horizontal-tb">Horizontal</option>
-                      <option value="vertical-rl">Vertical</option>
-                    </select>
-                  </label>
+                  {!isComicFormat && (
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs font-medium">
+                        Writing mode
+                      </span>
+                      <select
+                        aria-label="Writing mode"
+                        value={readerSettings.writingMode}
+                        onChange={(event) =>
+                          updateReaderSettings({
+                            writingMode: event.target.value as ReaderSettings["writingMode"],
+                          })
+                        }
+                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="horizontal-tb">Horizontal</option>
+                        <option value="vertical-rl">Vertical</option>
+                      </select>
+                    </label>
+                  )}
                   {readerSettings.flow !== "scrolled" && (
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground text-xs font-medium">Spread</span>
