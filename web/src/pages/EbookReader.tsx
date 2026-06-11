@@ -517,8 +517,16 @@ export default function EbookReader() {
     );
   }
 
+  // backToParam comes from the URL, so it must be validated before use as an
+  // href: only accept a single-leading-slash in-app relative path. This rejects
+  // absolute URLs, protocol-relative (`//host`), backslash tricks, and
+  // `javascript:`/`data:` schemes (open-redirect / XSS).
+  const safeBackTo =
+    backToParam && backToParam.startsWith("/") && !/^\/[/\\]/.test(backToParam)
+      ? backToParam
+      : null;
   const backHref =
-    backToParam ||
+    safeBackTo ||
     `/item/${encodeURIComponent(item.content_id)}${
       libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
     }`;
