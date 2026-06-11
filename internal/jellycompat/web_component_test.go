@@ -136,6 +136,43 @@ func TestWebComponentStatusUsesPersistedSettingsForDisplay(t *testing.T) {
 	}
 }
 
+func TestWebComponentStatusDoesNotRequireRestartForLiveIdentitySettings(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":                 "true",
+		"jellyfin_compat.listen":                  ":8096",
+		"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
+		"jellyfin_compat.server_name":             "Silo",
+		"jellyfin_compat.emulated_server_version": "10.11.0",
+		"jellyfin_compat.web_install_dir":         root,
+		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+
+	status := WebComponentStatusForConfig(cfg, map[string]string{
+		"jellyfin_compat.public_url":              "https://compat.example.test",
+		"jellyfin_compat.server_name":             "Silo Compat",
+		"jellyfin_compat.emulated_server_version": "10.11.6",
+		"jellyfin_compat.web_install_dir":         root,
+		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
+	})
+
+	if status.PublicURL != "https://compat.example.test" {
+		t.Fatalf("PublicURL = %q, want persisted public URL", status.PublicURL)
+	}
+	if status.ServerName != "Silo Compat" {
+		t.Fatalf("ServerName = %q, want persisted server name", status.ServerName)
+	}
+	if status.EmulatedVersion != "10.11.6" {
+		t.Fatalf("EmulatedVersion = %q, want persisted emulated version", status.EmulatedVersion)
+	}
+	if status.RestartRequired {
+		t.Fatal("RestartRequired = true, want false for live identity settings")
+	}
+}
+
 func TestWebComponentStatusDoesNotDefaultPinnedVersionToEmulatedVersion(t *testing.T) {
 	root := t.TempDir()
 	cfg, err := config.LoadFromDB(map[string]string{

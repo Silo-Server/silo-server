@@ -399,10 +399,7 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 	}
 	if cfg != nil {
 		status.RestartRequired = enabled != cfg.JellyfinCompat.Enabled ||
-			strings.TrimSpace(status.Listen) != strings.TrimSpace(cfg.JellyfinCompat.Listen) ||
-			strings.TrimSpace(status.PublicURL) != strings.TrimSpace(cfg.JellyfinCompat.PublicURL) ||
-			strings.TrimSpace(status.EmulatedVersion) != strings.TrimSpace(cfg.JellyfinCompat.EmulatedServerVersion) ||
-			strings.TrimSpace(status.ServerName) != strings.TrimSpace(cfg.JellyfinCompat.ServerName)
+			strings.TrimSpace(status.Listen) != strings.TrimSpace(cfg.JellyfinCompat.Listen)
 	}
 	return status
 }
