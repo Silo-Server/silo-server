@@ -27,7 +27,12 @@ import (
 const (
 	mangaMetadataImageProviderID = "manga-metadata"
 
-	defaultEnrichBatchSize = 50
+	// defaultEnrichBatchSize is sized so a sweep finishes within the 5-minute
+	// task interval: the plugin serves GetMetadata from its search cache, so
+	// an item costs one AniList request at the plugin's ~1 req/s budget. The
+	// task manager drops a trigger while a sweep is still running, so an
+	// overlong sweep degrades to back-to-back sweeps, not concurrent ones.
+	defaultEnrichBatchSize = 200
 	defaultEnrichWorkers   = 4
 
 	// enrichFailureCap is the manga_enrichment_state.failures count at which
@@ -44,6 +49,12 @@ const (
 // are retried on every sweep until the missing prerequisite appears.
 var errEnrichmentSkipped = errors.New("manga enrichment skipped")
 
+// errEnrichmentNoMatch marks an item every provider answered for without a
+// confident match. The item was stamped (it will not be re-claimed); the
+// sentinel only keeps the sweep counters honest — a no-match is neither an
+// enrichment nor a failure.
+var errEnrichmentNoMatch = errors.New("manga enrichment: no confident match")
+
 func mangaContentType() string {
 	return "manga"
 }
@@ -55,10 +66,19 @@ func mangaEnrichWorkers() int {
 			n = parsed
 		}
 	}
-	if n > defaultEnrichBatchSize {
-		n = defaultEnrichBatchSize
+	if n > mangaEnrichBatchSize() {
+		n = mangaEnrichBatchSize()
 	}
 	return n
+}
+
+func mangaEnrichBatchSize() int {
+	if v := os.Getenv("SILO_MANGA_ENRICH_BATCH"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultEnrichBatchSize
 }
 
 type enrichmentItemRow struct {
@@ -99,7 +119,7 @@ func NewEnricher(
 		itemRepo:    itemRepo,
 		personRepo:  personRepo,
 		providerIDs: providerIDs,
-		batchSize:   defaultEnrichBatchSize,
+		batchSize:   mangaEnrichBatchSize(),
 		workers:     mangaEnrichWorkers(),
 	}
 }
@@ -129,13 +149,23 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		"workers", e.workers,
 	)
 
-	enriched := e.runBatch(ctx, items, e.enrichItem, e.recordEnrichFailure)
+	stats := e.runBatch(ctx, items, e.enrichItem, e.recordEnrichFailure)
 
 	slog.Info("manga enrichment: sweep complete",
 		"attempted", len(items),
-		"enriched", enriched,
+		"enriched", stats.enriched,
+		"no_match", stats.noMatch,
+		"failed", stats.failed,
 	)
-	return enriched, nil
+	return int(stats.enriched), nil
+}
+
+// sweepStats separates the three terminal outcomes of a sweep so the log and
+// task result do not overcount: a stamped no-match is not an enrichment.
+type sweepStats struct {
+	enriched int64
+	noMatch  int64
+	failed   int64
 }
 
 func (e *Enricher) runBatch(
@@ -143,7 +173,7 @@ func (e *Enricher) runBatch(
 	items []enrichmentItemRow,
 	enrichFn func(context.Context, enrichmentItemRow) error,
 	recordFailure func(context.Context, enrichmentItemRow),
-) int {
+) sweepStats {
 	workers := e.workers
 	if workers <= 0 {
 		workers = 1
@@ -154,8 +184,8 @@ func (e *Enricher) runBatch(
 
 	ch := make(chan enrichmentItemRow, workers)
 	var (
-		wg       sync.WaitGroup
-		enriched int64
+		wg    sync.WaitGroup
+		stats sweepStats
 	)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -174,6 +204,10 @@ func (e *Enricher) runBatch(
 						)
 						continue
 					}
+					if errors.Is(err, errEnrichmentNoMatch) {
+						atomic.AddInt64(&stats.noMatch, 1)
+						continue
+					}
 					slog.Warn("manga enrichment: item failed",
 						"content_id", item.ContentID,
 						"title", item.Title,
@@ -184,9 +218,10 @@ func (e *Enricher) runBatch(
 					if recordFailure != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 						recordFailure(ctx, item)
 					}
+					atomic.AddInt64(&stats.failed, 1)
 					continue
 				}
-				atomic.AddInt64(&enriched, 1)
+				atomic.AddInt64(&stats.enriched, 1)
 			}
 		}()
 	}
@@ -198,7 +233,7 @@ func (e *Enricher) runBatch(
 	}
 	close(ch)
 	wg.Wait()
-	return int(enriched)
+	return stats
 }
 
 // claimBatchQuery selects unenriched manga. Items with fewer prior failures
@@ -295,7 +330,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 // enrichWithProviders runs the provider chain for one claimed item. Outcomes:
 //   - metadata obtained: persist it and stamp last_refreshed (nil error);
 //   - providers answered but nothing matched: stamp last_refreshed so the
-//     item is not re-claimed every sweep (nil error);
+//     item is not re-claimed every sweep (errEnrichmentNoMatch);
 //   - one or more providers errored and no metadata was obtained: return an
 //     error so the failure cap/backoff engages, without stamping;
 //   - no providers configured: skip (no stamp, no failure) so the item is
@@ -322,7 +357,10 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
-		return e.stampLastRefreshed(ctx, item.ContentID)
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return err
+		}
+		return errEnrichmentNoMatch
 	}
 
 	e.cacheRemotePoster(ctx, item.ContentID, accumulator)
