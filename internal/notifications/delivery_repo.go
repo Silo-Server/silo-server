@@ -228,6 +228,22 @@ func (r *DeliveryRepository) GetRowByID(ctx context.Context, id string) (*Delive
 	return &out[0], nil
 }
 
+// ListForUserSince returns the account's deliveries newer than the watermark,
+// ascending, across all of its profiles. Runs inside the email worker's claim
+// transaction so the rows read are the rows the advanced watermark covers.
+func (r *DeliveryRepository) ListForUserSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, limit int) ([]DeliveryRow, error) {
+	rows, err := tx.Query(ctx,
+		deliveryRowSelect+`
+		WHERE d.user_id = $1 AND (d.created_at, d.id) > ($2, $3)
+		ORDER BY d.created_at ASC, d.id ASC
+		LIMIT $4`,
+		userID, since.CreatedAt, since.ID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list user deliveries since: %w", err)
+	}
+	return scanDeliveryRows(rows)
+}
+
 // RecentUnread returns the newest unread rows for the websocket snapshot.
 func (r *DeliveryRepository) RecentUnread(ctx context.Context, profileID string, limit int) ([]DeliveryRow, error) {
 	rows, err := r.pool.Query(ctx,

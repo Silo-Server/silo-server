@@ -17,6 +17,10 @@ const KEYS = [
   "notifications.webhooks.max_per_profile",
   "notifications.webhooks.allow_private_destinations",
   "notifications.webhooks.deliveries_per_minute_per_profile",
+  "notifications.email_enabled",
+  "notifications.email.allow_per_episode",
+  "notifications.email.digest_hour",
+  "notifications.email.external_url",
   "notifications.retention.read_days",
   "notifications.retention.unread_days",
   "notifications.retention.event_days",
@@ -143,6 +147,37 @@ export default function NotificationsAdminSettings() {
               </p>
             </div>
           )}
+        </FieldGroup>
+
+        <FieldGroup label="Email">
+          <SettingField
+            label="Email Notifications"
+            hint="Deliver notifications by email to accounts that opt in. Requires SMTP to be configured on the Email page."
+            type="toggle"
+            value={toggleValue("notifications.email_enabled")}
+            onChange={(v) => form.setValue("notifications.email_enabled", v)}
+          />
+          <SettingField
+            label="Allow Per-Episode Email"
+            hint="Let users choose an email per episode instead of the daily digest. Off coerces those accounts to the digest."
+            type="toggle"
+            value={toggleValue("notifications.email.allow_per_episode")}
+            onChange={(v) => form.setValue("notifications.email.allow_per_episode", v)}
+          />
+          <SettingField
+            label="Digest Hour"
+            hint="Hour of day (0-23, server time) when daily digest emails go out (default 8)"
+            type="number"
+            value={numberValue("notifications.email.digest_hour", "8")}
+            onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
+          />
+          <SettingField
+            label="External URL"
+            hint="Public base URL of this server (e.g. https://silo.example.com) used for links inside emails. Empty sends emails without links."
+            type="text"
+            value={form.getValue("notifications.email.external_url")}
+            onChange={(v) => form.setValue("notifications.email.external_url", v)}
+          />
         </FieldGroup>
 
         <FieldGroup label="Retention">

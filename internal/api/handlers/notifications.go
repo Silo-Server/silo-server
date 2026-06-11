@@ -282,6 +282,15 @@ type capabilityResponse struct {
 	AndroidPush capabilityPush     `json:"android_push"`
 	WebPush     capabilityWebPush  `json:"web_push"`
 	Webhooks    capabilityWebhooks `json:"webhooks"`
+	Email       capabilityEmail    `json:"email"`
+}
+
+type capabilityEmail struct {
+	Available bool `json:"available"`
+	// Modes lists the cadences users may pick (per-episode is an admin
+	// allowance); DigestHour tells the UI when daily digests go out.
+	Modes      []string `json:"modes"`
+	DigestHour int      `json:"digest_hour"`
 }
 
 type capabilityWebPush struct {
@@ -324,12 +333,25 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 			webPush = capabilityWebPush{Available: true, PublicKey: publicKey}
 		}
 	}
+	email := capabilityEmail{Modes: []string{}}
+	if h.system.EmailAvailable(r.Context()) {
+		modes := []string{notifications.EmailModeDailyDigest}
+		if h.system.Settings.EmailAllowPerEpisode(r.Context()) {
+			modes = append(modes, notifications.EmailModePerEpisode)
+		}
+		email = capabilityEmail{
+			Available:  true,
+			Modes:      modes,
+			DigestHour: h.system.Settings.EmailDigestHour(r.Context()),
+		}
+	}
 	writeJSON(w, http.StatusOK, capabilityResponse{
 		InApp:       capabilityInApp{Enabled: h.system.Settings.UIEnabled(r.Context())},
 		ApplePush:   capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}},
 		AndroidPush: capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}},
 		WebPush:     webPush,
 		Webhooks:    webhooks,
+		Email:       email,
 	})
 }
 

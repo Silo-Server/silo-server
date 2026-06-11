@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
+  NotificationEmailMode,
   NotificationPreferences,
   NotificationWebhook,
   NotificationWebhookInput,
@@ -36,10 +37,20 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/hooks/useAuth";
 import {
+  useEmailNotificationPreferences,
   useNotificationPreferences,
+  useUpdateEmailNotificationPreferences,
   useUpdateNotificationPreferences,
 } from "@/hooks/queries/notifications";
 import {
@@ -137,6 +148,90 @@ function PreferencesSection() {
           />
         </div>
       ))}
+    </SettingsGroup>
+  );
+}
+
+function EmailSection() {
+  const { user } = useAuth();
+  const capability = useNotificationCapability();
+  const emailCap = capability.data?.email;
+  const available = emailCap?.available ?? false;
+  const { data: prefs, isLoading } = useEmailNotificationPreferences(available);
+  const updatePrefs = useUpdateEmailNotificationPreferences();
+
+  if (!available) {
+    return null;
+  }
+
+  const mode = prefs?.mode ?? "off";
+  const enabled = mode !== "off";
+  const allowPerEpisode = emailCap?.modes.includes("per_episode") ?? false;
+  const digestHour = String(emailCap?.digest_hour ?? 8).padStart(2, "0");
+
+  if (isLoading) {
+    return (
+      <SettingsGroup title="Email Notifications">
+        <Skeleton className="h-16 w-full" />
+      </SettingsGroup>
+    );
+  }
+
+  return (
+    <SettingsGroup
+      title="Email Notifications"
+      description="Account-wide: one email covers every profile on this account."
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Send to {user?.email || "your account email"}</div>
+          <div className="text-muted-foreground text-xs">
+            Notifications you'd see in the inbox, delivered by email
+          </div>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={updatePrefs.isPending}
+          onCheckedChange={(checked) =>
+            updatePrefs.mutate({ mode: checked ? "daily_digest" : "off" })
+          }
+        />
+      </div>
+      {enabled && (
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm">Frequency</div>
+            <div className="text-muted-foreground text-xs">
+              {mode === "per_episode"
+                ? "An email as soon as each notification arrives"
+                : `One summary per day, around ${digestHour}:00 server time`}
+            </div>
+          </div>
+          <Select
+            value={mode}
+            disabled={updatePrefs.isPending}
+            onValueChange={(value) => updatePrefs.mutate({ mode: value as NotificationEmailMode })}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="daily_digest">Daily digest</SelectItem>
+              {(allowPerEpisode || mode === "per_episode") && (
+                <SelectItem value="per_episode" disabled={!allowPerEpisode}>
+                  Every episode
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {enabled && mode === "per_episode" && !allowPerEpisode && (
+        <div className="text-xs text-amber-500">
+          Per-episode email is disabled by the administrator; you'll receive the daily digest
+          instead.
+        </div>
+      )}
     </SettingsGroup>
   );
 }
@@ -655,6 +750,8 @@ export default function NotificationsSettings() {
       <PreferencesSection />
 
       <WebPushSection />
+
+      <EmailSection />
 
       <SettingsGroup
         title="Webhooks"

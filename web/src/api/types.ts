@@ -2333,6 +2333,14 @@ export interface NotificationCapability {
   android_push: { available: boolean; provider: string; supported_modes: string[] };
   web_push: { available: boolean; public_key?: string };
   webhooks: { available: boolean; max_per_profile: number; supported_types: string[] };
+  email: { available: boolean; modes: string[]; digest_hour: number };
+}
+
+export type NotificationEmailMode = "off" | "per_episode" | "daily_digest";
+
+/** Account-level (not per-profile): one mode covers all profiles. */
+export interface NotificationEmailPreferences {
+  mode: NotificationEmailMode;
 }
 
 export interface WebPushSubscriptionView {

@@ -34,6 +34,11 @@ const (
 	SettingWebhooksMaxPerProfile = "notifications.webhooks.max_per_profile"
 	SettingWebhooksAllowPrivate  = "notifications.webhooks.allow_private_destinations"
 	SettingWebhooksRatePerMinute = "notifications.webhooks.deliveries_per_minute_per_profile"
+
+	SettingEmailEnabled         = "notifications.email_enabled"
+	SettingEmailAllowPerEpisode = "notifications.email.allow_per_episode"
+	SettingEmailDigestHour      = "notifications.email.digest_hour"
+	SettingEmailExternalURL     = "notifications.email.external_url"
 )
 
 const (
@@ -43,6 +48,7 @@ const (
 	defaultRetentionReadDays  = 90
 	defaultRetentionUnread    = 180
 	defaultRetentionEventDays = 30
+	defaultEmailDigestHour    = 8
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -196,4 +202,30 @@ func (s *Settings) WebhooksAllowPrivateDestinations(ctx context.Context) bool {
 // Over-limit notifications stay in the inbox; webhooks just don't fire.
 func (s *Settings) WebhooksDeliveriesPerMinute(ctx context.Context) int {
 	return s.intSetting(ctx, SettingWebhooksRatePerMinute, 60, 1, 10000)
+}
+
+// EmailEnabled gates the email notification channel (kill switch). Actual
+// availability additionally requires a configured SMTP sender (mail.Sender).
+func (s *Settings) EmailEnabled(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingEmailEnabled, true)
+}
+
+// EmailAllowPerEpisode controls whether users may choose per-episode email
+// alerts. When off, accounts set to per-episode are coerced to the daily
+// digest instead of going silent.
+func (s *Settings) EmailAllowPerEpisode(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingEmailAllowPerEpisode, true)
+}
+
+// EmailDigestHour is the hour of day (0-23, server-local time) at which daily
+// digest emails go out.
+func (s *Settings) EmailDigestHour(ctx context.Context) int {
+	return s.intSetting(ctx, SettingEmailDigestHour, defaultEmailDigestHour, 0, 23)
+}
+
+// EmailExternalURL is the externally reachable base URL of this server, used
+// for deep links inside notification emails. Empty renders emails without
+// links (webhooks deliberately never leak the origin; email is opt-in here).
+func (s *Settings) EmailExternalURL(ctx context.Context) string {
+	return strings.TrimRight(strings.TrimSpace(s.raw(ctx, SettingEmailExternalURL)), "/")
 }

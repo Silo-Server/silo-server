@@ -1544,6 +1544,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/capability", notificationsHandler.HandleCapability)
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
+						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
+						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
 						r.Post("/read-all", notificationsHandler.HandleReadAll)
 						r.Route("/webhooks", func(r chi.Router) {
 							r.Get("/", notificationsHandler.HandleListWebhooks)

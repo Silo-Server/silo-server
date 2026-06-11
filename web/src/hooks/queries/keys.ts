@@ -226,6 +226,7 @@ export const notificationKeys = {
   list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
   unreadCount: () => ["notifications", "unread-count"] as const,
   preferences: () => ["notifications", "preferences"] as const,
+  emailPreferences: () => ["notifications", "email-preferences"] as const,
   capability: () => ["notifications", "capability"] as const,
   webhooks: () => ["notifications", "webhooks"] as const,
   webPushSubscriptions: () => ["notifications", "web-push-subscriptions"] as const,

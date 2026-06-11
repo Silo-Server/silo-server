@@ -10,6 +10,7 @@ import (
 	"time"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -49,6 +50,11 @@ type System struct {
 	// WebPush is nil when the settings store is not writable (VAPID keys
 	// could not be provisioned).
 	WebPush *WebPushService
+	// EmailPrefs is nil when no mail sender was provided.
+	EmailPrefs *EmailPrefsRepository
+
+	mailSender  mail.Sender
+	emailWorker *EmailWorker
 
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
@@ -69,7 +75,8 @@ type System struct {
 }
 
 // NewSystem wires the notification system. hub may be nil (no realtime
-// publishing); redisClient may be nil (in-memory websocket tickets).
+// publishing); redisClient may be nil (in-memory websocket tickets);
+// mailSender may be nil (no email channel).
 func NewSystem(
 	pool *pgxpool.Pool,
 	settingsReader SettingReader,
@@ -79,6 +86,7 @@ func NewSystem(
 	hub *evt.Hub,
 	redisClient *redis.Client,
 	cipher *secret.Cipher,
+	mailSender mail.Sender,
 ) *System {
 	settings := NewSettings(settingsReader)
 	releases := NewReleaseRepository(pool)
@@ -120,6 +128,16 @@ func NewSystem(
 		dispatchers = append(dispatchers, webPushDispatcher)
 	}
 
+	// Email rides the shared SMTP core. Unlike the per-target channels it
+	// keeps no outbox: its dispatcher only nudges the watermark sweep.
+	var emailPrefs *EmailPrefsRepository
+	var emailWorker *EmailWorker
+	if mailSender != nil {
+		emailPrefs = NewEmailPrefsRepository(pool)
+		emailWorker = newEmailWorker(pool, deliveries, emailPrefs, settings, mailSender)
+		dispatchers = append(dispatchers, newEmailDispatcher(emailWorker))
+	}
+
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
 	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, multiDispatcher)
 	if webhookRepo != nil {
@@ -144,6 +162,9 @@ func NewSystem(
 		Tickets:           NewTicketStore(redisClient),
 		Webhooks:          webhookService,
 		WebPush:           webPushService,
+		EmailPrefs:        emailPrefs,
+		mailSender:        mailSender,
+		emailWorker:       emailWorker,
 		webhookRepo:       webhookRepo,
 		webhookDispatcher: webhookDispatcher,
 		webhookRetry:      webhookRetry,
@@ -216,6 +237,13 @@ func (s *System) Start(ctx context.Context) {
 		go func() {
 			defer s.wg.Done()
 			s.webhookRetry.Run(ctx)
+		}()
+	}
+	if s.emailWorker != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.emailWorker.Run(ctx)
 		}()
 	}
 	if s.webPushDispatcher != nil {

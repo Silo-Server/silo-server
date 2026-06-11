@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api } from "@/api/client";
 import type {
   AppNotification,
+  NotificationEmailPreferences,
   NotificationListResponse,
   NotificationPreferences,
   NotificationReadEventPayload,
@@ -89,6 +90,31 @@ export function useUpdateNotificationPreferences() {
     },
     onError: () => {
       toast.error("Failed to save notification preferences");
+    },
+  });
+}
+
+export function useEmailNotificationPreferences(enabled = true) {
+  return useQuery({
+    queryKey: notificationKeys.emailPreferences(),
+    queryFn: () => api<NotificationEmailPreferences>("/notifications/email-preferences"),
+    enabled,
+  });
+}
+
+export function useUpdateEmailNotificationPreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: NotificationEmailPreferences) =>
+      api<NotificationEmailPreferences>("/notifications/email-preferences", {
+        method: "PUT",
+        body: JSON.stringify(update),
+      }),
+    onSuccess: (prefs) => {
+      queryClient.setQueryData(notificationKeys.emailPreferences(), prefs);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to save email preferences");
     },
   });
 }
