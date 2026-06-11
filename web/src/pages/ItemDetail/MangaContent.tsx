@@ -1,14 +1,21 @@
-import { useMemo } from "react";
-import { BookOpen } from "lucide-react";
+import { useMemo, useState } from "react";
+import { BookOpen, Check, Download, Loader2 } from "lucide-react";
 import { Link } from "react-router";
-import type { ItemDetail, MangaChapter } from "@/api/types";
+import { toast } from "sonner";
+import type { FileVersion, ItemDetail, MangaChapter } from "@/api/types";
+import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import PageBack from "@/components/PageBack";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
-import { buildMediaPlayHref } from "@/lib/mediaNavigation";
+import { fetchCatalogItemVersions } from "@/hooks/queries/catalogRead";
+import { useWatchedStateMutation } from "@/hooks/queries/items";
+import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList } from "@/lib/mangaChapters";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
+import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();
@@ -32,25 +39,128 @@ function chapterLabel(chapter: MangaChapter): string {
   return chapter.title || "Chapter";
 }
 
-// MangaRow is a single flat clickable reader row used for volume units, loose
-// chapters, and chapters nested inside a volume section.
+function chapterVersionSummary(version: FileVersion): string {
+  return metadataLine([
+    version.container ? version.container.toUpperCase() : undefined,
+    formatFileSize(version.file_size),
+    formatPageCount(version.duration),
+  ]);
+}
+
+// MangaRow is a single reader row used for volume units, loose chapters, and
+// chapters nested inside a volume section. Each row offers Read (the reader
+// link), Mark-read, and Download. Because the manga detail payload carries only
+// the chapter's content_id (no file versions), Download lazily fetches the
+// chapter's versions on demand and hands them to the shared picker.
 function MangaRow({
   chapter,
   label,
+  seriesContentId,
   libraryId,
 }: {
   chapter: MangaChapter;
   label: string;
+  seriesContentId: string;
   libraryId?: number;
 }) {
+  const { user } = useAuth();
+  // The series detail is where "back" should land from the reader; passing it
+  // explicitly avoids the chapter→reader→chapter loop. Only manga rows set this.
+  const backTo = buildItemHref({ contentId: seriesContentId, libraryId });
+  const readerHref = `${buildMediaPlayHref({
+    contentId: chapter.content_id,
+    type: "ebook",
+    libraryId,
+  })}&backTo=${encodeURIComponent(backTo)}`;
+
+  // The row payload has no read state, so we track the user's mark-read action
+  // locally and fire the shared watched mutation against this chapter's id.
+  const watchedMutation = useWatchedStateMutation({
+    content_id: chapter.content_id,
+    type: "ebook",
+  });
+  const [markedRead, setMarkedRead] = useState(false);
+
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloadVersions, setDownloadVersions] = useState<FileVersion[] | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const canDownload = Boolean(user?.download_allowed);
+
+  const handleDownload = async () => {
+    if (loadingVersions) return;
+    if (downloadVersions && downloadVersions.length > 0) {
+      setDownloadOpen(true);
+      return;
+    }
+    setLoadingVersions(true);
+    try {
+      const versions = await fetchCatalogItemVersions(chapter.content_id);
+      if (versions.length === 0) {
+        toast.error("No downloadable files for this chapter");
+        return;
+      }
+      setDownloadVersions(versions);
+      setDownloadOpen(true);
+    } catch {
+      toast.error("Couldn't load chapter files. Try again later");
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
   return (
-    <Link
-      to={buildMediaPlayHref({ contentId: chapter.content_id, type: "ebook", libraryId })}
-      className="hover:bg-muted/40 flex items-center gap-3 px-4 py-3 transition-colors"
-    >
-      <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
-      <span className="text-foreground/90 truncate text-[15px] font-medium">{label}</span>
-    </Link>
+    <div className="hover:bg-muted/40 flex items-center gap-3 px-4 py-3 transition-colors">
+      <Link to={readerHref} className="flex min-w-0 flex-1 items-center gap-3">
+        <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
+        <span className="text-foreground/90 truncate text-[15px] font-medium">{label}</span>
+      </Link>
+      <div className="flex flex-shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          variant={markedRead ? "secondary" : "ghost"}
+          size="icon-sm"
+          aria-label={markedRead ? "Mark chapter unread" : "Mark chapter read"}
+          aria-pressed={markedRead}
+          title={markedRead ? "Mark unread" : "Mark read"}
+          disabled={watchedMutation.isPending}
+          onClick={() => {
+            const next = !markedRead;
+            setMarkedRead(next);
+            watchedMutation.mutate(next, {
+              onError: () => setMarkedRead(!next),
+            });
+          }}
+        >
+          <Check className="size-4" />
+        </Button>
+        {canDownload && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Download chapter"
+            title="Download"
+            disabled={loadingVersions}
+            onClick={() => void handleDownload()}
+          >
+            {loadingVersions ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
+          </Button>
+        )}
+      </div>
+      {canDownload && downloadVersions && (
+        <DownloadVersionPicker
+          open={downloadOpen}
+          onOpenChange={setDownloadOpen}
+          versions={downloadVersions}
+          title={label}
+          summaryBuilder={chapterVersionSummary}
+        />
+      )}
+    </div>
   );
 }
 
@@ -112,6 +222,7 @@ export default function MangaContent({
                         <MangaRow
                           chapter={chapter}
                           label={chapterLabel(chapter)}
+                          seriesContentId={item.content_id}
                           libraryId={libraryId}
                         />
                       </li>
@@ -120,7 +231,12 @@ export default function MangaContent({
                 </li>
               ) : (
                 <li key={entry.chapter.content_id}>
-                  <MangaRow chapter={entry.chapter} label={entry.label} libraryId={libraryId} />
+                  <MangaRow
+                    chapter={entry.chapter}
+                    label={entry.label}
+                    seriesContentId={item.content_id}
+                    libraryId={libraryId}
+                  />
                 </li>
               ),
             )}
