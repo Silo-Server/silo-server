@@ -14,7 +14,6 @@ import type { ReactNode } from "react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 import { useNotificationsLive } from "@/hooks/useNotificationsLive";
-import { useServiceWorkerNavigation } from "@/hooks/useServiceWorkerNavigation";
 import { NotificationBell } from "@/components/NotificationBell";
 
 interface LayoutProps {
@@ -23,7 +22,6 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   useNotificationsLive();
-  useServiceWorkerNavigation();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Tracks whether the mobile header should slide off-screen on scroll.

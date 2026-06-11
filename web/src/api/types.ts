@@ -3798,17 +3798,3 @@ export interface Announcement {
   created_at: string;
   expires_at?: string;
 }
-
-export interface PushDeviceInfo {
-  device_id: string;
-  name: string;
-  platform: string;
-  transport: string;
-  push_enabled: boolean;
-  registered_at?: string;
-}
-
-export interface VapidKeyPair {
-  vapid_public: string;
-  vapid_private: string;
-}

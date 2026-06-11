@@ -112,7 +112,9 @@ export default function AdminAnnouncements() {
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Announcements</h1>
           <p className="page-subtitle text-sm sm:text-base">
-            Broadcast messages to all users, specific users, or library subscribers.
+            Send a message to your users — for downtime, new features, or anything they should know.
+            It appears in a highlighted bar at the top of their home page and in their notification
+            inbox, and stays until they dismiss it (or it expires).
           </p>
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -259,9 +261,12 @@ function CreateAnnouncementForm({ onClose }: { onClose: () => void }) {
           id={titleId}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Announcement title"
+          placeholder="e.g. Scheduled maintenance Sunday night"
           required
         />
+        <p className="text-muted-foreground text-xs">
+          Shown in bold at the top of the announcement.
+        </p>
       </div>
 
       {/* Body */}
@@ -271,33 +276,41 @@ function CreateAnnouncementForm({ onClose }: { onClose: () => void }) {
           id={bodyId}
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="Optional message body…"
+          placeholder="Optional details, e.g. Silo will be offline 1–2am while we upgrade."
           rows={3}
           className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full rounded-md border px-3 py-2 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none"
         />
+        <p className="text-muted-foreground text-xs">Optional. Plain text shown under the title.</p>
       </div>
 
       {/* Audience */}
       <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">Audience</legend>
-        <div className="space-y-1">
+        <legend className="text-sm font-medium">Who sees it?</legend>
+        <div className="space-y-1.5">
           {(
             [
-              { value: "all", label: "Everyone" },
-              { value: "users", label: "Specific users" },
-              { value: "libraries", label: "Libraries" },
-            ] as { value: AudienceMode; label: string }[]
-          ).map(({ value, label }) => (
-            <label key={value} className="flex cursor-pointer items-center gap-2 text-sm">
+              { value: "all", label: "Everyone", help: "Every user on this server." },
+              { value: "users", label: "Specific users", help: "Only the people you pick below." },
+              {
+                value: "libraries",
+                label: "Libraries",
+                help: "Users with access to the chosen libraries.",
+              },
+            ] as { value: AudienceMode; label: string; help: string }[]
+          ).map(({ value, label, help }) => (
+            <label key={value} className="flex cursor-pointer items-start gap-2 text-sm">
               <input
                 type="radio"
                 name="audience-mode"
                 value={value}
                 checked={mode === value}
                 onChange={() => setMode(value)}
-                className="accent-primary"
+                className="accent-primary mt-0.5"
               />
-              {label}
+              <span>
+                {label}
+                <span className="text-muted-foreground block text-xs">{help}</span>
+              </span>
             </label>
           ))}
         </div>
@@ -359,6 +372,10 @@ function CreateAnnouncementForm({ onClose }: { onClose: () => void }) {
           value={expiresAt}
           onChange={(e) => setExpiresAt(e.target.value)}
         />
+        <p className="text-muted-foreground text-xs">
+          After this time the announcement disappears from inboxes automatically. Leave blank to
+          keep it until each user dismisses it.
+        </p>
       </div>
 
       {/* Submit */}

@@ -15,7 +15,6 @@ import {
   Paintbrush,
   Layers,
   Subtitles,
-  BellRing,
   Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -39,7 +38,6 @@ import DownloadSettings from "./DownloadSettings";
 import LogRetentionSettings from "./LogRetentionSettings";
 import ThemeSettings from "./ThemeSettings";
 import OverlaySettings from "./OverlaySettings";
-import PushSettings from "./PushSettings";
 
 interface SettingsNav {
   id: string;
@@ -85,7 +83,6 @@ const SETTINGS_GROUPS: SettingsNavGroup[] = [
         component: WatchProvidersSettings,
       },
       { id: "integrations", label: "Integrations", icon: Puzzle, component: IntegrationsSettings },
-      { id: "push", label: "Push Notifications", icon: BellRing, component: PushSettings },
       {
         id: "compatibility-proxies",
         label: "Compatibility Proxies",
