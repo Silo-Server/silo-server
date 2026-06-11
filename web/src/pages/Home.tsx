@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
+import { AnnouncementBar } from "@/components/AnnouncementBar";
 import HeroBanner from "@/components/HeroBanner";
+import { NotificationStrip } from "@/components/NotificationStrip";
 import SectionRow from "@/components/SectionRow";
 import TasteSeedBanner from "@/components/TasteSeedBanner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -194,6 +196,8 @@ export default function Home() {
     <>
       <h1 className="sr-only">Home</h1>
       <div className={`space-y-10 ${hasHeroSlot ? "pb-2" : "pt-6 pb-2"}`}>
+        <AnnouncementBar />
+        <NotificationStrip />
         {heroSlot}
         <TasteSeedBanner />
 
