@@ -256,6 +256,9 @@ type MangaChapter struct {
 	Title        string   `json:"title"`
 	ChapterIndex *float64 `json:"chapter_index,omitempty"`
 	Volume       string   `json:"volume,omitempty"`
+	// Read is true when the current viewer has finished this chapter, mirroring
+	// ebook read state: ebook_reader_progress.progress >= the finished threshold.
+	Read bool `json:"read"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -1012,7 +1015,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		detail.Ebook = s.buildEbookExtension(ctx, item, crewCredits, filter)
 	}
 	if item.Type == "manga" {
-		detail.Manga = s.buildMangaExtension(ctx, item)
+		detail.Manga = s.buildMangaExtension(ctx, item, filter)
 	}
 
 	// Series folder paths from confirmed claims when available, otherwise from
@@ -1191,12 +1194,12 @@ func (s *DetailService) buildEbookExtension(
 
 // buildMangaExtension assembles the manga-series detail payload by listing the
 // series' chapters (ebook items linked via manga_chapters).
-func (s *DetailService) buildMangaExtension(ctx context.Context, item *models.MediaItem) *MangaDetailExtension {
+func (s *DetailService) buildMangaExtension(ctx context.Context, item *models.MediaItem, filter AccessFilter) *MangaDetailExtension {
 	if item == nil {
 		return nil
 	}
 	return &MangaDetailExtension{
-		Chapters: s.fetchMangaChapters(ctx, item.ContentID),
+		Chapters: s.fetchMangaChapters(ctx, item.ContentID, filter),
 	}
 }
 
@@ -1204,22 +1207,34 @@ func (s *DetailService) buildMangaExtension(ctx context.Context, item *models.Me
 // order. Chapters with a parsed index sort first (ascending); those without
 // fall back to sort_title. Kept as a package var so the ordering contract can
 // be asserted without a database.
-const mangaChaptersQuery = `
-	SELECT m.content_id, m.title, mc.chapter_index, mc.volume
+//
+// Manga chapters are ebook items, so per-chapter read state mirrors the ebook
+// surfaces: a chapter is read when the current viewer's ebook_reader_progress
+// row has progress >= the finished threshold. The LEFT JOIN is scoped by the
+// viewer's user_id + profile_id ($2/$3) and yields false when no row exists.
+var mangaChaptersQuery = fmt.Sprintf(`
+	SELECT m.content_id, m.title, mc.chapter_index, mc.volume,
+	       COALESCE(erp.progress >= %s, false) AS read
 	FROM manga_chapters mc
 	JOIN media_items m ON m.content_id = mc.chapter_content_id
+	LEFT JOIN ebook_reader_progress erp
+	  ON erp.content_id = mc.chapter_content_id
+	 AND erp.user_id = $2
+	 AND erp.profile_id = $3
 	WHERE mc.series_content_id = $1
 	ORDER BY mc.chapter_index NULLS LAST, m.sort_title
-`
+`, EbookFinishedProgressThresholdSQL)
 
 // fetchMangaChapters returns the ordered chapters for a manga series. It never
-// returns nil so the JSON payload always carries a (possibly empty) array.
-func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID string) []MangaChapter {
+// returns nil so the JSON payload always carries a (possibly empty) array. The
+// access filter supplies the viewer (user_id/profile_id) used to resolve each
+// chapter's per-viewer read state.
+func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID string, filter AccessFilter) []MangaChapter {
 	chapters := make([]MangaChapter, 0, 16)
 	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
 		return chapters
 	}
-	rows, err := s.itemRepo.pool.Query(ctx, mangaChaptersQuery, seriesContentID)
+	rows, err := s.itemRepo.pool.Query(ctx, mangaChaptersQuery, seriesContentID, filter.UserID, filter.ProfileID)
 	if err != nil {
 		return chapters
 	}
@@ -1231,7 +1246,7 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 			index  *float64
 			volume *string
 		)
-		if err := rows.Scan(&ch.ContentID, &ch.Title, &index, &volume); err != nil {
+		if err := rows.Scan(&ch.ContentID, &ch.Title, &index, &volume, &ch.Read); err != nil {
 			return chapters
 		}
 		ch.ChapterIndex = index
