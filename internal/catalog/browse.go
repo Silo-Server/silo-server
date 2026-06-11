@@ -372,7 +372,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup, browseFiltersAreMovieOnly(filters))
 	argIdx += len(orderArgs)
 
-	selectClause := browseItemColumns("mi")
+	selectClause := browseItemColumns("mi") + ", " + mangaCountColumns("mi")
 	groupByClause := ""
 	switch {
 	case singleLibraryNoDedup:
@@ -1123,6 +1123,17 @@ func browseItemColumns(alias string) string {
 	return strings.Join(prefixed, ", ")
 }
 
+// mangaCountColumns returns two index-backed correlated subqueries that count a
+// manga series' chapters and volume-tagged chapters. They return 0 for
+// non-manga rows (no matching manga_chapters), which the scan path nils out so
+// only manga cards carry the counts. The subqueries are functionally dependent
+// on alias.content_id (the media_items PK, which leads browseGroupByColumns), so
+// they remain valid under the dedup GROUP BY without being listed there.
+func mangaCountColumns(alias string) string {
+	return "(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id) AS manga_chapter_count, " +
+		"(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND mc.volume IS NOT NULL AND mc.volume <> '') AS manga_volume_count"
+}
+
 // browseGroupByColumns returns the columns needed for GROUP BY when joining
 // with the junction table.
 func browseGroupByColumns(alias string) string {
@@ -1200,10 +1211,18 @@ func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.Status,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.MangaChapterCount,
+			&item.MangaVolumeCount,
 			&item.AddedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning browse item row: %w", err)
+		}
+		// The manga count subqueries return 0 for non-manga rows; drop them so
+		// only manga cards carry the counts (movies/series stay clean).
+		if item.Type != "manga" {
+			item.MangaChapterCount = nil
+			item.MangaVolumeCount = nil
 		}
 		items = append(items, &item)
 	}
