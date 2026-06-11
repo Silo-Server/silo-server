@@ -89,17 +89,17 @@ func (f *fakeNotificationsStore) UnreadCount(_ context.Context, _ int, _ string,
 	return f.unreadCount, nil
 }
 
-func (f *fakeNotificationsStore) MarkRead(_ context.Context, _ int, _ []int64) error {
+func (f *fakeNotificationsStore) MarkRead(_ context.Context, _ int, _ string, _ []int64) error {
 	f.markReadCalled = true
 	return nil
 }
 
-func (f *fakeNotificationsStore) MarkAllRead(_ context.Context, _ int) error {
+func (f *fakeNotificationsStore) MarkAllRead(_ context.Context, _ int, _ string) error {
 	f.markAllReadCalled = true
 	return nil
 }
 
-func (f *fakeNotificationsStore) Dismiss(_ context.Context, _ int, _ int64) error {
+func (f *fakeNotificationsStore) Dismiss(_ context.Context, _ int, _ string, _ int64) error {
 	return f.dismissErr
 }
 

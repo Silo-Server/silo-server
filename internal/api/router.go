@@ -794,7 +794,6 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.ImpersonationService = authService
 		adminHandler.StatsSource = deps.AdminStatsProvider
 		adminHandler.RealtimeHub = deps.RealtimeHub
-		adminHandler.NotificationsSvc = deps.NotificationsService
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
 		adminHandler.BootstrapSensitiveValues = deps.BootstrapSensitiveValues
 		if settingsRepo != nil {

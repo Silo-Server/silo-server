@@ -2,6 +2,18 @@ package notifications
 
 import "time"
 
+// Bounds on admin-authored announcement text. Announcements fan out one row per
+// (user, profile), so these caps limit write amplification across all inboxes.
+const (
+	MaxAnnouncementTitleLen = 200
+	MaxAnnouncementBodyLen  = 4000
+)
+
+// EventUserPasswordChanged is the domain event published (on ChannelSessions)
+// when an account password changes. Shared by the publisher (admin user
+// handler) and the system matcher so the two cannot drift apart.
+const EventUserPasswordChanged = "user.password_changed"
+
 type Category string
 
 const (

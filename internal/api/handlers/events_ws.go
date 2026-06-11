@@ -105,8 +105,8 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	}
 
 	startWebSocketPingLoop(ctx, func() error {
-		if rr, ok := h.presence.(interface{ Refresh(context.Context, int) }); ok {
-			rr.Refresh(ctx, claims.UserID)
+		if h.presence != nil {
+			h.presence.Refresh(ctx, claims.UserID)
 		}
 		return writeWebSocketControl(conn, websocket.PingMessage, nil)
 	})
@@ -318,10 +318,22 @@ func allowsEventForClaims(claims *auth.Claims, env evt.Envelope) bool {
 	if env.AdminOnly && claims.Role != "admin" {
 		return false
 	}
-	if env.UserID > 0 && claims.Role != "admin" && env.UserID != claims.UserID {
-		return false
+	if env.UserID > 0 && env.UserID != claims.UserID {
+		// The notifications and requests channels carry per-user private content
+		// (inbox titles/bodies, requested media names). Nobody — including
+		// admins — may receive another user's events on them. Other channels
+		// keep the admin cross-user monitoring bypass.
+		if claims.Role != "admin" || isPersonalChannel(env.Channel) {
+			return false
+		}
 	}
 	return true
+}
+
+// isPersonalChannel reports whether a channel carries per-user private content
+// that must never be delivered across user boundaries, even to admins.
+func isPersonalChannel(c evt.EventChannel) bool {
+	return c == evt.ChannelNotifications || c == evt.ChannelRequests
 }
 
 func marshalJSON(value any) json.RawMessage {

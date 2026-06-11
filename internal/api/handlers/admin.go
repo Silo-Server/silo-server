@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -91,7 +92,6 @@ type AdminHandler struct {
 	ItemRefreshResolver          ItemRefreshScopeResolver
 	ImpersonationService         ImpersonationService
 	RealtimeHub                  *notifications.Hub
-	NotificationsSvc             *notifications.Service
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
@@ -531,10 +531,13 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if req.Password != nil && h.NotificationsSvc != nil {
-		h.NotificationsSvc.CreateSystem(r.Context(), id,
-			"system.password_changed", "Password changed",
-			"Your account password was changed. If this wasn't you, contact your administrator.")
+	// Publish a domain event rather than creating the notification inline; the
+	// notifications materializer's system matcher turns it into the user's
+	// "Password changed" notice, keeping all notification creation event-driven.
+	if req.Password != nil && h.RealtimeHub != nil {
+		_ = h.RealtimeHub.EventsHub().PublishJSON(r.Context(),
+			evt.ChannelSessions, notifications.EventUserPasswordChanged, nil,
+			evt.PublishOptions{UserID: id})
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)

@@ -11,10 +11,10 @@ import (
 )
 
 type fakeStore struct {
-	Store     // embed for unimplemented methods (nil-panic = test failure, intended)
-	inserted  []*Notification
-	nextID    int64
-	prefs     map[int]map[Category]bool
+	Store          // embed for unimplemented methods (nil-panic = test failure, intended)
+	inserted       []*Notification
+	nextID         int64
+	prefs          map[int]map[Category]bool
 	admins         []int
 	libUsers       map[int][]int
 	allUsers       []int

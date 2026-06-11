@@ -37,6 +37,7 @@ func NewMaterializer(hub *evt.Hub, svc *Service, content ContentResolver) *Mater
 		m.register("content", m.matchContent)
 	}
 	m.register("admin", m.matchAdmin)
+	m.register("system", m.matchSystem)
 	return m
 }
 

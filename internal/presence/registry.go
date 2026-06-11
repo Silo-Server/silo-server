@@ -14,6 +14,9 @@ type Registry interface {
 	Add(ctx context.Context, userID int) (release func())
 	// Connected reports whether userID has any live connection.
 	Connected(ctx context.Context, userID int) bool
+	// Refresh extends the liveness of userID's presence (used by registries
+	// with a TTL, such as Redis). Process-local registries may no-op.
+	Refresh(ctx context.Context, userID int)
 }
 
 // MemoryRegistry is a process-local refcount registry.
@@ -51,5 +54,8 @@ func (m *MemoryRegistry) Connected(_ context.Context, userID int) bool {
 	defer m.mu.Unlock()
 	return m.counts[userID] > 0
 }
+
+// Refresh is a no-op for the process-local registry, which has no TTL.
+func (m *MemoryRegistry) Refresh(_ context.Context, _ int) {}
 
 var _ Registry = (*MemoryRegistry)(nil)

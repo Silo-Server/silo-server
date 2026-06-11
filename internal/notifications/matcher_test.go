@@ -623,3 +623,56 @@ func TestContentMatcher_OldItemMetadataRefreshIgnored(t *testing.T) {
 		t.Fatalf("expected 0 inserts for old item metadata refresh, got %d", len(store.inserted))
 	}
 }
+
+func TestSystemMatcher_PasswordChanged_CreatesNotification(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelSessions,
+		Event:   EventUserPasswordChanged,
+		UserID:  99,
+	})
+
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 system notification, got %d", len(store.inserted))
+	}
+	n := store.inserted[0]
+	if n.Type != "system.password_changed" {
+		t.Errorf("type = %q, want %q", n.Type, "system.password_changed")
+	}
+	if n.UserID != 99 {
+		t.Errorf("user_id = %d, want 99", n.UserID)
+	}
+	if n.Category != CategorySystem {
+		t.Errorf("category = %q, want %q", n.Category, CategorySystem)
+	}
+}
+
+func TestSystemMatcher_IgnoresOtherChannels(t *testing.T) {
+	store := &fakeStore{}
+	svc, hub := newTestService(store)
+	m := NewMaterializer(hub, svc, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Same event name on a different channel must not materialize anything.
+	publishAndSettle(t, hub, m, evt.Envelope{
+		Channel: evt.ChannelCatalog,
+		Event:   EventUserPasswordChanged,
+		UserID:  99,
+	})
+
+	if len(store.inserted) != 0 {
+		t.Fatalf("expected 0 notifications for off-channel event, got %d", len(store.inserted))
+	}
+}

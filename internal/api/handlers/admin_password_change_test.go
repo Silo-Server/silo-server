@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -43,16 +44,16 @@ func (f *fakeUserRepo) GetByID(_ context.Context, _ int) (*models.User, error) {
 var _ UserRepository = (*fakeUserRepo)(nil)
 
 // ---------------------------------------------------------------------------
-// Helper: build AdminHandler with a notifications service backed by the
-// provided fakeNotificationsStore.
+// Helper: build AdminHandler with a realtime hub whose events the test can
+// observe. Password changes publish a domain event; the notifications
+// materializer (tested separately) turns it into the user's notification.
 // ---------------------------------------------------------------------------
 
-func newAdminHandlerWithNotifications(userRepo UserRepository, notifStore *fakeNotificationsStore) *AdminHandler {
-	hub := evt.NewHub("test", nil)
-	svc := notifications.NewService(notifStore, hub)
+func newAdminHandlerWithHub(userRepo UserRepository) (*AdminHandler, *evt.Hub) {
+	rh := notifications.NewHub("test", nil)
 	h := NewAdminHandler(userRepo, nil, nil)
-	h.NotificationsSvc = svc
-	return h
+	h.RealtimeHub = rh
+	return h, rh.EventsHub()
 }
 
 // adminUpdateRequest builds a PUT /admin/users/{id} HTTP request.
@@ -68,10 +69,10 @@ func adminUpdateRequest(body []byte, userID string) *http.Request {
 // Tests: HandleUpdateUser password change notification
 // ---------------------------------------------------------------------------
 
-// TestHandleUpdateUser_WithPassword_SystemNotificationSent asserts that when
-// Password is included in the update payload, exactly one system notification
-// of type "system.password_changed" is emitted for the target user.
-func TestHandleUpdateUser_WithPassword_SystemNotificationSent(t *testing.T) {
+// TestHandleUpdateUser_WithPassword_PublishesEvent asserts that including a
+// Password in the update payload publishes one user.password_changed event on
+// ChannelSessions targeted at the updated user.
+func TestHandleUpdateUser_WithPassword_PublishesEvent(t *testing.T) {
 	targetUser := &models.User{
 		ID:       99,
 		Username: "alice",
@@ -79,8 +80,9 @@ func TestHandleUpdateUser_WithPassword_SystemNotificationSent(t *testing.T) {
 		Role:     "user",
 	}
 	repo := &fakeUserRepo{user: targetUser}
-	notifStore := &fakeNotificationsStore{}
-	h := newAdminHandlerWithNotifications(repo, notifStore)
+	h, eventsHub := newAdminHandlerWithHub(repo)
+	ch, unsub := eventsHub.Subscribe()
+	defer unsub()
 
 	body := []byte(`{"password":"newSecret123"}`)
 	req := adminUpdateRequest(body, "99")
@@ -92,24 +94,25 @@ func TestHandleUpdateUser_WithPassword_SystemNotificationSent(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 
-	if len(notifStore.list) != 1 {
-		t.Fatalf("expected 1 system notification, got %d", len(notifStore.list))
-	}
-	n := notifStore.list[0]
-	if n.Type != "system.password_changed" {
-		t.Errorf("notification type = %q, want %q", n.Type, "system.password_changed")
-	}
-	if n.UserID != 99 {
-		t.Errorf("notification user_id = %d, want 99", n.UserID)
-	}
-	if n.Category != notifications.CategorySystem {
-		t.Errorf("notification category = %q, want %q", n.Category, notifications.CategorySystem)
+	select {
+	case env := <-ch:
+		if env.Channel != evt.ChannelSessions {
+			t.Errorf("channel = %q, want %q", env.Channel, evt.ChannelSessions)
+		}
+		if env.Event != notifications.EventUserPasswordChanged {
+			t.Errorf("event = %q, want %q", env.Event, notifications.EventUserPasswordChanged)
+		}
+		if env.UserID != 99 {
+			t.Errorf("event user_id = %d, want 99", env.UserID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected a user.password_changed event, got none")
 	}
 }
 
-// TestHandleUpdateUser_WithoutPassword_NoNotification asserts that when the
-// update payload does not include a password, no system notification is sent.
-func TestHandleUpdateUser_WithoutPassword_NoNotification(t *testing.T) {
+// TestHandleUpdateUser_WithoutPassword_NoEvent asserts that a non-password
+// update publishes no user.password_changed event.
+func TestHandleUpdateUser_WithoutPassword_NoEvent(t *testing.T) {
 	targetUser := &models.User{
 		ID:       99,
 		Username: "alice",
@@ -117,8 +120,9 @@ func TestHandleUpdateUser_WithoutPassword_NoNotification(t *testing.T) {
 		Role:     "user",
 	}
 	repo := &fakeUserRepo{user: targetUser}
-	notifStore := &fakeNotificationsStore{}
-	h := newAdminHandlerWithNotifications(repo, notifStore)
+	h, eventsHub := newAdminHandlerWithHub(repo)
+	ch, unsub := eventsHub.Subscribe()
+	defer unsub()
 
 	body := []byte(`{"username":"alice-renamed"}`)
 	req := adminUpdateRequest(body, "99")
@@ -130,7 +134,10 @@ func TestHandleUpdateUser_WithoutPassword_NoNotification(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 
-	if len(notifStore.list) != 0 {
-		t.Errorf("expected 0 notifications on non-password update, got %d", len(notifStore.list))
+	select {
+	case env := <-ch:
+		t.Errorf("expected no event, got %q on %q", env.Event, env.Channel)
+	case <-time.After(100 * time.Millisecond):
+		// no event, as expected
 	}
 }

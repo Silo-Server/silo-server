@@ -7,12 +7,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/push"
 )
+
+// maxPushTokenLen bounds a registered push token. APNs/FCM device tokens are
+// short; a Web Push subscription JSON (endpoint + keys) is ~1 KB.
+const maxPushTokenLen = 8192
 
 // pushRegistry is the minimal interface PushHandler needs from *push.Store.
 type pushRegistry interface {
@@ -52,29 +56,39 @@ type registerRequest struct {
 	Token     string `json:"token"`
 }
 
+// deviceContext extracts the authenticated user, device id, and active profile
+// required by the profile-scoped push device endpoints. It writes a 400 and
+// returns ok=false when any of the three is missing.
+func (h *PushHandler) deviceContext(w http.ResponseWriter, r *http.Request) (userID int, deviceID, profileID string, ok bool) {
+	userID = apimw.GetUserID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "Authentication required")
+		return 0, "", "", false
+	}
+	deviceID = strings.TrimSpace(r.Header.Get(deviceIDHeader))
+	if deviceID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "X-Silo-Device-Id header is required")
+		return 0, "", "", false
+	}
+	profileID = strings.TrimSpace(apimw.GetProfileID(r.Context()))
+	if profileID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "X-Profile-Id header is required")
+		return 0, "", "", false
+	}
+	return userID, deviceID, profileID, true
+}
+
 // HandleRegister handles PUT /notifications/push/device.
 // Requires userID (from JWT claims), X-Silo-Device-Id, and X-Profile-Id headers.
 // Body: {"transport": "apns"|"fcm"|"webpush", "token": "..."}
 // Returns 204 on success.
 func (h *PushHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "Authentication required")
+	userID, deviceID, profileID, ok := h.deviceContext(w, r)
+	if !ok {
 		return
 	}
 
-	deviceID := strings.TrimSpace(r.Header.Get(deviceIDHeader))
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "X-Silo-Device-Id header is required")
-		return
-	}
-
-	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "X-Profile-Id header is required")
-		return
-	}
-
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
@@ -92,6 +106,12 @@ func (h *PushHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "token must not be empty")
 		return
 	}
+	// Cap token length: APNs/FCM device tokens are short; a Web Push subscription
+	// JSON (endpoint + keys) is ~1 KB. 8 KB is generous and bounds the stored row.
+	if len(req.Token) > maxPushTokenLen {
+		writeError(w, http.StatusBadRequest, "bad_request", "token too large")
+		return
+	}
 
 	if err := h.reg.RegisterToken(r.Context(), userID, profileID, deviceID, req.Transport, req.Token); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to register push token")
@@ -104,21 +124,8 @@ func (h *PushHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 // Requires userID, X-Silo-Device-Id, and X-Profile-Id headers.
 // Returns 204 on success.
 func (h *PushHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "Authentication required")
-		return
-	}
-
-	deviceID := strings.TrimSpace(r.Header.Get(deviceIDHeader))
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "X-Silo-Device-Id header is required")
-		return
-	}
-
-	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "X-Profile-Id header is required")
+	userID, deviceID, profileID, ok := h.deviceContext(w, r)
+	if !ok {
 		return
 	}
 

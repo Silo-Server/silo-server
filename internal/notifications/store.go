@@ -23,9 +23,9 @@ type Store interface {
 	Insert(ctx context.Context, n *Notification) (created bool, err error)
 	List(ctx context.Context, f ListFilter) ([]*Notification, error)
 	UnreadCount(ctx context.Context, userID int, profileID string, childSafe bool) (int, error)
-	MarkRead(ctx context.Context, userID int, ids []int64) error
-	MarkAllRead(ctx context.Context, userID int) error
-	Dismiss(ctx context.Context, userID int, id int64) error
+	MarkRead(ctx context.Context, userID int, profileID string, ids []int64) error
+	MarkAllRead(ctx context.Context, userID int, profileID string) error
+	Dismiss(ctx context.Context, userID int, profileID string, id int64) error
 	Preferences(ctx context.Context, userID int) (map[Category]bool, error)
 	SetPreference(ctx context.Context, userID int, c Category, enabled bool) error
 	InsertAnnouncement(ctx context.Context, a *Announcement) error
@@ -206,8 +206,11 @@ func (r *Repository) UnreadCount(ctx context.Context, userID int, profileID stri
 	return count, nil
 }
 
-// MarkRead sets read_at = now() for the given notification IDs belonging to userID.
-func (r *Repository) MarkRead(ctx context.Context, userID int, ids []int64) error {
+// MarkRead sets read_at = now() for the given notification IDs visible to the
+// (userID, profileID) pair. Profile scoping prevents one profile from marking a
+// sibling profile's notifications read; account-wide rows (profile_id IS NULL)
+// are shared and remain markable by any profile.
+func (r *Repository) MarkRead(ctx context.Context, userID int, profileID string, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -215,39 +218,45 @@ func (r *Repository) MarkRead(ctx context.Context, userID int, ids []int64) erro
 		UPDATE notifications
 		SET read_at = now()
 		WHERE user_id = $1
-		  AND id = ANY($2)
+		  AND (profile_id IS NULL OR profile_id = $2)
+		  AND id = ANY($3)
 		  AND read_at IS NULL
-	`, userID, ids)
+	`, userID, profileID, ids)
 	if err != nil {
 		return fmt.Errorf("mark notifications read: %w", err)
 	}
 	return nil
 }
 
-// MarkAllRead sets read_at = now() for all unread notifications belonging to userID.
-func (r *Repository) MarkAllRead(ctx context.Context, userID int) error {
+// MarkAllRead sets read_at = now() for all unread notifications visible to the
+// (userID, profileID) pair (the active profile's rows plus shared account-wide
+// rows), leaving sibling profiles' notifications untouched.
+func (r *Repository) MarkAllRead(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET read_at = now()
 		WHERE user_id = $1
+		  AND (profile_id IS NULL OR profile_id = $2)
 		  AND read_at IS NULL
-	`, userID)
+	`, userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark all notifications read: %w", err)
 	}
 	return nil
 }
 
-// Dismiss sets dismissed_at = now() for the notification. Returns ErrNotFound if
-// the notification does not exist or is already dismissed.
-func (r *Repository) Dismiss(ctx context.Context, userID int, id int64) error {
+// Dismiss sets dismissed_at = now() for the notification, scoped to the active
+// profile (plus shared account-wide rows). Returns ErrNotFound if no such
+// notification exists for this profile or it is already dismissed.
+func (r *Repository) Dismiss(ctx context.Context, userID int, profileID string, id int64) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET dismissed_at = now()
 		WHERE user_id = $1
-		  AND id = $2
+		  AND (profile_id IS NULL OR profile_id = $2)
+		  AND id = $3
 		  AND dismissed_at IS NULL
-	`, userID, id)
+	`, userID, profileID, id)
 	if err != nil {
 		return fmt.Errorf("dismiss notification: %w", err)
 	}

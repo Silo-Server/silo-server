@@ -1629,9 +1629,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		}
 		switch newStatus {
 		case StatusCompleted:
-			if change != reconcileCompleted {
-				change = reconcileCompleted
-			}
+			change = reconcileCompleted
 		case StatusDownloading:
 			if change == reconcileUnchanged {
 				change = reconcileDownloading

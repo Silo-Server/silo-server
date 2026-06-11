@@ -149,6 +149,7 @@ type markReadRequest struct {
 // Body: {"ids":[...]} OR {"all":true}. 400 when neither present.
 func (h *NotificationsHandler) HandleMarkRead(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
 
 	var req markReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -162,12 +163,12 @@ func (h *NotificationsHandler) HandleMarkRead(w http.ResponseWriter, r *http.Req
 	}
 
 	if req.All {
-		if err := h.svc.MarkAllRead(r.Context(), userID); err != nil {
+		if err := h.svc.MarkAllRead(r.Context(), userID, profileID); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to mark all read")
 			return
 		}
 	} else {
-		if err := h.svc.MarkRead(r.Context(), userID, req.IDs); err != nil {
+		if err := h.svc.MarkRead(r.Context(), userID, profileID, req.IDs); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to mark notifications read")
 			return
 		}
@@ -179,6 +180,7 @@ func (h *NotificationsHandler) HandleMarkRead(w http.ResponseWriter, r *http.Req
 // 400 for invalid id; 404 on ErrNotFound; 204 on success.
 func (h *NotificationsHandler) HandleDismiss(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
 
 	rawID := chi.URLParam(r, "id")
 	id, err := strconv.ParseInt(rawID, 10, 64)
@@ -187,7 +189,7 @@ func (h *NotificationsHandler) HandleDismiss(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.svc.Dismiss(r.Context(), userID, id); err != nil {
+	if err := h.svc.Dismiss(r.Context(), userID, profileID, id); err != nil {
 		if errors.Is(err, notifications.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Notification not found")
 			return
@@ -265,6 +267,10 @@ func (h *NotificationsHandler) HandleListAnnouncements(w http.ResponseWriter, r 
 // validation error; 201 with the announcement on success.
 func (h *NotificationsHandler) HandleCreateAnnouncement(w http.ResponseWriter, r *http.Request) {
 	claims := apimw.GetClaims(r.Context())
+
+	// Announcements fan out one row per (user, profile); cap the request body so
+	// a large title/body cannot be amplified into the whole server's inboxes.
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 
 	var a notifications.Announcement
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {

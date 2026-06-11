@@ -163,10 +163,11 @@ func (q *storeQueue) Claim(ctx context.Context, now time.Time, limit int) ([]cla
 	if err != nil {
 		return nil, nil, err
 	}
-	return items, &txOutcomes{s: q.s, tx: tx, conn: conn}, nil
+	return items, &txOutcomes{ctx: ctx, s: q.s, tx: tx, conn: conn}, nil
 }
 
 type txOutcomes struct {
+	ctx  context.Context
 	s    *Store
 	tx   pgx.Tx
 	conn *pgxpool.Conn
@@ -175,20 +176,20 @@ type txOutcomes struct {
 }
 
 func (o *txOutcomes) Sent(id int64) {
-	o.run(func() error { return o.s.MarkSentTx(context.Background(), o.tx, id) })
+	o.run(func() error { return o.s.MarkSentTx(o.ctx, o.tx, id) })
 }
 func (o *txOutcomes) Skipped(id int64, r string) {
-	o.run(func() error { return o.s.MarkSkippedTx(context.Background(), o.tx, id, r) })
+	o.run(func() error { return o.s.MarkSkippedTx(o.ctx, o.tx, id, r) })
 }
 func (o *txOutcomes) Failed(id int64, n time.Time, m string) {
-	o.run(func() error { return o.s.MarkFailedTx(context.Background(), o.tx, id, n, m) })
+	o.run(func() error { return o.s.MarkFailedTx(o.ctx, o.tx, id, n, m) })
 }
 func (o *txOutcomes) Dead(id int64, userID int, deviceID, m string) {
 	o.run(func() error {
-		if err := o.s.MarkDeadTx(context.Background(), o.tx, id, m); err != nil {
+		if err := o.s.MarkDeadTx(o.ctx, o.tx, id, m); err != nil {
 			return err
 		}
-		return o.s.PruneTokenTx(context.Background(), o.tx, userID, deviceID)
+		return o.s.PruneTokenTx(o.ctx, o.tx, userID, deviceID)
 	})
 }
 

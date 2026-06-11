@@ -57,6 +57,12 @@ func (s *Service) PublishAnnouncement(ctx context.Context, a *Announcement) erro
 	if a.Title == "" {
 		return fmt.Errorf("notifications: announcement title required")
 	}
+	if len(a.Title) > MaxAnnouncementTitleLen {
+		return fmt.Errorf("notifications: announcement title exceeds %d characters", MaxAnnouncementTitleLen)
+	}
+	if len(a.Body) > MaxAnnouncementBodyLen {
+		return fmt.Errorf("notifications: announcement body exceeds %d characters", MaxAnnouncementBodyLen)
+	}
 	set := 0
 	if a.Audience.All {
 		set++
@@ -164,20 +170,21 @@ func (s *Service) UnreadCount(ctx context.Context, userID int, profileID string,
 	return s.store.UnreadCount(ctx, userID, profileID, childSafe)
 }
 
-// MarkRead marks the specified notifications as read for userID.
-func (s *Service) MarkRead(ctx context.Context, userID int, ids []int64) error {
-	return s.store.MarkRead(ctx, userID, ids)
+// MarkRead marks the specified notifications as read for the active profile.
+func (s *Service) MarkRead(ctx context.Context, userID int, profileID string, ids []int64) error {
+	return s.store.MarkRead(ctx, userID, profileID, ids)
 }
 
-// MarkAllRead marks all notifications for userID as read.
-func (s *Service) MarkAllRead(ctx context.Context, userID int) error {
-	return s.store.MarkAllRead(ctx, userID)
+// MarkAllRead marks all of the active profile's notifications as read.
+func (s *Service) MarkAllRead(ctx context.Context, userID int, profileID string) error {
+	return s.store.MarkAllRead(ctx, userID, profileID)
 }
 
-// Dismiss marks a single notification as dismissed. Returns ErrNotFound when
-// the notification does not exist or is already dismissed.
-func (s *Service) Dismiss(ctx context.Context, userID int, id int64) error {
-	return s.store.Dismiss(ctx, userID, id)
+// Dismiss marks a single notification as dismissed for the active profile.
+// Returns ErrNotFound when the notification does not exist for this profile or
+// is already dismissed.
+func (s *Service) Dismiss(ctx context.Context, userID int, profileID string, id int64) error {
+	return s.store.Dismiss(ctx, userID, profileID, id)
 }
 
 // GetPreferences returns the full preference list for userID, merging stored
