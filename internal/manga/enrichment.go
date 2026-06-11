@@ -27,12 +27,14 @@ import (
 const (
 	mangaMetadataImageProviderID = "manga-metadata"
 
-	// defaultEnrichBatchSize is sized so a sweep finishes within the 5-minute
-	// task interval: the plugin serves GetMetadata from its search cache, so
-	// an item costs one AniList request at the plugin's ~1 req/s budget. The
-	// task manager drops a trigger while a sweep is still running, so an
-	// overlong sweep degrades to back-to-back sweeps, not concurrent ones.
-	defaultEnrichBatchSize = 200
+	// defaultEnrichBatchSize is sized so a sweep finishes just within the
+	// 5-minute task interval: the plugin serves GetMetadata from its search
+	// cache, so an item costs one AniList request at the plugin's ~28 req/min
+	// budget (AniList's degraded-mode ceiling is 30/min) — 140 items ≈ 295s.
+	// Larger batches are not faster: the task manager drops a trigger while a
+	// sweep is still running, so an overlong sweep idles until the trigger
+	// after next and the effective rate drops below the AniList budget.
+	defaultEnrichBatchSize = 140
 	defaultEnrichWorkers   = 4
 
 	// enrichFailureCap is the manga_enrichment_state.failures count at which
