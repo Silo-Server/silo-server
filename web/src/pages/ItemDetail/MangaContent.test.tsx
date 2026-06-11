@@ -6,6 +6,13 @@ import type { ItemDetail, MangaChapter } from "@/api/types";
 
 vi.mock("@/hooks/useAmbientColor", () => ({ useAmbientColor: () => undefined }));
 vi.mock("@/components/PageBack", () => ({ default: () => null }));
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { download_allowed: true } }) }));
+vi.mock("@/hooks/queries/items", () => ({
+  useWatchedStateMutation: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("@/hooks/queries/catalogRead", () => ({
+  fetchCatalogItemVersions: vi.fn().mockResolvedValue([]),
+}));
 vi.mock("@/pages/ItemDetail/components/MetadataBadges", () => ({ default: () => null }));
 vi.mock("@/pages/ItemDetail/DetailHero", () => ({
   default: ({ title, actions }: { title: string; actions?: ReactNode }) => (
@@ -86,17 +93,33 @@ describe("MangaContent", () => {
     expect(screen.queryByText(/^Chapter \d/)).not.toBeInTheDocument();
   });
 
-  it("links a flat volume row to the ebook reader by content_id with the library id", () => {
+  it("links a flat volume row to the ebook reader by content_id with the library id and a backTo to the series", () => {
     render(
       <MemoryRouter>
         <MangaContent item={volumeSeries()} libraryId={7} />
       </MemoryRouter>,
     );
 
+    // The reader link carries the series content id as backTo so the reader's
+    // back action returns to the series instead of looping into the chapter.
     expect(screen.getByRole("link", { name: /Volume 1/i })).toHaveAttribute(
       "href",
-      "/reader/ebook/v01?libraryId=7",
+      "/reader/ebook/v01?libraryId=7&backTo=" + encodeURIComponent("/item/manga-1?libraryId=7"),
     );
+  });
+
+  it("offers per-row Read, Mark-read, and Download actions", () => {
+    render(
+      <MemoryRouter>
+        <MangaContent item={volumeSeries()} libraryId={7} />
+      </MemoryRouter>,
+    );
+
+    // Read remains the row link.
+    expect(screen.getByRole("link", { name: /Volume 1/i })).toBeInTheDocument();
+    // Mark-read + Download toggles exist per row (2 volumes → 2 of each).
+    expect(screen.getAllByRole("button", { name: /Mark chapter read/i })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /Download chapter/i })).toHaveLength(2);
   });
 
   it("nests a multi-chapter volume as a section header with chapter rows", () => {
@@ -111,7 +134,10 @@ describe("MangaContent", () => {
     expect(screen.getByText("Volume 1")).toBeInTheDocument();
 
     const firstChapter = screen.getByRole("link", { name: /Chapter 1/i });
-    expect(firstChapter).toHaveAttribute("href", "/reader/ebook/v1-c1?libraryId=7");
+    expect(firstChapter).toHaveAttribute(
+      "href",
+      "/reader/ebook/v1-c1?libraryId=7&backTo=" + encodeURIComponent("/item/manga-1?libraryId=7"),
+    );
 
     const links = screen.getAllByRole("link");
     const order = links
