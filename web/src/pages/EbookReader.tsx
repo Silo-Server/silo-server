@@ -197,6 +197,11 @@ export default function EbookReader() {
   const [searchParams] = useSearchParams();
   const requestedFileID = Number(searchParams.get("file_id") || "");
   const libraryIdParam = searchParams.get("libraryId");
+  // Manga chapter rows pass an explicit backTo target (the manga series detail)
+  // so the reader's back action returns to the series instead of the chapter's
+  // own junk item detail — which would loop straight back into the reader.
+  // Absent for normal ebooks, so their back behavior is unchanged.
+  const backToParam = searchParams.get("backTo");
   const { data: item, isLoading, error } = useCatalogItemDetail(contentId || undefined);
   const selectedFile = useMemo(
     () =>
@@ -512,9 +517,11 @@ export default function EbookReader() {
     );
   }
 
-  const backHref = `/item/${encodeURIComponent(item.content_id)}${
-    libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
-  }`;
+  const backHref =
+    backToParam ||
+    `/item/${encodeURIComponent(item.content_id)}${
+      libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
+    }`;
 
   if (!selectedFile) {
     return (
