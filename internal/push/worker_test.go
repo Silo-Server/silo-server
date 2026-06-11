@@ -218,6 +218,37 @@ func TestWorker_ParkedTransportFails(t *testing.T) {
 	}
 }
 
+// TestWorker_EmptyTokenSkippedNotDead asserts that a delivery with an empty
+// token is skipped (reason "empty token") without ever calling the transport,
+// and is NOT marked dead (which would prune the device-wide token row).
+func TestWorker_EmptyTokenSkippedNotDead(t *testing.T) {
+	tr := &fakeTransport{name: TransportWebPush, configured: true, res: ResultSent}
+	out := &fakeOutcomes{}
+	item := claimedDelivery{
+		Delivery: Delivery{ID: 42, UserID: 7, Attempts: 0, Transport: TransportWebPush},
+		Token:    "", // empty token — the bug scenario
+	}
+	q := &fakeQueue{items: deliveries(item), out: out}
+	w := NewWorker(q, fakePresence{}, []Transport{tr}, nil)
+
+	if _, err := w.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if len(out.rec) != 1 {
+		t.Fatalf("expected 1 outcome; got %d", len(out.rec))
+	}
+	rec := out.rec[0]
+	if rec.kind != StatusSkipped {
+		t.Errorf("empty token must be skipped, got kind=%s", rec.kind)
+	}
+	if rec.msg != "empty token" {
+		t.Errorf("reason must be %q, got %q", "empty token", rec.msg)
+	}
+	if tr.calls != 0 {
+		t.Errorf("Send must not be called for empty token; calls=%d", tr.calls)
+	}
+}
+
 // TestWorker_IntermediateBackoff checks that attempts=1 produces a 5m backoff
 // and attempts=2 produces a 30m backoff (no retryAfter, so schedule wins).
 func TestWorker_IntermediateBackoff(t *testing.T) {

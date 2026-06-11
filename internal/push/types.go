@@ -36,6 +36,7 @@ type Delivery struct {
 	ID             int64
 	NotificationID int64
 	UserID         int
+	ProfileID      string
 	DeviceID       string
 	Transport      string
 	Status         string

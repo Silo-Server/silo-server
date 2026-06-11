@@ -59,9 +59,9 @@ func (s *Store) EligibleDevices(ctx context.Context, userID int, profileID, cate
 // EnqueueDelivery writes one pending delivery row.
 func (s *Store) EnqueueDelivery(ctx context.Context, notificationID int64, d Device, notBefore time.Time) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO push_deliveries (notification_id, user_id, device_id, transport, status, not_before)
-		VALUES ($1,$2,$3,$4,'pending',$5)`,
-		notificationID, d.UserID, d.DeviceID, d.Transport, notBefore)
+		INSERT INTO push_deliveries (notification_id, user_id, profile_id, device_id, transport, status, not_before)
+		VALUES ($1,$2,$3,$4,$5,'pending',$6)`,
+		notificationID, d.UserID, d.ProfileID, d.DeviceID, d.Transport, notBefore)
 	if err != nil {
 		return fmt.Errorf("enqueue delivery: %w", err)
 	}
@@ -90,10 +90,10 @@ func (s *Store) ClaimDue(ctx context.Context, now time.Time, limit int) (*pgxpoo
 		return nil, nil, nil, fmt.Errorf("begin: %w", err)
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT pd.id, pd.notification_id, pd.user_id, pd.device_id, pd.transport, pd.status, pd.attempts, pd.not_before,
+		SELECT pd.id, pd.notification_id, pd.user_id, pd.profile_id, pd.device_id, pd.transport, pd.status, pd.attempts, pd.not_before,
 		       d.push_token, n.title, n.body, COALESCE(n.link,''), n.category
 		FROM push_deliveries pd
-		JOIN user_devices d ON d.user_id = pd.user_id AND d.device_id = pd.device_id
+		JOIN user_devices d ON d.user_id = pd.user_id AND d.device_id = pd.device_id AND d.profile_id = pd.profile_id
 		JOIN notifications n ON n.id = pd.notification_id
 		WHERE pd.status IN ('pending','failed') AND pd.not_before <= $1
 		ORDER BY pd.not_before
@@ -109,7 +109,7 @@ func (s *Store) ClaimDue(ctx context.Context, now time.Time, limit int) (*pgxpoo
 	for rows.Next() {
 		var c claimedDelivery
 		var token *string
-		if err := rows.Scan(&c.ID, &c.NotificationID, &c.UserID, &c.DeviceID, &c.Transport,
+		if err := rows.Scan(&c.ID, &c.NotificationID, &c.UserID, &c.ProfileID, &c.DeviceID, &c.Transport,
 			&c.Status, &c.Attempts, &c.NotBefore,
 			&token, &c.Payload.Title, &c.Payload.Body, &c.Payload.Link, &c.Payload.Category); err != nil {
 			_ = tx.Rollback(ctx)

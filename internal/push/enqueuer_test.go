@@ -75,6 +75,33 @@ func TestEnqueuer_EligibleErrorIsSwallowed(t *testing.T) {
 	}
 }
 
+// TestEnqueuer_ProfileIDPropagated asserts that the Device (including
+// ProfileID) passed to EligibleDevices is forwarded unchanged to
+// EnqueueDelivery so that the delivery row is scoped to the correct
+// (profile, device) pair.
+func TestEnqueuer_ProfileIDPropagated(t *testing.T) {
+	src := &fakeDeviceSource{devices: []Device{
+		{UserID: 7, ProfileID: "prof-active", DeviceID: "d1", Transport: TransportWebPush, Token: "t1"},
+	}}
+	now := time.Unix(2_000_000, 0)
+	e := NewEnqueuer(src, 0, func() time.Time { return now })
+
+	e.EnqueueForNotification(context.Background(), &notifications.Notification{
+		ID: 99, UserID: 7, Category: notifications.CategoryContent, Title: "hi",
+	})
+
+	if len(src.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want 1", len(src.enqueued))
+	}
+	got := src.enqueued[0].dev
+	if got.ProfileID != "prof-active" {
+		t.Errorf("ProfileID = %q, want %q", got.ProfileID, "prof-active")
+	}
+	if got.DeviceID != "d1" {
+		t.Errorf("DeviceID = %q, want %q", got.DeviceID, "d1")
+	}
+}
+
 func TestEnqueuer_NilOrZeroUserNoop(t *testing.T) {
 	src := &fakeDeviceSource{devices: []Device{{UserID: 7, DeviceID: "d1"}}}
 	e := NewEnqueuer(src, 30*time.Second, time.Now)

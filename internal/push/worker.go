@@ -98,6 +98,13 @@ func (w *Worker) handle(ctx context.Context, now time.Time, it claimedDelivery, 
 		out.Failed(it.ID, until, "transport rate-limited")
 		return
 	}
+	// An empty token is a data integrity problem, not a dead subscription.
+	// Skip it so we do NOT feed it to the transport (which would ResultDead →
+	// PruneTokenTx and silently wipe the real token on the device row).
+	if it.Token == "" {
+		out.Skipped(it.ID, "empty token")
+		return
+	}
 
 	res, retryAfter, sendErr := t.Send(ctx, it.Token, it.Payload)
 	switch res {
