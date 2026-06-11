@@ -91,6 +91,14 @@ var SensitiveSettingKeys = map[string]bool{
 	// still referenced by older request_integrations rows until backfilled).
 	"requests.radarr.api_key": true,
 	"requests.sonarr.api_key": true,
+
+	// Shared outbound email (internal/mail) SMTP credential.
+	"email.smtp_password": true,
+
+	// Web Push VAPID keypair JSON (generated + persisted atomically as one
+	// value by the notifications system; clients receive the public half via
+	// the capability endpoint, never from the settings store).
+	"notifications.web_push.vapid_keypair": true,
 }
 
 // EncryptedSettingsRepo decorates a raw settings store, transparently

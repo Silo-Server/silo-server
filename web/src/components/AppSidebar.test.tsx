@@ -56,6 +56,14 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/notifications", () => ({
+  useUnreadNotificationCount: () => ({ data: 0 }),
+}));
+
+vi.mock("@/hooks/queries/notificationWebhooks", () => ({
+  useNotificationCapability: () => ({ data: { in_app: { enabled: true } }, isError: false }),
+}));
+
 vi.mock("@/hooks/useViewTransition", () => ({
   useViewTransitionNavigate: () => vi.fn(),
 }));

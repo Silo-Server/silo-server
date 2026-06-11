@@ -1,0 +1,643 @@
+package notifications
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"sync"
+	"time"
+
+	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+)
+
+// UserLister enumerates login accounts for the interest backfill. Satisfied
+// by *auth.UserRepository.
+type UserLister interface {
+	List(ctx context.Context) ([]*models.User, error)
+}
+
+// ImageURLResolver presigns stored image paths into client-fetchable URLs.
+// Satisfied by *catalog.DetailService.
+type ImageURLResolver interface {
+	PresignImageURL(ctx context.Context, path, imageType, size string) string
+}
+
+// System bundles the user-facing release-notification services: availability
+// detection, interest maintenance, fanout, inbox repositories, and websocket
+// tickets. It is distinct from the operational Hub in hub.go.
+type System struct {
+	Settings    *Settings
+	Releases    *ReleaseRepository
+	Interests   *InterestRepository
+	Deliveries  *DeliveryRepository
+	Preferences *PreferencesRepository
+	Detector    *AvailabilityDetector
+	Interest    *InterestUpdater
+	Fanout      *FanoutWorker
+	Tickets     TicketStore
+	// Webhooks is nil when no at-rest cipher is configured (webhook URLs are
+	// credentials and must not be stored in plaintext).
+	Webhooks *WebhookService
+	// WebPush is nil when the settings store is not writable (VAPID keys
+	// could not be provisioned).
+	WebPush *WebPushService
+
+	webhookRepo       *WebhookRepository
+	webhookDispatcher *WebhookDispatcher
+	webhookRetry      *WebhookRetryWorker
+	webPushRepo       *WebPushRepository
+	webPushDispatcher *WebPushDispatcher
+
+	pool   *pgxpool.Pool
+	stores userstore.UserStoreProvider
+	users  UserLister
+	images ImageURLResolver
+	logger *slog.Logger
+	wg     sync.WaitGroup
+}
+
+// NewSystem wires the notification system. hub may be nil (no realtime
+// publishing); redisClient may be nil (in-memory websocket tickets).
+func NewSystem(
+	pool *pgxpool.Pool,
+	settingsReader SettingReader,
+	stores userstore.UserStoreProvider,
+	scopes ScopeResolver,
+	users UserLister,
+	hub *evt.Hub,
+	redisClient *redis.Client,
+	cipher *secret.Cipher,
+) *System {
+	settings := NewSettings(settingsReader)
+	releases := NewReleaseRepository(pool)
+	interests := NewInterestRepository(pool)
+	deliveries := NewDeliveryRepository(pool)
+	preferences := NewPreferencesRepository(pool)
+
+	wsDispatcher := NewWebsocketDispatcher(hub)
+	dispatchers := []Dispatcher{wsDispatcher}
+
+	// Outbound webhooks require the at-rest cipher: destination URLs are
+	// bearer credentials (Discord) and must never be stored in plaintext.
+	var webhookRepo *WebhookRepository
+	var webhookService *WebhookService
+	var webhookDispatcher *WebhookDispatcher
+	var webhookRetry *WebhookRetryWorker
+	var sender *webhookSender
+	if cipher != nil {
+		webhookRepo = NewWebhookRepository(pool)
+		sender = newWebhookSender(webhookRepo, deliveries, cipher, settings, hub)
+		webhookService = newWebhookService(webhookRepo, cipher, settings, sender)
+		webhookDispatcher = newWebhookDispatcher(sender)
+		webhookRetry = newWebhookRetryWorker(sender)
+		dispatchers = append(dispatchers, webhookDispatcher)
+	}
+
+	// Web push needs a writable settings store to self-provision its VAPID
+	// keypair. The reader main passes is the encrypted settings repo, which
+	// also writes; tests may pass a read-only stub.
+	var webPushRepo *WebPushRepository
+	var webPushService *WebPushService
+	var webPushDispatcher *WebPushDispatcher
+	var webPushSenderInst *webPushSender
+	if writer, ok := settingsReader.(SettingWriter); ok && writer != nil {
+		webPushRepo = NewWebPushRepository(pool)
+		webPushService = newWebPushService(webPushRepo, settings, writer)
+		webPushSenderInst = newWebPushSender(webPushRepo, deliveries, webPushService, settings)
+		webPushDispatcher = newWebPushDispatcher(webPushSenderInst)
+		dispatchers = append(dispatchers, webPushDispatcher)
+	}
+
+	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, NewMultiDispatcher(dispatchers...))
+	if webhookRepo != nil {
+		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
+	}
+	if webPushRepo != nil {
+		fanout.SetWebPushOutbox(webPushRepo)
+	}
+	detector := NewAvailabilityDetector(releases, settings)
+	detector.SetFanoutNudge(fanout.Nudge)
+	interest := NewInterestUpdater(pool, interests, stores, scopes)
+
+	system := &System{
+		Settings:          settings,
+		Releases:          releases,
+		Interests:         interests,
+		Deliveries:        deliveries,
+		Preferences:       preferences,
+		Detector:          detector,
+		Interest:          interest,
+		Fanout:            fanout,
+		Tickets:           NewTicketStore(redisClient),
+		Webhooks:          webhookService,
+		WebPush:           webPushService,
+		webhookRepo:       webhookRepo,
+		webhookDispatcher: webhookDispatcher,
+		webhookRetry:      webhookRetry,
+		webPushRepo:       webPushRepo,
+		webPushDispatcher: webPushDispatcher,
+		pool:              pool,
+		stores:            stores,
+		users:             users,
+		logger:            slog.Default().With("component", "notifications.system"),
+	}
+	wsDispatcher.payload = system.PayloadForRow
+	if sender != nil {
+		sender.payload = system.PayloadForRow
+	}
+	if webPushSenderInst != nil {
+		webPushSenderInst.payload = system.PayloadForRow
+	}
+	return system
+}
+
+// SetImageResolver wires presigned poster URLs into notification payloads.
+// Optional; without it clients fall back to thumbhash placeholders.
+func (s *System) SetImageResolver(resolver ImageURLResolver) {
+	if s != nil {
+		s.images = resolver
+	}
+}
+
+// PayloadForRow converts a row to its wire shape, attaching a presigned
+// poster URL when an image resolver is configured.
+func (s *System) PayloadForRow(ctx context.Context, row DeliveryRow) DeliveryRowPayload {
+	payload := PayloadForRow(row)
+	if s != nil && s.images != nil && row.PosterPath != "" {
+		payload.PosterURL = s.images.PresignImageURL(ctx, row.PosterPath, "poster", "")
+	}
+	return payload
+}
+
+// PayloadsForRows converts rows to their wire shape with poster URLs.
+func (s *System) PayloadsForRows(ctx context.Context, rows []DeliveryRow) []DeliveryRowPayload {
+	payloads := make([]DeliveryRowPayload, 0, len(rows))
+	for _, row := range rows {
+		payloads = append(payloads, s.PayloadForRow(ctx, row))
+	}
+	return payloads
+}
+
+// Start launches the fanout worker, interest updater, and (when configured)
+// the webhook dispatch pool and retry worker under ctx.
+func (s *System) Start(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	s.wg.Add(2)
+	go func() {
+		defer s.wg.Done()
+		s.Fanout.Run(ctx)
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.Interest.Run(ctx)
+	}()
+	if s.webhookDispatcher != nil {
+		s.wg.Add(2)
+		go func() {
+			defer s.wg.Done()
+			s.webhookDispatcher.Run(ctx)
+		}()
+		go func() {
+			defer s.wg.Done()
+			s.webhookRetry.Run(ctx)
+		}()
+	}
+	if s.webPushDispatcher != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.webPushDispatcher.Run(ctx)
+		}()
+		// Provision the VAPID keypair eagerly so a broken settings store
+		// surfaces at startup instead of on the first subscribe, and the
+		// capability endpoint never pays the generation latency.
+		go func() {
+			if _, err := s.WebPush.PublicKey(ctx); err != nil && ctx.Err() == nil {
+				s.logger.Error("web push VAPID provisioning failed", "error", err)
+			}
+		}()
+	}
+}
+
+// Wait blocks until the background loops exit (after their context is
+// canceled), so shutdown can drain in-flight work.
+func (s *System) Wait() {
+	if s != nil {
+		s.wg.Wait()
+	}
+}
+
+// PurgeProfile removes all notification state for a deleted profile.
+// Profiles may live in per-user SQLite stores, so Postgres cascades cannot
+// cover this.
+func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
+	if s == nil || profileID == "" {
+		return nil
+	}
+	if err := s.Interests.DeleteAllForProfile(ctx, profileID); err != nil {
+		return fmt.Errorf("purge interest rows: %w", err)
+	}
+	if err := s.Deliveries.DeleteAllForProfile(ctx, profileID); err != nil {
+		return fmt.Errorf("purge deliveries: %w", err)
+	}
+	if err := s.Preferences.DeleteForProfile(ctx, profileID); err != nil {
+		return fmt.Errorf("purge preferences: %w", err)
+	}
+	if s.webhookRepo != nil {
+		if err := s.webhookRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+			return fmt.Errorf("purge webhooks: %w", err)
+		}
+	}
+	if s.webPushRepo != nil {
+		if err := s.webPushRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+			return fmt.Errorf("purge web push subscriptions: %w", err)
+		}
+	}
+	return nil
+}
+
+// SeedAvailability inserts episode_availability for every currently playable
+// episode without creating release events, then writes the per-library seed
+// markers. Idempotent and rerunnable; it exists for libraries that predate
+// the notifications feature.
+//
+// Library selection is load-bearing for flood and loss safety:
+//   - already-seeded libraries are skipped: availability there is owned by
+//     the scan-end detector, and a silent (emitEvents=false) insert racing an
+//     in-flight scan would permanently suppress the claimed episode's release
+//     event;
+//   - never-fully-scanned libraries are skipped: their catalog is empty or
+//     partial, so seed-marking them now would make the first real scan emit
+//     release events for the entire back catalog. The detector writes their
+//     marker when that first full scan completes.
+func (s *System) SeedAvailability(ctx context.Context, progress func(percent int, message string)) error {
+	report := func(percent int, message string) {
+		if progress != nil {
+			progress(percent, message)
+		}
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT mf.id
+		FROM media_folders mf
+		WHERE mf.last_scanned_at IS NOT NULL
+		  AND NOT EXISTS (
+			SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id
+		  )
+		ORDER BY mf.id`)
+	if err != nil {
+		return fmt.Errorf("list libraries: %w", err)
+	}
+	libraryIDs := make([]int, 0, 8)
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan library id: %w", err)
+		}
+		libraryIDs = append(libraryIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	totalSeeded := 0
+	for i, libraryID := range libraryIDs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		inserted, _, err := s.Releases.RecordAvailabilityForLibrary(ctx, libraryID, false)
+		if err != nil {
+			return fmt.Errorf("seed library %d: %w", libraryID, err)
+		}
+		if err := s.Releases.MarkLibrarySeeded(ctx, libraryID); err != nil {
+			return fmt.Errorf("mark library %d seeded: %w", libraryID, err)
+		}
+		totalSeeded += inserted
+		report((i+1)*100/max(len(libraryIDs), 1),
+			fmt.Sprintf("Seeded library %d (%d new availability rows)", libraryID, inserted))
+	}
+	s.logger.Info("availability seeding completed",
+		"libraries", len(libraryIDs), "availability_rows", totalSeeded)
+	return nil
+}
+
+const interestRebuildTask = "interest_rebuild"
+
+// RebuildInterest incrementally rebuilds profile_series_interest from
+// favorites, watchlist, and watch progress for every profile. Checkpointed
+// per profile so a crash resumes with at most one profile of repeated work;
+// recomputes are idempotent upserts. Completed runs reset and start over
+// (the task doubles as periodic drift repair).
+func (s *System) RebuildInterest(ctx context.Context, progress func(percent int, message string)) error {
+	report := func(percent int, message string) {
+		if progress != nil {
+			progress(percent, message)
+		}
+	}
+	if s.users == nil {
+		return fmt.Errorf("interest rebuild requires a user lister")
+	}
+
+	checkpoint, completedAt, err := s.loadBackfillCheckpoint(ctx, interestRebuildTask)
+	if err != nil {
+		return err
+	}
+	if completedAt != nil {
+		// Start a fresh repair pass.
+		checkpoint = ""
+		if err := s.resetBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
+			return err
+		}
+	}
+
+	users, err := s.users.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list users: %w", err)
+	}
+	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
+
+	processed := 0
+	for userIdx, user := range users {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		store, err := s.stores.ForUser(ctx, user.ID)
+		if err != nil {
+			s.logger.Warn("interest rebuild: open user store failed", "user_id", user.ID, "error", err)
+			continue
+		}
+		profiles, err := store.ListProfiles(ctx)
+		if err != nil {
+			s.logger.Warn("interest rebuild: list profiles failed", "user_id", user.ID, "error", err)
+			continue
+		}
+		sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
+
+		for _, profile := range profiles {
+			key := backfillKey(user.ID, profile.ID)
+			if checkpoint != "" && key <= checkpoint {
+				continue
+			}
+			if err := s.rebuildProfileInterest(ctx, store, user.ID, profile.ID); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				s.logger.Warn("interest rebuild: profile failed",
+					"user_id", user.ID, "profile_id", profile.ID, "error", err)
+			}
+			if err := s.saveBackfillCheckpoint(ctx, interestRebuildTask, key); err != nil {
+				return err
+			}
+			processed++
+		}
+		report((userIdx+1)*100/max(len(users), 1),
+			fmt.Sprintf("Rebuilt interest for %d profiles", processed))
+	}
+
+	if err := s.completeBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
+		return err
+	}
+	s.logger.Info("interest rebuild completed", "profiles", processed)
+	return nil
+}
+
+// rebuildProfileInterest recomputes every series the profile has any
+// relationship with (favorites, watchlist, progress).
+func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.UserStore, userID int, profileID string) error {
+	const pageSize = 500
+	itemIDs := make(map[string]struct{}, 64)
+
+	for offset := 0; ; offset += pageSize {
+		favorites, err := store.ListFavorites(ctx, profileID, pageSize, offset)
+		if err != nil {
+			return fmt.Errorf("list favorites: %w", err)
+		}
+		for _, favorite := range favorites {
+			itemIDs[favorite.MediaItemID] = struct{}{}
+		}
+		if len(favorites) < pageSize {
+			break
+		}
+	}
+	for offset := 0; ; offset += pageSize {
+		watchlist, err := store.ListWatchlist(ctx, profileID, pageSize, offset)
+		if err != nil {
+			return fmt.Errorf("list watchlist: %w", err)
+		}
+		for _, entry := range watchlist {
+			itemIDs[entry.MediaItemID] = struct{}{}
+		}
+		if len(watchlist) < pageSize {
+			break
+		}
+	}
+	for offset := 0; ; offset += pageSize {
+		progress, err := store.ListProgress(ctx, profileID, "", pageSize, offset)
+		if err != nil {
+			return fmt.Errorf("list progress: %w", err)
+		}
+		for _, entry := range progress {
+			itemIDs[entry.MediaItemID] = struct{}{}
+		}
+		if len(progress) < pageSize {
+			break
+		}
+	}
+	if len(itemIDs) == 0 {
+		return nil
+	}
+
+	seriesIDs, err := s.batchResolveSeries(ctx, itemIDs)
+	if err != nil {
+		return err
+	}
+	for seriesID := range seriesIDs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := s.Interest.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
+			s.logger.Warn("interest rebuild: series recompute failed",
+				"user_id", userID, "profile_id", profileID, "series_id", seriesID, "error", err)
+		}
+	}
+	return nil
+}
+
+// batchResolveSeries maps item IDs (episodes, seasons, series) to their
+// series IDs; movies resolve to nothing.
+func (s *System) batchResolveSeries(ctx context.Context, itemIDs map[string]struct{}) (map[string]struct{}, error) {
+	ids := make([]string, 0, len(itemIDs))
+	for id := range itemIDs {
+		ids = append(ids, id)
+	}
+	seriesIDs := make(map[string]struct{}, len(ids))
+	const chunkSize = 500
+	for start := 0; start < len(ids); start += chunkSize {
+		end := min(start+chunkSize, len(ids))
+		rows, err := s.pool.Query(ctx, `
+			SELECT series_id FROM episodes WHERE content_id = ANY($1)
+			UNION
+			SELECT series_id FROM seasons WHERE content_id = ANY($1)
+			UNION
+			SELECT content_id FROM media_items WHERE content_id = ANY($1) AND type = 'series'`,
+			ids[start:end])
+		if err != nil {
+			return nil, fmt.Errorf("resolve series ids: %w", err)
+		}
+		for rows.Next() {
+			var seriesID string
+			if err := rows.Scan(&seriesID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan series id: %w", err)
+			}
+			if seriesID != "" {
+				seriesIDs[seriesID] = struct{}{}
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return seriesIDs, nil
+}
+
+// RetentionStats reports what a retention pass removed.
+type RetentionStats struct {
+	DeliveriesDeleted      int64
+	EventsDeleted          int64
+	StaleEventsDeleted     int64
+	InterestPruned         int64
+	WebhookAttemptsDeleted int64
+	WebPushAttemptsDeleted int64
+}
+
+// RunRetention applies the retention policy: read deliveries past the read
+// window, unread past the unread window, processed release events past the
+// debug window, unprocessed release events past the fanout staleness horizon,
+// and inert interest rows.
+func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
+	var stats RetentionStats
+	now := time.Now().UTC()
+	readCutoff := now.AddDate(0, 0, -s.Settings.ReadRetentionDays(ctx))
+	unreadCutoff := now.AddDate(0, 0, -s.Settings.UnreadRetentionDays(ctx))
+	eventCutoff := now.AddDate(0, 0, -s.Settings.EventRetentionDays(ctx))
+
+	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff)
+	if err != nil {
+		return stats, fmt.Errorf("prune deliveries: %w", err)
+	}
+	stats.DeliveriesDeleted = deleted
+
+	events, err := s.Releases.DeleteProcessedBefore(ctx, eventCutoff)
+	if err != nil {
+		return stats, fmt.Errorf("prune release events: %w", err)
+	}
+	stats.EventsDeleted = events
+
+	// Unprocessed events accumulate without bound when fanout is disabled
+	// while availability detection keeps emitting; the fanout worker would
+	// suppress them as stale anyway, so retention reclaims them directly.
+	staleEvents, err := s.Releases.DeleteUnprocessedBefore(ctx, now.Add(-s.Settings.MaxEventAge(ctx)))
+	if err != nil {
+		return stats, fmt.Errorf("prune stale release events: %w", err)
+	}
+	stats.StaleEventsDeleted = staleEvents
+
+	pruned, err := s.Interests.PruneInert(ctx)
+	if err != nil {
+		return stats, fmt.Errorf("prune interest rows: %w", err)
+	}
+	stats.InterestPruned = pruned
+
+	if s.webhookRepo != nil {
+		attempts, err := s.webhookRepo.DeleteOldAttempts(ctx, now)
+		if err != nil {
+			return stats, fmt.Errorf("prune webhook attempts: %w", err)
+		}
+		stats.WebhookAttemptsDeleted = attempts
+	}
+	if s.webPushRepo != nil {
+		attempts, err := s.webPushRepo.DeleteOldAttempts(ctx, now)
+		if err != nil {
+			return stats, fmt.Errorf("prune web push attempts: %w", err)
+		}
+		stats.WebPushAttemptsDeleted = attempts
+	}
+	return stats, nil
+}
+
+func backfillKey(userID int, profileID string) string {
+	return fmt.Sprintf("%010d|%s", userID, profileID)
+}
+
+func (s *System) loadBackfillCheckpoint(ctx context.Context, task string) (string, *time.Time, error) {
+	var key *string
+	var completedAt *time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT last_processed_key, completed_at FROM notification_backfill_state WHERE task = $1`,
+		task,
+	).Scan(&key, &completedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("load backfill checkpoint: %w", err)
+	}
+	checkpoint := ""
+	if key != nil {
+		checkpoint = *key
+	}
+	return checkpoint, completedAt, nil
+}
+
+func (s *System) saveBackfillCheckpoint(ctx context.Context, task, key string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at)
+		VALUES ($1, $2, now(), now())
+		ON CONFLICT (task) DO UPDATE SET
+			last_processed_key = EXCLUDED.last_processed_key,
+			updated_at = now()`,
+		task, key)
+	if err != nil {
+		return fmt.Errorf("save backfill checkpoint: %w", err)
+	}
+	return nil
+}
+
+func (s *System) resetBackfillCheckpoint(ctx context.Context, task string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at, completed_at)
+		VALUES ($1, NULL, now(), now(), NULL)
+		ON CONFLICT (task) DO UPDATE SET
+			last_processed_key = NULL,
+			started_at = now(),
+			updated_at = now(),
+			completed_at = NULL`,
+		task)
+	if err != nil {
+		return fmt.Errorf("reset backfill checkpoint: %w", err)
+	}
+	return nil
+}
+
+func (s *System) completeBackfillCheckpoint(ctx context.Context, task string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE notification_backfill_state SET completed_at = now(), updated_at = now() WHERE task = $1`,
+		task)
+	if err != nil {
+		return fmt.Errorf("complete backfill checkpoint: %w", err)
+	}
+	return nil
+}

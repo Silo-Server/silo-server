@@ -595,6 +595,16 @@ func main() {
 		bootstrapSensitiveValues["redis.url"] = bc.RedisURL
 	}
 
+	// Shared Redis client for components needing raw Redis beyond the event
+	// bus (websocket handshake tickets, session listing). Nil on Redis-less
+	// deployments; consumers fall back to in-process implementations.
+	apiRedisClient, apiRedisErr := cache.NewRedisClient(cfg.Redis)
+	if apiRedisErr != nil {
+		slog.Warn("redis client init failed; multi-node websocket tickets disabled", "error", apiRedisErr)
+	} else if apiRedisClient != nil {
+		defer func() { _ = apiRedisClient.Close() }()
+	}
+
 	deps := api.Dependencies{
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -605,6 +615,7 @@ func main() {
 		DB:                           pool,
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
+		RedisClient:                  apiRedisClient,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
@@ -1271,6 +1282,39 @@ func main() {
 		}
 		defer userStoreProvider.Close()
 	}
+
+	// User-facing release notifications. The system reads user state through
+	// the raw store provider; the provider handed to everything downstream is
+	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
+	// jellycompat, imports, playback) feeds the interest index.
+	var notificationSystem *notifications.System
+	if deps.DB != nil && userStoreProvider != nil {
+		notificationScopes := access.NewResolver(
+			auth.NewUserRepository(deps.DB),
+			userStoreProvider,
+			access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
+		)
+		notificationSystem = notifications.NewSystem(
+			deps.DB,
+			settingsRepo,
+			userStoreProvider,
+			notificationScopes,
+			auth.NewUserRepository(deps.DB),
+			deps.EventsHub,
+			deps.RedisClient,
+			deps.SecretCipher,
+		)
+		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
+		deps.Notifications = notificationSystem
+		if libraryIngestExecutor != nil {
+			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)
+		}
+		if needsWorkers {
+			notificationSystem.Start(appCtx)
+			defer notificationSystem.Wait()
+		}
+	}
+
 	if userStoreProvider != nil && pluginService != nil {
 		deps.PluginUserConfig = plugins.NewUserConfigStore(userStoreProvider, pluginService)
 	}
@@ -1575,6 +1619,11 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		if notificationSystem != nil {
+			taskMgr.Register(tasks.NewSeedEpisodeAvailabilityTask(notificationSystem))
+			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
+			taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationSystem))
+		}
 		if matchWorker != nil {
 			taskMgr.Register(tasks.NewMatchMediaTask(matchWorker))
 		}

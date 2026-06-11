@@ -2221,7 +2221,122 @@ export type EventChannel =
   | "tasks"
   | "scans"
   | "history_import"
-  | "user_state";
+  | "user_state"
+  | "notifications";
+
+export interface NotificationReasonFlags {
+  favorite?: boolean;
+  watchlist?: boolean;
+  continue_watching?: boolean;
+  next_up?: boolean;
+}
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  profile_id: string;
+  library_id?: number;
+  series_id?: string;
+  episode_id?: string;
+  series_title?: string;
+  episode_title?: string;
+  season_number?: number;
+  episode_number?: number;
+  poster_path?: string;
+  poster_url?: string;
+  poster_thumbhash?: string;
+  reason_flags: NotificationReasonFlags;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface NotificationListResponse {
+  notifications: AppNotification[];
+  next_cursor?: string;
+}
+
+export interface NotificationSyncResponse {
+  notifications: AppNotification[];
+  next_cursor?: string;
+  unread_count: number;
+}
+
+export interface NotificationUnreadCountResponse {
+  count: number;
+}
+
+export interface NotificationPreferences {
+  profile_id: string;
+  enabled: boolean;
+  notify_favorites: boolean;
+  notify_watchlist: boolean;
+  notify_continue_watching: boolean;
+  notify_next_up: boolean;
+}
+
+export interface NotificationReadEventPayload {
+  profile_id: string;
+  id?: string;
+  all?: boolean;
+}
+
+export type NotificationWebhookType = "discord" | "generic";
+
+export interface NotificationWebhook {
+  id: string;
+  name: string;
+  type: NotificationWebhookType;
+  url_host: string;
+  enabled: boolean;
+  notify_favorites: boolean;
+  notify_watchlist: boolean;
+  notify_continue_watching: boolean;
+  notify_next_up: boolean;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure_status: number | null;
+  last_failure_message: string | null;
+  /** Present only in create / rotate-secret responses; shown exactly once. */
+  signing_secret?: string;
+}
+
+export interface NotificationWebhookInput {
+  name?: string;
+  url?: string;
+  type?: NotificationWebhookType;
+  enabled?: boolean;
+  notify_favorites?: boolean;
+  notify_watchlist?: boolean;
+  notify_continue_watching?: boolean;
+  notify_next_up?: boolean;
+}
+
+export interface NotificationWebhookTestResult {
+  ok: boolean;
+  http_status?: number;
+  duration_ms: number;
+  message?: string;
+}
+
+export interface NotificationCapability {
+  in_app: { enabled: boolean };
+  apple_push: { available: boolean; provider: string; supported_modes: string[] };
+  android_push: { available: boolean; provider: string; supported_modes: string[] };
+  web_push: { available: boolean; public_key?: string };
+  webhooks: { available: boolean; max_per_profile: number; supported_types: string[] };
+}
+
+export interface WebPushSubscriptionView {
+  id: string;
+  endpoint: string;
+  device_name?: string;
+  enabled: boolean;
+  created_at: string;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
 
 export interface EventsHelloMessage {
   type: "hello";

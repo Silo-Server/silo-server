@@ -37,6 +37,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -119,6 +120,7 @@ type Dependencies struct {
 	NodeID                       string
 	LogStreamHub                 *logstream.Hub
 	RealtimeHub                  *notifications.Hub
+	Notifications                *notifications.System // user-facing release notifications (may be nil)
 	EventsHub                    *evt.Hub
 	ScanRegistry                 *evt.ScanRegistry
 	LibraryScanQueue             *scanqueue.Service
@@ -1522,7 +1524,44 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.LibraryScanQueue,
 						historyImportSvc,
 					)
+					eventsHandler.SetNotificationsSystem(deps.Notifications)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
+				}
+
+				// User notifications: profile-scoped inbox, preferences, and
+				// the websocket handshake ticket.
+				if deps.Notifications != nil {
+					if detailSvc != nil {
+						deps.Notifications.SetImageResolver(detailSvc)
+					}
+					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
+					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
+					r.Route("/notifications", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/", notificationsHandler.HandleList)
+						r.Get("/sync", notificationsHandler.HandleSync)
+						r.Get("/unread-count", notificationsHandler.HandleUnreadCount)
+						r.Get("/capability", notificationsHandler.HandleCapability)
+						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
+						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
+						r.Post("/read-all", notificationsHandler.HandleReadAll)
+						r.Route("/webhooks", func(r chi.Router) {
+							r.Get("/", notificationsHandler.HandleListWebhooks)
+							r.Post("/", notificationsHandler.HandleCreateWebhook)
+							r.Put("/{id}", notificationsHandler.HandleUpdateWebhook)
+							r.Delete("/{id}", notificationsHandler.HandleDeleteWebhook)
+							r.Post("/{id}/rotate-secret", notificationsHandler.HandleRotateWebhookSecret)
+							r.Post("/{id}/test", notificationsHandler.HandleTestWebhook)
+						})
+						r.Route("/web-push", func(r chi.Router) {
+							r.Get("/subscriptions", notificationsHandler.HandleWebPushList)
+							r.Post("/subscriptions", notificationsHandler.HandleWebPushSubscribe)
+							r.Delete("/subscriptions/{id}", notificationsHandler.HandleWebPushDelete)
+							r.Post("/unsubscribe", notificationsHandler.HandleWebPushUnsubscribe)
+						})
+						r.Get("/{id}", notificationsHandler.HandleGet)
+						r.Post("/{id}/read", notificationsHandler.HandleMarkRead)
+					})
 				}
 
 				// Marker read/write/clear for any authenticated viewer: users
@@ -2118,6 +2157,10 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/settings/{key}", adminHandler.HandleGetSetting)
 							r.Get("/settings", adminHandler.HandleGetSettings)
 							r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
+							if settingsRepo != nil {
+								emailHandler := handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
+								r.Post("/email/test", emailHandler.HandleTest)
+							}
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
 								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)

@@ -3,15 +3,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import type {
   AdminJob,
   AdminSession,
+  AppNotification,
   EventChannel,
   EventsEventMessage,
   EventsSnapshotMessage,
   EventsStreamMessage,
   HistoryImportRun,
+  NotificationReadEventPayload,
   ScanRun,
   TaskInfo,
 } from "@/api/types";
 import { api, getAccessToken } from "@/api/client";
+import {
+  applyNotificationCreated,
+  applyNotificationRead,
+  applyNotificationsSnapshot,
+  formatEpisodeCode,
+} from "@/hooks/queries/notifications";
+import { toast } from "sonner";
 import {
   RealtimeEventsContext,
   type EventChannelHandlers,
@@ -61,13 +70,45 @@ const DASHBOARD_QUERY_KEYS = [
   adminKeys.users(),
 ] as const;
 
-function buildEventsUrl(token: string | null, location: Pick<Location, "protocol" | "host">) {
+function buildEventsUrl(
+  token: string | null,
+  location: Pick<Location, "protocol" | "host">,
+  ticket?: string | null,
+) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const search = new URLSearchParams();
   if (token) {
     search.set("token", token);
   }
+  if (ticket) {
+    search.set("ticket", ticket);
+  }
   return `${protocol}//${location.host}/api/v1/events/ws${search.toString() ? `?${search.toString()}` : ""}`;
+}
+
+/**
+ * Mints a short-lived single-use websocket ticket binding the connection to
+ * the active profile (required for the notifications channel). Returns null
+ * when no profile is active or the mint fails — the connection then proceeds
+ * unbound, and the subscribed-message handler retries the binding with
+ * backoff when the notifications subscription is rejected.
+ */
+async function mintEventsTicket(hasProfile: boolean): Promise<string | null> {
+  if (!hasProfile) {
+    return null;
+  }
+  try {
+    const response = await api<{ ticket: string }>("/events/ws-ticket", {
+      method: "POST",
+      // A hung mint must settle: connect() awaits this before any socket
+      // exists, so without a timeout no onclose fires and no reconnect is
+      // ever scheduled — realtime would stay "connecting" forever.
+      signal: AbortSignal.timeout(10_000),
+    });
+    return response.ticket || null;
+  } catch {
+    return null;
+  }
 }
 
 function parseEventsMessage(value: unknown): EventsStreamMessage | null {
@@ -359,6 +400,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const allowDashboardRealtimeUpdates = !isDashboardRoute || pageActivity.canPollDashboard;
   const [connectionState, setConnectionState] = useState<RealtimeConnectionState>("connecting");
   const reconnectTimerRef = useRef<number | undefined>(undefined);
+  const profileRebindAttemptsRef = useRef(0);
+  const nextReconnectDelayRef = useRef<number | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const helloReceivedRef = useRef(false);
   const requestCounterRef = useRef(0);
@@ -459,10 +502,39 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       case "history_import":
         updateHistoryImportCaches(queryClient);
         break;
+      case "notifications":
+        if (Array.isArray(message.data)) {
+          applyNotificationsSnapshot(queryClient, message.data as AppNotification[]);
+        }
+        break;
       default:
         break;
     }
     dispatchChannelMessage(message.channel, "snapshot", message);
+  }
+
+  function handleNotificationEvent(message: EventsEventMessage) {
+    if (message.event === "notification.created") {
+      const notification = message.data as AppNotification;
+      if (
+        notification.profile_id &&
+        activeProfileIDRef.current &&
+        notification.profile_id !== activeProfileIDRef.current
+      ) {
+        return;
+      }
+      applyNotificationCreated(queryClient, notification);
+      if (notification.type === "episode.available" && notification.series_title) {
+        const episodeCode = formatEpisodeCode(notification);
+        toast(`New episode of ${notification.series_title}`, {
+          description: [episodeCode, notification.episode_title].filter(Boolean).join(" — "),
+        });
+      }
+      return;
+    }
+    if (message.event === "notification.read") {
+      applyNotificationRead(queryClient, message.data as NotificationReadEventPayload);
+    }
   }
 
   function handleEvent(message: EventsEventMessage) {
@@ -531,6 +603,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           allowDashboardRealtimeUpdatesRef.current,
         );
         break;
+      case "notifications":
+        handleNotificationEvent(message);
+        break;
       default:
         break;
     }
@@ -576,13 +651,17 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       if (closedByEffect || reconnectTimerRef.current !== undefined) {
         return;
       }
+      // The profile-rebind path stretches the delay so a persistently failing
+      // ticket mint cannot turn into a tight reconnect loop.
+      const delay = nextReconnectDelayRef.current ?? 1_000;
+      nextReconnectDelayRef.current = null;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = undefined;
         if (closedByEffect) {
           return;
         }
         connect();
-      }, 1_000);
+      }, delay);
     };
 
     const connect = () => {
@@ -592,9 +671,25 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       setConnectionState("connecting");
       helloReceivedRef.current = false;
 
+      // The ticket binds the connection to the active profile so the server
+      // can authorize the notifications channel. Failure degrades gracefully
+      // to an unbound connection; without a profile we connect synchronously.
+      if (!activeProfileIDRef.current) {
+        openSocket(null);
+        return;
+      }
+      void mintEventsTicket(true).then((ticket) => {
+        if (closedByEffect) {
+          return;
+        }
+        openSocket(ticket);
+      });
+    };
+
+    const openSocket = (ticket: string | null) => {
       let socket: WebSocket;
       try {
-        socket = new WebSocket(buildEventsUrl(getAccessToken(), window.location));
+        socket = new WebSocket(buildEventsUrl(getAccessToken(), window.location, ticket));
       } catch {
         setConnectionState("disconnected");
         scheduleReconnect();
@@ -628,8 +723,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             helloReceivedRef.current = true;
             sendSubscribe();
             return;
-          case "subscribed":
+          case "subscribed": {
+            // A profile_required rejection means the profile binding was lost
+            // (the ticket mint failed or the ticket was not honored). Left
+            // alone, this socket would stay healthy for hours while silently
+            // delivering no notifications — reconnect with backoff to re-mint.
+            const profileRequired = (message.rejected ?? []).some(
+              (entry) => entry.channel === "notifications" && entry.code === "profile_required",
+            );
+            if (profileRequired && activeProfileIDRef.current) {
+              profileRebindAttemptsRef.current += 1;
+              nextReconnectDelayRef.current = Math.min(
+                30_000,
+                1_000 * 2 ** Math.min(profileRebindAttemptsRef.current, 5),
+              );
+              socket.close();
+            } else {
+              profileRebindAttemptsRef.current = 0;
+            }
             return;
+          }
           case "snapshot":
             handleSnapshot(message);
             return;
@@ -684,7 +797,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         socket.close();
       }
     };
-  }, [authenticatedUserID, pageActivity.canApplyRealtimeUpdates, queryClient]);
+    // profile?.id is a dependency on purpose: the websocket binds to the
+    // active profile via the handshake ticket, so a profile switch must
+    // reconnect (and resubscribe) under the new identity.
+  }, [authenticatedUserID, profile?.id, pageActivity.canApplyRealtimeUpdates, queryClient]);
 
   const value = useMemo<RealtimeEventsContextValue>(
     () => ({

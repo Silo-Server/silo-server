@@ -88,6 +88,7 @@ type Executor struct {
 	skippedRootRepo SkippedRootRepository
 	events          cache.EventBus
 	realtime        *notifications.Hub
+	availability    *notifications.AvailabilityDetector
 	now             func() time.Time
 
 	// tvDrainSettleWindow overrides scopedTVDrainSettleWindow when > 0. Kept
@@ -116,6 +117,15 @@ func NewExecutor(
 		events:          events,
 		realtime:        realtime,
 		now:             time.Now,
+	}
+}
+
+// SetAvailabilityDetector wires episode-availability detection for release
+// notifications. Optional; runs after matching completes and never blocks or
+// fails the ingest.
+func (e *Executor) SetAvailabilityDetector(detector *notifications.AvailabilityDetector) {
+	if e != nil {
+		e.availability = detector
 	}
 }
 
@@ -347,6 +357,15 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		if err := e.folders.UpdateLastScanned(scanCtx, folder.ID, e.now().UTC()); err != nil {
 			return result, fmt.Errorf("update last scanned: %w", err)
 		}
+	}
+
+	// Episode availability runs after matching/reconcile so releases are tied
+	// to resolved episodes. It runs detached: the detector is best-effort with
+	// its own deadline (it detaches from scanCtx internally, surviving its
+	// cancellation), and a slow pass must not delay scan completion or the
+	// serialized scan queue.
+	if e.availability != nil && (isTVLibraryType(folder.Type) || isMixedLibraryType(folder.Type)) {
+		go e.availability.HandleIngestCompleted(scanCtx, folder.ID, mode == scopeModeLibrary, matchScopes)
 	}
 
 	if shouldPublish(result) && e.events != nil {

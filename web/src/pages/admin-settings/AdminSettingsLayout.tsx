@@ -16,12 +16,14 @@ import {
   Layers,
   Subtitles,
   Sparkles,
+  Mail,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { cn } from "@/lib/utils";
 
+import EmailSettings from "./EmailSettings";
 import GeneralSettings from "./GeneralSettings";
 import PlaybackSettings from "./PlaybackSettings";
 import ScannerSettings from "./ScannerSettings";
@@ -83,6 +85,7 @@ const SETTINGS_GROUPS: SettingsNavGroup[] = [
         component: WatchProvidersSettings,
       },
       { id: "integrations", label: "Integrations", icon: Puzzle, component: IntegrationsSettings },
+      { id: "email", label: "Email", icon: Mail, component: EmailSettings },
       {
         id: "compatibility-proxies",
         label: "Compatibility Proxies",
