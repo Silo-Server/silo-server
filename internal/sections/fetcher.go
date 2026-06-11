@@ -2019,7 +2019,7 @@ func buildRecentlyAddedQuery(s ResolvedSection, libraryID *int, libraryIDs []int
 
 	query := fmt.Sprintf(
 		`SELECT %s FROM %s %s ORDER BY mi.created_at DESC, mi.content_id ASC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
+		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return query, args
@@ -2080,7 +2080,7 @@ func buildRecentlyAddedSingleLibraryQuery(s ResolvedSection, cfgFilters SectionC
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 	query := fmt.Sprintf(
 		`SELECT %s FROM media_item_libraries mil JOIN media_items mi ON mi.content_id = mil.content_id %s ORDER BY mil.first_seen_at DESC, mil.content_id ASC LIMIT $%d`,
-		itemColumns("mi"), whereClause, argIdx,
+		itemColumnsLatestMangaPoster("mi"), whereClause, argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return sectionQuery{sql: query, args: args}, true
@@ -2110,7 +2110,7 @@ func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []
 
 	query := fmt.Sprintf(
 		`SELECT %s FROM %s %s ORDER BY mi.year DESC, mi.created_at DESC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
+		itemColumnsLatestMangaPoster("mi"), fromClause, whereClause, argIdx,
 	)
 	args = append(args, s.ItemLimit)
 	return query, args
@@ -2441,9 +2441,10 @@ func utcDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// itemColumns returns the SELECT column list matching scanMediaItems.
-// Mirrors catalog.browseItemColumns.
-func itemColumns(alias string) string {
+// itemColumnsList returns the alias-prefixed SELECT columns matching
+// scanMediaItems, in scan order. Mirrors catalog.browseItemColumns. The shared
+// source of truth for itemColumns and its manga-poster-override variant.
+func itemColumnsList(alias string) []string {
 	cols := []string{
 		"content_id", "type", "title", "sort_title", "original_title", "year", "genres",
 		"content_rating", "runtime", "overview", "tagline",
@@ -2459,7 +2460,48 @@ func itemColumns(alias string) string {
 	for i, c := range cols {
 		prefixed[i] = alias + "." + c
 	}
-	return strings.Join(prefixed, ", ")
+	return prefixed
+}
+
+// itemColumns returns the SELECT column list matching scanMediaItems.
+// Mirrors catalog.browseItemColumns.
+func itemColumns(alias string) string {
+	return strings.Join(itemColumnsList(alias), ", ")
+}
+
+// itemColumnsLatestMangaPoster returns the same SELECT column list as
+// itemColumns (identical order and aliases, so scanMediaItems is unchanged) but
+// overrides poster_path/poster_thumbhash for type='manga' SERIES rows: a manga
+// series card shows the cover of its latest-added volume/chapter (the linked
+// manga_chapters row with the greatest created_at) instead of the AniList series
+// cover, falling back to the series' own poster when no chapter cover exists.
+//
+// Strictly gated on mi.type = 'manga' so movies/TV/audiobooks/ebooks keep their
+// own poster exactly. Used only by the recently-added / recently-released
+// section builders; all other queries keep itemColumns.
+func itemColumnsLatestMangaPoster(alias string) string {
+	cols := itemColumnsList(alias)
+	for i, c := range cols {
+		switch c {
+		case alias + ".poster_path":
+			cols[i] = mangaLatestVolumePosterExpr(alias, "poster_path")
+		case alias + ".poster_thumbhash":
+			cols[i] = mangaLatestVolumePosterExpr(alias, "poster_thumbhash")
+		}
+	}
+	return strings.Join(cols, ", ")
+}
+
+// mangaLatestVolumePosterExpr emits the manga-gated CASE override for a single
+// poster column, aliased back to the original column name so the scan order and
+// column set are unchanged.
+func mangaLatestVolumePosterExpr(alias, col string) string {
+	return "CASE WHEN " + alias + ".type = 'manga' THEN COALESCE((" +
+		"SELECT c." + col + " FROM media_items c " +
+		"JOIN manga_chapters mc ON mc.chapter_content_id = c.content_id " +
+		"WHERE mc.series_content_id = " + alias + ".content_id " +
+		"ORDER BY c.created_at DESC, c.content_id DESC LIMIT 1), " +
+		alias + "." + col + ") ELSE " + alias + "." + col + " END AS " + col
 }
 
 // scanMediaItems scans rows into MediaItem slices. Must match itemColumns order.
