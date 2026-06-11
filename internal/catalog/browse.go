@@ -344,6 +344,10 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)
 
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone catalog items.
+	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+
 	if filters.SnapshotAt != nil {
 		conditions = append(conditions, fmt.Sprintf("mi.created_at <= $%d", argIdx))
 		args = append(args, *filters.SnapshotAt)
@@ -1132,6 +1136,27 @@ func browseItemColumns(alias string) string {
 func mangaCountColumns(alias string) string {
 	return "(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id) AS manga_chapter_count, " +
 		"(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND mc.volume IS NOT NULL AND mc.volume <> '') AS manga_volume_count"
+}
+
+// mangaChapterExclusionWhere returns a WHERE predicate that hides manga CHAPTER
+// items (type='ebook' rows linked into a type='manga' series via the
+// manga_chapters table) from catalog listing surfaces — browse, section
+// resolution, and search. Chapters are internal sub-units of a manga series and
+// must never appear as standalone catalog items; only the series should.
+//
+// It is index-backed: manga_chapters.chapter_content_id is the table's primary
+// key, so the anti-join is a cheap unique-index probe. The predicate is global
+// and harmless for every other row: regular ebooks have no manga_chapters link,
+// and non-ebook types never match either, so they all pass. It is redundant
+// (but harmless) for type='manga' browse scopes, whose series rows are linked
+// via series_content_id, not chapter_content_id.
+//
+// By-id fetch paths that legitimately resolve chapters — the ebook reader,
+// continue-reading (ebook_reader_progress / watch-progress), and the series
+// detail chapter list (mangaChaptersQuery) — use separate queries and must NOT
+// call this.
+func mangaChapterExclusionWhere(alias string) string {
+	return "NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = " + alias + ".content_id)"
 }
 
 // browseGroupByColumns returns the columns needed for GROUP BY when joining

@@ -327,6 +327,10 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		argIdx++
 	}
 
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone catalog items.
+	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
 		// Dual-column OR matching browse.go and favorites_browse.go: items where
 		// a curated sort_title differs from title (e.g. title="The Office",
