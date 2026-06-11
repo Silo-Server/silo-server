@@ -92,10 +92,13 @@ type enrichmentItemRow struct {
 	Author      string
 	ProviderIDs map[string]string
 
-	// HasPoster marks an already-enriched item claimed only because its
-	// backdrop is missing; the sweep then fetches by stored provider ID and
-	// touches nothing but the backdrop.
+	// HasPoster marks an already-enriched item claimed only because a
+	// secondary field (backdrop, status) is missing; the sweep then fetches by
+	// stored provider ID and touches only the missing secondary fields.
 	HasPoster bool
+	// HasBackdrop guards the secondary pass against re-caching an existing
+	// backdrop when the item was claimed for another missing field.
+	HasBackdrop bool
 }
 
 // Enricher drives the manga metadata enrichment sweep.
@@ -244,11 +247,12 @@ func (e *Enricher) runBatch(
 }
 
 // claimBatchQuery selects manga needing enrichment: unenriched items (no
-// poster) and enriched items whose backdrop is still missing (claimed for a
-// backdrop-only pass; stamping after the attempt keeps banner-less series
-// from being re-claimed forever). Items with fewer prior failures are claimed
-// first and items at/above enrichFailureCap are skipped entirely, so a block
-// of permanently failing items cannot occupy every sweep.
+// poster) and enriched items missing a secondary field (backdrop, publication
+// status), claimed for a secondary-only pass. Stamping after the attempt
+// keeps items whose provider has no banner/status from being re-claimed
+// forever. Items with fewer prior failures are claimed first and items
+// at/above enrichFailureCap are skipped entirely, so a block of permanently
+// failing items cannot occupy every sweep.
 const claimBatchQuery = `
 	SELECT
 		mi.content_id,
@@ -266,14 +270,16 @@ const claimBatchQuery = `
 			 LIMIT 1),
 			''
 		) AS author,
-		(mi.poster_path IS NOT NULL AND mi.poster_path <> '') AS has_poster
+		(mi.poster_path IS NOT NULL AND mi.poster_path <> '') AS has_poster,
+		(mi.backdrop_path IS NOT NULL AND mi.backdrop_path <> '') AS has_backdrop
 	FROM media_items mi
 	LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
 	LEFT JOIN media_folders mf ON mf.id = mil.media_folder_id
 	LEFT JOIN manga_enrichment_state ees ON ees.content_id = mi.content_id
 	WHERE mi.type = 'manga'
 	  AND ((mi.poster_path IS NULL OR mi.poster_path = '')
-	    OR (mi.backdrop_path IS NULL OR mi.backdrop_path = ''))
+	    OR (mi.backdrop_path IS NULL OR mi.backdrop_path = '')
+	    OR (mi.show_status IS NULL OR mi.show_status = ''))
 	  AND mi.last_refreshed IS NULL
 	  AND COALESCE(ees.failures, 0) < $2
 	ORDER BY COALESCE(ees.failures, 0) ASC, mi.created_at ASC
@@ -299,6 +305,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			&item.Language,
 			&item.Author,
 			&item.HasPoster,
+			&item.HasBackdrop,
 		); err != nil {
 			return nil, fmt.Errorf("scanning manga enrichment row: %w", err)
 		}
@@ -356,7 +363,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	accumulator, accumulatedIDs, providerErrs := collectMangaMetadata(ctx, item, providers)
 
 	if item.HasPoster {
-		return e.enrichBackdropOnly(ctx, item, accumulator, providerErrs)
+		return e.enrichSecondaryOnly(ctx, item, accumulator, providerErrs)
 	}
 
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
@@ -398,22 +405,34 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	return nil
 }
 
-// enrichBackdropOnly finishes a backdrop-only claim: an already-enriched item
-// whose backdrop is missing. Only the backdrop is written — the existing
-// poster, overview, people, and provider IDs stay untouched. Whatever the
-// outcome (banner cached, provider has no banner), the item is stamped so it
-// is not re-claimed every sweep; provider errors engage the failure cap
-// without stamping, like the full path.
-func (e *Enricher) enrichBackdropOnly(ctx context.Context, item enrichmentItemRow, result *metadata.MetadataResult, providerErrs []error) error {
-	if result == nil || result.BackdropPath == "" {
+// enrichSecondaryOnly finishes a secondary-fields claim: an already-enriched
+// item missing its backdrop and/or publication status. Only the missing
+// secondary fields are written — the existing poster, overview, people, and
+// provider IDs stay untouched. Whatever the outcome (fields filled, provider
+// has neither), the item is stamped so it is not re-claimed every sweep;
+// provider errors engage the failure cap without stamping, like the full path.
+func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemRow, result *metadata.MetadataResult, providerErrs []error) error {
+	upd := &catalog.MetadataUpdate{}
+	if result != nil && result.BackdropPath != "" && !item.HasBackdrop {
+		path, thumbhash := e.cacheRemoteImage(ctx, item.ContentID, result.BackdropPath, metadata.ImageBackdrop)
+		upd.BackdropPath = &path
+		if thumbhash != "" {
+			upd.BackdropThumbhash = &thumbhash
+		}
+	}
+	if result != nil && result.ShowStatus != "" {
+		upd.ShowStatus = &result.ShowStatus
+	}
+
+	if upd.BackdropPath == nil && upd.ShowStatus == nil {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if len(providerErrs) > 0 {
-			return fmt.Errorf("no backdrop obtained, %d provider error(s): %w",
+			return fmt.Errorf("no secondary metadata obtained, %d provider error(s): %w",
 				len(providerErrs), errors.Join(providerErrs...))
 		}
-		slog.Info("manga enrichment: no banner available",
+		slog.Info("manga enrichment: no secondary metadata available",
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
@@ -423,18 +442,15 @@ func (e *Enricher) enrichBackdropOnly(ctx context.Context, item enrichmentItemRo
 		return errEnrichmentNoMatch
 	}
 
-	path, thumbhash := e.cacheRemoteImage(ctx, item.ContentID, result.BackdropPath, metadata.ImageBackdrop)
-	upd := &catalog.MetadataUpdate{BackdropPath: &path}
-	if thumbhash != "" {
-		upd.BackdropThumbhash = &thumbhash
-	}
 	if err := e.updateMetadataAndTimestamps(ctx, item.ContentID, upd); err != nil {
-		return fmt.Errorf("persisting backdrop for %s: %w", item.ContentID, err)
+		return fmt.Errorf("persisting secondary metadata for %s: %w", item.ContentID, err)
 	}
 
-	slog.Info("manga enrichment: backdrop added",
+	slog.Info("manga enrichment: secondary metadata added",
 		"content_id", item.ContentID,
 		"title", item.Title,
+		"backdrop", upd.BackdropPath != nil,
+		"status", upd.ShowStatus != nil,
 	)
 	return nil
 }
