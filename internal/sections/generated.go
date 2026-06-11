@@ -34,6 +34,38 @@ func GeneratedHomeLibraryRecentConfig(libraryID int) json.RawMessage {
 	return config
 }
 
+// GeneratedHomeLibraryRecentConfigScoped builds the generated home "recent"
+// config for a library while constraining results to a single media scope.
+// This is required for mixed-type libraries (e.g. manga, which contains both
+// type='manga' series and type='ebook' chapters) so the auto-generated home
+// rows only surface the series and not the junk chapter filenames. It mirrors
+// the modern QueryDefinition shape used by GeneratedHomeLibraryRecentEpisodesConfig
+// (library_ids + media_scope) — note we intentionally avoid filter_library_id
+// here, since that flat key routes the config through the legacy parser which
+// drops media_scope. Library targeting comes from both library_ids and the
+// generated_library_id metadata read by parseGeneratedHomeLibraryRecentConfig.
+func GeneratedHomeLibraryRecentConfigScoped(libraryID int, mediaScope string) json.RawMessage {
+	config, err := json.Marshal(struct {
+		catalog.QueryDefinition
+		GeneratedLibraryID int    `json:"generated_library_id"`
+		GeneratedSource    string `json:"generated_source"`
+	}{
+		QueryDefinition: catalog.QueryDefinition{
+			LibraryIDs: []int{libraryID},
+			MediaScope: mediaScope,
+			Match:      "all",
+			Groups:     []catalog.QueryGroup{},
+			Sort:       catalog.QuerySort{Field: "added_at", Order: "desc"},
+		}.Normalize(),
+		GeneratedLibraryID: libraryID,
+		GeneratedSource:    GeneratedHomeLibraryRecentSource,
+	})
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return config
+}
+
 func GeneratedHomeLibraryRecentEpisodesConfig(libraryID int) json.RawMessage {
 	config, err := json.Marshal(struct {
 		catalog.QueryDefinition
