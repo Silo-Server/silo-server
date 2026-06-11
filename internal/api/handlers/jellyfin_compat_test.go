@@ -78,6 +78,102 @@ func TestUpdateJellyfinCompatSettingsUpdatesWebEnabled(t *testing.T) {
 	}
 }
 
+func TestUpdateJellyfinCompatSettingsDoesNotMarkRestartForLiveFields(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	root := t.TempDir()
+	settings := &fakeServerSettingsStore{values: map[string]string{}}
+	restartStatus := NewServerRestartStatusTracker()
+	handler := &AdminHandler{
+		Config:        cfg,
+		SettingsRepo:  settings,
+		RestartStatus: restartStatus,
+	}
+
+	body := `{"public_url":"https://compat.example.test","server_name":"Silo Compat","emulated_server_version":"10.11.6","web_version":"10.11.6","web_install_dir":"` + root + `"}`
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/admin/jellyfin-compat/settings",
+		strings.NewReader(body),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateJellyfinCompatSettings(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := settings.values["jellyfin_compat.public_url"]; got != "https://compat.example.test" {
+		t.Fatalf("jellyfin_compat.public_url = %q, want updated value", got)
+	}
+	if got := settings.values["jellyfin_compat.server_name"]; got != "Silo Compat" {
+		t.Fatalf("jellyfin_compat.server_name = %q, want updated value", got)
+	}
+	if got := settings.values["jellyfin_compat.emulated_server_version"]; got != "10.11.6" {
+		t.Fatalf("jellyfin_compat.emulated_server_version = %q, want 10.11.6", got)
+	}
+	if got := settings.values["jellyfin_compat.web_version"]; got != "10.11.6" {
+		t.Fatalf("jellyfin_compat.web_version = %q, want 10.11.6", got)
+	}
+	if got := settings.values["jellyfin_compat.web_install_dir"]; got != root {
+		t.Fatalf("jellyfin_compat.web_install_dir = %q, want %q", got, root)
+	}
+	if snapshot := restartStatus.Snapshot(); snapshot.RestartRequired {
+		t.Fatalf("RestartRequired = true, want false for live Jellyfin settings")
+	}
+}
+
+func TestJellyfinCompatSettingsRequireRestartFollowsRestartRegistry(t *testing.T) {
+	cases := []struct {
+		name    string
+		updates map[string]string
+		want    bool
+	}{
+		{
+			name: "listener setting",
+			updates: map[string]string{
+				"jellyfin_compat.enabled": "true",
+			},
+			want: true,
+		},
+		{
+			name: "live identity settings",
+			updates: map[string]string{
+				"jellyfin_compat.public_url":              "https://compat.example.test",
+				"jellyfin_compat.server_name":             "Silo Compat",
+				"jellyfin_compat.emulated_server_version": "10.11.6",
+			},
+		},
+		{
+			name: "live web settings",
+			updates: map[string]string{
+				"jellyfin_compat.web_enabled":     "false",
+				"jellyfin_compat.web_version":     "10.11.6",
+				"jellyfin_compat.web_dir":         "/var/lib/silo/compat/jellyfin-web/current",
+				"jellyfin_compat.web_install_dir": "/var/lib/silo/compat/jellyfin-web",
+			},
+		},
+		{
+			name: "mixed live and listener settings",
+			updates: map[string]string{
+				"jellyfin_compat.enabled":     "false",
+				"jellyfin_compat.web_enabled": "false",
+			},
+			want: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := jellyfinCompatSettingsRequireRestart(tc.updates); got != tc.want {
+				t.Fatalf("jellyfinCompatSettingsRequireRestart() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUpdateJellyfinCompatSettingsDisablesWebWhenAPIDisabled(t *testing.T) {
 	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {

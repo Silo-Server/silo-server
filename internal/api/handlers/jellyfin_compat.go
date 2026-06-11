@@ -115,7 +115,7 @@ func (h *AdminHandler) HandleUpdateJellyfinCompatSettings(w http.ResponseWriter,
 
 func jellyfinCompatSettingsRequireRestart(updates map[string]string) bool {
 	for key := range updates {
-		if key != "jellyfin_compat.web_enabled" {
+		if config.RestartRequired(key) {
 			return true
 		}
 	}
