@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type JASSUB from "jassub";
 import type { PlayerSubtitleInfo } from "../types";
-import { isASSCodec } from "../utils/assSubtitles";
+import { isASSCodec } from "../utils/subtitleCodecs";
 import {
   fallbackFontForSubtitle,
   forceASSFontFamily,

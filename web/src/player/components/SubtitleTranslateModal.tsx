@@ -5,12 +5,11 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerFetch, PlayerFetchError } from "../player-fetch";
 import { LANGUAGES, getLanguageName } from "../utils/languageNames";
+import { isBitmapCodec } from "../utils/subtitleCodecs";
 import { QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
 
 // Formats the server can parse directly from an external/downloaded file.
 const TRANSLATABLE_TEXT_CODECS = new Set(["srt", "subrip", "vtt", "webvtt"]);
-// Bitmap codecs the server can't extract as text (it would burn them in).
-const BITMAP_CODECS = new Set(["pgs", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]);
 
 // Mirror the server's loadSource acceptance: embedded non-bitmap tracks are
 // extracted to text via ffmpeg, while external/downloaded sources must already
@@ -20,7 +19,7 @@ export function isTranslatableSource(track: PlayerSubtitleInfo): boolean {
   if (track.live) return false;
   const codec = (track.codec ?? "").toLowerCase();
   if (track.source === "embedded") {
-    return !BITMAP_CODECS.has(codec);
+    return !isBitmapCodec(codec);
   }
   return TRANSLATABLE_TEXT_CODECS.has(codec);
 }

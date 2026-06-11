@@ -9,7 +9,7 @@ import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
 import { playerFetch } from "../player-fetch";
 import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
-import { getSubtitleFormatLabel } from "../utils/assSubtitles";
+import { getSubtitleFormatLabel } from "../utils/subtitleCodecs";
 
 interface SubtitleMenuProps {
   tracks: PlayerSubtitleInfo[];

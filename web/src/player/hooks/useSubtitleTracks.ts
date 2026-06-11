@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { parseVTT, type ParsedCue } from "../utils/parseVTT";
 import type { PlayerSubtitleInfo } from "../types";
-import { isASSCodec } from "../utils/assSubtitles";
+import { isASSCodec } from "../utils/subtitleCodecs";
 import { toMediaTime } from "../utils/mediaTimeline";
 
 // Each subtitle fetch covers this many source-time seconds. Matches the
