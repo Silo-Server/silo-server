@@ -252,15 +252,16 @@ export default function MangaContent({
   const year = item.year ? String(item.year) : "";
   const publisher = item.studios?.[0];
   const chapterRows = item.manga?.chapters ?? [];
-  // Detail-page counts mirror the browse-card chip semantics: distinct volume
-  // tokens, plus loose chapters that carry no volume.
+  // Derive the badge counts from the rendered list so they always match the
+  // rows on screen: a volume/section entry is one volume (buildMangaList
+  // already canonicalizes v01 ≡ 1), a loose chapter entry is one chapter.
   const volumeCount = useMemo(
-    () => new Set(chapterRows.map((c) => c.volume?.trim()).filter(Boolean)).size,
-    [chapterRows],
+    () => entries.filter((e) => e.kind === "volume" || e.kind === "section").length,
+    [entries],
   );
   const looseChapterCount = useMemo(
-    () => chapterRows.filter((c) => !c.volume?.trim()).length,
-    [chapterRows],
+    () => entries.filter((e) => e.kind === "chapter").length,
+    [entries],
   );
 
   // The resume target is the first unfinished chapter in reading order. Any

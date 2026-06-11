@@ -528,6 +528,10 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		}
 		mergeEnrichmentProviderIDs(accumulator, result)
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
+		// MergeMetadata does not propagate HasMetadata; without this a confident
+		// match carrying only genres/authors/status/year (no cover, no overview)
+		// would fail the no-match check below and be discarded + stamped.
+		accumulator.HasMetadata = true
 
 		slog.Debug("manga enrichment: metadata received",
 			"provider", p.Slug(),

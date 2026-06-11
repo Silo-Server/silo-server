@@ -37,7 +37,13 @@ function chapterSortKey(chapter: MangaChapter): number {
 }
 
 function byChapterIndex(a: MangaChapter, b: MangaChapter): number {
-  return chapterSortKey(a) - chapterSortKey(b);
+  const ka = chapterSortKey(a);
+  const kb = chapterSortKey(b);
+  // Both missing → both POSITIVE_INFINITY; the subtraction would be NaN (which
+  // Array.sort treats as 0, leaving order undefined). Compare explicitly so
+  // un-indexed chapters keep a stable order.
+  if (ka === kb) return 0;
+  return ka < kb ? -1 : 1;
 }
 
 // buildMangaList turns a flat chapter list into ordered display entries.
