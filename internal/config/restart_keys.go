@@ -58,6 +58,7 @@ var restartRequiredKeys = map[string]bool{
 	// public_url / server_name / emulated_server_version are read live per
 	// request; server_id is generate-once and baked into the resource
 	// mapper; the session TTLs are baked into store constructors.
+	"jellyfin_compat.enabled":              true,
 	"jellyfin_compat.listen":               true,
 	"jellyfin_compat.server_id":            true,
 	"jellyfin_compat.web_version":          true,

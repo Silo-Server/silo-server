@@ -335,13 +335,15 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 		// Infrastructure settings are captured at startup.
 		{key: "database.max_connections", value: "40", restartRequired: true},
 		{key: "s3.public_bucket", value: "assets", restartRequired: true},
+		{key: "jellyfin_compat.enabled", value: "false", restartRequired: true},
 		// Branding is read live from the settings repo per request.
 		{key: "branding.server_name", value: "Casa", restartRequired: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
 			settings := &fakeServerSettingsStore{}
-			handler := &AdminHandler{SettingsRepo: settings}
+			restartStatus := NewServerRestartStatusTracker()
+			handler := &AdminHandler{SettingsRepo: settings, RestartStatus: restartStatus}
 
 			req := httptest.NewRequest(
 				http.MethodPut,
@@ -362,6 +364,13 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 			}
 			if resp.RestartRequired != tc.restartRequired {
 				t.Fatalf("restart_required = %v, want %v", resp.RestartRequired, tc.restartRequired)
+			}
+			snapshot := restartStatus.Snapshot()
+			if snapshot.RestartRequired != tc.restartRequired {
+				t.Fatalf("tracker restart required = %v, want %v", snapshot.RestartRequired, tc.restartRequired)
+			}
+			if !tc.restartRequired && snapshot.RestartRequiredReason != "" {
+				t.Fatalf("tracker reason = %q, want empty", snapshot.RestartRequiredReason)
 			}
 		})
 	}

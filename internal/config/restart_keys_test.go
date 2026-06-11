@@ -19,6 +19,8 @@ func TestRestartRequired(t *testing.T) {
 		{"recommendations.enabled", true},
 		// Legacy AI aliases classify like their canonical keys.
 		{"subtitle_ai.max_concurrent_jobs", true},
+		// Compat listeners are only bound at process startup.
+		{"jellyfin_compat.enabled", true},
 		{"subtitle_ai.base_url", false}, // like ai.base_url — hot-reloaded
 		{"ai.api_key", false},
 		{"subtitle_ai.enabled", false},

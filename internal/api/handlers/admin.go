@@ -2152,9 +2152,10 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 	if h.OnServerSettingUpdated != nil {
 		h.OnServerSettingUpdated(r.Context(), key, req.Value)
 	}
-	h.markServerRestartRequired("server_settings")
-
 	restartRequired := config.RestartRequired(key)
+	if restartRequired {
+		h.markServerRestartRequired("server_settings")
+	}
 	if sensitiveSettingKeys[key] {
 		writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, RestartRequired: restartRequired})
 		return
