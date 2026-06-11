@@ -9,6 +9,11 @@ import { isActingAdmin } from "@/lib/permissions";
  */
 export function useIsActingAdmin() {
   const user = useOptionalAuth()?.user;
-  const { profile } = useCurrentProfile();
+  const { profile, hasSelectedProfile } = useCurrentProfile();
+  // Fail closed while a selected profile hasn't resolved yet (e.g. hard
+  // refresh before the profiles query returns); otherwise a stored
+  // non-primary profile would briefly look like "no profile selected" and
+  // re-enable admin access until the query settles.
+  if (hasSelectedProfile && !profile) return false;
   return isActingAdmin(user, profile);
 }

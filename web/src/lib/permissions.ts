@@ -25,26 +25,28 @@ export function isActingAdmin(
 export function hasPermission(
   user: Pick<User, "role" | "permissions"> | null | undefined,
   permission: string,
-  profile?: Pick<Profile, "is_primary"> | null,
+  profile: Pick<Profile, "is_primary"> | null,
 ) {
   if (!user) return false;
   // The role-derived grant only applies while acting as admin; an admin on a
   // non-primary profile keeps only explicitly assigned permissions. Callers
-  // that know the active profile should pass it.
-  if (isActingAdmin(user, profile ?? null)) return true;
+  // must pass the resolved active profile, or explicit null for the "no
+  // profile selected" case — the parameter is required so a missed call site
+  // can't silently restore the admin bypass.
+  if (isActingAdmin(user, profile)) return true;
   return Array.isArray(user.permissions) && user.permissions.includes(permission);
 }
 
 export function canCurateMetadata(
   user: Pick<User, "role" | "permissions"> | null | undefined,
-  profile?: Pick<Profile, "is_primary"> | null,
+  profile: Pick<Profile, "is_primary"> | null,
 ) {
   return hasPermission(user, PERMISSION_METADATA_CURATION, profile);
 }
 
 export function canEditMarkers(
   user: Pick<User, "role" | "permissions"> | null | undefined,
-  profile?: Pick<Profile, "is_primary"> | null,
+  profile: Pick<Profile, "is_primary"> | null,
 ) {
   return hasPermission(user, PERMISSION_MARKER_EDIT, profile);
 }

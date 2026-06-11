@@ -59,11 +59,12 @@ func TestRequireActingAdmin_RejectsNonPrimaryProfile(t *testing.T) {
 	}
 }
 
-func TestRequireActingAdmin_AllowsUnknownProfile(t *testing.T) {
-	// Unknown or foreign profile IDs are not this gate's concern.
+func TestRequireActingAdmin_RejectsUnknownProfile(t *testing.T) {
+	// A declared profile that doesn't resolve to one of the caller's profiles
+	// fails closed; otherwise a bogus X-Profile-Id would restore admin powers.
 	check := primaryChecker(false, false, nil)
-	if code := runActingAdminMiddleware(t, "admin", "prof-x", check); code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
+	if code := runActingAdminMiddleware(t, "admin", "prof-x", check); code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", code, http.StatusForbidden)
 	}
 }
 

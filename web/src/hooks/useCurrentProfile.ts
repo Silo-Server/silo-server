@@ -32,6 +32,10 @@ export function useCurrentProfile() {
   // toggle instead of only when the resolved profile changes.
   return {
     profile,
+    // True when a profile is selected even if it hasn't resolved to a Profile
+    // yet (e.g. hard refresh before the profiles query returns). Lets policy
+    // code distinguish "no profile selected" from "selection unresolved".
+    hasSelectedProfile: Boolean(selectedProfileId ?? cachedProfile),
     isLoading: profilesQuery.isLoading,
   };
 }

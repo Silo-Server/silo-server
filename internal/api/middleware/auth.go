@@ -212,9 +212,10 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker) func(http.Handler) h
 
 // actingAdminAllowed reports whether an admin request may exercise admin
 // powers given the profile it declares. Allowed when no checker is
-// configured, no profile is declared, the declared profile is unknown or
-// foreign (ownership is not this gate's concern), or the declared profile is
-// the account's primary profile.
+// configured, no profile is declared, or the declared profile is the
+// account's primary profile. A declared profile that cannot be resolved to
+// one of the caller's profiles fails closed: otherwise a non-primary session
+// could regain admin powers by sending a bogus X-Profile-Id.
 func actingAdminAllowed(r *http.Request, userID int, checkPrimary PrimaryProfileChecker) (bool, error) {
 	if checkPrimary == nil {
 		return true, nil
@@ -227,7 +228,7 @@ func actingAdminAllowed(r *http.Request, userID int, checkPrimary PrimaryProfile
 	if err != nil {
 		return false, err
 	}
-	return !found || isPrimary, nil
+	return found && isPrimary, nil
 }
 
 // declaredProfileID returns the active profile the request declares: the
