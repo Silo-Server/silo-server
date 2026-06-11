@@ -18,6 +18,14 @@ func TestClaimBatchQueryTargetsManga(t *testing.T) {
 	if !strings.Contains(claimBatchQuery, "manga_enrichment_state") {
 		t.Fatalf("claimBatchQuery must join manga_enrichment_state")
 	}
+	// Backdrop-only arm: enriched items missing a backdrop are claimed too,
+	// and has_poster distinguishes them so only the backdrop is written.
+	if !strings.Contains(claimBatchQuery, "mi.backdrop_path IS NULL OR mi.backdrop_path = ''") {
+		t.Fatalf("claimBatchQuery must claim backdrop-missing items")
+	}
+	if !strings.Contains(claimBatchQuery, "AS has_poster") {
+		t.Fatalf("claimBatchQuery must project has_poster")
+	}
 }
 
 func TestContentTypeIsManga(t *testing.T) {
