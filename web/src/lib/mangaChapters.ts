@@ -20,13 +20,13 @@ export function prettifyVolumeLabel(volume: string): string {
   return match ? `Volume ${Number(match[1])}` : volume.trim();
 }
 
-// looseChapterLabel prefers a "Chapter <n>" form derived from the index,
-// falling back to the chapter's own trimmed title when no index is available.
-function looseChapterLabel(chapter: MangaChapter): string {
+// chapterLabel prefers a "Chapter <n>" form derived from the index, falling
+// back to the chapter's own trimmed title when no index is available.
+export function chapterLabel(chapter: MangaChapter): string {
   if (typeof chapter.chapter_index === "number") {
     return `Chapter ${chapter.chapter_index}`;
   }
-  return chapter.title.trim() || "Chapter";
+  return chapter.title?.trim() || "Chapter";
 }
 
 // chapterSortKey returns a comparable index where missing indices sort last.
@@ -72,7 +72,7 @@ export function buildMangaList(chapters: MangaChapter[]): MangaListEntry[] {
   for (const chapter of loose) {
     ranked.push({
       sortKey: chapterSortKey(chapter),
-      entry: { kind: "chapter", chapter, label: looseChapterLabel(chapter) },
+      entry: { kind: "chapter", chapter, label: chapterLabel(chapter) },
     });
   }
 
@@ -98,4 +98,40 @@ export function buildMangaList(chapters: MangaChapter[]): MangaListEntry[] {
   }
 
   return ranked.sort((a, b) => a.sortKey - b.sortKey).map((r) => r.entry);
+}
+
+// A FlatMangaChapter is one readable unit in series order, with a label that
+// stays meaningful out of context ("Volume 3 · Chapter 12" for a chapter
+// nested in a volume section). Used by the series Continue CTA and the
+// reader's next-chapter navigation.
+export interface FlatMangaChapter {
+  chapter: MangaChapter;
+  label: string;
+}
+
+// flattenMangaList unrolls display entries into the flat reading order.
+export function flattenMangaList(entries: MangaListEntry[]): FlatMangaChapter[] {
+  const flat: FlatMangaChapter[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "section") {
+      for (const chapter of entry.chapters) {
+        flat.push({ chapter, label: `${entry.label} · ${chapterLabel(chapter)}` });
+      }
+    } else {
+      flat.push({ chapter: entry.chapter, label: entry.label });
+    }
+  }
+  return flat;
+}
+
+// firstUnreadChapter returns the resume target: the first chapter in reading
+// order the viewer has not finished, or null when everything is read (or the
+// list is empty).
+export function firstUnreadChapter(entries: MangaListEntry[]): FlatMangaChapter | null {
+  for (const flat of flattenMangaList(entries)) {
+    if (flat.chapter.read !== true) {
+      return flat;
+    }
+  }
+  return null;
 }

@@ -3197,3 +3197,37 @@ func (f *Fetcher) fetchMoodCollection(ctx context.Context, s ResolvedSection, li
 	}
 	return items, len(items), nil
 }
+
+// mangaChapterSeriesMetaQuery resolves the owning manga series for chapter
+// items (type='ebook' rows linked via manga_chapters) appearing on section
+// cards, so continue-reading surfaces can show the series instead of the
+// chapter's raw file title.
+const mangaChapterSeriesMetaQuery = `
+	SELECT mc.chapter_content_id, mc.series_content_id, si.title
+	FROM manga_chapters mc
+	JOIN media_items si ON si.content_id = mc.series_content_id
+	WHERE mc.chapter_content_id = ANY($1)
+`
+
+// FetchMangaChapterSeriesMeta returns series linkage keyed by chapter content
+// id. IDs that are not manga chapters simply have no entry.
+func (f *Fetcher) FetchMangaChapterSeriesMeta(ctx context.Context, ids []string) (map[string]SectionItemMeta, error) {
+	meta := make(map[string]SectionItemMeta, len(ids))
+	if f == nil || f.pool == nil || len(ids) == 0 {
+		return meta, nil
+	}
+	rows, err := f.pool.Query(ctx, mangaChapterSeriesMetaQuery, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var chapterID, seriesID, seriesTitle string
+		if err := rows.Scan(&chapterID, &seriesID, &seriesTitle); err != nil {
+			return nil, err
+		}
+		id := seriesID
+		meta[chapterID] = SectionItemMeta{SeriesID: &id, SeriesTitle: seriesTitle}
+	}
+	return meta, rows.Err()
+}

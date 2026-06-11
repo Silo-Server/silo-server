@@ -42,6 +42,8 @@ import { Button } from "@/components/ui/button";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
+import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
 import FoliateBookReader, {
@@ -203,6 +205,23 @@ export default function EbookReader() {
   // Absent for normal ebooks, so their back behavior is unchanged.
   const backToParam = searchParams.get("backTo");
   const { data: item, isLoading, error } = useCatalogItemDetail(contentId || undefined);
+  // Manga chapters carry their owning series id; fetching the series detail
+  // (usually already cached from the series page) gives the ordered chapter
+  // list, which powers next-chapter navigation and the default back target.
+  const mangaSeriesId = item?.type === "ebook" ? item.series_id : undefined;
+  const { data: mangaSeries } = useCatalogItemDetail(mangaSeriesId || undefined);
+  const nextChapter = useMemo(() => {
+    const seriesChapters = mangaSeries?.manga?.chapters;
+    if (!seriesChapters || seriesChapters.length === 0) {
+      return null;
+    }
+    const flat = flattenMangaList(buildMangaList(seriesChapters));
+    const index = flat.findIndex((entry) => entry.chapter.content_id === contentId);
+    if (index < 0 || index + 1 >= flat.length) {
+      return null;
+    }
+    return flat[index + 1];
+  }, [contentId, mangaSeries?.manga?.chapters]);
   const selectedFile = useMemo(
     () =>
       chooseReaderFile(
@@ -525,11 +544,31 @@ export default function EbookReader() {
     backToParam && backToParam.startsWith("/") && !/^\/[/\\]/.test(backToParam)
       ? backToParam
       : null;
+  const libraryIdNumber = libraryIdParam ? Number(libraryIdParam) : undefined;
+  // Manga chapters default their back target to the owning series, so entry
+  // points that cannot pass backTo (continue-reading cards, deep links) still
+  // escape the chapter's own junk item detail.
+  const mangaSeriesHref = mangaSeriesId
+    ? buildItemHref({
+        contentId: mangaSeriesId,
+        libraryId: Number.isFinite(libraryIdNumber) ? libraryIdNumber : undefined,
+      })
+    : null;
   const backHref =
     safeBackTo ||
+    mangaSeriesHref ||
     `/item/${encodeURIComponent(item.content_id)}${
       libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
     }`;
+  const nextChapterHref =
+    nextChapter && mangaSeriesHref
+      ? `${buildMediaPlayHref({
+          contentId: nextChapter.chapter.content_id,
+          type: "ebook",
+          libraryId: Number.isFinite(libraryIdNumber) ? libraryIdNumber : undefined,
+        })}&backTo=${encodeURIComponent(mangaSeriesHref)}`
+      : null;
+  const showEndOfBookNext = nextChapterHref != null && (readerProgress ?? 0) >= 0.995;
 
   if (!selectedFile) {
     return (
@@ -544,7 +583,7 @@ export default function EbookReader() {
     <div className="bg-background min-h-screen">
       <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
-          <Button asChild variant="ghost" size="icon" aria-label="Back to ebook">
+          <Button asChild variant="ghost" size="icon" aria-label="Back">
             <Link to={backHref}>
               <ArrowLeft className="size-5" />
             </Link>
@@ -553,6 +592,22 @@ export default function EbookReader() {
             <div className="truncate text-sm font-semibold">{item.title}</div>
             <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
           </div>
+          {nextChapterHref && nextChapter && (
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="hidden gap-1 sm:inline-flex"
+              title={`Next: ${nextChapter.label}`}
+            >
+              <Link to={nextChapterHref}>
+                <span className="text-muted-foreground max-w-36 truncate text-xs">
+                  {nextChapter.label}
+                </span>
+                <ChevronRight className="size-4" />
+              </Link>
+            </Button>
+          )}
           {progressLabel && (
             <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
               {progressLabel}
@@ -1182,6 +1237,20 @@ export default function EbookReader() {
           </aside>
         )}
       </main>
+      {showEndOfBookNext && nextChapter && nextChapterHref && (
+        <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
+          <Button
+            asChild
+            size="lg"
+            className="h-11 gap-2 rounded-full px-6 text-[15px] font-bold shadow-lg"
+          >
+            <Link to={nextChapterHref}>
+              Next: {nextChapter.label}
+              <ChevronRight className="size-[18px]" />
+            </Link>
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
