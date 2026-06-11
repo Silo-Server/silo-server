@@ -20,12 +20,12 @@ function makeQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderStrip() {
+function renderStrip(props: { reserveActivityWidget?: boolean } = {}) {
   const qc = makeQueryClient();
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <NotificationStrip />
+        <NotificationStrip {...props} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -122,5 +122,25 @@ describe("NotificationStrip", () => {
     const { container } = renderStrip();
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shifts the dismiss button with lg:mr-10 when reserveActivityWidget is set", () => {
+    mockedList.mockReturnValue(
+      listResult([
+        {
+          id: 2,
+          category: "request",
+          title: "Request approved",
+          body: "Dune 3 is on the way",
+          link: "/requests/2",
+          read_at: null,
+          created_at: "2026-06-11T09:00:00Z",
+        },
+      ]),
+    );
+
+    renderStrip({ reserveActivityWidget: true });
+
+    expect(screen.getByRole("button", { name: "Dismiss" })).toHaveClass("lg:mr-10");
   });
 });

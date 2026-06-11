@@ -10,7 +10,7 @@ import {
 } from "@/hooks/queries/notifications";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { timeAgo } from "@/lib/timeAgo";
+import { notificationTimeAgo, partitionAnnouncementsFirst } from "@/lib/notifications";
 import type { AppNotification } from "@/api/types";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ export default function Notifications() {
 
   const filters = activeTab === "" ? {} : { category: activeTab };
 
-  const list = useInfiniteList(filters);
+  const list = useNotificationsList(filters);
   const markRead = useMarkRead();
   const dismiss = useDismissNotification();
   const { data: unreadCount = 0 } = useUnreadCount();
@@ -78,12 +78,7 @@ export default function Notifications() {
   // above other notifications. The dedicated "Announcements" tab is unaffected.
   // A stable partition preserves recency within each group.
   const allItems: AppNotification[] =
-    activeTab === ""
-      ? [
-          ...loaded.filter((n) => n.category === "announcement"),
-          ...loaded.filter((n) => n.category !== "announcement"),
-        ]
-      : loaded;
+    activeTab === "" ? partitionAnnouncementsFirst(loaded) : loaded;
 
   const isEmpty = allItems.length === 0;
 
@@ -134,7 +129,7 @@ export default function Notifications() {
         <ul className="space-y-2">
           {allItems.map((n) => {
             const isUnread = !n.read_at;
-            const relTime = timeAgo(n.created_at, "") ?? n.created_at;
+            const relTime = notificationTimeAgo(n.created_at) ?? n.created_at;
             const inner = (
               <div className="min-w-0 flex-1">
                 <p className="text-sm leading-snug font-medium">{n.title}</p>
@@ -190,11 +185,4 @@ export default function Notifications() {
       ) : null}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Thin wrapper so we get a stable shape regardless of filter state
-// ---------------------------------------------------------------------------
-function useInfiniteList(filters: { category?: string }) {
-  return useNotificationsList(filters);
 }

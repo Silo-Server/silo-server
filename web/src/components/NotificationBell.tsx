@@ -10,6 +10,7 @@ import {
   useNotificationsList,
   useUnreadCount,
 } from "@/hooks/queries/notifications";
+import { partitionAnnouncementsFirst } from "@/lib/notifications";
 
 let bellOpenFlag = false;
 
@@ -31,10 +32,7 @@ export function NotificationBell() {
   const dismiss = useDismissNotification();
   // Pin announcements above other notifications, then take the latest 10.
   const loaded = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);
-  const items = [
-    ...loaded.filter((n) => n.category === "announcement"),
-    ...loaded.filter((n) => n.category !== "announcement"),
-  ].slice(0, 10);
+  const items = partitionAnnouncementsFirst(loaded).slice(0, 10);
 
   return (
     <Popover

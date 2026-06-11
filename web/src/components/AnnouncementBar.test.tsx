@@ -20,12 +20,12 @@ function makeQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderBar() {
+function renderBar(props: { reserveActivityWidget?: boolean } = {}) {
   const qc = makeQueryClient();
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <AnnouncementBar />
+        <AnnouncementBar {...props} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -93,5 +93,25 @@ describe("AnnouncementBar", () => {
     const { container } = renderBar();
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shifts the dismiss button with lg:mr-10 when reserveActivityWidget is set", () => {
+    mockedList.mockReturnValue(
+      listResult([
+        {
+          id: 7,
+          category: "announcement",
+          title: "New feature launched",
+          body: "Check out the redesign",
+          link: "/whats-new",
+          read_at: null,
+          created_at: "2026-06-11T10:00:00Z",
+        },
+      ]),
+    );
+
+    renderBar({ reserveActivityWidget: true });
+
+    expect(screen.getByRole("button", { name: "Dismiss" })).toHaveClass("lg:mr-10");
   });
 });
