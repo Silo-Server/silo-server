@@ -110,7 +110,7 @@ func mangaIndexForFile(base, seriesName string) (volume string, index float64, h
 func parseMangaIndex(name string) (volume string, index float64, has bool) {
 	if m := mangaVolYearIssue.FindStringSubmatch(name); m != nil {
 		if n, err := strconv.ParseFloat(m[2], 64); err == nil {
-			return strings.TrimSpace(m[1]), n, true
+			return "v" + strings.TrimSpace(m[2]), n, true
 		}
 	}
 	clean := strings.TrimSpace(mangaParenNoise.ReplaceAllString(name, " "))
