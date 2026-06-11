@@ -1,5 +1,8 @@
-import { useMemo } from "react";
-import { TriangleAlert } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, Copy, ExternalLink, Loader2, Send, TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/api/client";
+import { Button } from "@/components/ui/button";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
@@ -21,10 +24,126 @@ const KEYS = [
   "notifications.email.allow_per_episode",
   "notifications.email.digest_hour",
   "notifications.email.external_url",
+  "notifications.discord_enabled",
+  "notifications.discord.allow_per_episode",
+  "notifications.discord.digest_hour",
+  "discord.client_id",
+  "discord.client_secret",
+  "discord.bot_token",
   "notifications.retention.read_days",
   "notifications.retention.unread_days",
   "notifications.retention.event_days",
 ];
+
+interface DiscordTestResult {
+  ok: boolean;
+  duration_ms: number;
+  message?: string;
+}
+
+/**
+ * Invite link for adding the bot to a Discord server. Membership alone is
+ * enough to DM, so no permissions are requested.
+ */
+function discordInviteUrl(clientId: string): string {
+  return `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&scope=bot&permissions=0`;
+}
+
+function InviteBotRow({ clientId }: { clientId: string }) {
+  const [copied, setCopied] = useState(false);
+  const trimmed = clientId.trim();
+
+  return (
+    <div className="space-y-2 py-2">
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!trimmed}
+          onClick={() => window.open(discordInviteUrl(trimmed), "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+          Invite bot to server
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!trimmed}
+          onClick={() => {
+            void navigator.clipboard.writeText(discordInviteUrl(trimmed));
+            setCopied(true);
+            toast.success("Invite link copied");
+            window.setTimeout(() => setCopied(false), 2000);
+          }}
+        >
+          {copied ? (
+            <Check className="mr-1.5 h-3.5 w-3.5" />
+          ) : (
+            <Copy className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          Copy link
+        </Button>
+      </div>
+      <div className="text-muted-foreground text-xs">
+        {trimmed
+          ? "Anyone with Manage Server permission on your Discord server can open this link to add the bot. Users must be members of that server to receive DMs."
+          : "Enter the Client ID above to generate the invite link."}
+      </div>
+    </div>
+  );
+}
+
+function TestDiscordRow({ unsaved }: { unsaved: boolean }) {
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState<DiscordTestResult | null>(null);
+
+  const runTest = async () => {
+    setPending(true);
+    setResult(null);
+    try {
+      const response = await api<DiscordTestResult>("/admin/notifications/discord/test", {
+        method: "POST",
+      });
+      setResult(response);
+      if (response.ok) {
+        toast.success("Discord bot connected");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Test request failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 py-2">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={pending || unsaved}
+        onClick={() => void runTest()}
+      >
+        {pending ? (
+          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Send className="mr-1.5 h-3.5 w-3.5" />
+        )}
+        Test bot token
+      </Button>
+      {unsaved && (
+        <div className="text-muted-foreground text-xs">
+          Save your changes first — the test uses the saved credentials.
+        </div>
+      )}
+      {result && (
+        <div className={`text-xs ${result.ok ? "text-emerald-500" : "text-amber-500"}`}>
+          {result.ok ? "Success" : "Failed"} ({result.duration_ms}ms)
+          {result.message ? ` — ${result.message}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function NotificationsAdminSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -40,6 +159,16 @@ export default function NotificationsAdminSettings() {
 
   const allowPrivate =
     form.getValue("notifications.webhooks.allow_private_destinations") === "true";
+  // Discord is opt-in (default off); the rest of its settings only appear
+  // once the bot is enabled.
+  const discordEnabled = form.getValue("notifications.discord_enabled") === "true";
+  // The test endpoint reads the SAVED credentials; testing with unsaved
+  // edits in the form would silently test the old values.
+  const discordCredentialsDirty = [
+    "discord.client_id",
+    "discord.client_secret",
+    "discord.bot_token",
+  ].some(form.isDirty);
 
   return (
     <div className="flex h-full flex-col">
@@ -178,6 +307,89 @@ export default function NotificationsAdminSettings() {
             value={form.getValue("notifications.email.external_url")}
             onChange={(v) => form.setValue("notifications.email.external_url", v)}
           />
+        </FieldGroup>
+
+        <FieldGroup label="Discord">
+          <SettingField
+            label="Discord Bot"
+            hint="Let users link their Discord account and receive notifications as bot DMs. Off by default; while off, Discord notifications are hidden everywhere."
+            type="toggle"
+            value={form.getValue("notifications.discord_enabled") || "false"}
+            onChange={(v) => form.setValue("notifications.discord_enabled", v)}
+          />
+          {discordEnabled && (
+            <>
+              <div className="text-muted-foreground space-y-1.5 py-2 text-xs leading-relaxed">
+                <p>Set up at discord.com/developers/applications:</p>
+                <ol className="list-decimal space-y-1.5 pl-4">
+                  <li>Create an application (or open an existing one).</li>
+                  <li>
+                    OAuth2 page: copy the <strong>Client ID</strong>, reset and copy the{" "}
+                    <strong>Client Secret</strong>, and under Redirects add
+                    <code className="bg-muted mx-1 rounded px-1">
+                      {"<public URL>"}/api/v1/notifications/discord/link/callback
+                    </code>
+                    using this server&apos;s public URL (SILO_PUBLIC_URL) — it must match exactly.
+                  </li>
+                  <li>
+                    Bot page: reset and copy the <strong>Token</strong>. Leave all Privileged
+                    Gateway Intents (Presence, Server Members, Message Content) <strong>off</strong>{" "}
+                    — Silo never connects to the gateway; it only sends DMs.
+                  </li>
+                  <li>
+                    Keep <strong>Requires OAuth2 Code Grant</strong> off, or the invite link below
+                    won&apos;t work. Enable <strong>Public Bot</strong> only if someone other than
+                    the application owner will be inviting it.
+                  </li>
+                  <li>
+                    Paste the three credentials below, save, then use the invite button to add the
+                    bot to your Discord server. It needs <strong>no role permissions</strong> —
+                    membership alone lets it DM members, and users must share that server with the
+                    bot to receive DMs.
+                  </li>
+                </ol>
+              </div>
+              <SettingField
+                label="Allow Per-Episode DMs"
+                hint="Let users choose a DM per episode instead of the daily digest. Off coerces those accounts to the digest."
+                type="toggle"
+                value={toggleValue("notifications.discord.allow_per_episode")}
+                onChange={(v) => form.setValue("notifications.discord.allow_per_episode", v)}
+              />
+              <SettingField
+                label="Digest Hour"
+                hint="Hour of day (0-23, server time) when daily digest DMs go out (default 8)"
+                type="number"
+                value={numberValue("notifications.discord.digest_hour", "8")}
+                onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}
+              />
+              <SettingField
+                label="Client ID"
+                hint="The Discord application's OAuth2 client ID (used for account linking)"
+                type="text"
+                value={form.getValue("discord.client_id")}
+                onChange={(v) => form.setValue("discord.client_id", v)}
+              />
+              <InviteBotRow clientId={form.getValue("discord.client_id")} />
+              <SettingField
+                label="Client Secret"
+                hint="The Discord application's OAuth2 client secret"
+                type="password"
+                value={form.getValue("discord.client_secret")}
+                sensitiveConfigured={form.sensitiveConfigured.includes("discord.client_secret")}
+                onChange={(v) => form.setValue("discord.client_secret", v)}
+              />
+              <SettingField
+                label="Bot Token"
+                hint="The bot user's token (used to send DMs)"
+                type="password"
+                value={form.getValue("discord.bot_token")}
+                sensitiveConfigured={form.sensitiveConfigured.includes("discord.bot_token")}
+                onChange={(v) => form.setValue("discord.bot_token", v)}
+              />
+              <TestDiscordRow unsaved={discordCredentialsDirty} />
+            </>
+          )}
         </FieldGroup>
 
         <FieldGroup label="Retention">

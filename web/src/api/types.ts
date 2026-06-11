@@ -2327,20 +2327,47 @@ export interface NotificationWebhookTestResult {
   message?: string;
 }
 
+/** An account-level digest channel (email, Discord DMs). */
+export interface NotificationAccountChannelCapability {
+  available: boolean;
+  modes: string[];
+  digest_hour: number;
+}
+
 export interface NotificationCapability {
   in_app: { enabled: boolean };
   apple_push: { available: boolean; provider: string; supported_modes: string[] };
   android_push: { available: boolean; provider: string; supported_modes: string[] };
   web_push: { available: boolean; public_key?: string };
   webhooks: { available: boolean; max_per_profile: number; supported_types: string[] };
-  email: { available: boolean; modes: string[]; digest_hour: number };
+  email: NotificationAccountChannelCapability;
+  discord: NotificationAccountChannelCapability;
 }
 
-export type NotificationEmailMode = "off" | "per_episode" | "daily_digest";
+export type NotificationChannelMode =
+  | "off"
+  | "per_episode"
+  | "daily_digest"
+  | "per_episode_and_digest";
+export type NotificationEmailMode = NotificationChannelMode;
+export type NotificationDiscordMode = NotificationChannelMode;
 
 /** Account-level (not per-profile): one mode covers all profiles. */
 export interface NotificationEmailPreferences {
   mode: NotificationEmailMode;
+}
+
+/** Account-level Discord DM channel: link state, mode, and delivery health. */
+export interface NotificationDiscordPreferences {
+  linked: boolean;
+  discord_username?: string;
+  mode: NotificationDiscordMode;
+  /** Last DM delivery failure, surfaced as link health. Empty when healthy. */
+  link_failure?: string;
+}
+
+export interface NotificationDiscordLinkInit {
+  url: string;
 }
 
 export interface WebPushSubscriptionView {

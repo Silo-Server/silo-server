@@ -53,10 +53,50 @@ type discordWebhookBody struct {
 	Username string         `json:"username"`
 }
 
-// BuildDiscordWebhookPayload renders a delivery as a Discord embed. Pure
-// function; enforces Discord's embed limits with the spec's truncation
+// BuildDiscordWebhookPayload renders a delivery as a Discord webhook body.
+// Pure function; enforces Discord's embed limits with the spec's truncation
 // policy (description first, then drop fields right-to-left).
 func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
+	return json.Marshal(discordWebhookBody{
+		Embeds:   []discordEmbed{buildDiscordEmbed(row, test)},
+		Username: "Silo",
+	})
+}
+
+// discordDMMaxEmbeds is Discord's per-message embed cap.
+const discordDMMaxEmbeds = 10
+
+// discordDMBody is a bot channel-message body. Unlike webhook bodies it has
+// no username override: a bot message always carries the bot's own identity.
+type discordDMBody struct {
+	Content string         `json:"content,omitempty"`
+	Embeds  []discordEmbed `json:"embeds"`
+}
+
+// BuildDiscordDMPayload renders one account's pending deliveries as a single
+// bot DM, one embed per item up to Discord's 10-embed cap. Overflow keeps the
+// newest items and points at the Silo inbox for the rest, mirroring the email
+// digest's rendering cap.
+func BuildDiscordDMPayload(rows []DeliveryRow) ([]byte, error) {
+	overflow := 0
+	if len(rows) > discordDMMaxEmbeds {
+		overflow = len(rows) - discordDMMaxEmbeds
+		rows = rows[len(rows)-discordDMMaxEmbeds:]
+	}
+	embeds := make([]discordEmbed, 0, len(rows))
+	for _, row := range rows {
+		embeds = append(embeds, buildDiscordEmbed(row, false))
+	}
+	body := discordDMBody{Embeds: embeds}
+	if overflow > 0 {
+		body.Content = fmt.Sprintf("…and %d more in your Silo inbox", overflow)
+	}
+	return json.Marshal(body)
+}
+
+// buildDiscordEmbed renders one delivery as a Discord embed within all of
+// Discord's per-embed limits.
+func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 	flags := parseReasonFlags(row.ReasonFlags)
 
 	title := discordEmbedTitle(row)
@@ -116,11 +156,7 @@ func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
 		embed.Timestamp = row.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	enforceDiscordTotalLimit(&embed)
-
-	return json.Marshal(discordWebhookBody{
-		Embeds:   []discordEmbed{embed},
-		Username: "Silo",
-	})
+	return embed
 }
 
 func discordEmbedTitle(row DeliveryRow) string {

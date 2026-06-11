@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/discord"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -52,9 +53,14 @@ type System struct {
 	WebPush *WebPushService
 	// EmailPrefs is nil when no mail sender was provided.
 	EmailPrefs *EmailPrefsRepository
+	// DiscordPrefs holds Discord DM link + mode state; the channel only
+	// delivers once an admin configures bot credentials in settings.
+	DiscordPrefs *DiscordPrefsRepository
 
-	mailSender  mail.Sender
-	emailWorker *EmailWorker
+	mailSender    mail.Sender
+	emailWorker   *accountChannelWorker
+	discordWorker *accountChannelWorker
+	discordClient *discord.Client
 
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
@@ -131,12 +137,20 @@ func NewSystem(
 	// Email rides the shared SMTP core. Unlike the per-target channels it
 	// keeps no outbox: its dispatcher only nudges the watermark sweep.
 	var emailPrefs *EmailPrefsRepository
-	var emailWorker *EmailWorker
+	var emailWorker *accountChannelWorker
 	if mailSender != nil {
 		emailPrefs = NewEmailPrefsRepository(pool)
 		emailWorker = newEmailWorker(pool, deliveries, emailPrefs, settings, mailSender)
-		dispatchers = append(dispatchers, newEmailDispatcher(emailWorker))
+		dispatchers = append(dispatchers, newNudgeDispatcher(emailWorker))
 	}
+
+	// Discord DMs ride the same account-watermark engine as email. The
+	// channel is always wired (its credentials live in settings and may be
+	// configured at runtime); enabled() gates each pass on the bot token.
+	discordPrefs := NewDiscordPrefsRepository(pool)
+	discordClient := discord.NewClient()
+	discordWorker := newDiscordWorker(pool, deliveries, discordPrefs, settings, discordClient)
+	dispatchers = append(dispatchers, newNudgeDispatcher(discordWorker))
 
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
 	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, multiDispatcher)
@@ -163,8 +177,11 @@ func NewSystem(
 		Webhooks:          webhookService,
 		WebPush:           webPushService,
 		EmailPrefs:        emailPrefs,
+		DiscordPrefs:      discordPrefs,
 		mailSender:        mailSender,
 		emailWorker:       emailWorker,
+		discordWorker:     discordWorker,
+		discordClient:     discordClient,
 		webhookRepo:       webhookRepo,
 		webhookDispatcher: webhookDispatcher,
 		webhookRetry:      webhookRetry,
@@ -244,6 +261,13 @@ func (s *System) Start(ctx context.Context) {
 		go func() {
 			defer s.wg.Done()
 			s.emailWorker.Run(ctx)
+		}()
+	}
+	if s.discordWorker != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.discordWorker.Run(ctx)
 		}()
 	}
 	if s.webPushDispatcher != nil {
@@ -577,12 +601,13 @@ func (s *System) batchResolveSeries(ctx context.Context, itemIDs map[string]stru
 
 // RetentionStats reports what a retention pass removed.
 type RetentionStats struct {
-	DeliveriesDeleted      int64
-	EventsDeleted          int64
-	StaleEventsDeleted     int64
-	InterestPruned         int64
-	WebhookAttemptsDeleted int64
-	WebPushAttemptsDeleted int64
+	DeliveriesDeleted        int64
+	EventsDeleted            int64
+	StaleEventsDeleted       int64
+	InterestPruned           int64
+	WebhookAttemptsDeleted   int64
+	WebPushAttemptsDeleted   int64
+	DiscordLinkStatesDeleted int64
 }
 
 // RunRetention applies the retention policy: read deliveries past the read
@@ -636,6 +661,13 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 			return stats, fmt.Errorf("prune web push attempts: %w", err)
 		}
 		stats.WebPushAttemptsDeleted = attempts
+	}
+	if s.DiscordPrefs != nil {
+		states, err := s.DiscordPrefs.DeleteExpiredLinkStates(ctx)
+		if err != nil {
+			return stats, fmt.Errorf("prune discord link states: %w", err)
+		}
+		stats.DiscordLinkStatesDeleted = states
 	}
 	return stats, nil
 }

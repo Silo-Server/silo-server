@@ -277,15 +277,18 @@ func (h *NotificationsHandler) HandleUpdatePreferences(w http.ResponseWriter, r 
 }
 
 type capabilityResponse struct {
-	InApp       capabilityInApp    `json:"in_app"`
-	ApplePush   capabilityPush     `json:"apple_push"`
-	AndroidPush capabilityPush     `json:"android_push"`
-	WebPush     capabilityWebPush  `json:"web_push"`
-	Webhooks    capabilityWebhooks `json:"webhooks"`
-	Email       capabilityEmail    `json:"email"`
+	InApp       capabilityInApp          `json:"in_app"`
+	ApplePush   capabilityPush           `json:"apple_push"`
+	AndroidPush capabilityPush           `json:"android_push"`
+	WebPush     capabilityWebPush        `json:"web_push"`
+	Webhooks    capabilityWebhooks       `json:"webhooks"`
+	Email       capabilityAccountChannel `json:"email"`
+	Discord     capabilityAccountChannel `json:"discord"`
 }
 
-type capabilityEmail struct {
+// capabilityAccountChannel describes an account-level digest channel (email,
+// Discord DMs).
+type capabilityAccountChannel struct {
 	Available bool `json:"available"`
 	// Modes lists the cadences users may pick (per-episode is an admin
 	// allowance); DigestHour tells the UI when daily digests go out.
@@ -333,16 +336,32 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 			webPush = capabilityWebPush{Available: true, PublicKey: publicKey}
 		}
 	}
-	email := capabilityEmail{Modes: []string{}}
+	email := capabilityAccountChannel{Modes: []string{}}
 	if h.system.EmailAvailable(r.Context()) {
-		modes := []string{notifications.EmailModeDailyDigest}
+		modes := []string{notifications.ChannelModeDailyDigest}
 		if h.system.Settings.EmailAllowPerEpisode(r.Context()) {
-			modes = append(modes, notifications.EmailModePerEpisode)
+			modes = append(modes,
+				notifications.ChannelModePerEpisode,
+				notifications.ChannelModePerEpisodeAndDigest)
 		}
-		email = capabilityEmail{
+		email = capabilityAccountChannel{
 			Available:  true,
 			Modes:      modes,
 			DigestHour: h.system.Settings.EmailDigestHour(r.Context()),
+		}
+	}
+	discordCap := capabilityAccountChannel{Modes: []string{}}
+	if h.system.DiscordAvailable(r.Context()) {
+		modes := []string{notifications.ChannelModeDailyDigest}
+		if h.system.Settings.DiscordAllowPerEpisode(r.Context()) {
+			modes = append(modes,
+				notifications.ChannelModePerEpisode,
+				notifications.ChannelModePerEpisodeAndDigest)
+		}
+		discordCap = capabilityAccountChannel{
+			Available:  true,
+			Modes:      modes,
+			DigestHour: h.system.Settings.DiscordDigestHour(r.Context()),
 		}
 	}
 	writeJSON(w, http.StatusOK, capabilityResponse{
@@ -352,6 +371,7 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 		WebPush:     webPush,
 		Webhooks:    webhooks,
 		Email:       email,
+		Discord:     discordCap,
 	})
 }
 

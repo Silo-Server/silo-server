@@ -244,6 +244,24 @@ func (r *DeliveryRepository) ListForUserSince(ctx context.Context, tx pgx.Tx, us
 	return scanDeliveryRows(rows)
 }
 
+// HasForUserSince reports whether the account has any delivery newer than the
+// given watermark. Cheap pre-check (index-only) so account-channel sweeps do
+// not open a claim transaction for idle accounts every pass.
+func (r *DeliveryRepository) HasForUserSince(ctx context.Context, userID int, since Cursor) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM notification_deliveries
+			WHERE user_id = $1 AND (created_at, id) > ($2, $3)
+		)`,
+		userID, since.CreatedAt, since.ID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check deliveries since watermark: %w", err)
+	}
+	return exists, nil
+}
+
 // RecentUnread returns the newest unread rows for the websocket snapshot.
 func (r *DeliveryRepository) RecentUnread(ctx context.Context, profileID string, limit int) ([]DeliveryRow, error) {
 	rows, err := r.pool.Query(ctx,

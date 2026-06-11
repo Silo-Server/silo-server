@@ -95,6 +95,11 @@ var SensitiveSettingKeys = map[string]bool{
 	// Shared outbound email (internal/mail) SMTP credential.
 	"email.smtp_password": true,
 
+	// Discord notification integration. The client_id is public in Discord's
+	// own UI, so only the secret and bot token are encrypted.
+	"discord.client_secret": true,
+	"discord.bot_token":     true,
+
 	// Web Push VAPID keypair JSON (generated + persisted atomically as one
 	// value by the notifications system; clients receive the public half via
 	// the capability endpoint, never from the settings store).

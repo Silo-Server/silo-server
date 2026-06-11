@@ -1479,6 +1479,17 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Discord account-link OAuth callback: public — Discord redirects the
+		// browser here without credentials; the one-time link-state row
+		// authenticates the request and maps it back to the initiating
+		// account. The static path coexists with the authenticated
+		// /notifications subrouter below (static routes win in chi).
+		var discordNotificationsHandler *handlers.DiscordNotificationsHandler
+		if deps.Notifications != nil {
+			discordNotificationsHandler = handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
+			r.Get("/notifications/discord/link/callback", discordNotificationsHandler.HandleLinkCallback)
+		}
+
 		// API key management routes (auth only, no viewer access needed).
 		if apiKeyRepo != nil && authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -1546,6 +1557,12 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
 						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
 						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
+						if discordNotificationsHandler != nil {
+							r.Get("/discord-preferences", discordNotificationsHandler.HandleGetPreferences)
+							r.Put("/discord-preferences", discordNotificationsHandler.HandleUpdatePreferences)
+							r.Delete("/discord-link", discordNotificationsHandler.HandleUnlink)
+							r.Post("/discord/link/init", discordNotificationsHandler.HandleLinkInit)
+						}
 						r.Post("/read-all", notificationsHandler.HandleReadAll)
 						r.Route("/webhooks", func(r chi.Router) {
 							r.Get("/", notificationsHandler.HandleListWebhooks)
@@ -2162,6 +2179,9 @@ func NewRouter(deps Dependencies) chi.Router {
 							if settingsRepo != nil {
 								emailHandler := handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
 								r.Post("/email/test", emailHandler.HandleTest)
+							}
+							if discordNotificationsHandler != nil {
+								r.Post("/notifications/discord/test", discordNotificationsHandler.HandleAdminTest)
 							}
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)

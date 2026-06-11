@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
-  NotificationEmailMode,
+  NotificationChannelMode,
   NotificationPreferences,
   NotificationWebhook,
   NotificationWebhookInput,
@@ -48,8 +49,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import {
+  useDiscordLinkInit,
+  useDiscordNotificationPreferences,
   useEmailNotificationPreferences,
   useNotificationPreferences,
+  useUnlinkDiscord,
+  useUpdateDiscordNotificationPreferences,
   useUpdateEmailNotificationPreferences,
   useUpdateNotificationPreferences,
 } from "@/hooks/queries/notifications";
@@ -152,6 +157,65 @@ function PreferencesSection() {
   );
 }
 
+/**
+ * Frequency picker shared by the account-level digest channels (email,
+ * Discord). Per-episode stays listed-but-disabled when the admin allowance is
+ * off and the account is still set to it, so the coercion is visible.
+ */
+function ChannelFrequencyRow({
+  mode,
+  allowPerEpisode,
+  digestHour,
+  isPending,
+  perEpisodeHint,
+  onChange,
+}: {
+  mode: NotificationChannelMode;
+  allowPerEpisode: boolean;
+  digestHour: string;
+  isPending: boolean;
+  perEpisodeHint: string;
+  onChange: (mode: NotificationChannelMode) => void;
+}) {
+  const digestText = `One summary per day, around ${digestHour}:00 server time`;
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <div className="text-sm">Frequency</div>
+        <div className="text-muted-foreground text-xs">
+          {mode === "per_episode"
+            ? perEpisodeHint
+            : mode === "per_episode_and_digest"
+              ? `${perEpisodeHint}, plus a daily summary around ${digestHour}:00 server time`
+              : digestText}
+        </div>
+      </div>
+      <Select
+        value={mode}
+        disabled={isPending}
+        onValueChange={(value) => onChange(value as NotificationChannelMode)}
+      >
+        <SelectTrigger className="w-[220px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="daily_digest">Daily digest</SelectItem>
+          {(allowPerEpisode || mode === "per_episode") && (
+            <SelectItem value="per_episode" disabled={!allowPerEpisode}>
+              Every episode
+            </SelectItem>
+          )}
+          {(allowPerEpisode || mode === "per_episode_and_digest") && (
+            <SelectItem value="per_episode_and_digest" disabled={!allowPerEpisode}>
+              Every episode + daily digest
+            </SelectItem>
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function EmailSection() {
   const { user } = useAuth();
   const capability = useNotificationCapability();
@@ -198,39 +262,161 @@ function EmailSection() {
         />
       </div>
       {enabled && (
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm">Frequency</div>
-            <div className="text-muted-foreground text-xs">
-              {mode === "per_episode"
-                ? "An email as soon as each notification arrives"
-                : `One summary per day, around ${digestHour}:00 server time`}
-            </div>
-          </div>
-          <Select
-            value={mode}
-            disabled={updatePrefs.isPending}
-            onValueChange={(value) => updatePrefs.mutate({ mode: value as NotificationEmailMode })}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="daily_digest">Daily digest</SelectItem>
-              {(allowPerEpisode || mode === "per_episode") && (
-                <SelectItem value="per_episode" disabled={!allowPerEpisode}>
-                  Every episode
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
+        <ChannelFrequencyRow
+          mode={mode}
+          allowPerEpisode={allowPerEpisode}
+          digestHour={digestHour}
+          isPending={updatePrefs.isPending}
+          perEpisodeHint="An email as soon as each notification arrives"
+          onChange={(value) => updatePrefs.mutate({ mode: value })}
+        />
       )}
-      {enabled && mode === "per_episode" && !allowPerEpisode && (
+      {enabled && mode !== "daily_digest" && !allowPerEpisode && (
         <div className="text-xs text-amber-500">
           Per-episode email is disabled by the administrator; you'll receive the daily digest
           instead.
         </div>
+      )}
+    </SettingsGroup>
+  );
+}
+
+const DISCORD_LINK_ERRORS: Record<string, string> = {
+  denied: "Discord linking was cancelled",
+  disabled: "Discord notifications were disabled by the administrator",
+  invalid_callback: "Discord linking failed: invalid callback",
+  state_invalid: "Discord linking expired — try again",
+  exchange_failed: "Discord linking failed — try again",
+};
+
+function DiscordSection() {
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const capability = useNotificationCapability();
+  const discordCap = capability.data?.discord;
+  const available = discordCap?.available ?? false;
+  const { data: prefs, isLoading } = useDiscordNotificationPreferences(available);
+  const updatePrefs = useUpdateDiscordNotificationPreferences();
+  const linkInit = useDiscordLinkInit();
+  const unlink = useUnlinkDiscord();
+
+  // Surface the OAuth callback result (the link flow round-trips through
+  // Discord and lands back here with a query param), then clean the URL.
+  useEffect(() => {
+    const linked = searchParams.get("discord_linked");
+    const error = searchParams.get("discord_error");
+    if (!linked && !error) {
+      return;
+    }
+    if (linked) {
+      toast.success("Discord account linked");
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.discordPreferences() });
+    } else if (error) {
+      toast.error(DISCORD_LINK_ERRORS[error] ?? "Discord linking failed");
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("discord_linked");
+    next.delete("discord_error");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, queryClient]);
+
+  if (!available) {
+    return null;
+  }
+
+  if (isLoading) {
+    return (
+      <SettingsGroup title="Discord Notifications">
+        <Skeleton className="h-16 w-full" />
+      </SettingsGroup>
+    );
+  }
+
+  const linked = prefs?.linked ?? false;
+  const mode = prefs?.mode ?? "off";
+  const enabled = mode !== "off";
+  const allowPerEpisode = discordCap?.modes.includes("per_episode") ?? false;
+  const digestHour = String(discordCap?.digest_hour ?? 8).padStart(2, "0");
+
+  const startLink = () => {
+    linkInit.mutate(undefined, {
+      onSuccess: (init) => {
+        window.location.assign(init.url);
+      },
+    });
+  };
+
+  return (
+    <SettingsGroup
+      title="Discord Notifications"
+      description="Account-wide: the Silo bot sends direct messages covering every profile on this account. You must share a Discord server with the bot."
+    >
+      {!linked ? (
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">Link your Discord account</div>
+            <div className="text-muted-foreground text-xs">
+              Authorize on Discord so the bot knows who to message
+            </div>
+          </div>
+          <Button size="sm" disabled={linkInit.isPending} onClick={startLink}>
+            {linkInit.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            Link Discord
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">
+                Linked as {prefs?.discord_username || "Discord user"}
+              </div>
+              <div className="text-muted-foreground text-xs">
+                Notifications you'd see in the inbox, delivered as a DM
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={enabled}
+                disabled={updatePrefs.isPending}
+                onCheckedChange={(checked) =>
+                  updatePrefs.mutate({ mode: checked ? "daily_digest" : "off" })
+                }
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                disabled={unlink.isPending}
+                onClick={() => unlink.mutate()}
+              >
+                Unlink
+              </Button>
+            </div>
+          </div>
+          {enabled && (
+            <ChannelFrequencyRow
+              mode={mode}
+              allowPerEpisode={allowPerEpisode}
+              digestHour={digestHour}
+              isPending={updatePrefs.isPending}
+              perEpisodeHint="A DM as soon as each notification arrives"
+              onChange={(value) => updatePrefs.mutate({ mode: value })}
+            />
+          )}
+          {enabled && mode !== "daily_digest" && !allowPerEpisode && (
+            <div className="text-xs text-amber-500">
+              Per-episode DMs are disabled by the administrator; you'll receive the daily digest
+              instead.
+            </div>
+          )}
+          {enabled && prefs?.link_failure && (
+            <div className="flex items-start gap-1.5 text-xs text-amber-500">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{prefs.link_failure}</span>
+            </div>
+          )}
+        </>
       )}
     </SettingsGroup>
   );
@@ -828,6 +1014,8 @@ export default function NotificationsSettings() {
       <WebPushSection />
 
       <EmailSection />
+
+      <DiscordSection />
 
       <WebhooksSection />
     </div>

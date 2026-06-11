@@ -7,65 +7,71 @@ import (
 	"time"
 )
 
-func TestEffectiveEmailMode(t *testing.T) {
-	if got := effectiveEmailMode(EmailModePerEpisode, true); got != EmailModePerEpisode {
+func TestEffectiveChannelMode(t *testing.T) {
+	if got := effectiveChannelMode(ChannelModePerEpisode, true); got != ChannelModePerEpisode {
 		t.Fatalf("allowed per-episode coerced to %q", got)
 	}
-	if got := effectiveEmailMode(EmailModePerEpisode, false); got != EmailModeDailyDigest {
+	if got := effectiveChannelMode(ChannelModePerEpisode, false); got != ChannelModeDailyDigest {
 		t.Fatalf("disallowed per-episode should coerce to digest, got %q", got)
 	}
-	if got := effectiveEmailMode(EmailModeDailyDigest, false); got != EmailModeDailyDigest {
+	if got := effectiveChannelMode(ChannelModeDailyDigest, false); got != ChannelModeDailyDigest {
 		t.Fatalf("digest mode changed to %q", got)
 	}
-	if got := effectiveEmailMode(EmailModeOff, true); got != EmailModeOff {
+	if got := effectiveChannelMode(ChannelModeOff, true); got != ChannelModeOff {
 		t.Fatalf("off mode changed to %q", got)
+	}
+	if got := effectiveChannelMode(ChannelModePerEpisodeAndDigest, true); got != ChannelModePerEpisodeAndDigest {
+		t.Fatalf("allowed combined mode coerced to %q", got)
+	}
+	if got := effectiveChannelMode(ChannelModePerEpisodeAndDigest, false); got != ChannelModeDailyDigest {
+		t.Fatalf("disallowed combined mode should coerce to digest, got %q", got)
 	}
 }
 
-func TestEmailDigestDue(t *testing.T) {
+func TestChannelDigestDue(t *testing.T) {
 	loc := time.UTC
 	morning := time.Date(2026, 6, 11, 7, 30, 0, 0, loc)
 	afternoon := time.Date(2026, 6, 11, 14, 0, 0, 0, loc)
 	yesterday := time.Date(2026, 6, 10, 9, 0, 0, 0, loc)
 	today := time.Date(2026, 6, 11, 8, 5, 0, 0, loc)
 
-	if emailDigestDue(morning, 8, nil) {
+	if channelDigestDue(morning, 8, nil) {
 		t.Fatal("digest due before today's send hour")
 	}
-	if !emailDigestDue(afternoon, 8, nil) {
+	if !channelDigestDue(afternoon, 8, nil) {
 		t.Fatal("first-ever digest not due after send hour")
 	}
-	if !emailDigestDue(afternoon, 8, &yesterday) {
+	if !channelDigestDue(afternoon, 8, &yesterday) {
 		t.Fatal("digest not due when last one was yesterday")
 	}
-	if emailDigestDue(afternoon, 8, &today) {
+	if channelDigestDue(afternoon, 8, &today) {
 		t.Fatal("digest due twice in one day")
 	}
 }
 
-func TestEmailRetryEligible(t *testing.T) {
+func TestChannelRetryEligible(t *testing.T) {
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	recent := now.Add(-30 * time.Second)
 	stale := now.Add(-10 * time.Minute)
 
-	if !emailRetryEligible(now, nil, 0) {
+	if !channelRetryEligible(now, nil, 0) {
 		t.Fatal("clean account not eligible")
 	}
-	if !emailRetryEligible(now, &recent, 0) {
+	if !channelRetryEligible(now, &recent, 0) {
 		t.Fatal("successful account not eligible")
 	}
-	if emailRetryEligible(now, &recent, 1) {
+	if channelRetryEligible(now, &recent, 1) {
 		t.Fatal("eligible 30s after first failure (backoff is 1m)")
 	}
-	if !emailRetryEligible(now, &stale, 3) {
+	if !channelRetryEligible(now, &stale, 3) {
 		t.Fatal("not eligible 10m after third failure (backoff is 4m)")
 	}
 	// Large failure counts must not overflow the shift; cap applies.
 	old := now.Add(-7 * time.Hour)
-	if !emailRetryEligible(now, &old, 60) {
+	if !channelRetryEligible(now, &old, 60) {
 		t.Fatal("not eligible past the 6h backoff cap")
 	}
-	if emailRetryEligible(now, &recent, 60) {
+	if channelRetryEligible(now, &recent, 60) {
 		t.Fatal("eligible 30s after many failures")
 	}
 }

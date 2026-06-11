@@ -3,6 +3,9 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api } from "@/api/client";
 import type {
   AppNotification,
+  NotificationDiscordLinkInit,
+  NotificationDiscordMode,
+  NotificationDiscordPreferences,
   NotificationEmailPreferences,
   NotificationListResponse,
   NotificationPreferences,
@@ -115,6 +118,56 @@ export function useUpdateEmailNotificationPreferences() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to save email preferences");
+    },
+  });
+}
+
+export function useDiscordNotificationPreferences(enabled = true) {
+  return useQuery({
+    queryKey: notificationKeys.discordPreferences(),
+    queryFn: () => api<NotificationDiscordPreferences>("/notifications/discord-preferences"),
+    enabled,
+  });
+}
+
+export function useUpdateDiscordNotificationPreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: { mode: NotificationDiscordMode }) =>
+      api<NotificationDiscordPreferences>("/notifications/discord-preferences", {
+        method: "PUT",
+        body: JSON.stringify(update),
+      }),
+    onSuccess: (prefs) => {
+      queryClient.setQueryData(notificationKeys.discordPreferences(), prefs);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to save Discord preferences");
+    },
+  });
+}
+
+/** Starts the Discord account-link OAuth flow; navigate to the returned URL. */
+export function useDiscordLinkInit() {
+  return useMutation({
+    mutationFn: () =>
+      api<NotificationDiscordLinkInit>("/notifications/discord/link/init", { method: "POST" }),
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to start Discord link");
+    },
+  });
+}
+
+export function useUnlinkDiscord() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api("/notifications/discord-link", { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.discordPreferences() });
+      toast.success("Discord account unlinked");
+    },
+    onError: () => {
+      toast.error("Failed to unlink Discord account");
     },
   });
 }

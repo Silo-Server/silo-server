@@ -18,8 +18,9 @@ type SettingReader interface {
 // Server-setting keys for the notification system. All keys are live (no
 // restart required): consumers read them through Settings, which caches reads
 // briefly. The enabled flags default to on and act as kill switches — except
-// webhooks, which are opt-in and stay off until an admin enables them. Flood
-// safety comes from per-library seed markers, not from staged flag flips.
+// webhooks and Discord, which are opt-in and stay off until an admin enables
+// them. Flood safety comes from per-library seed markers, not from staged
+// flag flips.
 const (
 	SettingReleaseEventsEnabled = "notifications.release_events_enabled"
 	SettingFanoutEnabled        = "notifications.fanout_enabled"
@@ -40,6 +41,17 @@ const (
 	SettingEmailAllowPerEpisode = "notifications.email.allow_per_episode"
 	SettingEmailDigestHour      = "notifications.email.digest_hour"
 	SettingEmailExternalURL     = "notifications.email.external_url"
+
+	SettingDiscordEnabled         = "notifications.discord_enabled"
+	SettingDiscordAllowPerEpisode = "notifications.discord.allow_per_episode"
+	SettingDiscordDigestHour      = "notifications.discord.digest_hour"
+
+	// Discord application credentials live under the discord.* namespace
+	// (admin-configured, alongside email.smtp_*). The secret and bot token
+	// are registered in catalog.SensitiveSettingKeys and encrypted at rest.
+	SettingDiscordClientID     = "discord.client_id"
+	SettingDiscordClientSecret = "discord.client_secret"
+	SettingDiscordBotToken     = "discord.bot_token"
 )
 
 const (
@@ -49,7 +61,9 @@ const (
 	defaultRetentionReadDays  = 90
 	defaultRetentionUnread    = 180
 	defaultRetentionEventDays = 30
-	defaultEmailDigestHour    = 8
+	// defaultDigestHour applies to every account-level digest channel
+	// (email, Discord).
+	defaultDigestHour = 8
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -106,6 +120,20 @@ func (s *Settings) raw(ctx context.Context, key string) string {
 	s.cache[key] = settingsCacheEntry{value: value, fetchedAt: s.now()}
 	s.mu.Unlock()
 	return value
+}
+
+// Invalidate drops cached values so the next read hits the store. Admin test
+// paths use it: a test typically runs seconds after a settings save, inside
+// the read-cache TTL, and must see the just-saved value.
+func (s *Settings) Invalidate(keys ...string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	for _, key := range keys {
+		delete(s.cache, key)
+	}
+	s.mu.Unlock()
 }
 
 func (s *Settings) boolSetting(ctx context.Context, key string, fallback bool) bool {
@@ -224,7 +252,7 @@ func (s *Settings) EmailAllowPerEpisode(ctx context.Context) bool {
 // EmailDigestHour is the hour of day (0-23, server-local time) at which daily
 // digest emails go out.
 func (s *Settings) EmailDigestHour(ctx context.Context) int {
-	return s.intSetting(ctx, SettingEmailDigestHour, defaultEmailDigestHour, 0, 23)
+	return s.intSetting(ctx, SettingEmailDigestHour, defaultDigestHour, 0, 23)
 }
 
 // EmailExternalURL is the externally reachable base URL of this server, used
@@ -232,4 +260,42 @@ func (s *Settings) EmailDigestHour(ctx context.Context) int {
 // links (webhooks deliberately never leak the origin; email is opt-in here).
 func (s *Settings) EmailExternalURL(ctx context.Context) string {
 	return strings.TrimRight(strings.TrimSpace(s.raw(ctx, SettingEmailExternalURL)), "/")
+}
+
+// DiscordEnabled is the master switch for the Discord bot integration. Like
+// webhooks it is opt-in: while off, the channel never delivers, linking is
+// refused, and clients are told the channel is unavailable (which hides the
+// Discord section in user settings). Actual availability additionally
+// requires the configured bot credentials.
+func (s *Settings) DiscordEnabled(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingDiscordEnabled, false)
+}
+
+// DiscordAllowPerEpisode controls whether users may choose per-episode
+// Discord DMs. When off, accounts set to per-episode are coerced to the daily
+// digest instead of going silent.
+func (s *Settings) DiscordAllowPerEpisode(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingDiscordAllowPerEpisode, true)
+}
+
+// DiscordDigestHour is the hour of day (0-23, server-local time) at which
+// daily digest DMs go out.
+func (s *Settings) DiscordDigestHour(ctx context.Context) int {
+	return s.intSetting(ctx, SettingDiscordDigestHour, defaultDigestHour, 0, 23)
+}
+
+// DiscordClientID is the Discord application's OAuth2 client ID.
+func (s *Settings) DiscordClientID(ctx context.Context) string {
+	return strings.TrimSpace(s.raw(ctx, SettingDiscordClientID))
+}
+
+// DiscordClientSecret is the Discord application's OAuth2 client secret.
+func (s *Settings) DiscordClientSecret(ctx context.Context) string {
+	return strings.TrimSpace(s.raw(ctx, SettingDiscordClientSecret))
+}
+
+// DiscordBotToken is the Discord bot token used to open DM channels and send
+// messages.
+func (s *Settings) DiscordBotToken(ctx context.Context) string {
+	return strings.TrimSpace(s.raw(ctx, SettingDiscordBotToken))
 }
