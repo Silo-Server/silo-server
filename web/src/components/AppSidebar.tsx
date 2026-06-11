@@ -167,7 +167,10 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
   const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
-  const isAdmin = user?.role === "admin";
+  // Admin navigation is shown only when the admin account is acting through
+  // its primary (household parent) profile — other profiles on the account
+  // are treated as regular viewers.
+  const showAdminNav = user?.role === "admin" && profile?.is_primary === true;
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
   const { togglePin } = useToggleSidebarPin();
@@ -675,7 +678,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
 
       {/* Footer */}
       <div className="sidebar-footer border-sidebar-border/70 space-y-2 border-t px-3 py-3">
-        {isAdmin && (
+        {showAdminNav && (
           <Link
             to="/admin"
             onClick={onNavigate}

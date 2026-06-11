@@ -172,8 +172,12 @@ function RequireProfile({ children }: { children: ReactNode }) {
 }
 
 function RequireAdmin({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   if (user?.role !== "admin") return <Navigate to="/" replace />;
+  // The admin area stays reachable with no profile selected (post-login) or
+  // through the household primary profile; other profiles on the admin
+  // account are treated as regular viewers.
+  if (profile && profile.is_primary !== true) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
