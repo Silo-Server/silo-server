@@ -92,13 +92,24 @@ func generatedHomeLibraryRecentID(section *PageSection, libraryID int) string {
 }
 
 func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType string) []*PageSection {
+	// addedConfig/releasedConfig default to the library-scoped (no media_scope)
+	// generated config. A manga library mixes type='manga' series with
+	// type='ebook' chapters, so we scope its generated home rows to the series
+	// only — otherwise the chapter junk filenames leak into the home page.
+	addedConfig := GeneratedHomeLibraryRecentConfig(libraryID)
+	releasedConfig := GeneratedHomeLibraryRecentConfig(libraryID)
+	if libraryType == "manga" {
+		addedConfig = GeneratedHomeLibraryRecentConfigScoped(libraryID, "manga")
+		releasedConfig = GeneratedHomeLibraryRecentConfigScoped(libraryID, "manga")
+	}
+
 	sections := []*PageSection{
 		{
 			Scope:       "home",
 			SectionType: SectionRecentlyAdded,
 			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyAdded, libraryName),
 			ItemLimit:   20,
-			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
+			Config:      addedConfig,
 			Enabled:     true,
 		},
 	}
@@ -119,7 +130,7 @@ func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType 
 			SectionType: SectionRecentlyReleased,
 			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyReleased, libraryName),
 			ItemLimit:   20,
-			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
+			Config:      releasedConfig,
 			Enabled:     true,
 		})
 	}

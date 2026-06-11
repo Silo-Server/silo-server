@@ -555,3 +555,54 @@ func TestHomeDefaultsIncludeRecipeRichSet(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratedHomeLibraryRecentDefaultsMangaScope(t *testing.T) {
+	got := generatedHomeLibraryRecentDefaults(7, "Manga", "manga")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 generated manga home sections, got %d", len(got))
+	}
+
+	wantTitles := map[SectionType]string{
+		SectionRecentlyAdded:    "Recently Added in Manga",
+		SectionRecentlyReleased: "Recently Released in Manga",
+	}
+	for _, sec := range got {
+		wantTitle, ok := wantTitles[sec.SectionType]
+		if !ok {
+			t.Fatalf("unexpected section type %s", sec.SectionType)
+		}
+		if sec.Title != wantTitle {
+			t.Fatalf("section %s title = %q, want %q", sec.SectionType, sec.Title, wantTitle)
+		}
+
+		def, err := ParseQueryDefinition(sec.Config)
+		if err != nil {
+			t.Fatalf("ParseQueryDefinition(%s) error = %v", sec.SectionType, err)
+		}
+		if def.MediaScope != "manga" {
+			t.Fatalf("section %s media_scope = %q, want manga", sec.SectionType, def.MediaScope)
+		}
+		if len(def.LibraryIDs) != 1 || def.LibraryIDs[0] != 7 {
+			t.Fatalf("section %s library_ids = %v, want [7]", sec.SectionType, def.LibraryIDs)
+		}
+		if id, ok := ParseGeneratedHomeLibraryRecentConfig(sec.Config); !ok || id != 7 {
+			t.Fatalf("section %s generated config id = %d ok = %v, want 7 true", sec.SectionType, id, ok)
+		}
+	}
+}
+
+func TestGeneratedHomeLibraryRecentDefaultsNonMangaNoScope(t *testing.T) {
+	got := generatedHomeLibraryRecentDefaults(7, "Movies", "movies")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 generated movies home sections, got %d", len(got))
+	}
+	for _, sec := range got {
+		def, err := ParseQueryDefinition(sec.Config)
+		if err != nil {
+			t.Fatalf("ParseQueryDefinition(%s) error = %v", sec.SectionType, err)
+		}
+		if def.MediaScope == "manga" {
+			t.Fatalf("section %s unexpectedly carries manga media_scope", sec.SectionType)
+		}
+	}
+}
