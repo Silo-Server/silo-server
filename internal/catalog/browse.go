@@ -1127,15 +1127,17 @@ func browseItemColumns(alias string) string {
 	return strings.Join(prefixed, ", ")
 }
 
-// mangaCountColumns returns two index-backed correlated subqueries that count a
-// manga series' chapters and volume-tagged chapters. They return 0 for
-// non-manga rows (no matching manga_chapters), which the scan path nils out so
-// only manga cards carry the counts. The subqueries are functionally dependent
-// on alias.content_id (the media_items PK, which leads browseGroupByColumns), so
-// they remain valid under the dedup GROUP BY without being listed there.
+// mangaCountColumns returns two index-backed correlated subqueries feeding the
+// "X Volumes · X Chapters" poster chip: distinct volume tokens (many chapter
+// rows can share one volume) and loose chapter rows without a volume token.
+// They return 0 for non-manga rows (no matching manga_chapters), which the
+// scan path nils out so only manga cards carry the counts. The subqueries are
+// functionally dependent on alias.content_id (the media_items PK, which leads
+// browseGroupByColumns), so they remain valid under the dedup GROUP BY without
+// being listed there.
 func mangaCountColumns(alias string) string {
-	return "(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id) AS manga_chapter_count, " +
-		"(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND mc.volume IS NOT NULL AND mc.volume <> '') AS manga_volume_count"
+	return "(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND (mc.volume IS NULL OR mc.volume = '')) AS manga_chapter_count, " +
+		"(SELECT count(DISTINCT mc.volume) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND mc.volume IS NOT NULL AND mc.volume <> '') AS manga_volume_count"
 }
 
 // mangaChapterExclusionWhere returns a WHERE predicate that hides manga CHAPTER

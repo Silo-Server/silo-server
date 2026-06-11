@@ -127,8 +127,20 @@ describe("MangaContent", () => {
       <MemoryRouter>
         <MangaContent
           item={mangaItem([
-            { content_id: "v01", title: "Railgun v01", chapter_index: 1, volume: "v01", read: true },
-            { content_id: "v02", title: "Railgun v02", chapter_index: 2, volume: "v02", read: false },
+            {
+              content_id: "v01",
+              title: "Railgun v01",
+              chapter_index: 1,
+              volume: "v01",
+              read: true,
+            },
+            {
+              content_id: "v02",
+              title: "Railgun v02",
+              chapter_index: 2,
+              volume: "v02",
+              read: false,
+            },
           ])}
           libraryId={7}
         />

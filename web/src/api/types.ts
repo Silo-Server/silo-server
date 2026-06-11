@@ -795,6 +795,8 @@ export interface BrowseItem {
   user_state?: MediaItemUserState;
   // Manga-only count chips. The host populates these only for type='manga'
   // browse items; they are absent (undefined) for every other media type.
+  // chapter count = loose chapters without a volume token; volume count =
+  // distinct volumes ("12 Volumes · 3 Chapters").
   manga_chapter_count?: number;
   manga_volume_count?: number;
 }

@@ -58,20 +58,25 @@ function formatProgress(ratio?: number | null) {
 }
 
 // mangaCountChipLabel returns the top-right poster chip label for a manga
-// browse item, or null when the item is not manga or has no positive chapter
-// count. When the volume count dominates (volumes >= loose chapters) the label
-// reads "Vols N", otherwise "Ch N". This is strictly manga-gated so no other
-// card type renders it.
+// browse item, or null when the item is not manga or has no counts. The server
+// sends distinct volumes (manga_volume_count) and loose un-volumed chapters
+// (manga_chapter_count) separately; the label shows whichever are present:
+// "12 Volumes", "100 Chapters", or "12 Volumes · 3 Chapters". This is strictly
+// manga-gated so no other card type renders it.
 function mangaCountChipLabel(item: BrowseItem): string | null {
   if (item.type !== "manga") {
     return null;
   }
-  const chapters = item.manga_chapter_count;
-  if (typeof chapters !== "number" || chapters <= 0) {
-    return null;
-  }
   const volumes = item.manga_volume_count ?? 0;
-  return volumes >= chapters - volumes ? `Vols ${chapters}` : `Ch ${chapters}`;
+  const chapters = item.manga_chapter_count ?? 0;
+  const parts: string[] = [];
+  if (volumes > 0) {
+    parts.push(`${volumes} ${volumes === 1 ? "Volume" : "Volumes"}`);
+  }
+  if (chapters > 0) {
+    parts.push(`${chapters} ${chapters === 1 ? "Chapter" : "Chapters"}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
