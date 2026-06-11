@@ -26,7 +26,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Megaphone, Plus, Trash2 } from "lucide-react";
@@ -317,7 +316,7 @@ function CreateAnnouncementForm({ onClose }: { onClose: () => void }) {
 
         {/* User list */}
         {mode === "users" && (
-          <ScrollArea className="border-input max-h-40 rounded-md border p-2">
+          <div className="border-input max-h-40 overflow-y-auto rounded-md border p-2">
             <div className="space-y-1">
               {users.map((u) => (
                 <label key={u.id} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -337,12 +336,12 @@ function CreateAnnouncementForm({ onClose }: { onClose: () => void }) {
                 <p className="text-muted-foreground text-xs">No users found.</p>
               )}
             </div>
-          </ScrollArea>
+          </div>
         )}
 
         {/* Library list */}
         {mode === "libraries" && (
-          <ScrollArea className="border-input max-h-40 rounded-md border p-2">
+          <div className="border-input max-h-40 overflow-y-auto rounded-md border p-2">
             <div className="space-y-1">
               {libraries.map((lib) => (
                 <label key={lib.id} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -359,7 +358,7 @@ function CreateAnnouncementForm({ onClose }: { onClose: () => void }) {
                 <p className="text-muted-foreground text-xs">No libraries found.</p>
               )}
             </div>
-          </ScrollArea>
+          </div>
         )}
       </fieldset>
 
