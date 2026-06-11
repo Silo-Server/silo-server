@@ -4,6 +4,7 @@ import { Menu, Search } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import AppSidebar from "@/components/AppSidebar";
 import ServerActivity from "@/components/ServerActivity";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -27,7 +28,7 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const { user } = useAuth();
   const { profile } = useCurrentProfile();
-  const isAdmin = user?.role === "admin";
+  const showAdminActivity = useIsActingAdmin();
   const { isBackgroundBarVisible } = useWatchPlaybackController();
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
@@ -155,7 +156,7 @@ export default function Layout({ children }: LayoutProps) {
           >
             <Search className="h-5 w-5" />
           </ViewTransitionLink>
-          {isAdmin && <ServerActivity hideWhenEmpty />}
+          {showAdminActivity && <ServerActivity hideWhenEmpty />}
           <Link
             to="/settings/playback"
             className="bg-primary text-primary-foreground flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]"
@@ -178,7 +179,7 @@ export default function Layout({ children }: LayoutProps) {
       </Sheet>
 
       {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
-      {isAdmin && (
+      {showAdminActivity && (
         <div className="fixed top-6 right-5 z-40 hidden lg:block">
           <ServerActivity hideWhenEmpty />
         </div>

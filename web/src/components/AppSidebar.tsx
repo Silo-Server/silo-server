@@ -6,6 +6,7 @@ import { getProfileMenuSide, isSidebarExpanded } from "@/components/AppSidebar.l
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
@@ -167,7 +168,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
   const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
-  const isAdmin = user?.role === "admin";
+  const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
   const { togglePin } = useToggleSidebarPin();
@@ -675,7 +676,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
 
       {/* Footer */}
       <div className="sidebar-footer border-sidebar-border/70 space-y-2 border-t px-3 py-3">
-        {isAdmin && (
+        {showAdminNav && (
           <Link
             to="/admin"
             onClick={onNavigate}

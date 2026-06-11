@@ -164,6 +164,83 @@ func RequireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// PrimaryProfileChecker reports whether profileID belongs to userID and, if
+// so, whether it is the household primary profile. found must be false when
+// the profile does not exist or belongs to a different account.
+type PrimaryProfileChecker func(ctx context.Context, userID int, profileID string) (isPrimary bool, found bool, err error)
+
+// RequireActingAdmin enforces the admin role plus the household policy that
+// admin powers are only exercised through the account's primary profile.
+// When the request declares an active profile (X-Profile-Id) that belongs to
+// the admin account but is not the primary profile, the request is refused;
+// requests with no declared profile keep working (clients that haven't
+// selected a profile yet). With a nil checker it behaves exactly like
+// RequireAdmin.
+//
+// Note this enforces the declared profile, not an authenticated one: all
+// profiles on an account share the login session, so this is a policy
+// boundary for well-behaved clients, not a defense against the account
+// holder themselves.
+func RequireActingAdmin(checkPrimary PrimaryProfileChecker) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := GetClaims(r.Context())
+			if claims == nil {
+				writeUnauthorized(w, "Authentication required")
+				return
+			}
+
+			if claims.Role != "admin" {
+				writeForbidden(w, "Admin access required")
+				return
+			}
+
+			allowed, err := actingAdminAllowed(r, claims.UserID, checkPrimary)
+			if err != nil {
+				writeInternalError(w, "Failed to verify active profile")
+				return
+			}
+			if !allowed {
+				writeForbidden(w, "Admin access requires the account's primary profile")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// actingAdminAllowed reports whether an admin request may exercise admin
+// powers given the profile it declares. Allowed when no checker is
+// configured, no profile is declared, or the declared profile is the
+// account's primary profile. A declared profile that cannot be resolved to
+// one of the caller's profiles fails closed: otherwise a non-primary session
+// could regain admin powers by sending a bogus X-Profile-Id.
+func actingAdminAllowed(r *http.Request, userID int, checkPrimary PrimaryProfileChecker) (bool, error) {
+	if checkPrimary == nil {
+		return true, nil
+	}
+	profileID := declaredProfileID(r)
+	if profileID == "" {
+		return true, nil
+	}
+	isPrimary, found, err := checkPrimary(r.Context(), userID, profileID)
+	if err != nil {
+		return false, err
+	}
+	return found && isPrimary, nil
+}
+
+// declaredProfileID returns the active profile the request declares: the
+// profile context when RequireProfile ran earlier in the chain, otherwise
+// the raw X-Profile-Id header.
+func declaredProfileID(r *http.Request) string {
+	if id := GetProfileID(r.Context()); id != "" {
+		return id
+	}
+	return r.Header.Get("X-Profile-Id")
+}
+
 // SetClaims stores JWT claims in the context. This is useful for testing
 // handlers that depend on authentication without going through the full
 // middleware chain.
@@ -239,6 +316,16 @@ func writeUnauthorized(w http.ResponseWriter, message string) {
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:   "unauthorized",
+		Message: message,
+	})
+}
+
+// writeInternalError writes a 500 JSON error response.
+func writeInternalError(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   "internal_error",
 		Message: message,
 	})
 }

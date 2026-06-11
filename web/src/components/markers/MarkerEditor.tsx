@@ -19,7 +19,7 @@ import type {
 } from "@/api/types";
 import { MARKER_KINDS, MARKER_LABELS, formatClock, parseClock } from "@/lib/markers";
 import { useItemMarkerHistory, useItemMarkers, useSetItemMarkers } from "@/hooks/queries/markers";
-import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 
 interface MarkerEditorProps {
   itemId: string;
@@ -44,8 +44,7 @@ function fieldsFromResponse(data: FileMarkersResponse): FieldState {
  * authenticated markers API.
  */
 export function MarkerEditor({ itemId, open, onOpenChange }: MarkerEditorProps) {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = useIsActingAdmin();
   const { data, isLoading, isError } = useItemMarkers(itemId, { enabled: open });
   const history = useItemMarkerHistory(itemId, { enabled: open && isAdmin, limit: 25 });
 

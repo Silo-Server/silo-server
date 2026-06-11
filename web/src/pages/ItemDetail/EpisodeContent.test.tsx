@@ -40,6 +40,7 @@ vi.mock("@/hooks/queries/episodes", () => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
+  useOptionalAuth: mocks.useAuth,
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({

@@ -14,6 +14,7 @@ import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { personKeys } from "@/hooks/queries/keys";
 import { useRefreshPerson } from "@/hooks/queries/people";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatBirthDate, computeAge } from "@/lib/date";
@@ -28,7 +29,7 @@ export default function PersonDetail() {
   const autoRefreshWindowRef = useRef<{ personId: number; until: number } | null>(null);
   const autoRefreshRequestedPersonIdRef = useRef<number | null>(null);
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = useIsActingAdmin();
   const refreshMutation = useRefreshPerson(id, isAdmin);
 
   const { data: person, isLoading: personLoading } = useQuery({

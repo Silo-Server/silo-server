@@ -12,13 +12,14 @@ const mockLogout = vi.fn();
 const mockClearProfile = vi.fn();
 const mockTogglePin = vi.fn();
 
-vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({
+vi.mock("@/hooks/useAuth", () => {
+  const useAuth = () => ({
     user: { id: 1, username: "alex", role: "admin" },
     logout: mockLogout,
     clearProfile: mockClearProfile,
-  }),
-}));
+  });
+  return { useAuth, useOptionalAuth: useAuth };
+});
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({

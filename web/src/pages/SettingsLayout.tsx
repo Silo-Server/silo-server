@@ -19,7 +19,8 @@ import type { LucideIcon } from "lucide-react";
 import PageBack from "@/components/PageBack";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useAuth } from "@/hooks/useAuth";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { resolveSettingsDocumentTitle } from "@/lib/documentTitle";
 import { cn } from "@/lib/utils";
 
@@ -140,11 +141,11 @@ const NAV_SECTIONS: NavSection[] = [
 
 export default function SettingsLayout() {
   const location = useLocation();
-  const { user, profile } = useAuth();
+  const { profile } = useCurrentProfile();
+  const actingAdmin = useIsActingAdmin();
   const segments = location.pathname.split("/");
   const activeSegment = segments[2] || "playback";
-  const isAdmin = user?.role === "admin";
-  const canManageProfiles = isAdmin || profile?.is_primary === true;
+  const canManageProfiles = actingAdmin || profile?.is_primary === true;
 
   const visibleSections = NAV_SECTIONS.map((section) => ({
     ...section,

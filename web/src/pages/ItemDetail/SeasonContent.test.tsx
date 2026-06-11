@@ -46,6 +46,11 @@ vi.mock("@/hooks/queries/ratings", () => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
+  useOptionalAuth: mocks.useAuth,
+}));
+
+vi.mock("@/hooks/useCurrentProfile", () => ({
+  useCurrentProfile: () => ({ profile: mocks.useAuth()?.profile ?? null }),
 }));
 
 vi.mock("@/components/MediaItemMenu", () => ({

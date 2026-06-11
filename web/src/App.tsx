@@ -12,6 +12,8 @@ import {
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -172,14 +174,15 @@ function RequireProfile({ children }: { children: ReactNode }) {
 }
 
 function RequireAdmin({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  if (user?.role !== "admin") return <Navigate to="/" replace />;
+  const actingAdmin = useIsActingAdmin();
+  if (!actingAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
 function RequirePrimaryOrAdmin({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
-  if (user?.role !== "admin" && profile?.is_primary !== true) {
+  const actingAdmin = useIsActingAdmin();
+  const { profile } = useCurrentProfile();
+  if (!actingAdmin && profile?.is_primary !== true) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -552,12 +555,12 @@ function AppRoutes() {
 }
 
 function RealtimeEventChannels() {
-  const { user } = useAuth();
+  const actingAdmin = useIsActingAdmin();
 
   useEventChannel("catalog");
   useEventChannel("user_state");
 
-  return user?.role === "admin" ? <AdminRealtimeEventChannels /> : null;
+  return actingAdmin ? <AdminRealtimeEventChannels /> : null;
 }
 
 function AdminRealtimeEventChannels() {
