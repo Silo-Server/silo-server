@@ -75,13 +75,6 @@ export default function NotificationsAdminSettings() {
             onChange={(v) => form.setValue("notifications.ui_enabled", v)}
           />
           <SettingField
-            label="Outbound Webhooks"
-            hint="Deliver notifications to user-configured webhooks (Discord, generic)."
-            type="toggle"
-            value={toggleValue("notifications.webhooks_enabled")}
-            onChange={(v) => form.setValue("notifications.webhooks_enabled", v)}
-          />
-          <SettingField
             label="Web Push"
             hint="Deliver browser push notifications to subscribed devices."
             type="toggle"
@@ -115,6 +108,13 @@ export default function NotificationsAdminSettings() {
         </FieldGroup>
 
         <FieldGroup label="Webhook Guards">
+          <SettingField
+            label="Outbound Webhooks"
+            hint="Let users create personal webhooks (Discord, generic) that receive their notifications. Off by default; sends server-originated requests to user-chosen URLs."
+            type="toggle"
+            value={form.getValue("notifications.webhooks_enabled") || "false"}
+            onChange={(v) => form.setValue("notifications.webhooks_enabled", v)}
+          />
           <SettingField
             label="Max Webhooks Per Profile"
             hint="How many webhooks a single profile may create (default 10)"

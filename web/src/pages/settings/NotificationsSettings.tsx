@@ -732,8 +732,7 @@ function WebhookCard({
   );
 }
 
-export default function NotificationsSettings() {
-  useDocumentTitle("Notification Settings");
+function WebhooksSection() {
   const capability = useNotificationCapability();
   const webhooksAvailable = capability.data?.webhooks.available ?? false;
   const { data: webhooks, isLoading } = useNotificationWebhooks(webhooksAvailable);
@@ -745,23 +744,17 @@ export default function NotificationsSettings() {
   const maxPerProfile = capability.data?.webhooks.max_per_profile ?? 10;
   const atLimit = (webhooks?.length ?? 0) >= maxPerProfile;
 
+  if (!webhooksAvailable) {
+    return null;
+  }
+
   return (
-    <div className="space-y-6">
-      <PreferencesSection />
-
-      <WebPushSection />
-
-      <EmailSection />
-
+    <>
       <SettingsGroup
         title="Webhooks"
         description="Send this profile's notifications to a webhook URL. Discord URLs render as native embeds; other URLs receive signed JSON."
       >
-        {!webhooksAvailable ? (
-          <div className="text-muted-foreground text-sm">
-            Webhooks are not available on this server.
-          </div>
-        ) : isLoading ? (
+        {isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : (
           <>
@@ -821,6 +814,22 @@ export default function NotificationsSettings() {
         />
       )}
       <SigningSecretDialog secret={secret} onClose={() => setSecret(null)} />
+    </>
+  );
+}
+
+export default function NotificationsSettings() {
+  useDocumentTitle("Notification Settings");
+
+  return (
+    <div className="space-y-6">
+      <PreferencesSection />
+
+      <WebPushSection />
+
+      <EmailSection />
+
+      <WebhooksSection />
     </div>
   );
 }

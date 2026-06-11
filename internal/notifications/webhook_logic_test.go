@@ -1,16 +1,48 @@
 package notifications
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
 )
+
+// mapSettingReader is a SettingReader fake; missing keys read as unset.
+type mapSettingReader map[string]string
+
+func (m mapSettingReader) Get(_ context.Context, key string) (string, error) {
+	return m[key], nil
+}
+
+func TestWebhooksDisabledByDefault(t *testing.T) {
+	ctx := context.Background()
+	if NewSettings(nil).WebhooksEnabled(ctx) {
+		t.Fatal("WebhooksEnabled must default to false until an admin opts in")
+	}
+	if !NewSettings(mapSettingReader{SettingWebhooksEnabled: "true"}).WebhooksEnabled(ctx) {
+		t.Fatal("WebhooksEnabled = false with the setting on, want true")
+	}
+}
+
+func TestWebhookCreateAndTestBlockedWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	service := newWebhookService(nil, nil, NewSettings(nil), nil)
+
+	name, url := "hook", "https://discord.com/api/webhooks/1/abc"
+	if _, _, err := service.Create(ctx, 1, "profile", WebhookInput{Name: &name, URL: &url}); !errors.Is(err, ErrWebhooksDisabled) {
+		t.Fatalf("Create error = %v, want ErrWebhooksDisabled", err)
+	}
+	if _, err := service.Test(ctx, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
+		t.Fatalf("Test error = %v, want ErrWebhooksDisabled", err)
+	}
+}
 
 func TestWebhookIPAllowed(t *testing.T) {
 	denied := []string{

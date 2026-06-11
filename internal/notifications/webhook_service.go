@@ -15,9 +15,10 @@ import (
 
 // Webhook service errors surfaced to the API layer.
 var (
-	ErrWebhookInvalid  = errors.New("invalid webhook")
-	ErrWebhookNotFound = errors.New("webhook not found")
-	ErrWebhookLimit    = errors.New("webhook limit reached")
+	ErrWebhookInvalid   = errors.New("invalid webhook")
+	ErrWebhookNotFound  = errors.New("webhook not found")
+	ErrWebhookLimit     = errors.New("webhook limit reached")
+	ErrWebhooksDisabled = errors.New("webhooks are disabled by the administrator")
 )
 
 // WebhookService owns webhook CRUD, validation, and signing-secret handling.
@@ -82,6 +83,12 @@ func (s *WebhookService) Get(ctx context.Context, profileID, id string) (*Webhoo
 // Create validates and persists a new webhook. For generic webhooks the
 // returned signingSecret is shown exactly once.
 func (s *WebhookService) Create(ctx context.Context, userID int, profileID string, input WebhookInput) (*Webhook, string, error) {
+	// Webhooks are opt-in: creation is blocked until an admin enables the
+	// channel. Existing webhooks stay manageable (list/update/delete) so a
+	// later disable never strands rows users can no longer remove.
+	if !s.settings.WebhooksEnabled(ctx) {
+		return nil, "", ErrWebhooksDisabled
+	}
 	if input.Name == nil || input.URL == nil {
 		return nil, "", fmt.Errorf("%w: name and url are required", ErrWebhookInvalid)
 	}
@@ -278,6 +285,11 @@ type WebhookTestResult struct {
 // Test synchronously POSTs a clearly marked sample payload. Test sends never
 // touch webhook_delivery_attempts or the failure counters.
 func (s *WebhookService) Test(ctx context.Context, profileID, id string) (*WebhookTestResult, error) {
+	// Test sends are outbound traffic; the channel gate covers them too
+	// (regular delivery is already gated at enqueue and dispatch).
+	if !s.settings.WebhooksEnabled(ctx) {
+		return nil, ErrWebhooksDisabled
+	}
 	hook, err := s.repo.GetByID(ctx, profileID, id)
 	if err != nil {
 		return nil, err

@@ -91,6 +91,8 @@ func (h *NotificationsHandler) webhooks() *notifications.WebhookService {
 
 func writeWebhookError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, notifications.ErrWebhooksDisabled):
+		writeError(w, http.StatusForbidden, "webhooks_disabled", "Webhooks are disabled by the server administrator")
 	case errors.Is(err, notifications.ErrWebhookNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Webhook not found")
 	case errors.Is(err, notifications.ErrWebhookLimit):

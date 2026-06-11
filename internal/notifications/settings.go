@@ -17,7 +17,8 @@ type SettingReader interface {
 
 // Server-setting keys for the notification system. All keys are live (no
 // restart required): consumers read them through Settings, which caches reads
-// briefly. The enabled flags default to on and act as kill switches; flood
+// briefly. The enabled flags default to on and act as kill switches — except
+// webhooks, which are opt-in and stay off until an admin enables them. Flood
 // safety comes from per-library seed markers, not from staged flag flips.
 const (
 	SettingReleaseEventsEnabled = "notifications.release_events_enabled"
@@ -182,9 +183,12 @@ func (s *Settings) EventRetentionDays(ctx context.Context) int {
 	return s.intSetting(ctx, SettingRetentionEventDays, defaultRetentionEventDays, 1, 3650)
 }
 
-// WebhooksEnabled gates the outbound webhooks channel (kill switch).
+// WebhooksEnabled gates the outbound webhooks channel. Unlike the other
+// channel flags this is opt-in: letting users point server-originated HTTP at
+// arbitrary destinations is an admin decision, so creation, test sends, and
+// delivery all stay off until an admin enables the setting.
 func (s *Settings) WebhooksEnabled(ctx context.Context) bool {
-	return s.boolSetting(ctx, SettingWebhooksEnabled, true)
+	return s.boolSetting(ctx, SettingWebhooksEnabled, false)
 }
 
 // WebhooksMaxPerProfile caps how many webhooks one profile may create.
