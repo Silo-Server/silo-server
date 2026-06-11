@@ -320,6 +320,8 @@ type MediaItem struct {
 	MetadataS3Path               string
 	MetadataEtag                 string
 	SeasonCount                  *int // series only
+	MangaChapterCount            *int // manga series only: total manga_chapters rows
+	MangaVolumeCount             *int // manga series only: manga_chapters rows with a non-empty volume token
 	Studios                      []string
 	Networks                     []string
 	Countries                    []string
