@@ -189,6 +189,68 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain("S01E03");
   });
 
+  it("renders a manga count chip with the volume label when volumes dominate", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-1",
+        type: "manga",
+        title: "Railgun",
+        manga_chapter_count: 12,
+        manga_volume_count: 12,
+      },
+    });
+
+    expect(markup).toContain("Vols 12");
+  });
+
+  it("renders a manga count chip with the chapter label when loose chapters dominate", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-2",
+        type: "manga",
+        title: "One Piece",
+        manga_chapter_count: 100,
+        manga_volume_count: 0,
+      },
+    });
+
+    expect(markup).toContain("Ch 100");
+  });
+
+  it("does not render a manga count chip on non-manga cards", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "ebook-9",
+        type: "ebook",
+        title: "Not Manga",
+        // Even if these stray fields were present, gating is on type.
+        manga_chapter_count: 99,
+        manga_volume_count: 99,
+      },
+    });
+
+    expect(markup).not.toContain("Vols");
+    expect(markup).not.toContain("Ch 99");
+  });
+
+  it("does not render a manga count chip when the chapter count is missing or zero", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-3",
+        type: "manga",
+        title: "Empty Manga",
+        manga_chapter_count: 0,
+      },
+    });
+
+    expect(markup).not.toContain("Vols");
+    expect(markup).not.toContain("Ch ");
+  });
+
   it("renders episode cards with series context when available", () => {
     const markup = renderCard({
       item: {
