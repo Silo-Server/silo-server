@@ -86,3 +86,22 @@ func TestRunBatchSeparatesOutcomes(t *testing.T) {
 		t.Fatalf("recordFailure calls = %d, want 1", failures)
 	}
 }
+
+// The scanner's manga_series identity rows must never reach the metadata
+// flow: they made the search-skip guard treat every item as already matched.
+func TestFilterMangaProviderIDsDropsInternalIdentity(t *testing.T) {
+	filtered := filterMangaProviderIDs(map[string]string{
+		"manga_series": "abc123",
+		"anilist":      "42",
+		"asin":         "B000",
+	})
+	if _, ok := filtered["manga_series"]; ok {
+		t.Fatalf("manga_series identity must be filtered, got %v", filtered)
+	}
+	if filtered["anilist"] != "42" {
+		t.Fatalf("anilist id must survive, got %v", filtered)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("filtered = %v, want only anilist", filtered)
+	}
+}
