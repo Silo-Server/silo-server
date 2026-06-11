@@ -251,6 +251,38 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain("1 Vol · 1 Ch");
   });
 
+  it("renders a color-coded publication status chip on manga cards", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-st",
+        type: "manga",
+        title: "Ongoing Manga",
+        manga_volume_count: 5,
+        show_status: "Ongoing",
+      },
+    });
+    expect(markup).toContain("Ongoing");
+    expect(markup).toContain("text-emerald-200");
+  });
+
+  it("does not render a status chip on non-manga cards or when status is absent", () => {
+    const noStatus = renderCard({
+      item: { ...baseItem, content_id: "manga-ns", type: "manga", title: "No Status" },
+    });
+    expect(noStatus).not.toContain("Ongoing");
+    const ebook = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "eb",
+        type: "ebook",
+        title: "Book",
+        show_status: "Completed",
+      },
+    });
+    expect(ebook).not.toContain("Completed");
+  });
+
   it("does not render a manga count chip on non-manga cards", () => {
     const markup = renderCard({
       item: {
