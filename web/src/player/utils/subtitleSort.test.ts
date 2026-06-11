@@ -469,3 +469,55 @@ describe("resolveSubtitleAutoSelect", () => {
     });
   });
 });
+
+describe("bitmap (PGS) codec deprioritization", () => {
+  it("prefers a text track over a PGS track of the same language and source", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
+      makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("still prefers a better source even when it is bitmap-free elsewhere", () => {
+    // External text beats embedded PGS, and embedded text beats embedded PGS,
+    // but an external PGS-like entry would still beat embedded text — source
+    // remains the primary key.
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "subrip" }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("selects a PGS track when it is the only language match", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "fr", codec: "subrip" }),
+      makeSub({ index: 1, source: "embedded", language: "en", codec: "pgs" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("auto-selects a forced PGS track when forced display is enabled", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "subrip" }),
+      makeSub({
+        index: 1,
+        source: "embedded",
+        language: "en",
+        codec: "hdmv_pgs_subtitle",
+        forced: true,
+      }),
+    ];
+    expect(
+      resolveSubtitleAutoSelect({
+        mode: "off",
+        tracks,
+        preferredLanguage: null,
+        audioLanguage: "en",
+        profileLanguage: "en",
+        showForcedSubtitles: true,
+      }),
+    ).toBe(1);
+  });
+});
