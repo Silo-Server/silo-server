@@ -1663,6 +1663,9 @@ func main() {
 			)
 			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
 		}
+		if notificationSystem != nil {
+			requestReconcileSvc.SetFulfillmentNotifier(notifications.NewRequestFulfillmentNotifier(notificationSystem))
+		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {
 			autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)

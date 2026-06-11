@@ -28,6 +28,9 @@ type genericWebhookBody struct {
 	Reasons    ReasonFlags            `json:"reason_flags"`
 	Series     *genericWebhookSeries  `json:"series,omitempty"`
 	Episode    *genericWebhookEpisode `json:"episode,omitempty"`
+	// Request is present for request.fulfilled deliveries; the catalog item is
+	// in Series (movies included — the field carries the matched item).
+	Request *genericWebhookRequest `json:"request,omitempty"`
 }
 
 type genericWebhookSeries struct {
@@ -40,6 +43,12 @@ type genericWebhookEpisode struct {
 	Title         string `json:"title"`
 	SeasonNumber  *int   `json:"season_number,omitempty"`
 	EpisodeNumber *int   `json:"episode_number,omitempty"`
+}
+
+type genericWebhookRequest struct {
+	ID        string `json:"id"`
+	TMDBID    int    `json:"tmdb_id,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 // BuildGenericWebhookPayload renders a delivery as canonical Silo JSON. Pure
@@ -70,6 +79,14 @@ func BuildGenericWebhookPayload(row DeliveryRow, webhookID string, test bool) ([
 			Title:         row.EpisodeTitle,
 			SeasonNumber:  row.SeasonNumber,
 			EpisodeNumber: row.EpisodeNumber,
+		}
+	}
+	if row.Type == DeliveryTypeRequestFulfilled {
+		flags := parseRequestFulfilledFlags(row.ReasonFlags)
+		body.Request = &genericWebhookRequest{
+			ID:        flags.RequestID,
+			TMDBID:    flags.TMDBID,
+			MediaType: flags.MediaType,
 		}
 	}
 	return json.Marshal(body)

@@ -163,6 +163,85 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 	}
 }
 
+func requestFulfilledTestRow() DeliveryRow {
+	contentID := "movie-123"
+	return DeliveryRow{
+		Delivery: Delivery{
+			ID:          "01REQUEST",
+			ProfileID:   "profile-1",
+			SeriesID:    &contentID,
+			Type:        DeliveryTypeRequestFulfilled,
+			ReasonFlags: []byte(`{"request_id":"01REQ","tmdb_id":438631,"media_type":"movie"}`),
+			CreatedAt:   time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
+		},
+		SeriesTitle: "Dune",
+	}
+}
+
+func TestBuildDiscordWebhookPayloadRequestFulfilled(t *testing.T) {
+	payload, err := BuildDiscordWebhookPayload(requestFulfilledTestRow(), false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	var body struct {
+		Embeds []struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Fields      []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"fields"`
+		} `json:"embeds"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not valid JSON: %v", err)
+	}
+	if len(body.Embeds) != 1 {
+		t.Fatalf("unexpected body shape: %+v", body)
+	}
+	embed := body.Embeds[0]
+	if embed.Title != "Dune" {
+		t.Fatalf("unexpected title %q", embed.Title)
+	}
+	if embed.Description != "Your media request is now available on Silo" {
+		t.Fatalf("unexpected description %q", embed.Description)
+	}
+	if len(embed.Fields) != 1 || embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" {
+		t.Fatalf("expected a single Type=Movie field, got %+v", embed.Fields)
+	}
+}
+
+func TestGenericWebhookPayloadRequestFulfilled(t *testing.T) {
+	payload, err := BuildGenericWebhookPayload(requestFulfilledTestRow(), "hook-1", false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	var body struct {
+		Type   string `json:"type"`
+		Series *struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"series"`
+		Request *struct {
+			ID        string `json:"id"`
+			TMDBID    int    `json:"tmdb_id"`
+			MediaType string `json:"media_type"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not valid JSON: %v", err)
+	}
+	if body.Type != DeliveryTypeRequestFulfilled {
+		t.Fatalf("unexpected type %q", body.Type)
+	}
+	if body.Request == nil || body.Request.ID != "01REQ" || body.Request.TMDBID != 438631 || body.Request.MediaType != "movie" {
+		t.Fatalf("unexpected request block: %+v", body.Request)
+	}
+	if body.Series == nil || body.Series.ID != "movie-123" || body.Series.Title != "Dune" {
+		t.Fatalf("unexpected series block: %+v", body.Series)
+	}
+}
+
 func TestBuildDiscordWebhookPayloadTestMarker(t *testing.T) {
 	payload, err := BuildDiscordWebhookPayload(webhookTestRow(), true)
 	if err != nil {

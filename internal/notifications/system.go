@@ -55,6 +55,10 @@ type System struct {
 	webhookRetry      *WebhookRetryWorker
 	webPushRepo       *WebPushRepository
 	webPushDispatcher *WebPushDispatcher
+	// dispatcher is the same MultiDispatcher the fanout worker uses; the
+	// operational dispatch path shares it so every delivery reaches every
+	// configured channel the same way.
+	dispatcher Dispatcher
 
 	pool   *pgxpool.Pool
 	stores userstore.UserStoreProvider
@@ -94,7 +98,7 @@ func NewSystem(
 	var sender *webhookSender
 	if cipher != nil {
 		webhookRepo = NewWebhookRepository(pool)
-		sender = newWebhookSender(webhookRepo, deliveries, cipher, settings, hub)
+		sender = newWebhookSender(webhookRepo, deliveries, cipher, settings)
 		webhookService = newWebhookService(webhookRepo, cipher, settings, sender)
 		webhookDispatcher = newWebhookDispatcher(sender)
 		webhookRetry = newWebhookRetryWorker(sender)
@@ -116,7 +120,8 @@ func NewSystem(
 		dispatchers = append(dispatchers, webPushDispatcher)
 	}
 
-	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, NewMultiDispatcher(dispatchers...))
+	multiDispatcher := NewMultiDispatcher(dispatchers...)
+	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, multiDispatcher)
 	if webhookRepo != nil {
 		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
 	}
@@ -144,6 +149,7 @@ func NewSystem(
 		webhookRetry:      webhookRetry,
 		webPushRepo:       webPushRepo,
 		webPushDispatcher: webPushDispatcher,
+		dispatcher:        multiDispatcher,
 		pool:              pool,
 		stores:            stores,
 		users:             users,
@@ -151,7 +157,7 @@ func NewSystem(
 	}
 	wsDispatcher.payload = system.PayloadForRow
 	if sender != nil {
-		sender.payload = system.PayloadForRow
+		sender.operational = system.DispatchOperational
 	}
 	if webPushSenderInst != nil {
 		webPushSenderInst.payload = system.PayloadForRow

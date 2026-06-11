@@ -228,28 +228,6 @@ func (r *DeliveryRepository) GetRowByID(ctx context.Context, id string) (*Delive
 	return &out[0], nil
 }
 
-// InsertOperational inserts a single operational delivery (e.g.
-// webhook.auto_disabled) outside the fanout path. Returns nil when the row
-// deduped away.
-func (r *DeliveryRepository) InsertOperational(ctx context.Context, delivery Delivery) (*InsertedDelivery, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin operational delivery tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	inserted, err := r.BulkInsert(ctx, tx, []Delivery{delivery})
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit operational delivery: %w", err)
-	}
-	if len(inserted) == 0 {
-		return nil, nil
-	}
-	return &inserted[0], nil
-}
-
 // RecentUnread returns the newest unread rows for the websocket snapshot.
 func (r *DeliveryRepository) RecentUnread(ctx context.Context, profileID string, limit int) ([]DeliveryRow, error) {
 	rows, err := r.pool.Query(ctx,

@@ -46,6 +46,7 @@ type WebhookInput struct {
 	NotifyWatchlist        *bool
 	NotifyContinueWatching *bool
 	NotifyNextUp           *bool
+	NotifyRequests         *bool
 }
 
 func validateWebhookName(name string) (string, error) {
@@ -130,6 +131,7 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 		NotifyWatchlist:        boolOrDefault(input.NotifyWatchlist, true),
 		NotifyContinueWatching: boolOrDefault(input.NotifyContinueWatching, true),
 		NotifyNextUp:           boolOrDefault(input.NotifyNextUp, true),
+		NotifyRequests:         boolOrDefault(input.NotifyRequests, true),
 	}
 	hook.URLCiphertext, err = s.cipher.Encrypt(rawURL, webhookURLAAD(hook.ID))
 	if err != nil {
@@ -214,6 +216,9 @@ func (s *WebhookService) Update(ctx context.Context, profileID, id string, input
 	}
 	if input.NotifyNextUp != nil {
 		hook.NotifyNextUp = *input.NotifyNextUp
+	}
+	if input.NotifyRequests != nil {
+		hook.NotifyRequests = *input.NotifyRequests
 	}
 
 	if err := s.repo.Update(ctx, *hook); err != nil {

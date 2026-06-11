@@ -32,6 +32,26 @@ func TestBuildWebPushPayload(t *testing.T) {
 		}
 	})
 
+	t.Run("request fulfilled deep-links to the matched item", func(t *testing.T) {
+		raw, err := buildWebPushPayload(requestFulfilledTestRow(), "https://cdn.example.com/poster.jpg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload webPushPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Title != "Dune is now available" {
+			t.Fatalf("unexpected title %q", payload.Title)
+		}
+		if payload.URL != "/item/movie-123" {
+			t.Fatalf("unexpected url %q", payload.URL)
+		}
+		if payload.Icon != "https://cdn.example.com/poster.jpg" {
+			t.Fatalf("unexpected icon %q", payload.Icon)
+		}
+	})
+
 	t.Run("webhook auto-disable routes to settings", func(t *testing.T) {
 		row := DeliveryRow{Delivery: Delivery{ID: "01X", Type: DeliveryTypeWebhookAutoDisabled}}
 		raw, err := buildWebPushPayload(row, "")

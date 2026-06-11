@@ -81,6 +81,17 @@ func buildWebPushPayload(row DeliveryRow, posterURL string) ([]byte, error) {
 			payload.URL = "/item/" + *row.EpisodeID
 		}
 		payload.Icon = posterURL
+	case DeliveryTypeRequestFulfilled:
+		if row.SeriesTitle != "" {
+			payload.Title = row.SeriesTitle + " is now available"
+		} else {
+			payload.Title = "Your request is now available"
+		}
+		payload.Body = "Your media request has arrived in the library."
+		if row.SeriesID != nil {
+			payload.URL = "/item/" + *row.SeriesID
+		}
+		payload.Icon = posterURL
 	case DeliveryTypeWebhookAutoDisabled:
 		payload.Title = "A webhook stopped working"
 		payload.Body = "Open notification settings to fix it."

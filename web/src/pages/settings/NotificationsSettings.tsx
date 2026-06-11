@@ -68,7 +68,14 @@ const REASON_FIELDS = [
   { key: "notify_next_up", label: "Next Up" },
 ] as const;
 
-type ReasonKey = (typeof REASON_FIELDS)[number]["key"];
+// Webhooks additionally carry the request.fulfilled toggle; it is not an
+// episode reason, so the profile preferences section keeps REASON_FIELDS.
+const WEBHOOK_NOTIFY_FIELDS = [
+  ...REASON_FIELDS,
+  { key: "notify_requests", label: "Requests" },
+] as const;
+
+type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
 
 function formatRelativeTime(value: string | null): string | null {
   if (!value) {
@@ -307,11 +314,12 @@ function WebhookFormDialog({
   const update = useUpdateNotificationWebhook();
   const [name, setName] = useState(webhook?.name ?? "");
   const [url, setUrl] = useState("");
-  const [reasons, setReasons] = useState<Record<ReasonKey, boolean>>({
+  const [reasons, setReasons] = useState<Record<WebhookNotifyKey, boolean>>({
     notify_favorites: webhook?.notify_favorites ?? true,
     notify_watchlist: webhook?.notify_watchlist ?? true,
     notify_continue_watching: webhook?.notify_continue_watching ?? true,
     notify_next_up: webhook?.notify_next_up ?? true,
+    notify_requests: webhook?.notify_requests ?? true,
   });
   const pending = create.isPending || update.isPending;
   const editing = webhook != null;
@@ -384,11 +392,14 @@ function WebhookFormDialog({
           </div>
           <div className="space-y-2">
             <Label>Send notifications for</Label>
-            {REASON_FIELDS.map((field) => {
+            {WEBHOOK_NOTIFY_FIELDS.map((field) => {
+              // Requests have no per-profile reason toggle; only the master
+              // switch suppresses them.
               const globallyDisabled =
                 globalPrefs != null &&
                 (!globalPrefs.enabled ||
-                  !(globalPrefs[field.key as keyof NotificationPreferences] as boolean));
+                  (field.key !== "notify_requests" &&
+                    !(globalPrefs[field.key as keyof NotificationPreferences] as boolean)));
               return (
                 <div key={field.key} className="flex items-center justify-between gap-3">
                   <div className="text-sm">
@@ -446,7 +457,7 @@ function WebhookCard({
   const failing =
     webhook.last_failure_at != null &&
     (webhook.last_success_at == null || webhook.last_failure_at > webhook.last_success_at);
-  const enabledReasons = REASON_FIELDS.filter(
+  const enabledReasons = WEBHOOK_NOTIFY_FIELDS.filter(
     (field) => webhook[field.key as keyof NotificationWebhook] as boolean,
   ).map((field) => field.label);
 
@@ -468,7 +479,7 @@ function WebhookCard({
       </div>
 
       <div className="text-muted-foreground text-xs">
-        {enabledReasons.length === REASON_FIELDS.length
+        {enabledReasons.length === WEBHOOK_NOTIFY_FIELDS.length
           ? "All reasons"
           : enabledReasons.length > 0
             ? enabledReasons.join(" · ")

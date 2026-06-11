@@ -24,6 +24,7 @@ type webhookResponse struct {
 	NotifyWatchlist        bool       `json:"notify_watchlist"`
 	NotifyContinueWatching bool       `json:"notify_continue_watching"`
 	NotifyNextUp           bool       `json:"notify_next_up"`
+	NotifyRequests         bool       `json:"notify_requests"`
 	ConsecutiveFailures    int        `json:"consecutive_failures"`
 	DisabledReason         *string    `json:"disabled_reason"`
 	LastSuccessAt          *time.Time `json:"last_success_at"`
@@ -45,6 +46,7 @@ func webhookToResponse(hook notifications.Webhook) webhookResponse {
 		NotifyWatchlist:        hook.NotifyWatchlist,
 		NotifyContinueWatching: hook.NotifyContinueWatching,
 		NotifyNextUp:           hook.NotifyNextUp,
+		NotifyRequests:         hook.NotifyRequests,
 		ConsecutiveFailures:    hook.ConsecutiveFailures,
 		DisabledReason:         hook.DisabledReason,
 		LastSuccessAt:          hook.LastSuccessAt,
@@ -63,6 +65,7 @@ type webhookRequest struct {
 	NotifyWatchlist        *bool   `json:"notify_watchlist"`
 	NotifyContinueWatching *bool   `json:"notify_continue_watching"`
 	NotifyNextUp           *bool   `json:"notify_next_up"`
+	NotifyRequests         *bool   `json:"notify_requests"`
 }
 
 func (r webhookRequest) toInput() notifications.WebhookInput {
@@ -75,6 +78,7 @@ func (r webhookRequest) toInput() notifications.WebhookInput {
 		NotifyWatchlist:        r.NotifyWatchlist,
 		NotifyContinueWatching: r.NotifyContinueWatching,
 		NotifyNextUp:           r.NotifyNextUp,
+		NotifyRequests:         r.NotifyRequests,
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/oklog/ulid/v2"
 )
@@ -69,9 +68,10 @@ type webhookSender struct {
 	cipher     *secret.Cipher
 	settings   *Settings
 	client     *http.Client
-	hub        *evt.Hub
-	payload    func(ctx context.Context, row DeliveryRow) DeliveryRowPayload
-	logger     *slog.Logger
+	// operational posts the auto-disable notice through the system's shared
+	// durable dispatch path. Wired by NewSystem after construction.
+	operational func(ctx context.Context, delivery Delivery, opts OperationalDispatch) (*InsertedDelivery, error)
+	logger      *slog.Logger
 }
 
 func newWebhookSender(
@@ -79,14 +79,12 @@ func newWebhookSender(
 	deliveries *DeliveryRepository,
 	cipher *secret.Cipher,
 	settings *Settings,
-	hub *evt.Hub,
 ) *webhookSender {
 	sender := &webhookSender{
 		webhooks:   webhooks,
 		deliveries: deliveries,
 		cipher:     cipher,
 		settings:   settings,
-		hub:        hub,
 		logger:     slog.Default().With("component", "notifications.webhooks"),
 	}
 	sender.client = newWebhookHTTPClient(func() bool {
@@ -267,20 +265,13 @@ func (s *webhookSender) disableWebhook(ctx context.Context, hook *Webhook, resul
 		Type:        DeliveryTypeWebhookAutoDisabled,
 		ReasonFlags: noticeFlags,
 	}
-	inserted, err := s.deliveries.InsertOperational(ctx, notice)
-	if err != nil || inserted == nil {
-		s.logger.Warn("webhook auto-disable notice insert failed", "webhook_id", hook.ID, "error", err)
+	if s.operational == nil {
 		return
 	}
-	notice.ID = inserted.ID
-	notice.CreatedAt = inserted.CreatedAt
-	if s.hub != nil {
-		payload := PayloadForRow(DeliveryRow{Delivery: notice})
-		if s.payload != nil {
-			payload = s.payload(ctx, DeliveryRow{Delivery: notice})
-		}
-		_ = s.hub.PublishJSON(ctx, evt.ChannelNotifications, EventNotificationCreated,
-			payload, evt.PublishOptions{UserID: hook.UserID, ProfileID: hook.ProfileID})
+	// Nil WebhookFilter: the notice must never re-dispatch as a webhook, or a
+	// broken webhook would loop forever.
+	if _, err := s.operational(ctx, notice, OperationalDispatch{}); err != nil {
+		s.logger.Warn("webhook auto-disable notice dispatch failed", "webhook_id", hook.ID, "error", err)
 	}
 }
 

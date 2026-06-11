@@ -46,6 +46,9 @@ function notificationTitle(notification: AppNotification): string {
   if (notification.type === "episode.available") {
     return notification.series_title || "New episode available";
   }
+  if (notification.type === "request.fulfilled") {
+    return notification.series_title || "Request available";
+  }
   // Unknown types render with a generic fallback by design — the type
   // registry is extensible.
   return "Notification";
@@ -57,6 +60,14 @@ function notificationDescription(notification: AppNotification): string {
     return (
       [code, notification.episode_title].filter(Boolean).join(" — ") || "New episode available"
     );
+  }
+  if (notification.type === "request.fulfilled") {
+    const mediaType = notification.reason_flags?.media_type;
+    return mediaType === "movie"
+      ? "Your requested movie is now available"
+      : mediaType === "series"
+        ? "Your requested series is now available"
+        : "Your request is now available";
   }
   return notification.type;
 }

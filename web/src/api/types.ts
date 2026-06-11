@@ -2225,10 +2225,15 @@ export type EventChannel =
   | "notifications";
 
 export interface NotificationReasonFlags {
+  // episode.available reasons
   favorite?: boolean;
   watchlist?: boolean;
   continue_watching?: boolean;
   next_up?: boolean;
+  // request.fulfilled operational payload
+  request_id?: string;
+  tmdb_id?: number;
+  media_type?: string;
 }
 
 export interface AppNotification {
@@ -2292,6 +2297,7 @@ export interface NotificationWebhook {
   notify_watchlist: boolean;
   notify_continue_watching: boolean;
   notify_next_up: boolean;
+  notify_requests: boolean;
   consecutive_failures: number;
   disabled_reason: string | null;
   last_success_at: string | null;
@@ -2311,6 +2317,7 @@ export interface NotificationWebhookInput {
   notify_watchlist?: boolean;
   notify_continue_watching?: boolean;
   notify_next_up?: boolean;
+  notify_requests?: boolean;
 }
 
 export interface NotificationWebhookTestResult {

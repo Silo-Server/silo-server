@@ -66,6 +66,9 @@ func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
 	title = truncateWithEllipsis(title, discordTitleLimit)
 
 	description := "New episode available on Silo"
+	if row.Type == DeliveryTypeRequestFulfilled {
+		description = "Your media request is now available on Silo"
+	}
 	footerText := "Silo"
 	if row.SeriesTitle != "" {
 		footerText = "Silo • " + truncateWithEllipsis(row.SeriesTitle, discordFooterLimit-16)
@@ -81,6 +84,11 @@ func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
 			Value:  truncateWithEllipsis(strings.Join(labels, " & "), discordFieldValueLimit),
 			Inline: true,
 		})
+	}
+	if row.Type == DeliveryTypeRequestFulfilled {
+		if mediaType := requestMediaTypeLabel(row.ReasonFlags); mediaType != "" {
+			fields = append(fields, discordEmbedField{Name: "Type", Value: mediaType, Inline: true})
+		}
 	}
 	if row.SeasonNumber != nil {
 		fields = append(fields, discordEmbedField{
@@ -116,7 +124,15 @@ func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
 }
 
 func discordEmbedTitle(row DeliveryRow) string {
-	if row.Type != DeliveryTypeEpisodeAvailable {
+	switch row.Type {
+	case DeliveryTypeRequestFulfilled:
+		if row.SeriesTitle != "" {
+			return row.SeriesTitle
+		}
+		return "Request fulfilled"
+	case DeliveryTypeEpisodeAvailable:
+		// Falls out of the switch into the episode title assembly below.
+	default:
 		return genericNotificationTitle
 	}
 	series := row.SeriesTitle
@@ -134,6 +150,19 @@ func discordEmbedTitle(row DeliveryRow) string {
 		return fmt.Sprintf("%s — %s", series, code)
 	default:
 		return series
+	}
+}
+
+// requestMediaTypeLabel renders a request.fulfilled delivery's media type as
+// a display label; unknown values render nothing.
+func requestMediaTypeLabel(reasonFlags []byte) string {
+	switch parseRequestFulfilledFlags(reasonFlags).MediaType {
+	case "movie":
+		return "Movie"
+	case "series":
+		return "Series"
+	default:
+		return ""
 	}
 }
 

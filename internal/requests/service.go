@@ -47,6 +47,7 @@ type Service struct {
 	router            RequestRouterProvider
 	entitlements      EntitlementResolver
 	requesterIdentity RequesterIdentityResolver
+	notifier          FulfillmentNotifier
 	Now               func() time.Time
 }
 
@@ -718,6 +719,12 @@ func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileRe
 		case reconcileSkipped:
 			result.Skipped++
 		}
+	}
+	// Presence-gated fulfillment notifications: completion above (and via the
+	// per-target aggregate path) only marks status; the notification fires
+	// once the media is confirmed present in the catalog.
+	if s.notifier != nil {
+		s.notifyFulfilledPending(ctx)
 	}
 	return result, nil
 }
