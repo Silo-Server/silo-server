@@ -79,21 +79,46 @@ func (s *Service) PublishAnnouncement(ctx context.Context, a *Announcement) erro
 	if err := s.store.InsertAnnouncement(ctx, a); err != nil {
 		return fmt.Errorf("notifications: insert announcement: %w", err)
 	}
+	profilesByUser, err := s.store.ProfileIDsForUsers(ctx, userIDs)
+	if err != nil {
+		return fmt.Errorf("notifications: profiles for audience: %w", err)
+	}
+	// Fan out one row per profile so each profile reads/dismisses the
+	// announcement independently (mirrors content/request notifications). The
+	// profile-scoped dedup_ref keeps the unique (user_id, type, dedup_ref) index
+	// satisfied across a single account's profiles.
 	for _, uid := range userIDs {
-		in := CreateInput{
-			UserID:    uid,
-			Category:  CategoryAnnouncement,
-			Type:      "announcement",
-			Title:     a.Title,
-			Body:      a.Body,
-			DedupRef:  fmt.Sprintf("announcement-%d", a.ID),
-			ExpiresAt: a.ExpiresAt,
+		profiles := profilesByUser[uid]
+		if len(profiles) == 0 {
+			// No profiles on this account (unexpected): fall back to a single
+			// account-wide row so the user still receives it.
+			s.fanOutAnnouncement(ctx, a, uid, "", fmt.Sprintf("announcement-%d", a.ID))
+			continue
 		}
-		if err := s.Create(ctx, in); err != nil {
-			slog.WarnContext(ctx, "notifications: announcement fan-out failed", "user_id", uid, "error", err)
+		for _, pid := range profiles {
+			s.fanOutAnnouncement(ctx, a, uid, pid, fmt.Sprintf("announcement-%d-%s", a.ID, pid))
 		}
 	}
 	return nil
+}
+
+// fanOutAnnouncement creates one announcement notification for a single
+// (user, profile) pair, logging rather than failing the publish on error.
+func (s *Service) fanOutAnnouncement(ctx context.Context, a *Announcement, userID int, profileID, dedupRef string) {
+	in := CreateInput{
+		UserID:    userID,
+		ProfileID: profileID,
+		Category:  CategoryAnnouncement,
+		Type:      "announcement",
+		Title:     a.Title,
+		Body:      a.Body,
+		DedupRef:  dedupRef,
+		ExpiresAt: a.ExpiresAt,
+	}
+	if err := s.Create(ctx, in); err != nil {
+		slog.WarnContext(ctx, "notifications: announcement fan-out failed",
+			"user_id", userID, "profile_id", profileID, "error", err)
+	}
 }
 
 func (s *Service) resolveAudience(ctx context.Context, a Audience) ([]int, error) {
@@ -126,7 +151,7 @@ func (s *Service) DeleteAnnouncement(ctx context.Context, id int64) error {
 	if err := s.store.DeleteAnnouncement(ctx, id); err != nil {
 		return fmt.Errorf("notifications: delete announcement: %w", err)
 	}
-	return s.store.DismissUnreadByTypeAndRef(ctx, "announcement", fmt.Sprintf("announcement-%d", id))
+	return s.store.DismissAnnouncementNotifications(ctx, id)
 }
 
 // List returns non-dismissed notifications for the given filter.

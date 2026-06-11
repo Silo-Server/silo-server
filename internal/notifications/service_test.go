@@ -15,14 +15,14 @@ type fakeStore struct {
 	inserted  []*Notification
 	nextID    int64
 	prefs     map[int]map[Category]bool
-	admins    []int
-	libUsers  map[int][]int
-	allUsers  []int
-	insertErr error // when non-nil, Insert returns this error
+	admins         []int
+	libUsers       map[int][]int
+	allUsers       []int
+	profilesByUser map[int][]string // user id → profile ids (announcement fan-out)
+	insertErr      error            // when non-nil, Insert returns this error
 
-	// recorded args for dismiss calls
-	dismissTyp      string
-	dismissDedupRef string
+	// recorded arg for the delete-cleanup call
+	dismissedAnnouncementID int64
 
 	// digest support
 	digestSubs  []int
@@ -66,10 +66,19 @@ func (f *fakeStore) InsertAnnouncement(_ context.Context, a *Announcement) error
 	return nil
 }
 
-func (f *fakeStore) DismissUnreadByTypeAndRef(_ context.Context, typ, dedupRef string) error {
-	f.dismissTyp = typ
-	f.dismissDedupRef = dedupRef
+func (f *fakeStore) DismissAnnouncementNotifications(_ context.Context, announcementID int64) error {
+	f.dismissedAnnouncementID = announcementID
 	return nil
+}
+
+func (f *fakeStore) ProfileIDsForUsers(_ context.Context, userIDs []int) (map[int][]string, error) {
+	out := make(map[int][]string, len(userIDs))
+	for _, uid := range userIDs {
+		if profiles, ok := f.profilesByUser[uid]; ok {
+			out[uid] = profiles
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) DeleteAnnouncement(context.Context, int64) error { return nil }
@@ -291,8 +300,15 @@ func TestCreate_DigestOptInInserts(t *testing.T) {
 	}
 }
 
-func TestPublishAnnouncement_FanOutAll(t *testing.T) {
-	store := &fakeStore{allUsers: []int{1, 2, 3}}
+func TestPublishAnnouncement_FanOutAllPerProfile(t *testing.T) {
+	store := &fakeStore{
+		allUsers: []int{1, 2, 3},
+		profilesByUser: map[int][]string{
+			1: {"p1a", "p1b"},
+			2: {"p2"},
+			3: {"p3a", "p3b", "p3c"},
+		},
+	}
 	svc, _ := newTestService(store)
 
 	err := svc.PublishAnnouncement(context.Background(), &Announcement{
@@ -302,16 +318,43 @@ func TestPublishAnnouncement_FanOutAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublishAnnouncement returned error: %v", err)
 	}
-	if len(store.inserted) != 3 {
-		t.Fatalf("expected 3 inserted rows, got %d", len(store.inserted))
+	// One row per profile across all three accounts (2 + 1 + 3).
+	if len(store.inserted) != 6 {
+		t.Fatalf("expected 6 inserted rows (one per profile), got %d", len(store.inserted))
 	}
 	for _, n := range store.inserted {
 		if n.Category != CategoryAnnouncement {
 			t.Errorf("expected category %q, got %q", CategoryAnnouncement, n.Category)
 		}
-		if n.DedupRef != "announcement-1" {
-			t.Errorf("expected dedup_ref %q, got %q", "announcement-1", n.DedupRef)
+		if n.ProfileID == nil || *n.ProfileID == "" {
+			t.Fatalf("expected a per-profile row, got nil/empty profile_id")
 		}
+		want := "announcement-1-" + *n.ProfileID
+		if n.DedupRef != want {
+			t.Errorf("expected dedup_ref %q, got %q", want, n.DedupRef)
+		}
+	}
+}
+
+func TestPublishAnnouncement_FallbackNoProfiles(t *testing.T) {
+	// A user with no profiles still receives a single account-wide row.
+	store := &fakeStore{allUsers: []int{1}}
+	svc, _ := newTestService(store)
+
+	err := svc.PublishAnnouncement(context.Background(), &Announcement{
+		Title:    "Maintenance",
+		Audience: Audience{All: true},
+	})
+	if err != nil {
+		t.Fatalf("PublishAnnouncement returned error: %v", err)
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("expected 1 account-wide row, got %d", len(store.inserted))
+	}
+	if n := store.inserted[0]; n.ProfileID != nil {
+		t.Errorf("expected nil profile_id (account-wide), got %q", *n.ProfileID)
+	} else if n.DedupRef != "announcement-1" {
+		t.Errorf("expected dedup_ref %q, got %q", "announcement-1", n.DedupRef)
 	}
 }
 
@@ -417,11 +460,8 @@ func TestDeleteAnnouncement_DismissesUnread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteAnnouncement returned error: %v", err)
 	}
-	if store.dismissTyp != "announcement" {
-		t.Errorf("expected dismissTyp %q, got %q", "announcement", store.dismissTyp)
-	}
-	if store.dismissDedupRef != "announcement-42" {
-		t.Errorf("expected dismissDedupRef %q, got %q", "announcement-42", store.dismissDedupRef)
+	if store.dismissedAnnouncementID != 42 {
+		t.Errorf("expected dismissedAnnouncementID 42, got %d", store.dismissedAnnouncementID)
 	}
 }
 

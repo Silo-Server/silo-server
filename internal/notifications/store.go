@@ -31,11 +31,12 @@ type Store interface {
 	InsertAnnouncement(ctx context.Context, a *Announcement) error
 	ListAnnouncements(ctx context.Context) ([]*Announcement, error)
 	DeleteAnnouncement(ctx context.Context, id int64) error
-	DismissUnreadByTypeAndRef(ctx context.Context, typ, dedupRef string) error
+	DismissAnnouncementNotifications(ctx context.Context, announcementID int64) error
 	PurgeOld(ctx context.Context, dismissedBefore, allBefore time.Time) (int64, error)
 	AdminUserIDs(ctx context.Context) ([]int, error)
 	UserIDsWithLibraryAccess(ctx context.Context, libraryID int) ([]int, error)
 	AllEnabledUserIDs(ctx context.Context) ([]int, error)
+	ProfileIDsForUsers(ctx context.Context, userIDs []int) (map[int][]string, error)
 	DigestSubscribers(ctx context.Context) ([]int, error)
 	AddedItemCountForUser(ctx context.Context, userID int, since time.Time) (int, error)
 }
@@ -365,21 +366,53 @@ func (r *Repository) DeleteAnnouncement(ctx context.Context, id int64) error {
 	return nil
 }
 
-// DismissUnreadByTypeAndRef bulk-dismisses unread notifications whose type and
-// dedup_ref match exactly.
-func (r *Repository) DismissUnreadByTypeAndRef(ctx context.Context, typ, dedupRef string) error {
+// DismissAnnouncementNotifications dismisses the unread notification copies of
+// an announcement across every profile it was fanned out to. It matches both
+// the per-profile dedup refs (announcement-<id>-<profileID>) and the legacy
+// account-wide ref (announcement-<id>). The trailing "-" in the LIKE prevents
+// announcement-5 from matching announcement-50.
+func (r *Repository) DismissAnnouncementNotifications(ctx context.Context, announcementID int64) error {
+	ref := fmt.Sprintf("announcement-%d", announcementID)
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET dismissed_at = now()
-		WHERE type = $1
-		  AND dedup_ref = $2
+		WHERE type = 'announcement'
+		  AND (dedup_ref = $1 OR dedup_ref LIKE $1 || '-%')
 		  AND read_at IS NULL
 		  AND dismissed_at IS NULL
-	`, typ, dedupRef)
+	`, ref)
 	if err != nil {
-		return fmt.Errorf("dismiss notifications by type and ref: %w", err)
+		return fmt.Errorf("dismiss announcement notifications: %w", err)
 	}
 	return nil
+}
+
+// ProfileIDsForUsers returns the profile ids for each given user id, keyed by
+// user id. Users that have no profiles are absent from the returned map.
+func (r *Repository) ProfileIDsForUsers(ctx context.Context, userIDs []int) (map[int][]string, error) {
+	out := make(map[int][]string, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT user_id, id FROM user_profiles WHERE user_id = ANY($1) ORDER BY user_id, created_at`,
+		userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("profiles for users: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int
+		var pid string
+		if err := rows.Scan(&uid, &pid); err != nil {
+			return nil, fmt.Errorf("scan profile: %w", err)
+		}
+		out[uid] = append(out[uid], pid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate profiles: %w", err)
+	}
+	return out, nil
 }
 
 // PurgeOld deletes old notifications according to three criteria and returns

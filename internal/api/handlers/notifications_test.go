@@ -138,8 +138,11 @@ func (f *fakeNotificationsStore) DeleteAnnouncement(_ context.Context, id int64)
 	return notifications.ErrNotFound
 }
 
-func (f *fakeNotificationsStore) DismissUnreadByTypeAndRef(_ context.Context, _, _ string) error {
+func (f *fakeNotificationsStore) DismissAnnouncementNotifications(_ context.Context, _ int64) error {
 	return nil
+}
+func (f *fakeNotificationsStore) ProfileIDsForUsers(_ context.Context, _ []int) (map[int][]string, error) {
+	return nil, nil
 }
 func (f *fakeNotificationsStore) PurgeOld(_ context.Context, _, _ time.Time) (int64, error) {
 	return 0, nil
