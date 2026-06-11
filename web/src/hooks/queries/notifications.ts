@@ -137,7 +137,10 @@ export function useCreateAnnouncement() {
       }),
     onSuccess: () => {
       toast.success("Announcement published");
-      queryClient.invalidateQueries({ queryKey: notificationKeys.announcements() });
+      // Invalidate the whole notifications tree (admin list + the user-facing
+      // notification lists, unread count, and bars) so the publisher's own
+      // session shows the announcement without a manual reload.
+      queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to publish announcement");
@@ -154,7 +157,8 @@ export function useDeleteAnnouncement() {
       }),
     onSuccess: () => {
       toast.success("Announcement deleted");
-      queryClient.invalidateQueries({ queryKey: notificationKeys.announcements() });
+      // Clear it from the admin list and every user-facing notification view.
+      queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to delete announcement");
