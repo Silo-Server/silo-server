@@ -12,6 +12,7 @@ import {
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -172,7 +173,10 @@ function RequireProfile({ children }: { children: ReactNode }) {
 }
 
 function RequireAdmin({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
+  // Resolve the active profile the same way the admin chrome does
+  // (AppSidebar/Layout) so the route gate and the visible UI never disagree.
+  const { profile } = useCurrentProfile();
   if (user?.role !== "admin") return <Navigate to="/" replace />;
   // The admin area stays reachable with no profile selected (post-login) or
   // through the household primary profile; other profiles on the admin
@@ -182,7 +186,8 @@ function RequireAdmin({ children }: { children: ReactNode }) {
 }
 
 function RequirePrimaryOrAdmin({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
+  const { profile } = useCurrentProfile();
   if (user?.role !== "admin" && profile?.is_primary !== true) {
     return <Navigate to="/" replace />;
   }
