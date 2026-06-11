@@ -14,6 +14,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
+import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitlePositionStyle } from "../hooks/useSubtitlePositionStyle";
 import { useNextEpisode } from "../hooks/useNextEpisode";
@@ -1613,6 +1614,16 @@ export function VideoPlayer({
     subtitleDelayMs,
   );
 
+  // -- PGS (Blu-ray bitmap) subtitle rendering via libpgs --
+  const { isActive: isPGSActive } = usePGSSubtitles(
+    videoRef,
+    subtitleUrls,
+    activeSubtitleIndex,
+    isDetached,
+    transcodeQuality.streamOriginSeconds,
+    subtitleDelayMs,
+  );
+
   // -- Auto-select subtitle track based on mode --
   useEffect(() => {
     if (subtitleSelectionWasManualRef.current) {
@@ -2274,8 +2285,8 @@ export function VideoPlayer({
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
 
-      {/* Subtitle overlay — suppressed when JASSUB is rendering ASS subtitles */}
-      {!isDetached && !isASSActive && activeCueTexts.length > 0 && (
+      {/* Subtitle overlay — suppressed when JASSUB (ASS) or libpgs (PGS) is rendering */}
+      {!isDetached && !isASSActive && !isPGSActive && activeCueTexts.length > 0 && (
         <div
           className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center gap-1"
           style={{ ...containerStyle, ...subtitlePositionStyle }}

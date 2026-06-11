@@ -1,4 +1,5 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
+import { isBitmapCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
 
@@ -7,6 +8,17 @@ const SOURCE_PRIORITY: Record<string, number> = {
   downloaded: 1,
   embedded: 2,
 };
+
+/**
+ * Auto-select priority for a track: lower is better. Within the same source
+ * tier, text tracks beat bitmap (PGS) tracks — bitmap is heavier to render
+ * and can't be styled — while a bitmap track still wins when it's the only
+ * match for the language.
+ */
+function trackPriority(track: PlayerSubtitleInfo): number {
+  const source = SOURCE_PRIORITY[track.source ?? "embedded"] ?? 2;
+  return source * 2 + (isBitmapCodec(track.codec) ? 1 : 0);
+}
 
 const ISO639_TO_3: Record<string, string> = {
   en: "eng",
@@ -127,7 +139,7 @@ export function findPreferredSubtitleIndex(tracks: PlayerSubtitleInfo[], languag
 
   for (const track of tracks) {
     if (!track || !sameLanguage(track, language)) continue;
-    const priority = SOURCE_PRIORITY[track.source ?? "embedded"] ?? 2;
+    const priority = trackPriority(track);
     if (priority < bestPriority) {
       bestPriority = priority;
       bestIdx = track.index;
@@ -148,7 +160,7 @@ function findPreferredSubtitleIndexWithSignature(
 
   for (const track of tracks) {
     if (!track || !sameLanguage(track, language)) continue;
-    const priority = SOURCE_PRIORITY[track.source ?? "embedded"] ?? 2;
+    const priority = trackPriority(track);
     const score = scoreSignatureFallback(track, signature);
     if (
       bestTrack === null ||

@@ -1444,10 +1444,14 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 
 // subtitleURLExt returns the URL file extension for a subtitle codec.
 // ASS/SSA tracks get ".ass" so the frontend can request raw ASS data for
-// client-side rendering (JASSUB); all other text formats get ".vtt".
+// client-side rendering (JASSUB); PGS tracks get ".sup" for client-side
+// bitmap rendering (libpgs); all other text formats get ".vtt".
 func subtitleURLExt(codec string) string {
-	if playback.IsASS(codec) {
+	switch {
+	case playback.IsASS(codec):
 		return ".ass"
+	case playback.IsPGS(codec):
+		return ".sup"
 	}
 	return ".vtt"
 }
@@ -1474,7 +1478,10 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 
 	embeddedOffset := len(file.ExternalSubtitles)
 	for i, track := range file.SubtitleTracks {
-		if playback.NeedsBurnIn(track.Codec) {
+		// PGS bitmap tracks are deliverable as .sup streams for
+		// client-side rendering; DVD/DVB bitmap tracks still have no
+		// non-burn-in delivery path, so they stay hidden.
+		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) {
 			continue
 		}
 

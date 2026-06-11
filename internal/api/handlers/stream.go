@@ -219,7 +219,10 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// Check embedded tracks.
 	if embeddedIndex < len(file.SubtitleTracks) {
 		track := file.SubtitleTracks[embeddedIndex]
-		if playback.NeedsBurnIn(track.Codec) {
+		// PGS is the one bitmap codec we can deliver without burn-in: the
+		// track is copied losslessly into a .sup stream and rendered
+		// client-side. DVD/DVB bitmap subs still require burn-in.
+		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"Bitmap subtitle tracks cannot be extracted as text")
 			return
@@ -417,12 +420,24 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
-	if playback.IsASS(track.Codec) {
+	switch {
+	case playback.IsASS(track.Codec):
 		outFormat = "ass"
+	case playback.IsPGS(track.Codec):
+		outFormat = "sup"
 	}
 
-	seek := subtitleSeekPosition(r, session)
-	duration := subtitleWindowDuration(r)
+	// ASS and PGS are fetched exactly once and consumed whole by their
+	// client-side renderers (JASSUB / libpgs), so they must never be
+	// windowed. Note subtitleSeekPosition falls back to the session's
+	// last reported position even without a ?position= query — relying
+	// on StreamExtractSubtitle's codec guard alone would still log a
+	// misleading nonzero seek here.
+	var seek, duration float64
+	if outFormat == "vtt" {
+		seek = subtitleSeekPosition(r, session)
+		duration = subtitleWindowDuration(r)
+	}
 	slog.InfoContext(r.Context(), "subtitle stream requested",
 		"file_id", file.ID,
 		"embedded_index", embeddedIndex,
@@ -433,9 +448,12 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		"duration_seconds", duration,
 	)
 
-	if outFormat == "ass" {
+	switch outFormat {
+	case "ass":
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	} else {
+	case "sup":
+		w.Header().Set("Content-Type", "application/octet-stream")
+	default:
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")

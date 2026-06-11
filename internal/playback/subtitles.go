@@ -26,6 +26,20 @@ func NeedsBurnIn(subtitleCodec string) bool {
 	return bitmapSubtitleCodecs[strings.ToLower(subtitleCodec)]
 }
 
+// pgsSubtitleCodecs lists PGS (Blu-ray bitmap) subtitle codec names. Unlike
+// other bitmap codecs, PGS can be extracted losslessly to a .sup elementary
+// stream and rendered client-side (libpgs in the web player), so burn-in is
+// not the only delivery option. DVD/DVB bitmap subs still require burn-in.
+var pgsSubtitleCodecs = map[string]bool{
+	"pgs":               true,
+	"hdmv_pgs_subtitle": true,
+}
+
+// IsPGS reports whether the given subtitle codec is PGS format.
+func IsPGS(codec string) bool {
+	return pgsSubtitleCodecs[strings.ToLower(codec)]
+}
+
 // assSubtitleCodecs lists subtitle codecs that are ASS/SSA format and support
 // rich styling (fonts, colors, positioning, karaoke, typesetting).
 var assSubtitleCodecs = map[string]bool{

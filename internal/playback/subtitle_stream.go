@@ -62,55 +62,12 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		return errors.New("StreamExtractSubtitle: InputPath is required")
 	}
 
-	outCodec, outFormat := streamExtractOutput(opts.SourceCodec)
-
 	bin := opts.FFmpegPath
 	if bin == "" {
 		bin = "ffmpeg"
 	}
 
-	args := []string{
-		"-hide_banner", "-nostats", "-loglevel", "error",
-	}
-
-	// Input seek (before -i) is the fast variant: ffmpeg jumps near the
-	// requested position before demuxing. ASS can't use it because the
-	// output needs the [Script Info] header which only sits at offset 0.
-	seekApplied := opts.SeekSeconds > 0 && !IsASS(opts.SourceCodec)
-	if seekApplied {
-		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
-	}
-
-	// Duration limit must be an *input* option (placed before -i) so it
-	// caps how much of the file we read. Placed as an output option, -t
-	// combined with -copyts stops output when PTS reaches the given
-	// value — which with a non-zero seek is already in the past, so
-	// ffmpeg would emit only the WEBVTT header and zero cues.
-	if opts.DurationSeconds > 0 {
-		args = append(args, "-t", strconv.FormatFloat(opts.DurationSeconds, 'f', 3, 64))
-	}
-
-	args = append(args,
-		"-i", opts.InputPath,
-		"-map", fmt.Sprintf("0:s:%d", opts.TrackIndex),
-		"-c:s", outCodec,
-	)
-
-	// When we seek the input, preserve the absolute source timestamps
-	// in the output. Without this ffmpeg rebases cues to start at 0,
-	// which makes every cue play `opts.SeekSeconds` earlier than it
-	// should — the symptom is subtitles that look "out of sync" with
-	// the video the player is showing at the same media time.
-	if seekApplied {
-		args = append(args, "-copyts", "-avoid_negative_ts", "disabled")
-	}
-
-	args = append(args,
-		"-f", outFormat,
-		"pipe:1",
-	)
-
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, streamExtractArgs(opts)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
@@ -152,6 +109,59 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	return nil
 }
 
+// streamExtractArgs builds the ffmpeg argument list for a streaming
+// subtitle extract.
+func streamExtractArgs(opts StreamExtractOpts) []string {
+	outCodec, outFormat := streamExtractOutput(opts.SourceCodec)
+
+	args := []string{
+		"-hide_banner", "-nostats", "-loglevel", "error",
+	}
+
+	// Input seek (before -i) is the fast variant: ffmpeg jumps near the
+	// requested position before demuxing. ASS can't use it because the
+	// output needs the [Script Info] header which only sits at offset 0.
+	// PGS can't either: the client (libpgs) fetches the .sup stream
+	// exactly once and consumes it whole, so the output must cover the
+	// complete track from offset 0 with original timestamps — windowing
+	// would silently drop every cue outside the window. The same logic
+	// excludes both from the -t duration cap below.
+	windowable := !IsASS(opts.SourceCodec) && !IsPGS(opts.SourceCodec)
+	seekApplied := opts.SeekSeconds > 0 && windowable
+	if seekApplied {
+		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
+	}
+
+	// Duration limit must be an *input* option (placed before -i) so it
+	// caps how much of the file we read. Placed as an output option, -t
+	// combined with -copyts stops output when PTS reaches the given
+	// value — which with a non-zero seek is already in the past, so
+	// ffmpeg would emit only the WEBVTT header and zero cues.
+	if opts.DurationSeconds > 0 && windowable {
+		args = append(args, "-t", strconv.FormatFloat(opts.DurationSeconds, 'f', 3, 64))
+	}
+
+	args = append(args,
+		"-i", opts.InputPath,
+		"-map", fmt.Sprintf("0:s:%d", opts.TrackIndex),
+		"-c:s", outCodec,
+	)
+
+	// When we seek the input, preserve the absolute source timestamps
+	// in the output. Without this ffmpeg rebases cues to start at 0,
+	// which makes every cue play `opts.SeekSeconds` earlier than it
+	// should — the symptom is subtitles that look "out of sync" with
+	// the video the player is showing at the same media time.
+	if seekApplied {
+		args = append(args, "-copyts", "-avoid_negative_ts", "disabled")
+	}
+
+	return append(args,
+		"-f", outFormat,
+		"pipe:1",
+	)
+}
+
 // copyAndFlush streams from src to dst in 32KB chunks, calling Flush on
 // dst after each successful write when dst implements http.Flusher.
 func copyAndFlush(dst io.Writer, src io.Reader) error {
@@ -177,11 +187,16 @@ func copyAndFlush(dst io.Writer, src io.Reader) error {
 }
 
 // streamExtractOutput picks the ffmpeg output codec and muxer format for
-// a given source codec. ASS/SSA is copied so styling survives; everything
-// else is transmuxed to WebVTT for direct `<track>` consumption.
+// a given source codec. ASS/SSA is copied so styling survives; PGS is
+// copied into a .sup elementary stream for client-side bitmap rendering
+// (libpgs); everything else is transmuxed to WebVTT for direct `<track>`
+// consumption.
 func streamExtractOutput(codec string) (outCodec, outFormat string) {
-	if IsASS(codec) {
+	switch {
+	case IsASS(codec):
 		return "copy", "ass"
+	case IsPGS(codec):
+		return "copy", "sup"
 	}
 	return "webvtt", "webvtt"
 }

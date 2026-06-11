@@ -223,6 +223,31 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// When the URL requests SUP format (e.g. /subtitles/{token}/2.sup),
+	// stream the PGS track as a raw .sup elementary stream for client-side
+	// bitmap rendering (libpgs). Unlike the buffered text paths below, this
+	// streams ffmpeg output directly: the track can be large and the client
+	// renders progressively as data arrives.
+	if requestedFormat == "sup" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		err := playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
+			InputPath:   claims.MediaPath,
+			TrackIndex:  trackIndex,
+			SourceCodec: "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
+			FFmpegPath:  cfg.Playback.FFmpegPath,
+			Writer:      w,
+		})
+		if err != nil && r.Context().Err() == nil {
+			// Headers already committed — log and let the client see a
+			// truncated response.
+			slog.Error("stream subtitle (sup)", "error", err, "track", trackIndex,
+				"path", claims.MediaPath, "playback_session_id", claims.SessionID)
+		}
+		return
+	}
+
 	// When the URL requests ASS format (e.g. /subtitles/{token}/2.ass),
 	// extract as raw ASS to preserve styling for client-side rendering.
 	if requestedFormat == "ass" {
