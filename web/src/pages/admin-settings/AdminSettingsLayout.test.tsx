@@ -41,6 +41,7 @@ describe("AdminSettingsLayout", () => {
       "Downloads",
       "Watch Providers",
       "Integrations",
+      "Notifications",
       "Compatibility Proxies",
       "Rate Limiting",
       "Database",
