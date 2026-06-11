@@ -992,6 +992,10 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	}
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone search results.
+	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	// Bind ExactTitleHint exactly once. The same arg index is referenced by
