@@ -589,6 +589,9 @@ export interface MangaChapter {
   title: string;
   chapter_index?: number;
   volume?: string;
+  // True when the current viewer has finished this chapter (ebook read state).
+  // Seeds the row's mark-read toggle on load.
+  read?: boolean;
 }
 
 // MangaDetailExtension mirrors the host catalog.MangaDetailExtension struct;

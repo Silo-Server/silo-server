@@ -122,6 +122,28 @@ describe("MangaContent", () => {
     expect(screen.getAllByRole("button", { name: /Download chapter/i })).toHaveLength(2);
   });
 
+  it("seeds the mark-read toggle from the chapter's server read state", () => {
+    render(
+      <MemoryRouter>
+        <MangaContent
+          item={mangaItem([
+            { content_id: "v01", title: "Railgun v01", chapter_index: 1, volume: "v01", read: true },
+            { content_id: "v02", title: "Railgun v02", chapter_index: 2, volume: "v02", read: false },
+          ])}
+          libraryId={7}
+        />
+      </MemoryRouter>,
+    );
+
+    // The read chapter's toggle starts pressed (label flips to "unread"); the
+    // unread chapter's toggle stays in the default "read" prompt state.
+    const readToggle = screen.getByRole("button", { name: /Mark chapter unread/i });
+    expect(readToggle).toHaveAttribute("aria-pressed", "true");
+
+    const unreadToggle = screen.getByRole("button", { name: /Mark chapter read/i });
+    expect(unreadToggle).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("nests a multi-chapter volume as a section header with chapter rows", () => {
     render(
       <MemoryRouter>

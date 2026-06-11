@@ -73,13 +73,14 @@ function MangaRow({
     libraryId,
   })}&backTo=${encodeURIComponent(backTo)}`;
 
-  // The row payload has no read state, so we track the user's mark-read action
-  // locally and fire the shared watched mutation against this chapter's id.
+  // Seed the toggle from the chapter's server-resolved read state, then track
+  // the user's mark-read action locally and fire the shared watched mutation
+  // against this chapter's id.
   const watchedMutation = useWatchedStateMutation({
     content_id: chapter.content_id,
     type: "ebook",
   });
-  const [markedRead, setMarkedRead] = useState(false);
+  const [markedRead, setMarkedRead] = useState(chapter.read ?? false);
 
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [downloadVersions, setDownloadVersions] = useState<FileVersion[] | null>(null);
