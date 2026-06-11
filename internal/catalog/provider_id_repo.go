@@ -243,6 +243,42 @@ func (r *ProviderIDRepository) GetByContentID(ctx context.Context, contentID str
 	return scanProviderIDs(rows)
 }
 
+// GetByContentIDs fetches provider IDs for many content items in one query,
+// grouped by content_id (IDs with no rows are absent). Replaces per-item
+// GetByContentID loops on the enrichment claim path.
+func (r *ProviderIDRepository) GetByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaItemProviderID, error) {
+	out := make(map[string][]*models.MediaItemProviderID, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+providerIDColumns+`
+		FROM media_item_provider_ids
+		WHERE content_id = ANY($1)
+		ORDER BY content_id,
+			CASE LOWER(provider)
+				WHEN 'tmdb' THEN 0
+				WHEN 'tvdb' THEN 1
+				WHEN 'imdb' THEN 2
+				ELSE 3
+			END,
+			LOWER(provider) ASC,
+			provider_id ASC
+	`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("getting provider IDs by content_ids: %w", err)
+	}
+	defer rows.Close()
+	all, err := scanProviderIDs(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, pid := range all {
+		out[pid.ContentID] = append(out[pid.ContentID], pid)
+	}
+	return out, nil
+}
+
 // ReplaceByContentID replaces all durable provider IDs for a content item.
 func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error {
 	if strings.TrimSpace(contentID) == "" {
