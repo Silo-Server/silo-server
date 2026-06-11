@@ -20,6 +20,7 @@ import type {
   NotificationWebhook,
   NotificationWebhookInput,
   NotificationWebhookTestResult,
+  WebPushSubscriptionView,
 } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -140,6 +141,37 @@ function PreferencesSection() {
   );
 }
 
+/**
+ * Delivery health for one push subscription, derived the same way as webhook
+ * health: a failure newer than the last success means the device is failing.
+ */
+function webPushHealth(sub: WebPushSubscriptionView): { text: string; failing: boolean } {
+  if (!sub.enabled) {
+    return { text: "Disabled after repeated delivery failures", failing: true };
+  }
+  const failing =
+    sub.last_failure_at != null &&
+    (sub.last_success_at == null || sub.last_failure_at > sub.last_success_at);
+  if (failing) {
+    const when = formatRelativeTime(sub.last_failure_at);
+    return { text: when ? `Last delivery failed ${when}` : "Last delivery failed", failing: true };
+  }
+  if (sub.last_success_at) {
+    const when = formatRelativeTime(sub.last_success_at);
+    return { text: when ? `Last delivered ${when}` : "Delivering", failing: false };
+  }
+  return { text: "No deliveries yet", failing: false };
+}
+
+function webPushSubtitle(sub: WebPushSubscriptionView): { text: string; failing: boolean } {
+  const health = webPushHealth(sub);
+  const added = formatRelativeTime(sub.created_at);
+  return {
+    text: added ? `Added ${added} · ${health.text}` : health.text,
+    failing: health.failing,
+  };
+}
+
 function WebPushSection() {
   const queryClient = useQueryClient();
   const capability = useNotificationCapability();
@@ -155,8 +187,12 @@ function WebPushSection() {
     void currentWebPushSubscription().then((sub) => setThisEndpoint(sub?.endpoint ?? null));
   }, []);
 
-  const subscribedHere =
-    thisEndpoint != null && (subscriptions ?? []).some((sub) => sub.endpoint === thisEndpoint);
+  const thisSub =
+    thisEndpoint != null
+      ? (subscriptions ?? []).find((sub) => sub.endpoint === thisEndpoint)
+      : undefined;
+  const subscribedHere = thisSub != null;
+  const thisHealth = thisSub ? webPushHealth(thisSub) : null;
 
   const enable = async () => {
     if (!webPushCap?.public_key) {
@@ -216,8 +252,18 @@ function WebPushSection() {
             <BellRing className="text-muted-foreground h-4 w-4" />
             <div>
               <div className="text-sm font-medium">This browser</div>
-              <div className="text-muted-foreground text-xs">
-                {subscribedHere ? "Receiving notifications" : "Not receiving notifications"}
+              <div
+                className={
+                  thisHealth?.failing ? "text-xs text-amber-500" : "text-muted-foreground text-xs"
+                }
+              >
+                {!subscribedHere
+                  ? "Not receiving notifications"
+                  : thisHealth?.failing
+                    ? thisHealth.text
+                    : thisHealth && thisHealth.text !== "No deliveries yet"
+                      ? `Receiving notifications · ${thisHealth.text}`
+                      : "Receiving notifications"}
               </div>
             </div>
           </div>
@@ -235,25 +281,41 @@ function WebPushSection() {
 
       {otherSubscriptions.length > 0 && (
         <div className="space-y-2">
-          <div className="text-muted-foreground text-xs font-medium">Other devices</div>
-          {otherSubscriptions.map((sub) => (
-            <div key={sub.id} className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <MonitorSmartphone className="text-muted-foreground h-4 w-4 shrink-0" />
-                <span className="truncate text-sm">{sub.device_name || "Unknown device"}</span>
+          <div className="text-muted-foreground text-xs font-medium">
+            Other devices ({otherSubscriptions.length})
+          </div>
+          {otherSubscriptions.map((sub) => {
+            const subtitle = webPushSubtitle(sub);
+            return (
+              <div key={sub.id} className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <MonitorSmartphone className="text-muted-foreground h-4 w-4 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm">{sub.device_name || "Unknown device"}</div>
+                    <div
+                      className={
+                        subtitle.failing
+                          ? "truncate text-xs text-amber-500"
+                          : "text-muted-foreground truncate text-xs"
+                      }
+                    >
+                      {subtitle.text}
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive"
+                  disabled={removeSubscription.isPending}
+                  onClick={() => removeSubscription.mutate(sub.id)}
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Remove
+                </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive"
-                disabled={removeSubscription.isPending}
-                onClick={() => removeSubscription.mutate(sub.id)}
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                Remove
-              </Button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </SettingsGroup>
