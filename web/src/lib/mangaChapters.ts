@@ -49,6 +49,15 @@ function byChapterIndex(a: MangaChapter, b: MangaChapter): number {
 //      with two or more it becomes a `section` (chapters ordered by index).
 //   4. All top-level entries order by a representative index: a unit/loose by
 //      its own index (nulls last), a section by its minimum chapter index.
+// volumeBucketKey canonicalizes a volume token for grouping: "v01", "01" and
+// "1" all describe Volume 1 and must land in one bucket (mixed release naming
+// otherwise yields duplicate "Volume 1" entries). Non-numeric tokens group by
+// their trimmed text.
+function volumeBucketKey(token: string): string {
+  const match = token.match(VOLUME_TOKEN_PATTERN);
+  return match ? String(Number(match[1])) : token;
+}
+
 export function buildMangaList(chapters: MangaChapter[]): MangaListEntry[] {
   const volumeBuckets = new Map<string, MangaChapter[]>();
   const loose: MangaChapter[] = [];
@@ -56,11 +65,12 @@ export function buildMangaList(chapters: MangaChapter[]): MangaListEntry[] {
   for (const chapter of chapters) {
     const token = chapter.volume?.trim();
     if (token) {
-      const bucket = volumeBuckets.get(token);
+      const key = volumeBucketKey(token);
+      const bucket = volumeBuckets.get(key);
       if (bucket) {
         bucket.push(chapter);
       } else {
-        volumeBuckets.set(token, [chapter]);
+        volumeBuckets.set(key, [chapter]);
       }
     } else {
       loose.push(chapter);

@@ -128,3 +128,30 @@ describe("prettifyVolumeLabel", () => {
     expect(prettifyVolumeLabel("Omnibus")).toBe("Omnibus");
   });
 });
+
+describe("volume token normalization", () => {
+  it("buckets 'v01' and '1' into the same volume", () => {
+    const entries = buildMangaList([
+      { content_id: "a", title: "Series v01", chapter_index: 1, volume: "v01" },
+      { content_id: "b", title: "Series 1 extras", chapter_index: 2, volume: "1" },
+    ]);
+
+    // One section labeled "Volume 1" holding both chapters — not two
+    // duplicate top-level entries.
+    expect(entries).toHaveLength(1);
+    const [entry] = entries;
+    expect(entry.kind).toBe("section");
+    if (entry.kind === "section") {
+      expect(entry.label).toBe("Volume 1");
+      expect(entry.chapters.map((c) => c.content_id)).toEqual(["a", "b"]);
+    }
+  });
+
+  it("keeps non-numeric tokens distinct", () => {
+    const entries = buildMangaList([
+      { content_id: "a", title: "Omnibus", chapter_index: 1, volume: "Omnibus" },
+      { content_id: "b", title: "v2", chapter_index: 2, volume: "v2" },
+    ]);
+    expect(entries).toHaveLength(2);
+  });
+});

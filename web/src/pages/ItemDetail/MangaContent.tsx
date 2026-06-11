@@ -382,7 +382,9 @@ export default function MangaContent({
           </div>
         )}
         {entries.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No chapters found.</p>
+          <p className="text-muted-foreground text-sm">
+            No chapters found. Chapters appear here once the library scan completes.
+          </p>
         ) : (
           <ul className="divide-border/40 border-border/40 divide-y overflow-hidden rounded-lg border">
             {entries.map((entry) =>
