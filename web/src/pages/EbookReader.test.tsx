@@ -320,6 +320,23 @@ describe("EbookReader", () => {
     expect(container.innerHTML).toContain('href="/item/ebook-1?libraryId=12"');
   });
 
+  it("sends the reader back action to an explicit backTo target (manga series)", async () => {
+    const backTo = encodeURIComponent("/item/manga-series-1?libraryId=7");
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={[`/reader/ebook/ebook-1?libraryId=7&backTo=${backTo}`]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // backTo wins over the default chapter-detail target, breaking the loop.
+    expect(container.innerHTML).toContain('href="/item/manga-series-1?libraryId=7"');
+    expect(container.innerHTML).not.toContain('href="/item/ebook-1?libraryId=7"');
+  });
+
   it("switches between multiple ebook files from the reader header", async () => {
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem({
