@@ -18,6 +18,11 @@ func TestMangaChaptersQueryOrdering(t *testing.T) {
 		"JOIN media_items m ON m.content_id = mc.chapter_content_id",
 		"WHERE mc.series_content_id = $1",
 		"ORDER BY mc.chapter_index NULLS LAST, m.sort_title",
+		// Per-chapter read state: viewer-scoped LEFT JOIN onto ebook progress.
+		"LEFT JOIN ebook_reader_progress erp",
+		"AND erp.user_id = $2",
+		"AND erp.profile_id = $3",
+		"AS read",
 	} {
 		if !strings.Contains(q, want) {
 			t.Fatalf("manga chapters query missing %q\nquery: %s", want, q)
@@ -29,12 +34,12 @@ func TestMangaChaptersQueryOrdering(t *testing.T) {
 // payload must always carry an array) and tolerates an unconfigured pool.
 func TestFetchMangaChaptersNilSafe(t *testing.T) {
 	var s *DetailService
-	if got := s.fetchMangaChapters(context.Background(), "series-1"); got == nil {
+	if got := s.fetchMangaChapters(context.Background(), "series-1", AccessFilter{}); got == nil {
 		t.Fatal("nil receiver should yield an empty slice, not nil")
 	}
 
 	s = &DetailService{}
-	got := s.fetchMangaChapters(context.Background(), "series-1")
+	got := s.fetchMangaChapters(context.Background(), "series-1", AccessFilter{})
 	if got == nil {
 		t.Fatal("unconfigured pool should yield an empty slice, not nil")
 	}
