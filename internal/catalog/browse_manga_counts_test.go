@@ -30,3 +30,23 @@ func TestMangaCountColumns(t *testing.T) {
 		t.Fatalf("expected 2 manga count subqueries, got %d\ngot: %s", got, cols)
 	}
 }
+
+// The library page browses through the catalog query preview path
+// (previewQuerySource -> QueryExecutor.PreviewPage), not BrowseRepository, so
+// the preview-page SELECT must carry the same manga count columns or manga
+// cards in /library/{id}?tab=library render without the Vols/Ch chip.
+func TestPreviewPageSQLIncludesMangaCounts(t *testing.T) {
+	sql, _, err := (&QueryExecutor{}).buildPreviewPageSQL(
+		QueryDefinition{MediaScope: "manga"},
+		AccessFilter{},
+		20, 0, true,
+	)
+	if err != nil {
+		t.Fatalf("buildPreviewPageSQL error: %v", err)
+	}
+	for _, want := range []string{"AS manga_chapter_count", "AS manga_volume_count"} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("preview-page SQL missing %q\ngot: %s", want, sql)
+		}
+	}
+}
