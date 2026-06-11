@@ -6,6 +6,7 @@ import { getProfileMenuSide, isSidebarExpanded } from "@/components/AppSidebar.l
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
@@ -167,10 +168,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
   const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
-  // Admin navigation is shown only when the admin account is acting through
-  // its primary (household parent) profile — other profiles on the account
-  // are treated as regular viewers.
-  const showAdminNav = user?.role === "admin" && profile?.is_primary === true;
+  const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
   const { togglePin } = useToggleSidebarPin();

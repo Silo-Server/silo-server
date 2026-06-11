@@ -237,6 +237,33 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker)
 
+	// Resolves whether a declared profile belongs to the user and is the
+	// household primary profile. Nil (no user store) disables the
+	// acting-admin profile policy, degrading admin routes to the plain
+	// role check.
+	var checkPrimaryProfile apimw.PrimaryProfileChecker
+	if deps.UserStoreProvider != nil {
+		userStores := deps.UserStoreProvider
+		checkPrimaryProfile = func(ctx context.Context, userID int, profileID string) (bool, bool, error) {
+			store, err := userStores.ForUser(ctx, userID)
+			if err != nil {
+				return false, false, err
+			}
+			profile, err := store.GetProfile(ctx, profileID)
+			if err != nil {
+				return false, false, err
+			}
+			if profile == nil {
+				return false, false, nil
+			}
+			return profile.IsPrimary, true, nil
+		}
+	}
+
+	// Admin authorization for routes: admin role, exercised through the
+	// account's primary household profile (see apimw.RequireActingAdmin).
+	requireActingAdmin := apimw.RequireActingAdmin(checkPrimaryProfile)
+
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
 	// if config is absent (tests, minimal fixtures); JSON omits empties.
@@ -310,6 +337,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			permissionMiddleware = apimw.NewPermissionMiddleware(
 				userRepo,
 				apimw.NewPGMetadataTargetLibraryResolver(deps.DB),
+				checkPrimaryProfile,
 			)
 		}
 	}
@@ -1335,7 +1363,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Use(authMiddleware.RequireAuth)
 					r.Get("/theme/catalog", themeHandler.HandleCatalog)
 					r.Get("/theme/download", themeHandler.HandleDownload)
-					r.With(apimw.RequireAdmin).Post("/theme/catalog/refresh", themeHandler.HandleCatalogRefresh)
+					r.With(requireActingAdmin).Post("/theme/catalog/refresh", themeHandler.HandleCatalogRefresh)
 				})
 			}
 		}
@@ -1515,7 +1543,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Library management routes (admin-only).
 				if libraryHandler != nil {
 					r.Group(func(r chi.Router) {
-						r.Use(apimw.RequireAdmin)
+						r.Use(requireActingAdmin)
 
 						r.Route("/libraries", func(r chi.Router) {
 							r.Get("/", libraryHandler.HandleListLibraries)
@@ -2027,7 +2055,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Admin routes.
 				if adminHandler != nil {
 					r.Route("/admin", func(r chi.Router) {
-						metadataItemAccess := apimw.RequireAdmin
+						metadataItemAccess := requireActingAdmin
 						if permissionMiddleware != nil {
 							metadataItemAccess = permissionMiddleware.RequireMetadataCurationForItem
 						}
@@ -2054,7 +2082,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 
 						r.Group(func(r chi.Router) {
-							r.Use(apimw.RequireAdmin)
+							r.Use(requireActingAdmin)
 
 							r.Get("/users", adminHandler.HandleListUsers)
 							r.Post("/users", adminHandler.HandleCreateUser)

@@ -20,6 +20,7 @@ import {
 } from "@/components/realtimeEventsContext";
 import { invalidateCatalogState } from "@/components/realtimeCatalogInvalidation";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
@@ -350,6 +351,7 @@ function handleUserStateEvent(
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { user, profile } = useAuth();
+  const actingAdmin = useIsActingAdmin();
   const pageActivity = usePageActivity();
   const location = useLocation();
   const authenticatedUserID = user?.id ?? null;
@@ -703,7 +705,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        if (user?.role !== "admin" || connectionState !== "live") {
+        // Must match the gate on AdminRealtimeEventChannels: when the jobs
+        // channel isn't subscribed (not acting as admin), waiting on a live
+        // event would hang until the fallback timeout — poll instead.
+        if (!actingAdmin || connectionState !== "live") {
           return pollAdminJobUntilTerminal(jobId);
         }
 
@@ -755,7 +760,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         };
       },
     }),
-    [connectionState, queryClient, user?.role],
+    [connectionState, queryClient, actingAdmin],
   );
 
   return <RealtimeEventsContext.Provider value={value}>{children}</RealtimeEventsContext.Provider>;

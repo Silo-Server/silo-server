@@ -22,17 +22,25 @@ type MetadataTargetLibraryResolver interface {
 }
 
 type PermissionMiddleware struct {
-	users     PermissionUserLoader
-	libraries MetadataTargetLibraryResolver
+	users        PermissionUserLoader
+	libraries    MetadataTargetLibraryResolver
+	checkPrimary PrimaryProfileChecker // nil disables the acting-admin profile policy
 }
 
-func NewPermissionMiddleware(users PermissionUserLoader, libraries MetadataTargetLibraryResolver) *PermissionMiddleware {
-	return &PermissionMiddleware{users: users, libraries: libraries}
+func NewPermissionMiddleware(
+	users PermissionUserLoader,
+	libraries MetadataTargetLibraryResolver,
+	checkPrimary PrimaryProfileChecker,
+) *PermissionMiddleware {
+	return &PermissionMiddleware{users: users, libraries: libraries, checkPrimary: checkPrimary}
 }
 
-// RequireMetadataCurationForItem allows admins or users with metadata_curation
-// permission when every library containing the target item is within the user's
-// assigned libraries. A nil user library list means unrestricted library access.
+// RequireMetadataCurationForItem allows acting admins or users with
+// metadata_curation permission when every library containing the target item
+// is within the user's assigned libraries. A nil user library list means
+// unrestricted library access. An admin declaring a non-primary profile does
+// not get the admin bypass (see actingAdminAllowed) and is held to the same
+// explicitly-assigned-permission bar as everyone else.
 func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
@@ -41,8 +49,19 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			return
 		}
 		if claims.Role == "admin" {
-			next.ServeHTTP(w, r)
-			return
+			var checkPrimary PrimaryProfileChecker
+			if m != nil {
+				checkPrimary = m.checkPrimary
+			}
+			actingAdmin, err := actingAdminAllowed(r, claims.UserID, checkPrimary)
+			if err != nil {
+				writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
+				return
+			}
+			if actingAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 		if m == nil || m.users == nil || m.libraries == nil {
 			writeForbidden(w, "Metadata curation permission required")
@@ -60,7 +79,14 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			writeForbidden(w, "Metadata curation permission required")
 			return
 		}
-		if !auth.HasEffectivePermission(user, auth.PermissionMetadataCuration) {
+		hasPermission := auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
+		if claims.Role == "admin" {
+			// Reached only when the admin bypass was refused (non-primary
+			// profile declared): the role-derived grant does not apply, only
+			// an explicitly assigned permission does.
+			hasPermission = auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
+		}
+		if !hasPermission {
 			writeForbidden(w, "Metadata curation permission required")
 			return
 		}

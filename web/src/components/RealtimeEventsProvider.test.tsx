@@ -23,12 +23,13 @@ const mockState = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({
+vi.mock("@/hooks/useAuth", () => {
+  const useAuth = () => ({
     user: mockState.user,
     profile: null,
-  }),
-}));
+  });
+  return { useAuth, useOptionalAuth: useAuth };
+});
 
 vi.mock("@/hooks/usePageActivity", () => ({
   usePageActivity: () => mockState.pageActivity,

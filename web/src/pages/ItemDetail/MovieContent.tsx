@@ -8,6 +8,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { useSetRating, useDeleteRating } from "@/hooks/queries/ratings";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
@@ -49,10 +50,10 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const navigate = useNavigate();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  const canCurateMetadata = canCurateMetadataForUser(user);
-  const canEditMarkers = canEditMarkersForUser(user);
+  const isAdmin = useIsActingAdmin();
   const { profile: currentProfile } = useCurrentProfile();
+  const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
+  const canEditMarkers = canEditMarkersForUser(user, currentProfile);
 
   const isFavorite = item.user_state?.is_favorite ?? false;
   const inWatchlist = item.user_state?.in_watchlist ?? false;

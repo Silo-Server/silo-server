@@ -5,6 +5,7 @@ import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/p
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import {
   useRedetectEpisodeIntro,
@@ -53,10 +54,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  const canCurateMetadata = canCurateMetadataForUser(user);
-  const canEditMarkers = canEditMarkersForUser(user);
+  const isAdmin = useIsActingAdmin();
   const { profile: currentProfile } = useCurrentProfile();
+  const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
+  const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const [editOpen, setEditOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);

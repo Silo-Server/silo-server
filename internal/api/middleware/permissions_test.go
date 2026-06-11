@@ -43,6 +43,7 @@ func runMetadataCurationMiddleware(user *models.User, libraryIDs []int, role str
 	mw := NewPermissionMiddleware(
 		fakePermissionUserLoader{user: user},
 		fakeTargetLibraryResolver{ids: libraryIDs},
+		nil,
 	)
 	next := mw.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -50,6 +51,52 @@ func runMetadataCurationMiddleware(user *models.User, libraryIDs []int, role str
 	rec := httptest.NewRecorder()
 	next.ServeHTTP(rec, requestWithItemID(role))
 	return rec.Code
+}
+
+func runMetadataCurationMiddlewareWithProfile(
+	user *models.User,
+	libraryIDs []int,
+	role, profileID string,
+	check PrimaryProfileChecker,
+) int {
+	mw := NewPermissionMiddleware(
+		fakePermissionUserLoader{user: user},
+		fakeTargetLibraryResolver{ids: libraryIDs},
+		check,
+	)
+	next := mw.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := requestWithItemID(role)
+	if profileID != "" {
+		req.Header.Set("X-Profile-Id", profileID)
+	}
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func TestRequireMetadataCurationForItem_AdminOnPrimaryProfileBypasses(t *testing.T) {
+	code := runMetadataCurationMiddlewareWithProfile(nil, nil, "admin", "prof-1", primaryChecker(true, true, nil))
+	if code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
+	}
+}
+
+func TestRequireMetadataCurationForItem_AdminOnNonPrimaryProfileWithoutAssignedPermission(t *testing.T) {
+	admin := &models.User{ID: 7, Role: "admin", Enabled: true, LibraryIDs: nil, Permissions: nil}
+	code := runMetadataCurationMiddlewareWithProfile(admin, []int{1}, "admin", "prof-2", primaryChecker(false, true, nil))
+	if code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", code, http.StatusForbidden)
+	}
+}
+
+func TestRequireMetadataCurationForItem_AdminOnNonPrimaryProfileWithAssignedPermission(t *testing.T) {
+	admin := &models.User{ID: 7, Role: "admin", Enabled: true, LibraryIDs: nil, Permissions: []string{"metadata_curation"}}
+	code := runMetadataCurationMiddlewareWithProfile(admin, []int{1}, "admin", "prof-2", primaryChecker(false, true, nil))
+	if code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", code, http.StatusNoContent)
+	}
 }
 
 func TestRequireMetadataCurationForItem_AllowsAdmin(t *testing.T) {

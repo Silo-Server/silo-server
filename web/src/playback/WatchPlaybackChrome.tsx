@@ -399,7 +399,7 @@ export function WatchPlaybackHost() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
-  const canEditMarkers = canEditMarkersForUser(user);
+  const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const { data: effectivePlaybackSettings = {} } = useEffectiveSettings(currentProfile?.id, [
     AUTO_SKIP_INTRO_KEY,
   ]);

@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: (...args: unknown[]) => mocks.useAuth(...args),
+  useOptionalAuth: (...args: unknown[]) => mocks.useAuth(...args),
+}));
+
+vi.mock("@/hooks/useCurrentProfile", () => ({
+  useCurrentProfile: () => ({ profile: mocks.useAuth()?.profile ?? null }),
 }));
 
 import SettingsLayout from "./SettingsLayout";

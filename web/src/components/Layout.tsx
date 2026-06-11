@@ -4,6 +4,7 @@ import { Menu, Search } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import AppSidebar from "@/components/AppSidebar";
 import ServerActivity from "@/components/ServerActivity";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -27,10 +28,7 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const { user } = useAuth();
   const { profile } = useCurrentProfile();
-  // Admin chrome is shown only when the admin account is acting through its
-  // primary (household parent) profile — other profiles on the account, e.g.
-  // a kid's profile, are treated as regular viewers.
-  const showAdminActivity = user?.role === "admin" && profile?.is_primary === true;
+  const showAdminActivity = useIsActingAdmin();
   const { isBackgroundBarVisible } = useWatchPlaybackController();
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;

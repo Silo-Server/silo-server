@@ -10,6 +10,8 @@ import { useContinueWatching } from "@/hooks/queries/progress";
 import { useSetRating, useDeleteRating } from "@/hooks/queries/ratings";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -35,8 +37,9 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
   const navigate = useNavigate();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  const canCurateMetadata = canCurateMetadataForUser(user);
+  const isAdmin = useIsActingAdmin();
+  const { profile: currentProfile } = useCurrentProfile();
+  const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
 
   const isFavorite = item.user_state?.is_favorite ?? false;
   const inWatchlist = item.user_state?.in_watchlist ?? false;
