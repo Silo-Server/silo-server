@@ -141,9 +141,11 @@ export function useCreateAnnouncement() {
       }),
     onSuccess: () => {
       toast.success("Announcement published");
-      // Invalidate the whole notifications tree (admin list + the user-facing
-      // notification lists, unread count, and bars) so the publisher's own
-      // session shows the announcement without a manual reload.
+      // The admin announcements list lives under a separate ["admin",...] key,
+      // so invalidate it explicitly. Also invalidate the user-facing
+      // notification tree so the publisher's own home bar/inbox/bell/count
+      // refresh without a manual reload.
+      queryClient.invalidateQueries({ queryKey: notificationKeys.announcements() });
       queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     },
     onError: (err) => {
@@ -161,7 +163,9 @@ export function useDeleteAnnouncement() {
       }),
     onSuccess: () => {
       toast.success("Announcement deleted");
-      // Clear it from the admin list and every user-facing notification view.
+      // Clear it from the admin list (separate ["admin",...] key) and every
+      // user-facing notification view.
+      queryClient.invalidateQueries({ queryKey: notificationKeys.announcements() });
       queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     },
     onError: (err) => {
