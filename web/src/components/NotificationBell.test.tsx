@@ -122,6 +122,48 @@ describe("NotificationBell", () => {
       expect(mockDismissMutate).toHaveBeenCalledWith(7);
     });
 
+    it("pins announcements above other notifications", async () => {
+      mockedList.mockReturnValue({
+        data: {
+          pages: [
+            {
+              items: [
+                {
+                  id: 9,
+                  title: "Recent Request",
+                  body: "",
+                  link: null,
+                  read_at: null,
+                  category: "request",
+                },
+                {
+                  id: 2,
+                  title: "Server Notice",
+                  body: "",
+                  link: null,
+                  read_at: null,
+                  category: "announcement",
+                },
+              ],
+              next_cursor: null,
+            },
+          ],
+        },
+      } as unknown as ReturnType<typeof useNotificationsList>);
+
+      const user = userEvent.setup();
+      renderBell();
+
+      await user.click(screen.getByRole("button", { name: "Notifications" }));
+
+      const announcement = screen.getByText("Server Notice");
+      const request = screen.getByText("Recent Request");
+      // The announcement should appear before the request in document order.
+      expect(
+        announcement.compareDocumentPosition(request) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
     it("shows empty state when no items", async () => {
       mockedList.mockReturnValue({
         data: { pages: [{ items: [], next_cursor: null }] },

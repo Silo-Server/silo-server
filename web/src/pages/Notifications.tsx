@@ -73,7 +73,17 @@ export default function Notifications() {
 
   const visibleTabs = TABS.filter((t) => !t.adminOnly || user?.role === "admin");
 
-  const allItems: AppNotification[] = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const loaded: AppNotification[] = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  // Pin announcements to the top of the mixed "All" view so system messages sit
+  // above other notifications. The dedicated "Announcements" tab is unaffected.
+  // A stable partition preserves recency within each group.
+  const allItems: AppNotification[] =
+    activeTab === ""
+      ? [
+          ...loaded.filter((n) => n.category === "announcement"),
+          ...loaded.filter((n) => n.category !== "announcement"),
+        ]
+      : loaded;
 
   const isEmpty = allItems.length === 0;
 

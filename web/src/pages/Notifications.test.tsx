@@ -160,6 +160,27 @@ describe("Notifications page", () => {
     expect(unreadRows.length).toBe(2);
   });
 
+  it("pins announcements to the top of the All view", async () => {
+    mocks.listPages = [
+      {
+        items: [
+          makeNotification(5, { category: "request", title: "Request Title" }),
+          makeNotification(3, { category: "announcement", title: "Announcement Title" }),
+        ],
+      },
+    ];
+
+    const el = await mount(root, container, wrap(<Notifications />));
+
+    const rows = Array.from(el.querySelectorAll("li"));
+    const annIdx = rows.findIndex((r) => r.textContent?.includes("Announcement Title"));
+    const reqIdx = rows.findIndex((r) => r.textContent?.includes("Request Title"));
+    expect(annIdx).toBeGreaterThanOrEqual(0);
+    expect(reqIdx).toBeGreaterThanOrEqual(0);
+    // Announcement is pinned above the request even though it came later in the page.
+    expect(annIdx).toBeLessThan(reqIdx);
+  });
+
   // -------------------------------------------------------------------------
   // Test 2: admin tab hidden for non-admin; shown for admin
   // -------------------------------------------------------------------------

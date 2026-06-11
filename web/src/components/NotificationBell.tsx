@@ -29,7 +29,12 @@ export function NotificationBell() {
   const list = useNotificationsList({});
   const markRead = useMarkRead();
   const dismiss = useDismissNotification();
-  const items = (list.data?.pages ?? []).flatMap((p) => p.items ?? []).slice(0, 10);
+  // Pin announcements above other notifications, then take the latest 10.
+  const loaded = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const items = [
+    ...loaded.filter((n) => n.category === "announcement"),
+    ...loaded.filter((n) => n.category !== "announcement"),
+  ].slice(0, 10);
 
   return (
     <Popover
