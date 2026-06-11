@@ -180,6 +180,9 @@ type MetadataResult struct {
 	LastAirDate  string
 	AirTime      string
 	AirTimezone  string
+	// ShowStatus is the publication/airing status ("Ongoing", "Completed",
+	// "Continuing", "Ended") when the provider reports one.
+	ShowStatus string
 }
 
 // Ratings holds ratings from multiple sources.

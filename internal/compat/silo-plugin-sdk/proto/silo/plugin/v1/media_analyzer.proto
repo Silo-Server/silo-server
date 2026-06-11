@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+
+service MediaAnalyzer {
+  rpc Analyze(AnalyzeMediaRequest) returns (AnalyzeMediaResponse);
+}
+
+message AnalyzeMediaRequest {
+  string media_path = 1;
+  string file_hash = 2;
+  double duration_seconds = 3;
+  google.protobuf.Struct metadata = 4;
+}
+
+message MarkerRange {
+  double start_seconds = 1;
+  double end_seconds = 2;
+}
+
+message AnalyzeMediaResponse {
+  MarkerRange intro = 1;
+  MarkerRange credits = 2;
+  double confidence = 3;
+  google.protobuf.Struct metadata = 4;
+}

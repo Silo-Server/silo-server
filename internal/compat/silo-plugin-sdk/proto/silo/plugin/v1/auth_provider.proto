@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+
+service AuthProvider {
+  // Authenticate handles password-based login. Existing surface.
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+
+  // InitAuthorize starts an OAuth/OIDC authorization-code flow. The plugin
+  // returns the URL to redirect the user agent to, plus opaque provider_state
+  // (e.g., PKCE verifier) the host stores and round-trips on the callback.
+  rpc InitAuthorize(InitAuthorizeRequest) returns (InitAuthorizeResponse);
+
+  // ExchangeCode exchanges the authorization code for tokens, decodes the
+  // user identity, and returns the same shape as Authenticate.
+  rpc ExchangeCode(ExchangeCodeRequest) returns (AuthenticateResponse);
+
+  // RefreshSession optionally refreshes a previously-issued session using
+  // provider-specific refresh state. Plugins that don't support refresh
+  // should return Unimplemented.
+  rpc RefreshSession(RefreshSessionRequest) returns (AuthenticateResponse);
+}
+
+message AuthenticateRequest {
+  string username = 1;
+  string password = 2;
+  google.protobuf.Struct metadata = 3;
+}
+
+message AuthenticateResponse {
+  string external_subject = 1;
+  string display_name = 2;
+  string email = 3;
+  google.protobuf.Struct claims = 4;
+}
+
+message InitAuthorizeRequest {
+  string redirect_uri = 1;
+  string state = 2;
+  bool linking = 3;
+  google.protobuf.Struct metadata = 4;
+}
+
+message InitAuthorizeResponse {
+  string authorize_url = 1;
+  google.protobuf.Struct provider_state = 2;
+}
+
+message ExchangeCodeRequest {
+  string code = 1;
+  string state = 2;
+  string redirect_uri = 3;
+  google.protobuf.Struct provider_state = 4;
+}
+
+message RefreshSessionRequest {
+  string external_subject = 1;
+  google.protobuf.Struct refresh_state = 2;
+}

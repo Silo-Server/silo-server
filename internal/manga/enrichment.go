@@ -659,6 +659,9 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	if result.Year > 0 {
 		upd.Year = &result.Year
 	}
+	if result.ShowStatus != "" {
+		upd.ShowStatus = &result.ShowStatus
+	}
 
 	providerIDs = filterMangaProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {

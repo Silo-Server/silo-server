@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+
+service EventConsumer {
+  rpc HandleEvent(HandleEventRequest) returns (HandleEventResponse);
+}
+
+message HandleEventRequest {
+  string event_name = 1;
+  google.protobuf.Struct payload = 2;
+}
+
+message HandleEventResponse {}

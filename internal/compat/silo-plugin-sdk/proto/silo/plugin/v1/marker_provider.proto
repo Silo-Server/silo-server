@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+
+service MarkerProvider {
+  rpc FetchMarkers(FetchMarkersRequest) returns (FetchMarkersResponse);
+  rpc SubmitMarker(SubmitMarkerRequest) returns (SubmitMarkerResponse);
+  rpc GetMarkerProviderStats(GetMarkerProviderStatsRequest) returns (MarkerProviderStatsResponse);
+}
+
+message MarkerExternalIDs {
+  string tmdb_id = 1;
+  string imdb_id = 2;
+  string tvdb_id = 3;
+  google.protobuf.Struct provider_ids = 4;
+}
+
+message FetchMarkersRequest {
+  string item_type = 1; // "movie" | "episode"
+  MarkerExternalIDs external_ids = 2;
+  int32 season_number = 3;
+  int32 episode_number = 4;
+  double duration_seconds = 5;
+  google.protobuf.Struct metadata = 6;
+}
+
+message MarkerSegment {
+  string segment = 1; // "intro" | "credits" | "recap" | "preview"
+  optional double start_seconds = 2;
+  optional double end_seconds = 3;
+  double confidence = 4;
+  int32 submission_count = 5;
+  string algorithm = 6;
+  google.protobuf.Struct metadata = 7;
+}
+
+message FetchMarkersResponse {
+  repeated MarkerSegment markers = 1;
+  google.protobuf.Struct metadata = 2;
+}
+
+message SubmitMarkerRequest {
+  string item_type = 1; // "movie" | "episode"
+  MarkerExternalIDs external_ids = 2;
+  int32 season_number = 3;
+  int32 episode_number = 4;
+  string segment = 5; // "intro" | "credits" | "recap" | "preview"
+  optional double start_seconds = 6;
+  optional double end_seconds = 7;
+  double duration_seconds = 8;
+  google.protobuf.Struct metadata = 9;
+}
+
+message SubmitMarkerResponse {
+  string submission_id = 1;
+  string status = 2; // "pending" | "accepted" | "rejected"
+  double weight = 3;
+  google.protobuf.Struct metadata = 4;
+}
+
+message GetMarkerProviderStatsRequest {}
+
+message MarkerProviderStatsResponse {
+  int32 total = 1;
+  int32 accepted = 2;
+  int32 pending = 3;
+  int32 rejected = 4;
+  double acceptance_rate = 5;
+  int32 current_streak = 6;
+  int32 best_streak = 7;
+  google.protobuf.Struct metadata = 8;
+}

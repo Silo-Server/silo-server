@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build example plugin
+        run: go build ./examples/hello-scheduled-task
+
+      - name: Build hello-runtime-host example
+        run: go build ./examples/hello-runtime-host

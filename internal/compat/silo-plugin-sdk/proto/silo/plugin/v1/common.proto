@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package silo.plugin.v1;
+
+option go_package = "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1;pluginv1";
+
+import "google/protobuf/struct.proto";
+
+message SupportedPlatform {
+  string os = 1;
+  string arch = 2;
+}
+
+message ConfigSchema {
+  string key = 1;
+  string title = 2;
+  string description = 3;
+  string json_schema = 4;
+  bool required = 5;
+  AdminFormDescriptor admin_form = 6;
+}
+
+enum AdminFormControl {
+  ADMIN_FORM_CONTROL_UNSPECIFIED = 0;
+  ADMIN_FORM_CONTROL_TEXT = 1;
+  ADMIN_FORM_CONTROL_TEXTAREA = 2;
+  ADMIN_FORM_CONTROL_PASSWORD = 3;
+  ADMIN_FORM_CONTROL_NUMBER = 4;
+  ADMIN_FORM_CONTROL_SWITCH = 5;
+  ADMIN_FORM_CONTROL_SELECT = 6;
+  ADMIN_FORM_CONTROL_MULTI_SELECT = 7;  // array-of-values (e.g. tags)
+}
+
+message AdminFormOption {
+  string value = 1;
+  string label = 2;
+  string description = 3;
+}
+
+message AdminFormField {
+  string key = 1;
+  string label = 2;
+  string description = 3;
+  AdminFormControl control = 4;
+  string placeholder = 5;
+  bool required = 6;
+  bool secret = 7;
+  bool multiline = 8;
+  google.protobuf.Value default_value = 9;
+  repeated AdminFormOption options = 10;
+  int32 rows = 11;
+  bool dynamic_options = 12;                  // populate options from ListConfigOptions[key]
+  repeated AdminFormCondition show_when = 13; // conditional visibility
+  AdminFormValidation validation = 14;        // per-field constraints
+  // exclusive_group_field names another config field whose value defines a
+  // group; at most one connection per distinct value of that field may have THIS
+  // field truthy. Empty = no exclusivity.
+  string exclusive_group_field = 15;
+}
+
+// AdminFormCondition: the owning field/section is shown only when, for every
+// listed condition, the named field's stringified value is in `equals`.
+message AdminFormCondition {
+  string field = 1;
+  repeated string equals = 2;
+}
+
+// AdminFormValidation: per-field constraints, enforced client-side and
+// re-checked server-side. has_min/has_max distinguish "unset" from a real 0.
+message AdminFormValidation {
+  bool   has_min = 1;
+  double min = 2;
+  bool   has_max = 3;
+  double max = 4;
+  string pattern = 5;       // RE2
+  int32  min_length = 6;
+  int32  max_length = 7;
+}
+
+// AdminFormSection groups fields (by key) into an ordered, optionally
+// collapsible section with its own visibility.
+message AdminFormSection {
+  string key = 1;
+  string title = 2;
+  string description = 3;
+  bool   collapsible = 4;
+  bool   collapsed_default = 5;
+  repeated string field_keys = 6;
+  repeated AdminFormCondition show_when = 7;
+}
+
+message AdminFormDescriptor {
+  repeated AdminFormField fields = 1;
+  string submit_label = 2;
+  repeated AdminFormSection sections = 3;     // optional; absent -> flat render of `fields`
+}
+
+message ConfigEntry {
+  string key = 1;
+  google.protobuf.Struct value = 2;
+}
+
+message HttpRouteDescriptor {
+  string id = 1;
+  string method = 2;
+  string path = 3;
+  string access = 4;
+  bool navigable = 5;
+  string navigation_label = 6;
+  string navigation_kind = 7;
+  bool static_asset = 8;
+}
+
+message PackagedAsset {
+  string path = 1;
+  string content_type = 2;
+  string integrity = 3;
+}
+
+message CapabilityDescriptor {
+  string type = 1;
+  string id = 2;
+  string display_name = 3;
+  string description = 4;
+  repeated string subscriptions = 5;
+  repeated ConfigSchema config_schema = 6;
+  google.protobuf.Struct metadata = 7;
+
+  // OAuth/OIDC flow modes the plugin supports. Only meaningful for
+  // capabilities of type "auth_provider.v1". Defaults to ["password"]
+  // host-side when absent (backward compat with password-only providers).
+  // Valid values: "password", "oauth2".
+  repeated string auth_modes = 8;
+
+  // Optional URL to a logo for this auth provider, rendered in silo's
+  // login UI as the icon for a "Sign in with X" button. Plugin-served path
+  // (e.g., /api/v1/plugins/<install>/assets/whmcs-logo.svg).
+  string icon_url = 9;
+}
+
+message PluginManifest {
+  string plugin_id = 1;
+  string version = 2;
+  string checksum = 3;
+  string silo_api_version = 4;
+  repeated SupportedPlatform supported_platforms = 5;
+  repeated CapabilityDescriptor capabilities = 6;
+  repeated ConfigSchema global_config_schema = 7;
+  repeated ConfigSchema user_config_schema = 8;
+  repeated HttpRouteDescriptor http_routes = 9;
+  repeated PackagedAsset assets = 10;
+  google.protobuf.Struct metadata = 11;
+  // category groups the plugin in the admin sidebar. The string is parsed
+  // as a slash-delimited path so plugins can declare nested grouping —
+  // e.g. "Books/Audiobooks" lands in Apps → Books → Audiobooks. Plugins
+  // without a category render under "Other". The host does not validate
+  // the value; the sidebar tolerates unknown segments.
+  string category = 12;
+}
+
+service Runtime {
+  rpc GetManifest(GetManifestRequest) returns (GetManifestResponse);
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+  // BindHostBroker is called by the host once at plugin start to tell the
+  // plugin which go-plugin broker stream ID exposes the RuntimeHost service.
+  // After this call returns, the plugin's runtime.Client.Host() begins
+  // returning a non-nil client.
+  rpc BindHostBroker(BindHostBrokerRequest) returns (BindHostBrokerResponse);
+}
+
+message GetManifestRequest {}
+
+message GetManifestResponse {
+  PluginManifest manifest = 1;
+}
+
+message ConfigureRequest {
+  repeated ConfigEntry config = 1;
+}
+
+message ConfigureResponse {}
+
+message BindHostBrokerRequest {
+  uint32 broker_id = 1;
+}
+
+message BindHostBrokerResponse {}
