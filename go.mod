@@ -74,7 +74,7 @@ require (
 )
 
 require (
-	github.com/Silo-Server/silo-plugin-sdk v0.6.0
+	github.com/Silo-Server/silo-plugin-sdk v0.7.0
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.21 // indirect
@@ -106,7 +106,3 @@ require (
 )
 
 replace github.com/zishang520/webtransport-go => ./internal/compat/zishang520-webtransport-go
-
-// Vendored unpublished SDK (adds MetadataItem.status); swap to the published
-// module version before opening the upstream PR.
-replace github.com/Silo-Server/silo-plugin-sdk => ./internal/compat/silo-plugin-sdk
