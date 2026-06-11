@@ -26,6 +26,7 @@ type Materializer struct {
 	matchers  []namedMatcher
 	processed atomic.Int64
 	unsub     func()
+	startOnce sync.Once
 	stopOnce  sync.Once
 }
 
@@ -48,26 +49,28 @@ func (m *Materializer) register(name string, fn matcherFunc) {
 // Processed reports how many envelopes have been fully processed (test hook).
 func (m *Materializer) Processed() int64 { return m.processed.Load() }
 
+// Start subscribes to the hub and begins materializing events. It is
+// single-shot and safe to call concurrently: only the first call subscribes;
+// later calls are no-ops.
 func (m *Materializer) Start(ctx context.Context) error {
-	if m.unsub != nil {
-		return nil // already started; single-shot
-	}
-	ch, unsub := m.hub.Subscribe()
-	m.unsub = unsub
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case env, ok := <-ch:
-				if !ok {
+	m.startOnce.Do(func() {
+		ch, unsub := m.hub.Subscribe()
+		m.unsub = unsub
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
 					return
+				case env, ok := <-ch:
+					if !ok {
+						return
+					}
+					m.handle(ctx, env)
+					m.processed.Add(1)
 				}
-				m.handle(ctx, env)
-				m.processed.Add(1)
 			}
-		}
-	}()
+		}()
+	})
 	return nil
 }
 
