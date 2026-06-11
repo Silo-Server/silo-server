@@ -230,3 +230,37 @@ func contentIDs(items []*models.MediaItem) []string {
 func intPtr(v int) *int {
 	return &v
 }
+
+func TestCollapseContinueWatchingSeriesCandidatesCollapsesMangaChapters(t *testing.T) {
+	t.Parallel()
+
+	seriesID := "manga-7"
+	older := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+	newer := time.Date(2025, 3, 5, 12, 0, 0, 0, time.UTC)
+
+	// Two in-progress chapters (ebook items) of one manga series, plus an
+	// unrelated ebook with no series — mirrors applyMangaChapterSeriesMeta's
+	// output feeding the shared collapse.
+	items := []*models.MediaItem{
+		{ContentID: "ch-12", Type: "ebook", Title: "Series v12"},
+		{ContentID: "ch-09", Type: "ebook", Title: "Series v09"},
+		{ContentID: "book-x", Type: "ebook", Title: "A standalone ebook"},
+	}
+	meta := map[string]SectionItemMeta{
+		"ch-12": {SeriesID: &seriesID, ItemSource: "in_progress", SortTimestamp: newer},
+		"ch-09": {SeriesID: &seriesID, ItemSource: "in_progress", SortTimestamp: older},
+	}
+
+	collapsed := collapseContinueWatchingSeriesCandidates(items, meta)
+
+	gotIDs := contentIDs(collapsed)
+	wantIDs := []string{"ch-12", "book-x"} // most-recent chapter kept; standalone untouched
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("collapsed IDs = %v, want %v", gotIDs, wantIDs)
+	}
+	for i := range wantIDs {
+		if gotIDs[i] != wantIDs[i] {
+			t.Fatalf("collapsed IDs = %v, want %v", gotIDs, wantIDs)
+		}
+	}
+}

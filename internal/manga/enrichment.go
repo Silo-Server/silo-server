@@ -328,11 +328,14 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 		return nil, fmt.Errorf("iterating manga enrichment rows: %w", err)
 	}
 
-	if e.providerIDs != nil {
+	if e.providerIDs != nil && len(items) > 0 {
+		ids := make([]string, len(items))
 		for i := range items {
-			pids, err := e.providerIDs.GetByContentID(ctx, items[i].ContentID)
-			if err == nil {
-				items[i].ProviderIDs = providerIDMapFromRows(pids)
+			ids[i] = items[i].ContentID
+		}
+		if byID, err := e.providerIDs.GetByContentIDs(ctx, ids); err == nil {
+			for i := range items {
+				items[i].ProviderIDs = providerIDMapFromRows(byID[items[i].ContentID])
 			}
 		}
 	}

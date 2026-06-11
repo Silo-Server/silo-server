@@ -397,6 +397,14 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		if err != nil {
 			return SectionWithItems{}, err
 		}
+		// Manga chapters are ebook items linked to a series; collapse multiple
+		// in-progress chapters of the same manga to a single card (keeping the
+		// most recently read), mirroring the episode→series collapse. Resolve
+		// the linkage into itemMeta so the shared collapse can group by series.
+		if len(orderedItems) > 1 {
+			f.applyMangaChapterSeriesMeta(ctx, orderedItems, itemMeta)
+			orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, itemMeta)
+		}
 		return SectionWithItems{
 			ResolvedSection: resolved,
 			Items:           orderedItems,
@@ -3230,4 +3238,31 @@ func (f *Fetcher) FetchMangaChapterSeriesMeta(ctx context.Context, ids []string)
 		meta[chapterID] = SectionItemMeta{SeriesID: &id, SeriesTitle: seriesTitle}
 	}
 	return meta, rows.Err()
+}
+
+// applyMangaChapterSeriesMeta resolves the owning manga series for any chapter
+// (ebook) items in the set and merges SeriesID/SeriesTitle into the existing
+// itemMeta, preserving the progress fields already populated there. Lets the
+// shared series-collapse group multiple in-progress chapters of one manga.
+func (f *Fetcher) applyMangaChapterSeriesMeta(ctx context.Context, items []*models.MediaItem, itemMeta map[string]SectionItemMeta) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil && item.Type == "ebook" && strings.TrimSpace(item.ContentID) != "" {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	seriesMeta, err := f.FetchMangaChapterSeriesMeta(ctx, ids)
+	if err != nil {
+		slog.Warn("continue-reading: manga series linkage lookup failed", "error", err)
+		return
+	}
+	for chapterID, sm := range seriesMeta {
+		m := itemMeta[chapterID]
+		m.SeriesID = sm.SeriesID
+		m.SeriesTitle = sm.SeriesTitle
+		itemMeta[chapterID] = m
+	}
 }
