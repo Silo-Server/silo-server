@@ -112,6 +112,30 @@ describe("useNotificationsLive", () => {
     expect(toastMock).not.toHaveBeenCalled();
   });
 
+  it("refetches active notification lists when an announcement arrives", () => {
+    const qc = setup(0);
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    capturedHandlers.onEvent?.(
+      frame({
+        id: 11,
+        category: "announcement",
+        title: "Maintenance",
+        body: "",
+        profile_id: "p-1",
+      }),
+    );
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refetchType: "active" }));
+  });
+
+  it("only marks lists stale (no refetch) for routine notifications", () => {
+    const qc = setup(0);
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    capturedHandlers.onEvent?.(
+      frame({ id: 12, category: "request", title: "Approved", body: "", profile_id: "p-1" }),
+    );
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ refetchType: "none" }));
+  });
+
   it("seeds unread count from snapshot", () => {
     const qc = setup(1);
     capturedHandlers.onSnapshot?.({

@@ -338,6 +338,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileToken(profileToken ?? null);
     storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(p));
     setProfile(p);
+    // Switching profiles changes the active-profile scope for every
+    // profile-scoped query (notifications, home, watchlist, ...). Drop the
+    // cache so the new profile fetches its own data instead of showing the
+    // previous profile's cached results (mirrors logout's queryClient.clear()).
+    queryClient.clear();
   }, []);
 
   useEffect(() => {

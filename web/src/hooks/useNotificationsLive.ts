@@ -34,9 +34,13 @@ export function useNotificationsLive() {
         queryClient.setQueryData<{ count: number }>(notificationKeys.unreadCount(), (prev) => ({
           count: (prev?.count ?? 0) + 1,
         }));
+        // Announcements are system-wide notices we want surfaced immediately, so
+        // refetch the active notification lists (home bar, inbox, bell) the
+        // moment one arrives. Routine notifications only mark the lists stale to
+        // avoid disrupting a list the user is currently reading.
         void queryClient.invalidateQueries({
           queryKey: [...notificationKeys.all, "list"],
-          refetchType: "none",
+          refetchType: n.category === "announcement" ? "active" : "none",
         });
         if (!isNotificationDropdownOpen()) {
           toast(n.title, { description: n.body || undefined });
