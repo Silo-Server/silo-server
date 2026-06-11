@@ -879,7 +879,7 @@ func filterMangaProviderIDs(providerIDs map[string]string) map[string]string {
 			continue
 		}
 		provider = strings.ToLower(provider)
-		if isMangaASINProvider(provider) {
+		if isMangaASINProvider(provider) || isInternalMangaProvider(provider) {
 			continue
 		}
 		filtered[provider] = providerID
@@ -893,6 +893,16 @@ func filterMangaProviderIDs(providerIDs map[string]string) map[string]string {
 func isMangaASINProvider(provider string) bool {
 	normalized := strings.ReplaceAll(strings.ReplaceAll(provider, "_", ""), "-", "")
 	return normalized == "asin" || normalized == "audibleasin"
+}
+
+// isInternalMangaProvider filters Silo-internal identity providers out of the
+// metadata flow. The scanner stamps every manga series with a manga_series
+// identity row for idempotency; passing it to the plugin made the
+// search-skip-when-already-matched guard treat every item as matched, so
+// unmatched items went straight to a by-ID fetch with no usable ID and were
+// stamped as no-match without a single search.
+func isInternalMangaProvider(provider string) bool {
+	return strings.ReplaceAll(provider, "-", "_") == "manga_series"
 }
 
 func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string {
