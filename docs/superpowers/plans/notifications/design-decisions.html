@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silo notifications — design decisions</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --background: #f4f4f6;
+  --card: #ffffff;
+  --border: #d8d8de;
+  --fg: #1a1a1e;
+  --fg-2: #3a3a42;
+  --muted: #63636b;
+  --chip: #e8e8ec;
+  --green: #22c55e;
+  --purple: #a855f7;
+  --amber: #f59e0b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #141417;
+    --card: #1c1c20;
+    --border: #28282e;
+    --fg: #e8e8ec;
+    --fg-2: #d0d0d6;
+    --muted: #9696a0;
+    --chip: #232328;
+    --green: #81c995;
+    --purple: #c78dbd;
+    --amber: #e8a87c;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--fg);
+  font-family: "Outfit", ui-sans-serif, system-ui, "Helvetica Neue", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+main { max-width: 880px; margin: 0 auto; padding: 52px 28px 48px; }
+h1 { font-size: 24px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+.sub { color: var(--muted); font-size: 14px; margin: 0 0 8px; }
+.sub code { font-size: 12.5px; }
+h2 {
+  font-size: 17px; font-weight: 600; margin: 44px 0 14px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+p { color: var(--fg-2); margin: 0 0 12px; max-width: 72ch; }
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px; background: var(--chip); border-radius: 4px; padding: 1px 5px;
+}
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+table { width: 100%; border-collapse: collapse; margin: 4px 0 0; }
+th { text-align: left; font-size: 13px; font-weight: 600; color: var(--fg); padding: 8px 14px 8px 0; border-bottom: 1px solid var(--border); }
+td { font-size: 13.5px; color: var(--fg-2); padding: 9px 14px 9px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+td:first-child, th:first-child { white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px;
+}
+.card h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 10px; }
+.kv { display: grid; grid-template-columns: 54px 1fr; row-gap: 7px; column-gap: 10px; }
+.kv dt { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0; }
+.kv dd { font-size: 13.5px; color: var(--fg-2); margin: 0; line-height: 1.55; }
+.svgwrap { border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 18px 14px 10px; }
+svg text { font-family: "Outfit", ui-sans-serif, system-ui, sans-serif; }
+.bt { font-size: 13px; font-weight: 600; fill: var(--fg); }
+.bm { font-size: 12.5px; font-weight: 600; fill: var(--fg); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.bs { font-size: 11.5px; fill: var(--muted); }
+.bx { fill: var(--card); stroke: var(--border); }
+ul.docs { padding-left: 20px; margin: 0; color: var(--fg-2); }
+ul.docs li { margin: 4px 0; }
+footer { margin-top: 40px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Silo notifications — design decisions</h1>
+<p class="sub">Episode-availability notifications for a self-hosted, privacy-focused media server, designed to hold up with hundreds of users on one install.</p>
+<p class="sub">Companion to the specs in <code>docs/superpowers/plans/notifications/</code> · drafts amended 2026-06-11</p>
+
+<h2>How a notification flows</h2>
+<p>Ingest records availability, a worker fans out to interested profiles, and a durable inbox row is written before any channel fires. Every channel below the row is a transport, never a source of truth.</p>
+<div class="svgwrap">
+<svg width="100%" viewBox="0 0 760 452" role="img" aria-label="Pipeline from library scan to release events to the fanout worker, into a durable notification_deliveries row, which dispatches to websocket, Apple push, Android push, and webhook channels after commit. The push channels continue through the opt-in Silo push relay, which sees only a device token and opaque IDs, then through APNs or FCM, and the woken device fetches notification details from the user's own server. A dashed path shows custom credentials skipping the relay.">
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+<path d="M2 1L8 5L2 9" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+<rect class="bx" x="20" y="24" width="190" height="52" rx="8"/>
+<text class="bt" x="115" y="45" text-anchor="middle">Scan and ingest</text>
+<text class="bs" x="115" y="63" text-anchor="middle">new episode lands</text>
+<rect class="bx" x="280" y="24" width="190" height="52" rx="8"/>
+<text class="bm" x="375" y="45" text-anchor="middle">release_events</text>
+<text class="bs" x="375" y="63" text-anchor="middle">one row per episode</text>
+<rect class="bx" x="540" y="24" width="190" height="52" rx="8"/>
+<text class="bt" x="635" y="45" text-anchor="middle">Fanout worker</text>
+<text class="bs" x="635" y="63" text-anchor="middle">burst caps + eligibility</text>
+<line x1="214" y1="50" x2="274" y2="50" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<line x1="474" y1="50" x2="534" y2="50" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<path d="M635 76 L635 98 L380 98 L380 114" fill="none" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<rect class="bx" x="250" y="120" width="260" height="52" rx="8"/>
+<text class="bm" x="380" y="141" text-anchor="middle">notification_deliveries</text>
+<text class="bs" x="380" y="159" text-anchor="middle">durable row, dispatched after commit</text>
+<line x1="380" y1="174" x2="97" y2="206" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<line x1="380" y1="174" x2="287" y2="206" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<line x1="380" y1="174" x2="473" y2="206" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<line x1="380" y1="174" x2="663" y2="206" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<rect class="bx" x="10" y="212" width="170" height="52" rx="8" stroke="var(--green)"/>
+<text class="bt" x="95" y="233" text-anchor="middle">Websocket</text>
+<text class="bs" x="95" y="251" text-anchor="middle">full content</text>
+<rect class="bx" x="200" y="212" width="170" height="52" rx="8" stroke="var(--purple)"/>
+<text class="bt" x="285" y="233" text-anchor="middle">Apple push</text>
+<text class="bs" x="285" y="251" text-anchor="middle">opaque wake</text>
+<rect class="bx" x="390" y="212" width="170" height="52" rx="8" stroke="var(--purple)"/>
+<text class="bt" x="475" y="233" text-anchor="middle">Android push</text>
+<text class="bs" x="475" y="251" text-anchor="middle">opaque wake</text>
+<rect class="bx" x="580" y="212" width="170" height="52" rx="8" stroke="var(--amber)"/>
+<text class="bt" x="665" y="233" text-anchor="middle">Webhooks</text>
+<text class="bs" x="665" y="251" text-anchor="middle">your chosen URL</text>
+<line x1="285" y1="268" x2="345" y2="292" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<line x1="475" y1="268" x2="415" y2="292" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<rect class="bx" x="290" y="296" width="180" height="52" rx="8" stroke="var(--purple)"/>
+<text class="bt" x="380" y="317" text-anchor="middle">Silo push relay</text>
+<text class="bs" x="380" y="335" text-anchor="middle">sees token + opaque IDs</text>
+<line x1="380" y1="352" x2="380" y2="380" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<path d="M230 268 L230 410 L284 410" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" marker-end="url(#a)"/>
+<text class="bs" x="222" y="352" text-anchor="end">custom credentials</text>
+<text class="bs" x="222" y="368" text-anchor="end">skip the relay</text>
+<rect class="bx" x="290" y="384" width="180" height="52" rx="8" stroke="var(--purple)"/>
+<text class="bt" x="380" y="405" text-anchor="middle">APNs / FCM</text>
+<text class="bs" x="380" y="423" text-anchor="middle">deliver the generic wake</text>
+<line x1="474" y1="410" x2="536" y2="410" stroke="var(--muted)" stroke-width="1" marker-end="url(#a)"/>
+<rect class="bx" x="540" y="384" width="190" height="52" rx="8" stroke="var(--green)"/>
+<text class="bt" x="635" y="405" text-anchor="middle">Device wakes</text>
+<text class="bs" x="635" y="423" text-anchor="middle">fetches details from home</text>
+</svg>
+<div class="legend" style="padding: 8px 6px 8px;">
+<span><i class="sw" style="background: var(--green);"></i>content stays in Silo</span>
+<span><i class="sw" style="background: var(--purple);"></i>opaque wake only, device fetches from home</span>
+<span><i class="sw" style="background: var(--amber);"></i>full content to a destination the profile chose</span>
+</div>
+</div>
+
+<h2>Trust model</h2>
+<table>
+<thead><tr><th>Channel</th><th>Who sees content</th><th>Why that's acceptable</th></tr></thead>
+<tbody>
+<tr><td><i class="sw" style="background: var(--green); margin-right: 8px;"></i>Inbox + websocket</td><td>Only the user's own server and signed-in clients</td><td>Same auth boundary as the rest of Silo</td></tr>
+<tr><td><i class="sw" style="background: var(--purple); margin-right: 8px;"></i>Apple / Android push</td><td>Nobody — relay and Apple/Google see a device token, timestamps, and opaque IDs</td><td>The device fetches real content from the user's server after waking</td></tr>
+<tr><td><i class="sw" style="background: var(--amber); margin-right: 8px;"></i>Webhooks</td><td>The destination operator (e.g., Discord)</td><td>The profile pasted that URL; consent is explicit</td></tr>
+</tbody>
+</table>
+
+<h2>Foundation</h2>
+<div class="grid">
+<div class="card">
+<h3>Durable inbox is the source of truth</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Every profile on the server</dd>
+<dt>What</dt><dd>One delivery row per event; every channel is just a transport on top</dd>
+<dt>Where</dt><dd>The server's own PostgreSQL</dd>
+<dt>Why</dt><dd>Transports fail — the row survives, so reconnect or refresh always recovers</dd>
+</dl>
+</div>
+<div class="card">
+<h3>Preferences are flat, not a matrix</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Profiles tuning what they hear about</dd>
+<dt>What</dt><dd>Four reason toggles plus a master switch; per-device and per-webhook filters can only narrow further</dd>
+<dt>Where</dt><dd>Hard gate at fanout, extra filters at dispatch</dd>
+<dt>Why</dt><dd>A per-channel by per-reason grid is unexplainable in UI and impossible to debug</dd>
+</dl>
+</div>
+</div>
+
+<h2>Privacy boundaries</h2>
+<div class="grid">
+<div class="card">
+<h3>Opaque push through a hosted relay</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Admins who opt in; official store app builds</dd>
+<dt>What</dt><dd>The relay holds the Apple and Google signing credentials and forwards a device token plus opaque IDs only</dd>
+<dt>Where</dt><dd>Silo-operated service in its own repo, stateless on the request path</dd>
+<dt>Why</dt><dd>Only the publisher's credentials can wake store builds; content never leaves the server — the device fetches details from home after waking</dd>
+</dl>
+</div>
+<div class="card">
+<h3>Custom credentials escape hatch</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Power users and forks shipping their own signed app builds</dd>
+<dt>What</dt><dd><code>custom_apns</code> / <code>custom_fcm</code> send straight to Apple or Google with the exact same minimal payload</dd>
+<dt>Where</dt><dd>Entirely on the user's server</dd>
+<dt>Why</dt><dd>Zero Silo infrastructure in the path, without loosening the privacy contract</dd>
+</dl>
+</div>
+<div class="card">
+<h3>Profiles, not accounts, are the unit</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Households sharing one login across several profiles</dd>
+<dt>What</dt><dd>Preferences, devices, webhooks, inbox rows, and websocket bindings are all profile-keyed</dd>
+<dt>Where</dt><dd>Every table, API route, and event envelope</dd>
+<dt>Why</dt><dd>A kid's profile and a parent's profile must not see each other's activity</dd>
+</dl>
+</div>
+<div class="card">
+<h3>Webhooks carry full content, by choice</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Each profile, up to 10 destinations</dd>
+<dt>What</dt><dd>Discord embeds or HMAC-signed JSON with series and episode details</dd>
+<dt>Where</dt><dd>Direct HTTPS from the server to the URL the profile pasted</dd>
+<dt>Why</dt><dd>Choosing the destination is the consent; HTTPS-only, the SSRF deny list, and no-server-origin rules stay mandatory</dd>
+</dl>
+</div>
+</div>
+
+<h2>Scale and reliability</h2>
+<div class="grid">
+<div class="card">
+<h3>Fanout reads a compact interest index</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Servers with hundreds of users, roughly 1,000 profiles</dd>
+<dt>What</dt><dd><code>profile_series_interest</code> keyed by library and series, updated on favorite, watchlist, and watch transitions</dd>
+<dt>Where</dt><dd>Written at interaction time, read once per release event</dd>
+<dt>Why</dt><dd>Cost scales with profiles interested in one series, not with a million-episode catalog</dd>
+</dl>
+</div>
+<div class="card">
+<h3>Back-catalog imports never flood</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Anyone adding a new library or a full season pack</dd>
+<dt>What</dt><dd>First scans seed availability silently; bulk additions cap at 3 notifications per series per scan</dd>
+<dt>Where</dt><dd>Scanner seeding plus the fanout worker burst cap</dd>
+<dt>Why</dt><dd>One 200-episode import with 300 interested profiles would otherwise mean about 60,000 pushes in a single scan</dd>
+</dl>
+</div>
+<div class="card">
+<h3>Dispatch enqueue is durable (outbox)</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Operators who care what a crash costs</dd>
+<dt>What</dt><dd>Pending push and webhook attempt rows commit in the same transaction as the inbox row</dd>
+<dt>Where</dt><dd>The fanout transaction; recovery workers sweep stale rows</dd>
+<dt>Why</dt><dd>A crash between commit and dispatch delays sends instead of silently losing them</dd>
+</dl>
+</div>
+<div class="card">
+<h3>One delivery per episode, across libraries</h3>
+<dl class="kv">
+<dt>Who</dt><dd>Dual-quality setups like TV plus TV 4K</dd>
+<dt>What</dt><dd>A partial unique index on profile and episode spans libraries; the first event processed wins</dd>
+<dt>Where</dt><dd>The <code>notification_deliveries</code> schema</dd>
+<dt>Why</dt><dd>Media items are catalog-level in Silo, so the same episode landing twice must not notify twice</dd>
+</dl>
+</div>
+</div>
+
+<h2>Source documents</h2>
+<ul class="docs">
+<li><code>00-architecture-overview.md</code> — channel model, fanout pipeline, threat model, relay addressing</li>
+<li><code>01-release-events-and-inbox.md</code> — durable inbox, fanout worker, seeding and burst suppression, sync API</li>
+<li><code>02-apns-relay.md</code> — Apple push: hosted relay and custom APNs</li>
+<li><code>03-fcm-relay.md</code> — Android push: hosted relay and custom FCM</li>
+<li><code>04-outbound-webhooks.md</code> — Discord and generic JSON+HMAC webhooks</li>
+<li><code>README.md</code> — reading order, status, and the 2026-06-11 amendment index</li>
+</ul>
+
+<footer>Generated 2026-06-11 from the amended notification specs. Commands and paths assume the repository root is the cwd.</footer>
+
+</main>
+</body>
+</html>
