@@ -50,14 +50,31 @@ export default function HeroCrewLine({
     .map((c): CrewPerson => ({ name: c.name, personId: c.person_id }))
     .slice(0, 2);
 
+  // Book/manga credits: shown when the item has Author people (video items
+  // never do, so the section simply doesn't render there).
+  const authors = crew
+    .filter((c) => c.job === "Author")
+    .map((c): CrewPerson => ({ name: c.name, personId: c.person_id }))
+    .slice(0, 3);
+
   const hasDirectors = directors.length > 0;
   const hasWriters = writers.length > 0;
+  const hasAuthors = authors.length > 0;
   const hasGenres = genres && genres.length > 0;
 
-  if (!hasDirectors && !hasWriters && !hasGenres) return null;
+  if (!hasDirectors && !hasWriters && !hasAuthors && !hasGenres) return null;
 
   return (
     <div className="text-muted-foreground text-[13px]">
+      {hasAuthors && (
+        <>
+          <span className="text-muted-foreground/60">By </span>
+          <CrewNames people={authors} />
+        </>
+      )}
+      {hasAuthors && (hasDirectors || hasWriters || hasGenres) && (
+        <span className="text-muted-foreground/40 mx-2">&middot;</span>
+      )}
       {hasDirectors && (
         <>
           <span className="text-muted-foreground/60">{jobLabel} </span>

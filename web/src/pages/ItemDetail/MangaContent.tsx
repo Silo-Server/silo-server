@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   Check,
+  ChevronDown,
+  CornerDownRight,
   Download,
   FileText,
   Loader2,
@@ -28,9 +30,16 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { fetchCatalogItemVersions } from "@/hooks/queries/catalogRead";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
-import { buildMangaList, chapterLabel, firstUnreadChapter } from "@/lib/mangaChapters";
+import {
+  buildMangaList,
+  chapterLabel,
+  firstUnreadChapter,
+  flattenMangaList,
+  type MangaListEntry,
+} from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
 import DetailHero from "./DetailHero";
+import HeroCrewLine from "./components/HeroCrewLine";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
 import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
@@ -132,10 +141,27 @@ function MangaRow({
     }
   };
 
+  const progressPct =
+    !markedRead && typeof chapter.progress === "number" && chapter.progress > 0
+      ? Math.max(1, Math.min(99, Math.round(chapter.progress * 100)))
+      : null;
+
   return (
-    <div className="hover:bg-muted/40 flex items-center gap-3 px-4 py-3 transition-colors">
+    <div
+      id={`manga-chapter-${chapter.content_id}`}
+      className="hover:bg-muted/40 flex items-center gap-3 px-4 py-2 transition-colors"
+    >
       <Link to={readerHref} className="flex min-w-0 flex-1 items-center gap-3">
-        <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
+        {chapter.poster_url ? (
+          <img
+            src={chapter.poster_url}
+            alt=""
+            loading="lazy"
+            className="h-12 w-8 flex-shrink-0 rounded object-cover"
+          />
+        ) : (
+          <BookOpen className="text-muted-foreground size-[18px] flex-shrink-0" />
+        )}
         <span
           className={cn(
             "truncate text-[15px] font-medium",
@@ -148,6 +174,17 @@ function MangaRow({
           <span className="text-success flex-shrink-0" title="Read">
             <Check className="size-4" />
             <span className="sr-only">Read</span>
+          </span>
+        )}
+        {progressPct != null && (
+          <span className="flex flex-shrink-0 items-center gap-1.5" title={`${progressPct}% read`}>
+            <span className="bg-muted block h-1 w-16 overflow-hidden rounded-full">
+              <span
+                className="bg-primary block h-full rounded-full"
+                style={{ width: `${progressPct}%` }}
+              />
+            </span>
+            <span className="text-muted-foreground text-[11px] tabular-nums">{progressPct}%</span>
           </span>
         )}
       </Link>
@@ -214,12 +251,22 @@ export default function MangaContent({
   const entries = useMemo(() => buildMangaList(item.manga?.chapters ?? []), [item.manga?.chapters]);
   const year = item.year ? String(item.year) : "";
   const publisher = item.studios?.[0];
+  const chapterRows = item.manga?.chapters ?? [];
+  // Detail-page counts mirror the browse-card chip semantics: distinct volume
+  // tokens, plus loose chapters that carry no volume.
+  const volumeCount = useMemo(
+    () => new Set(chapterRows.map((c) => c.volume?.trim()).filter(Boolean)).size,
+    [chapterRows],
+  );
+  const looseChapterCount = useMemo(
+    () => chapterRows.filter((c) => !c.volume?.trim()).length,
+    [chapterRows],
+  );
 
   // The resume target is the first unfinished chapter in reading order. Any
   // finished chapter before it means the viewer is mid-series ("Continue");
   // a fully read series restarts from the beginning.
-  const chapters = item.manga?.chapters ?? [];
-  const anyRead = chapters.some((chapter) => chapter.read === true);
+  const anyRead = chapterRows.some((chapter) => chapter.read === true);
   const resume = useMemo(() => firstUnreadChapter(entries), [entries]);
   const fallbackStart = entries.length > 0 ? flattenFirst(entries) : null;
   const cta = resume
@@ -247,6 +294,8 @@ export default function MangaContent({
           <MetadataBadges
             year={year || undefined}
             contentRating={item.content_rating || undefined}
+            volumeCount={volumeCount}
+            chapterCount={looseChapterCount}
           />
         }
         scoreRow={
@@ -257,6 +306,7 @@ export default function MangaContent({
           />
         }
         overview={item.overview}
+        crewLine={<HeroCrewLine crew={item.crew ?? []} />}
         genres={item.genres}
         genreHref={(genre) => genreHref(genre, libraryId)}
         actions={
@@ -312,30 +362,37 @@ export default function MangaContent({
         }
       />
 
-      <div className="page-shell space-y-6 py-10">
+      <div className="page-shell space-y-4 py-10">
+        {resume && flattenMangaList(entries).length > 10 && (
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground gap-1.5"
+              onClick={() => {
+                document
+                  .getElementById(`manga-chapter-${resume.chapter.content_id}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
+            >
+              <CornerDownRight className="size-4" />
+              Jump to {resume.label}
+            </Button>
+          </div>
+        )}
         {entries.length === 0 ? (
           <p className="text-muted-foreground text-sm">No chapters found.</p>
         ) : (
           <ul className="divide-border/40 border-border/40 divide-y overflow-hidden rounded-lg border">
             {entries.map((entry) =>
               entry.kind === "section" ? (
-                <li key={`section-${entry.label}`}>
-                  <h2 className="text-muted-foreground bg-muted/30 px-4 py-2 text-sm font-bold tracking-tight uppercase">
-                    {entry.label}
-                  </h2>
-                  <ul className="divide-border/40 divide-y">
-                    {entry.chapters.map((chapter) => (
-                      <li key={chapter.content_id} className="pl-4">
-                        <MangaRow
-                          chapter={chapter}
-                          label={chapterLabel(chapter)}
-                          seriesContentId={item.content_id}
-                          libraryId={libraryId}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </li>
+                <MangaSection
+                  key={`section-${entry.label}`}
+                  entry={entry}
+                  seriesContentId={item.content_id}
+                  libraryId={libraryId}
+                />
               ) : (
                 <li key={entry.chapter.content_id}>
                   <MangaRow
@@ -367,6 +424,61 @@ export default function MangaContent({
         isPending={refreshMetadataMutation.isPending}
       />
     </div>
+  );
+}
+
+// MangaSection renders a multi-chapter volume as a collapsible block with a
+// sticky header. Fully read sections start collapsed so long series open at
+// the unread frontier.
+function MangaSection({
+  entry,
+  seriesContentId,
+  libraryId,
+}: {
+  entry: Extract<MangaListEntry, { kind: "section" }>;
+  seriesContentId: string;
+  libraryId?: number;
+}) {
+  const allRead = entry.chapters.every((chapter) => chapter.read === true);
+  const [open, setOpen] = useState(!allRead);
+
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="bg-background/95 hover:bg-muted/40 sticky top-0 z-10 flex w-full items-center justify-between px-4 py-2 backdrop-blur transition-colors"
+      >
+        <span className="text-muted-foreground text-sm font-bold tracking-tight uppercase">
+          {entry.label}
+        </span>
+        <span className="text-muted-foreground flex items-center gap-2 text-xs">
+          {allRead && (
+            <span className="text-success flex items-center" title="All chapters read">
+              <Check className="size-3.5" />
+              <span className="sr-only">All chapters read</span>
+            </span>
+          )}
+          {entry.chapters.length} {entry.chapters.length === 1 ? "chapter" : "chapters"}
+          <ChevronDown className={cn("size-4 transition-transform", !open && "-rotate-90")} />
+        </span>
+      </button>
+      {open && (
+        <ul className="divide-border/40 divide-y">
+          {entry.chapters.map((chapter) => (
+            <li key={chapter.content_id} className="pl-4">
+              <MangaRow
+                chapter={chapter}
+                label={chapterLabel(chapter)}
+                seriesContentId={seriesContentId}
+                libraryId={libraryId}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

@@ -261,30 +261,27 @@ export default function DetailHero({
                 </div>
               )}
 
-              {/* Crew line replaces genres when provided */}
-              {crewLine ? (
-                <div className="mt-3">{crewLine}</div>
-              ) : (
-                genres &&
-                genres.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {genres.map((genre) =>
-                      genreHref ? (
-                        <a
-                          key={genre}
-                          href={genreHref(genre)}
-                          className="metadata-badge hover:bg-foreground/10 transition-colors"
-                        >
-                          {genre}
-                        </a>
-                      ) : (
-                        <span key={genre} className="metadata-badge">
-                          {genre}
-                        </span>
-                      ),
-                    )}
-                  </div>
-                )
+              {/* Crew line and genre chips render independently: pages that
+                  fold genres into their crew line simply omit the genres prop. */}
+              {crewLine && <div className="mt-3">{crewLine}</div>}
+              {genres && genres.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {genres.map((genre) =>
+                    genreHref ? (
+                      <a
+                        key={genre}
+                        href={genreHref(genre)}
+                        className="metadata-badge hover:bg-foreground/10 transition-colors"
+                      >
+                        {genre}
+                      </a>
+                    ) : (
+                      <span key={genre} className="metadata-badge">
+                        {genre}
+                      </span>
+                    ),
+                  )}
+                </div>
               )}
 
               {actions && (

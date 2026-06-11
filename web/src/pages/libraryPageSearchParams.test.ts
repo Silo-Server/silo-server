@@ -463,8 +463,8 @@ describe("getLibrarySortRelevanceScope", () => {
     expect(getLibrarySortRelevanceScope("audiobooks")).toBe("audiobook");
     expect(getLibrarySortRelevanceScope("ebook")).toBe("ebook");
     expect(getLibrarySortRelevanceScope("ebooks")).toBe("ebook");
-    // Manga reuses the ebook sort universe (manga is not a sort scope).
-    expect(getLibrarySortRelevanceScope("manga")).toBe("ebook");
+    // Manga has its own sort universe (no Duration/Bitrate, reading labels).
+    expect(getLibrarySortRelevanceScope("manga")).toBe("manga");
   });
 
   it("falls back to the media scope and then to all for mixed libraries", () => {
