@@ -80,6 +80,28 @@ function mangaCountChipLabel(item: BrowseItem): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+// mangaStatusChip returns the top-left publication-status pill for a manga
+// browse card (color-coded), or null when the item is not manga or has no
+// status. Strictly manga-gated so no other card type renders it.
+function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | null {
+  if (item.type !== "manga") {
+    return null;
+  }
+  const status = item.show_status?.trim();
+  if (!status) {
+    return null;
+  }
+  const tone =
+    {
+      Ongoing: "text-emerald-200 border-emerald-400/30",
+      Completed: "text-sky-200 border-sky-400/30",
+      Hiatus: "text-amber-200 border-amber-400/30",
+      Cancelled: "text-red-300 border-red-400/30",
+      Upcoming: "text-violet-200 border-violet-400/30",
+    }[status] ?? "text-foreground border-white/15";
+  return { label: status, tone };
+}
+
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
   const episodeLabels = buildEpisodeCardLabels(item);
   const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
@@ -176,6 +198,7 @@ export default function ItemCard({
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
   const mangaCountLabel = mangaCountChipLabel(item);
+  const mangaStatus = mangaStatusChip(item);
 
   return (
     <div className="media-card group/card">
@@ -230,8 +253,15 @@ export default function ItemCard({
             {item.status === "matched" && overlayPrefs && (
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
             )}
+            {mangaStatus && (
+              <span
+                className={`glass-chip absolute top-2.5 left-2.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
+              >
+                {mangaStatus.label}
+              </span>
+            )}
             {mangaCountLabel && (
-              <span className="glass-subtle text-foreground absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+              <span className="glass-chip text-foreground absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
                 <Layers className="size-3" />
                 {mangaCountLabel}
               </span>
