@@ -14,7 +14,9 @@ interface NotificationStripProps {
 }
 
 export function NotificationStrip({ reserveActivityWidget }: NotificationStripProps = {}) {
-  const list = useNotificationsList({ unread: true });
+  // Always refetch on home mount so newly pushed notifications appear without a
+  // manual reload (matches AnnouncementBar).
+  const list = useNotificationsList({ unread: true }, { staleTime: 0, refetchOnMount: "always" });
   const markRead = useMarkRead();
 
   const items = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);

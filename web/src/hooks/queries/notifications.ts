@@ -18,7 +18,10 @@ interface UnreadCountResponse {
   count: number;
 }
 
-export function useNotificationsList(filters: { unread?: boolean; category?: string } = {}) {
+export function useNotificationsList(
+  filters: { unread?: boolean; category?: string } = {},
+  options?: { staleTime?: number; refetchOnMount?: boolean | "always" },
+) {
   return useInfiniteQuery({
     queryKey: notificationKeys.list(filters),
     queryFn: ({ pageParam }: { pageParam: number }) => {
@@ -31,7 +34,8 @@ export function useNotificationsList(filters: { unread?: boolean; category?: str
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-    staleTime: 2 * 60 * 1000,
+    staleTime: options?.staleTime ?? 2 * 60 * 1000,
+    refetchOnMount: options?.refetchOnMount ?? true,
   });
 }
 

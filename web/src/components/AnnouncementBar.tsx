@@ -15,7 +15,12 @@ interface AnnouncementBarProps {
 }
 
 export function AnnouncementBar({ reserveActivityWidget }: AnnouncementBarProps = {}) {
-  const list = useNotificationsList({ unread: true, category: "announcement" });
+  // Always refetch when the home page mounts so a just-published announcement
+  // shows the moment you land on the app, without a manual reload.
+  const list = useNotificationsList(
+    { unread: true, category: "announcement" },
+    { staleTime: 0, refetchOnMount: "always" },
+  );
   const markRead = useMarkRead();
 
   const items = (list.data?.pages ?? []).flatMap((p) => p.items ?? []);
