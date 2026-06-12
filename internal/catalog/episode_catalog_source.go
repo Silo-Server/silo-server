@@ -29,6 +29,7 @@ const episodeCatalogSelectBody = `(
 		COALESCE(e.tmdb_id, '') AS tmdb_id,
 		COALESCE(e.tvdb_id, '') AS tvdb_id,
 		COALESCE(NULLIF(s.poster_path, ''), NULLIF(si.poster_path, ''), NULLIF(e.still_path, ''), '') AS poster_path,
+		''::text AS poster_source_path,
 		COALESCE(NULLIF(s.poster_thumbhash, ''), NULLIF(si.poster_thumbhash, ''), NULLIF(e.still_thumbhash, ''), '') AS poster_thumbhash,
 		COALESCE(si.backdrop_path, '') AS backdrop_path,
 		COALESCE(si.backdrop_thumbhash, '') AS backdrop_thumbhash,

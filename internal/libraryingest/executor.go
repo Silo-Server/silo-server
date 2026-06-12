@@ -88,6 +88,7 @@ type Executor struct {
 	skippedRootRepo SkippedRootRepository
 	events          cache.EventBus
 	realtime        *notifications.Hub
+	availability    *notifications.AvailabilityDetector
 	now             func() time.Time
 
 	// tvDrainSettleWindow overrides scopedTVDrainSettleWindow when > 0. Kept
@@ -116,6 +117,15 @@ func NewExecutor(
 		events:          events,
 		realtime:        realtime,
 		now:             time.Now,
+	}
+}
+
+// SetAvailabilityDetector wires episode-availability detection for release
+// notifications. Optional; runs after matching completes and never blocks or
+// fails the ingest.
+func (e *Executor) SetAvailabilityDetector(detector *notifications.AvailabilityDetector) {
+	if e != nil {
+		e.availability = detector
 	}
 }
 
@@ -349,6 +359,21 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		}
 	}
 
+	// Content availability runs after matching/reconcile so releases are tied
+	// to resolved items. It runs detached: the detector is best-effort with
+	// its own deadline (it detaches from scanCtx internally, surviving its
+	// cancellation), and a slow pass must not delay scan completion or the
+	// serialized scan queue.
+	if e.availability != nil {
+		kinds := notifications.AvailabilityKinds{
+			Episodes: isTVLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
+			Movies:   isMovieLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
+		}
+		if kinds.Episodes || kinds.Movies {
+			go e.availability.HandleIngestCompleted(scanCtx, folder.ID, mode == scopeModeLibrary, matchScopes, kinds)
+		}
+	}
+
 	if shouldPublish(result) && e.events != nil {
 		if err := e.events.Publish(scanCtx, cache.ChannelCatalog, cache.Event{
 			Type:    cache.EventScanComplete,
@@ -444,6 +469,17 @@ func isTVLibraryType(libraryType string) bool {
 
 func isMixedLibraryType(libraryType string) bool {
 	return strings.ToLower(strings.TrimSpace(libraryType)) == "mixed"
+}
+
+// isMovieLibraryType mirrors the scanner's movie library naming
+// (internal/scanner/scanner.go).
+func isMovieLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "movie", "movies":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Executor) scan(ctx context.Context, folder *models.MediaFolder, mode scopeMode, scopePath string) ([]string, *scanner.ScanResult, error) {

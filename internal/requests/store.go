@@ -18,6 +18,12 @@ type Store interface {
 	CreateRequest(ctx context.Context, input CreateRequestRecord) (*Request, error)
 	GetRequest(ctx context.Context, id string) (*Request, error)
 	ListReconciliationCandidates(ctx context.Context, limit int) ([]*Request, error)
+	// ListFulfilledUnnotified returns completed requests whose fulfillment
+	// notification has not fired yet (presence-gated notify pass).
+	ListFulfilledUnnotified(ctx context.Context, limit int) ([]*Request, error)
+	// MarkFulfilledNotified stamps a request's fulfillment-notification
+	// marker so the notify pass stops considering it. Idempotent.
+	MarkFulfilledNotified(ctx context.Context, id string) error
 	ListMine(ctx context.Context, userID int, filter ListFilter) ([]*Request, error)
 	ListAdmin(ctx context.Context, filter ListFilter) ([]*Request, error)
 	SetStatus(ctx context.Context, id string, status Status, actor Viewer) (*Request, error)

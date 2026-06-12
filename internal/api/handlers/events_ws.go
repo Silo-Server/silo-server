@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	"github.com/gorilla/websocket"
@@ -39,6 +40,15 @@ type EventsHandler struct {
 	scans          *evt.ScanRegistry
 	persistedScans activeScanLister
 	historyImports historyImportActiveLister
+	notifications  *notifications.System
+}
+
+// SetNotificationsSystem wires the user-notification system: websocket
+// handshake tickets and the notifications channel snapshot.
+func (h *EventsHandler) SetNotificationsSystem(system *notifications.System) {
+	if h != nil {
+		h.notifications = system
+	}
 }
 
 func NewEventsHandler(
@@ -71,6 +81,27 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	if claims == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Browsers cannot set custom headers on websocket handshakes, so profile
+	// identity arrives as a short-lived single-use ticket minted via
+	// POST /events/ws-ticket. A connection without a ticket stays unbound and
+	// simply cannot subscribe to the profile-scoped notifications channel.
+	boundProfileID := ""
+	if ticket := r.URL.Query().Get("ticket"); ticket != "" && h.notifications != nil {
+		ticketUserID, ticketProfileID, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
+		if ok && ticketUserID == claims.UserID {
+			boundProfileID = ticketProfileID
+		} else {
+			// Expired, reused, consumed on a different node, or minted for
+			// another user: degrade to an unbound connection instead of
+			// failing the handshake. The binding grants nothing on its own —
+			// the client retries it when its notifications subscription is
+			// rejected — whereas a hard 403 would take down every realtime
+			// channel over a notifications-only concern.
+			slog.Warn("events: websocket ticket rejected; connection unbound",
+				"user_id", claims.UserID)
+		}
 	}
 
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
@@ -142,7 +173,7 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			)
 			return
 		case data := <-readMessages:
-			nextSubs, handled, ok := h.handleEventsClientMessage(conn, r, claims, data, allowedChannels)
+			nextSubs, handled, ok := h.handleEventsClientMessage(conn, r, claims, boundProfileID, data, allowedChannels)
 			if !ok {
 				return
 			}
@@ -164,10 +195,10 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			if _, subscribed := subscriptions[env.Channel]; !subscribed {
 				continue
 			}
-			if !allowsEventForClaims(claims, env) {
+			if !allowsEventForClaims(claims, boundProfileID, env) {
 				continue
 			}
-			if err := h.writeEventFrame(conn, r, claims, env); err != nil {
+			if err := h.writeEventFrame(conn, r, claims, boundProfileID, env); err != nil {
 				return
 			}
 		}
@@ -178,6 +209,7 @@ func (h *EventsHandler) handleEventsClientMessage(
 	conn *websocket.Conn,
 	r *http.Request,
 	claims *auth.Claims,
+	boundProfileID string,
 	data []byte,
 	allowed []evt.EventChannel,
 ) (map[evt.EventChannel]struct{}, bool, bool) {
@@ -245,6 +277,16 @@ func (h *EventsHandler) handleEventsClientMessage(
 			})
 			continue
 		}
+		// The notifications channel is profile-scoped: it requires a
+		// connection bound to a profile via a websocket ticket.
+		if channel == evt.ChannelNotifications && boundProfileID == "" {
+			rejected = append(rejected, evt.EventsRejectedChannel{
+				Channel: channel,
+				Code:    "profile_required",
+				Message: "A profile-bound websocket ticket is required",
+			})
+			continue
+		}
 		if _, seen := nextSubs[channel]; seen {
 			continue
 		}
@@ -262,7 +304,7 @@ func (h *EventsHandler) handleEventsClientMessage(
 	}
 
 	for _, channel := range accepted {
-		if err := h.writeSnapshotFrame(conn, r, claims, channel); err != nil {
+		if err := h.writeSnapshotFrame(conn, r, claims, boundProfileID, channel); err != nil {
 			return nil, false, false
 		}
 	}
@@ -275,6 +317,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 		evt.ChannelCatalog,
 		evt.ChannelHistoryImport,
 		evt.ChannelUserState,
+		evt.ChannelNotifications,
 	}
 	if role == "admin" {
 		channels = append(channels,
@@ -287,12 +330,19 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 	return channels
 }
 
-func allowsEventForClaims(claims *auth.Claims, env evt.Envelope) bool {
+func allowsEventForClaims(claims *auth.Claims, boundProfileID string, env evt.Envelope) bool {
 	if claims == nil {
 		return false
 	}
 	if env.AdminOnly && claims.Role != "admin" {
 		return false
+	}
+	if env.Channel == evt.ChannelNotifications {
+		// Notifications are personal: even admins only receive their own
+		// profile's deliveries, and only on a profile-bound connection.
+		return boundProfileID != "" &&
+			env.UserID == claims.UserID &&
+			env.ProfileID == boundProfileID
 	}
 	if env.UserID > 0 && claims.Role != "admin" && env.UserID != claims.UserID {
 		return false
@@ -314,11 +364,24 @@ func marshalJSON(value any) json.RawMessage {
 func (h *EventsHandler) snapshotForChannel(
 	r *http.Request,
 	claims *auth.Claims,
+	boundProfileID string,
 	channel evt.EventChannel,
 ) (json.RawMessage, error) {
 	switch channel {
 	case evt.ChannelCatalog, evt.ChannelUserState:
 		return json.RawMessage("null"), nil
+	case evt.ChannelNotifications:
+		// Recent unread deliveries for the bound profile so reconnecting
+		// clients hydrate without a separate REST call. Same row shape as the
+		// inbox list API.
+		if h == nil || h.notifications == nil || boundProfileID == "" {
+			return json.RawMessage("[]"), nil
+		}
+		rows, err := h.notifications.Deliveries.RecentUnread(r.Context(), boundProfileID, 25)
+		if err != nil {
+			return nil, err
+		}
+		return marshalJSON(h.notifications.PayloadsForRows(r.Context(), rows)), nil
 	case evt.ChannelJobs:
 		if h == nil || h.jobs == nil || h.jobs.repo == nil {
 			return json.RawMessage("[]"), nil
@@ -387,9 +450,10 @@ func (h *EventsHandler) writeSnapshotFrame(
 	conn *websocket.Conn,
 	r *http.Request,
 	claims *auth.Claims,
+	boundProfileID string,
 	channel evt.EventChannel,
 ) error {
-	data, err := h.snapshotForChannel(r, claims, channel)
+	data, err := h.snapshotForChannel(r, claims, boundProfileID, channel)
 	if err != nil {
 		slog.Error(
 			"events: failed to build initial snapshot",
@@ -415,14 +479,19 @@ func (h *EventsHandler) writeEventFrame(
 	conn *websocket.Conn,
 	r *http.Request,
 	claims *auth.Claims,
+	boundProfileID string,
 	env evt.Envelope,
 ) error {
 	data := env.Data
 	if len(data) == 0 || (env.Channel == evt.ChannelSessions && env.Event == "sessions.replaced") {
-		snapshot, err := h.snapshotForChannel(r, claims, env.Channel)
+		snapshot, err := h.snapshotForChannel(r, claims, boundProfileID, env.Channel)
 		if err != nil {
+			// Drop the frame but keep the stream open (same contract as
+			// writeSnapshotFrame): durable state covers the gap on the next
+			// event or reconnect, while closing the socket tears down every
+			// channel the client subscribed to.
 			slog.Error("events: failed to build event payload", "channel", env.Channel, "event", env.Event, "error", err)
-			return err
+			return nil
 		}
 		data = snapshot
 	}

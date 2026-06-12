@@ -37,6 +37,8 @@ import EbookReader from "@/pages/EbookReader";
 import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
+import Notifications from "@/pages/Notifications";
+import NotificationsSettings from "@/pages/settings/NotificationsSettings";
 import Requests from "@/pages/Requests";
 import RequestBrowse from "@/pages/RequestBrowse";
 import RequestDetail from "@/pages/RequestDetail";
@@ -246,6 +248,7 @@ function QueryCacheManager() {
       qc.removeQueries({ queryKey: ["sections"] });
       qc.removeQueries({ queryKey: ["calendar"] });
       qc.removeQueries({ queryKey: ["requests"] });
+      qc.removeQueries({ queryKey: ["notifications"] });
       // Recommendation rows include per-profile user_state (is_favorite, etc.);
       // the taste-seed picker depends on this for pre-selection.
       qc.removeQueries({ queryKey: ["recommendations"] });
@@ -442,6 +445,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>
                 <Route
@@ -535,6 +539,7 @@ function AppRoutes() {
                             element={<RecommendationsSection />}
                           />
                           <Route path="/calendar" element={<Calendar />} />
+                          <Route path="/notifications" element={<Notifications />} />
                           <Route
                             path="/profile/customize-home"
                             element={<ProfileCustomizeHome />}
@@ -559,6 +564,9 @@ function RealtimeEventChannels() {
 
   useEventChannel("catalog");
   useEventChannel("user_state");
+  // Profile-scoped; the server rejects the subscription until the connection
+  // is bound to a profile via the websocket ticket, which is harmless.
+  useEventChannel("notifications");
 
   return actingAdmin ? <AdminRealtimeEventChannels /> : null;
 }

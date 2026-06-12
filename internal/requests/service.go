@@ -47,6 +47,8 @@ type Service struct {
 	router            RequestRouterProvider
 	entitlements      EntitlementResolver
 	requesterIdentity RequesterIdentityResolver
+	notifier          FulfillmentNotifier
+	lifecycle         LifecycleNotifier
 	Now               func() time.Time
 }
 
@@ -455,7 +457,11 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		}
 		return nil, err
 	}
+	s.notifyLifecycle(ctx, *req, LifecycleNotifier.RequestSubmitted)
 	if req.Status == StatusApproved {
+		// Auto-approval is a real approval transition; channels subscribed to
+		// approvals see it alongside the submission.
+		s.notifyLifecycle(ctx, *req, LifecycleNotifier.RequestApproved)
 		return s.submitApprovedRequest(ctx, *req, viewer, nil)
 	}
 	return req, nil
@@ -592,6 +598,7 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
+	s.notifyLifecycle(ctx, *approved, LifecycleNotifier.RequestApproved)
 	return s.submitApprovedRequest(ctx, *approved, viewer, nil)
 }
 
@@ -614,7 +621,12 @@ func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string)
 		strings.TrimSpace(req.IntegrationKind) != "" {
 		return nil, ErrInvalidState
 	}
-	return s.store.SetOutcome(ctx, req.ID, OutcomeDeclined, viewer, reason)
+	declined, err := s.store.SetOutcome(ctx, req.ID, OutcomeDeclined, viewer, reason)
+	if err != nil {
+		return nil, err
+	}
+	s.notifyLifecycle(ctx, *declined, LifecycleNotifier.RequestDeclined)
+	return declined, nil
 }
 
 // Cancel withdraws a request that has not yet been submitted to a downstream
@@ -718,6 +730,12 @@ func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileRe
 		case reconcileSkipped:
 			result.Skipped++
 		}
+	}
+	// Presence-gated fulfillment notifications: completion above (and via the
+	// per-target aggregate path) only marks status; the notification fires
+	// once the media is confirmed present in the catalog.
+	if s.notifier != nil {
+		s.notifyFulfilledPending(ctx)
 	}
 	return result, nil
 }

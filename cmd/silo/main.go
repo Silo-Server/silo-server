@@ -56,6 +56,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -595,6 +596,16 @@ func main() {
 		bootstrapSensitiveValues["redis.url"] = bc.RedisURL
 	}
 
+	// Shared Redis client for components needing raw Redis beyond the event
+	// bus (websocket handshake tickets, session listing). Nil on Redis-less
+	// deployments; consumers fall back to in-process implementations.
+	apiRedisClient, apiRedisErr := cache.NewRedisClient(cfg.Redis)
+	if apiRedisErr != nil {
+		slog.Warn("redis client init failed; multi-node websocket tickets disabled", "error", apiRedisErr)
+	} else if apiRedisClient != nil {
+		defer func() { _ = apiRedisClient.Close() }()
+	}
+
 	deps := api.Dependencies{
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -605,6 +616,7 @@ func main() {
 		DB:                           pool,
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
+		RedisClient:                  apiRedisClient,
 		LogStreamHub:                 logStreamHub,
 		RealtimeHub:                  realtimeHub,
 		EventsHub:                    eventsHub,
@@ -1208,8 +1220,10 @@ func main() {
 				cfg.Scanner.MaxConcurrentLibraries,
 				cfg.Scanner.MaxConcurrentScoped,
 			)
-			libraryScanQueue.Start()
-			defer libraryScanQueue.Stop()
+			// Started below, after the notification system has attached its
+			// availability detector to the executor: a scan resumed by the
+			// workers before that wiring would complete without recording
+			// episode availability, silently losing release notifications.
 			deps.LibraryScanQueue = libraryScanQueue
 		}
 		if deps.DB != nil && deps.FileRepo != nil && metadataService != nil {
@@ -1271,6 +1285,48 @@ func main() {
 		}
 		defer userStoreProvider.Close()
 	}
+
+	// User-facing release notifications. The system reads user state through
+	// the raw store provider; the provider handed to everything downstream is
+	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
+	// jellycompat, imports, playback) feeds the interest index.
+	var notificationSystem *notifications.System
+	if deps.DB != nil && userStoreProvider != nil {
+		notificationScopes := access.NewResolver(
+			auth.NewUserRepository(deps.DB),
+			userStoreProvider,
+			access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
+		)
+		notificationSystem = notifications.NewSystem(
+			deps.DB,
+			settingsRepo,
+			userStoreProvider,
+			notificationScopes,
+			auth.NewUserRepository(deps.DB),
+			deps.EventsHub,
+			deps.RedisClient,
+			deps.SecretCipher,
+			mail.NewSMTPSender(settingsRepo),
+		)
+		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
+		deps.Notifications = notificationSystem
+		if libraryIngestExecutor != nil {
+			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)
+		}
+		if needsWorkers {
+			notificationSystem.Start(appCtx)
+			defer notificationSystem.Wait()
+		}
+	}
+
+	// Start the scan queue only now that the availability detector (when
+	// notifications are enabled) is attached to the ingest executor, so scans
+	// resumed at startup cannot complete before the detector exists.
+	if libraryScanQueue != nil {
+		libraryScanQueue.Start()
+		defer libraryScanQueue.Stop()
+	}
+
 	if userStoreProvider != nil && pluginService != nil {
 		deps.PluginUserConfig = plugins.NewUserConfigStore(userStoreProvider, pluginService)
 	}
@@ -1575,6 +1631,11 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		if notificationSystem != nil {
+			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
+			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
+			taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationSystem))
+		}
 		if matchWorker != nil {
 			taskMgr.Register(tasks.NewMatchMediaTask(matchWorker))
 		}
@@ -1613,6 +1674,9 @@ func main() {
 				access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
 			)
 			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
+		}
+		if notificationSystem != nil {
+			requestReconcileSvc.SetFulfillmentNotifier(notifications.NewRequestFulfillmentNotifier(notificationSystem))
 		}
 		taskMgr.Register(tasks.NewReconcileRequestsTask(requestReconcileSvc, 100))
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && pluginService != nil && pluginInstallationStore != nil {

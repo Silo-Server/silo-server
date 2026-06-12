@@ -221,6 +221,18 @@ export const settingsKeys = {
   pluginDetail: (installationId: number) => ["settings", "plugins", installationId] as const,
 };
 
+export const notificationKeys = {
+  all: ["notifications"] as const,
+  list: (status: "all" | "unread" = "all") => ["notifications", "list", status] as const,
+  unreadCount: () => ["notifications", "unread-count"] as const,
+  preferences: () => ["notifications", "preferences"] as const,
+  emailPreferences: () => ["notifications", "email-preferences"] as const,
+  discordPreferences: () => ["notifications", "discord-preferences"] as const,
+  capability: () => ["notifications", "capability"] as const,
+  webhooks: () => ["notifications", "webhooks"] as const,
+  webPushSubscriptions: () => ["notifications", "web-push-subscriptions"] as const,
+};
+
 export const historyImportKeys = {
   all: ["history-imports"] as const,
   sources: () => ["history-imports", "sources"] as const,
@@ -315,6 +327,7 @@ export const themeKeys = {
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
   userDetail: (userId: number) => ["admin", "users", userId] as const,
   userProfiles: (userId?: number) => ["admin", "users", userId, "profiles"] as const,
   userSettings: (userId: number) => ["admin", "users", userId, "settings"] as const,

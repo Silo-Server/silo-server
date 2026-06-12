@@ -2221,7 +2221,216 @@ export type EventChannel =
   | "tasks"
   | "scans"
   | "history_import"
-  | "user_state";
+  | "user_state"
+  | "notifications";
+
+export interface NotificationReasonFlags {
+  // episode.available reasons
+  favorite?: boolean;
+  watchlist?: boolean;
+  continue_watching?: boolean;
+  next_up?: boolean;
+  // request.fulfilled operational payload
+  request_id?: string;
+  tmdb_id?: number;
+  media_type?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  profile_id: string;
+  library_id?: number;
+  series_id?: string;
+  episode_id?: string;
+  series_title?: string;
+  episode_title?: string;
+  season_number?: number;
+  episode_number?: number;
+  poster_path?: string;
+  poster_url?: string;
+  poster_thumbhash?: string;
+  reason_flags: NotificationReasonFlags;
+  created_at: string;
+  read_at: string | null;
+}
+
+export interface NotificationListResponse {
+  notifications: AppNotification[];
+  next_cursor?: string;
+}
+
+export interface NotificationSyncResponse {
+  notifications: AppNotification[];
+  next_cursor?: string;
+  unread_count: number;
+}
+
+export interface NotificationUnreadCountResponse {
+  count: number;
+}
+
+export interface NotificationPreferences {
+  profile_id: string;
+  enabled: boolean;
+  notify_favorites: boolean;
+  notify_watchlist: boolean;
+  notify_continue_watching: boolean;
+  notify_next_up: boolean;
+}
+
+export interface NotificationReadEventPayload {
+  profile_id: string;
+  id?: string;
+  all?: boolean;
+}
+
+export type NotificationWebhookType = "discord" | "generic";
+
+export interface NotificationWebhook {
+  id: string;
+  name: string;
+  type: NotificationWebhookType;
+  url_host: string;
+  enabled: boolean;
+  notify_favorites: boolean;
+  notify_watchlist: boolean;
+  notify_continue_watching: boolean;
+  notify_next_up: boolean;
+  notify_requests: boolean;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure_status: number | null;
+  last_failure_message: string | null;
+  /** Present only in create / rotate-secret responses; shown exactly once. */
+  signing_secret?: string;
+}
+
+export interface NotificationWebhookInput {
+  name?: string;
+  url?: string;
+  type?: NotificationWebhookType;
+  enabled?: boolean;
+  notify_favorites?: boolean;
+  notify_watchlist?: boolean;
+  notify_continue_watching?: boolean;
+  notify_next_up?: boolean;
+  notify_requests?: boolean;
+}
+
+export interface NotificationWebhookTestResult {
+  ok: boolean;
+  http_status?: number;
+  duration_ms: number;
+  message?: string;
+}
+
+/** Admin-owned broadcast destination ("community channel"). */
+export interface ServerNotificationChannel {
+  id: string;
+  name: string;
+  type: NotificationWebhookType;
+  url_host: string;
+  enabled: boolean;
+  notify_new_movies: boolean;
+  notify_new_episodes: boolean;
+  notify_request_submitted: boolean;
+  notify_request_approved: boolean;
+  notify_request_declined: boolean;
+  notify_request_fulfilled: boolean;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure_status: number | null;
+  last_failure_message: string | null;
+  created_at: string;
+  /** Present only in create / rotate-secret responses; shown exactly once. */
+  signing_secret?: string;
+}
+
+export interface ServerNotificationChannelInput {
+  name?: string;
+  url?: string;
+  type?: NotificationWebhookType;
+  enabled?: boolean;
+  notify_new_movies?: boolean;
+  notify_new_episodes?: boolean;
+  notify_request_submitted?: boolean;
+  notify_request_approved?: boolean;
+  notify_request_declined?: boolean;
+  notify_request_fulfilled?: boolean;
+}
+
+/** An account-level digest channel (email, Discord DMs). */
+export interface NotificationAccountChannelCapability {
+  available: boolean;
+  modes: string[];
+  digest_hour: number;
+}
+
+export interface NotificationCapability {
+  in_app: { enabled: boolean };
+  apple_push: { available: boolean; provider: string; supported_modes: string[] };
+  android_push: { available: boolean; provider: string; supported_modes: string[] };
+  web_push: { available: boolean; public_key?: string };
+  webhooks: { available: boolean; max_per_profile: number; supported_types: string[] };
+  email: NotificationAccountChannelCapability;
+  discord: NotificationAccountChannelCapability;
+}
+
+export type NotificationChannelMode =
+  | "off"
+  | "per_episode"
+  | "daily_digest"
+  | "per_episode_and_digest";
+export type NotificationEmailMode = NotificationChannelMode;
+export type NotificationDiscordMode = NotificationChannelMode;
+
+/**
+ * Profile-scoped email channel state. Each profile verifies its own
+ * destination address and receives nothing until it has one — there is no
+ * account-email fallback.
+ */
+export interface NotificationEmailPreferences {
+  mode: NotificationEmailMode;
+  /** Verified destination; "" = none, channel inert. */
+  custom_email: string;
+  /** Address awaiting link-click verification. */
+  pending_email: string;
+  /** False for child profiles, which cannot set addresses. */
+  can_edit_address: boolean;
+}
+
+/** PUT /notifications/email-preferences body: only the mode is writable. */
+export interface NotificationEmailPreferencesUpdate {
+  mode: NotificationEmailMode;
+}
+
+/** Account-level Discord DM channel: link state, mode, and delivery health. */
+export interface NotificationDiscordPreferences {
+  linked: boolean;
+  discord_username?: string;
+  mode: NotificationDiscordMode;
+  /** Last DM delivery failure, surfaced as link health. Empty when healthy. */
+  link_failure?: string;
+}
+
+export interface NotificationDiscordLinkInit {
+  url: string;
+}
+
+export interface WebPushSubscriptionView {
+  id: string;
+  endpoint: string;
+  device_name?: string;
+  enabled: boolean;
+  created_at: string;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
 
 export interface EventsHelloMessage {
   type: "hello";
