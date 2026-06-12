@@ -244,15 +244,21 @@ func (r *DeliveryRepository) GetRowByID(ctx context.Context, id string) (*Delive
 }
 
 // ListForUserSince returns the account's deliveries newer than the watermark,
-// ascending, across all of its profiles. Runs inside the email worker's claim
-// transaction so the rows read are the rows the advanced watermark covers.
-func (r *DeliveryRepository) ListForUserSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, limit int) ([]DeliveryRow, error) {
-	rows, err := tx.Query(ctx,
-		deliveryRowSelect+`
-		WHERE d.user_id = $1 AND (d.created_at, d.id) > ($2, $3)
-		ORDER BY d.created_at ASC, d.id ASC
-		LIMIT $4`,
-		userID, since.CreatedAt, since.ID, limit)
+// ascending, across all of its profiles. A non-zero until excludes rows
+// created at or after it (digest window upper edge). Runs inside the channel
+// worker's claim transaction so the rows read are the rows the advanced
+// watermark covers.
+func (r *DeliveryRepository) ListForUserSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
+	query := deliveryRowSelect + `
+		WHERE d.user_id = $1 AND (d.created_at, d.id) > ($2, $3)`
+	args := []any{userID, since.CreatedAt, since.ID}
+	if !until.IsZero() {
+		args = append(args, until)
+		query += fmt.Sprintf(" AND d.created_at < $%d", len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(" ORDER BY d.created_at ASC, d.id ASC LIMIT $%d", len(args))
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list user deliveries since: %w", err)
 	}
@@ -278,15 +284,20 @@ func (r *DeliveryRepository) HasForUserSince(ctx context.Context, userID int, si
 }
 
 // ListForProfileSince returns the profile's deliveries newer than the
-// watermark, ascending. Runs inside the email worker's claim transaction so
-// the rows read are the rows the advanced watermark covers.
-func (r *DeliveryRepository) ListForProfileSince(ctx context.Context, tx pgx.Tx, profileID string, since Cursor, limit int) ([]DeliveryRow, error) {
-	rows, err := tx.Query(ctx,
-		deliveryRowSelect+`
-		WHERE d.profile_id = $1 AND (d.created_at, d.id) > ($2, $3)
-		ORDER BY d.created_at ASC, d.id ASC
-		LIMIT $4`,
-		profileID, since.CreatedAt, since.ID, limit)
+// watermark, ascending. A non-zero until excludes rows created at or after it
+// (digest window upper edge). Runs inside the channel worker's claim
+// transaction so the rows read are the rows the advanced watermark covers.
+func (r *DeliveryRepository) ListForProfileSince(ctx context.Context, tx pgx.Tx, profileID string, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
+	query := deliveryRowSelect + `
+		WHERE d.profile_id = $1 AND (d.created_at, d.id) > ($2, $3)`
+	args := []any{profileID, since.CreatedAt, since.ID}
+	if !until.IsZero() {
+		args = append(args, until)
+		query += fmt.Sprintf(" AND d.created_at < $%d", len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(" ORDER BY d.created_at ASC, d.id ASC LIMIT $%d", len(args))
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list profile deliveries since: %w", err)
 	}

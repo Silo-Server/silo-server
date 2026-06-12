@@ -397,10 +397,10 @@ func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
 	return nil
 }
 
-// SeedAvailability inserts episode_availability for every currently playable
-// episode without creating release events, then writes the per-library seed
-// markers. Idempotent and rerunnable; it exists for libraries that predate
-// the notifications feature.
+// SeedAvailability inserts episode_availability and movie_availability for
+// every currently playable episode and movie without creating release events,
+// then writes the per-library, per-kind seed markers. Idempotent and
+// rerunnable; it exists for libraries that predate the notifications feature.
 //
 // Library selection is load-bearing for flood and loss safety:
 //   - already-seeded libraries are skipped: availability there is owned by

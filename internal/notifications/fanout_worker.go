@@ -324,13 +324,14 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		seasonNumber := event.SeasonNumber
 		episodeNumber := event.EpisodeNumber
 		dispatchRows = append(dispatchRows, DeliveryRow{
-			Delivery:        delivery,
-			SeriesTitle:     display.seriesTitle,
-			EpisodeTitle:    display.episodeTitle,
-			SeasonNumber:    &seasonNumber,
-			EpisodeNumber:   &episodeNumber,
-			PosterPath:      display.posterPath,
-			PosterThumbhash: display.posterThumbhash,
+			Delivery:         delivery,
+			SeriesTitle:      display.seriesTitle,
+			EpisodeTitle:     display.episodeTitle,
+			SeasonNumber:     &seasonNumber,
+			EpisodeNumber:    &episodeNumber,
+			PosterPath:       display.posterPath,
+			PosterThumbhash:  display.posterThumbhash,
+			PosterSourcePath: display.posterSourcePath,
 		})
 	}
 	return dispatchRows, len(candidates), nil
@@ -427,10 +428,11 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 }
 
 type eventDisplay struct {
-	seriesTitle     string
-	episodeTitle    string
-	posterPath      string
-	posterThumbhash string
+	seriesTitle      string
+	episodeTitle     string
+	posterPath       string
+	posterThumbhash  string
+	posterSourcePath string
 }
 
 // loadEventDisplay fetches per-event display metadata once and reuses it for
@@ -439,12 +441,14 @@ func loadEventDisplay(ctx context.Context, tx pgx.Tx, episodeID string) (eventDi
 	var display eventDisplay
 	err := tx.QueryRow(ctx, `
 		SELECT COALESCE(e.title, ''), COALESCE(s.title, ''),
-		       COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, '')
+		       COALESCE(s.poster_path, ''), COALESCE(s.poster_thumbhash, ''),
+		       COALESCE(s.poster_source_path, '')
 		FROM episodes e
 		LEFT JOIN media_items s ON s.content_id = e.series_id
 		WHERE e.content_id = $1`,
 		episodeID,
-	).Scan(&display.episodeTitle, &display.seriesTitle, &display.posterPath, &display.posterThumbhash)
+	).Scan(&display.episodeTitle, &display.seriesTitle, &display.posterPath,
+		&display.posterThumbhash, &display.posterSourcePath)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return eventDisplay{}, nil
 	}

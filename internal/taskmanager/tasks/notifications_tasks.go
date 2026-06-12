@@ -9,46 +9,47 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// SeedEpisodeAvailabilityTask inserts episode_availability rows for every
-// currently playable episode without creating release events, then writes the
-// per-library seed markers. Running it is what allows release events to flow
-// for libraries that predate the notifications feature; rerunning is a cheap
-// idempotent repair pass.
-type SeedEpisodeAvailabilityTask struct {
+// SeedContentAvailabilityTask inserts episode_availability and
+// movie_availability rows for every currently playable episode and movie
+// without creating release events, then writes the per-library, per-kind seed
+// markers. Running it is what allows release events to flow for libraries
+// that predate the notifications feature; rerunning is a cheap idempotent
+// repair pass.
+type SeedContentAvailabilityTask struct {
 	system *notifications.System
 }
 
-// NewSeedEpisodeAvailabilityTask creates the seeding task.
-func NewSeedEpisodeAvailabilityTask(system *notifications.System) *SeedEpisodeAvailabilityTask {
-	return &SeedEpisodeAvailabilityTask{system: system}
+// NewSeedContentAvailabilityTask creates the seeding task.
+func NewSeedContentAvailabilityTask(system *notifications.System) *SeedContentAvailabilityTask {
+	return &SeedContentAvailabilityTask{system: system}
 }
 
-func (t *SeedEpisodeAvailabilityTask) Key() string  { return "seed_episode_availability" }
-func (t *SeedEpisodeAvailabilityTask) Name() string { return "Seed Episode Availability" }
-func (t *SeedEpisodeAvailabilityTask) Description() string {
-	return "Records the existing episode back-catalog as already-released so new-episode notifications only fire for episodes that arrive afterwards."
+func (t *SeedContentAvailabilityTask) Key() string  { return "seed_content_availability" }
+func (t *SeedContentAvailabilityTask) Name() string { return "Seed Content Availability" }
+func (t *SeedContentAvailabilityTask) Description() string {
+	return "Records the existing episode and movie back-catalog as already-released so new-content notifications only fire for items that arrive afterwards."
 }
-func (t *SeedEpisodeAvailabilityTask) Category() taskmanager.TaskCategory {
+func (t *SeedContentAvailabilityTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
 }
-func (t *SeedEpisodeAvailabilityTask) IsHidden() bool { return true }
+func (t *SeedContentAvailabilityTask) IsHidden() bool { return true }
 
-func (t *SeedEpisodeAvailabilityTask) DefaultTriggers() []taskmanager.TriggerConfig {
+func (t *SeedContentAvailabilityTask) DefaultTriggers() []taskmanager.TriggerConfig {
 	return []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
 }
 
-func (t *SeedEpisodeAvailabilityTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
+func (t *SeedContentAvailabilityTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	if t == nil || t.system == nil {
 		progress.Report(100, "Notifications are not configured")
 		return nil
 	}
-	progress.Report(0, "Seeding episode availability")
+	progress.Report(0, "Seeding content availability")
 	if err := t.system.SeedAvailability(ctx, func(percent int, message string) {
 		progress.Report(float64(percent), message)
 	}); err != nil {
-		return fmt.Errorf("seeding episode availability: %w", err)
+		return fmt.Errorf("seeding content availability: %w", err)
 	}
-	progress.Report(100, "Episode availability seeded")
+	progress.Report(100, "Content availability seeded")
 	return nil
 }
 

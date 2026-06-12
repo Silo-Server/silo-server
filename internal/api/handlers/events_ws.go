@@ -486,8 +486,12 @@ func (h *EventsHandler) writeEventFrame(
 	if len(data) == 0 || (env.Channel == evt.ChannelSessions && env.Event == "sessions.replaced") {
 		snapshot, err := h.snapshotForChannel(r, claims, boundProfileID, env.Channel)
 		if err != nil {
+			// Drop the frame but keep the stream open (same contract as
+			// writeSnapshotFrame): durable state covers the gap on the next
+			// event or reconnect, while closing the socket tears down every
+			// channel the client subscribed to.
 			slog.Error("events: failed to build event payload", "channel", env.Channel, "event", env.Event, "error", err)
-			return err
+			return nil
 		}
 		data = snapshot
 	}

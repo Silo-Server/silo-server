@@ -1632,7 +1632,7 @@ func main() {
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
 		if notificationSystem != nil {
-			taskMgr.Register(tasks.NewSeedEpisodeAvailabilityTask(notificationSystem))
+			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
 			taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationSystem))
 		}

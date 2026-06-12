@@ -167,8 +167,9 @@ type accountChannel[K comparable] interface {
 	// every pass.
 	hasPendingSince(ctx context.Context, key K, since Cursor) (bool, error)
 	// listSince returns the recipient's deliveries newer than the watermark,
-	// ascending, inside the claim transaction.
-	listSince(ctx context.Context, tx pgx.Tx, key K, since Cursor, limit int) ([]DeliveryRow, error)
+	// ascending, inside the claim transaction. A non-zero until excludes rows
+	// created at or after it (the digest window's exclusive upper edge).
+	listSince(ctx context.Context, tx pgx.Tx, key K, since Cursor, until time.Time, limit int) ([]DeliveryRow, error)
 	// claim locks the recipient's prefs row for one dispatch attempt with
 	// FOR UPDATE SKIP LOCKED; (nil, nil) means another node holds the row.
 	claim(ctx context.Context, tx pgx.Tx, key K) (*accountRecipient[K], error)
@@ -363,6 +364,11 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 			now := w.now()
 			digestAt = &now
 			if claimed.LastDigestAt != nil {
+				// The empty cursor ID makes this lower bound inclusive of rows
+				// created at exactly last_digest_at. The previous digest's
+				// drain stopped strictly before that instant (the `until`
+				// bound below), so consecutive digest windows partition rows
+				// exactly: no boundary row is recapped twice or skipped.
 				digestCursor := Cursor{CreatedAt: *claimed.LastDigestAt}
 				if cursorLess(digestCursor, fetchFrom) {
 					fetchFrom = digestCursor
@@ -375,8 +381,16 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 		return nil
 	}
 
+	// Digest reads stop strictly before the stamped digest time, so the next
+	// digest's inclusive lower bound resumes exactly where this one ended.
+	// Rows created mid-drain wait for the next per-episode pass or digest
+	// window instead of straddling two windows.
+	var until time.Time
+	if digestAt != nil {
+		until = *digestAt
+	}
 	fetch := func(since Cursor, limit int) ([]DeliveryRow, error) {
-		return w.channel.listSince(ctx, tx, rec.Key, since, limit)
+		return w.channel.listSince(ctx, tx, rec.Key, since, until, limit)
 	}
 	var rows []DeliveryRow
 	if digestAt != nil {

@@ -76,8 +76,8 @@ func (c *discordChannel) hasPendingSince(ctx context.Context, userID int, since 
 	return c.deliveries.HasForUserSince(ctx, userID, since)
 }
 
-func (c *discordChannel) listSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, limit int) ([]DeliveryRow, error) {
-	return c.deliveries.ListForUserSince(ctx, tx, userID, since, limit)
+func (c *discordChannel) listSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
+	return c.deliveries.ListForUserSince(ctx, tx, userID, since, until, limit)
 }
 
 func (c *discordChannel) claim(ctx context.Context, tx pgx.Tx, userID int) (*accountRecipient[int], error) {
