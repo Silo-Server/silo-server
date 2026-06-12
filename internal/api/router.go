@@ -1558,6 +1558,16 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
+					// Discord DM channel: the linked identity and mode hang off
+					// the login account, not a profile, so these stay outside
+					// the RequireProfile subrouter below (static paths coexist
+					// with it, same as the public email-link routes above).
+					if discordNotificationsHandler != nil {
+						r.Get("/notifications/discord-preferences", discordNotificationsHandler.HandleGetPreferences)
+						r.Put("/notifications/discord-preferences", discordNotificationsHandler.HandleUpdatePreferences)
+						r.Delete("/notifications/discord-link", discordNotificationsHandler.HandleUnlink)
+						r.Post("/notifications/discord/link/init", discordNotificationsHandler.HandleLinkInit)
+					}
 					r.Route("/notifications", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", notificationsHandler.HandleList)
@@ -1570,12 +1580,6 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
 						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
 						r.Delete("/email-preferences/address", notificationsHandler.HandleClearEmailAddress)
-						if discordNotificationsHandler != nil {
-							r.Get("/discord-preferences", discordNotificationsHandler.HandleGetPreferences)
-							r.Put("/discord-preferences", discordNotificationsHandler.HandleUpdatePreferences)
-							r.Delete("/discord-link", discordNotificationsHandler.HandleUnlink)
-							r.Post("/discord/link/init", discordNotificationsHandler.HandleLinkInit)
-						}
 						r.Post("/read-all", notificationsHandler.HandleReadAll)
 						r.Route("/webhooks", func(r chi.Router) {
 							r.Get("/", notificationsHandler.HandleListWebhooks)
