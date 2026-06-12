@@ -1,27 +1,17 @@
+import { useMemo, useState, type ComponentType } from "react";
 import { useSearchParams } from "react-router";
-import {
-  Settings2,
-  Captions,
-  Cloud,
-  PlayCircle,
-  ScanSearch,
-  Gauge,
-  Download,
-  Puzzle,
-  Network,
-  Database,
-  HardDrive,
-  ScrollText,
-  Paintbrush,
-  Layers,
-  Subtitles,
-  Sparkles,
-  Mail,
-  Bell,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
+import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
+import {
+  countSettingsSearchItems,
+  filterSettingsSearchGroups,
+} from "@/components/settings/settingsSearch";
+import {
+  ADMIN_SETTINGS_GROUPS,
+  ADMIN_SETTINGS_NAV,
+  type AdminSettingsSearchItem,
+} from "@/lib/adminSettingsSearch";
 import { cn } from "@/lib/utils";
 
 import EmailSettings from "./EmailSettings";
@@ -43,11 +33,8 @@ import LogRetentionSettings from "./LogRetentionSettings";
 import ThemeSettings from "./ThemeSettings";
 import OverlaySettings from "./OverlaySettings";
 
-interface SettingsNav {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  component: React.ComponentType;
+interface SettingsNav extends AdminSettingsSearchItem {
+  component: ComponentType;
 }
 
 interface SettingsNavGroup {
@@ -55,75 +42,59 @@ interface SettingsNavGroup {
   items: SettingsNav[];
 }
 
-// Tab ids are stable URL state (?tab=...) — regroup or reorder freely, but
-// renaming an id breaks bookmarks and deep links.
-const SETTINGS_GROUPS: SettingsNavGroup[] = [
-  {
-    label: "Server",
-    items: [
-      { id: "general", label: "General", icon: Settings2, component: GeneralSettings },
-      { id: "theming", label: "Theming", icon: Paintbrush, component: ThemeSettings },
-      { id: "overlays", label: "Card Overlays", icon: Layers, component: OverlaySettings },
-    ],
-  },
-  {
-    label: "Media",
-    items: [
-      { id: "scanner", label: "Scanner & Matcher", icon: ScanSearch, component: ScannerSettings },
-      { id: "intro", label: "Intro Markers", icon: Captions, component: IntroSettings },
-      { id: "subtitles", label: "Subtitles", icon: Subtitles, component: SubtitlesSettings },
-      { id: "ai", label: "AI Services", icon: Sparkles, component: AIServicesSettings },
-      { id: "playback", label: "Playback", icon: PlayCircle, component: PlaybackSettings },
-      { id: "downloads", label: "Downloads", icon: Download, component: DownloadSettings },
-    ],
-  },
-  {
-    label: "Connections",
-    items: [
-      {
-        id: "watch-providers",
-        label: "Watch Providers",
-        icon: Cloud,
-        component: WatchProvidersSettings,
-      },
-      { id: "integrations", label: "Integrations", icon: Puzzle, component: IntegrationsSettings },
-      { id: "email", label: "Email", icon: Mail, component: EmailSettings },
-      {
-        id: "notifications",
-        label: "Notifications",
-        icon: Bell,
-        component: NotificationsAdminSettings,
-      },
-      {
-        id: "compatibility-proxies",
-        label: "Compatibility Proxies",
-        icon: Network,
-        component: CompatibilityProxiesSettings,
-      },
-      { id: "rate-limiting", label: "Rate Limiting", icon: Gauge, component: RateLimitSettings },
-    ],
-  },
-  {
-    label: "Data",
-    items: [
-      { id: "database", label: "Database", icon: Database, component: DatabaseSettings },
-      { id: "storage", label: "Storage", icon: HardDrive, component: StorageSettings },
-      {
-        id: "log-retention",
-        label: "Log Retention",
-        icon: ScrollText,
-        component: LogRetentionSettings,
-      },
-    ],
-  },
-];
+const SETTINGS_COMPONENTS: Record<string, ComponentType> = {
+  general: GeneralSettings,
+  theming: ThemeSettings,
+  overlays: OverlaySettings,
+  scanner: ScannerSettings,
+  intro: IntroSettings,
+  subtitles: SubtitlesSettings,
+  ai: AIServicesSettings,
+  playback: PlaybackSettings,
+  downloads: DownloadSettings,
+  "watch-providers": WatchProvidersSettings,
+  integrations: IntegrationsSettings,
+  email: EmailSettings,
+  notifications: NotificationsAdminSettings,
+  "compatibility-proxies": CompatibilityProxiesSettings,
+  "rate-limiting": RateLimitSettings,
+  database: DatabaseSettings,
+  storage: StorageSettings,
+  "log-retention": LogRetentionSettings,
+};
 
-const SETTINGS_NAV: SettingsNav[] = SETTINGS_GROUPS.flatMap((group) => group.items);
+function settingsComponent(id: string) {
+  const component = SETTINGS_COMPONENTS[id];
+  if (!component) {
+    throw new Error(`Missing admin settings component for ${id}`);
+  }
+  return component;
+}
+
+const SETTINGS_GROUPS: SettingsNavGroup[] = ADMIN_SETTINGS_GROUPS.map((group) => ({
+  ...group,
+  items: group.items.map((item) => ({ ...item, component: settingsComponent(item.id) })),
+}));
+
+const SETTINGS_NAV: SettingsNav[] = ADMIN_SETTINGS_NAV.map((item) => ({
+  ...item,
+  component: settingsComponent(item.id),
+}));
 
 export default function AdminSettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [settingsSearch, setSettingsSearch] = useState("");
   const rawActiveId = searchParams.get("tab") || "general";
   const activeId = rawActiveId === "jellyfin" ? "compatibility-proxies" : rawActiveId;
+  const filteredSettingsGroups = useMemo(
+    () => filterSettingsSearchGroups(SETTINGS_GROUPS, settingsSearch),
+    [settingsSearch],
+  );
+  const filteredSettingsNav = useMemo(
+    () => filteredSettingsGroups.flatMap((group) => group.items),
+    [filteredSettingsGroups],
+  );
+  const filteredSettingsCount = countSettingsSearchItems(filteredSettingsGroups);
 
   function setActiveId(id: string) {
     setSearchParams({ tab: id }, { replace: true });
@@ -133,11 +104,20 @@ export default function AdminSettingsLayout() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
-        <p className="page-subtitle text-sm sm:text-base">
-          Configure server-wide settings. Most changes require a server restart to take effect.
-        </p>
+      <div className="page-header gap-5">
+        <div className="min-w-0 space-y-3">
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
+          <p className="page-subtitle text-sm sm:text-base">
+            Configure server-wide settings. Most changes require a server restart to take effect.
+          </p>
+        </div>
+        <SettingsSearchInput
+          value={settingsSearch}
+          onChange={setSettingsSearch}
+          resultCount={filteredSettingsCount}
+          totalCount={SETTINGS_NAV.length}
+          className="w-full sm:max-w-sm"
+        />
       </div>
 
       <div className="surface-panel flex min-h-[500px] flex-col overflow-hidden rounded-[1.8rem] border-0 lg:flex-row">
@@ -148,7 +128,7 @@ export default function AdminSettingsLayout() {
           style={{ WebkitOverflowScrolling: "touch" }}
         >
           <div className="flex min-w-max items-stretch gap-1">
-            {SETTINGS_NAV.map((item) => {
+            {filteredSettingsNav.map((item) => {
               const isActive = item.id === active.id;
               return (
                 <button
@@ -168,6 +148,11 @@ export default function AdminSettingsLayout() {
                 </button>
               );
             })}
+            {filteredSettingsNav.length === 0 ? (
+              <p className="text-muted-foreground px-3 py-2.5 text-sm whitespace-nowrap">
+                No matching settings
+              </p>
+            ) : null}
           </div>
         </nav>
 
@@ -176,7 +161,7 @@ export default function AdminSettingsLayout() {
           aria-label="Admin settings sections"
           className="border-border hidden space-y-5 border-r px-3 py-4 lg:block lg:w-60 lg:flex-shrink-0"
         >
-          {SETTINGS_GROUPS.map((group) => (
+          {filteredSettingsGroups.map((group) => (
             <SideNavSection key={group.label} label={group.label} idPrefix="admin-settings-nav">
               {group.items.map((item) => (
                 <SideNavItem
@@ -189,6 +174,9 @@ export default function AdminSettingsLayout() {
               ))}
             </SideNavSection>
           ))}
+          {filteredSettingsGroups.length === 0 ? (
+            <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
+          ) : null}
         </nav>
 
         {/* Content area */}

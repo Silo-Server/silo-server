@@ -1,3 +1,5 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -37,10 +39,12 @@ describe("AdminSettingsLayout", () => {
       "Scanner &amp; Matcher",
       "Intro Markers",
       "Subtitles",
+      "AI Services",
       "Playback",
       "Downloads",
       "Watch Providers",
       "Integrations",
+      "Email",
       "Notifications",
       "Compatibility Proxies",
       "Rate Limiting",
@@ -64,5 +68,48 @@ describe("AdminSettingsLayout", () => {
     const direct = renderLayout("?tab=compatibility-proxies");
 
     expect(withAlias).toBe(direct);
+  });
+
+  it("filters admin settings sections from the search box", async () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/settings"]}>
+        <AdminSettingsLayout />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "redis");
+
+    expect(screen.getAllByRole("button", { name: /Database/ })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /Playback/ })).not.toBeInTheDocument();
+    expect(screen.getByText("1 match")).toBeInTheDocument();
+  });
+
+  it("matches individual admin setting labels", async () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/settings"]}>
+        <AdminSettingsLayout />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "Search settings" }),
+      "pool max open",
+    );
+
+    expect(screen.getAllByRole("button", { name: /Database/ })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /General/ })).not.toBeInTheDocument();
+  });
+
+  it("focuses admin settings search with Cmd+K", () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/settings"]}>
+        <AdminSettingsLayout />
+      </MemoryRouter>,
+    );
+
+    const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
+    fireEvent.keyDown(document, { key: "k", metaKey: true });
+
+    expect(searchBox).toHaveFocus();
   });
 });
