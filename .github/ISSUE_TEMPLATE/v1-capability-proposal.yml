@@ -1,0 +1,56 @@
+name: v1 capability proposal
+description: Propose a user-facing capability for the Silo v1 scope lock
+title: "[v1] <capability name>"
+labels: ["epic", "v1-proposed"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One proposal per **user-facing capability** (e.g. "Manga library type", "Transcoded playback"),
+        not per PR or per endpoint. Locked capabilities are what the client teams plan against —
+        the **API surface** section is mandatory for a capability to be lockable.
+        Scope state and lock rules: `docs/architecture/v1-scope.md`.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One paragraph, user-facing language. What can a user do when this ships?
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: User value / why v1
+      description: Why does v1 need this rather than v1.1?
+    validations:
+      required: true
+  - type: textarea
+    id: api-surface
+    attributes:
+      label: API surface
+      description: >
+        Endpoints/payloads clients will call (method + path + notable request/response fields).
+        Plain list now; OpenAPI pointers once the #135 tooling lands. A capability cannot be
+        Locked without this section filled in.
+      placeholder: |
+        GET  /api/v1/manga/{seriesId}/chapters — list chapters (id, index, volume, read_state)
+        POST /api/v1/watch-progress — records reading progress (existing endpoint, new item type)
+    validations:
+      required: true
+  - type: textarea
+    id: client-impact
+    attributes:
+      label: Client impact (android / apple / web)
+      description: What must each client build to surface this capability? "None" is a valid answer per client.
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Rough size (server-side)
+      options:
+        - S
+        - M
+        - L
+    validations:
+      required: true

@@ -88,3 +88,21 @@ Recent history follows Conventional Commit-style subjects such as `feat(playback
 - Silo separates login accounts (`users`) from household profiles; multiple profiles on one account share the same `user_id`.
 - Profile `is_primary` marks the household parent for that account; it is not the same as server-wide `admin` role on the user account.
 - Point the Vite dev frontend at a remote backend with `VITE_API_PROXY_TARGET` in `web/.env.local` (or inline) when running `make dev-frontend`; the frontend calls relative `/api` URLs proxied by Vite.
+
+## Silo v1 Process (scope lock & API rules)
+
+Silo is working toward a locked v1 feature set so client teams can plan against a stable core. These rules apply to every change.
+
+**Scope gate.** Before implementing a new user-facing capability, check `docs/architecture/v1-scope.md`. If the capability is not listed there — or the file says scope is not yet locked — do NOT open a feature PR. File a **v1 capability proposal** issue (template in this repo) and wait for triage. Bug fixes, refactors, and work on already-locked capabilities proceed normally.
+
+**API rules — additive-only within `/api/v1`.**
+- Never rename or remove a response field, change a field's type, or repurpose a status code on an existing endpoint.
+- New functionality adds new fields/endpoints; removals go through the existing Deprecation/Sunset header flow only.
+- New features expose capability endpoints (feature detection) rather than relying on version sniffing.
+- Contract strategy and tooling: issue #135.
+
+**PR requirements.**
+- Link the capability epic or sub-issue the PR serves (`Part of #NNN`). PRs with no linked scope item will be questioned at review.
+- One concern per PR; Conventional Commit subject; AI-use disclosure in the PR body.
+
+**Pre-push checklist.** `make lint` · `cd web && pnpm run lint && pnpm run format:check` · `make verify-local-paths` · Go tests in a libvips-capable container (a bare-host `go test ./...` silently skips CGO packages, including `internal/api/handlers`).
