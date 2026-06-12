@@ -91,6 +91,23 @@ func buildWebPushPayload(row DeliveryRow, posterURL string) ([]byte, error) {
 			payload.URL = "/item/" + *row.SeriesID
 		}
 		payload.Icon = posterURL
+	case DeliveryTypeRequestApproved:
+		flags := parseRequestFlags(row.ReasonFlags)
+		payload.Title = "Your request was approved"
+		if flags.Title != "" {
+			payload.Title = flags.Title + " was approved"
+		}
+		payload.Body = "Your media request was approved."
+	case DeliveryTypeRequestDeclined:
+		flags := parseRequestFlags(row.ReasonFlags)
+		payload.Title = "Your request was declined"
+		if flags.Title != "" {
+			payload.Title = flags.Title + " was declined"
+		}
+		payload.Body = "Your media request was declined."
+		if flags.Reason != "" {
+			payload.Body = "Reason: " + flags.Reason
+		}
 	case DeliveryTypeWebhookAutoDisabled:
 		payload.Title = "A webhook stopped working"
 		payload.Body = "Open notification settings to fix it."

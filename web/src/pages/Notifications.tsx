@@ -50,6 +50,9 @@ function notificationTitle(notification: AppNotification): string {
   if (notification.type === "request.fulfilled") {
     return notification.series_title || "Request available";
   }
+  if (notification.type === "request.approved" || notification.type === "request.declined") {
+    return notification.reason_flags?.title || "Media request";
+  }
   // Unknown types render with a generic fallback by design — the type
   // registry is extensible.
   return "Notification";
@@ -69,6 +72,13 @@ function notificationDescription(notification: AppNotification): string {
       : mediaType === "series"
         ? "Your requested series is now available"
         : "Your request is now available";
+  }
+  if (notification.type === "request.approved") {
+    return "Your request was approved";
+  }
+  if (notification.type === "request.declined") {
+    const reason = notification.reason_flags?.reason;
+    return reason ? `Your request was declined — ${reason}` : "Your request was declined";
   }
   return notification.type;
 }

@@ -283,6 +283,24 @@ func (r *DeliveryRepository) HasForUserSince(ctx context.Context, userID int, si
 	return exists, nil
 }
 
+// HasTransactionalForUserSince reports whether the account has any
+// transactional delivery (digest-bypassing request-status notice; see
+// transactionalDeliveryTypes) newer than the given watermark.
+func (r *DeliveryRepository) HasTransactionalForUserSince(ctx context.Context, userID int, since Cursor) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM notification_deliveries
+			WHERE user_id = $1 AND (created_at, id) > ($2, $3) AND type = ANY($4)
+		)`,
+		userID, since.CreatedAt, since.ID, transactionalDeliveryTypes,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check transactional deliveries since watermark: %w", err)
+	}
+	return exists, nil
+}
+
 // ListForProfileSince returns the profile's deliveries newer than the
 // watermark, ascending. A non-zero until excludes rows created at or after it
 // (digest window upper edge). Runs inside the channel worker's claim
@@ -318,6 +336,24 @@ func (r *DeliveryRepository) HasForProfileSince(ctx context.Context, profileID s
 	).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check profile deliveries since watermark: %w", err)
+	}
+	return exists, nil
+}
+
+// HasTransactionalForProfileSince reports whether the profile has any
+// transactional delivery (digest-bypassing request-status notice; see
+// transactionalDeliveryTypes) newer than the given watermark.
+func (r *DeliveryRepository) HasTransactionalForProfileSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM notification_deliveries
+			WHERE profile_id = $1 AND (created_at, id) > ($2, $3) AND type = ANY($4)
+		)`,
+		profileID, since.CreatedAt, since.ID, transactionalDeliveryTypes,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check profile transactional deliveries since watermark: %w", err)
 	}
 	return exists, nil
 }

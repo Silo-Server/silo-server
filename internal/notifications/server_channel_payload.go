@@ -360,7 +360,18 @@ func BuildServerChannelRequestDiscord(event string, info RequestEventInfo) ([]by
 		embed.Thumbnail = &discordEmbedMedia{URL: poster}
 	}
 	enforceDiscordTotalLimit(&embed)
-	return json.Marshal(discordWebhookBody{Embeds: []discordEmbed{embed}, Username: siloSenderName})
+	body := discordWebhookBody{Embeds: []discordEmbed{embed}, Username: siloSenderName}
+	// A mention only pings from message content, never from inside an embed,
+	// so the tag rides above the embed; the embed field keeps the plain
+	// username so the post stays readable when the user left the guild.
+	if info.RequesterDiscordID != "" {
+		body.Content = "<@" + info.RequesterDiscordID + ">"
+		body.AllowedMentions = &discordAllowedMentions{
+			Parse: []string{},
+			Users: []string{info.RequesterDiscordID},
+		}
+	}
+	return json.Marshal(body)
 }
 
 // serverChannelRequestBody is the canonical generic-webhook JSON for one

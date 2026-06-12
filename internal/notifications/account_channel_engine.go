@@ -25,6 +25,16 @@ const (
 	ChannelModePerEpisodeAndDigest = "per_episode_and_digest"
 )
 
+// transactionalDeliveryTypes are the delivery types that bypass digest
+// batching: digest-mode recipients receive them in a prompt early send (the
+// off-schedule leg in processRecipient) instead of waiting for the digest
+// hour. The repo's HasTransactional* queries and the channels'
+// hasTransactionalPendingSince implementations filter on this list.
+var transactionalDeliveryTypes = []string{
+	DeliveryTypeRequestApproved,
+	DeliveryTypeRequestDeclined,
+}
+
 // ValidChannelMode reports whether mode is a recognized account-channel mode.
 func ValidChannelMode(mode string) bool {
 	switch mode {
@@ -166,6 +176,12 @@ type accountChannel[K comparable] interface {
 	// past the watermark, so idle recipients don't open a claim transaction
 	// every pass.
 	hasPendingSince(ctx context.Context, key K, since Cursor) (bool, error)
+	// hasTransactionalPendingSince cheaply reports whether the recipient has
+	// transactional deliveries (request-status notices; see
+	// transactionalDeliveryTypes) past the watermark. Digest-mode recipients
+	// with transactional rows pending get an early send instead of waiting
+	// for the digest hour.
+	hasTransactionalPendingSince(ctx context.Context, key K, since Cursor) (bool, error)
 	// listSince returns the recipient's deliveries newer than the watermark,
 	// ascending, inside the claim transaction. A non-zero until excludes rows
 	// created at or after it (the digest window's exclusive upper edge).
@@ -293,7 +309,20 @@ func (w *accountChannelWorker[K]) runPass(ctx context.Context) {
 			}
 		case ChannelModeDailyDigest:
 			if !digestDue {
-				continue
+				// Transactional notices bypass the digest schedule: a pending
+				// request-status row makes the recipient eligible for a
+				// prompt early send (the off-schedule leg in
+				// processRecipient).
+				pending, err := w.channel.hasTransactionalPendingSince(ctx, rec.Key,
+					Cursor{CreatedAt: rec.WatermarkCreatedAt, ID: rec.WatermarkID})
+				if err != nil {
+					w.logger.Warn("channel pass: transactional pending check failed",
+						"recipient", rec.Key, "error", err)
+					continue
+				}
+				if !pending {
+					continue
+				}
 			}
 		default:
 			continue
@@ -354,7 +383,20 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 	case ChannelModePerEpisode:
 	case ChannelModeDailyDigest:
 		if !digestDue {
-			return nil
+			// Off-schedule transactional leg: request-status notices must not
+			// wait for the digest hour. The send flushes the pending window
+			// with digest rendering but leaves last_digest_at alone, so the
+			// daily schedule is unaffected and tomorrow's digest covers only
+			// rows past this send's watermark. Re-derived under the lock: the
+			// pre-scan signal may predate another node's send.
+			pending, err := w.channel.hasTransactionalPendingSince(ctx, rec.Key, since)
+			if err != nil {
+				return err
+			}
+			if !pending {
+				return nil
+			}
+			break
 		}
 		now := w.now()
 		digestAt = &now

@@ -76,6 +76,10 @@ func (c *discordChannel) hasPendingSince(ctx context.Context, userID int, since 
 	return c.deliveries.HasForUserSince(ctx, userID, since)
 }
 
+func (c *discordChannel) hasTransactionalPendingSince(ctx context.Context, userID int, since Cursor) (bool, error) {
+	return c.deliveries.HasTransactionalForUserSince(ctx, userID, since)
+}
+
 func (c *discordChannel) listSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
 	return c.deliveries.ListForUserSince(ctx, tx, userID, since, until, limit)
 }

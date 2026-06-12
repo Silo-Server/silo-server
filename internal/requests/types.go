@@ -124,34 +124,38 @@ type EffectivePolicy struct {
 }
 
 type Request struct {
-	ID                   string     `json:"id"`
-	Provider             string     `json:"provider"`
-	MediaType            MediaType  `json:"media_type"`
-	TMDBID               int        `json:"tmdb_id"`
-	TVDBID               *int       `json:"tvdb_id,omitempty"`
-	IMDbID               string     `json:"imdb_id,omitempty"`
-	Title                string     `json:"title"`
-	Year                 *int       `json:"year,omitempty"`
-	Overview             string     `json:"overview,omitempty"`
-	PosterPath           string     `json:"poster_path,omitempty"`
-	BackdropPath         string     `json:"backdrop_path,omitempty"`
-	Status               Status     `json:"status"`
-	Outcome              Outcome    `json:"outcome"`
-	RequestedByUserID    int        `json:"requested_by_user_id,omitempty"`
-	RequestedByProfileID string     `json:"requested_by_profile_id,omitempty"`
-	RequesterEmail       string     `json:"-"`
-	RequesterUsername    string     `json:"-"`
-	IntegrationKind      string     `json:"integration_kind,omitempty"`
-	IsAnime              bool       `json:"is_anime"`
-	Targets              []Target   `json:"targets,omitempty"`
-	ExternalID           string     `json:"external_id,omitempty"`
-	ExternalStatus       string     `json:"external_status,omitempty"`
-	LibraryContentID     string     `json:"library_content_id,omitempty"`
-	LastError            string     `json:"last_error,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
-	ApprovedAt           *time.Time `json:"approved_at,omitempty"`
-	CompletedAt          *time.Time `json:"completed_at,omitempty"`
+	ID                   string    `json:"id"`
+	Provider             string    `json:"provider"`
+	MediaType            MediaType `json:"media_type"`
+	TMDBID               int       `json:"tmdb_id"`
+	TVDBID               *int      `json:"tvdb_id,omitempty"`
+	IMDbID               string    `json:"imdb_id,omitempty"`
+	Title                string    `json:"title"`
+	Year                 *int      `json:"year,omitempty"`
+	Overview             string    `json:"overview,omitempty"`
+	PosterPath           string    `json:"poster_path,omitempty"`
+	BackdropPath         string    `json:"backdrop_path,omitempty"`
+	Status               Status    `json:"status"`
+	Outcome              Outcome   `json:"outcome"`
+	RequestedByUserID    int       `json:"requested_by_user_id,omitempty"`
+	RequestedByProfileID string    `json:"requested_by_profile_id,omitempty"`
+	RequesterEmail       string    `json:"-"`
+	RequesterUsername    string    `json:"-"`
+	// DeclineReason is the admin's decline message, populated transiently for
+	// the lifecycle notifier (the durable copy lives in the request event
+	// record, not on this row).
+	DeclineReason    string     `json:"-"`
+	IntegrationKind  string     `json:"integration_kind,omitempty"`
+	IsAnime          bool       `json:"is_anime"`
+	Targets          []Target   `json:"targets,omitempty"`
+	ExternalID       string     `json:"external_id,omitempty"`
+	ExternalStatus   string     `json:"external_status,omitempty"`
+	LibraryContentID string     `json:"library_content_id,omitempty"`
+	LastError        string     `json:"last_error,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	ApprovedAt       *time.Time `json:"approved_at,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
 }
 
 type RequestEvent struct {

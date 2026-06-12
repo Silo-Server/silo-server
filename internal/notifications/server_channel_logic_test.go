@@ -354,6 +354,11 @@ func TestBuildServerChannelRequestPayloads(t *testing.T) {
 	if len(embed.Fields) != 2 || embed.Fields[1].Value != "quick" {
 		t.Fatalf("unexpected fields %+v", embed.Fields)
 	}
+	// Without a resolved Discord identity there is no mention.
+	if discord.Content != "" || discord.AllowedMentions != nil {
+		t.Fatalf("unexpected mention without discord id: content=%q mentions=%+v",
+			discord.Content, discord.AllowedMentions)
+	}
 
 	generic, err := BuildServerChannelRequestGeneric(ServerChannelEventRequestDeclined, info, "chan-1")
 	if err != nil {
@@ -366,6 +371,52 @@ func TestBuildServerChannelRequestPayloads(t *testing.T) {
 	if decoded.Event != ServerChannelEventRequestDeclined || decoded.Request.ID != "req-1" ||
 		decoded.Request.RequesterName != "quick" {
 		t.Fatalf("unexpected generic body %+v", decoded)
+	}
+}
+
+func TestBuildServerChannelRequestDiscordMentionsRequester(t *testing.T) {
+	info := RequestEventInfo{
+		RequestID:          "req-1",
+		TMDBID:             42,
+		MediaType:          "movie",
+		Title:              testMovieTitle,
+		RequesterName:      "quick",
+		RequesterUserID:    7,
+		RequesterDiscordID: "123456789",
+	}
+
+	body, err := BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var discord discordWebhookBody
+	if err := json.Unmarshal(body, &discord); err != nil {
+		t.Fatal(err)
+	}
+	if discord.Content != "<@123456789>" {
+		t.Fatalf("unexpected content %q", discord.Content)
+	}
+	if discord.AllowedMentions == nil ||
+		len(discord.AllowedMentions.Users) != 1 || discord.AllowedMentions.Users[0] != "123456789" {
+		t.Fatalf("unexpected allowed mentions %+v", discord.AllowedMentions)
+	}
+	// Parse must serialize as an empty list (not be omitted) so Discord's
+	// implicit mention parsing stays disabled.
+	if !strings.Contains(string(body), `"parse":[]`) {
+		t.Fatalf("allowed_mentions.parse not serialized: %s", body)
+	}
+	// The embed keeps the plain username; only the content line pings.
+	if len(discord.Embeds) != 1 || discord.Embeds[0].Fields[1].Value != "quick" {
+		t.Fatalf("unexpected embed fields %+v", discord.Embeds)
+	}
+
+	// The generic payload never carries the Discord identity.
+	generic, err := BuildServerChannelRequestGeneric(ServerChannelEventRequestApproved, info, "chan-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(generic), "123456789") {
+		t.Fatalf("discord id leaked into generic payload: %s", generic)
 	}
 }
 

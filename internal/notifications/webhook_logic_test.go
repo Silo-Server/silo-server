@@ -385,6 +385,106 @@ func TestGenericWebhookPayloadRequestFulfilled(t *testing.T) {
 	}
 }
 
+func requestDeclinedTestRow() DeliveryRow {
+	return DeliveryRow{
+		Delivery: Delivery{
+			ID:        "01DECLINED",
+			ProfileID: "profile-1",
+			Type:      DeliveryTypeRequestDeclined,
+			ReasonFlags: []byte(`{"request_id":"01REQ","tmdb_id":438631,"media_type":"movie",` +
+				`"title":"Dune","year":2021,"reason":"Already available in 4K"}`),
+			CreatedAt: time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC),
+		},
+	}
+}
+
+func TestBuildDiscordWebhookPayloadRequestLifecycle(t *testing.T) {
+	payload, err := BuildDiscordWebhookPayload(requestDeclinedTestRow(), false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	var body struct {
+		Embeds []discordEmbed `json:"embeds"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not valid JSON: %v", err)
+	}
+	if len(body.Embeds) != 1 {
+		t.Fatalf("unexpected body shape: %+v", body)
+	}
+	embed := body.Embeds[0]
+	// No catalog join exists for declined requests; title and link come from
+	// the reason flags.
+	if embed.Title != "Dune (2021)" {
+		t.Fatalf("unexpected title %q", embed.Title)
+	}
+	if embed.Author == nil || embed.Author.Name != "Your request was declined on Silo" {
+		t.Fatalf("unexpected author %+v", embed.Author)
+	}
+	if embed.URL != "https://www.themoviedb.org/movie/438631" {
+		t.Fatalf("unexpected title URL %q", embed.URL)
+	}
+	if embed.Color != serverChannelColorDeclined {
+		t.Fatalf("unexpected color %d", embed.Color)
+	}
+	if len(embed.Fields) != 2 ||
+		embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" ||
+		embed.Fields[1].Name != "Reason" || embed.Fields[1].Value != "Already available in 4K" {
+		t.Fatalf("expected Type and Reason fields, got %+v", embed.Fields)
+	}
+
+	approved := requestDeclinedTestRow()
+	approved.Type = DeliveryTypeRequestApproved
+	payload, err = BuildDiscordWebhookPayload(approved, false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not valid JSON: %v", err)
+	}
+	embed = body.Embeds[0]
+	if embed.Author == nil || embed.Author.Name != "Your request was approved on Silo" {
+		t.Fatalf("unexpected author %+v", embed.Author)
+	}
+	if embed.Color != serverChannelColorApproved {
+		t.Fatalf("unexpected color %d", embed.Color)
+	}
+	// The decline reason must not leak into approved embeds.
+	for _, field := range embed.Fields {
+		if field.Name == "Reason" {
+			t.Fatalf("approved embed must not carry a decline reason: %+v", embed.Fields)
+		}
+	}
+}
+
+func TestGenericWebhookPayloadRequestDeclined(t *testing.T) {
+	payload, err := BuildGenericWebhookPayload(requestDeclinedTestRow(), "hook-1", false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	var body struct {
+		Type    string `json:"type"`
+		Request *struct {
+			ID        string `json:"id"`
+			TMDBID    int    `json:"tmdb_id"`
+			MediaType string `json:"media_type"`
+			Title     string `json:"title"`
+			Year      int    `json:"year"`
+			Reason    string `json:"reason"`
+		} `json:"request"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not valid JSON: %v", err)
+	}
+	if body.Type != DeliveryTypeRequestDeclined {
+		t.Fatalf("unexpected type %q", body.Type)
+	}
+	if body.Request == nil || body.Request.ID != "01REQ" || body.Request.Title != "Dune" ||
+		body.Request.Year != 2021 || body.Request.Reason != "Already available in 4K" {
+		t.Fatalf("unexpected request block: %+v", body.Request)
+	}
+}
+
 func TestBuildDiscordWebhookPayloadTestMarker(t *testing.T) {
 	payload, err := BuildDiscordWebhookPayload(webhookTestRow(), true)
 	if err != nil {

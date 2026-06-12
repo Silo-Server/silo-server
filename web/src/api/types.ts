@@ -2230,10 +2230,14 @@ export interface NotificationReasonFlags {
   watchlist?: boolean;
   continue_watching?: boolean;
   next_up?: boolean;
-  // request.fulfilled operational payload
+  // request.* operational payload (title/year/reason ride on
+  // request.approved / request.declined, which have no catalog item yet)
   request_id?: string;
   tmdb_id?: number;
   media_type?: string;
+  title?: string;
+  year?: number;
+  reason?: string;
 }
 
 export interface AppNotification {

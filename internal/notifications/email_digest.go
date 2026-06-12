@@ -52,6 +52,10 @@ func (c *emailChannel) hasPendingSince(ctx context.Context, profileID string, si
 	return c.deliveries.HasForProfileSince(ctx, profileID, since)
 }
 
+func (c *emailChannel) hasTransactionalPendingSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
+	return c.deliveries.HasTransactionalForProfileSince(ctx, profileID, since)
+}
+
 func (c *emailChannel) listSince(ctx context.Context, tx pgx.Tx, profileID string, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
 	return c.deliveries.ListForProfileSince(ctx, tx, profileID, since, until, limit)
 }
