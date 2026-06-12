@@ -149,6 +149,29 @@ type DeliveryRow struct {
 	EpisodeNumber   *int
 	PosterPath      string
 	PosterThumbhash string
+	// PosterSourcePath is the provider-origin artwork path preserved when
+	// image caching rewrote PosterPath to a local storage key; embeds fall
+	// back to it to build public provider-CDN poster URLs.
+	PosterSourcePath string
+	// PosterURL is the fetchable poster URL chosen for outbound embeds by
+	// the sender layer (System.discordPosterURL). Transient — never read
+	// from or written to the database; empty renders the embed without an
+	// image.
+	PosterURL string
+	// Catalog enrichment rendered by outbound channels (Discord embeds).
+	// Series-level fields describe the joined media_items row, which for
+	// request.fulfilled deliveries is the matched movie or series itself.
+	MediaType       string // media_items.type: "movie" | "series"
+	Year            int
+	SeriesOverview  string
+	EpisodeOverview string
+	Genres          []string
+	ContentRating   string
+	RatingIMDB      float64
+	RatingTMDB      float64
+	IMDBID          string
+	TMDBID          string
+	TVDBID          string
 }
 
 // InsertedDelivery identifies a delivery row actually inserted by a bulk

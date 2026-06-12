@@ -145,10 +145,21 @@ func webhookTestRow() DeliveryRow {
 			ReasonFlags: []byte(`{"favorite":true,"continue_watching":true}`),
 			CreatedAt:   time.Date(2026, 4, 28, 12, 34, 56, 0, time.UTC),
 		},
-		SeriesTitle:   "Severance",
-		EpisodeTitle:  "Hello, Ms. Cobel",
-		SeasonNumber:  &season,
-		EpisodeNumber: &episode,
+		SeriesTitle:     "Severance",
+		EpisodeTitle:    "Hello, Ms. Cobel",
+		SeasonNumber:    &season,
+		EpisodeNumber:   &episode,
+		PosterPath:      testSeriesPosterPath,
+		PosterURL:       testSeriesPosterCDN,
+		MediaType:       "series",
+		SeriesOverview:  "Mark leads a team whose memories have been surgically divided.",
+		EpisodeOverview: "Mark is promoted after the disappearance of his colleague.",
+		Genres:          []string{"Drama", "Sci-Fi & Fantasy"},
+		ContentRating:   "TV-MA",
+		RatingIMDB:      8.7,
+		IMDBID:          "tt11280740",
+		TMDBID:          "95396",
+		TVDBID:          "371980",
 	}
 }
 
@@ -158,18 +169,8 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 	var body struct {
-		Username string `json:"username"`
-		Embeds   []struct {
-			Title  string `json:"title"`
-			Color  int    `json:"color"`
-			Footer struct {
-				Text string `json:"text"`
-			} `json:"footer"`
-			Fields []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"fields"`
-		} `json:"embeds"`
+		Username string         `json:"username"`
+		Embeds   []discordEmbed `json:"embeds"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil {
 		t.Fatalf("payload is not valid JSON: %v", err)
@@ -184,14 +185,118 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 	if embed.Color != discordColorFavorite {
 		t.Fatalf("favorite reason must pick the favorite color, got %d", embed.Color)
 	}
-	if embed.Fields[0].Name != "Reason" || embed.Fields[0].Value != "Favorited & Continue Watching" {
-		t.Fatalf("unexpected reason field: %+v", embed.Fields[0])
+	if embed.Author == nil || embed.Author.Name != "New episode on Silo" {
+		t.Fatalf("unexpected author %+v", embed.Author)
 	}
-	// The v1 privacy contract: no image, url, thumbnail, or avatar fields.
-	for _, forbidden := range []string{`"image"`, `"thumbnail"`, `"avatar_url"`, `"url"`} {
-		if strings.Contains(string(payload), forbidden) {
-			t.Fatalf("v1 Discord payload must not contain %s: %s", forbidden, payload)
+	if embed.URL != "https://www.themoviedb.org/tv/95396" {
+		t.Fatalf("unexpected title URL %q", embed.URL)
+	}
+	if embed.Thumbnail == nil || embed.Thumbnail.URL != testSeriesPosterCDN {
+		t.Fatalf("unexpected thumbnail %+v", embed.Thumbnail)
+	}
+	// Episode overview wins over the series overview; provider links follow.
+	if !strings.HasPrefix(embed.Description, "Mark is promoted") ||
+		!strings.Contains(embed.Description, "[TMDB](https://www.themoviedb.org/tv/95396)") ||
+		!strings.Contains(embed.Description, "[IMDb](https://www.imdb.com/title/tt11280740/)") ||
+		!strings.Contains(embed.Description, "[TVDB](https://thetvdb.com/dereferrer/series/371980)") {
+		t.Fatalf("unexpected description %q", embed.Description)
+	}
+	if len(embed.Fields) != 3 ||
+		embed.Fields[0].Name != "Reason" || embed.Fields[0].Value != "Favorited & Continue Watching" ||
+		embed.Fields[1].Value != "★ 8.7 IMDb" ||
+		embed.Fields[2].Value != "Drama, Sci-Fi & Fantasy" {
+		t.Fatalf("unexpected fields: %+v", embed.Fields)
+	}
+	if embed.Footer == nil || embed.Footer.Text != "Silo • TV-MA" {
+		t.Fatalf("unexpected footer %+v", embed.Footer)
+	}
+	// The privacy contract: only public provider origins may appear — never
+	// this server's own URL (which the builder cannot even see).
+	for _, origin := range allOriginsIn(t, string(payload)) {
+		switch origin {
+		case "www.themoviedb.org", "image.tmdb.org", "www.imdb.com", "thetvdb.com":
+		default:
+			t.Fatalf("payload names non-provider origin %q: %s", origin, payload)
 		}
+	}
+}
+
+// allOriginsIn extracts every http(s) host named anywhere in the payload.
+func allOriginsIn(t *testing.T, payload string) []string {
+	t.Helper()
+	hosts := make([]string, 0, 4)
+	rest := payload
+	for {
+		at := strings.Index(rest, "https://")
+		if at < 0 {
+			break
+		}
+		rest = rest[at+len("https://"):]
+		end := strings.IndexAny(rest, "/\"\\)")
+		if end < 0 {
+			end = len(rest)
+		}
+		hosts = append(hosts, rest[:end])
+	}
+	if strings.Contains(payload, "http://") {
+		t.Fatalf("payload contains insecure http:// URL: %s", payload)
+	}
+	return hosts
+}
+
+func TestBuildDiscordWebhookPayloadWithoutPosterURL(t *testing.T) {
+	row := webhookTestRow()
+	// The poster decision is the sender layer's; a row without a resolved
+	// PosterURL must render without an image regardless of stored paths.
+	row.PosterURL = ""
+	payload, err := BuildDiscordWebhookPayload(row, false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	if strings.Contains(string(payload), `"thumbnail"`) {
+		t.Fatalf("rows without a resolved poster URL must not render a thumbnail: %s", payload)
+	}
+}
+
+// fakePresigner fakes the catalog image resolver: every path presigns to a
+// recognizable server-storage URL.
+type fakePresigner struct{}
+
+func (fakePresigner) PresignImageURL(_ context.Context, path, _, _ string) string {
+	return "https://s3.example.com/" + path + "?sig=abc"
+}
+
+func TestDiscordPosterURLModes(t *testing.T) {
+	const cachedKey = "tmdb/series/95396/poster/original.jpg"
+	system := func(mode string, images ImageURLResolver) *System {
+		return &System{
+			Settings: NewSettings(mapSettingReader{SettingDiscordPosterMode: mode}),
+			images:   images,
+		}
+	}
+	ctx := context.Background()
+
+	// Off: nothing renders, even provider-CDN-resolvable artwork.
+	if got := system("off", fakePresigner{}).discordPosterURL(ctx, testSeriesPosterPath, ""); got != "" {
+		t.Fatalf("mode off must drop posters, got %q", got)
+	}
+	// Provider (default): public CDN URLs only; cached keys never presign.
+	if got := system("", fakePresigner{}).discordPosterURL(ctx, testSeriesPosterPath, ""); got != testSeriesPosterCDN {
+		t.Fatalf("provider mode CDN resolution failed, got %q", got)
+	}
+	if got := system("", fakePresigner{}).discordPosterURL(ctx, cachedKey, ""); got != "" {
+		t.Fatalf("provider mode must not presign cached keys, got %q", got)
+	}
+	// Server: provider CDN still wins; cached keys presign as the fallback.
+	if got := system("server", fakePresigner{}).discordPosterURL(ctx, cachedKey, testSeriesPosterPath); got != testSeriesPosterCDN {
+		t.Fatalf("server mode must still prefer provider CDN, got %q", got)
+	}
+	if got := system("server", fakePresigner{}).discordPosterURL(ctx, cachedKey, ""); got != "https://s3.example.com/"+cachedKey+"?sig=abc" {
+		t.Fatalf("server mode presign fallback failed, got %q", got)
+	}
+	// Server without a wired resolver degrades to no image.
+	if got := system("server", nil).discordPosterURL(ctx, cachedKey, ""); got != "" {
+		t.Fatalf("server mode without resolver must render no image, got %q", got)
 	}
 }
 
@@ -206,7 +311,12 @@ func requestFulfilledTestRow() DeliveryRow {
 			ReasonFlags: []byte(`{"request_id":"01REQ","tmdb_id":438631,"media_type":"movie"}`),
 			CreatedAt:   time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
 		},
-		SeriesTitle: "Dune",
+		SeriesTitle:    "Dune",
+		MediaType:      "movie",
+		Year:           2021,
+		SeriesOverview: "Paul Atreides, a brilliant and gifted young man.",
+		RatingTMDB:     7.8,
+		TMDBID:         "438631",
 	}
 }
 
@@ -216,14 +326,7 @@ func TestBuildDiscordWebhookPayloadRequestFulfilled(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 	var body struct {
-		Embeds []struct {
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			Fields      []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"fields"`
-		} `json:"embeds"`
+		Embeds []discordEmbed `json:"embeds"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil {
 		t.Fatalf("payload is not valid JSON: %v", err)
@@ -232,14 +335,22 @@ func TestBuildDiscordWebhookPayloadRequestFulfilled(t *testing.T) {
 		t.Fatalf("unexpected body shape: %+v", body)
 	}
 	embed := body.Embeds[0]
-	if embed.Title != "Dune" {
+	if embed.Title != "Dune (2021)" {
 		t.Fatalf("unexpected title %q", embed.Title)
 	}
-	if embed.Description != "Your media request is now available on Silo" {
+	if embed.Author == nil || embed.Author.Name != "Your request is now available on Silo" {
+		t.Fatalf("unexpected author %+v", embed.Author)
+	}
+	if embed.URL != "https://www.themoviedb.org/movie/438631" {
+		t.Fatalf("unexpected title URL %q", embed.URL)
+	}
+	if !strings.HasPrefix(embed.Description, "Paul Atreides") {
 		t.Fatalf("unexpected description %q", embed.Description)
 	}
-	if len(embed.Fields) != 1 || embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" {
-		t.Fatalf("expected a single Type=Movie field, got %+v", embed.Fields)
+	if len(embed.Fields) != 2 ||
+		embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" ||
+		embed.Fields[1].Name != "Rating" || embed.Fields[1].Value != "★ 7.8 TMDB" {
+		t.Fatalf("expected Type and Rating fields, got %+v", embed.Fields)
 	}
 }
 

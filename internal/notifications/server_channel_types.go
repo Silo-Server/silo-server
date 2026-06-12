@@ -93,8 +93,12 @@ func (c ServerChannel) WantsRequestEvent(event string) bool {
 type RequestEventInfo struct {
 	RequestID     string
 	TMDBID        int
+	TVDBID        int
+	IMDBID        string
 	MediaType     string // "movie" | "series"
 	Title         string
 	Year          int
+	Overview      string
+	PosterPath    string // raw TMDB image path ("/abc.jpg") from discovery
 	RequesterName string
 }

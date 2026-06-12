@@ -61,7 +61,19 @@ const deliveryRowSelect = `
 	       COALESCE(e.title, '') AS episode_title,
 	       e.season_number, e.episode_number,
 	       COALESCE(s.poster_path, '') AS poster_path,
-	       COALESCE(s.poster_thumbhash, '') AS poster_thumbhash
+	       COALESCE(s.poster_thumbhash, '') AS poster_thumbhash,
+	       COALESCE(s.poster_source_path, '') AS poster_source_path,
+	       COALESCE(s.type, '') AS media_type,
+	       COALESCE(s.year, 0) AS year,
+	       COALESCE(s.overview, '') AS series_overview,
+	       COALESCE(e.overview, '') AS episode_overview,
+	       COALESCE(s.genres, '{}'::text[]) AS genres,
+	       COALESCE(s.content_rating, '') AS content_rating,
+	       COALESCE(s.rating_imdb, 0) AS rating_imdb,
+	       COALESCE(s.rating_tmdb, 0) AS rating_tmdb,
+	       COALESCE(s.imdb_id, '') AS imdb_id,
+	       COALESCE(s.tmdb_id, '') AS tmdb_id,
+	       COALESCE(s.tvdb_id, '') AS tvdb_id
 	FROM notification_deliveries d
 	LEFT JOIN episodes e ON e.content_id = d.episode_id
 	LEFT JOIN media_items s ON s.content_id = d.series_id`
@@ -76,7 +88,10 @@ func scanDeliveryRows(rows pgx.Rows) ([]DeliveryRow, error) {
 			&row.LibraryID, &row.SeriesID, &row.EpisodeID,
 			&row.Type, &row.ReasonFlags, &row.Status, &row.ReadAt, &row.DeliveredAt, &row.CreatedAt,
 			&row.SeriesTitle, &row.EpisodeTitle, &row.SeasonNumber, &row.EpisodeNumber,
-			&row.PosterPath, &row.PosterThumbhash,
+			&row.PosterPath, &row.PosterThumbhash, &row.PosterSourcePath,
+			&row.MediaType, &row.Year, &row.SeriesOverview, &row.EpisodeOverview,
+			&row.Genres, &row.ContentRating, &row.RatingIMDB, &row.RatingTMDB,
+			&row.IMDBID, &row.TMDBID, &row.TVDBID,
 		); err != nil {
 			return nil, fmt.Errorf("scan delivery row: %w", err)
 		}

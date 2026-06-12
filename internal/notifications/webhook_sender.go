@@ -71,7 +71,11 @@ type webhookSender struct {
 	// operational posts the auto-disable notice through the system's shared
 	// durable dispatch path. Wired by NewSystem after construction.
 	operational func(ctx context.Context, delivery Delivery, opts OperationalDispatch) (*InsertedDelivery, error)
-	logger      *slog.Logger
+	// posterURL picks the artwork URL Discord embeds may carry (admin poster
+	// mode + provider-CDN/presign resolution). Wired by NewSystem after
+	// construction; nil renders embeds without images.
+	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
+	logger    *slog.Logger
 }
 
 func newWebhookSender(
@@ -133,6 +137,9 @@ func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow
 	url, err := s.decryptURL(hook)
 	if err != nil {
 		return webhookSendResult{Message: "webhook URL could not be decrypted"}
+	}
+	if hook.Type == WebhookTypeDiscord && s.posterURL != nil {
+		row.PosterURL = s.posterURL(ctx, row.PosterPath, row.PosterSourcePath)
 	}
 	body, headers, err := s.buildPayload(hook, row, test)
 	if err != nil {

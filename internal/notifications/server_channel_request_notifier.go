@@ -55,12 +55,18 @@ func requestEventInfoFor(req requests.Request) RequestEventInfo {
 	info := RequestEventInfo{
 		RequestID:     req.ID,
 		TMDBID:        req.TMDBID,
+		IMDBID:        req.IMDbID,
 		MediaType:     string(req.MediaType),
 		Title:         req.Title,
+		Overview:      req.Overview,
+		PosterPath:    req.PosterPath,
 		RequesterName: req.RequesterUsername,
 	}
 	if req.Year != nil {
 		info.Year = *req.Year
+	}
+	if req.TVDBID != nil {
+		info.TVDBID = *req.TVDBID
 	}
 	return info
 }

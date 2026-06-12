@@ -35,14 +35,29 @@ type discordEmbedFooter struct {
 	Text string `json:"text"`
 }
 
-// discordEmbed deliberately has no image, url, or thumbnail fields: in v1 the
-// embed must never name an origin Discord would fetch from, because that
-// origin would be the user's server URL. The v1.5 CDN proxy re-enables images
-// (docs/superpowers/plans/notifications/04, "Discord" payload notes).
+type discordEmbedAuthor struct {
+	Name string `json:"name"`
+}
+
+type discordEmbedMedia struct {
+	URL string `json:"url"`
+}
+
+// discordEmbed names external origins under the admin's poster mode
+// (System.discordPosterURL): public provider services (themoviedb.org,
+// imdb.com, thetvdb.com and their image CDNs) by default, plus presigned
+// server-storage URLs only under the explicit "server" opt-in — Discord
+// fetches thumbnail URLs and the raw payload is visible to channel members,
+// so a self-hosted URL reveals the server's address (docs/superpowers/plans/
+// notifications/04, "Server URL leakage"). Builders never derive artwork
+// URLs themselves; they render the PosterURL the sender layer resolved.
 type discordEmbed struct {
 	Title       string              `json:"title"`
+	URL         string              `json:"url,omitempty"`
 	Description string              `json:"description,omitempty"`
 	Color       int                 `json:"color"`
+	Author      *discordEmbedAuthor `json:"author,omitempty"`
+	Thumbnail   *discordEmbedMedia  `json:"thumbnail,omitempty"`
 	Footer      *discordEmbedFooter `json:"footer,omitempty"`
 	Timestamp   string              `json:"timestamp,omitempty"`
 	Fields      []discordEmbedField `json:"fields,omitempty"`
@@ -95,28 +110,48 @@ func BuildDiscordDMPayload(rows []DeliveryRow) ([]byte, error) {
 	return json.Marshal(body)
 }
 
+// discordEmbedAuthorLine renders the small "what happened" line above the
+// embed title.
+func discordEmbedAuthorLine(deliveryType string) string {
+	switch deliveryType {
+	case DeliveryTypeEpisodeAvailable:
+		return "New episode on Silo"
+	case DeliveryTypeRequestFulfilled:
+		return "Your request is now available on Silo"
+	default:
+		return genericNotificationTitle
+	}
+}
+
+// discordEmbedFooterText renders the footer: the sender brand, plus the
+// content rating when known so the advisory rides along unobtrusively.
+func discordEmbedFooterText(contentRating string, test bool) string {
+	if test {
+		return "Silo test notification"
+	}
+	if contentRating != "" {
+		return siloSenderName + " • " + truncateWithEllipsis(contentRating, 32)
+	}
+	return siloSenderName
+}
+
 // buildDiscordEmbed renders one delivery as a Discord embed within all of
-// Discord's per-embed limits.
+// Discord's per-embed limits: poster thumbnail, overview teaser, provider
+// links, rating, and genres on top of the title/reason basics. The
+// season/episode code lives in the title, so no dedicated fields repeat it.
 func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 	flags := parseReasonFlags(row.ReasonFlags)
 
-	title := discordEmbedTitle(row)
 	// Titles assembled from catalog metadata virtually never approach the
 	// limit, but Discord hard-rejects oversized embeds, so clip as a last
 	// resort even though the truncation policy prefers other fields.
-	title = truncateWithEllipsis(title, discordTitleLimit)
+	title := truncateWithEllipsis(discordEmbedTitle(row), discordTitleLimit)
 
-	description := "New episode available on Silo"
-	if row.Type == DeliveryTypeRequestFulfilled {
-		description = "Your media request is now available on Silo"
+	overview := row.SeriesOverview
+	if row.Type == DeliveryTypeEpisodeAvailable && row.EpisodeOverview != "" {
+		overview = row.EpisodeOverview
 	}
-	footerText := siloSenderName
-	if row.SeriesTitle != "" {
-		footerText = "Silo • " + truncateWithEllipsis(row.SeriesTitle, discordFooterLimit-16)
-	}
-	if test {
-		footerText = "Silo test notification"
-	}
+	ids := providerIDs{MediaType: row.MediaType, IMDB: row.IMDBID, TMDB: row.TMDBID, TVDB: row.TVDBID}
 
 	fields := make([]discordEmbedField, 0, 3)
 	if labels := reasonLabelList(flags); len(labels) > 0 {
@@ -131,27 +166,26 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 			fields = append(fields, discordEmbedField{Name: "Type", Value: mediaType, Inline: true})
 		}
 	}
-	if row.SeasonNumber != nil {
-		fields = append(fields, discordEmbedField{
-			Name:   "Season",
-			Value:  fmt.Sprintf("%d", *row.SeasonNumber),
-			Inline: true,
-		})
+	if rating := ratingLabel(row.RatingIMDB, row.RatingTMDB); rating != "" {
+		fields = append(fields, discordEmbedField{Name: "Rating", Value: rating, Inline: true})
 	}
-	if row.EpisodeNumber != nil {
-		fields = append(fields, discordEmbedField{
-			Name:   "Episode",
-			Value:  fmt.Sprintf("%d", *row.EpisodeNumber),
-			Inline: true,
-		})
+	if genres := genresLabel(row.Genres); genres != "" {
+		fields = append(fields, discordEmbedField{Name: "Genres", Value: genres, Inline: true})
 	}
 
 	embed := discordEmbed{
 		Title:       title,
-		Description: description,
+		URL:         ids.titleURL(),
+		Description: embedDescription(overview, ids),
 		Color:       discordEmbedColor(flags),
-		Footer:      &discordEmbedFooter{Text: footerText},
+		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row.Type)},
+		Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(row.ContentRating, test)},
 		Fields:      fields,
+	}
+	// The poster decision (provider CDN vs presigned vs none) is the sender
+	// layer's: builders render whatever PosterURL carries.
+	if row.PosterURL != "" {
+		embed.Thumbnail = &discordEmbedMedia{URL: row.PosterURL}
 	}
 	if !row.CreatedAt.IsZero() {
 		embed.Timestamp = row.CreatedAt.UTC().Format(time.RFC3339)
@@ -164,7 +198,7 @@ func discordEmbedTitle(row DeliveryRow) string {
 	switch row.Type {
 	case DeliveryTypeRequestFulfilled:
 		if row.SeriesTitle != "" {
-			return row.SeriesTitle
+			return titleWithYear(row.SeriesTitle, row.Year)
 		}
 		return "Request fulfilled"
 	case DeliveryTypeEpisodeAvailable:
@@ -213,6 +247,9 @@ func discordEmbedColor(flags ReasonFlags) int {
 
 func discordEmbedTotal(embed *discordEmbed) int {
 	total := len(embed.Title) + len(embed.Description)
+	if embed.Author != nil {
+		total += len(embed.Author.Name)
+	}
 	if embed.Footer != nil {
 		total += len(embed.Footer.Text)
 	}

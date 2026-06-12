@@ -1483,6 +1483,12 @@ func (s *MetadataService) mergeAndPersist(
 	if s.autoCacheImages.Load() && s.imageCacher != nil && isCanonicalWrite {
 		s.cacheItemImages(ctx, item, images)
 	}
+	// Refreshes that keep the already-cached poster (locked field, no new
+	// candidates) never pass through cacheItemImages' source capture, so the
+	// provider-origin path must survive from the existing row.
+	if item.PosterSourcePath == "" && existingItem != nil && item.PosterPath == existingItem.PosterPath {
+		item.PosterSourcePath = existingItem.PosterSourcePath
+	}
 
 	if isNew && contentID == "" {
 		var genErr error
@@ -5174,6 +5180,12 @@ func (s *MetadataService) cacheItemImages(ctx context.Context, item *models.Medi
 
 	for cr := range results {
 		j := jobs[cr.idx]
+		if j.field.imageType == ImagePoster {
+			// Keep the provider-origin path the cache rewrite erases below:
+			// outbound notification embeds build public provider-CDN poster
+			// URLs from it (local storage URLs never leave the server).
+			item.PosterSourcePath = j.url
+		}
 		*j.field.path = cachedOriginalImagePath(cr.result.BasePath, cr.result.Ext)
 		if j.field.thumbhash != nil && cr.result.Thumbhash != "" {
 			*j.field.thumbhash = cr.result.Thumbhash

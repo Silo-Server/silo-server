@@ -45,6 +45,7 @@ const (
 	SettingDiscordEnabled         = "notifications.discord_enabled"
 	SettingDiscordAllowPerEpisode = "notifications.discord.allow_per_episode"
 	SettingDiscordDigestHour      = "notifications.discord.digest_hour"
+	SettingDiscordPosterMode      = "notifications.discord.poster_mode"
 
 	SettingServerChannelsEnabled      = "notifications.server_channels_enabled"
 	SettingServerChannelsBatchSeconds = "notifications.server_channels.batch_seconds"
@@ -281,6 +282,33 @@ func (s *Settings) EmailExternalURL(ctx context.Context) string {
 // requires the configured bot credentials.
 func (s *Settings) DiscordEnabled(ctx context.Context) bool {
 	return s.boolSetting(ctx, SettingDiscordEnabled, false)
+}
+
+// Discord embed poster modes (SettingDiscordPosterMode values).
+const (
+	// DiscordPostersOff renders all Discord embeds without artwork.
+	DiscordPostersOff = "off"
+	// DiscordPostersProvider (default) allows artwork served by public
+	// provider CDNs only (image.tmdb.org, artworks.thetvdb.com).
+	DiscordPostersProvider = "provider"
+	// DiscordPostersServer additionally falls back to presigned URLs from
+	// this server's own image storage for locally cached artwork. The
+	// storage origin becomes visible to the destination and must be
+	// reachable from the internet for Discord to render the image.
+	DiscordPostersServer = "server"
+)
+
+// DiscordPosterMode controls artwork in outbound Discord embeds; unknown
+// values fall back to the provider-CDN-only default.
+func (s *Settings) DiscordPosterMode(ctx context.Context) string {
+	switch strings.TrimSpace(s.raw(ctx, SettingDiscordPosterMode)) {
+	case DiscordPostersOff:
+		return DiscordPostersOff
+	case DiscordPostersServer:
+		return DiscordPostersServer
+	default:
+		return DiscordPostersProvider
+	}
 }
 
 // DiscordAllowPerEpisode controls whether users may choose per-episode

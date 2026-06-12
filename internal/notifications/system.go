@@ -176,7 +176,7 @@ func NewSystem(
 	// configured at runtime); enabled() gates each pass on the bot token.
 	discordPrefs := NewDiscordPrefsRepository(pool)
 	discordClient := discord.NewClient()
-	discordWorker := newDiscordWorker(pool, deliveries, discordPrefs, settings, discordClient)
+	discordWorker, discordChannelInst := newDiscordWorker(pool, deliveries, discordPrefs, settings, discordClient)
 	dispatchers = append(dispatchers, newNudgeDispatcher(discordWorker))
 
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
@@ -231,6 +231,11 @@ func NewSystem(
 	}
 	if sender != nil {
 		sender.operational = system.DispatchOperational
+		sender.posterURL = system.discordPosterURL
+	}
+	discordChannelInst.posterURL = system.discordPosterURL
+	if serverChannelSweep != nil {
+		serverChannelSweep.posterURL = system.discordPosterURL
 	}
 	if webPushSenderInst != nil {
 		webPushSenderInst.payload = system.PayloadForRow
@@ -244,6 +249,25 @@ func (s *System) SetImageResolver(resolver ImageURLResolver) {
 	if s != nil {
 		s.images = resolver
 	}
+}
+
+// discordPosterURL resolves a delivery's poster to a URL a Discord embed may
+// carry, honoring the admin's poster mode: nothing when posters are off,
+// public provider CDN URLs when derivable, and — only on the explicit
+// "server" opt-in — a presigned URL from this server's own image storage.
+// Wired into the Discord send paths as their posterURL hook.
+func (s *System) discordPosterURL(ctx context.Context, posterPath, posterSourcePath string) string {
+	mode := s.Settings.DiscordPosterMode(ctx)
+	if mode == DiscordPostersOff {
+		return ""
+	}
+	if url := embedPosterURL(posterPath, posterSourcePath); url != "" {
+		return url
+	}
+	if mode != DiscordPostersServer || s.images == nil || posterPath == "" {
+		return ""
+	}
+	return s.images.PresignImageURL(ctx, posterPath, "poster", "")
 }
 
 // PayloadForRow converts a row to its wire shape, attaching a presigned

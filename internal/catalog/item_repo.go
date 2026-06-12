@@ -117,7 +117,7 @@ var itemColumnNames = []string{
 	"content_rating", "runtime", "overview", "tagline",
 	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 	"imdb_id", "tmdb_id", "tvdb_id",
-	"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
+	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
@@ -130,6 +130,7 @@ var itemColumnNames = []string{
 // lists coalesce them to ”.
 var nullableStringItemColumns = map[string]bool{
 	"poster_path":        true,
+	"poster_source_path": true,
 	"poster_thumbhash":   true,
 	"backdrop_path":      true,
 	"backdrop_thumbhash": true,
@@ -215,6 +216,7 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.TmdbID,
 		&item.TvdbID,
 		&item.PosterPath,
+		&item.PosterSourcePath,
 		&item.PosterThumbhash,
 		&item.BackdropPath,
 		&item.BackdropThumbhash,
@@ -278,6 +280,7 @@ func scanItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.TmdbID,
 			&item.TvdbID,
 			&item.PosterPath,
+			&item.PosterSourcePath,
 			&item.PosterThumbhash,
 			&item.BackdropPath,
 			&item.BackdropThumbhash,
@@ -351,6 +354,7 @@ func scanItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
 			&item.TmdbID,
 			&item.TvdbID,
 			&item.PosterPath,
+			&item.PosterSourcePath,
 			&item.PosterThumbhash,
 			&item.BackdropPath,
 			&item.BackdropThumbhash,
@@ -417,7 +421,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			content_rating, runtime, overview, tagline,
 			rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
 			imdb_id, tmdb_id, tvdb_id,
-			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+			poster_path, poster_source_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 			metadata_s3_path, metadata_etag, season_count,
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			show_status,
@@ -428,12 +432,12 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			$9, $10, $11, $12,
 			$13, $14, $15, $16,
 			$17, $18, $19,
-			$20, $21, $22, $23, $24,
-			$25, $26, $27,
-			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
-			$38,
-			$39, $40, $41,
-			$42, $43, $44
+			$20, $21, $22, $23, $24, $25,
+			$26, $27, $28,
+			$29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
+			$39,
+			$40, $41, $42,
+			$43, $44, $45
 		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
@@ -455,6 +459,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			tmdb_id = EXCLUDED.tmdb_id,
 			tvdb_id = EXCLUDED.tvdb_id,
 			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			backdrop_path = EXCLUDED.backdrop_path,
 			backdrop_thumbhash = EXCLUDED.backdrop_thumbhash,
@@ -502,6 +507,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 		item.TmdbID,
 		item.TvdbID,
 		item.PosterPath,
+		item.PosterSourcePath,
 		item.PosterThumbhash,
 		item.BackdropPath,
 		item.BackdropThumbhash,
@@ -1423,6 +1429,12 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	addString("tvdb_id", upd.TvdbID)
 	addIntArray("locked_fields", upd.LockedFields)
 	addString("poster_path", upd.PosterPath)
+	if upd.PosterPath != nil {
+		// An explicit poster override invalidates the provider-origin source
+		// path captured by image caching; outbound embeds must not keep
+		// rendering the replaced provider artwork.
+		setClauses = append(setClauses, "poster_source_path = NULL")
+	}
 	addString("poster_thumbhash", upd.PosterThumbhash)
 	addString("backdrop_path", upd.BackdropPath)
 	addString("backdrop_thumbhash", upd.BackdropThumbhash)

@@ -26,6 +26,9 @@ type discordChannel struct {
 	deliveries *DeliveryRepository
 	settings   *Settings
 	client     *discord.Client
+	// posterURL picks the artwork URL DM embeds may carry. Wired by
+	// NewSystem after construction; nil renders embeds without images.
+	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
 }
 
 // The assertion also keeps staticcheck's unused-analysis aware that the
@@ -33,20 +36,22 @@ type discordChannel struct {
 var _ accountChannel[int] = (*discordChannel)(nil)
 
 // newDiscordWorker assembles the Discord DM channel on the shared
-// account-channel engine.
+// account-channel engine, returning the channel too so NewSystem can wire
+// post-construction hooks (posterURL) on it.
 func newDiscordWorker(
 	pool *pgxpool.Pool,
 	deliveries *DeliveryRepository,
 	prefs *DiscordPrefsRepository,
 	settings *Settings,
 	client *discord.Client,
-) *accountChannelWorker[int] {
-	return newAccountChannelWorker(pool, &discordChannel{
+) (*accountChannelWorker[int], *discordChannel) {
+	channel := &discordChannel{
 		prefs:      prefs,
 		deliveries: deliveries,
 		settings:   settings,
 		client:     client,
-	})
+	}
+	return newAccountChannelWorker(pool, channel), channel
 }
 
 func (c *discordChannel) name() string { return "discord" }
@@ -122,6 +127,11 @@ func (c *discordChannel) send(ctx context.Context, tx pgx.Tx, userID int, _ stri
 		}
 	}
 
+	if c.posterURL != nil {
+		for i := range rows {
+			rows[i].PosterURL = c.posterURL(ctx, rows[i].PosterPath, rows[i].PosterSourcePath)
+		}
+	}
 	payload, err := BuildDiscordDMPayload(rows)
 	if err != nil {
 		return fmt.Errorf("build discord dm payload: %w", err)

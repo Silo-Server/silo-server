@@ -28,6 +28,7 @@ const KEYS = [
   "notifications.discord_enabled",
   "notifications.discord.allow_per_episode",
   "notifications.discord.digest_hour",
+  "notifications.discord.poster_mode",
   "notifications.server_channels_enabled",
   "notifications.server_channels.batch_seconds",
   "discord.client_id",
@@ -313,6 +314,18 @@ export default function NotificationsAdminSettings() {
         </FieldGroup>
 
         <FieldGroup label="Discord">
+          <SettingField
+            label="Embed Posters"
+            hint="Artwork in outgoing Discord messages (personal webhooks, bot DMs, server channels). Provider CDNs serve posters from TMDB/TVDB and never reveal this server. Server storage additionally serves locally cached posters from this server's image storage — its URL becomes visible to message recipients and must be reachable from the internet."
+            type="select"
+            value={form.getValue("notifications.discord.poster_mode") || "provider"}
+            options={[
+              { value: "provider", label: "Provider CDNs only (default)" },
+              { value: "server", label: "Provider CDNs + server storage" },
+              { value: "off", label: "No images" },
+            ]}
+            onChange={(v) => form.setValue("notifications.discord.poster_mode", v)}
+          />
           <SettingField
             label="Discord Bot"
             hint="Let users link their Discord account and receive notifications as bot DMs. Off by default; while off, Discord notifications are hidden everywhere."

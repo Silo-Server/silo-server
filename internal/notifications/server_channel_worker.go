@@ -28,6 +28,9 @@ type serverChannelWorker struct {
 	settings *Settings
 	logger   *slog.Logger
 	nudge    chan struct{}
+	// posterURL picks the artwork URL Discord embeds may carry. Wired by
+	// NewSystem after construction; nil renders embeds without images.
+	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
 
 	// Short-lived cache behind requestEventChannels.
 	requestChannelsMu        sync.Mutex
@@ -195,11 +198,17 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 		return false, tx.Commit(ctx)
 	}
 
-	titles, err := loadContentTitles(ctx, tx, fresh)
+	metas, err := loadContentMeta(ctx, tx, fresh)
 	if err != nil {
 		return false, err
 	}
-	groups := GroupContentEvents(fresh, titles)
+	groups := GroupContentEvents(fresh, metas)
+	if ch.Type == WebhookTypeDiscord && w.posterURL != nil {
+		for i := range groups {
+			groups[i].Meta.PosterURL = w.posterURL(ctx,
+				groups[i].Meta.PosterPath, groups[i].Meta.PosterSourcePath)
+		}
+	}
 
 	result := w.sender.sendContent(ctx, ch, groups, false)
 	if !result.OK {
@@ -228,9 +237,9 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 	return true, nil
 }
 
-// loadContentTitles batch-fetches display titles for every series and movie
+// loadContentMeta batch-fetches display metadata for every series and movie
 // in the batch, keyed by content id.
-func loadContentTitles(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map[string]ContentTitle, error) {
+func loadContentMeta(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map[string]ContentMeta, error) {
 	idSet := make(map[string]struct{}, len(events))
 	ids := make([]string, 0, len(events))
 	add := func(id string) {
@@ -249,27 +258,37 @@ func loadContentTitles(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (m
 			add(event.SeriesID)
 		}
 	}
-	titles := make(map[string]ContentTitle, len(ids))
+	metas := make(map[string]ContentMeta, len(ids))
 	if len(ids) == 0 {
-		return titles, nil
+		return metas, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT content_id, title, COALESCE(year, 0)
+		SELECT content_id, title, COALESCE(year, 0), COALESCE(type, ''),
+		       COALESCE(overview, ''), COALESCE(poster_path, ''),
+		       COALESCE(poster_source_path, ''),
+		       COALESCE(genres, '{}'::text[]), COALESCE(content_rating, ''),
+		       COALESCE(rating_imdb, 0), COALESCE(rating_tmdb, 0),
+		       COALESCE(imdb_id, ''), COALESCE(tmdb_id, ''), COALESCE(tvdb_id, '')
 		FROM media_items
 		WHERE content_id = ANY($1)`, ids)
 	if err != nil {
-		return nil, fmt.Errorf("load content titles: %w", err)
+		return nil, fmt.Errorf("load content metadata: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var title ContentTitle
-		if err := rows.Scan(&id, &title.Title, &title.Year); err != nil {
-			return nil, fmt.Errorf("scan content title: %w", err)
+		var meta ContentMeta
+		if err := rows.Scan(&id, &meta.Title, &meta.Year, &meta.Type,
+			&meta.Overview, &meta.PosterPath, &meta.PosterSourcePath,
+			&meta.Genres, &meta.ContentRating,
+			&meta.RatingIMDB, &meta.RatingTMDB,
+			&meta.IMDBID, &meta.TMDBID, &meta.TVDBID,
+		); err != nil {
+			return nil, fmt.Errorf("scan content metadata: %w", err)
 		}
-		titles[id] = title
+		metas[id] = meta
 	}
-	return titles, rows.Err()
+	return metas, rows.Err()
 }
 
 // requestEventChannels returns the request-subscribed channel list through a
@@ -304,6 +323,11 @@ func (w *serverChannelWorker) PostRequestEvent(ctx context.Context, event string
 	if err != nil {
 		w.logger.Warn("server channel request post: list channels failed", "error", err)
 		return
+	}
+	// Request posters are raw TMDB paths rendered by the Discord builder;
+	// "off" is the only poster mode that changes them.
+	if w.settings.DiscordPosterMode(ctx) == DiscordPostersOff {
+		info.PosterPath = ""
 	}
 	now := time.Now()
 	for _, ch := range channels {

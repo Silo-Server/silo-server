@@ -19,11 +19,32 @@ const (
 	serverChannelColorFulfilled = 5814783  // blurple — request fulfilled
 )
 
-// ContentTitle is the display metadata for one catalog item (series or
-// movie), fetched in one batched query by the sweep worker.
-type ContentTitle struct {
-	Title string
-	Year  int
+// ContentMeta is the display metadata for one catalog item (series or
+// movie), fetched in one batched query by the sweep worker. Only metadata a
+// Discord embed renders is carried; everything else stays in the catalog.
+type ContentMeta struct {
+	Title      string
+	Year       int
+	Type       string // media_items.type: "movie" | "series"
+	Overview   string
+	PosterPath string
+	// PosterSourcePath is the provider-origin path preserved when image
+	// caching rewrote PosterPath to a local storage key.
+	PosterSourcePath string
+	// PosterURL is the fetchable poster URL chosen by the sweep worker
+	// (System.discordPosterURL); empty renders the embed without an image.
+	PosterURL     string
+	Genres        []string
+	ContentRating string
+	RatingIMDB    float64
+	RatingTMDB    float64
+	IMDBID        string
+	TMDBID        string
+	TVDBID        string
+}
+
+func (m ContentMeta) providerIDs() providerIDs {
+	return providerIDs{MediaType: m.Type, IMDB: m.IMDBID, TMDB: m.TMDBID, TVDB: m.TVDBID}
 }
 
 // ContentGroup is one rendered unit of a content digest: a movie, or every
@@ -32,21 +53,21 @@ type ContentGroup struct {
 	Kind      string // EventKindEpisode | EventKindMovie
 	LibraryID int
 	// Episode groups.
-	SeriesID    string
-	SeriesTitle string
-	Episodes    []ReleaseEvent // ascending episode_key
+	SeriesID string
+	Episodes []ReleaseEvent // ascending episode_key
 	// Movie groups.
 	ItemID string
-	Title  string
-	Year   int
+	// Meta describes the series (episode groups) or the movie itself, with
+	// Title already defaulted when the catalog row is missing.
+	Meta ContentMeta
 }
 
 // GroupContentEvents folds a batch of release events into display groups:
 // episodes group per (library, series) so a season pack renders as one line,
 // movies render individually but dedupe by item across libraries. Group order
-// follows first appearance in the batch (sweep order). titles is keyed by
+// follows first appearance in the batch (sweep order). metas is keyed by
 // series_id / item_id; missing entries fall back to generic labels.
-func GroupContentEvents(events []ReleaseEvent, titles map[string]ContentTitle) []ContentGroup {
+func GroupContentEvents(events []ReleaseEvent, metas map[string]ContentMeta) []ContentGroup {
 	type groupKey struct {
 		kind      string
 		libraryID int
@@ -65,17 +86,15 @@ func GroupContentEvents(events []ReleaseEvent, titles map[string]ContentTitle) [
 				continue
 			}
 			seenMovies[event.ItemID] = struct{}{}
-			title := titles[event.ItemID]
-			display := title.Title
-			if display == "" {
-				display = "New movie"
+			meta := metas[event.ItemID]
+			if meta.Title == "" {
+				meta.Title = "New movie"
 			}
 			groups = append(groups, ContentGroup{
 				Kind:      EventKindMovie,
 				LibraryID: event.LibraryID,
 				ItemID:    event.ItemID,
-				Title:     display,
-				Year:      title.Year,
+				Meta:      meta,
 			})
 		default:
 			key := groupKey{EventKindEpisode, event.LibraryID, event.SeriesID}
@@ -83,17 +102,17 @@ func GroupContentEvents(events []ReleaseEvent, titles map[string]ContentTitle) [
 				groups[at].Episodes = append(groups[at].Episodes, event)
 				continue
 			}
-			seriesTitle := titles[event.SeriesID].Title
-			if seriesTitle == "" {
-				seriesTitle = genericEpisodeTitle
+			meta := metas[event.SeriesID]
+			if meta.Title == "" {
+				meta.Title = genericEpisodeTitle
 			}
 			index[key] = len(groups)
 			groups = append(groups, ContentGroup{
-				Kind:        EventKindEpisode,
-				LibraryID:   event.LibraryID,
-				SeriesID:    event.SeriesID,
-				SeriesTitle: seriesTitle,
-				Episodes:    []ReleaseEvent{event},
+				Kind:      EventKindEpisode,
+				LibraryID: event.LibraryID,
+				SeriesID:  event.SeriesID,
+				Episodes:  []ReleaseEvent{event},
+				Meta:      meta,
 			})
 		}
 	}
@@ -131,16 +150,13 @@ func episodeRangeLabel(episodes []ReleaseEvent) string {
 func contentGroupTitle(group ContentGroup) string {
 	switch group.Kind {
 	case EventKindMovie:
-		if group.Year > 0 {
-			return fmt.Sprintf("%s (%d)", group.Title, group.Year)
-		}
-		return group.Title
+		return titleWithYear(group.Meta.Title, group.Meta.Year)
 	default:
 		if len(group.Episodes) == 1 {
-			return fmt.Sprintf("%s — %s", group.SeriesTitle, episodeRangeLabel(group.Episodes))
+			return fmt.Sprintf("%s — %s", group.Meta.Title, episodeRangeLabel(group.Episodes))
 		}
 		return fmt.Sprintf("%s — %d new episodes (%s)",
-			group.SeriesTitle, len(group.Episodes), episodeRangeLabel(group.Episodes))
+			group.Meta.Title, len(group.Episodes), episodeRangeLabel(group.Episodes))
 	}
 }
 
@@ -158,24 +174,34 @@ func BuildServerChannelDiscordContent(groups []ContentGroup, test bool) ([]byte,
 		groups = groups[len(groups)-serverChannelMaxEmbeds:]
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	footer := siloSenderName
-	if test {
-		footer = "Silo test notification"
-	}
 	embeds := make([]discordEmbed, 0, len(groups))
 	for _, group := range groups {
-		description := "New episodes available on Silo"
+		author := "New episodes available on Silo"
 		if group.Kind == EventKindMovie {
-			description = "New movie available on Silo"
+			author = "New movie available on Silo"
 		} else if len(group.Episodes) == 1 {
-			description = "New episode available on Silo"
+			author = "New episode available on Silo"
+		}
+		ids := group.Meta.providerIDs()
+		fields := make([]discordEmbedField, 0, 2)
+		if rating := ratingLabel(group.Meta.RatingIMDB, group.Meta.RatingTMDB); rating != "" {
+			fields = append(fields, discordEmbedField{Name: "Rating", Value: rating, Inline: true})
+		}
+		if genres := genresLabel(group.Meta.Genres); genres != "" {
+			fields = append(fields, discordEmbedField{Name: "Genres", Value: genres, Inline: true})
 		}
 		embed := discordEmbed{
 			Title:       truncateWithEllipsis(contentGroupTitle(group), discordTitleLimit),
-			Description: description,
+			URL:         ids.titleURL(),
+			Description: embedDescription(group.Meta.Overview, ids),
 			Color:       serverChannelColorContent,
-			Footer:      &discordEmbedFooter{Text: footer},
+			Author:      &discordEmbedAuthor{Name: author},
+			Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(group.Meta.ContentRating, test)},
 			Timestamp:   now,
+			Fields:      fields,
+		}
+		if group.Meta.PosterURL != "" {
+			embed.Thumbnail = &discordEmbedMedia{URL: group.Meta.PosterURL}
 		}
 		enforceDiscordTotalLimit(&embed)
 		embeds = append(embeds, embed)
@@ -236,11 +262,11 @@ func BuildServerChannelGenericContent(groups []ContentGroup, channelID string, t
 		switch group.Kind {
 		case EventKindMovie:
 			row.ItemID = group.ItemID
-			row.Title = group.Title
-			row.Year = group.Year
+			row.Title = group.Meta.Title
+			row.Year = group.Meta.Year
 		default:
 			row.SeriesID = group.SeriesID
-			row.SeriesTitle = group.SeriesTitle
+			row.SeriesTitle = group.Meta.Title
 			row.EpisodeCount = len(group.Episodes)
 			if len(group.Episodes) > 0 {
 				first := group.Episodes[0]
@@ -299,8 +325,13 @@ func BuildServerChannelRequestDiscord(event string, info RequestEventInfo) ([]by
 	if title == "" {
 		title = "Media request"
 	}
-	if info.Year > 0 {
-		title = fmt.Sprintf("%s (%d)", title, info.Year)
+	title = titleWithYear(title, info.Year)
+	ids := providerIDs{MediaType: info.MediaType, IMDB: info.IMDBID}
+	if info.TMDBID > 0 {
+		ids.TMDB = fmt.Sprintf("%d", info.TMDBID)
+	}
+	if info.TVDBID > 0 {
+		ids.TVDB = fmt.Sprintf("%d", info.TVDBID)
 	}
 	fields := make([]discordEmbedField, 0, 2)
 	if label := mediaTypeLabel(info.MediaType); label != "" {
@@ -315,11 +346,18 @@ func BuildServerChannelRequestDiscord(event string, info RequestEventInfo) ([]by
 	}
 	embed := discordEmbed{
 		Title:       truncateWithEllipsis(title, discordTitleLimit),
-		Description: requestEventDescription(event),
+		URL:         ids.titleURL(),
+		Description: embedDescription(info.Overview, ids),
 		Color:       requestEventColor(event),
+		Author:      &discordEmbedAuthor{Name: requestEventDescription(event)},
 		Footer:      &discordEmbedFooter{Text: siloSenderName},
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		Fields:      fields,
+	}
+	// Request poster paths are raw TMDB image paths from discovery, not
+	// stored catalog artwork.
+	if poster := tmdbRawImageURL(info.PosterPath); poster != "" {
+		embed.Thumbnail = &discordEmbedMedia{URL: poster}
 	}
 	enforceDiscordTotalLimit(&embed)
 	return json.Marshal(discordWebhookBody{Embeds: []discordEmbed{embed}, Username: siloSenderName})
@@ -367,9 +405,9 @@ func BuildServerChannelRequestGeneric(event string, info RequestEventInfo, chann
 // mediaTypeLabel renders a request media type as a display label.
 func mediaTypeLabel(mediaType string) string {
 	switch mediaType {
-	case "movie":
+	case mediaTypeMovie:
 		return "Movie"
-	case "series":
+	case mediaTypeSeries:
 		return "Series"
 	default:
 		return ""

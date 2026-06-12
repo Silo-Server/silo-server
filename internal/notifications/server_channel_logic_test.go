@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	testMovieTitle  = "Dune"
-	testSeriesTitle = "Severance"
+	testMovieTitle       = "Dune"
+	testSeriesTitle      = "Severance"
+	testSeriesPosterCDN  = "https://image.tmdb.org/t/p/w500/severance.jpg"
+	testSeriesPosterPath = "tmdb://poster/severance.jpg"
 )
 
 func episodeEvent(id string, libraryID int, seriesID string, season, episode int) ReleaseEvent {
@@ -35,7 +37,7 @@ func movieEvent(id string, libraryID int, itemID string) ReleaseEvent {
 }
 
 func TestGroupContentEvents(t *testing.T) {
-	titles := map[string]ContentTitle{
+	titles := map[string]ContentMeta{
 		"series-1": {Title: testSeriesTitle},
 		"movie-1":  {Title: testMovieTitle, Year: 2026},
 	}
@@ -110,11 +112,11 @@ func TestGroupContentEvents(t *testing.T) {
 			episodeEvent("1", 1, "unknown-series", 1, 1),
 			movieEvent("2", 1, "unknown-movie"),
 		}, nil)
-		if groups[0].SeriesTitle != genericEpisodeTitle {
-			t.Fatalf("unexpected series fallback %q", groups[0].SeriesTitle)
+		if groups[0].Meta.Title != genericEpisodeTitle {
+			t.Fatalf("unexpected series fallback %q", groups[0].Meta.Title)
 		}
-		if groups[1].Title != "New movie" {
-			t.Fatalf("unexpected movie fallback %q", groups[1].Title)
+		if groups[1].Meta.Title != "New movie" {
+			t.Fatalf("unexpected movie fallback %q", groups[1].Meta.Title)
 		}
 	})
 
@@ -168,7 +170,22 @@ func TestServerChannelWantsToggles(t *testing.T) {
 }
 
 func TestBuildServerChannelDiscordContent(t *testing.T) {
-	titles := map[string]ContentTitle{"series-1": {Title: testSeriesTitle}, "movie-1": {Title: testMovieTitle, Year: 2026}}
+	titles := map[string]ContentMeta{
+		"series-1": {
+			Title:         testSeriesTitle,
+			Type:          "series",
+			Overview:      "Mark leads a team whose memories have been surgically divided.",
+			PosterPath:    testSeriesPosterPath,
+			PosterURL:     testSeriesPosterCDN,
+			Genres:        []string{"Drama", "Sci-Fi & Fantasy", "Mystery", "Thriller"},
+			ContentRating: "TV-MA",
+			RatingIMDB:    8.7,
+			IMDBID:        "tt11280740",
+			TMDBID:        "95396",
+			TVDBID:        "371980",
+		},
+		"movie-1": {Title: testMovieTitle, Year: 2026, Type: "movie"},
+	}
 	groups := GroupContentEvents([]ReleaseEvent{
 		episodeEvent("1", 1, "series-1", 2, 1),
 		episodeEvent("2", 1, "series-1", 2, 2),
@@ -196,10 +213,35 @@ func TestBuildServerChannelDiscordContent(t *testing.T) {
 	if decoded.Content != "" {
 		t.Fatalf("no overflow expected, got content %q", decoded.Content)
 	}
-	// The v1 embed shape must not name any fetchable origin.
-	if strings.Contains(string(body), `"image"`) || strings.Contains(string(body), `"url"`) ||
-		strings.Contains(string(body), `"thumbnail"`) {
-		t.Fatal("server channel embeds must not contain image/url/thumbnail fields")
+
+	episodes := decoded.Embeds[0]
+	if episodes.Author == nil || episodes.Author.Name != "New episodes available on Silo" {
+		t.Fatalf("unexpected author %+v", episodes.Author)
+	}
+	if episodes.URL != "https://www.themoviedb.org/tv/95396" {
+		t.Fatalf("unexpected title URL %q", episodes.URL)
+	}
+	if episodes.Thumbnail == nil || episodes.Thumbnail.URL != testSeriesPosterCDN {
+		t.Fatalf("unexpected thumbnail %+v", episodes.Thumbnail)
+	}
+	if !strings.HasPrefix(episodes.Description, "Mark leads a team") ||
+		!strings.Contains(episodes.Description, "[IMDb](https://www.imdb.com/title/tt11280740/)") ||
+		!strings.Contains(episodes.Description, "[TVDB](https://thetvdb.com/dereferrer/series/371980)") {
+		t.Fatalf("unexpected description %q", episodes.Description)
+	}
+	if len(episodes.Fields) != 2 ||
+		episodes.Fields[0].Value != "★ 8.7 IMDb" ||
+		episodes.Fields[1].Value != "Drama, Sci-Fi & Fantasy, Mystery" {
+		t.Fatalf("unexpected fields %+v", episodes.Fields)
+	}
+	if episodes.Footer == nil || episodes.Footer.Text != "Silo • TV-MA" {
+		t.Fatalf("unexpected footer %+v", episodes.Footer)
+	}
+
+	// Embeds may name public provider origins only — never this server's.
+	movie := decoded.Embeds[1]
+	if movie.URL != "" || movie.Thumbnail != nil {
+		t.Fatalf("metadata-less movie must omit url/thumbnail, got %+v", movie)
 	}
 }
 
@@ -209,8 +251,7 @@ func TestBuildServerChannelDiscordContentOverflow(t *testing.T) {
 		groups = append(groups, ContentGroup{
 			Kind:   EventKindMovie,
 			ItemID: "movie",
-			Title:  "Movie",
-			Year:   2000 + i,
+			Meta:   ContentMeta{Title: "Movie", Year: 2000 + i},
 		})
 	}
 	body, err := BuildServerChannelDiscordContent(groups, false)
@@ -237,7 +278,7 @@ func TestBuildServerChannelDiscordContentOverflow(t *testing.T) {
 }
 
 func TestBuildServerChannelGenericContent(t *testing.T) {
-	titles := map[string]ContentTitle{"series-1": {Title: testSeriesTitle}, "movie-1": {Title: testMovieTitle, Year: 2026}}
+	titles := map[string]ContentMeta{"series-1": {Title: testSeriesTitle}, "movie-1": {Title: testMovieTitle, Year: 2026}}
 	groups := GroupContentEvents([]ReleaseEvent{
 		episodeEvent("1", 7, "series-1", 2, 1),
 		episodeEvent("2", 7, "series-1", 2, 3),
@@ -277,6 +318,8 @@ func TestBuildServerChannelRequestPayloads(t *testing.T) {
 		MediaType:     "movie",
 		Title:         testMovieTitle,
 		Year:          2026,
+		Overview:      "Paul Atreides unites with the Fremen.",
+		PosterPath:    "/dune.jpg",
 		RequesterName: "quick",
 	}
 
@@ -295,8 +338,18 @@ func TestBuildServerChannelRequestPayloads(t *testing.T) {
 	if embed.Title != "Dune (2026)" {
 		t.Fatalf("unexpected title %q", embed.Title)
 	}
-	if embed.Description != "New media request on Silo" {
+	if embed.Author == nil || embed.Author.Name != "New media request on Silo" {
+		t.Fatalf("unexpected author %+v", embed.Author)
+	}
+	if embed.URL != "https://www.themoviedb.org/movie/42" {
+		t.Fatalf("unexpected title URL %q", embed.URL)
+	}
+	if !strings.HasPrefix(embed.Description, "Paul Atreides unites") ||
+		!strings.Contains(embed.Description, "[TMDB](https://www.themoviedb.org/movie/42)") {
 		t.Fatalf("unexpected description %q", embed.Description)
+	}
+	if embed.Thumbnail == nil || embed.Thumbnail.URL != "https://image.tmdb.org/t/p/w500/dune.jpg" {
+		t.Fatalf("unexpected thumbnail %+v", embed.Thumbnail)
 	}
 	if len(embed.Fields) != 2 || embed.Fields[1].Value != "quick" {
 		t.Fatalf("unexpected fields %+v", embed.Fields)
