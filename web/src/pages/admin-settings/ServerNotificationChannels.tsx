@@ -41,7 +41,21 @@ import {
 } from "@/hooks/queries/admin/serverNotificationChannels";
 import { formatRelativeTime } from "@/lib/date";
 
-const EVENT_SECTIONS = [
+type ChannelNotifyKey =
+  | "notify_new_movies"
+  | "notify_new_episodes"
+  | "notify_request_submitted"
+  | "notify_request_approved"
+  | "notify_request_declined"
+  | "notify_request_fulfilled";
+
+interface ChannelNotifyField {
+  key: ChannelNotifyKey;
+  label: string;
+  defaultValue: boolean;
+}
+
+const EVENT_SECTIONS: { label: string; fields: ChannelNotifyField[] }[] = [
   {
     label: "New content",
     fields: [
@@ -58,11 +72,9 @@ const EVENT_SECTIONS = [
       { key: "notify_request_fulfilled", label: "Request fulfilled", defaultValue: false },
     ],
   },
-] as const;
+];
 
 const CHANNEL_NOTIFY_FIELDS = EVENT_SECTIONS.flatMap((section) => section.fields);
-
-type ChannelNotifyKey = (typeof EVENT_SECTIONS)[number]["fields"][number]["key"];
 
 function ChannelFormDialog({
   open,
