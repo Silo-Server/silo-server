@@ -16,14 +16,21 @@ import (
 const discordDMBlockedMessage = "Discord rejected the direct message. " +
 	"Make sure you share a server with the bot and allow direct messages from server members."
 
-// discordChannel implements accountChannel over the Discord bot REST API.
-// The bot token is read live from settings on every pass, so admin changes
-// apply without a restart (same pattern as the SMTP sender).
+// discordChannel implements accountChannel over the Discord bot REST API,
+// keyed by login account: the linked identity is account-level, so one DM
+// collapses cross-profile duplicates. The bot token is read live from
+// settings on every pass, so admin changes apply without a restart (same
+// pattern as the SMTP sender).
 type discordChannel struct {
-	prefs    *DiscordPrefsRepository
-	settings *Settings
-	client   *discord.Client
+	prefs      *DiscordPrefsRepository
+	deliveries *DeliveryRepository
+	settings   *Settings
+	client     *discord.Client
 }
+
+// The assertion also keeps staticcheck's unused-analysis aware that the
+// adapter methods are consumed through the generic engine interface.
+var _ accountChannel[int] = (*discordChannel)(nil)
 
 // newDiscordWorker assembles the Discord DM channel on the shared
 // account-channel engine.
@@ -33,11 +40,12 @@ func newDiscordWorker(
 	prefs *DiscordPrefsRepository,
 	settings *Settings,
 	client *discord.Client,
-) *accountChannelWorker {
-	return newAccountChannelWorker(pool, deliveries, &discordChannel{
-		prefs:    prefs,
-		settings: settings,
-		client:   client,
+) *accountChannelWorker[int] {
+	return newAccountChannelWorker(pool, &discordChannel{
+		prefs:      prefs,
+		deliveries: deliveries,
+		settings:   settings,
+		client:     client,
 	})
 }
 
@@ -55,11 +63,19 @@ func (c *discordChannel) digestHour(ctx context.Context) int {
 	return c.settings.DiscordDigestHour(ctx)
 }
 
-func (c *discordChannel) listRecipients(ctx context.Context) ([]accountRecipient, error) {
+func (c *discordChannel) listRecipients(ctx context.Context) ([]accountRecipient[int], error) {
 	return c.prefs.ListActiveRecipients(ctx)
 }
 
-func (c *discordChannel) claim(ctx context.Context, tx pgx.Tx, userID int) (*accountRecipient, error) {
+func (c *discordChannel) hasPendingSince(ctx context.Context, userID int, since Cursor) (bool, error) {
+	return c.deliveries.HasForUserSince(ctx, userID, since)
+}
+
+func (c *discordChannel) listSince(ctx context.Context, tx pgx.Tx, userID int, since Cursor, limit int) ([]DeliveryRow, error) {
+	return c.deliveries.ListForUserSince(ctx, tx, userID, since, limit)
+}
+
+func (c *discordChannel) claim(ctx context.Context, tx pgx.Tx, userID int) (*accountRecipient[int], error) {
 	return c.prefs.claimForUpdate(ctx, tx, userID)
 }
 

@@ -2352,8 +2352,23 @@ export type NotificationChannelMode =
 export type NotificationEmailMode = NotificationChannelMode;
 export type NotificationDiscordMode = NotificationChannelMode;
 
-/** Account-level (not per-profile): one mode covers all profiles. */
+/**
+ * Profile-scoped email channel state. Each profile verifies its own
+ * destination address and receives nothing until it has one — there is no
+ * account-email fallback.
+ */
 export interface NotificationEmailPreferences {
+  mode: NotificationEmailMode;
+  /** Verified destination; "" = none, channel inert. */
+  custom_email: string;
+  /** Address awaiting link-click verification. */
+  pending_email: string;
+  /** False for child profiles, which cannot set addresses. */
+  can_edit_address: boolean;
+}
+
+/** PUT /notifications/email-preferences body: only the mode is writable. */
+export interface NotificationEmailPreferencesUpdate {
   mode: NotificationEmailMode;
 }
 

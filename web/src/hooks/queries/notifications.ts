@@ -7,6 +7,7 @@ import type {
   NotificationDiscordMode,
   NotificationDiscordPreferences,
   NotificationEmailPreferences,
+  NotificationEmailPreferencesUpdate,
   NotificationListResponse,
   NotificationPreferences,
   NotificationReadEventPayload,
@@ -108,7 +109,7 @@ export function useEmailNotificationPreferences(enabled = true) {
 export function useUpdateEmailNotificationPreferences() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (update: NotificationEmailPreferences) =>
+    mutationFn: (update: NotificationEmailPreferencesUpdate) =>
       api<NotificationEmailPreferences>("/notifications/email-preferences", {
         method: "PUT",
         body: JSON.stringify(update),
@@ -118,6 +119,40 @@ export function useUpdateEmailNotificationPreferences() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to save email preferences");
+    },
+  });
+}
+
+export function useRequestEmailNotificationAddress() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) =>
+      api<NotificationEmailPreferences>("/notifications/email-preferences/address", {
+        method: "PUT",
+        body: JSON.stringify({ email }),
+      }),
+    onSuccess: (prefs) => {
+      queryClient.setQueryData(notificationKeys.emailPreferences(), prefs);
+      toast.success(`Verification email sent to ${prefs.pending_email}`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to send the verification email");
+    },
+  });
+}
+
+export function useClearEmailNotificationAddress() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<NotificationEmailPreferences>("/notifications/email-preferences/address", {
+        method: "DELETE",
+      }),
+    onSuccess: (prefs) => {
+      queryClient.setQueryData(notificationKeys.emailPreferences(), prefs);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to remove the custom address");
     },
   });
 }

@@ -194,10 +194,23 @@ func itemURL(baseURL, itemID string) string {
 	return baseURL + "/item/" + itemID
 }
 
+// emailComposeOptions carries the per-send rendering context.
+type emailComposeOptions struct {
+	// BaseURL is the admin-configured external URL; empty renders without
+	// links.
+	BaseURL string
+	// ProfileName labels whose notifications these are — several profiles on
+	// one account may deliver to the same fallback address.
+	ProfileName string
+	// UnsubscribeURL is the tokenized one-click unsubscribe link; empty
+	// renders without one.
+	UnsubscribeURL string
+}
+
 // composeNotificationEmail renders one email (text + HTML) for the given
-// delivery rows. baseURL is the admin-configured external URL; empty renders
-// without links.
-func composeNotificationEmail(mode string, rows []DeliveryRow, baseURL string) emailContent {
+// delivery rows.
+func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailComposeOptions) emailContent {
+	baseURL := opts.BaseURL
 	items := collateEmailItems(rows)
 
 	var text strings.Builder
@@ -274,18 +287,36 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, baseURL string) e
 			`<p style="margin:8px 0;color:#888;">%s</p>`, html.EscapeString(more)))
 	}
 
-	intro := "New in your library:"
-	if mode == EmailModeDailyDigest {
-		intro = "Here's what's new since your last digest:"
+	forProfile := ""
+	if opts.ProfileName != "" {
+		forProfile = " for " + opts.ProfileName
 	}
-	footer := "You're receiving this because email notifications are enabled for your Silo account. " +
-		"Manage them in Settings → Notifications."
+	intro := fmt.Sprintf("New in your library%s:", forProfile)
+	if mode == EmailModeDailyDigest {
+		intro = fmt.Sprintf("Here's what's new%s since the last digest:", forProfile)
+	}
+	subjectFor := ""
+	if opts.ProfileName != "" {
+		subjectFor = " (for " + opts.ProfileName + ")"
+	}
+
+	profileLabel := "this profile"
+	if opts.ProfileName != "" {
+		profileLabel = "the profile “" + opts.ProfileName + "”"
+	}
+	footer := fmt.Sprintf("You're receiving this because email notifications are enabled for"+
+		" %s on your Silo account. Manage them in Settings → Notifications.", profileLabel)
 	footerHTML := html.EscapeString(footer)
 	if baseURL != "" {
 		settingsURL := html.EscapeString(baseURL + "/settings/notifications")
 		footerHTML = strings.Replace(footerHTML,
 			"Settings → Notifications",
 			fmt.Sprintf(`<a href="%s" style="color:#888;">Settings → Notifications</a>`, settingsURL), 1)
+	}
+	if opts.UnsubscribeURL != "" {
+		footer += " To stop these emails, open: " + opts.UnsubscribeURL
+		footerHTML += fmt.Sprintf(` <a href="%s" style="color:#888;">Unsubscribe</a>`,
+			html.EscapeString(opts.UnsubscribeURL))
 	}
 
 	htmlBody := fmt.Sprintf(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1a1a1a;max-width:560px;">
@@ -297,7 +328,7 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, baseURL string) e
 		html.EscapeString(intro), body.String(), footerHTML)
 
 	return emailContent{
-		Subject: emailSubject(mode, items),
+		Subject: emailSubject(mode, items) + subjectFor,
 		Text:    intro + "\n\n" + text.String() + "\n" + footer + "\n",
 		HTML:    htmlBody,
 	}

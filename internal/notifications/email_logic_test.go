@@ -155,7 +155,7 @@ func TestEmailSubject(t *testing.T) {
 func TestComposeNotificationEmailLinks(t *testing.T) {
 	rows := []DeliveryRow{emailEpisodeRow("01A", "p1", "ep-1", 2, 3)}
 
-	withLinks := composeNotificationEmail(EmailModePerEpisode, rows, "https://silo.example.com")
+	withLinks := composeNotificationEmail(EmailModePerEpisode, rows, emailComposeOptions{BaseURL: "https://silo.example.com"})
 	if !strings.Contains(withLinks.HTML, `href="https://silo.example.com/item/ep-1"`) {
 		t.Fatalf("episode link missing from HTML:\n%s", withLinks.HTML)
 	}
@@ -163,7 +163,7 @@ func TestComposeNotificationEmailLinks(t *testing.T) {
 		t.Fatalf("settings link missing from HTML footer:\n%s", withLinks.HTML)
 	}
 
-	withoutLinks := composeNotificationEmail(EmailModePerEpisode, rows, "")
+	withoutLinks := composeNotificationEmail(EmailModePerEpisode, rows, emailComposeOptions{})
 	if strings.Contains(withoutLinks.HTML, "href=") {
 		t.Fatalf("HTML contains links with no external URL configured:\n%s", withoutLinks.HTML)
 	}
@@ -175,9 +175,76 @@ func TestComposeNotificationEmailLinks(t *testing.T) {
 func TestComposeNotificationEmailEscapesHTML(t *testing.T) {
 	row := emailEpisodeRow("01A", "p1", "ep-1", 2, 3)
 	row.SeriesTitle = `<script>alert("x")</script>`
-	content := composeNotificationEmail(EmailModePerEpisode, []DeliveryRow{row}, "")
+	content := composeNotificationEmail(EmailModePerEpisode, []DeliveryRow{row}, emailComposeOptions{})
 	if strings.Contains(content.HTML, "<script>") {
 		t.Fatalf("series title not escaped:\n%s", content.HTML)
+	}
+}
+
+func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
+	rows := []DeliveryRow{emailEpisodeRow("01A", "p1", "ep-1", 2, 3)}
+	opts := emailComposeOptions{
+		BaseURL:        "https://silo.example.com",
+		ProfileName:    "Emma & <Kids>",
+		UnsubscribeURL: "https://silo.example.com/api/v1/notifications/email/unsubscribe?token=tok",
+	}
+	content := composeNotificationEmail(EmailModePerEpisode, rows, opts)
+	if !strings.Contains(content.Subject, "(for Emma & <Kids>)") {
+		t.Fatalf("subject missing profile label: %q", content.Subject)
+	}
+	if strings.Contains(content.HTML, "<Kids>") {
+		t.Fatalf("profile name not escaped in HTML:\n%s", content.HTML)
+	}
+	if !strings.Contains(content.HTML, `href="https://silo.example.com/api/v1/notifications/email/unsubscribe?token=tok"`) {
+		t.Fatalf("unsubscribe link missing from HTML:\n%s", content.HTML)
+	}
+	if !strings.Contains(content.Text, "To stop these emails, open: "+opts.UnsubscribeURL) {
+		t.Fatalf("unsubscribe link missing from text:\n%s", content.Text)
+	}
+
+	plain := composeNotificationEmail(EmailModePerEpisode, rows, emailComposeOptions{})
+	if strings.Contains(plain.Subject, "(for") || strings.Contains(plain.Text, "To stop these emails") {
+		t.Fatalf("profile/unsubscribe copy leaked into unconfigured email: %q", plain.Subject)
+	}
+}
+
+func TestComposeVerificationEmail(t *testing.T) {
+	content := composeVerificationEmail(`<b>Emma</b>`, "https://silo.example.com/api/v1/notifications/email/verify?token=tok")
+	if !strings.Contains(content.Text, "https://silo.example.com/api/v1/notifications/email/verify?token=tok") {
+		t.Fatalf("verify link missing from text:\n%s", content.Text)
+	}
+	if strings.Contains(content.HTML, "<b>Emma</b>") {
+		t.Fatalf("profile name not escaped:\n%s", content.HTML)
+	}
+}
+
+func TestEmailTokens(t *testing.T) {
+	token, hash, err := newEmailToken()
+	if err != nil {
+		t.Fatalf("newEmailToken: %v", err)
+	}
+	if token == "" || hash == "" || token == hash {
+		t.Fatalf("degenerate token/hash: %q / %q", token, hash)
+	}
+	if hashEmailToken(token) != hash {
+		t.Fatal("hashEmailToken does not round-trip newEmailToken")
+	}
+	other, _, _ := newEmailToken()
+	if other == token {
+		t.Fatal("tokens are not unique")
+	}
+}
+
+func TestEmailUnsubscribeURL(t *testing.T) {
+	if got := emailUnsubscribeURL("", "tok"); got != "" {
+		t.Fatalf("URL built without a base: %q", got)
+	}
+	if got := emailUnsubscribeURL("https://x", ""); got != "" {
+		t.Fatalf("URL built without a token: %q", got)
+	}
+	want := "https://x/api/v1/notifications/email/unsubscribe?token=tok"
+	if got := emailUnsubscribeURL("https://x", "tok"); got != want {
+		t.Fatalf("unexpected unsubscribe URL %q", got)
 	}
 }
 
@@ -187,7 +254,7 @@ func TestComposeNotificationEmailCapsRenderedItems(t *testing.T) {
 		rows = append(rows, emailEpisodeRow(
 			fmt.Sprintf("01%03d", i), "p1", fmt.Sprintf("ep-%d", i), 1, i+1))
 	}
-	content := composeNotificationEmail(EmailModeDailyDigest, rows, "")
+	content := composeNotificationEmail(EmailModeDailyDigest, rows, emailComposeOptions{})
 	if !strings.Contains(content.Text, "and 10 more in your Silo inbox") {
 		t.Fatalf("overflow line missing:\n%s", content.Text)
 	}

@@ -1488,6 +1488,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.Notifications != nil {
 			discordNotificationsHandler = handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
 			r.Get("/notifications/discord/link/callback", discordNotificationsHandler.HandleLinkCallback)
+
+			// Tokenized email links: public — clicked from mail clients on
+			// devices without a Silo session; the single-use token (verify)
+			// or per-profile capability token (unsubscribe) authenticates the
+			// request. Static paths coexist with the authenticated
+			// /notifications subrouter below, same as the Discord callback.
+			deps.Notifications.SetPublicURL(deps.PublicURL)
+			emailLinkHandler := handlers.NewEmailLinkHandler(deps.Notifications)
+			r.Get("/notifications/email/verify", emailLinkHandler.HandleVerify)
+			r.Get("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
+			r.Post("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
 		}
 
 		// API key management routes (auth only, no viewer access needed).
@@ -1557,6 +1568,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
 						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
 						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
+						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
+						r.Delete("/email-preferences/address", notificationsHandler.HandleClearEmailAddress)
 						if discordNotificationsHandler != nil {
 							r.Get("/discord-preferences", discordNotificationsHandler.HandleGetPreferences)
 							r.Put("/discord-preferences", discordNotificationsHandler.HandleUpdatePreferences)

@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Account-channel modes shared by every account-level notification channel
-// (email, Discord). These channels are account-scoped: one setting covers
-// every profile on the login account, and the sweep collapses cross-profile
-// duplicates into a single send.
+// Channel modes shared by every watermark-sweep notification channel (email,
+// Discord). A channel is keyed by recipient: profiles for email (each profile
+// owns its address and watermark), login accounts for Discord (the linked
+// identity is account-level, and one send collapses cross-profile duplicates).
 const (
 	ChannelModeOff         = "off"
 	ChannelModePerEpisode  = "per_episode"
@@ -59,7 +59,7 @@ const (
 
 // errChannelUnavailable aborts a sweep pass entirely: the channel's transport
 // is unconfigured or globally down, so nothing else will send either. The
-// failing account is not penalized with backoff.
+// failing recipient is not penalized with backoff.
 var errChannelUnavailable = errors.New("notification channel unavailable")
 
 // effectiveChannelMode coerces per-episode modes to the daily digest when the
@@ -103,12 +103,13 @@ func channelRetryEligible(now time.Time, lastAttemptAt *time.Time, consecutiveFa
 	return !now.Before(lastAttemptAt.Add(backoff))
 }
 
-// accountRecipient is the channel-agnostic sweep state for one account: the
+// accountRecipient is the channel-agnostic sweep state for one recipient: the
 // user-chosen mode plus the dispatch watermark and failure backoff counters.
-// Channel-specific contact details (email address, Discord identity) stay
-// inside the channel implementation.
-type accountRecipient struct {
-	UserID              int
+// K is the channel's recipient key — profile ID (string) for email, login
+// account ID (int) for Discord. Channel-specific contact details (email
+// address, Discord identity) stay inside the channel implementation.
+type accountRecipient[K comparable] struct {
+	Key                 K
 	Mode                string
 	WatermarkCreatedAt  time.Time
 	WatermarkID         string
@@ -117,10 +118,11 @@ type accountRecipient struct {
 	ConsecutiveFailures int
 }
 
-// accountChannel supplies the channel-specific pieces of the account
-// watermark sweep: prefs-table access and the actual send. The engine owns
-// the loop, eligibility, claim transaction, and watermark advancement.
-type accountChannel interface {
+// accountChannel supplies the channel-specific pieces of the watermark sweep:
+// prefs-table access, recipient-scoped delivery reads, and the actual send.
+// The engine owns the loop, eligibility, claim transaction, and watermark
+// advancement.
+type accountChannel[K comparable] interface {
 	// name labels log lines.
 	name() string
 	// enabled gates a whole pass (kill switch + transport configured).
@@ -129,59 +131,62 @@ type accountChannel interface {
 	allowPerEpisode(ctx context.Context) bool
 	// digestHour is the hour of day (0-23, server-local) for daily digests.
 	digestHour(ctx context.Context) int
-	// listRecipients returns every account with the channel switched on and a
-	// usable destination. Disabled or deleted accounts must not appear.
-	listRecipients(ctx context.Context) ([]accountRecipient, error)
-	// claim locks the account's prefs row for one dispatch attempt with
+	// listRecipients returns every recipient with the channel switched on and
+	// a usable destination. Disabled or deleted accounts must not appear.
+	listRecipients(ctx context.Context) ([]accountRecipient[K], error)
+	// hasPendingSince cheaply reports whether the recipient has deliveries
+	// past the watermark, so idle recipients don't open a claim transaction
+	// every pass.
+	hasPendingSince(ctx context.Context, key K, since Cursor) (bool, error)
+	// listSince returns the recipient's deliveries newer than the watermark,
+	// ascending, inside the claim transaction.
+	listSince(ctx context.Context, tx pgx.Tx, key K, since Cursor, limit int) ([]DeliveryRow, error)
+	// claim locks the recipient's prefs row for one dispatch attempt with
 	// FOR UPDATE SKIP LOCKED; (nil, nil) means another node holds the row.
-	claim(ctx context.Context, tx pgx.Tx, userID int) (*accountRecipient, error)
+	claim(ctx context.Context, tx pgx.Tx, key K) (*accountRecipient[K], error)
 	// markSent advances the watermark past everything the send covered and
 	// resets failure backoff. digestAt is non-nil for digest sends.
-	markSent(ctx context.Context, tx pgx.Tx, userID int, watermark Cursor, digestAt *time.Time) error
+	markSent(ctx context.Context, tx pgx.Tx, key K, watermark Cursor, digestAt *time.Time) error
 	// markFailure records a failed send for backoff; the watermark stays put
 	// so the next eligible pass retries the same items.
-	markFailure(ctx context.Context, tx pgx.Tx, userID int, sendErr error) error
-	// send delivers one account's pending rows. It runs inside the claim
+	markFailure(ctx context.Context, tx pgx.Tx, key K, sendErr error) error
+	// send delivers one recipient's pending rows. It runs inside the claim
 	// transaction; tx is for channel-state updates only (the engine owns
 	// commit/rollback). Errors wrapping errChannelUnavailable abort the pass
-	// without penalizing the account.
-	send(ctx context.Context, tx pgx.Tx, userID int, mode string, rows []DeliveryRow) error
+	// without penalizing the recipient.
+	send(ctx context.Context, tx pgx.Tx, key K, mode string, rows []DeliveryRow) error
 }
 
-// accountChannelWorker drives one account-level channel. Unlike webhooks and
-// web push it keeps no per-target outbox: deliveries already carry user_id,
-// so a per-account watermark over notification_deliveries is the durable
-// dispatch state. The watermark advances only after a successful send, and
-// one send covers everything since the last one — which also collapses the
-// duplicate rows an account gets when several of its profiles follow the
-// same series.
-type accountChannelWorker struct {
-	pool       *pgxpool.Pool
-	deliveries *DeliveryRepository
-	channel    accountChannel
-	logger     *slog.Logger
-	nudge      chan struct{}
-	now        func() time.Time
+// accountChannelWorker drives one watermark-sweep channel. Unlike webhooks
+// and web push it keeps no per-target outbox: deliveries already carry
+// user_id and profile_id, so a per-recipient watermark over
+// notification_deliveries is the durable dispatch state. The watermark
+// advances only after a successful send, and one send covers everything
+// since the last one.
+type accountChannelWorker[K comparable] struct {
+	pool    *pgxpool.Pool
+	channel accountChannel[K]
+	logger  *slog.Logger
+	nudge   chan struct{}
+	now     func() time.Time
 }
 
-func newAccountChannelWorker(
+func newAccountChannelWorker[K comparable](
 	pool *pgxpool.Pool,
-	deliveries *DeliveryRepository,
-	channel accountChannel,
-) *accountChannelWorker {
-	return &accountChannelWorker{
-		pool:       pool,
-		deliveries: deliveries,
-		channel:    channel,
-		logger:     slog.Default().With("component", "notifications."+channel.name()),
-		nudge:      make(chan struct{}, 1),
-		now:        time.Now,
+	channel accountChannel[K],
+) *accountChannelWorker[K] {
+	return &accountChannelWorker[K]{
+		pool:    pool,
+		channel: channel,
+		logger:  slog.Default().With("component", "notifications."+channel.name()),
+		nudge:   make(chan struct{}, 1),
+		now:     time.Now,
 	}
 }
 
 // Nudge schedules a near-term pass so per-episode sends follow fanout within
 // seconds instead of waiting for the next poll. Non-blocking.
-func (w *accountChannelWorker) Nudge() {
+func (w *accountChannelWorker[K]) Nudge() {
 	if w == nil {
 		return
 	}
@@ -191,8 +196,8 @@ func (w *accountChannelWorker) Nudge() {
 	}
 }
 
-// Run sweeps eligible accounts until ctx is canceled.
-func (w *accountChannelWorker) Run(ctx context.Context) {
+// Run sweeps eligible recipients until ctx is canceled.
+func (w *accountChannelWorker[K]) Run(ctx context.Context) {
 	ticker := time.NewTicker(channelPollInterval)
 	defer ticker.Stop()
 	for {
@@ -214,10 +219,10 @@ func (w *accountChannelWorker) Run(ctx context.Context) {
 	}
 }
 
-// runPass attempts one send per eligible account. Failures back off per
-// account; the pass aborts entirely on errChannelUnavailable or after a few
+// runPass attempts one send per eligible recipient. Failures back off per
+// recipient; the pass aborts entirely on errChannelUnavailable or after a few
 // consecutive failures, since both indicate a global transport problem.
-func (w *accountChannelWorker) runPass(ctx context.Context) {
+func (w *accountChannelWorker[K]) runPass(ctx context.Context) {
 	recipients, err := w.channel.listRecipients(ctx)
 	if err != nil {
 		w.logger.Error("channel pass: list recipients failed", "error", err)
@@ -245,13 +250,13 @@ func (w *accountChannelWorker) runPass(ctx context.Context) {
 			if mode == ChannelModePerEpisodeAndDigest && digestDue {
 				break // the digest leg has work regardless of pending rows
 			}
-			// Cheap pre-check so idle accounts don't open a claim
+			// Cheap pre-check so idle recipients don't open a claim
 			// transaction every pass. A stale watermark only ever
 			// produces a harmless extra claim.
-			pending, err := w.deliveries.HasForUserSince(ctx, rec.UserID,
+			pending, err := w.channel.hasPendingSince(ctx, rec.Key,
 				Cursor{CreatedAt: rec.WatermarkCreatedAt, ID: rec.WatermarkID})
 			if err != nil {
-				w.logger.Warn("channel pass: pending check failed", "user_id", rec.UserID, "error", err)
+				w.logger.Warn("channel pass: pending check failed", "recipient", rec.Key, "error", err)
 				continue
 			}
 			if !pending {
@@ -264,33 +269,33 @@ func (w *accountChannelWorker) runPass(ctx context.Context) {
 		default:
 			continue
 		}
-		if err := w.processAccount(ctx, rec); err != nil {
+		if err := w.processRecipient(ctx, rec); err != nil {
 			if errors.Is(err, errChannelUnavailable) {
 				return // channel turned off mid-pass; nothing else will send either
 			}
 			failures++
-			w.logger.Warn("channel send failed", "user_id", rec.UserID, "mode", mode, "error", err)
+			w.logger.Warn("channel send failed", "recipient", rec.Key, "mode", mode, "error", err)
 		}
 	}
 }
 
-// processAccount sends one account's pending notifications under the prefs
-// row lock. The send happens inside the claim transaction: the row lock is
-// per-account and only contends with other nodes, and committing the
+// processRecipient sends one recipient's pending notifications under the
+// prefs row lock. The send happens inside the claim transaction: the row lock
+// is per-recipient and only contends with other nodes, and committing the
 // watermark only after a successful send is what makes the channel durable.
-func (w *accountChannelWorker) processAccount(ctx context.Context, rec accountRecipient) error {
+func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec accountRecipient[K]) error {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin channel dispatch tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	claimed, err := w.channel.claim(ctx, tx, rec.UserID)
+	claimed, err := w.channel.claim(ctx, tx, rec.Key)
 	if err != nil {
 		return err
 	}
 	if claimed == nil {
-		return nil // another node is handling this account
+		return nil // another node is handling this recipient
 	}
 
 	// Re-derive eligibility from the locked row: the pre-scan snapshot may
@@ -335,7 +340,7 @@ func (w *accountChannelWorker) processAccount(ctx context.Context, rec accountRe
 		return nil
 	}
 
-	rows, err := w.deliveries.ListForUserSince(ctx, tx, rec.UserID, fetchFrom, channelFetchLimit)
+	rows, err := w.channel.listSince(ctx, tx, rec.Key, fetchFrom, channelFetchLimit)
 	if err != nil {
 		return err
 	}
@@ -344,7 +349,7 @@ func (w *accountChannelWorker) processAccount(ctx context.Context, rec accountRe
 		// Nothing new. Digests still stamp so eligibility stops re-checking
 		// until tomorrow; the watermark needs no update.
 		if digestAt != nil {
-			if err := w.channel.markSent(ctx, tx, rec.UserID, since, digestAt); err != nil {
+			if err := w.channel.markSent(ctx, tx, rec.Key, since, digestAt); err != nil {
 				return err
 			}
 			return tx.Commit(ctx)
@@ -375,11 +380,11 @@ func (w *accountChannelWorker) processAccount(ctx context.Context, rec accountRe
 	}
 
 	if len(items) > 0 {
-		if err := w.channel.send(ctx, tx, rec.UserID, sendKind, items); err != nil {
+		if err := w.channel.send(ctx, tx, rec.Key, sendKind, items); err != nil {
 			if errors.Is(err, errChannelUnavailable) {
 				return err
 			}
-			if markErr := w.channel.markFailure(ctx, tx, rec.UserID, err); markErr != nil {
+			if markErr := w.channel.markFailure(ctx, tx, rec.Key, err); markErr != nil {
 				return errors.Join(err, markErr)
 			}
 			if commitErr := tx.Commit(ctx); commitErr != nil {
@@ -388,13 +393,19 @@ func (w *accountChannelWorker) processAccount(ctx context.Context, rec accountRe
 			return err
 		}
 		w.logger.Info("notification sent",
-			"user_id", rec.UserID, "mode", mode, "items", len(items))
+			"recipient", rec.Key, "mode", mode, "items", len(items))
 	}
 
-	if err := w.channel.markSent(ctx, tx, rec.UserID, watermark, digestAt); err != nil {
+	if err := w.channel.markSent(ctx, tx, rec.Key, watermark, digestAt); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// nudger is the cross-key-type surface of accountChannelWorker the dispatch
+// path needs.
+type nudger interface {
+	Nudge()
 }
 
 // nudgeDispatcher plugs an account-channel worker into the MultiDispatcher: a
@@ -402,10 +413,10 @@ func (w *accountChannelWorker) processAccount(ctx context.Context, rec accountRe
 // watermark. No per-delivery state is kept, so dropped nudges cost only poll
 // latency.
 type nudgeDispatcher struct {
-	worker *accountChannelWorker
+	worker nudger
 }
 
-func newNudgeDispatcher(worker *accountChannelWorker) *nudgeDispatcher {
+func newNudgeDispatcher(worker nudger) *nudgeDispatcher {
 	return &nudgeDispatcher{worker: worker}
 }
 

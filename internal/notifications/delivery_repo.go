@@ -262,6 +262,40 @@ func (r *DeliveryRepository) HasForUserSince(ctx context.Context, userID int, si
 	return exists, nil
 }
 
+// ListForProfileSince returns the profile's deliveries newer than the
+// watermark, ascending. Runs inside the email worker's claim transaction so
+// the rows read are the rows the advanced watermark covers.
+func (r *DeliveryRepository) ListForProfileSince(ctx context.Context, tx pgx.Tx, profileID string, since Cursor, limit int) ([]DeliveryRow, error) {
+	rows, err := tx.Query(ctx,
+		deliveryRowSelect+`
+		WHERE d.profile_id = $1 AND (d.created_at, d.id) > ($2, $3)
+		ORDER BY d.created_at ASC, d.id ASC
+		LIMIT $4`,
+		profileID, since.CreatedAt, since.ID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list profile deliveries since: %w", err)
+	}
+	return scanDeliveryRows(rows)
+}
+
+// HasForProfileSince reports whether the profile has any delivery newer than
+// the given watermark. Cheap pre-check (index-only) so account-channel sweeps
+// do not open a claim transaction for idle profiles every pass.
+func (r *DeliveryRepository) HasForProfileSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM notification_deliveries
+			WHERE profile_id = $1 AND (created_at, id) > ($2, $3)
+		)`,
+		profileID, since.CreatedAt, since.ID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check profile deliveries since watermark: %w", err)
+	}
+	return exists, nil
+}
+
 // RecentUnread returns the newest unread rows for the websocket snapshot.
 func (r *DeliveryRepository) RecentUnread(ctx context.Context, profileID string, limit int) ([]DeliveryRow, error) {
 	rows, err := r.pool.Query(ctx,

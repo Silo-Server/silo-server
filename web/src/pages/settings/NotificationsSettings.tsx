@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import type {
   NotificationChannelMode,
+  NotificationEmailPreferences,
   NotificationPreferences,
   NotificationWebhook,
   NotificationWebhookInput,
@@ -47,12 +48,13 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { useAuth } from "@/hooks/useAuth";
 import {
+  useClearEmailNotificationAddress,
   useDiscordLinkInit,
   useDiscordNotificationPreferences,
   useEmailNotificationPreferences,
   useNotificationPreferences,
+  useRequestEmailNotificationAddress,
   useUnlinkDiscord,
   useUpdateDiscordNotificationPreferences,
   useUpdateEmailNotificationPreferences,
@@ -216,8 +218,97 @@ function ChannelFrequencyRow({
   );
 }
 
+/**
+ * Destination address for this profile's emails. There is no account-email
+ * fallback: the profile receives nothing until an address is verified here.
+ * Changing it sends a verification link to the new address; the old address
+ * keeps receiving mail until the link is clicked. Removing the address also
+ * turns the channel off. Child profiles cannot set addresses.
+ */
+function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences }) {
+  const [editing, setEditing] = useState(false);
+  const [address, setAddress] = useState("");
+  const requestAddress = useRequestEmailNotificationAddress();
+  const clearAddress = useClearEmailNotificationAddress();
+
+  const hasAddress = prefs.custom_email !== "";
+
+  const submit = () => {
+    const trimmed = address.trim();
+    if (!trimmed) {
+      return;
+    }
+    requestAddress.mutate(trimmed, {
+      onSuccess: () => {
+        setEditing(false);
+        setAddress("");
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm">Deliver to</div>
+          <div className="text-muted-foreground text-xs">
+            {hasAddress ? prefs.custom_email : "No address set — verify one to receive emails"}
+          </div>
+        </div>
+        {prefs.can_edit_address && (
+          <div className="flex items-center gap-2">
+            {hasAddress && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={clearAddress.isPending}
+                onClick={() => clearAddress.mutate()}
+              >
+                Remove
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setEditing((value) => !value)}>
+              {editing ? "Cancel" : hasAddress ? "Change" : "Add address"}
+            </Button>
+          </div>
+        )}
+      </div>
+      {editing && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="email"
+            placeholder="name@example.com"
+            value={address}
+            onChange={(event) => setAddress(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                submit();
+              }
+            }}
+            className="max-w-xs"
+          />
+          <Button size="sm" disabled={requestAddress.isPending || !address.trim()} onClick={submit}>
+            {requestAddress.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+            Send verification
+          </Button>
+        </div>
+      )}
+      {prefs.pending_email !== "" && (
+        <div className="text-xs text-amber-500">
+          Verification email sent to {prefs.pending_email} — it becomes active once the link in it
+          is opened.
+        </div>
+      )}
+      {!prefs.can_edit_address && (
+        <div className="text-muted-foreground text-xs">
+          Child profiles can't receive email notifications.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmailSection() {
-  const { user } = useAuth();
   const capability = useNotificationCapability();
   const emailCap = capability.data?.email;
   const available = emailCap?.available ?? false;
@@ -233,7 +324,7 @@ function EmailSection() {
   const allowPerEpisode = emailCap?.modes.includes("per_episode") ?? false;
   const digestHour = String(emailCap?.digest_hour ?? 8).padStart(2, "0");
 
-  if (isLoading) {
+  if (isLoading || !prefs) {
     return (
       <SettingsGroup title="Email Notifications">
         <Skeleton className="h-16 w-full" />
@@ -241,26 +332,29 @@ function EmailSection() {
     );
   }
 
+  const hasAddress = prefs.custom_email !== "";
+
   return (
     <SettingsGroup
       title="Email Notifications"
-      description="Account-wide: one email covers every profile on this account."
+      description="Per profile: each profile verifies its own address and picks its own frequency."
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-medium">Send to {user?.email || "your account email"}</div>
+          <div className="text-sm font-medium">Email this profile's notifications</div>
           <div className="text-muted-foreground text-xs">
             Notifications you'd see in the inbox, delivered by email
           </div>
         </div>
         <Switch
           checked={enabled}
-          disabled={updatePrefs.isPending}
+          disabled={updatePrefs.isPending || (!enabled && !hasAddress)}
           onCheckedChange={(checked) =>
             updatePrefs.mutate({ mode: checked ? "daily_digest" : "off" })
           }
         />
       </div>
+      <EmailDestinationRow prefs={prefs} />
       {enabled && (
         <ChannelFrequencyRow
           mode={mode}

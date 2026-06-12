@@ -62,6 +62,8 @@ type Message struct {
 	HTMLBody string
 	// ReplyTo optionally overrides the reply address.
 	ReplyTo string
+	// Headers sets additional top-level headers (e.g. List-Unsubscribe).
+	Headers map[string]string
 }
 
 // Sender is the feature-facing abstraction. Implementations must be safe for
@@ -210,6 +212,9 @@ func buildMessage(cfg *smtpConfig, msg Message) (*gomail.Msg, error) {
 		}
 	}
 	message.Subject(msg.Subject)
+	for key, value := range msg.Headers {
+		message.SetGenHeader(gomail.Header(key), value)
+	}
 	switch {
 	case msg.HTMLBody != "" && msg.TextBody != "":
 		message.SetBodyString(gomail.TypeTextPlain, msg.TextBody)

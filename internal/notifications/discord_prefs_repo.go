@@ -138,7 +138,7 @@ func (r *DiscordPrefsRepository) SetMode(ctx context.Context, userID int, mode s
 
 // ListActiveRecipients returns every linked account with Discord DMs on.
 // Disabled or deleted accounts drop out of the join.
-func (r *DiscordPrefsRepository) ListActiveRecipients(ctx context.Context) ([]accountRecipient, error) {
+func (r *DiscordPrefsRepository) ListActiveRecipients(ctx context.Context) ([]accountRecipient[int], error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.user_id, p.mode, p.watermark_created_at, p.watermark_id,
 		       p.last_digest_at, p.last_attempt_at, p.consecutive_failures
@@ -150,10 +150,10 @@ func (r *DiscordPrefsRepository) ListActiveRecipients(ctx context.Context) ([]ac
 		return nil, fmt.Errorf("list discord recipients: %w", err)
 	}
 	defer rows.Close()
-	out := make([]accountRecipient, 0, 8)
+	out := make([]accountRecipient[int], 0, 8)
 	for rows.Next() {
-		var rec accountRecipient
-		if err := rows.Scan(&rec.UserID, &rec.Mode, &rec.WatermarkCreatedAt, &rec.WatermarkID,
+		var rec accountRecipient[int]
+		if err := rows.Scan(&rec.Key, &rec.Mode, &rec.WatermarkCreatedAt, &rec.WatermarkID,
 			&rec.LastDigestAt, &rec.LastAttemptAt, &rec.ConsecutiveFailures); err != nil {
 			return nil, fmt.Errorf("scan discord recipient: %w", err)
 		}
@@ -165,8 +165,8 @@ func (r *DiscordPrefsRepository) ListActiveRecipients(ctx context.Context) ([]ac
 // claimForUpdate locks the account's prefs row for one dispatch attempt.
 // SKIP LOCKED makes concurrent nodes pass over each other's in-flight users
 // instead of double-sending; (nil, nil) means another node holds the row.
-func (r *DiscordPrefsRepository) claimForUpdate(ctx context.Context, tx pgx.Tx, userID int) (*accountRecipient, error) {
-	rec := accountRecipient{UserID: userID}
+func (r *DiscordPrefsRepository) claimForUpdate(ctx context.Context, tx pgx.Tx, userID int) (*accountRecipient[int], error) {
+	rec := accountRecipient[int]{Key: userID}
 	err := tx.QueryRow(ctx, `
 		SELECT mode, watermark_created_at, watermark_id, last_digest_at,
 		       last_attempt_at, consecutive_failures

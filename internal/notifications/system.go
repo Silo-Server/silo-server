@@ -58,9 +58,12 @@ type System struct {
 	DiscordPrefs *DiscordPrefsRepository
 
 	mailSender    mail.Sender
-	emailWorker   *accountChannelWorker
-	discordWorker *accountChannelWorker
+	emailWorker   *accountChannelWorker[string]
+	discordWorker *accountChannelWorker[int]
 	discordClient *discord.Client
+	// publicURL is the server's externally reachable base URL, used as the
+	// fallback for tokenized email links (see SetPublicURL).
+	publicURL string
 
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
@@ -137,10 +140,17 @@ func NewSystem(
 	// Email rides the shared SMTP core. Unlike the per-target channels it
 	// keeps no outbox: its dispatcher only nudges the watermark sweep.
 	var emailPrefs *EmailPrefsRepository
-	var emailWorker *accountChannelWorker
+	var emailChannelInst *emailChannel
+	var emailWorker *accountChannelWorker[string]
 	if mailSender != nil {
 		emailPrefs = NewEmailPrefsRepository(pool)
-		emailWorker = newEmailWorker(pool, deliveries, emailPrefs, settings, mailSender)
+		emailChannelInst = &emailChannel{
+			prefs:      emailPrefs,
+			deliveries: deliveries,
+			settings:   settings,
+			sender:     mailSender,
+		}
+		emailWorker = newAccountChannelWorker(pool, emailChannelInst)
 		dispatchers = append(dispatchers, newNudgeDispatcher(emailWorker))
 	}
 
@@ -194,6 +204,9 @@ func NewSystem(
 		logger:            slog.Default().With("component", "notifications.system"),
 	}
 	wsDispatcher.payload = system.PayloadForRow
+	if emailChannelInst != nil {
+		emailChannelInst.profileName = system.lookupProfileName
+	}
 	if sender != nil {
 		sender.operational = system.DispatchOperational
 	}
@@ -321,6 +334,11 @@ func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
 	if s.webPushRepo != nil {
 		if err := s.webPushRepo.DeleteAllForProfile(ctx, profileID); err != nil {
 			return fmt.Errorf("purge web push subscriptions: %w", err)
+		}
+	}
+	if s.EmailPrefs != nil {
+		if err := s.EmailPrefs.DeleteForProfile(ctx, profileID); err != nil {
+			return fmt.Errorf("purge email prefs: %w", err)
 		}
 	}
 	return nil
