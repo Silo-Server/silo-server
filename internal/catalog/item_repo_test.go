@@ -443,3 +443,31 @@ func TestItemRepo_Search_GroupByHasNoOutputAliases(t *testing.T) {
 		}
 	}
 }
+
+// TestItemRepo_ListUnmatchedByFolderAndPathPrefix_ExcludesMangaChapters pins
+// the manga-chapter exclusion in the unmatched-item lister. Manga chapters are
+// type='ebook' items that stay status='pending' by design (the type='manga'
+// series item carries all provider metadata), so without a NOT EXISTS guard
+// against manga_chapters every library scan funnels each chapter through the
+// matcher's retry loop — one rate-limited ebook-plugin search per chapter
+// (observed live 2026-06-12: 31,564 chapters x ~1s = 8h46m per scan, 100%
+// no-match). Mirrors the same exclusion in the ebook enricher's claim query.
+func TestItemRepo_ListUnmatchedByFolderAndPathPrefix_ExcludesMangaChapters(t *testing.T) {
+	repo := &ItemRepository{}
+
+	sql, args := repo.buildListUnmatchedByFolderAndPathPrefixSQL(10, "/mnt/media/manga", 0)
+	if !strings.Contains(sql, "NOT EXISTS") || !strings.Contains(sql, "manga_chapters") {
+		t.Fatalf("expected manga_chapters NOT EXISTS guard in unmatched lister; got:\n%s", sql)
+	}
+	if len(args) != 3 {
+		t.Fatalf("expected 3 args without limit; got %v", args)
+	}
+
+	sql, args = repo.buildListUnmatchedByFolderAndPathPrefixSQL(10, "/mnt/media/manga", 25)
+	if !strings.Contains(sql, "LIMIT $4") {
+		t.Fatalf("expected LIMIT $4 when limit > 0; got:\n%s", sql)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args with limit; got %v", args)
+	}
+}

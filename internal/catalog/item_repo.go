@@ -1128,7 +1128,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 // items that are linked to at least one present file within the given folder
 // subtree. This intentionally includes ambiguous items so a library scan can
 // revisit legacy scanner ambiguities after inference heuristics improve.
-func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error) {
+func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int, pathPrefix string, limit int) (string, []any) {
 	query := `
 		SELECT mi.content_id
 		FROM media_items mi
@@ -1142,6 +1142,14 @@ func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context,
 		WHERE mil.media_folder_id = $1
 		  AND folders.enabled = true
 		  AND mi.status IN ('unmatched', 'pending', 'ambiguous')
+		  -- Manga chapters stay status='pending' by design: provider metadata
+		  -- lives on the type='manga' series item, so chapters are never
+		  -- matchable and must not feed the matcher's retry loop (mirrors the
+		  -- exclusion in the ebook enricher's claim query).
+		  AND NOT EXISTS (
+			SELECT 1 FROM manga_chapters mc
+			WHERE mc.chapter_content_id = mi.content_id
+		  )
 		  AND mf.missing_since IS NULL
 		  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 		GROUP BY mi.content_id
@@ -1152,6 +1160,11 @@ func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context,
 		query += ` LIMIT $4`
 		args = append(args, limit)
 	}
+	return query, args
+}
+
+func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error) {
+	query, args := r.buildListUnmatchedByFolderAndPathPrefixSQL(folderID, pathPrefix, limit)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
