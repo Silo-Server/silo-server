@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router";
 import { Bell, BellOff, Check, CheckCheck, Loader2, Settings2 } from "lucide-react";
 import type { AppNotification } from "@/api/types";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Separator } from "@/components/ui/separator";
 import {
   formatEpisodeCode,
   useMarkAllNotificationsRead,
@@ -251,7 +252,7 @@ function NotificationPreferencesPopover() {
           Preferences
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
+      <PopoverContent align="end" className="w-80 p-4">
         {isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-6 w-full" />
@@ -266,19 +267,26 @@ function NotificationPreferencesPopover() {
             </Button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             {toggles.map((toggle, index) => (
-              <div key={toggle.key} className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">{toggle.label}</div>
-                  <div className="text-muted-foreground text-xs">{toggle.description}</div>
+              <Fragment key={toggle.key}>
+                {index === 1 && <Separator />}
+                <div
+                  className={`flex items-center justify-between gap-3 transition-opacity ${
+                    index > 0 && !prefs.enabled ? "opacity-50" : ""
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{toggle.label}</div>
+                    <div className="text-muted-foreground text-xs">{toggle.description}</div>
+                  </div>
+                  <Switch
+                    checked={prefs[toggle.key]}
+                    disabled={index > 0 && !prefs.enabled}
+                    onCheckedChange={(checked) => updatePrefs.mutate({ [toggle.key]: checked })}
+                  />
                 </div>
-                <Switch
-                  checked={prefs[toggle.key]}
-                  disabled={index > 0 && !prefs.enabled}
-                  onCheckedChange={(checked) => updatePrefs.mutate({ [toggle.key]: checked })}
-                />
-              </div>
+              </Fragment>
             ))}
           </div>
         )}
