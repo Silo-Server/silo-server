@@ -166,7 +166,10 @@ func configureOperationalLogging(
 	}
 	opsPM := partman.NewManager(pool, "operational_logs", partman.Daily, 3)
 	if err := opsPM.EnsureFuturePartitions(ctx); err != nil {
-		log.Fatalf("ensure operational log partitions: %v", err)
+		// Non-fatal: a partition hiccup must not crash-loop the server (see the
+		// operational_logs partition incident). Writes fall back to the default
+		// partition and the periodic cleanup retries EnsureFuturePartitions.
+		slog.Warn("ensure operational log partitions; continuing in degraded mode", "error", err)
 	}
 
 	var operationalWriter opslog.Writer
@@ -1529,7 +1532,9 @@ func main() {
 	}
 	activityPM := partman.NewManager(pool, "activity_log", partman.Weekly, 2)
 	if err := activityPM.EnsureFuturePartitions(appCtx); err != nil {
-		log.Fatalf("ensure activity log partitions: %v", err)
+		// Non-fatal: see the operational_logs partition incident. Writes fall
+		// back to the default partition and periodic cleanup retries.
+		slog.Warn("ensure activity log partitions; continuing in degraded mode", "error", err)
 	}
 	var activityWriter activitylog.Writer
 	activityConsumer := activitylog.NewConsumer(pool, nil, logStreamHub)
