@@ -5,6 +5,8 @@ import (
 	"html"
 	"sort"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/mail"
 )
 
 // emailMaxItemsRendered caps how many lines one email renders; the remainder
@@ -218,19 +220,31 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 	rendered := 0
 	total := items.episodes + len(items.requests) + len(items.others)
 
-	writeLine := func(plain, href string) {
+	// writeItem renders one row: plain feeds the text body; code (optional
+	// "S02E03" badge) and label feed the HTML row.
+	writeItem := func(plain, code, label, href string) {
 		rendered++
 		if rendered > emailMaxItemsRendered {
 			return
 		}
 		text.WriteString("  " + plain + "\n")
-		if href != "" {
-			body.WriteString(fmt.Sprintf(
-				`<li style="margin:2px 0;"><a href="%s" style="color:#6d6df7;text-decoration:none;">%s</a></li>`,
-				html.EscapeString(href), html.EscapeString(plain)))
-		} else {
-			body.WriteString(fmt.Sprintf(`<li style="margin:2px 0;">%s</li>`, html.EscapeString(plain)))
+		var inner strings.Builder
+		if code != "" {
+			inner.WriteString(fmt.Sprintf(`<span style="font:500 12px/1 %s;color:%s;">%s</span>`,
+				mail.EmailFontMono, mail.EmailColorMuted, html.EscapeString(code)))
+			if label != "" {
+				inner.WriteString("&nbsp;&nbsp;")
+			}
 		}
+		inner.WriteString(html.EscapeString(label))
+		content := inner.String()
+		if href != "" {
+			content = fmt.Sprintf(`<a href="%s" style="color:%s;text-decoration:none;">%s</a>`,
+				html.EscapeString(href), mail.EmailColorText, content)
+		}
+		body.WriteString(fmt.Sprintf(
+			`<li style="margin:0;padding:8px 2px;border-top:1px solid %s;font:400 14px/1.5 %s;color:%s;">%s</li>`,
+			mail.EmailColorRule, mail.EmailFont, mail.EmailColorText, content))
 	}
 	writeHeading := func(title, href string) {
 		text.WriteString(title + "\n")
@@ -239,10 +253,15 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 			label = fmt.Sprintf(`<a href="%s" style="color:inherit;text-decoration:none;">%s</a>`,
 				html.EscapeString(href), label)
 		}
+		top := "22px"
+		if body.Len() == 0 {
+			top = "0"
+		}
 		body.WriteString(fmt.Sprintf(
-			`<h3 style="margin:14px 0 4px;font-size:15px;">%s</h3>`, label))
+			`<h2 style="margin:%s 0 6px;font:600 15px/1.4 %s;color:%s;">%s</h2>`,
+			top, mail.EmailFont, mail.EmailColorText, label))
 	}
-	openList := func() { body.WriteString(`<ul style="margin:4px 0;padding-left:20px;">`) }
+	openList := func() { body.WriteString(`<ul style="margin:0;padding:0;list-style:none;">`) }
 	closeList := func() { body.WriteString(`</ul>`) }
 
 	for _, group := range items.series {
@@ -256,7 +275,12 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 			if row.EpisodeID != nil {
 				episodeID = *row.EpisodeID
 			}
-			writeLine(episodeLine(row), itemURL(baseURL, episodeID))
+			code := episodeCode(row)
+			label := row.EpisodeTitle
+			if code == "" && label == "" {
+				label = genericEpisodeTitle
+			}
+			writeItem(episodeLine(row), code, label, itemURL(baseURL, episodeID))
 		}
 		closeList()
 	}
@@ -268,7 +292,7 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 			if row.SeriesID != nil {
 				seriesID = *row.SeriesID
 			}
-			writeLine(requestLine(row), itemURL(baseURL, seriesID))
+			writeItem(requestLine(row), "", requestLine(row), itemURL(baseURL, seriesID))
 		}
 		closeList()
 	}
@@ -276,15 +300,15 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 		writeHeading("Other updates", "")
 		openList()
 		for _, row := range items.others {
-			writeLine(otherLine(row), "")
+			writeItem(otherLine(row), "", otherLine(row), "")
 		}
 		closeList()
 	}
 	if remainder := total - emailMaxItemsRendered; remainder > 0 {
 		more := fmt.Sprintf("…and %d more in your Silo inbox.", remainder)
 		text.WriteString(more + "\n")
-		body.WriteString(fmt.Sprintf(
-			`<p style="margin:8px 0;color:#888;">%s</p>`, html.EscapeString(more)))
+		body.WriteString(fmt.Sprintf(`<p style="margin:14px 0 0;font:400 13px/1.5 %s;color:%s;">%s</p>`,
+			mail.EmailFont, mail.EmailColorMuted, html.EscapeString(more)))
 	}
 
 	forProfile := ""
@@ -311,25 +335,44 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 		settingsURL := html.EscapeString(baseURL + "/settings/notifications")
 		footerHTML = strings.Replace(footerHTML,
 			"Settings → Notifications",
-			fmt.Sprintf(`<a href="%s" style="color:#888;">Settings → Notifications</a>`, settingsURL), 1)
+			fmt.Sprintf(`<a href="%s" style="color:%s;">Settings → Notifications</a>`,
+				settingsURL, mail.EmailColorMuted), 1)
 	}
 	if opts.UnsubscribeURL != "" {
 		footer += " To stop these emails, open: " + opts.UnsubscribeURL
-		footerHTML += fmt.Sprintf(` <a href="%s" style="color:#888;">Unsubscribe</a>`,
-			html.EscapeString(opts.UnsubscribeURL))
+		footerHTML += fmt.Sprintf(` <a href="%s" style="color:%s;">Unsubscribe</a>`,
+			html.EscapeString(opts.UnsubscribeURL), mail.EmailColorMuted)
 	}
 
-	htmlBody := fmt.Sprintf(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1a1a1a;max-width:560px;">
-<p style="margin:0 0 8px;">%s</p>
-%s
-<hr style="border:none;border-top:1px solid #e5e5e5;margin:16px 0 8px;">
-<p style="margin:0;font-size:12px;color:#888;">%s</p>
-</div>`,
-		html.EscapeString(intro), body.String(), footerHTML)
+	htmlBody := mail.RenderLayout(mail.LayoutOptions{
+		Preheader:  emailPreheader(items),
+		Title:      strings.TrimSuffix(intro, ":"),
+		BodyHTML:   body.String(),
+		FooterHTML: footerHTML,
+	})
 
 	return emailContent{
 		Subject: emailSubject(mode, items) + subjectFor,
 		Text:    intro + "\n\n" + text.String() + "\n" + footer + "\n",
 		HTML:    htmlBody,
 	}
+}
+
+// emailPreheader picks the inbox-preview snippet: the first item, the same
+// way a notification banner would lead with it.
+func emailPreheader(items emailItems) string {
+	if len(items.series) > 0 && len(items.series[0].episodes) > 0 {
+		line := episodeLine(items.series[0].episodes[0])
+		if title := items.series[0].title; title != untitledSeriesGroup {
+			return title + " · " + line
+		}
+		return line
+	}
+	if len(items.requests) > 0 {
+		return requestLine(items.requests[0])
+	}
+	if len(items.others) > 0 {
+		return otherLine(items.others[0])
+	}
+	return ""
 }

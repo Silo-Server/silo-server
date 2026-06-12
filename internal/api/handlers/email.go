@@ -56,6 +56,13 @@ func (h *EmailHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
 		Subject: "Silo test email",
 		TextBody: "This is a test email from your Silo server.\n\n" +
 			"If you received it, outbound email is configured correctly.",
+		HTMLBody: silomail.RenderLayout(silomail.LayoutOptions{
+			Preheader: "Outbound email from your Silo server is configured correctly.",
+			Title:     "Outbound email is working",
+			BodyHTML: silomail.EmailParagraph("This is a test email from your Silo server.") +
+				silomail.EmailParagraph("If you're reading it, the SMTP settings are correct and "+
+					"notification emails will look like this one."),
+		}),
 	})
 	response := emailTestResponse{
 		OK:         err == nil,

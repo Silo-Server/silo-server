@@ -148,22 +148,31 @@ func composeVerificationEmail(profileName, verifyURL string) emailContent {
 	if profileName != "" {
 		who = "the profile “" + profileName + "”"
 	}
+	expiry := "The link expires in 24 hours. If you didn't request this, ignore this email — " +
+		"nothing will be sent to this address."
 	text := fmt.Sprintf(
 		"This address was entered as the notification destination for %s on a Silo server.\n\n"+
 			"To confirm and start receiving notifications here, open this link:\n\n  %s\n\n"+
-			"The link expires in 24 hours. If you didn't request this, ignore this email — "+
-			"nothing will be sent to this address.\n", who, verifyURL)
-	htmlBody := fmt.Sprintf(`<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1a1a1a;max-width:560px;">
-<p style="margin:0 0 8px;">This address was entered as the notification destination for %s on a Silo server.</p>
-<p style="margin:0 0 16px;">To confirm and start receiving notifications here:</p>
-<p style="margin:0 0 16px;"><a href="%s" style="background:#6d6df7;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;display:inline-block;">Confirm this address</a></p>
-<hr style="border:none;border-top:1px solid #e5e5e5;margin:16px 0 8px;">
-<p style="margin:0;font-size:12px;color:#888;">The link expires in 24 hours. If you didn't request this, ignore this email — nothing will be sent to this address.</p>
-</div>`,
-		html.EscapeString(who), html.EscapeString(verifyURL))
+			"%s\n", who, verifyURL, expiry)
+
+	var body strings.Builder
+	body.WriteString(mail.EmailParagraph(fmt.Sprintf(
+		"This address was entered as the notification destination for %s on a Silo server.", who)))
+	body.WriteString(mail.EmailParagraph("To confirm and start receiving notifications here:"))
+	body.WriteString(mail.EmailButton("Confirm this address", verifyURL))
+	body.WriteString(fmt.Sprintf(
+		`<p style="margin:20px 0 0;font:400 12px/1.7 %s;color:%s;">Or paste this link into your browser:<br>`+
+			`<span style="font:400 12px/1.7 %s;word-break:break-all;">%s</span></p>`,
+		mail.EmailFont, mail.EmailColorMuted, mail.EmailFontMono, html.EscapeString(verifyURL)))
+
 	return emailContent{
 		Subject: "Confirm your Silo notification address",
 		Text:    text,
-		HTML:    htmlBody,
+		HTML: mail.RenderLayout(mail.LayoutOptions{
+			Preheader:  "Confirm this address to start receiving Silo notifications.",
+			Title:      "Confirm your notification address",
+			BodyHTML:   body.String(),
+			FooterHTML: html.EscapeString(expiry),
+		}),
 	}
 }
