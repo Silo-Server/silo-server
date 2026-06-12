@@ -106,6 +106,20 @@ func (m *Manager) healDefaultConflict(ctx context.Context, name string, lower, u
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Block concurrent writes to the default partition for the duration of the
+	// heal. The missing partition is the current period, so live writers are
+	// actively routing rows into default; without this lock a row committed
+	// between the drain and the attach re-triggers the same check violation and
+	// rolls the whole heal back. Locking only the default leaf (not the parent)
+	// keeps the rest of the table readable and writable; tuple routing must
+	// lock the leaf to insert, so this is sufficient.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(
+		`LOCK TABLE public.%s IN ACCESS EXCLUSIVE MODE`,
+		quoteIdent(defaultTable),
+	)); err != nil {
+		return fmt.Errorf("lock default partition: %w", err)
+	}
+
 	// Standalone table matching the parent's columns. INCLUDING DEFAULTS is
 	// deliberately the only option: it must NOT copy the parent's identity, so
 	// the preserved rows insert with their original ids instead of regenerating.
