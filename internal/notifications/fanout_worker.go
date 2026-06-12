@@ -143,12 +143,22 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	events, err := w.releases.ClaimUnprocessed(ctx, tx, settle, fanoutClaimLimit)
+	claimed, err := w.releases.ClaimUnprocessed(ctx, tx, settle, fanoutClaimLimit)
 	if err != nil {
 		return 0, err
 	}
-	if len(events) == 0 {
+	if len(claimed) == 0 {
 		return 0, nil
+	}
+
+	// Non-episode kinds (movies) have no per-profile interest and never fan
+	// out; mark them processed immediately so retention reclaims them. This
+	// must happen before the burst cap: movie events have no series_id, and
+	// ApplyBurstCap groups by (library_id, series_id). The server-channel
+	// sweep reads events by cursor regardless of processed state.
+	events, others := PartitionEventsByKind(claimed)
+	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(others), nil); err != nil {
+		return 0, err
 	}
 
 	// Suppress events that aged past the staleness horizon before fanout
@@ -209,7 +219,8 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
 	}
 
 	w.logger.Info("fanout batch processed",
-		"claimed", len(events),
+		"claimed", len(claimed),
+		"non_episode", len(others),
 		"fanned_out", len(fanout),
 		"suppressed", len(suppressed),
 		"stale", len(stale),
@@ -218,7 +229,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
 		"deduped_count", totalRecipients-totalInserted,
 		"duration_ms", time.Since(started).Milliseconds(),
 	)
-	return len(events), nil
+	return len(claimed), nil
 }
 
 // fanOutEvent resolves recipients for one release event and inserts

@@ -18,6 +18,35 @@ type FulfillmentNotifier interface {
 // service. Optional; without it completed requests are never notified.
 func (s *Service) SetFulfillmentNotifier(n FulfillmentNotifier) { s.notifier = n }
 
+// LifecycleNotifier observes request lifecycle transitions (submitted,
+// approved, declined) for broadcast destinations such as admin server
+// channels. Implementations must be fast and non-blocking (dispatch async)
+// and must never fail the transition: methods return nothing.
+//
+// Fulfillment is deliberately not part of this interface — it stays on
+// FulfillmentNotifier, whose presence-checked, idempotent flow runs on the
+// reconcile service rather than the API service.
+type LifecycleNotifier interface {
+	RequestSubmitted(ctx context.Context, req Request)
+	RequestApproved(ctx context.Context, req Request)
+	RequestDeclined(ctx context.Context, req Request)
+}
+
+// SetLifecycleNotifier wires lifecycle observation into the API-facing
+// service. Optional; without it transitions are not broadcast.
+func (s *Service) SetLifecycleNotifier(n LifecycleNotifier) { s.lifecycle = n }
+
+// notifyLifecycle resolves requester display identity and invokes one
+// lifecycle hook. Best-effort by construction: the notifier cannot return an
+// error and identity resolution failures just leave the name empty.
+func (s *Service) notifyLifecycle(ctx context.Context, req Request, notify func(LifecycleNotifier, context.Context, Request)) {
+	if s.lifecycle == nil {
+		return
+	}
+	s.populateRequesterIdentity(ctx, &req)
+	notify(s.lifecycle, ctx, req)
+}
+
 // notifyFulfilledLimit bounds one notification pass; the remainder lands on
 // the next reconcile run.
 const notifyFulfilledLimit = 100

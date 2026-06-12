@@ -57,6 +57,12 @@ func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req re
 	if n == nil || n.system == nil {
 		return nil
 	}
+	// Server-channel broadcast first: it is community-facing and must not be
+	// gated by the requester's personal preferences or attribution. Detached
+	// and best-effort — a failure here must never block the
+	// fulfilled_notified_at stamp, or the per-profile path would re-fire.
+	n.system.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, requestEventInfoFor(req))
+
 	if req.RequestedByProfileID == "" || req.RequestedByUserID <= 0 {
 		return nil // legacy rows without attribution have no recipient
 	}

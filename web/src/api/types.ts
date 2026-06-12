@@ -2327,6 +2327,43 @@ export interface NotificationWebhookTestResult {
   message?: string;
 }
 
+/** Admin-owned broadcast destination ("community channel"). */
+export interface ServerNotificationChannel {
+  id: string;
+  name: string;
+  type: NotificationWebhookType;
+  url_host: string;
+  enabled: boolean;
+  notify_new_movies: boolean;
+  notify_new_episodes: boolean;
+  notify_request_submitted: boolean;
+  notify_request_approved: boolean;
+  notify_request_declined: boolean;
+  notify_request_fulfilled: boolean;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure_status: number | null;
+  last_failure_message: string | null;
+  created_at: string;
+  /** Present only in create / rotate-secret responses; shown exactly once. */
+  signing_secret?: string;
+}
+
+export interface ServerNotificationChannelInput {
+  name?: string;
+  url?: string;
+  type?: NotificationWebhookType;
+  enabled?: boolean;
+  notify_new_movies?: boolean;
+  notify_new_episodes?: boolean;
+  notify_request_submitted?: boolean;
+  notify_request_approved?: boolean;
+  notify_request_declined?: boolean;
+  notify_request_fulfilled?: boolean;
+}
+
 /** An account-level digest channel (email, Discord DMs). */
 export interface NotificationAccountChannelCapability {
   available: boolean;

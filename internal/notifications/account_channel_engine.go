@@ -81,6 +81,15 @@ func cursorLess(a, b Cursor) bool {
 	return a.ID < b.ID
 }
 
+// maxCursor returns the later of two cursors. Watermark advancement clamps
+// with this so a watermark only ever moves forward.
+func maxCursor(a, b Cursor) Cursor {
+	if cursorLess(a, b) {
+		return b
+	}
+	return a
+}
+
 // channelDigestDue reports whether a daily digest should go out: today's send
 // time (digestHour, local) has passed and no digest was stamped since.
 func channelDigestDue(now time.Time, digestHour int, lastDigestAt *time.Time) bool {
@@ -410,12 +419,9 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 	}
 
 	last := rows[len(rows)-1]
-	watermark := Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
-	if cursorLess(watermark, since) {
-		// A combined-mode digest can read entirely behind the watermark;
-		// the watermark only ever moves forward.
-		watermark = since
-	}
+	// A combined-mode digest can read entirely behind the watermark; clamp so
+	// the watermark only ever moves forward.
+	watermark := maxCursor(Cursor{CreatedAt: last.CreatedAt, ID: last.ID}, since)
 
 	if len(items) > 0 {
 		if err := w.channel.send(ctx, tx, rec.Key, sendKind, items); err != nil {

@@ -327,6 +327,7 @@ export const themeKeys = {
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
   userDetail: (userId: number) => ["admin", "users", userId] as const,
   userProfiles: (userId?: number) => ["admin", "users", userId, "profiles"] as const,
   userSettings: (userId: number) => ["admin", "users", userId, "settings"] as const,

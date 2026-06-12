@@ -46,6 +46,9 @@ const (
 	SettingDiscordAllowPerEpisode = "notifications.discord.allow_per_episode"
 	SettingDiscordDigestHour      = "notifications.discord.digest_hour"
 
+	SettingServerChannelsEnabled      = "notifications.server_channels_enabled"
+	SettingServerChannelsBatchSeconds = "notifications.server_channels.batch_seconds"
+
 	// Discord application credentials live under the discord.* namespace
 	// (admin-configured, alongside email.smtp_*). The secret and bot token
 	// are registered in catalog.SensitiveSettingKeys and encrypted at rest.
@@ -64,6 +67,15 @@ const (
 	// defaultDigestHour applies to every account-level digest channel
 	// (email, Discord).
 	defaultDigestHour = 8
+
+	// defaultServerChannelsBatchSeconds is the server-channel content batch
+	// window: how old a release event must be before the sweep reads it, so a
+	// season pack lands in one grouped post. The minimum must stay >= the
+	// availability detector's timeout (120s): an in-flight availability
+	// transaction can commit events whose created_at predates rows the sweep
+	// already passed, and the window is what keeps those visible.
+	defaultServerChannelsBatchSeconds = 300
+	minServerChannelsBatchSeconds     = 120
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -282,6 +294,20 @@ func (s *Settings) DiscordAllowPerEpisode(ctx context.Context) bool {
 // daily digest DMs go out.
 func (s *Settings) DiscordDigestHour(ctx context.Context) int {
 	return s.intSetting(ctx, SettingDiscordDigestHour, defaultDigestHour, 0, 23)
+}
+
+// ServerChannelsEnabled gates the admin server-channel feature (kill switch).
+// Defaults to on: unlike profile webhooks, every destination is created by an
+// admin, so creating a channel is itself the opt-in act.
+func (s *Settings) ServerChannelsEnabled(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingServerChannelsEnabled, true)
+}
+
+// ServerChannelsBatchWindow is how old a release event must be before the
+// server-channel sweep reads it (content posts batch within this window).
+func (s *Settings) ServerChannelsBatchWindow(ctx context.Context) time.Duration {
+	return time.Duration(s.intSetting(ctx, SettingServerChannelsBatchSeconds,
+		defaultServerChannelsBatchSeconds, minServerChannelsBatchSeconds, 3600)) * time.Second
 }
 
 // DiscordClientID is the Discord application's OAuth2 client ID.

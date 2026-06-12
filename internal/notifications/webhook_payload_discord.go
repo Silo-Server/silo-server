@@ -49,6 +49,7 @@ type discordEmbed struct {
 }
 
 type discordWebhookBody struct {
+	Content  string         `json:"content,omitempty"`
 	Embeds   []discordEmbed `json:"embeds"`
 	Username string         `json:"username"`
 }
@@ -59,7 +60,7 @@ type discordWebhookBody struct {
 func BuildDiscordWebhookPayload(row DeliveryRow, test bool) ([]byte, error) {
 	return json.Marshal(discordWebhookBody{
 		Embeds:   []discordEmbed{buildDiscordEmbed(row, test)},
-		Username: "Silo",
+		Username: siloSenderName,
 	})
 }
 
@@ -109,7 +110,7 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 	if row.Type == DeliveryTypeRequestFulfilled {
 		description = "Your media request is now available on Silo"
 	}
-	footerText := "Silo"
+	footerText := siloSenderName
 	if row.SeriesTitle != "" {
 		footerText = "Silo • " + truncateWithEllipsis(row.SeriesTitle, discordFooterLimit-16)
 	}
@@ -192,14 +193,7 @@ func discordEmbedTitle(row DeliveryRow) string {
 // requestMediaTypeLabel renders a request.fulfilled delivery's media type as
 // a display label; unknown values render nothing.
 func requestMediaTypeLabel(reasonFlags []byte) string {
-	switch parseRequestFulfilledFlags(reasonFlags).MediaType {
-	case "movie":
-		return "Movie"
-	case "series":
-		return "Series"
-	default:
-		return ""
-	}
+	return mediaTypeLabel(parseRequestFulfilledFlags(reasonFlags).MediaType)
 }
 
 func discordEmbedColor(flags ReasonFlags) int {

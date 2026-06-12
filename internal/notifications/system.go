@@ -48,6 +48,9 @@ type System struct {
 	// Webhooks is nil when no at-rest cipher is configured (webhook URLs are
 	// credentials and must not be stored in plaintext).
 	Webhooks *WebhookService
+	// ServerChannels is nil when no at-rest cipher is configured (channel
+	// URLs are credentials, same rule as webhooks).
+	ServerChannels *ServerChannelService
 	// WebPush is nil when the settings store is not writable (VAPID keys
 	// could not be provisioned).
 	WebPush *WebPushService
@@ -70,6 +73,9 @@ type System struct {
 	webhookRetry      *WebhookRetryWorker
 	webPushRepo       *WebPushRepository
 	webPushDispatcher *WebPushDispatcher
+	// serverChannelWorker sweeps release_events into admin broadcast posts;
+	// nil without the at-rest cipher.
+	serverChannelWorker *serverChannelWorker
 	// dispatcher is the same MultiDispatcher the fanout worker uses; the
 	// operational dispatch path shares it so every delivery reaches every
 	// configured channel the same way.
@@ -122,6 +128,17 @@ func NewSystem(
 		dispatchers = append(dispatchers, webhookDispatcher)
 	}
 
+	// Admin server channels (broadcast destinations) share the cipher
+	// requirement: their URLs are credentials too.
+	var serverChannelService *ServerChannelService
+	var serverChannelSweep *serverChannelWorker
+	if cipher != nil {
+		serverChannelRepo := NewServerChannelRepository(pool)
+		serverChannelSenderInst := newServerChannelSender(cipher, settings)
+		serverChannelService = newServerChannelService(serverChannelRepo, cipher, settings, serverChannelSenderInst)
+		serverChannelSweep = newServerChannelWorker(pool, serverChannelRepo, releases, serverChannelSenderInst, settings)
+	}
+
 	// Web push needs a writable settings store to self-provision its VAPID
 	// keypair. The reader main passes is the encrypted settings repo, which
 	// also writes; tests may pass a read-only stub.
@@ -171,37 +188,42 @@ func NewSystem(
 		fanout.SetWebPushOutbox(webPushRepo)
 	}
 	detector := NewAvailabilityDetector(releases, settings)
-	detector.SetFanoutNudge(fanout.Nudge)
+	detector.SetFanoutNudge(func() {
+		fanout.Nudge()
+		serverChannelSweep.Nudge() // nil-safe
+	})
 	interest := NewInterestUpdater(pool, interests, stores, scopes)
 
 	system := &System{
-		Settings:          settings,
-		Releases:          releases,
-		Interests:         interests,
-		Deliveries:        deliveries,
-		Preferences:       preferences,
-		Detector:          detector,
-		Interest:          interest,
-		Fanout:            fanout,
-		Tickets:           NewTicketStore(redisClient),
-		Webhooks:          webhookService,
-		WebPush:           webPushService,
-		EmailPrefs:        emailPrefs,
-		DiscordPrefs:      discordPrefs,
-		mailSender:        mailSender,
-		emailWorker:       emailWorker,
-		discordWorker:     discordWorker,
-		discordClient:     discordClient,
-		webhookRepo:       webhookRepo,
-		webhookDispatcher: webhookDispatcher,
-		webhookRetry:      webhookRetry,
-		webPushRepo:       webPushRepo,
-		webPushDispatcher: webPushDispatcher,
-		dispatcher:        multiDispatcher,
-		pool:              pool,
-		stores:            stores,
-		users:             users,
-		logger:            slog.Default().With("component", "notifications.system"),
+		Settings:            settings,
+		Releases:            releases,
+		Interests:           interests,
+		Deliveries:          deliveries,
+		Preferences:         preferences,
+		Detector:            detector,
+		Interest:            interest,
+		Fanout:              fanout,
+		Tickets:             NewTicketStore(redisClient),
+		Webhooks:            webhookService,
+		ServerChannels:      serverChannelService,
+		WebPush:             webPushService,
+		EmailPrefs:          emailPrefs,
+		DiscordPrefs:        discordPrefs,
+		mailSender:          mailSender,
+		emailWorker:         emailWorker,
+		discordWorker:       discordWorker,
+		discordClient:       discordClient,
+		webhookRepo:         webhookRepo,
+		webhookDispatcher:   webhookDispatcher,
+		webhookRetry:        webhookRetry,
+		webPushRepo:         webPushRepo,
+		webPushDispatcher:   webPushDispatcher,
+		serverChannelWorker: serverChannelSweep,
+		dispatcher:          multiDispatcher,
+		pool:                pool,
+		stores:              stores,
+		users:               users,
+		logger:              slog.Default().With("component", "notifications.system"),
 	}
 	wsDispatcher.payload = system.PayloadForRow
 	if emailChannelInst != nil {
@@ -267,6 +289,13 @@ func (s *System) Start(ctx context.Context) {
 		go func() {
 			defer s.wg.Done()
 			s.webhookRetry.Run(ctx)
+		}()
+	}
+	if s.serverChannelWorker != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.serverChannelWorker.Run(ctx)
 		}()
 	}
 	if s.emailWorker != nil {
@@ -364,49 +393,67 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 			progress(percent, message)
 		}
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT mf.id
-		FROM media_folders mf
-		WHERE mf.last_scanned_at IS NOT NULL
-		  AND NOT EXISTS (
-			SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id
-		  )
-		ORDER BY mf.id`)
-	if err != nil {
-		return fmt.Errorf("list libraries: %w", err)
+	// Episode and movie availability seed independently: each kind has its
+	// own seed markers, because the episode pass historically marked every
+	// scanned library (movie libraries included) with zero movie rows.
+	passes := []struct {
+		kind          string
+		seedCondition string
+		record        func(ctx context.Context, libraryID int, emitEvents bool) (int, int, error)
+	}{
+		{EventKindEpisode,
+			`SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id`,
+			s.Releases.RecordAvailabilityForLibrary},
+		{EventKindMovie,
+			`SELECT 1 FROM notification_content_seed_state seed WHERE seed.library_id = mf.id AND seed.kind = 'movie'`,
+			s.Releases.RecordMovieAvailabilityForLibrary},
 	}
-	libraryIDs := make([]int, 0, 8)
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan library id: %w", err)
-		}
-		libraryIDs = append(libraryIDs, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	totalSeeded := 0
-	for i, libraryID := range libraryIDs {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		inserted, _, err := s.Releases.RecordAvailabilityForLibrary(ctx, libraryID, false)
+	for passIdx, pass := range passes {
+		rows, err := s.pool.Query(ctx, `
+			SELECT mf.id
+			FROM media_folders mf
+			WHERE mf.last_scanned_at IS NOT NULL
+			  AND NOT EXISTS (`+pass.seedCondition+`)
+			ORDER BY mf.id`)
 		if err != nil {
-			return fmt.Errorf("seed library %d: %w", libraryID, err)
+			return fmt.Errorf("list libraries: %w", err)
 		}
-		if err := s.Releases.MarkLibrarySeeded(ctx, libraryID); err != nil {
-			return fmt.Errorf("mark library %d seeded: %w", libraryID, err)
+		libraryIDs := make([]int, 0, 8)
+		for rows.Next() {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan library id: %w", err)
+			}
+			libraryIDs = append(libraryIDs, id)
 		}
-		totalSeeded += inserted
-		report((i+1)*100/max(len(libraryIDs), 1),
-			fmt.Sprintf("Seeded library %d (%d new availability rows)", libraryID, inserted))
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		totalSeeded := 0
+		for i, libraryID := range libraryIDs {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			inserted, _, err := pass.record(ctx, libraryID, false)
+			if err != nil {
+				return fmt.Errorf("seed library %d (%s): %w", libraryID, pass.kind, err)
+			}
+			if err := s.Releases.MarkContentSeeded(ctx, libraryID, pass.kind); err != nil {
+				return fmt.Errorf("mark library %d seeded (%s): %w", libraryID, pass.kind, err)
+			}
+			totalSeeded += inserted
+			// Each pass owns half the progress range.
+			passBase := passIdx * 50
+			report(passBase+(i+1)*50/max(len(libraryIDs), 1),
+				fmt.Sprintf("Seeded library %d %s availability (%d new rows)", libraryID, pass.kind, inserted))
+		}
+		s.logger.Info("availability seeding completed",
+			"kind", pass.kind, "libraries", len(libraryIDs), "availability_rows", totalSeeded)
 	}
-	s.logger.Info("availability seeding completed",
-		"libraries", len(libraryIDs), "availability_rows", totalSeeded)
+	report(100, "Availability seeding completed")
 	return nil
 }
 

@@ -7,6 +7,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
+import ServerNotificationChannels from "./ServerNotificationChannels";
 
 const KEYS = [
   "notifications.release_events_enabled",
@@ -27,6 +28,8 @@ const KEYS = [
   "notifications.discord_enabled",
   "notifications.discord.allow_per_episode",
   "notifications.discord.digest_hour",
+  "notifications.server_channels_enabled",
+  "notifications.server_channels.batch_seconds",
   "discord.client_id",
   "discord.client_secret",
   "discord.bot_token",
@@ -390,6 +393,24 @@ export default function NotificationsAdminSettings() {
               <TestDiscordRow unsaved={discordCredentialsDirty} />
             </>
           )}
+        </FieldGroup>
+
+        <FieldGroup label="Server Channels">
+          <SettingField
+            label="Server Channels"
+            hint="Admin-created broadcast destinations that post server-wide events (new content, request activity) to a webhook, e.g. a community Discord channel."
+            type="toggle"
+            value={toggleValue("notifications.server_channels_enabled")}
+            onChange={(v) => form.setValue("notifications.server_channels_enabled", v)}
+          />
+          <SettingField
+            label="Batch Window (seconds)"
+            hint="How long new-content events collect before posting, so a season pack lands as one grouped message (default 300, minimum 120)"
+            type="number"
+            value={numberValue("notifications.server_channels.batch_seconds", "300")}
+            onChange={(v) => form.setValue("notifications.server_channels.batch_seconds", v)}
+          />
+          <ServerNotificationChannels />
         </FieldGroup>
 
         <FieldGroup label="Retention">

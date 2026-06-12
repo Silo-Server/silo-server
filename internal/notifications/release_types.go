@@ -22,11 +22,34 @@ const SuppressedReasonSeriesBurst = "series_burst"
 // extended downtime); delivering them long after the fact would be noise.
 const SuppressedReasonStale = "stale"
 
-// ReleaseEvent is one logical "episode became newly available in a library"
-// event. dedupe_key is "{library_id}:{episode_id}".
+// Release event kinds. Episode events carry the series/episode columns and
+// fan out to interested profiles; movie events carry ItemID only and exist
+// for the server-channel broadcast feed (no per-profile fanout in v1).
+const (
+	EventKindEpisode = "episode"
+	EventKindMovie   = "movie"
+)
+
+// normalizeEventKind treats an unset kind as episode — the single home of
+// that rule. The column is NOT NULL DEFAULT 'episode', so only in-memory
+// constructed events can carry an empty kind.
+func normalizeEventKind(kind string) string {
+	if kind == "" {
+		return EventKindEpisode
+	}
+	return kind
+}
+
+// ReleaseEvent is one logical "content became newly available in a library"
+// event. dedupe_key is "{library_id}:{episode_id}" for episodes and
+// "movie:{library_id}:{item_id}" for movies.
 type ReleaseEvent struct {
-	ID               string
-	LibraryID        int
+	ID        string
+	LibraryID int
+	Kind      string
+	// ItemID is the media_items content id for movie events; empty for
+	// episode events.
+	ItemID           string
 	SeriesID         string
 	EpisodeID        string
 	SeasonNumber     int

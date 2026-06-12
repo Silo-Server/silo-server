@@ -50,15 +50,55 @@ type WebhookInput struct {
 	NotifyRequests         *bool
 }
 
-func validateWebhookName(name string) (string, error) {
+// validateChannelName applies the shared destination-name policy (matching
+// the varchar(64) columns); invalid is the caller's sentinel to wrap.
+func validateChannelName(name string, invalid error) (string, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return "", fmt.Errorf("%w: name is required", ErrWebhookInvalid)
+		return "", fmt.Errorf("%w: name is required", invalid)
 	}
 	if len(trimmed) > 64 {
-		return "", fmt.Errorf("%w: name must be 64 characters or fewer", ErrWebhookInvalid)
+		return "", fmt.Errorf("%w: name must be 64 characters or fewer", invalid)
 	}
 	return trimmed, nil
+}
+
+// resolveWebhookType infers or validates a destination type against its URL.
+// An empty explicit type auto-detects; an explicit type must match the
+// destination, or the sender would apply the wrong payload/signing behavior
+// from the first delivery. Shared by profile webhooks and server channels.
+func resolveWebhookType(rawURL, explicitType string, invalid error) (string, error) {
+	isDiscordURL := discordWebhookURL(rawURL)
+	switch explicitType {
+	case "":
+		if isDiscordURL {
+			return WebhookTypeDiscord, nil
+		}
+		return WebhookTypeGeneric, nil
+	case WebhookTypeDiscord, WebhookTypeGeneric:
+	default:
+		return "", fmt.Errorf("%w: type must be discord or generic", invalid)
+	}
+	if explicitType == WebhookTypeDiscord && !isDiscordURL {
+		return "", fmt.Errorf("%w: type discord requires a Discord webhook URL", invalid)
+	}
+	if explicitType == WebhookTypeGeneric && isDiscordURL {
+		return "", fmt.Errorf("%w: Discord webhook URLs must use type discord", invalid)
+	}
+	return explicitType, nil
+}
+
+// validateReplacementURL checks a replacement URL stays compatible with the
+// destination's fixed type, so existing receivers keep working.
+func validateReplacementURL(hookType, rawURL string, invalid error) error {
+	isDiscordURL := discordWebhookURL(rawURL)
+	if hookType == WebhookTypeDiscord && !isDiscordURL {
+		return fmt.Errorf("%w: a Discord webhook needs a Discord webhook URL", invalid)
+	}
+	if hookType == WebhookTypeGeneric && isDiscordURL {
+		return fmt.Errorf("%w: Discord webhook URLs must use type discord", invalid)
+	}
+	return nil
 }
 
 func newSigningSecret() (string, error) {
@@ -92,7 +132,7 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 	if input.Name == nil || input.URL == nil {
 		return nil, "", fmt.Errorf("%w: name and url are required", ErrWebhookInvalid)
 	}
-	name, err := validateWebhookName(*input.Name)
+	name, err := validateChannelName(*input.Name, ErrWebhookInvalid)
 	if err != nil {
 		return nil, "", err
 	}
@@ -107,24 +147,9 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 	if input.Type != nil {
 		hookType = strings.TrimSpace(*input.Type)
 	}
-	isDiscordURL := discordWebhookURL(rawURL)
-	switch hookType {
-	case "":
-		hookType = WebhookTypeGeneric
-		if isDiscordURL {
-			hookType = WebhookTypeDiscord
-		}
-	case WebhookTypeDiscord, WebhookTypeGeneric:
-	default:
-		return nil, "", fmt.Errorf("%w: type must be discord or generic", ErrWebhookInvalid)
-	}
-	// An explicit type must match the destination, or the sender would apply
-	// the wrong payload/signing behavior from the first delivery.
-	if hookType == WebhookTypeDiscord && !isDiscordURL {
-		return nil, "", fmt.Errorf("%w: type discord requires a Discord webhook URL", ErrWebhookInvalid)
-	}
-	if hookType == WebhookTypeGeneric && isDiscordURL {
-		return nil, "", fmt.Errorf("%w: Discord webhook URLs must use type discord", ErrWebhookInvalid)
+	hookType, err = resolveWebhookType(rawURL, hookType, ErrWebhookInvalid)
+	if err != nil {
+		return nil, "", err
 	}
 
 	hook := Webhook{
@@ -183,7 +208,7 @@ func (s *WebhookService) Update(ctx context.Context, profileID, id string, input
 	}
 
 	if input.Name != nil {
-		name, err := validateWebhookName(*input.Name)
+		name, err := validateChannelName(*input.Name, ErrWebhookInvalid)
 		if err != nil {
 			return nil, err
 		}
@@ -195,10 +220,8 @@ func (s *WebhookService) Update(ctx context.Context, profileID, id string, input
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrWebhookInvalid, err.Error())
 		}
-		// The type is fixed at creation; a replacement URL must stay
-		// compatible so existing receivers keep working.
-		if hook.Type == WebhookTypeDiscord && !discordWebhookURL(rawURL) {
-			return nil, fmt.Errorf("%w: a Discord webhook needs a Discord webhook URL", ErrWebhookInvalid)
+		if err := validateReplacementURL(hook.Type, rawURL, ErrWebhookInvalid); err != nil {
+			return nil, err
 		}
 		hook.URLCiphertext, err = s.cipher.Encrypt(rawURL, webhookURLAAD(hook.ID))
 		if err != nil {
@@ -282,6 +305,16 @@ type WebhookTestResult struct {
 	Message    string `json:"message,omitempty"`
 }
 
+// testResult converts a send outcome to the API test-result shape.
+func (r webhookSendResult) testResult() *WebhookTestResult {
+	return &WebhookTestResult{
+		OK:         r.OK,
+		HTTPStatus: r.HTTPStatus,
+		DurationMS: r.Duration.Milliseconds(),
+		Message:    r.Message,
+	}
+}
+
 // Test synchronously POSTs a clearly marked sample payload. Test sends never
 // touch webhook_delivery_attempts or the failure counters.
 func (s *WebhookService) Test(ctx context.Context, profileID, id string) (*WebhookTestResult, error) {
@@ -297,13 +330,7 @@ func (s *WebhookService) Test(ctx context.Context, profileID, id string) (*Webho
 	if hook == nil {
 		return nil, ErrWebhookNotFound
 	}
-	result := s.sender.send(ctx, hook, sampleDeliveryRow(profileID), true)
-	return &WebhookTestResult{
-		OK:         result.OK,
-		HTTPStatus: result.HTTPStatus,
-		DurationMS: result.Duration.Milliseconds(),
-		Message:    result.Message,
-	}, nil
+	return s.sender.send(ctx, hook, sampleDeliveryRow(profileID), true).testResult(), nil
 }
 
 // sampleDeliveryRow is the fixture used for test sends.

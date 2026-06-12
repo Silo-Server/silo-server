@@ -32,6 +32,33 @@ func EvaluateRecipient(interest SeriesInterest, prefs Preferences, episodeKey in
 	return flags, flags.Any()
 }
 
+// PartitionEventsByKind splits claimed events into episode events (which fan
+// out to profiles) and everything else (movie events, which only feed the
+// server-channel broadcast sweep). Order is preserved within each partition.
+// The common all-episode batch returns the input slice unchanged.
+func PartitionEventsByKind(events []ReleaseEvent) (episodes, others []ReleaseEvent) {
+	allEpisodes := true
+	for _, event := range events {
+		if normalizeEventKind(event.Kind) != EventKindEpisode {
+			allEpisodes = false
+			break
+		}
+	}
+	if allEpisodes {
+		return events, nil
+	}
+	episodes = make([]ReleaseEvent, 0, len(events))
+	others = make([]ReleaseEvent, 0)
+	for _, event := range events {
+		if normalizeEventKind(event.Kind) == EventKindEpisode {
+			episodes = append(episodes, event)
+		} else {
+			others = append(others, event)
+		}
+	}
+	return episodes, others
+}
+
 // ApplyBurstCap groups claimed events by (library, series) and bounds fanout
 // per group: only the maxPerSeries events with the highest episode_key fan
 // out; the rest are suppressed (processed without deliveries). This bounds

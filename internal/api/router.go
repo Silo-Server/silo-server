@@ -531,6 +531,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}
+		// Server-channel broadcast of request lifecycle events (submitted /
+		// approved / declined). Fulfilled rides the reconcile service's
+		// fulfillment notifier instead.
+		if lifecycle := notifications.NewServerChannelLifecycleNotifier(deps.Notifications); lifecycle != nil {
+			requestSvc.SetLifecycleNotifier(lifecycle)
+		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
 		autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
@@ -2199,6 +2205,17 @@ func NewRouter(deps Dependencies) chi.Router {
 							}
 							if discordNotificationsHandler != nil {
 								r.Post("/notifications/discord/test", discordNotificationsHandler.HandleAdminTest)
+							}
+							if deps.Notifications != nil && deps.Notifications.ServerChannels != nil {
+								serverChannelsHandler := handlers.NewAdminServerChannelsHandler(deps.Notifications)
+								r.Route("/notifications/server-channels", func(r chi.Router) {
+									r.Get("/", serverChannelsHandler.HandleList)
+									r.Post("/", serverChannelsHandler.HandleCreate)
+									r.Put("/{id}", serverChannelsHandler.HandleUpdate)
+									r.Delete("/{id}", serverChannelsHandler.HandleDelete)
+									r.Post("/{id}/rotate-secret", serverChannelsHandler.HandleRotateSecret)
+									r.Post("/{id}/test", serverChannelsHandler.HandleTest)
+								})
 							}
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
