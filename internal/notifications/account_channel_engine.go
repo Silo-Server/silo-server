@@ -46,8 +46,9 @@ const (
 	// channelNudgeDelay coalesces the per-row dispatch nudges of one fanout
 	// batch (all rows commit before the first nudge fires) into one pass.
 	channelNudgeDelay = 2 * time.Second
-	// channelFetchLimit bounds one send's worth of watermark progress; the
-	// next pass drains the remainder.
+	// channelFetchLimit is the delivery read page size. Per-episode sends
+	// stop after one page (the next pass drains the remainder); digest sends
+	// page until the window is empty before stamping last_digest_at.
 	channelFetchLimit = 200
 	// channelMaxFailuresPerPass stops a pass early when sends keep failing —
 	// transport trouble is almost always global, not per-recipient.
@@ -88,6 +89,24 @@ func channelDigestDue(now time.Time, digestHour int, lastDigestAt *time.Time) bo
 		return false
 	}
 	return lastDigestAt == nil || lastDigestAt.Before(todaySend)
+}
+
+// drainSince pages fetch from the given cursor until a short read, returning
+// every row in the window in delivery order.
+func drainSince(fetch func(since Cursor, limit int) ([]DeliveryRow, error), from Cursor) ([]DeliveryRow, error) {
+	var all []DeliveryRow
+	for {
+		batch, err := fetch(from, channelFetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < channelFetchLimit {
+			return all, nil
+		}
+		last := batch[len(batch)-1]
+		from = Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
 }
 
 // channelRetryEligible applies exponential backoff after failed sends:
@@ -298,6 +317,13 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 		return nil // another node is handling this recipient
 	}
 
+	// Re-check the admin kill switch under the lock: a pass over many
+	// recipients can outlive a settings flip, and disabling the channel must
+	// stop in-flight sends, not just future passes.
+	if !w.channel.enabled(ctx) {
+		return fmt.Errorf("channel disabled: %w", errChannelUnavailable)
+	}
+
 	// Re-derive eligibility from the locked row: the pre-scan snapshot may
 	// predate a user mode flip or another node's digest stamp.
 	mode := effectiveChannelMode(claimed.Mode, w.channel.allowPerEpisode(ctx))
@@ -340,7 +366,19 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 		return nil
 	}
 
-	rows, err := w.channel.listSince(ctx, tx, rec.Key, fetchFrom, channelFetchLimit)
+	fetch := func(since Cursor, limit int) ([]DeliveryRow, error) {
+		return w.channel.listSince(ctx, tx, rec.Key, since, limit)
+	}
+	var rows []DeliveryRow
+	if digestAt != nil {
+		// Stamping last_digest_at closes the digest window — permanently for
+		// the combined mode, until tomorrow for digest-only — so the digest
+		// must drain the whole window, not stop at one page. Renderers cap
+		// how many items they show, so a large drain stays deliverable.
+		rows, err = drainSince(fetch, fetchFrom)
+	} else {
+		rows, err = fetch(fetchFrom, channelFetchLimit)
+	}
 	if err != nil {
 		return err
 	}
