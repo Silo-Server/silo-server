@@ -101,4 +101,12 @@ type RequestEventInfo struct {
 	Overview      string
 	PosterPath    string // raw TMDB image path ("/abc.jpg") from discovery
 	RequesterName string
+	// RequesterUserID is the requesting login account; 0 for requests
+	// without one. The sweep worker resolves it to the linked Discord
+	// identity just before a Discord channel receives the event.
+	RequesterUserID int
+	// RequesterDiscordID is the requester's OAuth-linked Discord user id,
+	// filled in by the worker only when the admin enabled requester
+	// mentions. Empty renders the plain RequesterName with no mention.
+	RequesterDiscordID string
 }

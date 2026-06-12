@@ -625,6 +625,7 @@ func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string)
 	if err != nil {
 		return nil, err
 	}
+	declined.DeclineReason = strings.TrimSpace(reason)
 	s.notifyLifecycle(ctx, *declined, LifecycleNotifier.RequestDeclined)
 	return declined, nil
 }

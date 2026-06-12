@@ -152,6 +152,49 @@ func TestEmailSubject(t *testing.T) {
 	}
 }
 
+func TestCollateEmailItemsKeepsLifecycleAndFulfilledForSameRequest(t *testing.T) {
+	// One request can produce an approved row and a fulfilled row in the same
+	// window; both must render.
+	rows := []DeliveryRow{
+		requestDeclinedTestRow(),
+		requestFulfilledTestRow(), // different request id is irrelevant; types differ
+		{Delivery: Delivery{
+			ID:          "01APPROVED",
+			Type:        DeliveryTypeRequestApproved,
+			ReasonFlags: []byte(`{"request_id":"01REQ","media_type":"movie","title":"Dune"}`),
+		}},
+	}
+	items := collateEmailItems(rows)
+	if len(items.requests) != 3 {
+		t.Fatalf("expected 3 request rows (distinct types), got %d", len(items.requests))
+	}
+	if requestsAllFulfilled(items) {
+		t.Fatal("mixed request rows must not report all-fulfilled")
+	}
+}
+
+func TestRequestLineLifecycle(t *testing.T) {
+	declined := requestDeclinedTestRow()
+	if got := requestLine(declined); got != "Your request for Dune was declined — Already available in 4K" {
+		t.Fatalf("unexpected declined line %q", got)
+	}
+	approved := requestDeclinedTestRow()
+	approved.Type = DeliveryTypeRequestApproved
+	approved.ReasonFlags = []byte(`{"request_id":"01REQ","title":"Dune"}`)
+	if got := requestLine(approved); got != "Your request for Dune was approved" {
+		t.Fatalf("unexpected approved line %q", got)
+	}
+
+	subject := emailSubject(EmailModePerEpisode, collateEmailItems([]DeliveryRow{approved}))
+	if subject != "Your request for Dune was approved" {
+		t.Fatalf("unexpected single-update subject %q", subject)
+	}
+	mixed := collateEmailItems([]DeliveryRow{approved, requestFulfilledTestRow()})
+	if got := emailSubject(EmailModeDailyDigest, mixed); got != "Silo daily digest: 2 request updates" {
+		t.Fatalf("unexpected mixed subject %q", got)
+	}
+}
+
 func TestComposeNotificationEmailLinks(t *testing.T) {
 	rows := []DeliveryRow{emailEpisodeRow("01A", "p1", "ep-1", 2, 3)}
 

@@ -63,10 +63,20 @@ type discordEmbed struct {
 	Fields      []discordEmbedField `json:"fields,omitempty"`
 }
 
+// discordAllowedMentions whitelists exactly what a message's content may
+// ping. Parse always serializes (an empty list disables Discord's implicit
+// mention parsing), so content assembled from user-derived text can never
+// ping roles or @everyone.
+type discordAllowedMentions struct {
+	Parse []string `json:"parse"`
+	Users []string `json:"users,omitempty"`
+}
+
 type discordWebhookBody struct {
-	Content  string         `json:"content,omitempty"`
-	Embeds   []discordEmbed `json:"embeds"`
-	Username string         `json:"username"`
+	Content         string                  `json:"content,omitempty"`
+	Embeds          []discordEmbed          `json:"embeds"`
+	Username        string                  `json:"username"`
+	AllowedMentions *discordAllowedMentions `json:"allowed_mentions,omitempty"`
 }
 
 // BuildDiscordWebhookPayload renders a delivery as a Discord webhook body.
@@ -118,6 +128,10 @@ func discordEmbedAuthorLine(deliveryType string) string {
 		return "New episode on Silo"
 	case DeliveryTypeRequestFulfilled:
 		return "Your request is now available on Silo"
+	case DeliveryTypeRequestApproved:
+		return "Your request was approved on Silo"
+	case DeliveryTypeRequestDeclined:
+		return "Your request was declined on Silo"
 	default:
 		return genericNotificationTitle
 	}
@@ -151,7 +165,19 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 	if row.Type == DeliveryTypeEpisodeAvailable && row.EpisodeOverview != "" {
 		overview = row.EpisodeOverview
 	}
+	isRequestType := row.Type == DeliveryTypeRequestFulfilled || isRequestLifecycleType(row.Type)
+	var requestFlags RequestFlags
+	if isRequestType {
+		requestFlags = parseRequestFlags(row.ReasonFlags)
+	}
 	ids := providerIDs{MediaType: row.MediaType, IMDB: row.IMDBID, TMDB: row.TMDBID, TVDB: row.TVDBID}
+	if isRequestLifecycleType(row.Type) {
+		// No catalog join; derive the provider link from the request flags.
+		ids = providerIDs{MediaType: requestFlags.MediaType}
+		if requestFlags.TMDBID > 0 {
+			ids.TMDB = fmt.Sprintf("%d", requestFlags.TMDBID)
+		}
+	}
 
 	fields := make([]discordEmbedField, 0, 3)
 	if labels := reasonLabelList(flags); len(labels) > 0 {
@@ -161,10 +187,16 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 			Inline: true,
 		})
 	}
-	if row.Type == DeliveryTypeRequestFulfilled {
-		if mediaType := requestMediaTypeLabel(row.ReasonFlags); mediaType != "" {
+	if isRequestType {
+		if mediaType := mediaTypeLabel(requestFlags.MediaType); mediaType != "" {
 			fields = append(fields, discordEmbedField{Name: "Type", Value: mediaType, Inline: true})
 		}
+	}
+	if row.Type == DeliveryTypeRequestDeclined && requestFlags.Reason != "" {
+		fields = append(fields, discordEmbedField{
+			Name:  "Reason",
+			Value: truncateWithEllipsis(requestFlags.Reason, discordFieldValueLimit),
+		})
 	}
 	if rating := ratingLabel(row.RatingIMDB, row.RatingTMDB); rating != "" {
 		fields = append(fields, discordEmbedField{Name: "Rating", Value: rating, Inline: true})
@@ -173,11 +205,18 @@ func buildDiscordEmbed(row DeliveryRow, test bool) discordEmbed {
 		fields = append(fields, discordEmbedField{Name: "Genres", Value: genres, Inline: true})
 	}
 
+	color := discordEmbedColor(flags)
+	switch row.Type {
+	case DeliveryTypeRequestApproved:
+		color = serverChannelColorApproved
+	case DeliveryTypeRequestDeclined:
+		color = serverChannelColorDeclined
+	}
 	embed := discordEmbed{
 		Title:       title,
 		URL:         ids.titleURL(),
 		Description: embedDescription(overview, ids),
-		Color:       discordEmbedColor(flags),
+		Color:       color,
 		Author:      &discordEmbedAuthor{Name: discordEmbedAuthorLine(row.Type)},
 		Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(row.ContentRating, test)},
 		Fields:      fields,
@@ -201,6 +240,14 @@ func discordEmbedTitle(row DeliveryRow) string {
 			return titleWithYear(row.SeriesTitle, row.Year)
 		}
 		return "Request fulfilled"
+	case DeliveryTypeRequestApproved, DeliveryTypeRequestDeclined:
+		// No catalog join exists for an unfulfilled request; the title rides
+		// in the reason flags.
+		flags := parseRequestFlags(row.ReasonFlags)
+		if flags.Title != "" {
+			return titleWithYear(flags.Title, flags.Year)
+		}
+		return "Media request"
 	case DeliveryTypeEpisodeAvailable:
 		// Falls out of the switch into the episode title assembly below.
 	default:
@@ -222,12 +269,6 @@ func discordEmbedTitle(row DeliveryRow) string {
 	default:
 		return series
 	}
-}
-
-// requestMediaTypeLabel renders a request.fulfilled delivery's media type as
-// a display label; unknown values render nothing.
-func requestMediaTypeLabel(reasonFlags []byte) string {
-	return mediaTypeLabel(parseRequestFulfilledFlags(reasonFlags).MediaType)
 }
 
 func discordEmbedColor(flags ReasonFlags) int {

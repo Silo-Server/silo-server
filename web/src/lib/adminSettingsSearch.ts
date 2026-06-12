@@ -297,6 +297,7 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "Allow Private Destinations",
           "Server Channels",
           "Batch Window (seconds)",
+          "Mention Requesters on Discord",
           "Settle Delay (seconds)",
           "Max Series Burst",
           "Max Event Age (hours)",

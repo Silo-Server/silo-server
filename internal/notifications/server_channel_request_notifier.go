@@ -12,55 +12,18 @@ import (
 // theoretical worst case; in practice a couple of channels are subscribed).
 const serverChannelRequestPostTimeout = 60 * time.Second
 
-// ServerChannelLifecycleNotifier adapts request lifecycle transitions to
-// server-channel posts. Sends are detached and best-effort: the request flow
-// never waits on or fails because of a broadcast destination.
-type ServerChannelLifecycleNotifier struct {
-	system *System
-}
-
-// NewServerChannelLifecycleNotifier creates the adapter; returns nil when the
-// system has no server-channel support (no at-rest cipher).
-func NewServerChannelLifecycleNotifier(system *System) *ServerChannelLifecycleNotifier {
-	if system == nil || system.serverChannelWorker == nil {
-		return nil
-	}
-	return &ServerChannelLifecycleNotifier{system: system}
-}
-
-// RequestSubmitted implements requests.LifecycleNotifier.
-func (n *ServerChannelLifecycleNotifier) RequestSubmitted(ctx context.Context, req requests.Request) {
-	n.post(ctx, ServerChannelEventRequestSubmitted, req)
-}
-
-// RequestApproved implements requests.LifecycleNotifier.
-func (n *ServerChannelLifecycleNotifier) RequestApproved(ctx context.Context, req requests.Request) {
-	n.post(ctx, ServerChannelEventRequestApproved, req)
-}
-
-// RequestDeclined implements requests.LifecycleNotifier.
-func (n *ServerChannelLifecycleNotifier) RequestDeclined(ctx context.Context, req requests.Request) {
-	n.post(ctx, ServerChannelEventRequestDeclined, req)
-}
-
-func (n *ServerChannelLifecycleNotifier) post(ctx context.Context, event string, req requests.Request) {
-	if n == nil || n.system == nil {
-		return
-	}
-	n.system.PostServerChannelRequestEvent(ctx, event, requestEventInfoFor(req))
-}
-
 // requestEventInfoFor converts a request into the payload-layer shape.
 func requestEventInfoFor(req requests.Request) RequestEventInfo {
 	info := RequestEventInfo{
-		RequestID:     req.ID,
-		TMDBID:        req.TMDBID,
-		IMDBID:        req.IMDbID,
-		MediaType:     string(req.MediaType),
-		Title:         req.Title,
-		Overview:      req.Overview,
-		PosterPath:    req.PosterPath,
-		RequesterName: req.RequesterUsername,
+		RequestID:       req.ID,
+		TMDBID:          req.TMDBID,
+		IMDBID:          req.IMDbID,
+		MediaType:       string(req.MediaType),
+		Title:           req.Title,
+		Overview:        req.Overview,
+		PosterPath:      req.PosterPath,
+		RequesterName:   req.RequesterUsername,
+		RequesterUserID: req.RequestedByUserID,
 	}
 	if req.Year != nil {
 		info.Year = *req.Year
@@ -85,4 +48,23 @@ func (s *System) PostServerChannelRequestEvent(ctx context.Context, event string
 		defer cancel()
 		s.serverChannelWorker.PostRequestEvent(postCtx, event, info)
 	}()
+}
+
+// requesterDiscordID resolves a requester's OAuth-linked Discord user id for
+// @mentions in server-channel request posts. Empty when the admin has not
+// enabled requester mentions, the account never linked Discord, or the lookup
+// fails — the post then falls back to the plain username. Wired into the
+// sweep worker, which calls it only when a Discord channel is about to
+// receive the event.
+func (s *System) requesterDiscordID(ctx context.Context, userID int) string {
+	if userID <= 0 || s.DiscordPrefs == nil || !s.Settings.ServerChannelMentionRequesters(ctx) {
+		return ""
+	}
+	prefs, err := s.DiscordPrefs.Get(ctx, userID)
+	if err != nil {
+		s.logger.Warn("server channel request post: discord identity lookup failed",
+			"user_id", userID, "error", err)
+		return ""
+	}
+	return prefs.DiscordUserID
 }

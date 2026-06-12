@@ -31,6 +31,11 @@ type serverChannelWorker struct {
 	// posterURL picks the artwork URL Discord embeds may carry. Wired by
 	// NewSystem after construction; nil renders embeds without images.
 	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
+	// requesterDiscordID resolves a request's requester to their linked
+	// Discord user id for @mentions (System.requesterDiscordID, which owns
+	// the admin-setting gate). Wired by NewSystem after construction; nil or
+	// empty results post without a mention.
+	requesterDiscordID func(ctx context.Context, userID int) string
 
 	// Short-lived cache behind requestEventChannels.
 	requestChannelsMu        sync.Mutex
@@ -330,6 +335,7 @@ func (w *serverChannelWorker) PostRequestEvent(ctx context.Context, event string
 		info.PosterPath = ""
 	}
 	now := time.Now()
+	mentionResolved := false
 	for _, ch := range channels {
 		if ctx.Err() != nil {
 			return
@@ -339,6 +345,15 @@ func (w *serverChannelWorker) PostRequestEvent(ctx context.Context, event string
 		}
 		if !channelRetryEligible(now, ch.LastAttemptAt, ch.ConsecutiveFailures) {
 			continue
+		}
+		// Resolve the requester's Discord identity at most once per event,
+		// and only when a Discord channel is actually about to receive it —
+		// the common no-subscriber case must stay query-free.
+		if ch.Type == WebhookTypeDiscord && !mentionResolved {
+			mentionResolved = true
+			if w.requesterDiscordID != nil {
+				info.RequesterDiscordID = w.requesterDiscordID(ctx, info.RequesterUserID)
+			}
 		}
 		result := w.sender.sendRequest(ctx, &ch, event, info)
 		if result.OK {

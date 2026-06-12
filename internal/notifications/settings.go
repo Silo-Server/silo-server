@@ -47,8 +47,9 @@ const (
 	SettingDiscordDigestHour      = "notifications.discord.digest_hour"
 	SettingDiscordPosterMode      = "notifications.discord.poster_mode"
 
-	SettingServerChannelsEnabled      = "notifications.server_channels_enabled"
-	SettingServerChannelsBatchSeconds = "notifications.server_channels.batch_seconds"
+	SettingServerChannelsEnabled          = "notifications.server_channels_enabled"
+	SettingServerChannelsBatchSeconds     = "notifications.server_channels.batch_seconds"
+	SettingServerChannelMentionRequesters = "notifications.server_channels.mention_requesters"
 
 	// Discord application credentials live under the discord.* namespace
 	// (admin-configured, alongside email.smtp_*). The secret and bot token
@@ -329,6 +330,14 @@ func (s *Settings) DiscordDigestHour(ctx context.Context) int {
 // admin, so creating a channel is itself the opt-in act.
 func (s *Settings) ServerChannelsEnabled(ctx context.Context) bool {
 	return s.boolSetting(ctx, SettingServerChannelsEnabled, true)
+}
+
+// ServerChannelMentionRequesters controls whether server-channel request
+// posts to Discord destinations @mention the requesting user (when that
+// account has linked Discord). Opt-in: a mention pings the user, which an
+// admin must choose deliberately for a shared channel.
+func (s *Settings) ServerChannelMentionRequesters(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingServerChannelMentionRequesters, false)
 }
 
 // ServerChannelsBatchWindow is how old a release event must be before the

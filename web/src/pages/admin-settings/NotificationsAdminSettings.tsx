@@ -56,6 +56,7 @@ const KEYS = [
   "notifications.discord.poster_mode",
   "notifications.server_channels_enabled",
   "notifications.server_channels.batch_seconds",
+  "notifications.server_channels.mention_requesters",
   "discord.client_id",
   "discord.client_secret",
   "discord.bot_token",
@@ -764,6 +765,15 @@ export default function NotificationsAdminSettings() {
                 type="number"
                 value={numberValue("notifications.server_channels.batch_seconds", "300")}
                 onChange={(v) => form.setValue("notifications.server_channels.batch_seconds", v)}
+              />
+              <SettingField
+                label="Mention Requesters on Discord"
+                hint="Request posts to Discord destinations @mention the requesting user when their account has linked Discord (in user notification settings). Unlinked accounts show their Silo username without a mention."
+                type="toggle"
+                value={form.getValue("notifications.server_channels.mention_requesters")}
+                onChange={(v) =>
+                  form.setValue("notifications.server_channels.mention_requesters", v)
+                }
               />
               <div className="pt-3">
                 <ServerNotificationChannels />

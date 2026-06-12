@@ -75,10 +75,12 @@ func collateEmailItems(rows []DeliveryRow) emailItems {
 			}
 			items.series[idx].episodes = append(items.series[idx].episodes, row)
 			items.episodes++
-		case DeliveryTypeRequestFulfilled:
-			key := parseRequestFulfilledFlags(row.ReasonFlags).RequestID
-			if key == "" {
-				key = row.ID
+		case DeliveryTypeRequestFulfilled, DeliveryTypeRequestApproved, DeliveryTypeRequestDeclined:
+			// Key by (type, request): one request may legitimately produce an
+			// approved row and a fulfilled row in the same window.
+			key := row.ID
+			if requestID := parseRequestFlags(row.ReasonFlags).RequestID; requestID != "" {
+				key = row.Type + ":" + requestID
 			}
 			if _, ok := seenRequests[key]; ok {
 				continue
@@ -130,12 +132,46 @@ func episodeLine(row DeliveryRow) string {
 	}
 }
 
-// requestLine renders one fulfilled-request entry.
+// requestLine renders one request-status entry. Fulfilled rows carry the
+// catalog title via the join; approved/declined rows carry it in the flags.
 func requestLine(row DeliveryRow) string {
-	if row.SeriesTitle != "" {
-		return row.SeriesTitle + " is now available"
+	flags := parseRequestFlags(row.ReasonFlags)
+	title := row.SeriesTitle
+	if title == "" {
+		title = flags.Title
 	}
-	return "Your media request is now available"
+	switch row.Type {
+	case DeliveryTypeRequestApproved:
+		if title != "" {
+			return "Your request for " + title + " was approved"
+		}
+		return "Your media request was approved"
+	case DeliveryTypeRequestDeclined:
+		line := "Your media request was declined"
+		if title != "" {
+			line = "Your request for " + title + " was declined"
+		}
+		if flags.Reason != "" {
+			line += " — " + flags.Reason
+		}
+		return line
+	default:
+		if title != "" {
+			return title + " is now available"
+		}
+		return "Your media request is now available"
+	}
+}
+
+// requestsAllFulfilled reports whether every collated request row is a
+// fulfillment; it drives the "requests ready" vs "request updates" copy.
+func requestsAllFulfilled(items emailItems) bool {
+	for _, row := range items.requests {
+		if row.Type != DeliveryTypeRequestFulfilled {
+			return false
+		}
+	}
+	return true
 }
 
 // otherLine renders operational and unknown delivery types generically.
@@ -161,7 +197,11 @@ func emailSubject(mode string, items emailItems) string {
 		parts = append(parts, countPart(items.episodes, "new episode", "new episodes"))
 	}
 	if len(items.requests) > 0 {
-		parts = append(parts, countPart(len(items.requests), "request ready", "requests ready"))
+		singular, plural := "request update", "request updates"
+		if requestsAllFulfilled(items) {
+			singular, plural = "request ready", "requests ready"
+		}
+		parts = append(parts, countPart(len(items.requests), singular, plural))
 	}
 	if len(items.others) > 0 {
 		parts = append(parts, countPart(len(items.others), "update", "updates"))
@@ -285,7 +325,11 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 		closeList()
 	}
 	if len(items.requests) > 0 && rendered < emailMaxItemsRendered {
-		writeHeading("Requests ready", "")
+		heading := "Request updates"
+		if requestsAllFulfilled(items) {
+			heading = "Requests ready"
+		}
+		writeHeading(heading, "")
 		openList()
 		for _, row := range items.requests {
 			seriesID := ""

@@ -536,6 +536,18 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             : "Your request is now available",
           { description: "Your media request has arrived in the library." },
         );
+      } else if (
+        notification.type === "request.approved" ||
+        notification.type === "request.declined"
+      ) {
+        const verb = notification.type === "request.approved" ? "approved" : "declined";
+        const title = notification.reason_flags?.title;
+        toast(title ? `Request ${verb}: ${title}` : `Your request was ${verb}`, {
+          description:
+            notification.type === "request.declined"
+              ? notification.reason_flags?.reason
+              : undefined,
+        });
       }
       return;
     }

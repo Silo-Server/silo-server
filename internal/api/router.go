@@ -531,10 +531,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
 		}
-		// Server-channel broadcast of request lifecycle events (submitted /
-		// approved / declined). Fulfilled rides the reconcile service's
+		// Request lifecycle notifications (submitted / approved / declined):
+		// server-channel broadcasts plus personal deliveries to the requester
+		// on approve/decline. Fulfilled rides the reconcile service's
 		// fulfillment notifier instead.
-		if lifecycle := notifications.NewServerChannelLifecycleNotifier(deps.Notifications); lifecycle != nil {
+		if lifecycle := notifications.NewRequestLifecycleNotifier(deps.Notifications); lifecycle != nil {
 			requestSvc.SetLifecycleNotifier(lifecycle)
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)

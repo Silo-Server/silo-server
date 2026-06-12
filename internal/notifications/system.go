@@ -236,6 +236,7 @@ func NewSystem(
 	discordChannelInst.posterURL = system.discordPosterURL
 	if serverChannelSweep != nil {
 		serverChannelSweep.posterURL = system.discordPosterURL
+		serverChannelSweep.requesterDiscordID = system.requesterDiscordID
 	}
 	if webPushSenderInst != nil {
 		webPushSenderInst.payload = system.PayloadForRow
