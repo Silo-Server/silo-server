@@ -1,7 +1,7 @@
 name: v1 capability proposal
 description: Propose a user-facing capability for the Silo v1 scope lock
 title: "[v1] <capability name>"
-labels: ["epic", "v1-proposed"]
+labels: ["v1-proposed"]
 body:
   - type: markdown
     attributes:

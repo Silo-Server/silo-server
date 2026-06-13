@@ -1,0 +1,26 @@
+name: v1 proposal labeler
+
+# The issue form applies `v1-proposed` automatically, but only for submissions
+# through the web form. Contributors filing via the API/CLI (or from a fork)
+# cannot apply labels without triage/write access, so their proposals would land
+# unlabeled and never auto-add to the Silo v1 project. This stamps `v1-proposed`
+# on any issue whose title starts with `[v1]`, regardless of who filed it.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    if: startsWith(github.event.issue.title, '[v1]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply v1-proposed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label v1-proposed
