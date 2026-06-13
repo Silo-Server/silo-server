@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isTranslatableSource } from "./SubtitleTranslateModal";
-import type { PlayerSubtitleInfo } from "../types";
+import { buildSubtitleTranslateRequest, isTranslatableSource } from "./subtitleTranslateRequest";
+import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 
 function track(p: Partial<PlayerSubtitleInfo>): PlayerSubtitleInfo {
   return { index: 0, language: "en", label: "", url: "", ...p };
+}
+
+function audioTrack(p: Partial<PlayerAudioTrack>): PlayerAudioTrack {
+  return { language: "en", ...p };
 }
 
 describe("isTranslatableSource", () => {
@@ -34,5 +38,29 @@ describe("isTranslatableSource", () => {
     expect(isTranslatableSource(track({ source: "downloaded", codec: "srt", live: true }))).toBe(
       false,
     );
+  });
+});
+
+describe("buildSubtitleTranslateRequest", () => {
+  it("normalizes 3-letter audio language codes before choosing the ASR job kind", () => {
+    const body = buildSubtitleTranslateRequest({
+      mode: "audio",
+      mediaFileId: 42,
+      audioIndex: 0,
+      audioTracks: [audioTrack({ language: "eng" })],
+      targetLang: "en",
+      sessionId: "session-1",
+      startPosition: 12.5,
+    });
+
+    expect(body).toMatchObject({
+      media_file_id: 42,
+      kind: "transcribe",
+      source_index: 0,
+      source_language: "en",
+      target_language: "",
+      session_id: "session-1",
+      start_position: 12.5,
+    });
   });
 });
