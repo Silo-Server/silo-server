@@ -1,0 +1,282 @@
+// Package contentid derives deterministic, cross-server stable content IDs for
+// logical media items (movies, series, seasons, episodes).
+//
+// Historically every logical item was minted a Sonyflake ID — a locally
+// generated, time-ordered number that differs per server for the same title.
+// content_id is the anchor that artwork, metadata, watch history, progress,
+// favorites, ratings, collections and credits hang off, so a per-server ID
+// means two servers holding the same movie cannot share any of that state.
+//
+// This package replaces that with a structured natural key derived from the
+// provider IDs already embedded in the library:
+//
+//	movie:<provider>:<id>                      e.g. movie:tmdb:228064
+//	series:<provider>:<id>                     e.g. series:tvdb:296762
+//	season:<provider>:<seriesId>:<seasonNo>    e.g. season:tvdb:296762:1
+//	episode:<provider>:<seriesId>:<s>:<e>      e.g. episode:tvdb:296762:1:5
+//	local:<hex128>                             unmatched / local fallback
+//
+// Provider IDs are unique by construction, so the value is collision-free with
+// no hashing. The leading entity-type token domain-separates the namespaces so
+// a movie and an episode can never alias on a coincidental number.
+//
+// Load-bearing format invariant: an episode/season ID embeds its series anchor,
+// so the series content_id is always a pure string transform of the
+// episode/season ID (see SeriesIDFromContentID). The watch-history query relies
+// on this to resolve a show without an episodes table lookup. Never break it.
+//
+// See docs/architecture/deterministic-content-id.md for the full rationale.
+package contentid
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"golang.org/x/text/unicode/norm"
+)
+
+// SchemeVersion freezes the provider precedence and the exact string format.
+// Changing either re-IDs items, so it is a deliberate, rare event that forces a
+// full remap (see the migration machinery). It is intentionally a code constant,
+// not a per-row column: content_id has no lasting mixed-version population
+// because any scheme change normalizes every row at once.
+const SchemeVersion = 1
+
+// Entity-type tokens. These domain-separate the provider-number namespaces.
+const (
+	kindMovie   = "movie"
+	kindSeries  = "series"
+	kindSeason  = "season"
+	kindEpisode = "episode"
+	kindLocal   = "local"
+)
+
+// Canonical provider tokens.
+const (
+	ProviderTMDB = "tmdb"
+	ProviderIMDB = "imdb"
+	ProviderTVDB = "tvdb"
+)
+
+// MovieProviderPrecedence and SeriesProviderPrecedence freeze, per the scheme
+// version, which provider anchors a logical item when more than one tag is
+// present. Two servers that both see the tags therefore pick the same anchor.
+//
+//   - Movies prefer TMDB (the richest movie source).
+//   - Series/Season/Episode prefer TVDB (the traditional episode-canonical
+//     source).
+var (
+	MovieProviderPrecedence  = []string{ProviderTMDB, ProviderIMDB, ProviderTVDB}
+	SeriesProviderPrecedence = []string{ProviderTVDB, ProviderTMDB, ProviderIMDB}
+)
+
+// ProviderIDs carries the raw provider identifiers for an item as found on the
+// denormalized columns or parsed from folder/file tags. Empty fields are
+// ignored.
+type ProviderIDs struct {
+	Tmdb string
+	Imdb string
+	Tvdb string
+}
+
+func (p ProviderIDs) get(provider string) string {
+	switch provider {
+	case ProviderTMDB:
+		return p.Tmdb
+	case ProviderIMDB:
+		return p.Imdb
+	case ProviderTVDB:
+		return p.Tvdb
+	}
+	return ""
+}
+
+// numericIDPattern validates a tmdb/tvdb id: a non-empty run of digits.
+var numericIDPattern = regexp.MustCompile(`^[0-9]+$`)
+
+// imdbIDPattern validates an imdb id: the literal "tt" followed by digits.
+var imdbIDPattern = regexp.MustCompile(`^tt[0-9]+$`)
+
+// normalizeProviderID normalizes and validates a provider id for use in a
+// content_id. Returns the normalized id and whether it is usable. IMDb ids are
+// lowercased and must retain their "tt" prefix; tmdb/tvdb ids must be a bare
+// run of digits with no leading-zero rewriting (the provider's canonical form).
+func normalizeProviderID(provider, raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return "", false
+	}
+	switch provider {
+	case ProviderIMDB:
+		id = strings.ToLower(id)
+		if !imdbIDPattern.MatchString(id) {
+			return "", false
+		}
+		return id, true
+	case ProviderTMDB, ProviderTVDB:
+		if !numericIDPattern.MatchString(id) {
+			return "", false
+		}
+		return id, true
+	default:
+		return "", false
+	}
+}
+
+// anchor picks the canonical (provider, id) for an item under the given
+// precedence, returning ok=false when no usable provider id is present.
+func anchor(ids ProviderIDs, precedence []string) (provider, id string, ok bool) {
+	for _, p := range precedence {
+		if norm, valid := normalizeProviderID(p, ids.get(p)); valid {
+			return p, norm, true
+		}
+	}
+	return "", "", false
+}
+
+// ForMovie returns the deterministic content_id for a movie, or ("", false) if
+// no provider anchor is present (the caller should fall back to ForLocal).
+func ForMovie(ids ProviderIDs) (string, bool) {
+	provider, id, ok := anchor(ids, MovieProviderPrecedence)
+	if !ok {
+		return "", false
+	}
+	return kindMovie + ":" + provider + ":" + id, true
+}
+
+// ForSeries returns the deterministic content_id for a series, or ("", false)
+// if no provider anchor is present.
+func ForSeries(ids ProviderIDs) (string, bool) {
+	provider, id, ok := anchor(ids, SeriesProviderPrecedence)
+	if !ok {
+		return "", false
+	}
+	return kindSeries + ":" + provider + ":" + id, true
+}
+
+// seriesBody returns the "<provider>:<id>" portion of a provider-anchored series
+// content_id, e.g. "tvdb:296762" for "series:tvdb:296762". Returns ok=false for
+// any id that is not a provider-anchored series (local: series, legacy Sonyflake
+// ids, etc.) so seasons/episodes correctly fall back instead of composing a
+// malformed key.
+func seriesBody(seriesContentID string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(seriesContentID), kindSeries+":")
+	if !ok || rest == "" {
+		return "", false
+	}
+	// Guard the format invariant: exactly "<provider>:<id>" with a known,
+	// validated provider and id. Anything else cannot anchor children.
+	parts := strings.Split(rest, ":")
+	if len(parts) != 2 {
+		return "", false
+	}
+	if _, valid := normalizeProviderID(parts[0], parts[1]); !valid {
+		return "", false
+	}
+	return rest, true
+}
+
+// ForSeason composes a season content_id from its parent series content_id and
+// the season number. It relies on the format invariant: the season key embeds
+// the series anchor. Returns ("", false) when the series is not provider-
+// anchored, so the caller falls back to a local/legacy id.
+func ForSeason(seriesContentID string, seasonNumber int) (string, bool) {
+	body, ok := seriesBody(seriesContentID)
+	if !ok {
+		return "", false
+	}
+	return kindSeason + ":" + body + ":" + strconv.Itoa(seasonNumber), true
+}
+
+// ForEpisode composes an episode content_id from its parent series content_id
+// and the season/episode numbers. Episodes compose from the series anchor plus
+// numbers (both universally present in filenames), not their own provider
+// episode IDs which are often missing. Returns ("", false) when the series is
+// not provider-anchored.
+func ForEpisode(seriesContentID string, seasonNumber, episodeNumber int) (string, bool) {
+	body, ok := seriesBody(seriesContentID)
+	if !ok {
+		return "", false
+	}
+	return kindEpisode + ":" + body + ":" +
+		strconv.Itoa(seasonNumber) + ":" + strconv.Itoa(episodeNumber), true
+}
+
+// ForLocal returns a content_id in the disjoint "local:" namespace for an item
+// with no provider anchor, derived from a normalized path so the same library
+// on the same server stays stable across rescans. It can never collide with a
+// provider-derived id. An item's local id changes if it is later matched to a
+// provider — rare, and such items seldom carry watch state.
+//
+// The path is NFC-normalized and trimmed before hashing; the hash is the first
+// 128 bits of SHA-256, hex-encoded (32 chars). Cross-server stability for local
+// items is best-effort only (paths differ between servers).
+func ForLocal(path string) string {
+	normalized := norm.NFC.String(strings.TrimSpace(path))
+	sum := sha256.Sum256([]byte(normalized))
+	return kindLocal + ":" + hex.EncodeToString(sum[:16])
+}
+
+// SeriesIDFromContentID derives the owning series content_id from an episode or
+// season content_id by pure string transform — no catalog lookup — per the
+// format invariant. For a movie or series id it returns the id unchanged (a
+// movie is its own display item; a series id is already a series id). For a
+// local: episode/season (no embedded series anchor) or any unrecognized id it
+// returns ok=false, signaling the caller to fall back to a resolved lookup.
+//
+//	episode:tvdb:296762:1:5 -> series:tvdb:296762
+//	season:tvdb:296762:1    -> series:tvdb:296762
+//	movie:tmdb:228064       -> movie:tmdb:228064  (unchanged)
+//	series:tvdb:296762      -> series:tvdb:296762  (unchanged)
+func SeriesIDFromContentID(contentID string) (string, bool) {
+	id := strings.TrimSpace(contentID)
+	switch {
+	case strings.HasPrefix(id, kindMovie+":"), strings.HasPrefix(id, kindSeries+":"):
+		return id, true
+	case strings.HasPrefix(id, kindEpisode+":"), strings.HasPrefix(id, kindSeason+":"):
+		// Drop the kind token, keep "<provider>:<seriesId>" (the first two
+		// remaining components), re-prefix with "series:".
+		rest := id[strings.IndexByte(id, ':')+1:]
+		parts := strings.SplitN(rest, ":", 3)
+		if len(parts) < 2 {
+			return "", false
+		}
+		if _, valid := normalizeProviderID(parts[0], parts[1]); !valid {
+			return "", false
+		}
+		return kindSeries + ":" + parts[0] + ":" + parts[1], true
+	default:
+		// local: ids and legacy Sonyflake ids have no embedded anchor.
+		return "", false
+	}
+}
+
+// IsProviderAnchored reports whether the content_id is a provider-derived key
+// (movie/series/season/episode), as opposed to a local: id or a legacy
+// Sonyflake id. Used by migration and diagnostics to tell remappable items
+// apart.
+func IsProviderAnchored(contentID string) bool {
+	id := strings.TrimSpace(contentID)
+	for _, kind := range []string{kindMovie, kindSeries, kindSeason, kindEpisode} {
+		if strings.HasPrefix(id, kind+":") {
+			rest := id[len(kind)+1:]
+			parts := strings.SplitN(rest, ":", 3)
+			if len(parts) < 2 {
+				return false
+			}
+			if _, valid := normalizeProviderID(parts[0], parts[1]); valid {
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// IsLocal reports whether the content_id is in the local: fallback namespace.
+func IsLocal(contentID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(contentID), kindLocal+":")
+}
