@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Calendar,
+  ChevronRight,
   Film,
   Globe,
   GripVertical,
@@ -16,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { CSS } from "@dnd-kit/utilities";
 
-import type { Collection, UserCollectionType } from "@/api/types";
+import type { Collection, ServerCollectionsLibrary, UserCollectionType } from "@/api/types";
 import {
   useCollectionGroups,
   useCollections,
@@ -25,9 +26,14 @@ import {
   useDeleteCollectionGroup,
   useReorderCollectionGroups,
   useReorderCollections,
+  useServerCollections,
   useUpdateCollection,
   useUpdateCollectionGroup,
 } from "@/hooks/queries/collections";
+import {
+  COLLECTION_POSTER_GRID_CLASSES,
+  CollectionPosterCard,
+} from "@/components/collections/CollectionPosterCard";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -124,61 +130,137 @@ function CollectionList() {
         </div>
       </div>
 
-      {collections.length === 0 ? (
-        <div className="surface-panel flex flex-col items-center justify-center gap-3 rounded-[2rem] py-16 text-center">
-          <Library className="text-muted-foreground/50 h-10 w-10" />
-          <div className="space-y-1">
-            <p className="text-sm font-medium">No collections yet</p>
-            <p className="text-muted-foreground max-w-sm text-xs">
-              Start from a curated TMDB, Trakt, or MDBList template — or build your own from
-              scratch.
-            </p>
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your collections</h2>
+        {collections.length === 0 ? (
+          <div className="surface-panel flex flex-col items-center justify-center gap-3 rounded-[2rem] py-16 text-center">
+            <Library className="text-muted-foreground/50 h-10 w-10" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">No collections yet</p>
+              <p className="text-muted-foreground max-w-sm text-xs">
+                Start from a curated TMDB, Trakt, or MDBList template — or build your own from
+                scratch.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setGalleryOpen(true)}>
+                <Sparkles className="mr-1 h-4 w-4" /> Start from a template
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate(buildUserCollectionEditorPath("new"))}
+              >
+                <Plus className="mr-1 h-4 w-4" /> Create from scratch
+              </Button>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setGalleryOpen(true)}>
-              <Sparkles className="mr-1 h-4 w-4" /> Start from a template
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(buildUserCollectionEditorPath("new"))}
-            >
-              <Plus className="mr-1 h-4 w-4" /> Create from scratch
-            </Button>
-          </div>
+        ) : (
+          <GroupedCollectionsBoard
+            items={collections}
+            groups={groups}
+            renderItem={(collection) => {
+              const syncable = isImportedType(collection.collection_type);
+              const isSyncing = syncMutation.isPending && syncMutation.variables === collection.id;
+              return (
+                <SortableCollectionCard
+                  collection={collection}
+                  syncable={syncable}
+                  isSyncing={isSyncing}
+                  onSync={() => syncMutation.mutate(collection.id)}
+                  onEdit={() => navigate(buildUserCollectionEditorPath(collection.id))}
+                  onDelete={() => setConfirmDeleteCollection(collection)}
+                />
+              );
+            }}
+            onReorderInGroup={(groupId, orderedIds) =>
+              reorderMutation.mutate({ orderedIds, groupId })
+            }
+            onMoveItemAcross={(itemId, toGroupId) =>
+              updateMutation.mutate({ id: itemId, body: { group_id: toGroupId } })
+            }
+            onReorderGroups={(orderedIds) => reorderGroupsMutation.mutate(orderedIds)}
+            onAddGroup={(title) =>
+              createGroupMutation.mutate({ slug: slugifyGroupSlug(title), name: title })
+            }
+            onRenameGroup={(id, title) => renameGroupMutation.mutate({ id, name: title })}
+            onDeleteGroup={(id) => deleteGroupMutation.mutate(id)}
+          />
+        )}
+      </section>
+
+      <ServerCollectionsSection />
+    </div>
+  );
+}
+
+// ServerCollectionsSection renders admin-curated collections aggregated across
+// every accessible library, one horizontal teaser row per library. Each row
+// links into that library's full Collections tab via "See all".
+function ServerCollectionsSection() {
+  const { data, isLoading } = useServerCollections();
+  const libraries = data ?? [];
+
+  if (isLoading) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Server collections</h2>
+        <div className={COLLECTION_POSTER_GRID_CLASSES}>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i}>
+              <Skeleton className="aspect-[2/3] rounded-xl" />
+              <Skeleton className="mt-2 h-4 w-3/4" />
+            </div>
+          ))}
         </div>
-      ) : (
-        <GroupedCollectionsBoard
-          items={collections}
-          groups={groups}
-          renderItem={(collection) => {
-            const syncable = isImportedType(collection.collection_type);
-            const isSyncing = syncMutation.isPending && syncMutation.variables === collection.id;
-            return (
-              <SortableCollectionCard
-                collection={collection}
-                syncable={syncable}
-                isSyncing={isSyncing}
-                onSync={() => syncMutation.mutate(collection.id)}
-                onEdit={() => navigate(buildUserCollectionEditorPath(collection.id))}
-                onDelete={() => setConfirmDeleteCollection(collection)}
-              />
-            );
-          }}
-          onReorderInGroup={(groupId, orderedIds) =>
-            reorderMutation.mutate({ orderedIds, groupId })
-          }
-          onMoveItemAcross={(itemId, toGroupId) =>
-            updateMutation.mutate({ id: itemId, body: { group_id: toGroupId } })
-          }
-          onReorderGroups={(orderedIds) => reorderGroupsMutation.mutate(orderedIds)}
-          onAddGroup={(title) =>
-            createGroupMutation.mutate({ slug: slugifyGroupSlug(title), name: title })
-          }
-          onRenameGroup={(id, title) => renameGroupMutation.mutate({ id, name: title })}
-          onDeleteGroup={(id) => deleteGroupMutation.mutate(id)}
-        />
-      )}
+      </section>
+    );
+  }
+
+  if (libraries.length === 0) return null;
+
+  return (
+    <section className="space-y-6">
+      <div className="space-y-1">
+        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Server collections</h2>
+        <p className="text-muted-foreground text-sm">
+          Curated shelves from across every library on this server.
+        </p>
+      </div>
+      {libraries.map((library) => (
+        <ServerLibraryRow key={library.library_id} library={library} />
+      ))}
+    </section>
+  );
+}
+
+function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
+  const hasMore = library.total_count > library.collections.length;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-lg font-semibold">{library.library_name}</h3>
+        {hasMore ? (
+          <Link
+            to={`/library/${library.library_id}?tab=collections`}
+            className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 text-sm font-medium"
+          >
+            See all ({library.total_count})
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        ) : null}
+      </div>
+      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2 [scrollbar-width:thin]">
+        {library.collections.map((collection) => (
+          <div key={collection.id} className="w-32 shrink-0 sm:w-36 md:w-40">
+            <CollectionPosterCard
+              collection={collection}
+              kind="regular"
+              libraryId={library.library_id}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

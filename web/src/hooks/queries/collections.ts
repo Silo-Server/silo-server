@@ -6,6 +6,7 @@ import type {
   CollectionItem,
   CollectionsListResponse,
   CreateCollectionRequest,
+  ServerCollectionsResponse,
   UpdateCollectionRequest,
 } from "@/api/types";
 import { collectionKeys } from "./keys";
@@ -47,6 +48,18 @@ export function useCollectionGroups() {
     queryKey: collectionKeys.list(),
     queryFn: fetchCollectionsList,
     select: (data) => data.groups,
+  });
+}
+
+// useServerCollections loads the admin-curated "server" collections aggregated
+// across every library the viewer can access. Kept on a separate query key from
+// useCollections() (personal, editable) so personal mutations don't refetch the
+// server-wide catalog and the two sections load independently.
+export function useServerCollections() {
+  return useQuery({
+    queryKey: collectionKeys.server(),
+    queryFn: () =>
+      api<ServerCollectionsResponse>("/collections/server").then((d) => d.libraries ?? []),
   });
 }
 

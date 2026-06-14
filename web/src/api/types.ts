@@ -1479,6 +1479,20 @@ export interface LibraryTabResponse {
   ungrouped?: LibraryTabUngrouped;
 }
 
+// One library's bucket of server (admin-curated) collections in the aggregated
+// server-collections response. `collections` is a capped teaser slice;
+// `total_count` is the full visible count, used for the "See all (N)" link.
+export interface ServerCollectionsLibrary {
+  library_id: number;
+  library_name: string;
+  total_count: number;
+  collections: LibraryTabCollection[];
+}
+
+export interface ServerCollectionsResponse {
+  libraries: ServerCollectionsLibrary[];
+}
+
 export interface ImportMDBListCollectionRequest {
   library_id?: number;
   library_ids?: number[];
