@@ -1417,6 +1417,33 @@ func (s *MetadataService) mergeAndPersist(
 			}
 		}
 	}
+
+	// Promote a local: skeleton to its deterministic provider-anchored id now
+	// that the match supplied provider IDs (the untagged-then-matched re-ID).
+	// Runs under the provider-dedup lock acquired above, so the target id cannot
+	// be claimed underneath us; movies and first-match series move a handful of
+	// rows. Placed before the durableIDs merge below so the canonical row's
+	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
+	if !isNew && contentid.IsLocal(contentID) {
+		canonical, err := s.canonicalizeLocalContentID(
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize local content id: %w", err)
+		}
+		if canonical != contentID {
+			contentID = canonical
+			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				return nil, fmt.Errorf("loading canonicalized item: %w", err)
+			}
+			locked = intSliceToFields(existingItem.LockedFields)
+			durableIDs, err = s.loadDurableProviderIDs(ctx, contentID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
 			accumulator.ProviderIDs = make(map[string]string, len(durableIDs))
