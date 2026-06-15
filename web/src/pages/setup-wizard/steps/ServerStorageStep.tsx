@@ -16,9 +16,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronRight } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronRight, Download } from "lucide-react";
 import { toast } from "sonner";
-import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
+import {
+  useCheckAdminSettingsConnection,
+  useInstallJellyfinCompatWeb,
+  useJellyfinCompatStatus,
+} from "@/hooks/queries/admin/settings";
+import { hasPinnedJellyfinWebInstalled } from "@/lib/jellyfinCompat";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SettingField } from "@/pages/admin-settings/SettingField";
 import { useWizardContext } from "../WizardContext";
@@ -29,8 +34,11 @@ const SERVER_KEYS = [
   "playback.transcode_dir",
   "playback.hw_accel",
   "playback.transcode_enabled",
+  "jellyfin_compat.enabled",
   "jellyfin_compat.public_url",
   "jellyfin_compat.server_name",
+  "jellyfin_compat.web_version",
+  "jellyfin_compat.web_install_dir",
 ];
 
 const PUBLIC_S3_KEYS = [
@@ -133,13 +141,24 @@ function KeyPrefixField({ value, onChange }: { value: string; onChange: (value: 
   );
 }
 
+function statusLabel(value?: string): string {
+  if (!value) return "Unknown";
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function ServerStorageStep() {
   const { markDone } = useWizardContext();
   const form = useSettingsForm({ keys: useMemo(() => ALL_KEYS, []) });
   const redisConnectionCheck = useCheckAdminSettingsConnection();
   const publicS3ConnectionCheck = useCheckAdminSettingsConnection();
   const privateS3ConnectionCheck = useCheckAdminSettingsConnection();
+  const jellyfinStatusQuery = useJellyfinCompatStatus();
+  const installJellyfinWeb = useInstallJellyfinCompatWeb();
   const [submitting, setSubmitting] = useState(false);
+  const [jellyfinWebInstallRequested, setJellyfinWebInstallRequested] = useState(false);
   const [publicExpanded, setPublicExpanded] = useState(true);
   const [privateExpanded, setPrivateExpanded] = useState(false);
   const [redisHydrated, setRedisHydrated] = useState(false);
@@ -149,7 +168,6 @@ export function ServerStorageStep() {
     useState<ConnectionCheckResponse | null>(null);
   const [privateS3ConnectionResult, setPrivateS3ConnectionResult] =
     useState<ConnectionCheckResponse | null>(null);
-
   const redisQuery = useQuery({
     queryKey: ["setup-wizard", "setting", "redis.url"],
     queryFn: () => fetchSettingValue("redis.url"),
@@ -163,15 +181,23 @@ export function ServerStorageStep() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (form.dirtyCount === 0) {
+    const shouldInstallJellyfinWeb = jellyfinWebInstallRequested && !pinnedJellyfinWebInstalled;
+    if (form.dirtyCount === 0 && !shouldInstallJellyfinWeb) {
       markDone("server");
       return;
     }
+
     setSubmitting(true);
     try {
-      await form.save();
+      if (form.dirtyCount > 0) {
+        await form.save();
+        toast.success("Server settings saved");
+      }
+      if (shouldInstallJellyfinWeb) {
+        const version = form.getValue("jellyfin_compat.web_version").trim();
+        await installJellyfinWeb.mutateAsync(version ? { version } : {});
+      }
       markDone("server");
-      toast.success("Server settings saved");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save server settings");
     } finally {
@@ -231,7 +257,7 @@ export function ServerStorageStep() {
     }
   }
 
-  if (form.isLoading) {
+  if (form.isLoading || jellyfinStatusQuery.isLoading) {
     return (
       <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -242,6 +268,20 @@ export function ServerStorageStep() {
   }
 
   const publicURLAuth = form.getValue("s3.public_url_auth") || "presigned";
+  const jellyfinEnabledValue = form.getValue("jellyfin_compat.enabled");
+  const jellyfinStatus = jellyfinStatusQuery.data;
+  const jellyfinAPIEnabled =
+    jellyfinEnabledValue === ""
+      ? Boolean(jellyfinStatus?.enabled)
+      : jellyfinEnabledValue === "true";
+  const jellyfinOperationRunning =
+    jellyfinStatus?.operation?.state === "running" ||
+    jellyfinStatus?.web_state === "installing" ||
+    jellyfinStatus?.web_state === "removing";
+  const jellyfinMissingPrerequisites =
+    jellyfinStatus?.prerequisites?.filter((item) => !item.available) ?? [];
+  const jellyfinSettingsDirty = form.dirtyKeys.some((key) => key.startsWith("jellyfin_compat."));
+  const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(jellyfinStatus);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
@@ -323,9 +363,37 @@ export function ServerStorageStep() {
       </Section>
 
       <Section
-        label="Jellyfin compatibility"
+        label="Jellyfin-compatible app support"
         description="For VidHub, Findroid, Infuse, and other Jellyfin clients."
       >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="border-foreground/[0.06] bg-background/40 rounded-lg border px-3 py-3">
+            <p className="text-xs font-medium">API layer</p>
+            <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
+              Lets Jellyfin-compatible apps discover Silo, sign in, browse libraries, fetch
+              metadata, and start playback through Silo's compatibility API.
+            </p>
+          </div>
+          <div className="border-foreground/[0.06] bg-background/40 rounded-lg border px-3 py-3">
+            <p className="text-xs font-medium">Web UI layer</p>
+            <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
+              Downloads and builds Jellyfin Web assets for clients that expect Jellyfin's web route.
+            </p>
+          </div>
+        </div>
+        <div className="mb-4 flex items-center gap-2 pb-1">
+          <Switch
+            id="setup-jellyfin-enabled"
+            checked={jellyfinAPIEnabled}
+            onCheckedChange={(v) => {
+              form.setValue("jellyfin_compat.enabled", v ? "true" : "false");
+              if (!v) setJellyfinWebInstallRequested(false);
+            }}
+          />
+          <Label htmlFor="setup-jellyfin-enabled" className="text-xs">
+            Enable Jellyfin-compatible API
+          </Label>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="setup-jellyfin-url" className="text-xs">
@@ -348,6 +416,132 @@ export function ServerStorageStep() {
               onChange={(e) => form.setValue("jellyfin_compat.server_name", e.target.value)}
               placeholder="Silo"
             />
+          </div>
+        </div>
+        <div className="border-foreground/[0.07] mt-4 space-y-3 border-t pt-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="setup-jellyfin-web-version" className="text-xs">
+                Pinned Web version
+              </Label>
+              <Input
+                id="setup-jellyfin-web-version"
+                value={form.getValue("jellyfin_compat.web_version")}
+                onChange={(e) => form.setValue("jellyfin_compat.web_version", e.target.value)}
+                placeholder="Auto-select compatible release"
+              />
+              <p className="text-muted-foreground/70 text-xs">
+                Optional. Leave blank to use the latest compatible released Jellyfin Web patch.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="setup-jellyfin-web-install-dir" className="text-xs">
+                Web install directory
+              </Label>
+              <Input
+                id="setup-jellyfin-web-install-dir"
+                value={form.getValue("jellyfin_compat.web_install_dir")}
+                onChange={(e) => form.setValue("jellyfin_compat.web_install_dir", e.target.value)}
+                placeholder="Use Silo managed directory"
+              />
+              <p className="text-muted-foreground/70 text-xs">
+                Optional. Defaults to{" "}
+                <span className="font-mono">/var/lib/silo/compat/jellyfin-web</span>.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Web UI status</span>
+              <span>{statusLabel(jellyfinStatus?.web_state)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Pinned version</span>
+              <span>{jellyfinStatus?.pinned_version || "Not set"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Installed version</span>
+              <span>{jellyfinStatus?.installed_version || "Not installed"}</span>
+            </div>
+            <div className="space-y-0.5 sm:col-span-2">
+              <span className="text-muted-foreground">Install path</span>
+              <div className="truncate font-mono">{jellyfinStatus?.install_path || "Not set"}</div>
+            </div>
+          </div>
+
+          {jellyfinStatus?.last_error && (
+            <div className="text-destructive flex items-start gap-2 text-xs">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span>{jellyfinStatus.last_error}</span>
+            </div>
+          )}
+
+          {jellyfinStatus?.operation?.state === "running" && (
+            <div className="border-border/70 bg-muted/30 flex items-start gap-2 rounded-lg border px-3 py-2 text-xs">
+              <CheckCircle2 className="text-muted-foreground mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span className="text-muted-foreground leading-relaxed">
+                Jellyfin Web install is running.
+              </span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {!pinnedJellyfinWebInstalled && (
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                disabled={
+                  !jellyfinAPIEnabled ||
+                  installJellyfinWeb.isPending ||
+                  jellyfinOperationRunning ||
+                  jellyfinStatus?.installer_ready === false
+                }
+                onClick={() => setJellyfinWebInstallRequested((requested) => !requested)}
+              >
+                {jellyfinWebInstallRequested ? (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {jellyfinWebInstallRequested
+                  ? "Web UI will be installed"
+                  : jellyfinStatus?.web_state === "update_available"
+                    ? "Update Web UI"
+                    : jellyfinOperationRunning || installJellyfinWeb.isPending
+                      ? "Web UI Busy"
+                      : "Install Web UI"}
+              </Button>
+            )}
+            {pinnedJellyfinWebInstalled && (
+              <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Pinned Web UI version installed
+              </span>
+            )}
+            {jellyfinStatus?.license_present && jellyfinStatus?.provenance_present && (
+              <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                License and provenance files found
+              </span>
+            )}
+            {!jellyfinAPIEnabled && !pinnedJellyfinWebInstalled && (
+              <span className="text-muted-foreground text-xs">
+                Enable the Jellyfin-compatible API before installing Web UI.
+              </span>
+            )}
+            {jellyfinSettingsDirty && !jellyfinWebInstallRequested && (
+              <span className="text-muted-foreground text-xs">
+                Pending Jellyfin settings will be saved when you continue.
+              </span>
+            )}
+            {jellyfinMissingPrerequisites.length > 0 && (
+              <span className="text-muted-foreground text-xs">
+                Missing installer prerequisites:{" "}
+                {jellyfinMissingPrerequisites.map((item) => item.command).join(", ")}
+              </span>
+            )}
           </div>
         </div>
       </Section>

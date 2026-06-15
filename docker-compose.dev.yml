@@ -1,0 +1,181 @@
+# Development stack:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Vite serves the UI at http://localhost:${PORT:-8090} and proxies API
+# requests to the Air-reloaded Go backend on the compose network.
+name: silo-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    shm_size: ${POSTGRES_SHM_SIZE:-2gb}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-silo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
+      POSTGRES_DB: ${POSTGRES_DB:-silo}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - silo-dev-postgres:/var/lib/postgresql
+    command: ["postgres", "-c", "listen_addresses=*"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - silo-dev-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  silo:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM node:22-slim AS node_runtime
+
+        FROM golang:1.26
+
+        ENV CGO_ENABLED=1
+        ENV GOPROXY=direct
+        ENV GOPRIVATE=github.com/Silo-Server/*
+        ENV GONOSUMDB=github.com/Silo-Server/*
+
+        RUN apt-get update && apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            ffmpeg \
+            git \
+            libvips-dev \
+            pkg-config \
+          && rm -rf /var/lib/apt/lists/*
+
+        COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+        COPY --from=node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+        RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+            ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+        RUN go install github.com/air-verse/air@latest
+
+        WORKDIR /app
+    restart: unless-stopped
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p tmp web/dist
+        if [ ! -f web/dist/index.html ]; then
+          printf '%s\n' '<!doctype html><html><body><div id="root"></div></body></html>' > web/dist/index.html
+        fi
+
+        cat >/tmp/air.docker.toml <<'AIR'
+        root = "."
+        tmp_dir = "tmp"
+
+        [build]
+          cmd = "go build -o ./tmp/silo ./cmd/silo/"
+          bin = "./tmp/silo"
+          args_bin = []
+          include_ext = ["go", "sql", "json"]
+          include_dir = ["cmd", "internal", "migrations"]
+          exclude_dir = ["tmp", "vendor", "third_party", "docs", "scripts", "web"]
+          exclude_regex = ["_test\\.go$"]
+          delay = 500
+          stop_on_error = true
+          kill_delay = 500
+          send_interrupt = true
+
+        [log]
+          time = true
+
+        [misc]
+          clean_on_exit = true
+        AIR
+
+        air -c /tmp/air.docker.toml
+    environment:
+      MODE: integrated
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-silo}:${POSTGRES_PASSWORD:-silo}@postgres:5432/${POSTGRES_DB:-silo}?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
+      POSTGRES_TUNE: "off"
+    ports:
+      - "${BACKEND_PORT:-18080}:8080"
+      - "${JF_PORT:-8096}:8096"
+      - "${ABS_PORT:-13378}:13378"
+    volumes:
+      - .:/app
+      - silo-dev-air-tmp:/app/tmp
+      - silo-dev-go-build:/root/.cache/go-build
+      - silo-dev-go-mod:/go/pkg/mod
+      - silo-dev-plugins:/var/lib/silo/plugins
+      - silo-dev-compat:/var/lib/silo/compat
+      - silo-dev-transcode:/tmp/silo-transcode
+      - silo-dev-audiobook-covers:/var/lib/silo/audiobook-covers
+      - ${MEDIA_ROOT:-/tmp/silo-dev-media}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    env_file:
+      - path: .env
+        required: false
+
+  web:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM node:22-slim
+
+        RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+
+        WORKDIR /app/web
+    restart: unless-stopped
+    working_dir: /app/web
+    command: sh -c "pnpm install --frozen-lockfile --store-dir /pnpm/store && pnpm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_PROXY_TARGET: http://silo:8080
+      VITE_HMR_CLIENT_PORT: "${PORT:-8090}"
+      PNPM_STORE_DIR: /pnpm/store
+      CI: "true"
+    ports:
+      - "${PORT:-8090}:5173"
+    volumes:
+      - .:/app
+      - silo-dev-web-node-modules:/app/web/node_modules
+      - silo-dev-pnpm-store:/pnpm/store
+    depends_on:
+      silo:
+        condition: service_healthy
+
+volumes:
+  silo-dev-air-tmp:
+  silo-dev-audiobook-covers:
+  silo-dev-compat:
+  silo-dev-go-build:
+  silo-dev-go-mod:
+  silo-dev-plugins:
+  silo-dev-pnpm-store:
+  silo-dev-postgres:
+  silo-dev-redis:
+  silo-dev-transcode:
+  silo-dev-web-node-modules:

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"log/slog"
@@ -40,6 +42,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -299,7 +302,56 @@ func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *sec
 	}
 }
 
+func runCompatWebCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: silo compat-web {status|install|update|remove}")
+	}
+	command := args[0]
+	flags := flag.NewFlagSet("compat-web "+command, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	root := flags.String("dir", config.DefaultJellyfinWebInstallDir, "Jellyfin Web component install root")
+	version := flags.String("version", config.DefaultJellyfinWebVersion, "Jellyfin Web version without leading v")
+	source := flags.String("source", jellycompat.DefaultWebSourceURL, "upstream jellyfin-web git repository")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	switch command {
+	case "status":
+		status := jellycompat.WebComponentStatusForConfig(&config.Config{
+			JellyfinCompat: config.JellyfinCompatConfig{
+				Enabled:       false,
+				WebVersion:    *version,
+				WebInstallDir: *root,
+				WebDir:        filepath.Join(*root, "current"),
+			},
+		}, map[string]string{
+			"jellyfin_compat.web_source_url": *source,
+		})
+		return json.NewEncoder(os.Stdout).Encode(status)
+	case "install", "update":
+		status, err := jellycompat.InstallWebComponent(ctx, jellycompat.WebComponentInstallOptions{
+			InstallRoot: *root,
+			SourceURL:   *source,
+			Version:     *version,
+		})
+		_ = json.NewEncoder(os.Stdout).Encode(status)
+		return err
+	case "remove":
+		return jellycompat.RemoveWebComponent(*root)
+	default:
+		return fmt.Errorf("unknown compat-web command %q", command)
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
+		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
+			log.Fatalf("compat-web: %v", err)
+		}
+		return
+	}
+
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
@@ -1908,6 +1960,21 @@ func main() {
 	}
 	deps.FrontendFS = distFS
 	server.WebDistFS = distFS
+
+	// White-label branding: one service shared by the API (public read + admin
+	// upload) and the frontend handler (index.html title, favicon, manifest).
+	// S3 is optional — pass a nil AssetStore (not the typed-nil *s3client.Client)
+	// when it isn't configured so text branding still works without it.
+	if settingsRepo != nil {
+		var brandingStore branding.AssetStore
+		if deps.S3Public != nil {
+			brandingStore = deps.S3Public
+		}
+		brandingSvc := branding.NewService(settingsRepo, brandingStore)
+		deps.BrandingService = brandingSvc
+		server.Branding = brandingSvc
+	}
+
 	router := api.NewRouter(deps)
 
 	// Step 8: Expose Prometheus metrics endpoint (not behind auth).
@@ -2015,7 +2082,7 @@ func main() {
 	}
 
 	var compatSrv *http.Server
-	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Listen != "" {
+	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
 			Config:           cfg,
 			LiveConfig:       configWatcher.Config,

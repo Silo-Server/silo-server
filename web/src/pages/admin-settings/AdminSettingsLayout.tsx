@@ -31,6 +31,7 @@ import StorageSettings from "./StorageSettings";
 import DownloadSettings from "./DownloadSettings";
 import LogRetentionSettings from "./LogRetentionSettings";
 import ThemeSettings from "./ThemeSettings";
+import BrandingSettings from "./BrandingSettings";
 import OverlaySettings from "./OverlaySettings";
 
 interface SettingsNav extends AdminSettingsSearchItem {
@@ -44,6 +45,7 @@ interface SettingsNavGroup {
 
 const SETTINGS_COMPONENTS: Record<string, ComponentType> = {
   general: GeneralSettings,
+  branding: BrandingSettings,
   theming: ThemeSettings,
   overlays: OverlaySettings,
   scanner: ScannerSettings,

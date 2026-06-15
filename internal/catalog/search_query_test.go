@@ -68,3 +68,24 @@ func TestParseSearchQuery_ExactTitleHint_NormalizesSearchText(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildTitlePrefixTsQuery(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"Pride and P", "pride & p:*"},
+		{"Law & Ord", "law & ord:*"},
+		{"Dune: Part Two", "dune & part & 2:*"},
+		{"and", ""},
+		{"   ", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got := buildTitlePrefixTsQuery(tc.in)
+			if got != tc.want {
+				t.Fatalf("buildTitlePrefixTsQuery(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

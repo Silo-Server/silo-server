@@ -10,14 +10,15 @@ import (
 
 // RateLimitHandler handles rate limit config admin endpoints.
 type RateLimitHandler struct {
-	store    ratelimit.SettingsStore
-	mw       *ratelimit.Middleware
-	eventBus cache.EventBus
+	store         ratelimit.SettingsStore
+	mw            *ratelimit.Middleware
+	eventBus      cache.EventBus
+	restartStatus *ServerRestartStatusTracker
 }
 
 // NewRateLimitHandler creates a new RateLimitHandler.
-func NewRateLimitHandler(store ratelimit.SettingsStore, mw *ratelimit.Middleware, eventBus cache.EventBus) *RateLimitHandler {
-	return &RateLimitHandler{store: store, mw: mw, eventBus: eventBus}
+func NewRateLimitHandler(store ratelimit.SettingsStore, mw *ratelimit.Middleware, eventBus cache.EventBus, restartStatus *ServerRestartStatusTracker) *RateLimitHandler {
+	return &RateLimitHandler{store: store, mw: mw, eventBus: eventBus, restartStatus: restartStatus}
 }
 
 type rateLimitConfigResponse struct {
@@ -156,9 +157,16 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 
 	// Save backend setting (infrastructure-level, requires restart)
 	if req.Backend == "memory" || req.Backend == "redis" {
+		currentBackend, _ := h.store.Get(r.Context(), "ratelimit.backend")
+		if currentBackend == "" {
+			currentBackend = "memory"
+		}
 		if err := h.store.Set(r.Context(), "ratelimit.backend", req.Backend); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save backend setting")
 			return
+		}
+		if currentBackend != req.Backend {
+			h.restartStatus.MarkRequired("ratelimit_backend")
 		}
 	}
 

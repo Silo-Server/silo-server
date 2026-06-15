@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -85,7 +86,9 @@ type AdminHandler struct {
 	accountProvisioner           *auth.AccountProvisioner
 	DetailSvc                    *catalog.DetailService
 	StatsSource                  AdminStatsSource
+	Config                       *config.Config
 	EventBus                     cache.EventBus
+	EventsHub                    *evt.Hub
 	SettingsRepo                 ServerSettingsStore
 	JobRepo                      AdminJobCreator
 	ItemRefreshResolver          ItemRefreshScopeResolver
@@ -95,6 +98,7 @@ type AdminHandler struct {
 	BootstrapSensitiveValues     map[string]string
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
+	RestartStatus                *ServerRestartStatusTracker
 }
 
 // NewAdminHandler creates a new AdminHandler backed by the given
@@ -2148,8 +2152,10 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 	if h.OnServerSettingUpdated != nil {
 		h.OnServerSettingUpdated(r.Context(), key, req.Value)
 	}
-
 	restartRequired := config.RestartRequired(key)
+	if restartRequired {
+		h.markServerRestartRequired("server_settings")
+	}
 	if sensitiveSettingKeys[key] {
 		writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, RestartRequired: restartRequired})
 		return

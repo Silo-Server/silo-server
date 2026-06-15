@@ -9,6 +9,8 @@ import type {
   EventsSnapshotMessage,
   EventsStreamMessage,
   HistoryImportRun,
+  JellyfinCompatOperationStatus,
+  JellyfinCompatStatus,
   NotificationReadEventPayload,
   ScanRun,
   TaskInfo,
@@ -172,6 +174,46 @@ function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 
     jobs.push(nextJob);
   }
   return sortJobs(jobs).slice(0, limit);
+}
+
+function applyJellyfinCompatOperationUpdate(
+  queryClient: QueryClient,
+  operation: JellyfinCompatOperationStatus,
+) {
+  if (!operation?.id) {
+    void queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() });
+    return;
+  }
+
+  queryClient.setQueryData<JellyfinCompatStatus>(adminKeys.jellyfinCompatStatus(), (existing) => {
+    if (!existing) {
+      return existing;
+    }
+    return {
+      ...existing,
+      web_state: jellyfinCompatOperationWebState(operation),
+      operation,
+    };
+  });
+
+  if (operation.state !== "running") {
+    void queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() });
+  }
+}
+
+function jellyfinCompatOperationWebState(
+  operation: JellyfinCompatOperationStatus,
+): JellyfinCompatStatus["web_state"] {
+  if (operation.state === "running") {
+    return operation.kind === "remove" ? "removing" : "installing";
+  }
+  if (operation.state === "failed") {
+    return "failed";
+  }
+  if (operation.kind === "remove") {
+    return "missing";
+  }
+  return "installed";
 }
 
 function hydrateAdminJobSnapshot(queryClient: QueryClient, jobs: AdminJob[]) {
@@ -613,6 +655,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         break;
       case "history_import":
         updateHistoryImportCaches(queryClient, message.data as HistoryImportRun);
+        break;
+      case "settings":
+        if (message.event === "jellyfin_compat.web_operation.updated") {
+          applyJellyfinCompatOperationUpdate(
+            queryClient,
+            message.data as JellyfinCompatOperationStatus,
+          );
+        }
         break;
       case "user_state":
         handleUserStateEvent(

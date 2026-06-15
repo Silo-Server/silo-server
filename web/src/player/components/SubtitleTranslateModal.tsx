@@ -5,24 +5,12 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerFetch, PlayerFetchError } from "../player-fetch";
 import { LANGUAGES, getLanguageName } from "../utils/languageNames";
-import { isBitmapCodec } from "../utils/subtitleCodecs";
+import {
+  buildSubtitleTranslateRequest,
+  isTranslatableSource,
+  type SubtitleTranslateMode,
+} from "./subtitleTranslateRequest";
 import { QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
-
-// Formats the server can parse directly from an external/downloaded file.
-const TRANSLATABLE_TEXT_CODECS = new Set(["srt", "subrip", "vtt", "webvtt"]);
-
-// Mirror the server's loadSource acceptance: embedded non-bitmap tracks are
-// extracted to text via ffmpeg, while external/downloaded sources must already
-// be a parseable text format. Offering anything else starts a job that fails
-// asynchronously instead of preventing the choice up front.
-export function isTranslatableSource(track: PlayerSubtitleInfo): boolean {
-  if (track.live) return false;
-  const codec = (track.codec ?? "").toLowerCase();
-  if (track.source === "embedded") {
-    return !isBitmapCodec(codec);
-  }
-  return TRANSLATABLE_TEXT_CODECS.has(codec);
-}
 
 interface SubtitleTranslateModalProps {
   mediaFileId: number;
@@ -78,7 +66,7 @@ export function SubtitleTranslateModal({
   const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
   // Subtitle translation is the default; generating from audio takes over when
   // it's the only possible path (e.g. bitmap-only files).
-  const [mode, setMode] = useState<"subtitles" | "audio">(canTranslate ? "subtitles" : "audio");
+  const [mode, setMode] = useState<SubtitleTranslateMode>(canTranslate ? "subtitles" : "audio");
   const [sourceIndex, setSourceIndex] = useState<number | null>(null);
   const [audioIndex, setAudioIndex] = useState(0);
   const [targetLang, setTargetLang] = useState("en");
@@ -120,32 +108,17 @@ export function SubtitleTranslateModal({
     setSubmitting(true);
     setError(null);
     try {
-      let body: Record<string, unknown>;
-      if (fromAudio) {
-        const audio = audioTracks?.[audioIndex];
-        // Same target as the audio language -> plain transcription; otherwise
-        // transcribe then translate.
-        const sameLanguage = (audio?.language ?? "") === targetLang;
-        body = {
-          media_file_id: mediaFileId,
-          kind: sameLanguage ? "transcribe" : "transcribe_translate",
-          source_index: audioIndex,
-          source_language: audio?.language ?? "",
-          target_language: sameLanguage ? "" : targetLang,
-          session_id: sessionId ?? "",
-          start_position: getStartPosition?.() ?? 0,
-        };
-      } else {
-        const source = sourceTracks.find((t) => t.index === effectiveSourceIndex);
-        body = {
-          media_file_id: mediaFileId,
-          source_index: effectiveSourceIndex,
-          source_language: source?.language ?? "",
-          target_language: targetLang,
-          session_id: sessionId ?? "",
-          start_position: getStartPosition?.() ?? 0,
-        };
-      }
+      const body = buildSubtitleTranslateRequest({
+        mode,
+        mediaFileId,
+        sourceTracks,
+        effectiveSourceIndex,
+        audioTracks,
+        audioIndex,
+        targetLang,
+        sessionId,
+        startPosition: getStartPosition?.() ?? 0,
+      });
       const res = await playerFetch<{ job?: { status?: string } }>(
         playerConfig,
         "/subtitles/ai/translate",

@@ -1,4 +1,5 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
+import { normalizeLanguageCode } from "./languageNames";
 import { isBitmapCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
@@ -20,43 +21,6 @@ function trackPriority(track: PlayerSubtitleInfo): number {
   return source * 2 + (isBitmapCodec(track.codec) ? 1 : 0);
 }
 
-const ISO639_TO_3: Record<string, string> = {
-  en: "eng",
-  es: "spa",
-  fr: "fre",
-  de: "ger",
-  it: "ita",
-  pt: "por",
-  nl: "dut",
-  pl: "pol",
-  sv: "swe",
-  no: "nor",
-  da: "dan",
-  fi: "fin",
-  ru: "rus",
-  uk: "ukr",
-  cs: "cze",
-  sk: "slo",
-  hu: "hun",
-  ro: "rum",
-  bg: "bul",
-  hr: "hrv",
-  sl: "slv",
-  sr: "srp",
-  tr: "tur",
-  el: "gre",
-  he: "heb",
-  ar: "ara",
-  zh: "chi",
-  ja: "jpn",
-  ko: "kor",
-  vi: "vie",
-  th: "tha",
-  id: "ind",
-  ms: "may",
-  hi: "hin",
-};
-
 function normalize(value: string | undefined | null): string {
   return (value ?? "").trim().toLowerCase();
 }
@@ -73,8 +37,7 @@ function sameLanguageCode(a: string | undefined | null, b: string | undefined | 
   const left = normalizeConcreteLanguage(a);
   const right = normalizeConcreteLanguage(b);
   if (!left || !right) return false;
-  if (left === right) return true;
-  return (ISO639_TO_3[left] ?? left) === (ISO639_TO_3[right] ?? right);
+  return normalizeLanguageCode(left) === normalizeLanguageCode(right);
 }
 
 function sameLanguage(track: PlayerSubtitleInfo, language: string): boolean {

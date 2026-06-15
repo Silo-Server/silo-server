@@ -352,8 +352,14 @@ export default function AdminRecommendations() {
   function handleToggle(key: string, checked: boolean) {
     setConnectionResult(null);
     setLocalValues((prev) => ({ ...prev, [key]: checked ? "true" : "false" }));
-    updateSetting.mutate({ key, value: checked ? "true" : "false" });
-    setRestartRequired(true);
+    updateSetting.mutate(
+      { key, value: checked ? "true" : "false" },
+      {
+        onSuccess: () => {
+          setRestartRequired(true);
+        },
+      },
+    );
   }
 
   async function applyEmbeddingPreset(preset: RecommendationProviderPreset) {

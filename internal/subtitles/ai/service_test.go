@@ -20,6 +20,7 @@ type recordingRepo struct {
 	lastBefore time.Time
 	inserts    int
 	quotaUsed  int // returned by CountTranscribeJobsByUserSince
+	lastJob    Job
 }
 
 // InsertJob mirrors the Postgres repo's atomic quota guard: a non-nil quota
@@ -33,6 +34,7 @@ func (r *recordingRepo) InsertJob(_ context.Context, job *Job, quota *JobQuota) 
 	}
 	r.inserts++
 	job.ID = int64(r.inserts)
+	r.lastJob = *job
 	return nil
 }
 func (r *recordingRepo) GetJob(context.Context, int64) (*Job, error) { return nil, nil }
@@ -158,6 +160,23 @@ func TestEnqueueQuotaExemptions(t *testing.T) {
 			t.Errorf("inserts = %d, want 1", repo.inserts)
 		}
 	})
+}
+
+func TestEnqueueNormalizesSourceLanguageHint(t *testing.T) {
+	svc, repo := newQuotaTestService(t, 0, 0)
+
+	_, err := svc.Enqueue(context.Background(), JobRequest{
+		MediaFileID:    1,
+		Kind:           JobKindTranscribe,
+		SourceIndex:    -1,
+		SourceLanguage: "eng",
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if repo.lastJob.SourceLanguage != "en" {
+		t.Errorf("source language = %q, want en", repo.lastJob.SourceLanguage)
+	}
 }
 
 func TestTranscribeQuotaStatus(t *testing.T) {

@@ -86,7 +86,7 @@ func TestRateLimitHandlerWithoutRunningLimiter(t *testing.T) {
 	// endpoints must still work so an admin can re-enable it from the UI.
 	store := newFakeRateLimitStore()
 	store.values["ratelimit.enabled"] = "false"
-	h := NewRateLimitHandler(store, nil, nil)
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
 
 	got := getRateLimitConfig(t, h)
 	if got.Enabled {
@@ -116,7 +116,7 @@ func TestRateLimitHandlerWithoutRunningLimiter(t *testing.T) {
 func TestRateLimitHandlerWithRunningLimiter(t *testing.T) {
 	store := newFakeRateLimitStore()
 	mw := newRunningRateLimitMiddleware(t, store)
-	h := NewRateLimitHandler(store, mw, nil)
+	h := NewRateLimitHandler(store, mw, nil, NewServerRestartStatusTracker())
 
 	got := getRateLimitConfig(t, h)
 	if !got.Active {

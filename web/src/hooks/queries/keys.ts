@@ -323,6 +323,7 @@ export const themeKeys = {
   all: ["theme"] as const,
   adminCss: () => ["theme", "admin-css"] as const,
   catalogIndex: () => ["theme", "catalog"] as const,
+  branding: () => ["theme", "branding"] as const,
 };
 
 export const adminKeys = {
@@ -362,6 +363,7 @@ export const adminKeys = {
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
+  jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
   requestsRoot: () => ["admin", "requests"] as const,
   requests: (params: Record<string, unknown>) => ["admin", "requests", params] as const,
   requestSettings: () => ["admin", "requests", "settings"] as const,

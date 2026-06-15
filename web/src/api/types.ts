@@ -112,6 +112,87 @@ export interface AuthSession {
   revoked_at: string | null;
 }
 
+export type JellyfinCompatWebState =
+  | "missing"
+  | "installing"
+  | "removing"
+  | "installed"
+  | "failed"
+  | "update_available";
+
+export interface JellyfinCompatInstallerPrerequisite {
+  name: string;
+  command: string;
+  available: boolean;
+  path?: string;
+  message?: string;
+}
+
+export type JellyfinCompatOperationPhase =
+  | "preparing"
+  | "downloading"
+  | "installing_dependencies"
+  | "building"
+  | "staging"
+  | "activating"
+  | "persisting_settings"
+  | "removing";
+
+export interface JellyfinCompatOperationStatus {
+  id: string;
+  kind: "install" | "remove";
+  state: "running" | "succeeded" | "failed";
+  started_at: string;
+  completed_at?: string;
+  phase?: JellyfinCompatOperationPhase;
+  progress_percent?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface JellyfinCompatStatus {
+  enabled: boolean;
+  api_state: "disabled" | "enabled" | "error";
+  listen: string;
+  public_url: string;
+  emulated_server_version: string;
+  server_name: string;
+  web_enabled: boolean;
+  web_state: JellyfinCompatWebState;
+  pinned_version: string;
+  installed_version?: string;
+  source_url: string;
+  tag?: string;
+  commit_sha?: string;
+  checksum?: string;
+  install_root: string;
+  install_path: string;
+  installed_at?: string;
+  license_present: boolean;
+  provenance_present: boolean;
+  installer_ready: boolean;
+  prerequisites: JellyfinCompatInstallerPrerequisite[];
+  operation?: JellyfinCompatOperationStatus;
+  last_error?: string;
+  restart_required: boolean;
+}
+
+export interface JellyfinCompatSettingsPatch {
+  enabled?: boolean;
+  public_url?: string;
+  server_name?: string;
+  emulated_server_version?: string;
+  web_enabled?: boolean;
+  web_version?: string;
+  web_dir?: string;
+  web_install_dir?: string;
+}
+
+export interface JellyfinCompatWebInstallRequest {
+  version?: string;
+  source_url?: string;
+}
+
 // Profiles
 export interface Profile {
   id: string;
@@ -2222,6 +2303,7 @@ export type EventChannel =
   | "scans"
   | "history_import"
   | "user_state"
+  | "settings"
   | "notifications";
 
 export interface NotificationReasonFlags {

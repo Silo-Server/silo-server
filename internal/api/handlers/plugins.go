@@ -40,6 +40,7 @@ type PluginHandler struct {
 	chainRepo     *metadata.ChainRepository
 	imageResolver *metadata.PluginImageResolver
 	uploads       *uploads.Manager
+	restartStatus *ServerRestartStatusTracker
 }
 
 func NewPluginHandler(
@@ -51,6 +52,7 @@ func NewPluginHandler(
 	proxy *plugins.HTTPProxy,
 	chainRepo *metadata.ChainRepository,
 	imageResolver *metadata.PluginImageResolver,
+	restartStatus *ServerRestartStatusTracker,
 ) *PluginHandler {
 	return &PluginHandler{
 		repositories:  repositories,
@@ -61,6 +63,7 @@ func NewPluginHandler(
 		proxy:         proxy,
 		chainRepo:     chainRepo,
 		imageResolver: imageResolver,
+		restartStatus: restartStatus,
 		uploads: uploads.NewManager(uploads.ManagerOptions{
 			MaxSize:      maxPluginUploadSize,
 			MaxChunkSize: maxPluginUploadChunkSize,
@@ -1037,6 +1040,7 @@ func (h *PluginHandler) HandlePutTaskBinding(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	h.restartStatus.MarkRequired("plugin_task_binding")
 	writeJSON(w, http.StatusOK, pluginTaskBindingUpdateResponse{RestartRequired: true})
 }
 

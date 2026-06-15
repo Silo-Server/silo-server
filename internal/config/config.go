@@ -204,26 +204,32 @@ type AudiobookshelfCompatConfig struct {
 
 // JellyfinCompatConfig holds compatibility proxy settings.
 type JellyfinCompatConfig struct {
+	Enabled               bool          `yaml:"enabled"`
 	Listen                string        `yaml:"listen"`
 	PublicURL             string        `yaml:"public_url"`
 	EmulatedServerVersion string        `yaml:"emulated_server_version"`
 	ServerID              string        `yaml:"server_id"`
 	ServerName            string        `yaml:"server_name"`
+	WebEnabled            bool          `yaml:"web_enabled"`
 	WebVersion            string        `yaml:"web_version"`
 	WebDir                string        `yaml:"web_dir"`
+	WebInstallDir         string        `yaml:"web_install_dir"`
 	SessionTTL            time.Duration `yaml:"-"`
 	PlaybackSessionTTL    time.Duration `yaml:"-"`
 }
 
 // jellyfinCompatConfigRaw is the raw YAML representation with duration strings.
 type jellyfinCompatConfigRaw struct {
+	Enabled               bool   `yaml:"enabled"`
 	Listen                string `yaml:"listen"`
 	PublicURL             string `yaml:"public_url"`
 	EmulatedServerVersion string `yaml:"emulated_server_version"`
 	ServerID              string `yaml:"server_id"`
 	ServerName            string `yaml:"server_name"`
+	WebEnabled            bool   `yaml:"web_enabled"`
 	WebVersion            string `yaml:"web_version"`
 	WebDir                string `yaml:"web_dir"`
+	WebInstallDir         string `yaml:"web_install_dir"`
 	SessionTTL            string `yaml:"session_ttl"`
 	PlaybackSessionTTL    string `yaml:"playback_session_ttl"`
 }
@@ -356,8 +362,10 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 	[]byte("https://silo.local/jellycompat"),
 ).String()
 
+const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
 const DefaultJellyfinWebVersion = "10.11.6"
-const DefaultBundledJellyfinWebDir = "/srv/jellyfin-web/current"
+const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
+const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 
 // parseDuration parses a duration string that supports Go's time.ParseDuration
 // formats plus a custom "Nd" format for days.
@@ -437,13 +445,16 @@ func setDefaults() *configRaw {
 			RefreshTokenExpiry: "30d",
 		},
 		JellyfinCompat: jellyfinCompatConfigRaw{
+			Enabled:               false,
 			Listen:                ":8097",
 			PublicURL:             "http://127.0.0.1:8097",
-			EmulatedServerVersion: "10.12.0",
+			EmulatedServerVersion: DefaultJellyfinCompatEmulatedServerVersion,
 			ServerID:              defaultJellyfinCompatServerID,
 			ServerName:            "Silo",
+			WebEnabled:            true,
 			WebVersion:            DefaultJellyfinWebVersion,
-			WebDir:                DefaultBundledJellyfinWebDir,
+			WebDir:                DefaultJellyfinWebDir,
+			WebInstallDir:         DefaultJellyfinWebInstallDir,
 			SessionTTL:            "87600h",
 			PlaybackSessionTTL:    "6h",
 		},

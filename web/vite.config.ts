@@ -8,6 +8,7 @@ import path from "path";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8090";
+  const hmrClientPort = Number(env.VITE_HMR_CLIENT_PORT || "");
 
   return {
     plugins: [react(), tailwindcss()],
@@ -23,10 +24,14 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       allowedHosts: ["silo.local"],
+      hmr:
+        Number.isFinite(hmrClientPort) && hmrClientPort > 0
+          ? { clientPort: hmrClientPort }
+          : undefined,
       proxy: {
         "/api": {
           target: apiProxyTarget,
-          changeOrigin: true,
+          changeOrigin: false,
           secure: true,
           ws: true,
         },

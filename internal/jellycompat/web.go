@@ -1,16 +1,13 @@
 package jellycompat
 
 import (
-	"errors"
+	"context"
 	"io/fs"
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
-
-	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 func newCompatWebFSFromDirectory(root string) (fs.FS, error) {
@@ -18,10 +15,10 @@ func newCompatWebFSFromDirectory(root string) (fs.FS, error) {
 		return nil, nil
 	}
 
-	webFS := os.DirFS(root)
-	if _, err := fs.Stat(webFS, "index.html"); err != nil {
+	if _, err := validateWebComponentDirectory(root); err != nil {
 		return nil, err
 	}
+	webFS := os.DirFS(root)
 	return webFS, nil
 }
 
@@ -97,6 +94,22 @@ func newCompatWebHandler(webFS fs.FS, version string) http.Handler {
 	})
 }
 
+func newDynamicCompatWebHandler(deps Dependencies) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		webFS, version, err := resolveCompatWebFS(ctx, deps)
+		if err != nil || webFS == nil {
+			if err == nil && !compatWebEnabled(ctx, deps) && compatWebAssetsInstalled(ctx, deps) {
+				http.Error(w, compatWebDisabledMessage(ctx, deps), http.StatusNotFound)
+				return
+			}
+			http.Error(w, "Jellyfin Web UI assets are not installed", http.StatusNotFound)
+			return
+		}
+		newCompatWebHandler(webFS, version).ServeHTTP(w, r)
+	})
+}
+
 func shouldServeCompatWebIndex(relPath string) bool {
 	if relPath == "" || relPath == "." || relPath == "index.html" {
 		return true
@@ -112,53 +125,113 @@ func fileExists(fsys fs.FS, name string) bool {
 	return false
 }
 
-func resolveCompatWebFS(deps Dependencies) (fs.FS, error) {
+func resolveCompatWebFS(ctx context.Context, deps Dependencies) (fs.FS, string, error) {
+	if !compatWebEnabled(ctx, deps) {
+		return nil, "", nil
+	}
 	if deps.WebFS != nil {
 		if _, err := fs.Stat(deps.WebFS, "index.html"); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return deps.WebFS, nil
+		return deps.WebFS, compatWebVersion(ctx, deps), nil
 	}
 	if deps.Config == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 
-	for _, root := range compatWebSearchRoots(deps.Config.JellyfinCompat.WebDir) {
-		webFS, err := newCompatWebFSFromDirectory(root)
-		if err == nil {
-			return webFS, nil
-		}
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		return nil, err
+	root := compatWebDir(ctx, deps)
+	if root == "" {
+		return nil, "", nil
 	}
-	return nil, fs.ErrNotExist
+	webFS, err := newCompatWebFSFromDirectory(root)
+	if err != nil {
+		return nil, "", err
+	}
+	return webFS, compatWebVersion(ctx, deps), nil
 }
 
-func compatWebVersion(cfg *config.Config) string {
-	if cfg == nil {
+func compatWebEnabled(ctx context.Context, deps Dependencies) bool {
+	proxyEnabled, webEnabled := compatWebEnablement(ctx, deps)
+	return proxyEnabled && webEnabled
+}
+
+func compatWebDisabledMessage(ctx context.Context, deps Dependencies) string {
+	proxyEnabled, webEnabled := compatWebEnablement(ctx, deps)
+	switch {
+	case !proxyEnabled:
+		return "Jellyfin Web UI is disabled because the Jellyfin compatibility proxy is disabled"
+	case !webEnabled:
+		return "Jellyfin Web UI is disabled in Silo settings"
+	default:
+		return "Jellyfin Web UI is disabled"
+	}
+}
+
+func compatWebEnablement(ctx context.Context, deps Dependencies) (bool, bool) {
+	proxyEnabled := deps.Config == nil || deps.Config.JellyfinCompat.Enabled
+	webEnabled := true
+	if deps.Config != nil {
+		webEnabled = deps.Config.JellyfinCompat.WebEnabled
+	}
+	if deps.SettingsRepo != nil {
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.enabled"); strings.TrimSpace(value) != "" {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+				proxyEnabled = parsed
+			}
+		}
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.web_enabled"); strings.TrimSpace(value) != "" {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+				webEnabled = parsed
+			}
+		}
+	}
+	return proxyEnabled, webEnabled
+}
+
+func compatWebAssetsInstalled(ctx context.Context, deps Dependencies) bool {
+	if deps.WebFS != nil {
+		_, err := fs.Stat(deps.WebFS, "index.html")
+		return err == nil
+	}
+	if deps.Config == nil {
+		return false
+	}
+	root := compatWebDir(ctx, deps)
+	if root == "" {
+		return false
+	}
+	_, err := validateWebComponentDirectory(root)
+	return err == nil
+}
+
+func compatWebDir(ctx context.Context, deps Dependencies) string {
+	root := ""
+	if deps.SettingsRepo != nil {
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.web_install_dir"); strings.TrimSpace(value) != "" {
+			root = strings.TrimSpace(value)
+		}
+	}
+	if root == "" {
+		if deps.Config == nil {
+			return ""
+		}
+		root = DefaultWebInstallRoot(deps.Config)
+	}
+	root, err := normalizeWebInstallRoot(root)
+	if err != nil {
 		return ""
 	}
-	return cfg.JellyfinCompat.WebVersion
+	return ManagedWebInstallPath(root)
 }
 
-func compatWebSearchRoots(configuredRoot string) []string {
-	roots := make([]string, 0, 2)
-	if trimmed := strings.TrimSpace(configuredRoot); trimmed != "" {
-		roots = append(roots, trimmed)
+func compatWebVersion(ctx context.Context, deps Dependencies) string {
+	if deps.SettingsRepo != nil {
+		if value, _ := deps.SettingsRepo.Get(ctx, "jellyfin_compat.web_version"); strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
 	}
-	if trimmed := strings.TrimSpace(vendoredCompatWebDir()); trimmed != "" && trimmed != strings.TrimSpace(configuredRoot) {
-		roots = append(roots, trimmed)
-	}
-	return roots
-}
-
-func vendoredCompatWebDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
+	if deps.Config == nil {
 		return ""
 	}
-	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(file)))
-	return filepath.Join(repoRoot, "third_party", "jellyfin-web", "current")
+	return deps.Config.JellyfinCompat.WebVersion
 }

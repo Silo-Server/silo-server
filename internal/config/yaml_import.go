@@ -24,6 +24,39 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func yamlHasPath(data []byte, path ...string) (bool, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return false, err
+	}
+
+	node := &doc
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return false, nil
+		}
+		node = node.Content[0]
+	}
+
+	for _, key := range path {
+		if node.Kind != yaml.MappingNode {
+			return false, nil
+		}
+		found := false
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value == key {
+				node = node.Content[i+1]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // YAMLToSettingsMap reads a YAML config file and converts it to a flat
 // map[string]string suitable for insertion into the server_settings table.
 //
@@ -38,6 +71,10 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 
 	raw := setDefaults()
 	if err := yaml.Unmarshal(data, raw); err != nil {
+		return nil, fmt.Errorf("parsing YAML config: %w", err)
+	}
+	jellyfinCompatEnabledConfigured, err := yamlHasPath(data, "jellyfin_compat", "enabled")
+	if err != nil {
 		return nil, fmt.Errorf("parsing YAML config: %w", err)
 	}
 
@@ -199,13 +236,20 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 	setIfNonEmpty(m, "auth.refresh_token_expiry", raw.Auth.RefreshTokenExpiry)
 
 	// JellyfinCompat
+	if jellyfinCompatEnabledConfigured {
+		m["jellyfin_compat.enabled"] = strconv.FormatBool(raw.JellyfinCompat.Enabled)
+	} else if raw.JellyfinCompat.Listen != "" {
+		m["jellyfin_compat.enabled"] = "true"
+	}
 	setIfNonEmpty(m, "jellyfin_compat.listen", raw.JellyfinCompat.Listen)
 	setIfNonEmpty(m, "jellyfin_compat.public_url", raw.JellyfinCompat.PublicURL)
 	setIfNonEmpty(m, "jellyfin_compat.emulated_server_version", raw.JellyfinCompat.EmulatedServerVersion)
 	setIfNonEmpty(m, "jellyfin_compat.server_id", raw.JellyfinCompat.ServerID)
 	setIfNonEmpty(m, "jellyfin_compat.server_name", raw.JellyfinCompat.ServerName)
+	setIfNonEmpty(m, "jellyfin_compat.web_enabled", strconv.FormatBool(raw.JellyfinCompat.WebEnabled))
 	setIfNonEmpty(m, "jellyfin_compat.web_version", raw.JellyfinCompat.WebVersion)
 	setIfNonEmpty(m, "jellyfin_compat.web_dir", raw.JellyfinCompat.WebDir)
+	setIfNonEmpty(m, "jellyfin_compat.web_install_dir", raw.JellyfinCompat.WebInstallDir)
 	setIfNonEmpty(m, "jellyfin_compat.session_ttl", raw.JellyfinCompat.SessionTTL)
 	setIfNonEmpty(m, "jellyfin_compat.playback_session_ttl", raw.JellyfinCompat.PlaybackSessionTTL)
 

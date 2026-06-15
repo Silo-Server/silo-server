@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[14510],{4438:function(n,t,e){e.r(t),e.d(t,{getSetting:function(){return c},setSetting:function(){return i}});var u=e(90381),r="syncPlay";function c(n){return u.A.get(n,r)}function i(n,t){return u.A.set(n,t,r)}}}]);

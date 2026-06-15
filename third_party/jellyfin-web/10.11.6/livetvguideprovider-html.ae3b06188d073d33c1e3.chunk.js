@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[87936],{90833:function(e,i,a){a.r(i),i.default='<div id="liveTvGuideProviderPage" data-role="page" class="page type-interior liveTvSettingsPage"> <div> <div class="content-primary"> <div class="readOnlyContent providerTemplate" style="margin-top:2em"></div> </div> </div> </div> '}}]);

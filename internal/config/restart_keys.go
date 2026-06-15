@@ -56,12 +56,12 @@ var restartRequiredKeys = map[string]bool{
 	// Compat listeners and session stores.
 	"audiobookshelf_compat.enabled": true,
 	// public_url / server_name / emulated_server_version are read live per
-	// request; server_id is generate-once and baked into the resource
-	// mapper; the session TTLs are baked into store constructors.
+	// request; Jellyfin Web settings are read from the settings repo by
+	// the dynamic web handler; server_id is generate-once and baked into
+	// the resource mapper; the session TTLs are baked into store constructors.
+	"jellyfin_compat.enabled":              true,
 	"jellyfin_compat.listen":               true,
 	"jellyfin_compat.server_id":            true,
-	"jellyfin_compat.web_version":          true,
-	"jellyfin_compat.web_dir":              true,
 	"jellyfin_compat.session_ttl":          true,
 	"jellyfin_compat.playback_session_ttl": true,
 

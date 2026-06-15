@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
 import {
   useAdminServerSettings,
@@ -46,6 +46,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, []);
 
   const dirtyCount = dirty.size;
+  const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
   const isDirty = useCallback((key: string) => dirty.has(key), [dirty]);
 
@@ -91,6 +92,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     getValue,
     setValue,
     dirtyCount,
+    dirtyKeys,
     isDirty,
     save,
     discard,

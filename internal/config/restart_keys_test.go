@@ -19,6 +19,20 @@ func TestRestartRequired(t *testing.T) {
 		{"recommendations.enabled", true},
 		// Legacy AI aliases classify like their canonical keys.
 		{"subtitle_ai.max_concurrent_jobs", true},
+		// Compat listeners and session stores are only bound at process startup.
+		{"jellyfin_compat.enabled", true},
+		{"jellyfin_compat.listen", true},
+		{"jellyfin_compat.server_id", true},
+		{"jellyfin_compat.session_ttl", true},
+		{"jellyfin_compat.playback_session_ttl", true},
+		// Jellyfin identity and Web UI settings are live-read.
+		{"jellyfin_compat.public_url", false},
+		{"jellyfin_compat.server_name", false},
+		{"jellyfin_compat.emulated_server_version", false},
+		{"jellyfin_compat.web_enabled", false},
+		{"jellyfin_compat.web_version", false},
+		{"jellyfin_compat.web_dir", false},
+		{"jellyfin_compat.web_install_dir", false},
 		{"subtitle_ai.base_url", false}, // like ai.base_url — hot-reloaded
 		{"ai.api_key", false},
 		{"subtitle_ai.enabled", false},

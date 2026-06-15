@@ -35,6 +35,7 @@ describe("CompatibilityProxiesSettings", () => {
       keys: expect.arrayContaining([
         "jellyfin_compat.public_url",
         "jellyfin_compat.server_name",
+        "jellyfin_compat.web_enabled",
         "audiobookshelf_compat.enabled",
       ]),
     });

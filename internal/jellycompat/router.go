@@ -62,10 +62,6 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Use(middleware.Recoverer)
 
 	systemHandler := NewSystemHandler(deps.CurrentConfig)
-	webFS, err := resolveCompatWebFS(deps)
-	if err != nil {
-		slog.Error("jellycompat web bundle unavailable", "error", err)
-	}
 	authHandler := NewAuthHandler(deps.CurrentConfig, deps.LoginResolver, deps.Authenticator)
 	nextUpRepo := catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider)
 	var subtitleRepo subtitles.Repository
@@ -120,16 +116,14 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
 	r.Get("/Items/{id}/Images/{imageType}", imagesHandler.HandleItemImage)
 	r.Get("/Items/{id}/Images/{imageType}/{index}", imagesHandler.HandleItemImage)
-	if webFS != nil {
-		webHandler := http.StripPrefix("/web", newCompatWebHandler(webFS, compatWebVersion(deps.Config)))
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/web/", http.StatusFound)
-		})
-		r.Get("/web", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/web/", http.StatusFound)
-		})
-		r.Handle("/web/*", webHandler)
-	}
+	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/", http.StatusFound)
+	})
+	r.Get("/web", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/", http.StatusFound)
+	})
+	r.Handle("/web/*", webHandler)
 
 	if deps.Authenticator != nil {
 		r.Group(func(r chi.Router) {
@@ -340,7 +334,7 @@ func withDefaults(deps Dependencies) Dependencies {
 }
 
 // stripSlashesExceptWeb behaves like chi's middleware.StripSlashes for every
-// request, except those targeting the bundled Jellyfin-web mount at /web.
+// request, except those targeting the configured Jellyfin-compatible web mount at /web.
 // Trailing slashes there are load-bearing: the static handler chain
 // (StripPrefix → /web/* → newCompatWebHandler) needs the slash to distinguish
 // "/web" (redirect to /web/) from "/web/" (serve index.html). Stripping it

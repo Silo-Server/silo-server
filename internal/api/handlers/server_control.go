@@ -18,6 +18,7 @@ var ErrServerRestartAlreadyRequested = errors.New("server restart already reques
 type ServerControlHandler struct {
 	requestRestart func(ctx context.Context) error
 	commands       *playback.CommandDispatcher
+	restartStatus  *ServerRestartStatusTracker
 }
 
 type serverRestartRequest struct {
@@ -35,10 +36,12 @@ type serverRestartResponse struct {
 func NewServerControlHandler(
 	requestRestart func(ctx context.Context) error,
 	commands *playback.CommandDispatcher,
+	restartStatus *ServerRestartStatusTracker,
 ) *ServerControlHandler {
 	return &ServerControlHandler{
 		requestRestart: requestRestart,
 		commands:       commands,
+		restartStatus:  restartStatus,
 	}
 }
 
@@ -59,6 +62,7 @@ func (h *ServerControlHandler) HandleRestart(w http.ResponseWriter, r *http.Requ
 
 	if err := h.requestRestart(context.Background()); err != nil {
 		if errors.Is(err, ErrServerRestartAlreadyRequested) {
+			h.restartStatus.MarkRestartRequested()
 			writeJSON(w, http.StatusAccepted, serverRestartResponse{
 				Status:           "already_requested",
 				Message:          "Server restart is already in progress.",
@@ -71,6 +75,7 @@ func (h *ServerControlHandler) HandleRestart(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	h.restartStatus.MarkRestartRequested()
 	writeJSON(w, http.StatusAccepted, serverRestartResponse{
 		Status:           "restart_requested",
 		Message:          "Server restart requested. The process will shut down gracefully.",

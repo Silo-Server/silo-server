@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web-bundle migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -15,7 +15,8 @@ else ifneq ($(wildcard $(SHARED_PLUGIN_SDK_DIR)),)
 DEV_PLUGIN_SDK_DIR ?= $(SHARED_PLUGIN_SDK_DIR)
 endif
 
-JELLYFIN_WEB_OUTPUT_DIR ?= third_party/jellyfin-web
+JELLYFIN_WEB_INSTALL_DIR ?= .local/compat/jellyfin-web
+JELLYFIN_WEB_VERSION ?= 10.11.6
 
 # Build version stamping: inject the git revision so the admin Build panel shows a
 # version even when Go's VCS metadata isn't embedded (mirrors the Dockerfile ldflags).
@@ -82,9 +83,9 @@ install-hooks:
 	fi
 	git config core.hooksPath .githooks
 
-# Fetch and build the pinned Jellyfin Web bundle
-jellyfin-web-bundle:
-	JELLYFIN_WEB_OUTPUT_DIR=$(JELLYFIN_WEB_OUTPUT_DIR) scripts/fetch-jellyfin-web.sh
+# Fetch and build the pinned Jellyfin Web component into a gitignored local cache.
+jellyfin-web:
+	go run ./cmd/silo/ compat-web install --dir "$(JELLYFIN_WEB_INSTALL_DIR)" --version "$(JELLYFIN_WEB_VERSION)"
 
 # Read-only preflight for Continuum Docker installs moving to Silo.
 migrate-continuum-check:

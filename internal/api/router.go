@@ -26,6 +26,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -90,6 +91,7 @@ type Dependencies struct {
 	S3Public                     *s3client.Client                 // public assets bucket client (may be nil)
 	S3Private                    *s3client.Client                 // private internal bucket client (may be nil)
 	S3UserDB                     *s3client.Client                 // user-db bucket client (may be nil)
+	BrandingService              *branding.Service                // white-label branding (nil when DB unavailable)
 	FolderRepo                   *catalog.FolderRepository        // media folder repository (may be nil)
 	FileRepo                     *scanner.FileRepository          // media file repository (may be nil)
 	Scanner                      *scanner.Scanner                 // scanner instance (may be nil)
@@ -156,6 +158,7 @@ type Dependencies struct {
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
 	OnServerSettingUpdated func(ctx context.Context, key, value string)
 	RequestServerRestart   func(ctx context.Context) error
+	ServerRestartStatus    *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
@@ -797,7 +800,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
-	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher)
+	restartStatus := deps.ServerRestartStatus
+	if restartStatus == nil {
+		restartStatus = handlers.NewServerRestartStatusTracker()
+	}
+	serverControlHandler := handlers.NewServerControlHandler(deps.RequestServerRestart, playbackCommandDispatcher, restartStatus)
 
 	// Build admin handler if we have a user repo.
 	var adminHandler *handlers.AdminHandler
@@ -808,14 +815,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.SessionsLoader = playbackSessionsLoader
 		adminHandler.DetailSvc = detailSvc
 		adminHandler.EventBus = deps.EventBus
+		adminHandler.EventsHub = deps.EventsHub
 		adminHandler.ImpersonationService = authService
 		adminHandler.StatsSource = deps.AdminStatsProvider
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
 		adminHandler.BootstrapSensitiveValues = deps.BootstrapSensitiveValues
+		adminHandler.RestartStatus = restartStatus
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
+		adminHandler.Config = deps.Config
 		if deps.OnUserSessionsRevoked != nil {
 			adminHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 		}
@@ -1355,6 +1365,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
+
+		// Branding handler is shared between the public read/serve endpoints
+		// (registered with the theme endpoints below) and the admin
+		// upload/delete endpoints (registered in the admin group).
+		var brandingHandler *handlers.BrandingHandler
+		if deps.BrandingService != nil {
+			brandingHandler = handlers.NewBrandingHandler(deps.BrandingService)
+		}
+
 		if webhookSyncHandler != nil {
 			r.Post("/plex-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
 			r.Post("/webhook-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
@@ -1364,7 +1383,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		if settingsRepo != nil {
 			themeHandler := handlers.NewThemeHandler(settingsRepo)
 			r.Get("/theme/admin-css", themeHandler.HandleAdminCSS)
-			r.Get("/theme/branding", themeHandler.HandleBranding)
+			if brandingHandler != nil {
+				// Public branding read + asset serving (pre-login white-label).
+				r.Get("/theme/branding", brandingHandler.HandleGetBranding)
+				r.Get("/branding/assets/{kind}", brandingHandler.HandleServeAsset)
+			}
 
 			// Catalog and download proxies require auth (to avoid open proxy).
 			if authMiddleware != nil {
@@ -1865,6 +1888,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								deps.PluginHTTPProxy,
 								metadata.NewChainRepository(deps.DB),
 								deps.PluginImageResolver,
+								restartStatus,
 							)
 							r.Get("/plugins", pluginHandler.HandleListUserPluginSettings)
 							r.Get("/plugins/{installation_id}", pluginHandler.HandleGetUserPluginSettings)
@@ -2190,7 +2214,13 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
+							r.Get("/server/status", adminHandler.HandleGetServerStatus)
 							r.Post("/server/restart", serverControlHandler.HandleRestart)
+							r.Get("/jellyfin-compat/status", adminHandler.HandleGetJellyfinCompatStatus)
+							r.Patch("/jellyfin-compat/settings", adminHandler.HandleUpdateJellyfinCompatSettings)
+							r.Post("/jellyfin-compat/web/install", adminHandler.HandleInstallJellyfinCompatWeb)
+							r.Post("/jellyfin-compat/web/update", adminHandler.HandleUpdateJellyfinCompatWeb)
+							r.Post("/jellyfin-compat/web/remove", adminHandler.HandleRemoveJellyfinCompatWeb)
 							r.Get("/settings/sensitive-status", adminHandler.HandleGetSensitiveStatus)
 							r.Post("/settings/check/{kind}", adminHandler.HandleCheckSettingsConnection)
 							if sectionSettingsHandler != nil {
@@ -2200,6 +2230,12 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/settings/{key}", adminHandler.HandleGetSetting)
 							r.Get("/settings", adminHandler.HandleGetSettings)
 							r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
+							if brandingHandler != nil {
+								// Branding image upload/delete (scalar branding
+								// fields use the generic settings PUT above).
+								r.Post("/branding/assets/{kind}", brandingHandler.HandleUploadAsset)
+								r.Delete("/branding/assets/{kind}", brandingHandler.HandleDeleteAsset)
+							}
 							if settingsRepo != nil {
 								emailHandler := handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
 								r.Post("/email/test", emailHandler.HandleTest)
@@ -2279,6 +2315,7 @@ func NewRouter(deps Dependencies) chi.Router {
 									deps.PluginHTTPProxy,
 									metadata.NewChainRepository(deps.DB),
 									deps.PluginImageResolver,
+									restartStatus,
 								)
 								r.Route("/plugins", func(r chi.Router) {
 									r.Get("/repositories", pluginHandler.HandleListRepositories)
@@ -2456,10 +2493,10 @@ func NewRouter(deps Dependencies) chi.Router {
 
 							// Rate limit admin routes. Mounted even when the limiter is not
 							// running (deps.RateLimitMW == nil) so admins can always reach the
-							// config — otherwise disabling rate limiting and restarting would
-							// permanently lock the settings page out of re-enabling it.
+							// config; otherwise disabling rate limiting and restarting would
+							// lock the settings page out of re-enabling it.
 							if settingsRepo != nil {
-								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus)
+								rateLimitHandler := handlers.NewRateLimitHandler(settingsRepo, deps.RateLimitMW, deps.EventBus, restartStatus)
 								r.Route("/rate-limits", func(r chi.Router) {
 									r.Get("/config", rateLimitHandler.HandleGetConfig)
 									r.Put("/config", rateLimitHandler.HandleUpdateConfig)
