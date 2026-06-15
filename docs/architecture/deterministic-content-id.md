@@ -270,16 +270,29 @@ remap + `COLLATE "C"`. **Every metric improves.**
 
 **`content_id` index-probe cost** — 300k forced point lookups over 1.9M keys:
 
-| Key scheme | Index size | µs / probe | vs today |
-| ---------- | ---------- | ---------- | -------- |
-| Sonyflake text, `en_US.utf8` *(today)* | 74 MB | 5.05 | 1.00× |
-| **Structured + `COLLATE "C"` (this PR)** | 84 MB | **1.86** | **2.71×** |
-| 128-bit hash `bytea(16)` | 74 MB | 1.80 | 2.81× |
-| `bigint` surrogate | 41 MB | 1.23 | 4.11× |
+The last three columns are *why* the faster schemes were rejected: speed alone
+isn't the goal — the scheme has to carry the properties the whole feature exists
+for. ✓ = has the property, ✗ = lacks it.
 
-The structured key lands within 3% of a 128-bit hash while staying
-human-readable, cross-server deterministic, and supporting the zero-join
-episode→series transform. Index grows ~14%, immaterial.
+| Key scheme | Index size | µs / probe | vs today | Cross-server deterministic | Zero-join show transform | Human-readable |
+| ---------- | ---------- | ---------- | -------- | :------------------------: | :----------------------: | :------------: |
+| Sonyflake text, `en_US.utf8` *(today)* | 74 MB | 5.05 | 1.00× | ✗ | ✗ | ✗ |
+| **Structured + `COLLATE "C"` (this PR)** | 84 MB | **1.86** | **2.71×** | ✓ | ✓ | ✓ |
+| 128-bit hash `bytea(16)` | 74 MB | 1.80 | 2.81× | ✓ | ✗ | ✗ |
+| `bigint` surrogate | 41 MB | 1.23 | 4.11× | ✗ | ✗ | ✗ |
+
+The structured key lands within 3% of a 128-bit hash and is the **only all-✓
+row**. The two faster schemes each give up something load-bearing:
+
+- **128-bit hash** is cross-server deterministic (it hashes the same natural
+  key), but an opaque digest can't be string-transformed, so episode→series
+  needs a catalog join (no zero-join hot path), and it isn't legible in logs,
+  URLs, or `psql`.
+- **`bigint` surrogate** is just the status quo's narrow integer: fast because
+  it's 8 bytes, but per-server (not reproducible elsewhere), no embedded anchor
+  to transform, and not meaningful to a human.
+
+Index grows ~14% (84 vs 74 MB), immaterial.
 
 **Real history-page query** — heaviest profile (25,384 rows):
 
