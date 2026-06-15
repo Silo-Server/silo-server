@@ -3131,12 +3131,12 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(r *http.Request, coll
 
 	switch {
 	case len(collection.LibraryIDs) > 0:
-		def.LibraryIDs = intersectCollectionLibraryIDs(def.LibraryIDs, collection.LibraryIDs)
+		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, collection.LibraryIDs)
 		if len(def.LibraryIDs) == 0 {
 			return []itemListResponse{}, nil
 		}
 	case collection.LibraryID > 0:
-		def.LibraryIDs = intersectCollectionLibraryIDs(def.LibraryIDs, []int{collection.LibraryID})
+		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{collection.LibraryID})
 		if len(def.LibraryIDs) == 0 {
 			return []itemListResponse{}, nil
 		}
@@ -3175,33 +3175,8 @@ func (e smartCollectionQueryError) Unwrap() error {
 	return e.err
 }
 
-func intersectCollectionLibraryIDs(existing, required []int) []int {
-	if len(required) == 0 {
-		return append([]int(nil), existing...)
-	}
-	if len(existing) == 0 {
-		return append([]int(nil), required...)
-	}
-
-	allowed := make(map[int]struct{}, len(required))
-	for _, id := range required {
-		allowed[id] = struct{}{}
-	}
-
-	result := make([]int, 0, len(existing))
-	seen := make(map[int]struct{}, len(existing))
-	for _, id := range existing {
-		if _, ok := allowed[id]; !ok {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		result = append(result, id)
-	}
-	return result
-}
+// intersectCollectionLibraryIDs moved to catalog.IntersectCollectionLibraryIDs
+// so the web API and the Jellyfin-compat resolver share one implementation.
 
 func (h *LibraryCollectionHandler) toItemListResponse(r *http.Request, item *models.MediaItem) itemListResponse {
 	resp := itemListResponse{
