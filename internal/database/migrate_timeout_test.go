@@ -13,13 +13,13 @@ func TestMigrationTimeout(t *testing.T) {
 		set  bool
 		want time.Duration
 	}{
-		{"unset defaults to 5m", "", false, 5 * time.Minute},
-		{"empty defaults to 5m", "", true, 5 * time.Minute},
+		{"unset defaults to 20m", "", false, 20 * time.Minute},
+		{"empty defaults to 20m", "", true, 20 * time.Minute},
 		{"explicit 60m", "60m", true, 60 * time.Minute},
 		{"seconds", "90s", true, 90 * time.Second},
 		{"zero disables", "0", true, 0},
 		{"whitespace trimmed", "  30m  ", true, 30 * time.Minute},
-		{"invalid falls back to 5m", "not-a-duration", true, 5 * time.Minute},
+		{"invalid falls back to 20m", "not-a-duration", true, 20 * time.Minute},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

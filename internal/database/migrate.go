@@ -22,7 +22,7 @@ const (
 
 	// migrationTimeoutEnv configures how long a migration run may take.
 	migrationTimeoutEnv     = "SILO_MIGRATE_TIMEOUT"
-	defaultMigrationTimeout = 5 * time.Minute
+	defaultMigrationTimeout = 20 * time.Minute
 )
 
 // MigrationTimeout returns the deadline budget for a migration run. It is
