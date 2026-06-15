@@ -116,6 +116,14 @@ func TestSeriesIDFromContentID(t *testing.T) {
 		{"1234567890123456", "", false}, // legacy sonyflake
 		{"episode:bogus:xx:1:1", "", false},
 		{"episode:tvdb", "", false},
+		// Truncated/malformed anchors must fail closed, not masquerade as a
+		// valid series anchor (regression: these previously slipped through).
+		{"episode:tvdb:296762", "", false},     // missing season/episode
+		{"episode:tvdb:296762:1", "", false},   // missing episode
+		{"season:tvdb:296762", "", false},      // missing season number
+		{"episode:tvdb:296762:1:x", "", false}, // non-numeric episode
+		{"season:tvdb:296762:x", "", false},    // non-numeric season
+		{"series:tvdb:296762:1", "", false},    // over-long series anchor
 	}
 	for _, tt := range tests {
 		got, ok := SeriesIDFromContentID(tt.in)
@@ -157,7 +165,12 @@ func TestIsProviderAnchored(t *testing.T) {
 			t.Fatalf("IsProviderAnchored(%q) = false, want true", id)
 		}
 	}
-	notAnchored := []string{"local:abc", "1234567890", "movie:bogus:x", "movie:tmdb:", "", "movie:"}
+	notAnchored := []string{
+		"local:abc", "1234567890", "movie:bogus:x", "movie:tmdb:", "", "movie:",
+		// Truncated season/episode and non-numeric suffixes must fail closed.
+		"season:tvdb:2", "episode:tvdb:2", "episode:tvdb:2:1", "episode:imdb:tt3:1:x",
+		"season:tvdb:2:x", "series:tvdb:2:1",
+	}
 	for _, id := range notAnchored {
 		if IsProviderAnchored(id) {
 			t.Fatalf("IsProviderAnchored(%q) = true, want false", id)

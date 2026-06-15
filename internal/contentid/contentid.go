@@ -61,16 +61,20 @@ const (
 	ProviderTVDB = "tvdb"
 )
 
-// MovieProviderPrecedence and SeriesProviderPrecedence freeze, per the scheme
+// movieProviderPrecedence and seriesProviderPrecedence freeze, per the scheme
 // version, which provider anchors a logical item when more than one tag is
 // present. Two servers that both see the tags therefore pick the same anchor.
+// They are unexported and never returned by reference: the precedence is part of
+// SchemeVersion and is mirrored by the hard-coded order in
+// 20260612130000_deterministic_content_id.sql, so a stray runtime mutation would
+// silently mint ids that no longer match the migration.
 //
 //   - Movies prefer TMDB (the richest movie source).
 //   - Series/Season/Episode prefer TVDB (the traditional episode-canonical
 //     source).
 var (
-	MovieProviderPrecedence  = []string{ProviderTMDB, ProviderIMDB, ProviderTVDB}
-	SeriesProviderPrecedence = []string{ProviderTVDB, ProviderTMDB, ProviderIMDB}
+	movieProviderPrecedence  = []string{ProviderTMDB, ProviderIMDB, ProviderTVDB}
+	seriesProviderPrecedence = []string{ProviderTVDB, ProviderTMDB, ProviderIMDB}
 )
 
 // ProviderIDs carries the raw provider identifiers for an item as found on the
@@ -140,7 +144,7 @@ func anchor(ids ProviderIDs, precedence []string) (provider, id string, ok bool)
 // ForMovie returns the deterministic content_id for a movie, or ("", false) if
 // no provider anchor is present (the caller should fall back to ForLocal).
 func ForMovie(ids ProviderIDs) (string, bool) {
-	provider, id, ok := anchor(ids, MovieProviderPrecedence)
+	provider, id, ok := anchor(ids, movieProviderPrecedence)
 	if !ok {
 		return "", false
 	}
@@ -150,7 +154,7 @@ func ForMovie(ids ProviderIDs) (string, bool) {
 // ForSeries returns the deterministic content_id for a series, or ("", false)
 // if no provider anchor is present.
 func ForSeries(ids ProviderIDs) (string, bool) {
-	provider, id, ok := anchor(ids, SeriesProviderPrecedence)
+	provider, id, ok := anchor(ids, seriesProviderPrecedence)
 	if !ok {
 		return "", false
 	}
@@ -233,47 +237,76 @@ func ForLocal(path string) string {
 //	series:tvdb:296762      -> series:tvdb:296762  (unchanged)
 func SeriesIDFromContentID(contentID string) (string, bool) {
 	id := strings.TrimSpace(contentID)
-	switch {
-	case strings.HasPrefix(id, kindMovie+":"), strings.HasPrefix(id, kindSeries+":"):
+	if strings.HasPrefix(id, kindMovie+":") || strings.HasPrefix(id, kindSeries+":") {
+		// A movie is its own display item; a series id is already a series id.
+		// Still require the anchor to be well-formed so a truncated "series:"
+		// cannot pass through unchanged.
+		if !IsProviderAnchored(id) {
+			return "", false
+		}
 		return id, true
-	case strings.HasPrefix(id, kindEpisode+":"), strings.HasPrefix(id, kindSeason+":"):
-		// Drop the kind token, keep "<provider>:<seriesId>" (the first two
-		// remaining components), re-prefix with "series:".
-		rest := id[strings.IndexByte(id, ':')+1:]
-		parts := strings.SplitN(rest, ":", 3)
-		if len(parts) < 2 {
-			return "", false
-		}
-		if _, valid := normalizeProviderID(parts[0], parts[1]); !valid {
-			return "", false
-		}
-		return kindSeries + ":" + parts[0] + ":" + parts[1], true
-	default:
-		// local: ids and legacy Sonyflake ids have no embedded anchor.
-		return "", false
 	}
+	// episode/season carry an embedded "<provider>:<seriesId>" anchor; recover it
+	// by pure string transform. parseAnchored enforces the full per-kind arity, so
+	// a truncated "episode:tvdb:296762" (missing season/episode) fails closed
+	// rather than aliasing onto a series.
+	if provider, seriesID, ok := parseAnchored(id); ok {
+		return kindSeries + ":" + provider + ":" + seriesID, true
+	}
+	// local: ids and legacy Sonyflake ids have no embedded anchor.
+	return "", false
 }
 
-// IsProviderAnchored reports whether the content_id is a provider-derived key
-// (movie/series/season/episode), as opposed to a local: id or a legacy
-// Sonyflake id. Used by migration and diagnostics to tell remappable items
-// apart.
+// IsProviderAnchored reports whether the content_id is a fully-formed
+// provider-derived key (movie/series/season/episode), as opposed to a local: id,
+// a legacy Sonyflake id, or a truncated/malformed anchor. Used by migration and
+// diagnostics to tell remappable items apart.
 func IsProviderAnchored(contentID string) bool {
-	id := strings.TrimSpace(contentID)
-	for _, kind := range []string{kindMovie, kindSeries, kindSeason, kindEpisode} {
-		if strings.HasPrefix(id, kind+":") {
-			rest := id[len(kind)+1:]
-			parts := strings.SplitN(rest, ":", 3)
-			if len(parts) < 2 {
-				return false
-			}
-			if _, valid := normalizeProviderID(parts[0], parts[1]); valid {
-				return true
-			}
-			return false
+	_, _, ok := parseAnchored(strings.TrimSpace(contentID))
+	return ok
+}
+
+// parseAnchored validates a provider-anchored content_id against the exact
+// per-kind arity and component shape, returning the canonical (provider,
+// seriesId-or-id) anchor when it is well-formed:
+//
+//	movie:<p>:<id>                 -> (p, id)
+//	series:<p>:<id>                -> (p, id)
+//	season:<p>:<sid>:<n>           -> (p, sid)   n must be a base-10 integer
+//	episode:<p>:<sid>:<s>:<e>      -> (p, sid)   s,e must be base-10 integers
+//
+// It fails closed for any other shape (wrong part count, non-numeric
+// season/episode, unknown/invalid provider id, local: or legacy ids).
+func parseAnchored(id string) (provider, seriesID string, ok bool) {
+	kind, rest, found := strings.Cut(id, ":")
+	if !found {
+		return "", "", false
+	}
+	parts := strings.Split(rest, ":")
+	var wantParts int
+	switch kind {
+	case kindMovie, kindSeries:
+		wantParts = 2 // <provider>:<id>
+	case kindSeason:
+		wantParts = 3 // <provider>:<seriesId>:<seasonNo>
+	case kindEpisode:
+		wantParts = 4 // <provider>:<seriesId>:<seasonNo>:<episodeNo>
+	default:
+		return "", "", false
+	}
+	if len(parts) != wantParts {
+		return "", "", false
+	}
+	if _, valid := normalizeProviderID(parts[0], parts[1]); !valid {
+		return "", "", false
+	}
+	// The trailing season/episode numbers must be base-10 integers.
+	for _, n := range parts[2:] {
+		if !numericIDPattern.MatchString(n) {
+			return "", "", false
 		}
 	}
-	return false
+	return parts[0], parts[1], true
 }
 
 // IsLocal reports whether the content_id is in the local: fallback namespace.

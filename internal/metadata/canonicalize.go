@@ -2,8 +2,10 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
@@ -17,7 +19,7 @@ func providerIDsStruct(m map[string]string) contentid.ProviderIDs {
 	}
 }
 
-// canonicalizeLocalContentID promotes a local: skeleton to its deterministic,
+// canonicalizeLocalContentID promotes a local skeleton to its deterministic,
 // provider-anchored content_id once a confirmed match has supplied provider IDs
 // (the untagged-then-matched re-ID). It returns the canonical id, which equals
 // from when there is nothing to do.
@@ -38,7 +40,7 @@ func providerIDsStruct(m map[string]string) contentid.ProviderIDs {
 // merge branch on the next pass.
 //
 // Note: a series that already had season/episode rows before it matched keeps
-// those children on their Sonyflake ids (ForSeason/ForEpisode need a series:
+// those children on their Sonyflake ids (ForSeason/ForEpisode need a series
 // anchor). At first match the children usually do not exist yet, so this is
 // rare; re-deriving them is a deferred follow-up (recomposeSeriesChildIDs).
 func (s *MetadataService) canonicalizeLocalContentID(
@@ -52,7 +54,7 @@ func (s *MetadataService) canonicalizeLocalContentID(
 	}
 
 	// Derive with no path fallback: we only want a provider-anchored id here, not
-	// another local: value.
+	// another local value.
 	target, err := deriveLogicalContentID(itemType, ids, "")
 	if err != nil {
 		return "", err
@@ -61,12 +63,24 @@ func (s *MetadataService) canonicalizeLocalContentID(
 		return from, nil
 	}
 
-	// A row already at the target id is the same logical item; merge onto it.
-	if existing, err := s.itemRepo.GetByID(ctx, target); err == nil && existing != nil {
-		if err := s.rebindItemToExistingItem(ctx, from, target, false); err != nil {
+	// Look up the target, distinguishing "free" (not-found) from a transient
+	// failure. Treating a real error as "target free" would fall through to the
+	// rename path and surface as a misleading unique-constraint conflict instead
+	// of a retryable error.
+	existing, err := s.itemRepo.GetByID(ctx, target)
+	switch {
+	case err == nil && existing != nil:
+		// A row already at the target id is the same logical item; merge onto it.
+		// allowMatchedSource: this also runs when refreshing an already-matched
+		// local item, so the source row may be 'matched'; we still consolidate it
+		// onto the canonical target rather than orphaning a duplicate. Safe under
+		// the provider-dedup lock the caller holds.
+		if err := s.rebindItemToExistingItem(ctx, from, target, true); err != nil {
 			return "", fmt.Errorf("merging local item %s into %s: %w", from, target, err)
 		}
 		return target, nil
+	case err != nil && !errors.Is(err, catalog.ErrItemNotFound):
+		return "", fmt.Errorf("looking up canonical target %s: %w", target, err)
 	}
 
 	// Target free: pure value-move.
