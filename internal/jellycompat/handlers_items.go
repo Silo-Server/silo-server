@@ -222,6 +222,13 @@ func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.R
 // episodes of that season. The season is resolved to its owning series so the
 // shared episode-listing path (also used by /Shows/{id}/Episodes) can be reused.
 func (h *ItemsHandler) handleSeasonEpisodeChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	// A season's only children are its episodes; a type filter that excludes
+	// Episode (e.g. IncludeItemTypes=Movie) yields nothing, mirroring the
+	// series-parent path's handling of unsatisfiable type filters.
+	if query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode") {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
 	if h.seasonRepo == nil {
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return

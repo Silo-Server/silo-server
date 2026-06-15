@@ -162,6 +162,43 @@ func TestHandleItems_SeasonParentReturnsEpisodes(t *testing.T) {
 	}
 }
 
+// TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty pins that a season ParentId
+// with a type filter that excludes Episode (e.g. Movie) returns an empty page and
+// short-circuits before listing episodes, even though episodes exist.
+func TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+		seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
+			seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
+		}},
+	}
+
+	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID+"&IncludeItemTypes=Movie")
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("expected empty for Movie type under a season parent, got %+v", result.Items)
+	}
+	if contentSvc.listSeasonsCalls != 0 {
+		t.Fatalf("type guard should short-circuit before episode listing; ListSeasons called %d times", contentSvc.listSeasonsCalls)
+	}
+}
+
 // TestHandleItems_SeasonParentWithoutRepoIsEmptyNotViews ensures the season-parent
 // path degrades to an empty page (never the library views) when no season repo is
 // wired. countingContentService panics in ListUserLibraries to catch a views
