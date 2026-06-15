@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { ThemeId } from "@/lib/themes";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
 import { useOptionalAuth } from "@/hooks/useAuth";
+import { useBranding } from "@/hooks/useBranding";
 import { storage } from "@/utils/storage";
 import {
   getInitialTheme,
@@ -71,8 +72,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const apiHighContrast = apiSettings?.ui_high_contrast;
   const settingMutation = useSetSetting();
 
+  // Admin-set server default theme applies only when the user has expressed no
+  // preference of their own (no stored local choice and no profile ui_theme).
+  // A user's explicit choice always wins, preserving the per-user layering.
+  const { defaultTheme: adminDefaultTheme } = useBranding();
+  const hasStoredThemeChoice = storage.get(storage.KEYS.THEME) != null;
+  const fallbackTheme: ThemeId =
+    !hasStoredThemeChoice && isValidTheme(adminDefaultTheme) ? adminDefaultTheme : themePreference;
+
   const theme =
-    loadApiTheme && apiTheme ? getInitialThemeFromApi(apiTheme, themePreference) : themePreference;
+    loadApiTheme && apiTheme ? getInitialThemeFromApi(apiTheme, fallbackTheme) : fallbackTheme;
   const textScale = loadApiTheme
     ? parseTextScale(apiTextScale ?? textScalePreference)
     : textScalePreference;

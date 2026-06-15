@@ -54,25 +54,6 @@ func (h *ThemeHandler) HandleAdminCSS(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// brandingResponse is returned by GET /theme/branding.
-type brandingResponse struct {
-	ServerName    string `json:"server_name"`
-	LoginSubtitle string `json:"login_subtitle"`
-}
-
-// HandleBranding returns the server branding settings.
-// Public endpoint — no authentication required so branding appears on the login page.
-func (h *ThemeHandler) HandleBranding(w http.ResponseWriter, r *http.Request) {
-	serverName, _ := h.settings.Get(r.Context(), "branding.server_name")
-	loginSubtitle, _ := h.settings.Get(r.Context(), "branding.login_subtitle")
-
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	writeJSON(w, http.StatusOK, brandingResponse{
-		ServerName:    serverName,
-		LoginSubtitle: loginSubtitle,
-	})
-}
-
 // allowedDownloadHosts restricts which hosts the theme download proxy will fetch from.
 var allowedDownloadHosts = map[string]bool{
 	"raw.githubusercontent.com":     true,

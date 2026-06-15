@@ -16,6 +16,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
+import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
@@ -585,25 +586,27 @@ export default function App() {
       <AuthProvider>
         <QueryClientProvider client={queryClient}>
           <ErrorBoundary>
-            <ThemeProvider>
-              <CustomThemeProvider>
-                <WatchPlaybackProvider>
-                  <AudiobookPlaybackProvider>
-                    <RealtimeEventsProvider>
-                      <RealtimeEventChannels />
-                      <ScrollRestorationManager />
-                      <RouteAnnouncer />
-                      <QueryCacheManager />
-                      <AppChrome />
-                      <AppRoutes />
-                      <WatchPlaybackHost />
-                      <WatchPlaybackBar />
-                      <Toaster />
-                    </RealtimeEventsProvider>
-                  </AudiobookPlaybackProvider>
-                </WatchPlaybackProvider>
-              </CustomThemeProvider>
-            </ThemeProvider>
+            <BrandingProvider>
+              <ThemeProvider>
+                <CustomThemeProvider>
+                  <WatchPlaybackProvider>
+                    <AudiobookPlaybackProvider>
+                      <RealtimeEventsProvider>
+                        <RealtimeEventChannels />
+                        <ScrollRestorationManager />
+                        <RouteAnnouncer />
+                        <QueryCacheManager />
+                        <AppChrome />
+                        <AppRoutes />
+                        <WatchPlaybackHost />
+                        <WatchPlaybackBar />
+                        <Toaster />
+                      </RealtimeEventsProvider>
+                    </AudiobookPlaybackProvider>
+                  </WatchPlaybackProvider>
+                </CustomThemeProvider>
+              </ThemeProvider>
+            </BrandingProvider>
           </ErrorBoundary>
         </QueryClientProvider>
       </AuthProvider>

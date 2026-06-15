@@ -26,6 +26,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -90,6 +91,7 @@ type Dependencies struct {
 	S3Public                     *s3client.Client                 // public assets bucket client (may be nil)
 	S3Private                    *s3client.Client                 // private internal bucket client (may be nil)
 	S3UserDB                     *s3client.Client                 // user-db bucket client (may be nil)
+	BrandingService              *branding.Service                // white-label branding (nil when DB unavailable)
 	FolderRepo                   *catalog.FolderRepository        // media folder repository (may be nil)
 	FileRepo                     *scanner.FileRepository          // media file repository (may be nil)
 	Scanner                      *scanner.Scanner                 // scanner instance (may be nil)
@@ -1355,6 +1357,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
+
+		// Branding handler is shared between the public read/serve endpoints
+		// (registered with the theme endpoints below) and the admin
+		// upload/delete endpoints (registered in the admin group).
+		var brandingHandler *handlers.BrandingHandler
+		if deps.BrandingService != nil {
+			brandingHandler = handlers.NewBrandingHandler(deps.BrandingService)
+		}
+
 		if webhookSyncHandler != nil {
 			r.Post("/plex-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
 			r.Post("/webhook-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
@@ -1364,7 +1375,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		if settingsRepo != nil {
 			themeHandler := handlers.NewThemeHandler(settingsRepo)
 			r.Get("/theme/admin-css", themeHandler.HandleAdminCSS)
-			r.Get("/theme/branding", themeHandler.HandleBranding)
+			if brandingHandler != nil {
+				// Public branding read + asset serving (pre-login white-label).
+				r.Get("/theme/branding", brandingHandler.HandleGetBranding)
+				r.Get("/branding/assets/{kind}", brandingHandler.HandleServeAsset)
+			}
 
 			// Catalog and download proxies require auth (to avoid open proxy).
 			if authMiddleware != nil {
@@ -2200,6 +2215,12 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/settings/{key}", adminHandler.HandleGetSetting)
 							r.Get("/settings", adminHandler.HandleGetSettings)
 							r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
+							if brandingHandler != nil {
+								// Branding image upload/delete (scalar branding
+								// fields use the generic settings PUT above).
+								r.Post("/branding/assets/{kind}", brandingHandler.HandleUploadAsset)
+								r.Delete("/branding/assets/{kind}", brandingHandler.HandleDeleteAsset)
+							}
 							if settingsRepo != nil {
 								emailHandler := handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
 								r.Post("/email/test", emailHandler.HandleTest)

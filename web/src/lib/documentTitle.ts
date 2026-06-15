@@ -1,9 +1,28 @@
 /** Default app name, overridable by admin branding settings. */
 export let APP_DOCUMENT_TITLE = "Silo";
 
-/** Called by the branding provider to update the document title prefix. */
+/**
+ * The label of the currently-mounted page (set by useDocumentTitle). Tracked
+ * here so setAppDocumentTitle can re-apply the full title when branding loads
+ * after the page has already set its title.
+ */
+let activeLabel: string | null = null;
+
+/** Records the active page label so the title can be recomputed on rebrand. */
+export function setActiveDocumentTitleLabel(label: string | null | undefined) {
+  activeLabel = label ?? null;
+}
+
+/**
+ * Called by the branding provider to update the document title prefix. Also
+ * re-applies the current page's title so an already-rendered page reflects the
+ * server name as soon as branding resolves.
+ */
 export function setAppDocumentTitle(name: string) {
   APP_DOCUMENT_TITLE = name || "Silo";
+  if (typeof document !== "undefined") {
+    document.title = formatDocumentTitle(activeLabel);
+  }
 }
 
 const SETTINGS_TITLES: Record<string, string> = {

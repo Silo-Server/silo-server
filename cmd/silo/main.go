@@ -40,6 +40,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -1908,6 +1909,21 @@ func main() {
 	}
 	deps.FrontendFS = distFS
 	server.WebDistFS = distFS
+
+	// White-label branding: one service shared by the API (public read + admin
+	// upload) and the frontend handler (index.html title, favicon, manifest).
+	// S3 is optional — pass a nil AssetStore (not the typed-nil *s3client.Client)
+	// when it isn't configured so text branding still works without it.
+	if settingsRepo != nil {
+		var brandingStore branding.AssetStore
+		if deps.S3Public != nil {
+			brandingStore = deps.S3Public
+		}
+		brandingSvc := branding.NewService(settingsRepo, brandingStore)
+		deps.BrandingService = brandingSvc
+		server.Branding = brandingSvc
+	}
+
 	router := api.NewRouter(deps)
 
 	// Step 8: Expose Prometheus metrics endpoint (not behind auth).

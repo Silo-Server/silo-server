@@ -323,6 +323,7 @@ export const themeKeys = {
   all: ["theme"] as const,
   adminCss: () => ["theme", "admin-css"] as const,
   catalogIndex: () => ["theme", "catalog"] as const,
+  branding: () => ["theme", "branding"] as const,
 };
 
 export const adminKeys = {

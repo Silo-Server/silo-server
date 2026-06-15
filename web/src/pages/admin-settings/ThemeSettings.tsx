@@ -16,8 +16,6 @@ export default function ThemeSettings() {
   const [vars, setVars] = useState<ThemeVarOverrides>({});
   const [rawCss, setRawCss] = useState("");
   const [catalogUrl, setCatalogUrl] = useState("");
-  const [serverName, setServerName] = useState("");
-  const [loginSubtitle, setLoginSubtitle] = useState("");
 
   // Only seed local state once from the first server response
   const seededRef = useRef(false);
@@ -30,8 +28,6 @@ export default function ThemeSettings() {
         settings["theme.catalog_url"] ??
           "https://raw.githubusercontent.com/Silo-Server/silo-themes/main/catalog.json",
       );
-      setServerName(settings["branding.server_name"] ?? "");
-      setLoginSubtitle(settings["branding.login_subtitle"] ?? "");
     }
   }, [settings]);
 
@@ -135,49 +131,6 @@ export default function ThemeSettings() {
       <div>
         <h4 className="mb-2 text-sm font-medium">Custom CSS</h4>
         <RawCssEditor value={rawCss} onChange={handleCssChange} />
-      </div>
-
-      {/* Branding */}
-      <div>
-        <h4 className="mb-2 text-sm font-medium">Branding</h4>
-        <p className="text-muted-foreground mb-3 text-[13px]">
-          Customize the server name and login page text. Leave blank for defaults.
-        </p>
-        <div className="space-y-3">
-          <div>
-            <label className="text-muted-foreground mb-1 block text-xs font-medium">
-              Server Name
-            </label>
-            <input
-              type="text"
-              value={serverName}
-              onChange={(e) => setServerName(e.target.value)}
-              onBlur={() =>
-                updateSetting.mutate({ key: "branding.server_name", value: serverName })
-              }
-              className="border-border bg-background text-foreground focus:ring-ring w-full rounded-xl border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
-              placeholder="Silo"
-            />
-          </div>
-          <div>
-            <label className="text-muted-foreground mb-1 block text-xs font-medium">
-              Login Page Subtitle
-            </label>
-            <input
-              type="text"
-              value={loginSubtitle}
-              onChange={(e) => setLoginSubtitle(e.target.value)}
-              onBlur={() =>
-                updateSetting.mutate({
-                  key: "branding.login_subtitle",
-                  value: loginSubtitle,
-                })
-              }
-              className="border-border bg-background text-foreground focus:ring-ring w-full rounded-xl border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
-              placeholder="Sign in with an existing account."
-            />
-          </div>
-        </div>
       </div>
 
       {/* Catalog URL */}

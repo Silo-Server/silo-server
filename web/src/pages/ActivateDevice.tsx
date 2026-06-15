@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useServerBranding } from "@/hooks/useServerBranding";
+import { AuthBackground } from "@/components/auth/AuthBackground";
 import { toast } from "sonner";
 
 function normalizeCode(value: string) {
@@ -98,6 +99,7 @@ export default function ActivateDevice() {
 
   return (
     <div className="auth-shell">
+      <AuthBackground />
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
