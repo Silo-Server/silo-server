@@ -120,8 +120,9 @@ func Pack(contentID string) ([]byte, bool) {
 }
 
 // Unpack reverses Pack. It fails closed (ok=false) on any byte sequence Pack
-// could not have produced, including trailing data after a complete structured
-// id (the compat layer's zero padding is ignored, not rejected).
+// could not have produced. Trailing zero padding after a complete structured id
+// is ignored (the compat layer pads the packed bytes to fill the UUID); the
+// fixed-length local form has no padding and is matched exactly.
 func Unpack(data []byte) (string, bool) {
 	if len(data) == 0 {
 		return "", false
@@ -129,10 +130,12 @@ func Unpack(data []byte) (string, bool) {
 	tag, body := data[0], data[1:]
 
 	if tag == tagLocal {
-		if len(body) < localHashLen {
+		// The local form fills the payload exactly, so its body must be exactly
+		// localHashLen — reject any other length, including trailing bytes.
+		if len(body) != localHashLen {
 			return "", false
 		}
-		return kindLocal + sep + hex.EncodeToString(body[:localHashLen]), true
+		return kindLocal + sep + hex.EncodeToString(body), true
 	}
 
 	var kind string

@@ -79,3 +79,19 @@ func TestUnpackRejectsGarbage(t *testing.T) {
 		}
 	}
 }
+
+// TestUnpackLocalRequiresExactLength: unlike the padded structured forms, the
+// local form fills the payload exactly, so its body must be exactly
+// localHashLen. Trailing or missing bytes are non-canonical and must fail closed.
+func TestUnpackLocalRequiresExactLength(t *testing.T) {
+	exact := append([]byte{tagLocal}, make([]byte, localHashLen)...)
+	if _, ok := Unpack(exact); !ok {
+		t.Fatalf("Unpack(exact-length local body) = false, want true")
+	}
+	for _, n := range []int{localHashLen - 1, localHashLen + 1} {
+		b := append([]byte{tagLocal}, make([]byte, n)...)
+		if id, ok := Unpack(b); ok {
+			t.Fatalf("Unpack(local body len %d) = (%q, true), want fail-closed", n, id)
+		}
+	}
+}
