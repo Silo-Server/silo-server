@@ -111,6 +111,7 @@ export const historyKeys = {
 export const collectionKeys = {
   all: ["collections"] as const,
   list: () => ["collections", "list"] as const,
+  server: () => ["collections", "server"] as const,
   items: (collectionId: string) => ["collections", "items", collectionId] as const,
   preview: (scope: "user" | "admin", fingerprint: string) =>
     ["collections", "preview", scope, fingerprint] as const,

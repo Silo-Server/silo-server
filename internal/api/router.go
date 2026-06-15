@@ -1805,6 +1805,12 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Route("/collections", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", collectionHandler.HandleListCollections)
+						if libraryCollectionHandler != nil {
+							// Aggregated server (admin-curated) collections across
+							// every accessible library. Separate from "/" (personal,
+							// editable) by design — different access + cache lifecycle.
+							r.Get("/server", libraryCollectionHandler.HandleListServerCollections)
+						}
 						r.Post("/", collectionHandler.HandleCreateCollection)
 						r.Post("/preview", collectionHandler.HandlePreviewCollection)
 						r.Put("/order", collectionHandler.HandleReorderCollections)

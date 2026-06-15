@@ -15,6 +15,14 @@ interface MediaCarouselProps {
   onViewAll?: () => void;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
+  /**
+   * When true (default) the carousel applies its own page-edge horizontal
+   * padding, so it sits correctly on full-bleed pages (Home, Library). Set to
+   * false when embedding inside an already-padded container (e.g. a
+   * `page-shell` page) so the header and cards align to the parent's content
+   * box instead of picking up a second layer of padding.
+   */
+  edgePadding?: boolean;
 }
 
 export default function MediaCarousel({
@@ -26,8 +34,14 @@ export default function MediaCarousel({
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
   headerActions,
+  edgePadding = true,
 }: MediaCarouselProps) {
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  // Page-edge padding is opt-out so the carousel can also be embedded in an
+  // already-padded container without double-padding the header and cards.
+  const headerPadX = edgePadding ? " px-4 sm:px-6 lg:px-10 xl:px-12" : "";
+  const viewportPadX = edgePadding ? " pr-4 sm:pr-6 lg:pr-10 xl:pr-12" : "";
+  const containerPadX = edgePadding ? " pl-4 sm:pl-6 lg:pl-10 xl:pl-12" : "";
   const slideChildren = loading
     ? Array.from({ length: skeletonCount }).map((_, i) => (
         <div key={i} className="w-[130px] sm:w-[150px] lg:w-[178px]">
@@ -40,7 +54,7 @@ export default function MediaCarousel({
 
   return (
     <section className="section-row group/carousel relative isolate">
-      <div className="mb-5 flex items-end justify-between gap-4 px-4 sm:px-6 lg:px-10 xl:px-12">
+      <div className={`mb-5 flex items-end justify-between gap-4${headerPadX}`}>
         <div className="flex items-center gap-2">
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
@@ -86,7 +100,7 @@ export default function MediaCarousel({
 
         <div
           ref={emblaRef}
-          className="embla__viewport overflow-hidden pr-4 sm:pr-6 lg:pr-10 xl:pr-12"
+          className={`embla__viewport overflow-hidden${viewportPadX}`}
           tabIndex={0}
           aria-label="Media carousel"
           onKeyDown={(e) => {
@@ -99,7 +113,7 @@ export default function MediaCarousel({
         >
           <ul
             role="list"
-            className="embla__container flex cursor-grab list-none gap-4 pl-4 sm:pl-6 lg:gap-5 lg:pl-10 xl:pl-12"
+            className={`embla__container flex cursor-grab list-none gap-4 lg:gap-5${containerPadX}`}
           >
             {slideChildren.map((child, index) => (
               <li key={index} className="embla__slide shrink-0">
