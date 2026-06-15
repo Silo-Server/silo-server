@@ -921,6 +921,7 @@ func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []s
 // Argument order is intentionally fixed:
 //
 //	$1               searchText (always)
+//	$2               titlePrefixTsQuery (always)
 //	itemType placeholders, allowed/disabled libraries, MaxContentRating
 //	parsed.ExactTitleHint
 //	parsed.Year (or NULL)
@@ -936,8 +937,9 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 		return "", "", nil
 	}
 	var conditions []string
-	args = []any{searchText}
-	argIdx := 2
+	titlePrefixIdx := 2
+	args = []any{searchText, buildTitlePrefixTsQuery(searchText)}
+	argIdx := 3
 
 	// All title-side text on both sides of @@ flows through
 	// public.normalize_search_text() (migrations 127 / 138), which strips
@@ -955,12 +957,14 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	overviewVector := `to_tsvector('english', COALESCE(mi.overview, ''))`
 	normalizedTitleExpr := `public.normalize_search_text(%s)`
 	titleQuery := `websearch_to_tsquery('simple', public.normalize_search_text($1))`
+	titlePrefixQuery := fmt.Sprintf("to_tsquery('simple', $%d)", titlePrefixIdx)
 	titleMatch := fmt.Sprintf("%s @@ %s", titleVector, titleQuery)
+	titlePrefixMatch := fmt.Sprintf("($%d <> '' AND %s @@ %s)", titlePrefixIdx, titleVector, titlePrefixQuery)
 	overviewMatch := fmt.Sprintf("%s @@ websearch_to_tsquery('english', $1)", overviewVector)
 
 	// Keep the base match condition index-friendly; exact-title logic is used as
 	// a ranking boost later, not as an additional scan predicate.
-	conditions = append(conditions, fmt.Sprintf("(%s OR %s)", titleMatch, overviewMatch))
+	conditions = append(conditions, fmt.Sprintf("(%s OR %s OR %s)", titleMatch, titlePrefixMatch, overviewMatch))
 
 	if len(itemTypes) > 0 {
 		placeholders := make([]string, 0, len(itemTypes))
@@ -1075,6 +1079,10 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 					ELSE 0
 				END) AS year_match,
 				MAX(ts_rank_cd(%s, %s)) AS title_rank,
+				MAX(CASE
+					WHEN $%d <> '' THEN ts_rank_cd(%s, %s)
+					ELSE 0
+				END) AS title_prefix_rank,
 				MAX(ts_rank_cd(%s, websearch_to_tsquery('english', $1))) AS overview_rank,
 				MAX(CASE
 					WHEN $%d <> '' THEN ts_rank_cd(%s, phraseto_tsquery('simple', public.normalize_search_text($%d)))
@@ -1084,7 +1092,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 			%s
 			GROUP BY %s
 		)
-	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
+	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, titlePrefixIdx, titleVector, titlePrefixQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
 
 	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
 	// duplicates from the library JOIN, so the window count preserves the
@@ -1109,7 +1117,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	// would otherwise default to 0.
 	statsCTE := `
 		, stats AS (
-			SELECT MAX(CASE WHEN title_rank > 0 THEN 1 ELSE 0 END) AS has_title_match
+			SELECT MAX(CASE WHEN title_rank > 0 OR title_prefix_rank > 0 THEN 1 ELSE 0 END) AS has_title_match
 			FROM scored
 		)`
 	// postFilter is the FROM + CROSS JOIN + WHERE shared by both dataSQL and
@@ -1118,11 +1126,12 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	postFilter := fmt.Sprintf(`FROM scored
 		CROSS JOIN stats
 		WHERE scored.title_rank > 0
+		   OR scored.title_prefix_rank > 0
 		   OR (COALESCE(stats.has_title_match, 0) = 0 AND scored.overview_rank >= %g)`, overviewMatchFloor)
 	dataSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT %s, COUNT(*) OVER () AS total_count
 		%s
-		ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
+		ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, title_prefix_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
 		LIMIT $%d OFFSET $%d`, itemColumns, postFilter, argIdx, argIdx+1)
 	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT COUNT(*)
