@@ -88,7 +88,7 @@ func TestForLocal(t *testing.T) {
 	if !IsLocal(a) {
 		t.Fatalf("ForLocal output %q not recognized as local", a)
 	}
-	if len(a) != len("local-")+32 {
+	if len(a) != len("local-")+2*localHashLen {
 		t.Fatalf("ForLocal width unexpected: %q (len %d)", a, len(a))
 	}
 	// Whitespace differences normalize to the same id.

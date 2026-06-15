@@ -86,7 +86,7 @@ movie-<provider>-<id>                  movie-tmdb-228064
 series-<provider>-<id>                 series-tvdb-296762
 season-<provider>-<seriesId>-<n>       season-tvdb-296762-1
 episode-<provider>-<seriesId>-<s>-<e>  episode-tvdb-296762-1-5
-local-<hex128>                         local-<sha256(path)[:16]>
+local-<hex112>                         local-<sha256(path)[:14]>
 ```
 
 The component separator is `-`, an [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-2.3)
@@ -328,11 +328,18 @@ are the robust result, not absolute tps.*
   for the COLLATE rewrite + remap — run off-peak; very large installs (10–50M
   rows) should use the batched procedure noted in the migration header.
 - **`local-` uses the absolute path,** so a same-server remount re-IDs local
-  items. Acceptable for the best-effort local namespace.
-- **Client-visible id churn.** `jellycompat` hashes `content_id` into the
+  items. Acceptable for the best-effort local namespace. The hash is 112 bits
+  (`sha256(path)[:14]`) so a `local-` id packs losslessly into a compat UUID
+  (see below).
+- **Client-visible id churn.** `jellycompat` encodes `content_id` into the
   client-facing UUID, so item ids seen by Android/Apple/Jellyfin clients change at
   migration (caches/resume keyed on item id reset once). **silo-android** and
-  **silo-apple** should be made aware; server-side state is fully remapped.
+  **silo-apple** should be made aware; server-side state is fully remapped. The
+  encoding is *reversible* — a structured or local `content_id` is bit-packed
+  into the UUID (`contentid.Pack`/`Unpack`), not hashed into a lookup table — so
+  a compat item id decodes by pure computation and is stable across server
+  restarts and across instances. Only arbitrary names (genres, studios) and the
+  rare `content_id` too large to pack still use the in-memory hash map.
 
 ---
 

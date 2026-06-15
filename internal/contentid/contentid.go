@@ -14,7 +14,7 @@
 //	series-<provider>-<id>                     e.g. series-tvdb-296762
 //	season-<provider>-<seriesId>-<seasonNo>    e.g. season-tvdb-296762-1
 //	episode-<provider>-<seriesId>-<s>-<e>      e.g. episode-tvdb-296762-1-5
-//	local-<hex128>                             unmatched / local fallback
+//	local-<hex112>                             unmatched / local fallback
 //
 // Provider IDs are unique by construction, so the value is collision-free with
 // no hashing. The leading entity-type token domain-separates the namespaces so
@@ -232,12 +232,14 @@ func ForEpisode(seriesContentID string, seasonNumber, episodeNumber int) (string
 // provider — rare, and such items seldom carry watch state.
 //
 // The path is NFC-normalized and trimmed before hashing; the hash is the first
-// 128 bits of SHA-256, hex-encoded (32 chars). Cross-server stability for local
-// items is best-effort only (paths differ between servers).
+// localHashLen bytes (112 bits) of SHA-256, hex-encoded. That width is chosen so
+// the id packs losslessly into a Jellyfin-compat UUID (see Pack); 112 bits is
+// far beyond any single server's local-item count. Cross-server stability for
+// local items is best-effort only (paths differ between servers).
 func ForLocal(path string) string {
 	normalized := norm.NFC.String(strings.TrimSpace(path))
 	sum := sha256.Sum256([]byte(normalized))
-	return kindLocal + sep + hex.EncodeToString(sum[:16])
+	return kindLocal + sep + hex.EncodeToString(sum[:localHashLen])
 }
 
 // SeriesIDFromContentID derives the owning series content_id from an episode or
