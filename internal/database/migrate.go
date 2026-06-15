@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
+	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,7 +19,44 @@ import (
 const (
 	schemaMigrationsLockID int64 = 8_034_219_741
 	gooseVersionTable            = "public.goose_db_version"
+
+	// migrationTimeoutEnv configures how long a migration run may take.
+	migrationTimeoutEnv     = "SILO_MIGRATE_TIMEOUT"
+	defaultMigrationTimeout = 5 * time.Minute
 )
+
+// MigrationTimeout returns the deadline budget for a migration run. It is
+// configurable via SILO_MIGRATE_TIMEOUT (a Go duration such as "60m"). A value
+// of 0 or negative disables the deadline entirely — appropriate for a one-off
+// heavy data migration (e.g. a full-table COLLATE rewrite + value remap) that
+// legitimately runs longer than any fixed cap and must not be abandoned
+// mid-flight, since an abandoned run leaves an orphaned backend holding
+// AccessExclusive locks while the next boot retries. Unset or unparseable falls
+// back to defaultMigrationTimeout, preserving prior behavior.
+func MigrationTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(migrationTimeoutEnv))
+	if raw == "" {
+		return defaultMigrationTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		slog.Warn("invalid migration timeout; using default",
+			"env", migrationTimeoutEnv, "value", raw,
+			"default", defaultMigrationTimeout.String(), "error", err)
+		return defaultMigrationTimeout
+	}
+	return d
+}
+
+// MigrationContext derives the context for a migration run, honoring
+// MigrationTimeout. A non-positive timeout yields a cancelable context with no
+// deadline. The caller must always invoke the returned CancelFunc.
+func MigrationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if d := MigrationTimeout(); d > 0 {
+		return context.WithTimeout(ctx, d)
+	}
+	return context.WithCancel(ctx)
+}
 
 // RunMigrations applies all pending Goose migrations from fsys/dir.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir string) error {

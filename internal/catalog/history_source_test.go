@@ -42,8 +42,13 @@ func TestBuildHistoryDisplayBaseQueryIncludesSnapshotAndLibraryAccess(t *testing
 		"media_item_libraries mil_disabled",
 		"media_folder_id = ANY($5)",
 		"mi.content_rating = ANY($",
-		"LEFT JOIN episodes e ON e.content_id = h.media_item_id",
-		"JOIN media_items mi ON mi.content_id = COALESCE(NULLIF(e.series_id, ''), h.media_item_id)",
+		// Anchored episode ids resolve their show by string transform; the
+		// episodes probe is null-poisoned (skipped) for them and kept only for
+		// non-anchored (legacy/local/malformed) ids. The predicate requires the
+		// full five-part episode form, not just the 'episode-' prefix.
+		"LEFT JOIN episodes e\n\t\t\t\tON e.content_id = CASE WHEN h.media_item_id LIKE 'episode-%' AND split_part(h.media_item_id, '-', 2) <> '' AND split_part(h.media_item_id, '-', 3) <> '' AND split_part(h.media_item_id, '-', 4) <> '' AND split_part(h.media_item_id, '-', 5) <> '' THEN NULL ELSE h.media_item_id END",
+		"split_part(h.media_item_id, '-', 2)",
+		"JOIN media_items mi ON mi.content_id = COALESCE(",
 	}
 	for _, fragment := range expectedFragments {
 		if !strings.Contains(query, fragment) {

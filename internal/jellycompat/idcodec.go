@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
 // EncodedIDType distinguishes packed compat UUIDs.
@@ -79,9 +81,22 @@ func EncodeNumericID(kind EncodedIDType, value uint64) uuid.UUID {
 }
 
 // EncodeStringID encodes a Silo identifier into a Jellyfin UUID string.
+//
+// Content-id kinds (item, season) whose value is a structured or local
+// content_id are packed into the UUID reversibly (see contentid.Pack), so they
+// decode with no lookup table and survive a server restart. Numeric ids keep
+// their stateless numeric packing. Everything else — arbitrary names such as
+// genres and studios, and the rare content_id too large to pack — falls back to
+// a hashed UUID recorded in the reverse map.
 func (c *ResourceIDCodec) EncodeStringID(kind EncodedIDType, value string) string {
 	if numeric, err := strconv.ParseUint(value, 10, 64); err == nil {
 		return EncodeNumericID(kind, numeric).String()
+	}
+
+	if isContentIDKind(kind) {
+		if packed, ok := packContentIDUUID(kind, value); ok {
+			return packed.String()
+		}
 	}
 
 	namespace, ok := stringIDNamespaces[kind]
@@ -103,7 +118,18 @@ func (c *ResourceIDCodec) EncodeIntID(kind EncodedIDType, value int64) string {
 }
 
 // DecodeStringID decodes a compat UUID back to the original native string ID.
+//
+// A reversibly packed content_id is decoded first (and re-packed to confirm the
+// UUID genuinely came from the packer, so an opaque id whose bytes merely happen
+// to parse is rejected), then the stateless numeric encoding, then the reverse
+// map for hashed ids.
 func (c *ResourceIDCodec) DecodeStringID(kind EncodedIDType, raw string) (string, error) {
+	if isContentIDKind(kind) {
+		if id, ok := unpackContentIDUUID(kind, raw); ok {
+			return id, nil
+		}
+	}
+
 	if decoded, err := DecodeID(raw); err == nil && decoded.Type == kind {
 		return strconv.FormatUint(decoded.Value, 10), nil
 	}
@@ -115,6 +141,48 @@ func (c *ResourceIDCodec) DecodeStringID(kind EncodedIDType, raw string) (string
 		return "", fmt.Errorf("unknown compat id %q", raw)
 	}
 	return registered.value, nil
+}
+
+// isContentIDKind reports whether a compat id kind carries a Silo content_id (as
+// opposed to an arbitrary name like a genre or studio). Only these kinds use the
+// reversible content_id packing; everything else keeps the opaque hash + map.
+func isContentIDKind(kind EncodedIDType) bool {
+	return kind == EncodedIDItem || kind == EncodedIDSeason
+}
+
+// packContentIDUUID packs a structured or local content_id into a compat UUID:
+// byte 0 is the kind and bytes 1..15 hold contentid.Pack output, zero-padded.
+// The pack format tag at byte 1 is always non-zero, which distinguishes a packed
+// UUID from the numeric encoding (whose byte 1 is zero). ok=false when the id
+// does not pack within the 15-byte payload.
+func packContentIDUUID(kind EncodedIDType, contentID string) (uuid.UUID, bool) {
+	payload, ok := contentid.Pack(contentID)
+	if !ok || len(payload) > 15 {
+		return uuid.UUID{}, false
+	}
+	var u uuid.UUID
+	u[0] = byte(kind)
+	copy(u[1:], payload)
+	return u, true
+}
+
+// unpackContentIDUUID reverses packContentIDUUID. It re-packs the decoded id and
+// compares, so a UUID that was not produced by the packer (e.g. an opaque SHA1
+// id whose bytes happen to parse) is rejected and the caller falls through to
+// the reverse map.
+func unpackContentIDUUID(kind EncodedIDType, raw string) (string, bool) {
+	u, err := uuid.Parse(raw)
+	if err != nil || u[0] != byte(kind) || u[1] == 0 {
+		return "", false
+	}
+	id, ok := contentid.Unpack(u[1:])
+	if !ok {
+		return "", false
+	}
+	if check, ok := packContentIDUUID(kind, id); !ok || check != u {
+		return "", false
+	}
+	return id, true
 }
 
 // DecodeIntID decodes a compat UUID back to a native integer ID.

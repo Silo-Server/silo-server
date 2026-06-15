@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -1416,6 +1417,33 @@ func (s *MetadataService) mergeAndPersist(
 			}
 		}
 	}
+
+	// Promote a local: skeleton to its deterministic provider-anchored id now
+	// that the match supplied provider IDs (the untagged-then-matched re-ID).
+	// Runs under the provider-dedup lock acquired above, so the target id cannot
+	// be claimed underneath us; movies and first-match series move a handful of
+	// rows. Placed before the durableIDs merge below so the canonical row's
+	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
+	if !isNew && contentid.IsLocal(contentID) {
+		canonical, err := s.canonicalizeLocalContentID(
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize local content id: %w", err)
+		}
+		if canonical != contentID {
+			contentID = canonical
+			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				return nil, fmt.Errorf("loading canonicalized item: %w", err)
+			}
+			locked = intSliceToFields(existingItem.LockedFields)
+			durableIDs, err = s.loadDurableProviderIDs(ctx, contentID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
 			accumulator.ProviderIDs = make(map[string]string, len(durableIDs))
@@ -1491,8 +1519,15 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	if isNew && contentID == "" {
+		// A confirmed provider match carries provider IDs, so this derives a
+		// deterministic movie:/series: id; it only falls back when the match
+		// somehow lacks all anchors.
 		var genErr error
-		contentID, genErr = generateContentID()
+		contentID, genErr = deriveLogicalContentID(
+			item.Type,
+			contentid.ProviderIDs{Tmdb: item.TmdbID, Imdb: item.ImdbID, Tvdb: item.TvdbID},
+			"",
+		)
 		if genErr != nil {
 			return nil, fmt.Errorf("generate content id: %w", genErr)
 		}
@@ -2944,7 +2979,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					dbSeason.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
 				}
 			} else {
-				sid, genErr := idgen.NextID()
+				sid, genErr := deriveSeasonContentID(seriesID, providerSeason.SeasonNumber)
 				if genErr != nil {
 					slog.Warn("metadata: failed to generate season id",
 						"series_id", seriesID, "season", season.SeasonNumber, "error", genErr)
@@ -3029,7 +3064,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					seasonModel.PosterThumbhash = existingSeason.PosterThumbhash
 				}
 			} else {
-				sid, genErr := idgen.NextID()
+				sid, genErr := deriveSeasonContentID(seriesID, ep.SeasonNumber)
 				if genErr != nil {
 					slog.Warn("metadata: failed to generate implicit season id",
 						"series_id", seriesID, "season", ep.SeasonNumber, "error", genErr)
@@ -3093,7 +3128,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					dbEp.StillThumbhash = existingEpisode.StillThumbhash
 				}
 			} else {
-				eid, genErr := idgen.NextID()
+				eid, genErr := deriveEpisodeContentID(seriesID, providerEpisode.SeasonNumber, providerEpisode.EpisodeNumber)
 				if genErr != nil {
 					slog.Warn("metadata: failed to generate episode id",
 						"series_id", seriesID, "season", ep.SeasonNumber,
@@ -3196,7 +3231,7 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 				seasonID = existingSeason.ContentID
 				seasonIDs[seasonNum] = seasonID
 			case errors.Is(err, catalog.ErrSeasonNotFound):
-				seasonID, err = idgen.NextID()
+				seasonID, err = deriveSeasonContentID(seriesID, seasonNum)
 				if err != nil {
 					return fmt.Errorf("generating fallback season id: %w", err)
 				}
@@ -3229,7 +3264,7 @@ func (s *MetadataService) synthesizeFallbackSeriesStructure(ctx context.Context,
 			}
 			continue
 		case errors.Is(err, catalog.ErrEpisodeNotFound):
-			episodeID, err := idgen.NextID()
+			episodeID, err := deriveEpisodeContentID(seriesID, seasonNum, episodeNum)
 			if err != nil {
 				return fmt.Errorf("generating fallback episode id: %w", err)
 			}
@@ -4083,7 +4118,20 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
 		return nil, err
 	}
-	contentID, err := generateContentID()
+	// Derive a deterministic content_id from the structured provider tags the
+	// scanner already parsed from the folder/file name (the common case for
+	// Radarr/Sonarr/Plex-tagged libraries), so two servers seeing the same tags
+	// mint the same id at scan time with no provider API call. Untagged files
+	// fall back to a per-file local: id (keyed on the file path, not the folder)
+	// so distinct skeletons in a shared folder stay separate until the dedup
+	// machinery confirms a real shared identity — matching the pre-existing
+	// one-skeleton-per-file behavior while staying stable across rescans.
+	localAnchorPath := firstNonEmpty(file.FilePath, contentRootPath, observedRootPath)
+	contentID, err := deriveLogicalContentID(
+		res.Type,
+		contentid.ProviderIDs{Tmdb: res.TmdbID, Imdb: res.ImdbID, Tvdb: res.TvdbID},
+		localAnchorPath,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("generate content id: %w", err)
 	}
@@ -5393,8 +5441,83 @@ func ImageTypeFromString(s string) ImageType {
 	}
 }
 
+// generateContentID mints a content_id when no deterministic anchor is
+// available (non movie/series item types, or items with neither provider tags
+// nor a path to hash). Provider-anchored movies/series should go through
+// deriveLogicalContentID so the same title yields the same id on every server.
 func generateContentID() (string, error) {
 	return idgen.NextID()
+}
+
+// deriveLogicalContentID computes a deterministic, cross-server stable
+// content_id for a movie or series from its provider IDs (see the contentid
+// package). When no provider anchor is present it falls back to a local: id
+// derived from fallbackPath so the item stays stable across rescans on this
+// server; with neither, it falls back to a Sonyflake id. Item types other than
+// movie/series are out of the deterministic scheme's scope and always get a
+// Sonyflake id.
+func deriveLogicalContentID(itemType string, ids contentid.ProviderIDs, fallbackPath string) (string, error) {
+	switch normalizeItemTypeForContentID(itemType) {
+	case "movie":
+		if id, ok := contentid.ForMovie(ids); ok {
+			return id, nil
+		}
+		if strings.TrimSpace(fallbackPath) != "" {
+			return contentid.ForLocal(fallbackPath), nil
+		}
+	case "series":
+		if id, ok := contentid.ForSeries(ids); ok {
+			return id, nil
+		}
+		if strings.TrimSpace(fallbackPath) != "" {
+			return contentid.ForLocal(fallbackPath), nil
+		}
+	}
+	return generateContentID()
+}
+
+// deriveSeasonContentID composes a deterministic season content_id from its
+// parent series content_id. When the series is provider-anchored the season id
+// embeds the series anchor (the load-bearing format invariant); otherwise it
+// falls back to a Sonyflake id so legacy/local series keep working.
+func deriveSeasonContentID(seriesContentID string, seasonNumber int) (string, error) {
+	if id, ok := contentid.ForSeason(seriesContentID, seasonNumber); ok {
+		return id, nil
+	}
+	return generateContentID()
+}
+
+// deriveEpisodeContentID composes a deterministic episode content_id from its
+// parent series content_id plus the season/episode numbers, falling back to a
+// Sonyflake id when the series is not provider-anchored.
+func deriveEpisodeContentID(seriesContentID string, seasonNumber, episodeNumber int) (string, error) {
+	if id, ok := contentid.ForEpisode(seriesContentID, seasonNumber, episodeNumber); ok {
+		return id, nil
+	}
+	return generateContentID()
+}
+
+// firstNonEmpty returns the first non-blank string, or "" if all are blank.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// normalizeItemTypeForContentID maps the media_items.type values onto the two
+// entity kinds the deterministic scheme covers.
+func normalizeItemTypeForContentID(itemType string) string {
+	switch strings.ToLower(strings.TrimSpace(itemType)) {
+	case "movie", "movies":
+		return "movie"
+	case "series", "show", "tv":
+		return "series"
+	default:
+		return ""
+	}
 }
 
 func searchResultConflictsWithTrustedIDs(hintedIDs, candidateIDs map[string]string) bool {

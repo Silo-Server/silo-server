@@ -384,7 +384,7 @@ func main() {
 	slog.Info("connected to PostgreSQL")
 
 	if *migrateStatus {
-		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		migCtx, migCancel := database.MigrationContext(ctx)
 		statuses, statusErr := database.MigrationStatuses(migCtx, pool, migrations.FS, "sql")
 		migCancel()
 		if statusErr != nil {
@@ -409,7 +409,7 @@ func main() {
 	}
 
 	if *migrateOnly {
-		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		migCtx, migCancel := database.MigrationContext(ctx)
 		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
 		migCancel()
 		if migErr != nil {
@@ -427,7 +427,7 @@ func main() {
 	// ciphertext; secondary nodes read whatever the primary encrypted.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
-		migCtx, migCancel := context.WithTimeout(ctx, 5*time.Minute)
+		migCtx, migCancel := database.MigrationContext(ctx)
 		if migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql"); migErr != nil {
 			migCancel()
 			log.Fatalf("failed to run migrations: %v", migErr)
