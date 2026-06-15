@@ -245,6 +245,36 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 
+-- Step 6b: remap array-valued soft references. A text[] column that holds
+-- resolved content_ids is excluded from the scalar sweep above on BOTH axes —
+-- the type filter is scalar (text/varchar/bpchar) and the name list has
+-- 'content_id', not the plural 'content_ids' — and an array cannot carry an FK,
+-- so nothing else would touch it. Without this it keeps stale Sonyflake ids that
+-- resolve to nothing. trending_discover_snapshots.content_ids is the only such
+-- column in this schema; remap element-wise, preserving order, leaving unmapped
+-- elements (collisions / unmatched) untouched. The WHERE EXISTS guard skips
+-- empty and unaffected arrays so array_agg can never collapse the NOT NULL
+-- column to NULL.
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF to_regclass('public.trending_discover_snapshots') IS NOT NULL THEN
+        UPDATE trending_discover_snapshots t
+        SET content_ids = (
+            SELECT array_agg(COALESCE(m.new_id, u.elem) ORDER BY u.ord)
+            FROM unnest(t.content_ids) WITH ORDINALITY AS u(elem, ord)
+            LEFT JOIN content_id_migration_map m
+                ON m.status = 'mapped' AND m.old_id = u.elem
+        )
+        WHERE EXISTS (
+            SELECT 1
+            FROM unnest(t.content_ids) AS e(elem)
+            JOIN content_id_migration_map m ON m.status = 'mapped' AND m.old_id = e.elem
+        );
+    END IF;
+END $$;
+-- +goose StatementEnd
+
 -- Step 7: change collation of every family column to "C". This rewrites the
 -- columns' indexes; structured keys share long prefixes, so "C" (memcmp) is
 -- load-bearing — without it ordered/probe paths regress below the Sonyflake
@@ -386,6 +416,28 @@ BEGIN
     FOR r IN SELECT conname, rel, condef FROM content_id_migration_fk LOOP
         EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s', r.rel, r.conname, r.condef);
     END LOOP;
+END $$;
+-- +goose StatementEnd
+
+-- Reverse the array-valued soft-reference remap (mirror of Step 6b). Runs while
+-- content_id_migration_map still exists, i.e. before the DROP TABLE below.
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF to_regclass('public.trending_discover_snapshots') IS NOT NULL THEN
+        UPDATE trending_discover_snapshots t
+        SET content_ids = (
+            SELECT array_agg(COALESCE(m.old_id, u.elem) ORDER BY u.ord)
+            FROM unnest(t.content_ids) WITH ORDINALITY AS u(elem, ord)
+            LEFT JOIN content_id_migration_map m
+                ON m.status = 'mapped' AND m.new_id = u.elem
+        )
+        WHERE EXISTS (
+            SELECT 1
+            FROM unnest(t.content_ids) AS e(elem)
+            JOIN content_id_migration_map m ON m.status = 'mapped' AND m.new_id = e.elem
+        );
+    END IF;
 END $$;
 -- +goose StatementEnd
 

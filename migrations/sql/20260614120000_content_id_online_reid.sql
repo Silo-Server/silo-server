@@ -91,6 +91,17 @@ BEGIN
         EXECUTE format('UPDATE %s SET %I = $2 WHERE %I = $1', c.rel, c.col, c.col)
             USING p_from, p_to;
     END LOOP;
+
+    -- Array-valued soft references are not covered by the scalar loop above
+    -- (text[] is not in the type filter and cannot carry an FK), matching the
+    -- gap closed in 20260612130000 Step 6b. Negligible at runtime — a freshly
+    -- matched local item is essentially never already in a trending snapshot —
+    -- but kept in lockstep so a rename never leaves a stale array element.
+    IF to_regclass('public.trending_discover_snapshots') IS NOT NULL THEN
+        UPDATE trending_discover_snapshots
+        SET content_ids = array_replace(content_ids, p_from, p_to)
+        WHERE p_from = ANY(content_ids);
+    END IF;
 END;
 $$;
 -- +goose StatementEnd
