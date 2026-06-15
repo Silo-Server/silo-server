@@ -30,10 +30,7 @@ import {
   useUpdateCollection,
   useUpdateCollectionGroup,
 } from "@/hooks/queries/collections";
-import {
-  COLLECTION_POSTER_GRID_CLASSES,
-  CollectionPosterCard,
-} from "@/components/collections/CollectionPosterCard";
+import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -202,17 +199,29 @@ function ServerCollectionsSection() {
   const libraries = data ?? [];
 
   if (isLoading) {
+    // Mirror the loaded layout (per-library horizontal rows) so data arriving
+    // doesn't shift the page from a grid into rows.
     return (
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Server collections</h2>
-        <div className={COLLECTION_POSTER_GRID_CLASSES}>
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i}>
-              <Skeleton className="aspect-[2/3] rounded-xl" />
-              <Skeleton className="mt-2 h-4 w-3/4" />
-            </div>
-          ))}
+      <section className="space-y-6">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Server collections</h2>
+          <p className="text-muted-foreground text-sm">
+            Curated shelves from across every library on this server.
+          </p>
         </div>
+        {Array.from({ length: 2 }).map((_, row) => (
+          <div key={row} className="space-y-3">
+            <Skeleton className="h-6 w-40" />
+            <div className="-mx-1 flex gap-3 overflow-x-hidden px-1 pb-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="w-32 shrink-0 sm:w-36 md:w-40">
+                  <Skeleton className="aspect-[2/3] rounded-xl" />
+                  <Skeleton className="mt-2.5 h-4 w-3/4" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
     );
   }
