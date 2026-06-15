@@ -81,7 +81,7 @@ separate, deferred concern.
 
 ### Format (SchemeVersion 1)
 
-```
+```text
 movie-<provider>-<id>                  movie-tmdb-228064
 series-<provider>-<id>                 series-tvdb-296762
 season-<provider>-<seriesId>-<n>       season-tvdb-296762-1
@@ -125,7 +125,7 @@ episode IDs (often missing). Because `episode-<provider>-<seriesId>-<s>-<e>`
 embeds the series anchor, the series id is a pure **string transform** of the
 episode id — no catalog lookup:
 
-```
+```text
 episode-tvdb-296762-1-5   →   series-tvdb-296762
 movie-tmdb-228064         →   movie-tmdb-228064   (movies/series: unchanged)
 ```
@@ -179,7 +179,7 @@ and only learns its provider IDs later when the match worker confirms a result. 
 single gate in `mergeAndPersist` (`canonicalizeLocalContentID`) promotes the
 placeholder at first confirmed match:
 
-```
+```text
 SCAN a new file                          ← unchanged, still no network call
       ▼
 createOrFindSkeleton ──► tag?  YES ► movie-tmdb-123   NO ► local-<hash>
@@ -367,5 +367,3 @@ Retained so the decision isn't re-litigated:
 - **File-level deterministic id (`media_files`).** Deferred, not rejected — lower
   value (no metadata/watch state hangs off it), with open problems (server-local
   mount anchors, same-file-in-two-libraries). A complement, out of scope here.
-</content>
-</invoke>
