@@ -237,8 +237,11 @@ func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
 
 	h.HandleItemImage(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, body = %s; want 401", rec.Code, rec.Body.String())
+	// An unsigned/invalid tag must not serve the image. Per the Jellyfin
+	// contract (item-image GETs are anonymous, 200/404 only) the rejection
+	// surfaces as a 404, not a 401.
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", rec.Code, rec.Body.String())
 	}
 }
 
@@ -391,8 +394,10 @@ func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
 
 	h.HandleItemImage(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, body = %s; want 401", rec.Code, rec.Body.String())
+	// A stale tag (signed with the old secret) must not serve the cached image.
+	// Per the Jellyfin contract the rejection surfaces as a 404, not a 401.
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", rec.Code, rec.Body.String())
 	}
 	if called {
 		t.Fatal("served cached image before validating the signed tag")
@@ -411,6 +416,128 @@ func TestRedirectImageURLRejectsNonHTTPURL(t *testing.T) {
 	}
 	if got := rec.Header().Get("Location"); got != "" {
 		t.Fatalf("Location = %q, want empty", got)
+	}
+}
+
+// TestHandleItemImageChapterReturns404WithoutSession verifies an anonymous
+// chapter-image request (no auth, cold cache, no tag) degrades to a 404, not a
+// 401: Silo never stores "Chapter" route art, so the cache misses and the
+// session-fallback now returns NotFound per the Jellyfin contract.
+func TestHandleItemImageChapterReturns404WithoutSession(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, time.Now),
+		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID}},
+		imageTags: newImageTagSigner("image-secret"),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Chapter/0", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	routeCtx.URLParams.Add("imageType", "Chapter")
+	routeCtx.URLParams.Add("index", "0")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want empty", got)
+	}
+}
+
+// TestHandleItemImagePrimaryCacheHitRedirectsWithoutSession verifies a warm
+// Primary cache entry serves an anonymous <img> request via redirect, never
+// consulting auth.
+func TestHandleItemImagePrimaryCacheHitRedirectsWithoutSession(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	upstreamURL := "https://cdn.example.test/poster.jpg"
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, time.Now),
+		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID}},
+		imageTags: newImageTagSigner("image-secret"),
+	}
+	h.images.RememberSized(routeID, "Primary", upstreamURL, compatCardImageSize)
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary", nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	assertImageRedirect(t, rec, upstreamURL)
+}
+
+// serveUserImage issues an avatar request for pathID with the chi "id" route
+// param and no session in context.
+func serveUserImage(h *ImagesHandler, method, pathID string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "/Users/"+pathID+"/Images/Primary", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", pathID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rec := httptest.NewRecorder()
+	h.HandleUserImage(rec, req)
+	return rec
+}
+
+// TestHandleUserImageServesPlaceholderWithoutSession verifies the user-avatar
+// route serves a placeholder PNG without a session: it is byte-stable per id and
+// the palette varies across ids (the avatar is now drawn from a bounded fixed
+// palette, so two distinct ids may collide — variety is asserted over a sample).
+func TestHandleUserImageServesPlaceholderWithoutSession(t *testing.T) {
+	h := &ImagesHandler{codec: NewResourceIDCodec()}
+	id := PseudoUserID(1, "profile-1").String()
+
+	rec := serveUserImage(h, http.MethodGet, id)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", ct)
+	}
+	body := rec.Body.Bytes()
+	if len(body) == 0 {
+		t.Fatal("expected a non-empty avatar body")
+	}
+
+	again := serveUserImage(h, http.MethodGet, id)
+	if got := again.Body.Bytes(); string(got) != string(body) {
+		t.Fatal("avatar bytes for the same path id must be stable across calls")
+	}
+
+	// The palette is bounded, so individual ids may collide; assert variety over
+	// a sample instead of strict per-id divergence.
+	distinct := map[string]struct{}{}
+	for i := 0; i < 12; i++ {
+		out := serveUserImage(h, http.MethodGet, PseudoUserID(i+10, "profile").String())
+		distinct[out.Body.String()] = struct{}{}
+	}
+	if len(distinct) < 2 {
+		t.Fatalf("expected the avatar palette to vary across ids; got %d distinct outputs", len(distinct))
+	}
+}
+
+// TestHandleUserImageHeadRequest verifies the HEAD variant of the anonymous
+// avatar route returns 200 + image/png (the body may be empty for HEAD).
+func TestHandleUserImageHeadRequest(t *testing.T) {
+	h := &ImagesHandler{codec: NewResourceIDCodec()}
+	id := PseudoUserID(1, "profile-1").String()
+
+	rec := serveUserImage(h, http.MethodHead, id)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", ct)
 	}
 }
 

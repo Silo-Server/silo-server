@@ -116,6 +116,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Post("/Users/AuthenticateByName", authHandler.HandleAuthenticateByName)
 	r.Get("/Items/{id}/Images/{imageType}", imagesHandler.HandleItemImage)
 	r.Get("/Items/{id}/Images/{imageType}/{index}", imagesHandler.HandleItemImage)
+	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
+	// <img> tags that carry no auth, so the route is registered top-level rather
+	// than inside the session-auth group.
+	r.Get("/Users/{id}/Images/Primary", imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, "/Users/{id}/Images/Primary", http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
@@ -191,7 +196,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Studios", itemsHandler.HandleItemStub)
 			r.Get("/Artists", itemsHandler.HandleItemStub)
 			r.Get("/Movies/Recommendations", recsHandler.HandleRecommendations)
-			r.Get("/Users/{id}/Images/Primary", imagesHandler.HandleUserImage)
 			r.Post("/Sessions/Capabilities", playbackHandler.HandleCapabilitiesFull)
 			r.Post("/Sessions/Capabilities/Full", playbackHandler.HandleCapabilitiesFull)
 			r.Get("/Playback/BitrateTest", playbackHandler.HandleBitrateTest)
