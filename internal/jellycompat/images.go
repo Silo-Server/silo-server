@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/binary"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -224,7 +225,40 @@ func setCompatImageRouteNoStore(header http.Header) {
 	header.Add("Vary", "User-Agent")
 }
 
-func placeholderAvatarPNG(seed string) ([]byte, error) {
+// avatarPaletteSize bounds the number of distinct placeholder avatars. The
+// route is anonymous, so per-request PNG generation would be a CPU DoS amplifier
+// (a varying {id} flood defeats Cache-Control). Instead we precompute a small
+// fixed palette once and select by hashing the id — zero per-request generation,
+// bounded memory, while retaining per-id color variety.
+const avatarPaletteSize = 16
+
+// avatarPalette holds the precomputed placeholder PNGs, one per slot. Building
+// it at package init means a panic here (image encode failure) is impossible to
+// miss and never reaches a request.
+var avatarPalette = buildAvatarPalette()
+
+func buildAvatarPalette() [avatarPaletteSize][]byte {
+	var palette [avatarPaletteSize][]byte
+	for i := range palette {
+		// Seed each slot with a distinct value so the colors are spread out;
+		// reuse the same sha1-fill drawing as the original per-id generator.
+		pngBytes, err := renderPlaceholderAvatarPNG(fmt.Sprintf("avatar-slot-%d", i))
+		if err != nil {
+			panic(fmt.Sprintf("jellycompat: build avatar palette slot %d: %v", i, err))
+		}
+		palette[i] = pngBytes
+	}
+	return palette
+}
+
+// avatarPaletteIndex maps an id to a stable palette slot via the first byte of
+// its sha1 digest, so a given id always resolves to the same avatar.
+func avatarPaletteIndex(id string) int {
+	sum := sha1.Sum([]byte(id))
+	return int(sum[0]) % avatarPaletteSize
+}
+
+func renderPlaceholderAvatarPNG(seed string) ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, 128, 128))
 	sum := sha1.Sum([]byte(seed))
 	fill := color.RGBA{R: sum[0], G: sum[1], B: sum[2], A: 255}

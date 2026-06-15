@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -114,7 +113,10 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if session == nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		// Jellyfin item/chapter image GETs are anonymous (200/404 only, never
+		// 401): media players can't attach auth headers to <img> requests, and
+		// absent or unsupported art (e.g. Chapter) must degrade to a clean 404.
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
 
@@ -575,23 +577,17 @@ func parseRemoteImageURL(imageURL string) (*url.URL, error) {
 }
 
 // HandleUserImage returns a deterministic placeholder avatar.
+//
+// Jellyfin user-image GETs are anonymous (200/404 only): clients fetch avatars
+// via plain <img> tags that carry no auth. The response is selected from a
+// precomputed palette by hashing the path pseudo-user id, so it stays
+// deterministic per id without per-request PNG generation (which an anonymous
+// varying-{id} flood would otherwise turn into a CPU DoS amplifier).
 func (h *ImagesHandler) HandleUserImage(w http.ResponseWriter, r *http.Request) {
-	session := SessionFromContext(r.Context())
-	if session == nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
-		return
-	}
-	if !validatePseudoUser(w, chiURLParam(r, "id"), session) {
-		return
-	}
+	id := chiURLParam(r, "id")
 
-	data, err := placeholderAvatarPNG(fmt.Sprintf("%s:%s", session.Username, session.ProfileID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to generate avatar")
-		return
-	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = w.Write(avatarPalette[avatarPaletteIndex(id)])
 }
