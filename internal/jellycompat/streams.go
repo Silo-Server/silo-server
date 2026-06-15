@@ -695,12 +695,16 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 		return
 	}
 
-	// Ownership guard (mirrors the ownership check of the Stopped report path):
-	// only the session's own caller may tear it down. An unknown OR not-owned
-	// PlaySessionId is an idempotent 204 no-op, so the response never reveals
-	// which case it was (no cross-session teardown, no ownership oracle).
+	// Ownership guard (mirrors the Stopped report path): only the session's own
+	// caller may tear it down, and a session with no upstream transcode yet has
+	// nothing to tear down. The PlaybackSession is created by PlaybackInfo with
+	// an empty UpstreamSessionID; it is only populated once the first manifest
+	// request reaches ensureUpstreamPlayback. Deleting it before then would drop
+	// a live session and 404 the pending manifest, so an unknown, not-owned, or
+	// not-yet-started PlaySessionId is a uniform idempotent 204 no-op (no
+	// cross-session teardown, no ownership oracle, no premature deletion).
 	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
+	if !ok || playSession.CompatToken != session.Token || playSession.UpstreamSessionID == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

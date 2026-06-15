@@ -246,3 +246,29 @@ func TestHandleDeleteActiveEncodings_RealClientShape(t *testing.T) {
 		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
 	}
 }
+
+// TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown guards the early
+// window between PlaybackInfo and the first manifest request, when the play
+// session exists but UpstreamSessionID is still empty. A DELETE that lands then
+// must be a 204 no-op that leaves the session in the store, so the pending
+// manifest request still resolves (mirrors the Stopped report path). Removing
+// the UpstreamSessionID == "" guard makes this test fail.
+func TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown(t *testing.T) {
+	mgr := &testCompatSessionManager{}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); !ok {
+		t.Fatal("not-yet-started play session must survive teardown so the pending manifest still resolves")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
+	}
+}
