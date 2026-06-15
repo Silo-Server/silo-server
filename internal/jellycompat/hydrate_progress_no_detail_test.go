@@ -152,3 +152,65 @@ func TestHydrateProgressItems_NoFieldsLeavesDetailFieldsNil(t *testing.T) {
 		t.Errorf("MediaSources should be nil with no Fields; got %v", got[0].dto.MediaSources)
 	}
 }
+
+func TestHydrateProgressItems_EpisodeIncludesSeasonParentMetadata(t *testing.T) {
+	codec := NewResourceIDCodec()
+	episodeID := "episode-1"
+	seasonID := "season-1"
+	seriesID := "series-1"
+
+	itemRepo := &countingItemRepo{
+		itemsByID: map[string]*models.MediaItem{
+			seriesID: {ContentID: seriesID, Type: "series", Title: "Test Series"},
+		},
+	}
+	episodeRepo := &countingEpisodeRepo{
+		episodesByID: map[string]*models.Episode{
+			episodeID: {
+				ContentID:     episodeID,
+				SeriesID:      seriesID,
+				SeasonID:      seasonID,
+				Title:         "Episode Four",
+				SeasonNumber:  1,
+				EpisodeNumber: 4,
+			},
+		},
+	}
+
+	h := &ItemsHandler{
+		content:     &panicOnGetItemDetailContent{},
+		userData:    &mockUserDataService{},
+		itemRepo:    itemRepo,
+		episodeRepo: episodeRepo,
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+	}
+
+	got, err := h.hydrateProgressItems(
+		context.Background(),
+		&Session{StreamAppUserID: 1, ProfileID: "profile-1"},
+		[]upstreamProgress{{MediaItemID: episodeID, PositionSeconds: 120, DurationSeconds: 1800}},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("hydrateProgressItems returned error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 hydrated item; got %d (%v)", len(got), got)
+	}
+
+	wantSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonID)
+	if got[0].dto.SeasonID != wantSeasonID {
+		t.Fatalf("SeasonId = %q, want %q", got[0].dto.SeasonID, wantSeasonID)
+	}
+	if got[0].dto.ParentID != wantSeasonID {
+		t.Fatalf("ParentId = %q, want season id %q", got[0].dto.ParentID, wantSeasonID)
+	}
+	if got[0].dto.IndexNumber == nil || *got[0].dto.IndexNumber != 4 {
+		t.Fatalf("IndexNumber = %v, want 4", got[0].dto.IndexNumber)
+	}
+	if got[0].dto.ParentIndexNumber == nil || *got[0].dto.ParentIndexNumber != 1 {
+		t.Fatalf("ParentIndexNumber = %v, want 1", got[0].dto.ParentIndexNumber)
+	}
+}

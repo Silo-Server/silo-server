@@ -16,6 +16,8 @@ import (
 type compatEpisodeTarget struct {
 	Item         upstreamListItem
 	SeriesImages seriesImageSet
+	SeasonID     string
+	SeasonName   string
 }
 
 type libraryMembershipChecker interface {
@@ -166,7 +168,11 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 	}
 
 	access := h.resolveAccessFilter(ctx, session)
-	fromClause := "episodes e JOIN media_items si ON e.series_id = si.content_id"
+	fromClause := strings.Join([]string{
+		"episodes e",
+		"JOIN media_items si ON e.series_id = si.content_id",
+		"LEFT JOIN seasons se ON se.content_id = e.season_id",
+	}, " ")
 	conditions := []string{"e.content_id = ANY($1)"}
 	args := []any{normalized}
 	argIdx := 2
@@ -208,6 +214,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			e.updated_at,
 			e.season_number,
 			e.episode_number,
+			COALESCE(e.season_id, ''),
+			COALESCE(se.title, ''),
 			si.content_id,
 			si.title,
 			si.genres,
@@ -249,6 +257,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			updatedAt        time.Time
 			seasonNumber     int
 			episodeNumber    int
+			seasonID         string
+			seasonName       string
 			seriesID         string
 			seriesTitle      string
 			genres           []string
@@ -275,6 +285,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			&updatedAt,
 			&seasonNumber,
 			&episodeNumber,
+			&seasonID,
+			&seasonName,
 			&seriesID,
 			&seriesTitle,
 			&genres,
@@ -335,6 +347,8 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 				BackdropThumbhash: seriesBackdropTH,
 				UpdatedAt:         seriesUpdatedAt,
 			},
+			SeasonID:   seasonID,
+			SeasonName: seasonName,
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -446,6 +460,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 				BackdropThumbhash: series.BackdropThumbhash,
 				UpdatedAt:         series.UpdatedAt,
 			},
+			SeasonID: episode.SeasonID,
 		}
 	}
 

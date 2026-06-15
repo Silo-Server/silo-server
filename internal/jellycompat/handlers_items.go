@@ -2170,6 +2170,18 @@ func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL str
 }
 
 func (h *ItemsHandler) applyCompatEpisodeTarget(dto *baseItemDTO, target compatEpisodeTarget) {
+	if target.SeasonID != "" && h.codec != nil {
+		encodedSeasonID := h.codec.EncodeStringID(EncodedIDSeason, target.SeasonID)
+		if dto.SeasonID == "" {
+			dto.SeasonID = encodedSeasonID
+		}
+		if dto.ParentID == "" {
+			dto.ParentID = encodedSeasonID
+		}
+	}
+	if dto.SeasonName == "" && target.SeasonName != "" {
+		dto.SeasonName = target.SeasonName
+	}
 	h.mapper.applySeriesImages(dto, target.SeriesImages)
 	h.rememberCompatEpisodeImages(*dto, firstNonEmpty(target.Item.StillURL, target.Item.PosterURL), target.SeriesImages)
 }
