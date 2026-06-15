@@ -277,9 +277,9 @@ for. ✓ = has the property, ✗ = lacks it.
 | Key scheme | Index size | µs / probe | vs today | Cross-server deterministic | Zero-join show transform | Human-readable |
 | ---------- | ---------- | ---------- | -------- | :------------------------: | :----------------------: | :------------: |
 | Sonyflake text, `en_US.utf8` *(today)* | 74 MB | 5.05 | 1.00× | ✗ | ✗ | ✗ |
-| **Structured + `COLLATE "C"` (this PR)** | 84 MB | **1.86** | **2.71×** | ✓ | ✓ | ✓ |
 | 128-bit hash `bytea(16)` | 74 MB | 1.80 | 2.81× | ✓ | ✗ | ✗ |
 | `bigint` surrogate | 41 MB | 1.23 | 4.11× | ✗ | ✗ | ✗ |
+| **Structured + `COLLATE "C"` (this PR)** | 84 MB | **1.86** | **2.71×** | ✓ | ✓ | ✓ |
 
 The structured key lands within 3% of a 128-bit hash and is the **only all-✓
 row**. The two faster schemes each give up something load-bearing:
