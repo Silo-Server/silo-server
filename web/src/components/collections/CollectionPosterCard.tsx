@@ -41,7 +41,7 @@ export function CollectionPosterCard({
             <img
               src={collection.poster_url}
               alt={collection.title}
-              className={`h-full w-full object-cover transition-opacity duration-300 ${
+              className={`h-full w-full object-cover transition duration-300 group-hover/card:scale-[1.05] ${
                 loaded ? "opacity-100" : "opacity-0"
               }`}
               loading="lazy"

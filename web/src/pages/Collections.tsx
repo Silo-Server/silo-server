@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Calendar,
-  ChevronRight,
   Film,
   Globe,
   GripVertical,
@@ -31,6 +30,7 @@ import {
   useUpdateCollectionGroup,
 } from "@/hooks/queries/collections";
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
+import MediaCarousel from "@/components/MediaCarousel";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -192,8 +192,9 @@ function CollectionList() {
 }
 
 // ServerCollectionsSection renders admin-curated collections aggregated across
-// every accessible library, one horizontal teaser row per library. Each row
-// links into that library's full Collections tab via "See all".
+// every accessible library, one horizontal teaser row per library. Each row's
+// title (and the "Explore all" action when the library has more) links into
+// that library's full Collections tab.
 function ServerCollectionsSection() {
   const { data, isLoading } = useServerCollections();
   const libraries = data ?? [];
@@ -209,19 +210,21 @@ function ServerCollectionsSection() {
             Curated shelves from across every library on this server.
           </p>
         </div>
-        {Array.from({ length: 2 }).map((_, row) => (
-          <div key={row} className="space-y-3">
-            <Skeleton className="h-6 w-40" />
-            <div className="-mx-1 flex gap-3 overflow-x-hidden px-1 pb-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="w-32 shrink-0 sm:w-36 md:w-40">
-                  <Skeleton className="aspect-[2/3] rounded-xl" />
-                  <Skeleton className="mt-2.5 h-4 w-3/4" />
-                </div>
-              ))}
+        <div className="space-y-8">
+          {Array.from({ length: 2 }).map((_, row) => (
+            <div key={row} className="space-y-5">
+              <Skeleton className="h-7 w-40" />
+              <div className="flex gap-4 overflow-hidden lg:gap-5">
+                {Array.from({ length: 7 }).map((_, i) => (
+                  <div key={i} className="w-[130px] shrink-0 sm:w-[150px] lg:w-[178px]">
+                    <Skeleton className="aspect-[2/3] rounded-xl" />
+                    <Skeleton className="mt-2.5 h-4 w-3/4" />
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </section>
     );
   }
@@ -236,41 +239,41 @@ function ServerCollectionsSection() {
           Curated shelves from across every library on this server.
         </p>
       </div>
-      {libraries.map((library) => (
-        <ServerLibraryRow key={library.library_id} library={library} />
-      ))}
+      <div className="space-y-8">
+        {libraries.map((library) => (
+          <ServerLibraryRow key={library.library_id} library={library} />
+        ))}
+      </div>
     </section>
   );
 }
 
+// One library's teaser row of server collections, rendered with the shared
+// MediaCarousel so it matches every other content row in the app (hover scroll
+// arrows, edge fades, drag/snap, keyboard nav). edgePadding is off because this
+// section sits inside the Collections page's `page-shell`, which already
+// supplies horizontal padding — the row title and cards align to that column.
 function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
+  const navigate = useNavigate();
+  const collectionsHref = `/library/${library.library_id}?tab=collections`;
   const hasMore = library.total_count > library.collections.length;
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-lg font-semibold">{library.library_name}</h3>
-        {hasMore ? (
-          <Link
-            to={`/library/${library.library_id}?tab=collections`}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 text-sm font-medium"
-          >
-            See all ({library.total_count})
-            <ChevronRight className="h-4 w-4" />
-          </Link>
-        ) : null}
-      </div>
-      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2 [scrollbar-width:thin]">
-        {library.collections.map((collection) => (
-          <div key={collection.id} className="w-32 shrink-0 sm:w-36 md:w-40">
-            <CollectionPosterCard
-              collection={collection}
-              kind="regular"
-              libraryId={library.library_id}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
+    <MediaCarousel
+      title={library.library_name}
+      titleHref={collectionsHref}
+      onViewAll={hasMore ? () => navigate(collectionsHref) : undefined}
+      edgePadding={false}
+    >
+      {library.collections.map((collection) => (
+        <div key={collection.id} className="w-[130px] sm:w-[150px] lg:w-[178px]">
+          <CollectionPosterCard
+            collection={collection}
+            kind="regular"
+            libraryId={library.library_id}
+          />
+        </div>
+      ))}
+    </MediaCarousel>
   );
 }
 
