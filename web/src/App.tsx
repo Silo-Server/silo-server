@@ -12,8 +12,11 @@ import {
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
+import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
@@ -35,6 +38,8 @@ import EbookReader from "@/pages/EbookReader";
 import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
+import Notifications from "@/pages/Notifications";
+import NotificationsSettings from "@/pages/settings/NotificationsSettings";
 import Requests from "@/pages/Requests";
 import RequestBrowse from "@/pages/RequestBrowse";
 import RequestDetail from "@/pages/RequestDetail";
@@ -172,14 +177,15 @@ function RequireProfile({ children }: { children: ReactNode }) {
 }
 
 function RequireAdmin({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  if (user?.role !== "admin") return <Navigate to="/" replace />;
+  const actingAdmin = useIsActingAdmin();
+  if (!actingAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
 function RequirePrimaryOrAdmin({ children }: { children: ReactNode }) {
-  const { user, profile } = useAuth();
-  if (user?.role !== "admin" && profile?.is_primary !== true) {
+  const actingAdmin = useIsActingAdmin();
+  const { profile } = useCurrentProfile();
+  if (!actingAdmin && profile?.is_primary !== true) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -243,6 +249,7 @@ function QueryCacheManager() {
       qc.removeQueries({ queryKey: ["sections"] });
       qc.removeQueries({ queryKey: ["calendar"] });
       qc.removeQueries({ queryKey: ["requests"] });
+      qc.removeQueries({ queryKey: ["notifications"] });
       // Recommendation rows include per-profile user_state (is_favorite, etc.);
       // the taste-seed picker depends on this for pre-selection.
       qc.removeQueries({ queryKey: ["recommendations"] });
@@ -439,6 +446,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>
                 <Route
@@ -532,6 +540,7 @@ function AppRoutes() {
                             element={<RecommendationsSection />}
                           />
                           <Route path="/calendar" element={<Calendar />} />
+                          <Route path="/notifications" element={<Notifications />} />
                           <Route
                             path="/profile/customize-home"
                             element={<ProfileCustomizeHome />}
@@ -552,12 +561,15 @@ function AppRoutes() {
 }
 
 function RealtimeEventChannels() {
-  const { user } = useAuth();
+  const actingAdmin = useIsActingAdmin();
 
   useEventChannel("catalog");
   useEventChannel("user_state");
+  // Profile-scoped; the server rejects the subscription until the connection
+  // is bound to a profile via the websocket ticket, which is harmless.
+  useEventChannel("notifications");
 
-  return user?.role === "admin" ? <AdminRealtimeEventChannels /> : null;
+  return actingAdmin ? <AdminRealtimeEventChannels /> : null;
 }
 
 function AdminRealtimeEventChannels() {
@@ -575,25 +587,27 @@ export default function App() {
       <AuthProvider>
         <QueryClientProvider client={queryClient}>
           <ErrorBoundary>
-            <ThemeProvider>
-              <CustomThemeProvider>
-                <WatchPlaybackProvider>
-                  <AudiobookPlaybackProvider>
-                    <RealtimeEventsProvider>
-                      <RealtimeEventChannels />
-                      <ScrollRestorationManager />
-                      <RouteAnnouncer />
-                      <QueryCacheManager />
-                      <AppChrome />
-                      <AppRoutes />
-                      <WatchPlaybackHost />
-                      <WatchPlaybackBar />
-                      <Toaster />
-                    </RealtimeEventsProvider>
-                  </AudiobookPlaybackProvider>
-                </WatchPlaybackProvider>
-              </CustomThemeProvider>
-            </ThemeProvider>
+            <BrandingProvider>
+              <ThemeProvider>
+                <CustomThemeProvider>
+                  <WatchPlaybackProvider>
+                    <AudiobookPlaybackProvider>
+                      <RealtimeEventsProvider>
+                        <RealtimeEventChannels />
+                        <ScrollRestorationManager />
+                        <RouteAnnouncer />
+                        <QueryCacheManager />
+                        <AppChrome />
+                        <AppRoutes />
+                        <WatchPlaybackHost />
+                        <WatchPlaybackBar />
+                        <Toaster />
+                      </RealtimeEventsProvider>
+                    </AudiobookPlaybackProvider>
+                  </WatchPlaybackProvider>
+                </CustomThemeProvider>
+              </ThemeProvider>
+            </BrandingProvider>
           </ErrorBoundary>
         </QueryClientProvider>
       </AuthProvider>

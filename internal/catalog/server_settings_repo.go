@@ -45,6 +45,23 @@ func (r *ServerSettingsRepo) Set(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// SetIfAbsent inserts a setting only when the key has no value yet (absent or
+// empty), reporting whether this call won the write. Generated credentials
+// (e.g. the web push VAPID keypair) must be provisioned single-writer across
+// concurrent nodes: exactly one generated value may ever land.
+func (r *ServerSettingsRepo) SetIfAbsent(ctx context.Context, key, value string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`INSERT INTO server_settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+		 WHERE server_settings.value = ''`,
+		key, value,
+	)
+	if err != nil {
+		return false, fmt.Errorf("server_settings set-if-absent %q: %w", key, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // GetAll retrieves all settings as a map.
 func (r *ServerSettingsRepo) GetAll(ctx context.Context) (map[string]string, error) {
 	rows, err := r.pool.Query(ctx, `SELECT key, value FROM server_settings`)

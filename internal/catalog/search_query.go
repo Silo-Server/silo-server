@@ -98,6 +98,31 @@ func parseYearToken(token string) (int, bool) {
 	return year, true
 }
 
+func buildTitlePrefixTsQuery(input string) string {
+	normalized := normalizeTitleForComparison(input)
+	if normalized == "" {
+		return ""
+	}
+
+	fields := strings.Fields(normalized)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(fields))
+	for i, field := range fields {
+		if field == "" {
+			continue
+		}
+		if i == len(fields)-1 {
+			parts = append(parts, field+":*")
+			continue
+		}
+		parts = append(parts, field)
+	}
+	return strings.Join(parts, " & ")
+}
+
 // normalizeTitleForComparison must stay in lockstep with the SQL function
 // public.normalize_search_text (migrations 127 / 138) and the title_normalized
 // generated column. Mismatches between Go and SQL normalization produce

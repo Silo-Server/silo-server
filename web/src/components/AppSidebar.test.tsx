@@ -12,13 +12,14 @@ const mockLogout = vi.fn();
 const mockClearProfile = vi.fn();
 const mockTogglePin = vi.fn();
 
-vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({
+vi.mock("@/hooks/useAuth", () => {
+  const useAuth = () => ({
     user: { id: 1, username: "alex", role: "admin" },
     logout: mockLogout,
     clearProfile: mockClearProfile,
-  }),
-}));
+  });
+  return { useAuth, useOptionalAuth: useAuth };
+});
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({
@@ -53,6 +54,14 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestFeatureStatus: () => ({
     data: { requests_enabled: false },
   }),
+}));
+
+vi.mock("@/hooks/queries/notifications", () => ({
+  useUnreadNotificationCount: () => ({ data: 0 }),
+}));
+
+vi.mock("@/hooks/queries/notificationWebhooks", () => ({
+  useNotificationCapability: () => ({ data: { in_app: { enabled: true } }, isError: false }),
 }));
 
 vi.mock("@/hooks/useViewTransition", () => ({

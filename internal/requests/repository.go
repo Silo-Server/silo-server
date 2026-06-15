@@ -374,6 +374,53 @@ func (r *Repository) ListReconciliationCandidates(ctx context.Context, limit int
 	return out, nil
 }
 
+// ListFulfilledUnnotified returns completed requests whose fulfillment
+// notification has not fired, oldest first. The horizon bounds how long a
+// completed request keeps being presence-polled when its media never appears
+// in the catalog (requests completed before the feature shipped are stamped
+// by the migration backfill, so the horizon is defense in depth).
+func (r *Repository) ListFulfilledUnnotified(ctx context.Context, limit int) ([]*Request, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, requestSelectSQL()+`
+		WHERE outcome = 'active'
+		  AND status = 'completed'
+		  AND fulfilled_notified_at IS NULL
+		  AND completed_at > now() - interval '30 days'
+		ORDER BY completed_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list fulfilled unnotified requests: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*Request
+	for rows.Next() {
+		req, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate fulfilled unnotified requests: %w", err)
+	}
+	return out, nil
+}
+
+// MarkFulfilledNotified stamps the fulfillment-notification marker. Idempotent.
+func (r *Repository) MarkFulfilledNotified(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_requests SET fulfilled_notified_at = now()
+		WHERE id = $1 AND fulfilled_notified_at IS NULL`, id)
+	if err != nil {
+		return fmt.Errorf("mark request fulfill-notified: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ListMine(ctx context.Context, userID int, filter ListFilter) ([]*Request, error) {
 	sqlText, args := buildRequestListSQL("requested_by_user_id = $1", []any{userID}, filter)
 	return r.listRequests(ctx, sqlText, args)

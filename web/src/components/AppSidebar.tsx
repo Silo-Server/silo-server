@@ -6,8 +6,11 @@ import { getProfileMenuSide, isSidebarExpanded } from "@/components/AppSidebar.l
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
+import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
@@ -53,6 +56,7 @@ import {
   Puzzle,
   BookHeadphones,
   Send,
+  Bell,
 } from "lucide-react";
 import { useTheme } from "@/hooks/useTheme";
 import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
@@ -167,13 +171,23 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
   const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
-  const isAdmin = user?.role === "admin";
+  const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
   const { togglePin } = useToggleSidebarPin();
   const { data: pluginSettings } = usePluginSettingsList();
   const requestStatus = useRequestFeatureStatus();
   const showRequestsNav = requestStatus.data?.requests_enabled === true;
+  // Optimistic while loading (the setting defaults to on, so hiding until the
+  // capability resolves would flash); hidden when the admin kill switch is off
+  // or the server has no notifications API (worker modes → query errors).
+  const notificationCapability = useNotificationCapability();
+  const showNotificationsNav = notificationCapability.isError
+    ? false
+    : (notificationCapability.data?.in_app.enabled ?? true);
+  const { data: unreadNotifications } = useUnreadNotificationCount(
+    Boolean(profile) && showNotificationsNav,
+  );
   const pluginNavLinks = useMemo(() => {
     const installations = pluginSettings?.installations ?? [];
     const links: { id: string; basePath: string; label: string; pluginId: string }[] = [];
@@ -551,6 +565,41 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
               </ViewTransitionLink>
             </li>
+            {showNotificationsNav && (
+              <li>
+                <ViewTransitionLink
+                  to="/notifications"
+                  onClick={onNavigate}
+                  className={navLinkClass("/notifications")}
+                  aria-current={isActive("/notifications") ? "page" : undefined}
+                >
+                  {isActive("/notifications") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <span className="relative shrink-0">
+                    <Bell className="h-[18px] w-[18px] shrink-0" />
+                    {!showLabels && (unreadNotifications ?? 0) > 0 && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full"
+                        style={{ background: "var(--primary)" }}
+                      />
+                    )}
+                  </span>
+                  <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
+                  {showLabels && (unreadNotifications ?? 0) > 0 && (
+                    <span
+                      className="ml-auto rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold"
+                      style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                    >
+                      {(unreadNotifications ?? 0) > 99 ? "99+" : unreadNotifications}
+                    </span>
+                  )}
+                </ViewTransitionLink>
+              </li>
+            )}
           </ul>
         </div>
 
@@ -675,7 +724,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
 
       {/* Footer */}
       <div className="sidebar-footer border-sidebar-border/70 space-y-2 border-t px-3 py-3">
-        {isAdmin && (
+        {showAdminNav && (
           <Link
             to="/admin"
             onClick={onNavigate}

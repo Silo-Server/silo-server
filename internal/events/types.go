@@ -17,6 +17,10 @@ const (
 	ChannelUserState     EventChannel = "user_state"
 	ChannelSettings      EventChannel = "settings"
 	ChannelPlugins       EventChannel = "plugins"
+	// ChannelNotifications carries profile-scoped user notifications
+	// (inbox deliveries). Subscriptions require a websocket ticket binding
+	// the connection to a (user, profile).
+	ChannelNotifications EventChannel = "notifications"
 )
 
 var AllChannels = []EventChannel{
@@ -29,6 +33,7 @@ var AllChannels = []EventChannel{
 	ChannelUserState,
 	ChannelSettings,
 	ChannelPlugins,
+	ChannelNotifications,
 }
 
 type Envelope struct {

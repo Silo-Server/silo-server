@@ -64,6 +64,7 @@ vi.mock("@/hooks/queries/recommendations", () => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
+  useOptionalAuth: mocks.useAuth,
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({

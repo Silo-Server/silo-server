@@ -26,6 +26,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -37,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -89,6 +91,7 @@ type Dependencies struct {
 	S3Public                     *s3client.Client                 // public assets bucket client (may be nil)
 	S3Private                    *s3client.Client                 // private internal bucket client (may be nil)
 	S3UserDB                     *s3client.Client                 // user-db bucket client (may be nil)
+	BrandingService              *branding.Service                // white-label branding (nil when DB unavailable)
 	FolderRepo                   *catalog.FolderRepository        // media folder repository (may be nil)
 	FileRepo                     *scanner.FileRepository          // media file repository (may be nil)
 	Scanner                      *scanner.Scanner                 // scanner instance (may be nil)
@@ -119,6 +122,7 @@ type Dependencies struct {
 	NodeID                       string
 	LogStreamHub                 *logstream.Hub
 	RealtimeHub                  *notifications.Hub
+	Notifications                *notifications.System // user-facing release notifications (may be nil)
 	EventsHub                    *evt.Hub
 	ScanRegistry                 *evt.ScanRegistry
 	LibraryScanQueue             *scanqueue.Service
@@ -238,6 +242,33 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker)
 
+	// Resolves whether a declared profile belongs to the user and is the
+	// household primary profile. Nil (no user store) disables the
+	// acting-admin profile policy, degrading admin routes to the plain
+	// role check.
+	var checkPrimaryProfile apimw.PrimaryProfileChecker
+	if deps.UserStoreProvider != nil {
+		userStores := deps.UserStoreProvider
+		checkPrimaryProfile = func(ctx context.Context, userID int, profileID string) (bool, bool, error) {
+			store, err := userStores.ForUser(ctx, userID)
+			if err != nil {
+				return false, false, err
+			}
+			profile, err := store.GetProfile(ctx, profileID)
+			if err != nil {
+				return false, false, err
+			}
+			if profile == nil {
+				return false, false, nil
+			}
+			return profile.IsPrimary, true, nil
+		}
+	}
+
+	// Admin authorization for routes: admin role, exercised through the
+	// account's primary household profile (see apimw.RequireActingAdmin).
+	requireActingAdmin := apimw.RequireActingAdmin(checkPrimaryProfile)
+
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
 	// if config is absent (tests, minimal fixtures); JSON omits empties.
@@ -311,6 +342,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			permissionMiddleware = apimw.NewPermissionMiddleware(
 				userRepo,
 				apimw.NewPGMetadataTargetLibraryResolver(deps.DB),
+				checkPrimaryProfile,
 			)
 		}
 	}
@@ -501,6 +533,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
+		}
+		// Request lifecycle notifications (submitted / approved / declined):
+		// server-channel broadcasts plus personal deliveries to the requester
+		// on approve/decline. Fulfilled rides the reconcile service's
+		// fulfillment notifier instead.
+		if lifecycle := notifications.NewRequestLifecycleNotifier(deps.Notifications); lifecycle != nil {
+			requestSvc.SetLifecycleNotifier(lifecycle)
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
@@ -1326,6 +1365,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
+
+		// Branding handler is shared between the public read/serve endpoints
+		// (registered with the theme endpoints below) and the admin
+		// upload/delete endpoints (registered in the admin group).
+		var brandingHandler *handlers.BrandingHandler
+		if deps.BrandingService != nil {
+			brandingHandler = handlers.NewBrandingHandler(deps.BrandingService)
+		}
+
 		if webhookSyncHandler != nil {
 			r.Post("/plex-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
 			r.Post("/webhook-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
@@ -1335,7 +1383,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		if settingsRepo != nil {
 			themeHandler := handlers.NewThemeHandler(settingsRepo)
 			r.Get("/theme/admin-css", themeHandler.HandleAdminCSS)
-			r.Get("/theme/branding", themeHandler.HandleBranding)
+			if brandingHandler != nil {
+				// Public branding read + asset serving (pre-login white-label).
+				r.Get("/theme/branding", brandingHandler.HandleGetBranding)
+				r.Get("/branding/assets/{kind}", brandingHandler.HandleServeAsset)
+			}
 
 			// Catalog and download proxies require auth (to avoid open proxy).
 			if authMiddleware != nil {
@@ -1343,7 +1395,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Use(authMiddleware.RequireAuth)
 					r.Get("/theme/catalog", themeHandler.HandleCatalog)
 					r.Get("/theme/download", themeHandler.HandleDownload)
-					r.With(apimw.RequireAdmin).Post("/theme/catalog/refresh", themeHandler.HandleCatalogRefresh)
+					r.With(requireActingAdmin).Post("/theme/catalog/refresh", themeHandler.HandleCatalogRefresh)
 				})
 			}
 		}
@@ -1457,6 +1509,28 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Discord account-link OAuth callback: public — Discord redirects the
+		// browser here without credentials; the one-time link-state row
+		// authenticates the request and maps it back to the initiating
+		// account. The static path coexists with the authenticated
+		// /notifications subrouter below (static routes win in chi).
+		var discordNotificationsHandler *handlers.DiscordNotificationsHandler
+		if deps.Notifications != nil {
+			discordNotificationsHandler = handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
+			r.Get("/notifications/discord/link/callback", discordNotificationsHandler.HandleLinkCallback)
+
+			// Tokenized email links: public — clicked from mail clients on
+			// devices without a Silo session; the single-use token (verify)
+			// or per-profile capability token (unsubscribe) authenticates the
+			// request. Static paths coexist with the authenticated
+			// /notifications subrouter below, same as the Discord callback.
+			deps.Notifications.SetPublicURL(deps.PublicURL)
+			emailLinkHandler := handlers.NewEmailLinkHandler(deps.Notifications)
+			r.Get("/notifications/email/verify", emailLinkHandler.HandleVerify)
+			r.Get("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
+			r.Post("/notifications/email/unsubscribe", emailLinkHandler.HandleUnsubscribe)
+		}
+
 		// API key management routes (auth only, no viewer access needed).
 		if apiKeyRepo != nil && authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -1502,7 +1576,58 @@ func NewRouter(deps Dependencies) chi.Router {
 						deps.LibraryScanQueue,
 						historyImportSvc,
 					)
+					eventsHandler.SetNotificationsSystem(deps.Notifications)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
+				}
+
+				// User notifications: profile-scoped inbox, preferences, and
+				// the websocket handshake ticket.
+				if deps.Notifications != nil {
+					if detailSvc != nil {
+						deps.Notifications.SetImageResolver(detailSvc)
+					}
+					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
+					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
+					// Discord DM channel: the linked identity and mode hang off
+					// the login account, not a profile, so these stay outside
+					// the RequireProfile subrouter below (static paths coexist
+					// with it, same as the public email-link routes above).
+					if discordNotificationsHandler != nil {
+						r.Get("/notifications/discord-preferences", discordNotificationsHandler.HandleGetPreferences)
+						r.Put("/notifications/discord-preferences", discordNotificationsHandler.HandleUpdatePreferences)
+						r.Delete("/notifications/discord-link", discordNotificationsHandler.HandleUnlink)
+						r.Post("/notifications/discord/link/init", discordNotificationsHandler.HandleLinkInit)
+					}
+					r.Route("/notifications", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/", notificationsHandler.HandleList)
+						r.Get("/sync", notificationsHandler.HandleSync)
+						r.Get("/unread-count", notificationsHandler.HandleUnreadCount)
+						r.Get("/capability", notificationsHandler.HandleCapability)
+						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
+						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
+						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
+						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
+						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
+						r.Delete("/email-preferences/address", notificationsHandler.HandleClearEmailAddress)
+						r.Post("/read-all", notificationsHandler.HandleReadAll)
+						r.Route("/webhooks", func(r chi.Router) {
+							r.Get("/", notificationsHandler.HandleListWebhooks)
+							r.Post("/", notificationsHandler.HandleCreateWebhook)
+							r.Put("/{id}", notificationsHandler.HandleUpdateWebhook)
+							r.Delete("/{id}", notificationsHandler.HandleDeleteWebhook)
+							r.Post("/{id}/rotate-secret", notificationsHandler.HandleRotateWebhookSecret)
+							r.Post("/{id}/test", notificationsHandler.HandleTestWebhook)
+						})
+						r.Route("/web-push", func(r chi.Router) {
+							r.Get("/subscriptions", notificationsHandler.HandleWebPushList)
+							r.Post("/subscriptions", notificationsHandler.HandleWebPushSubscribe)
+							r.Delete("/subscriptions/{id}", notificationsHandler.HandleWebPushDelete)
+							r.Post("/unsubscribe", notificationsHandler.HandleWebPushUnsubscribe)
+						})
+						r.Get("/{id}", notificationsHandler.HandleGet)
+						r.Post("/{id}/read", notificationsHandler.HandleMarkRead)
+					})
 				}
 
 				// Marker read/write/clear for any authenticated viewer: users
@@ -1523,7 +1648,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Library management routes (admin-only).
 				if libraryHandler != nil {
 					r.Group(func(r chi.Router) {
-						r.Use(apimw.RequireAdmin)
+						r.Use(requireActingAdmin)
 
 						r.Route("/libraries", func(r chi.Router) {
 							r.Get("/", libraryHandler.HandleListLibraries)
@@ -2036,7 +2161,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Admin routes.
 				if adminHandler != nil {
 					r.Route("/admin", func(r chi.Router) {
-						metadataItemAccess := apimw.RequireAdmin
+						metadataItemAccess := requireActingAdmin
 						if permissionMiddleware != nil {
 							metadataItemAccess = permissionMiddleware.RequireMetadataCurationForItem
 						}
@@ -2063,7 +2188,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 
 						r.Group(func(r chi.Router) {
-							r.Use(apimw.RequireAdmin)
+							r.Use(requireActingAdmin)
 
 							r.Get("/users", adminHandler.HandleListUsers)
 							r.Post("/users", adminHandler.HandleCreateUser)
@@ -2105,6 +2230,30 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/settings/{key}", adminHandler.HandleGetSetting)
 							r.Get("/settings", adminHandler.HandleGetSettings)
 							r.Put("/settings/{key}", adminHandler.HandleUpdateSetting)
+							if brandingHandler != nil {
+								// Branding image upload/delete (scalar branding
+								// fields use the generic settings PUT above).
+								r.Post("/branding/assets/{kind}", brandingHandler.HandleUploadAsset)
+								r.Delete("/branding/assets/{kind}", brandingHandler.HandleDeleteAsset)
+							}
+							if settingsRepo != nil {
+								emailHandler := handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
+								r.Post("/email/test", emailHandler.HandleTest)
+							}
+							if discordNotificationsHandler != nil {
+								r.Post("/notifications/discord/test", discordNotificationsHandler.HandleAdminTest)
+							}
+							if deps.Notifications != nil && deps.Notifications.ServerChannels != nil {
+								serverChannelsHandler := handlers.NewAdminServerChannelsHandler(deps.Notifications)
+								r.Route("/notifications/server-channels", func(r chi.Router) {
+									r.Get("/", serverChannelsHandler.HandleList)
+									r.Post("/", serverChannelsHandler.HandleCreate)
+									r.Put("/{id}", serverChannelsHandler.HandleUpdate)
+									r.Delete("/{id}", serverChannelsHandler.HandleDelete)
+									r.Post("/{id}/rotate-secret", serverChannelsHandler.HandleRotateSecret)
+									r.Post("/{id}/test", serverChannelsHandler.HandleTest)
+								})
+							}
 							if adminIntroHandler != nil {
 								r.Post("/items/{id}/refresh-markers", adminIntroHandler.HandleRefreshEpisodeMarkers)
 								r.Post("/items/{id}/redetect-intro", adminIntroHandler.HandleRedetectEpisodeIntro)

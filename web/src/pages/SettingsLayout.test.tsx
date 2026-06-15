@@ -1,3 +1,5 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +10,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: (...args: unknown[]) => mocks.useAuth(...args),
+  useOptionalAuth: (...args: unknown[]) => mocks.useAuth(...args),
+}));
+
+vi.mock("@/hooks/useCurrentProfile", () => ({
+  useCurrentProfile: () => ({ profile: mocks.useAuth()?.profile ?? null }),
 }));
 
 import SettingsLayout from "./SettingsLayout";
@@ -93,5 +100,45 @@ describe("SettingsLayout", () => {
 
     expect(markup).toContain("/settings/profiles");
     expect(markup).toContain(">Profiles<");
+  });
+
+  it("filters personal settings sections from the search box", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "pin");
+
+    expect(screen.getAllByRole("link", { name: /Profiles/ })).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
+    expect(screen.getByText("1 match")).toBeInTheDocument();
+  });
+
+  it("matches individual personal setting labels", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "font family");
+
+    expect(screen.getAllByRole("link", { name: /Subtitles/ })).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
+  });
+
+  it("focuses personal settings search with Cmd+K", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
+    fireEvent.keyDown(document, { key: "k", metaKey: true });
+
+    expect(searchBox).toHaveFocus();
   });
 });

@@ -90,11 +90,69 @@ const LANGUAGE_NAMES_3: Record<string, string> = {
   fas: "Persian",
 };
 
+const LANGUAGE_CODE_ALIASES: Record<string, string> = {
+  eng: "en",
+  spa: "es",
+  fre: "fr",
+  fra: "fr",
+  ger: "de",
+  deu: "de",
+  ita: "it",
+  por: "pt",
+  dut: "nl",
+  nld: "nl",
+  pol: "pl",
+  rus: "ru",
+  chi: "zh",
+  zho: "zh",
+  jpn: "ja",
+  kor: "ko",
+  ara: "ar",
+  tur: "tr",
+  swe: "sv",
+  dan: "da",
+  nor: "no",
+  fin: "fi",
+  hun: "hu",
+  cze: "cs",
+  ces: "cs",
+  rum: "ro",
+  ron: "ro",
+  heb: "he",
+  tha: "th",
+  vie: "vi",
+  gre: "el",
+  ell: "el",
+  bul: "bg",
+  hrv: "hr",
+  slo: "sk",
+  slk: "sk",
+  slv: "sl",
+  ukr: "uk",
+  ind: "id",
+  may: "ms",
+  msa: "ms",
+  hin: "hi",
+  tam: "ta",
+  tel: "te",
+  ben: "bn",
+  per: "fa",
+  fas: "fa",
+};
+
 /** Combined lookup: supports both 2-letter and 3-letter codes. */
 const LANGUAGE_NAMES: Record<string, string> = {
   ...LANGUAGE_NAMES_2,
   ...LANGUAGE_NAMES_3,
 };
+
+export function normalizeLanguageCode(code: string | null | undefined): string {
+  const normalized = (code ?? "").trim().toLowerCase();
+  if (!normalized) return "";
+  const separator = normalized.search(/[-_]/);
+  const base = separator >= 0 ? normalized.slice(0, separator) : normalized;
+  return LANGUAGE_CODE_ALIASES[base] ?? base;
+}
 
 /**
  * Returns the full language name for an ISO 639-1 or 639-2 code.
@@ -103,7 +161,12 @@ const LANGUAGE_NAMES: Record<string, string> = {
 export function getLanguageName(code: string): string {
   if (!code) return "Unknown";
   const lower = code.toLowerCase();
-  return LANGUAGE_NAMES[lower] ?? code.charAt(0).toUpperCase() + code.slice(1);
+  const normalized = normalizeLanguageCode(code);
+  return (
+    LANGUAGE_NAMES_2[normalized] ??
+    LANGUAGE_NAMES[lower] ??
+    code.charAt(0).toUpperCase() + code.slice(1)
+  );
 }
 
 /** Language option for dropdowns (search modal, etc). */

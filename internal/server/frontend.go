@@ -4,11 +4,17 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
 // WebDistFS holds the embedded frontend build output.
 // When nil, FrontendHandler returns a placeholder response.
 var WebDistFS fs.FS
+
+// Branding supplies white-label customization (server name, favicon, manifest)
+// to the SPA shell. When nil, the frontend is served exactly as built.
+var Branding *branding.Service
 
 // frontendContentSecurityPolicy is served with every SPA HTML response.
 //
@@ -66,6 +72,21 @@ func FrontendHandler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		path := r.URL.Path
 
+		// Dynamic branding endpoints must be handled before the static file
+		// server, which would otherwise serve the bundled defaults shadowing
+		// them. Both fall through to the static asset when no override applies.
+		if Branding != nil {
+			switch path {
+			case "/site.webmanifest":
+				serveDynamicManifest(w, r)
+				return
+			case "/favicon.ico":
+				if serveCustomFavicon(w, r) {
+					return
+				}
+			}
+		}
+
 		// Try to serve the file directly. index.html is excluded so the SPA
 		// HTML always goes through the fallback below and carries the CSP.
 		if path != "/" && path != "/index.html" && !strings.HasSuffix(path, "/") {
@@ -82,9 +103,49 @@ func FrontendHandler() http.Handler {
 			http.Error(w, "index.html not found", http.StatusInternalServerError)
 			return
 		}
+		if Branding != nil {
+			indexBytes = branding.RenderIndexHTML(indexBytes, Branding.Load(r.Context()))
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", frontendContentSecurityPolicy)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(indexBytes)
 	})
+}
+
+// serveDynamicManifest writes the branding-aware web app manifest.
+func serveDynamicManifest(w http.ResponseWriter, r *http.Request) {
+	body := branding.RenderManifest(Branding.Load(r.Context()))
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+// serveCustomFavicon serves the admin-uploaded favicon at /favicon.ico when one
+// is configured, so direct requests (browsers, crawlers) get the branded icon.
+// Returns false when there is no custom favicon, letting the caller fall through
+// to the bundled static file.
+func serveCustomFavicon(w http.ResponseWriter, r *http.Request) bool {
+	data, contentType, ref, err := Branding.GetAsset(r.Context(), branding.KindFavicon)
+	if err != nil {
+		return false
+	}
+	// X-Content-Type-Options is already set on the response by the caller. The
+	// favicon may be an admin-uploaded SVG; harden it against script execution
+	// on direct navigation (stored-XSS defense), matching the API asset route.
+	etag := `"` + ref + `"`
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Security-Policy", branding.AssetContentSecurityPolicy)
+	w.Header().Set("ETag", etag)
+	// Stable path (no content hash in the URL), so revalidate rather than cache
+	// long-lived; the ETag lets browsers skip the body when unchanged.
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return true
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+	return true
 }

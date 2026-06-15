@@ -14,7 +14,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useQueries } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { libraryCollectionKeys } from "@/hooks/queries/keys";
-import { useOptionalAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import type { LibraryCollection } from "@/api/types";
 
 interface AddToCollectionDialogProps {
@@ -45,8 +45,7 @@ export default function AddToCollectionDialog({
   mediaItemId,
   itemTitle,
 }: AddToCollectionDialogProps) {
-  const auth = useOptionalAuth();
-  const isAdmin = auth?.user?.role === "admin";
+  const isAdmin = useIsActingAdmin();
   const { data: userCollections, isLoading: userLoading } = useCollections();
   const { data: libraries } = useUserLibraries();
   const addItem = useAddItemToCollection();

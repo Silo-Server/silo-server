@@ -117,7 +117,7 @@ var itemColumnNames = []string{
 	"content_rating", "runtime", "overview", "tagline",
 	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 	"imdb_id", "tmdb_id", "tvdb_id",
-	"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
+	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
@@ -130,6 +130,7 @@ var itemColumnNames = []string{
 // lists coalesce them to ”.
 var nullableStringItemColumns = map[string]bool{
 	"poster_path":        true,
+	"poster_source_path": true,
 	"poster_thumbhash":   true,
 	"backdrop_path":      true,
 	"backdrop_thumbhash": true,
@@ -215,6 +216,7 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.TmdbID,
 		&item.TvdbID,
 		&item.PosterPath,
+		&item.PosterSourcePath,
 		&item.PosterThumbhash,
 		&item.BackdropPath,
 		&item.BackdropThumbhash,
@@ -278,6 +280,7 @@ func scanItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.TmdbID,
 			&item.TvdbID,
 			&item.PosterPath,
+			&item.PosterSourcePath,
 			&item.PosterThumbhash,
 			&item.BackdropPath,
 			&item.BackdropThumbhash,
@@ -351,6 +354,7 @@ func scanItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
 			&item.TmdbID,
 			&item.TvdbID,
 			&item.PosterPath,
+			&item.PosterSourcePath,
 			&item.PosterThumbhash,
 			&item.BackdropPath,
 			&item.BackdropThumbhash,
@@ -417,7 +421,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			content_rating, runtime, overview, tagline,
 			rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
 			imdb_id, tmdb_id, tvdb_id,
-			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+			poster_path, poster_source_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
 			metadata_s3_path, metadata_etag, season_count,
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			show_status,
@@ -428,12 +432,12 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			$9, $10, $11, $12,
 			$13, $14, $15, $16,
 			$17, $18, $19,
-			$20, $21, $22, $23, $24,
-			$25, $26, $27,
-			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
-			$38,
-			$39, $40, $41,
-			$42, $43, $44
+			$20, $21, $22, $23, $24, $25,
+			$26, $27, $28,
+			$29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
+			$39,
+			$40, $41, $42,
+			$43, $44, $45
 		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
@@ -455,6 +459,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			tmdb_id = EXCLUDED.tmdb_id,
 			tvdb_id = EXCLUDED.tvdb_id,
 			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			backdrop_path = EXCLUDED.backdrop_path,
 			backdrop_thumbhash = EXCLUDED.backdrop_thumbhash,
@@ -502,6 +507,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 		item.TmdbID,
 		item.TvdbID,
 		item.PosterPath,
+		item.PosterSourcePath,
 		item.PosterThumbhash,
 		item.BackdropPath,
 		item.BackdropThumbhash,
@@ -915,6 +921,7 @@ func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []s
 // Argument order is intentionally fixed:
 //
 //	$1               searchText (always)
+//	$2               titlePrefixTsQuery (always)
 //	itemType placeholders, allowed/disabled libraries, MaxContentRating
 //	parsed.ExactTitleHint
 //	parsed.Year (or NULL)
@@ -930,8 +937,9 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 		return "", "", nil
 	}
 	var conditions []string
-	args = []any{searchText}
-	argIdx := 2
+	titlePrefixIdx := 2
+	args = []any{searchText, buildTitlePrefixTsQuery(searchText)}
+	argIdx := 3
 
 	// All title-side text on both sides of @@ flows through
 	// public.normalize_search_text() (migrations 127 / 138), which strips
@@ -949,12 +957,14 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	overviewVector := `to_tsvector('english', COALESCE(mi.overview, ''))`
 	normalizedTitleExpr := `public.normalize_search_text(%s)`
 	titleQuery := `websearch_to_tsquery('simple', public.normalize_search_text($1))`
+	titlePrefixQuery := fmt.Sprintf("to_tsquery('simple', $%d)", titlePrefixIdx)
 	titleMatch := fmt.Sprintf("%s @@ %s", titleVector, titleQuery)
+	titlePrefixMatch := fmt.Sprintf("($%d <> '' AND %s @@ %s)", titlePrefixIdx, titleVector, titlePrefixQuery)
 	overviewMatch := fmt.Sprintf("%s @@ websearch_to_tsquery('english', $1)", overviewVector)
 
 	// Keep the base match condition index-friendly; exact-title logic is used as
 	// a ranking boost later, not as an additional scan predicate.
-	conditions = append(conditions, fmt.Sprintf("(%s OR %s)", titleMatch, overviewMatch))
+	conditions = append(conditions, fmt.Sprintf("(%s OR %s OR %s)", titleMatch, titlePrefixMatch, overviewMatch))
 
 	if len(itemTypes) > 0 {
 		placeholders := make([]string, 0, len(itemTypes))
@@ -1069,6 +1079,10 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 					ELSE 0
 				END) AS year_match,
 				MAX(ts_rank_cd(%s, %s)) AS title_rank,
+				MAX(CASE
+					WHEN $%d <> '' THEN ts_rank_cd(%s, %s)
+					ELSE 0
+				END) AS title_prefix_rank,
 				MAX(ts_rank_cd(%s, websearch_to_tsquery('english', $1))) AS overview_rank,
 				MAX(CASE
 					WHEN $%d <> '' THEN ts_rank_cd(%s, phraseto_tsquery('simple', public.normalize_search_text($%d)))
@@ -1078,7 +1092,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 			%s
 			GROUP BY %s
 		)
-	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
+	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, titlePrefixIdx, titleVector, titlePrefixQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
 
 	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
 	// duplicates from the library JOIN, so the window count preserves the
@@ -1103,7 +1117,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	// would otherwise default to 0.
 	statsCTE := `
 		, stats AS (
-			SELECT MAX(CASE WHEN title_rank > 0 THEN 1 ELSE 0 END) AS has_title_match
+			SELECT MAX(CASE WHEN title_rank > 0 OR title_prefix_rank > 0 THEN 1 ELSE 0 END) AS has_title_match
 			FROM scored
 		)`
 	// postFilter is the FROM + CROSS JOIN + WHERE shared by both dataSQL and
@@ -1112,11 +1126,12 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	postFilter := fmt.Sprintf(`FROM scored
 		CROSS JOIN stats
 		WHERE scored.title_rank > 0
+		   OR scored.title_prefix_rank > 0
 		   OR (COALESCE(stats.has_title_match, 0) = 0 AND scored.overview_rank >= %g)`, overviewMatchFloor)
 	dataSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT %s, COUNT(*) OVER () AS total_count
 		%s
-		ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
+		ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, title_prefix_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
 		LIMIT $%d OFFSET $%d`, itemColumns, postFilter, argIdx, argIdx+1)
 	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT COUNT(*)
@@ -1423,6 +1438,12 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	addString("tvdb_id", upd.TvdbID)
 	addIntArray("locked_fields", upd.LockedFields)
 	addString("poster_path", upd.PosterPath)
+	if upd.PosterPath != nil {
+		// An explicit poster override invalidates the provider-origin source
+		// path captured by image caching; outbound embeds must not keep
+		// rendering the replaced provider artwork.
+		setClauses = append(setClauses, "poster_source_path = NULL")
+	}
 	addString("poster_thumbhash", upd.PosterThumbhash)
 	addString("backdrop_path", upd.BackdropPath)
 	addString("backdrop_thumbhash", upd.BackdropThumbhash)

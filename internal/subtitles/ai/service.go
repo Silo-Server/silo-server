@@ -181,6 +181,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		}
 		req.TargetLanguage = target
 	}
+	req.SourceLanguage = normalizeOptionalLanguageCode(req.SourceLanguage)
 
 	key := idempotencyKey(req.MediaFileID, req.Kind, req.SourceIndex, req.TargetLanguage, jobModel)
 	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
@@ -286,7 +287,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		return
 	}
 	if job.SourceLanguage == "" {
-		job.SourceLanguage = sourceLang
+		job.SourceLanguage = normalizeOptionalLanguageCode(sourceLang)
 	}
 
 	releaseName := translatedReleaseName(job.SourceLanguage, job.TargetLanguage)
@@ -390,14 +391,12 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 
 	// Language hint: an explicit source language wins; otherwise the track's
 	// tagged language, when it normalizes to an ISO code.
-	hint := job.SourceLanguage
+	hint := normalizeOptionalLanguageCode(job.SourceLanguage)
 	if hint == "" {
-		if code, err := subtitles.NormalizeLanguageCode(file.AudioTracks[audioIdx].Language); err == nil {
-			hint = code
-		}
+		hint = normalizeOptionalLanguageCode(file.AudioTracks[audioIdx].Language)
 	}
 	if job.Kind == JobKindTranscribe && hint == "" && job.TargetLanguage != "" {
-		hint = job.TargetLanguage
+		hint = normalizeOptionalLanguageCode(job.TargetLanguage)
 	}
 
 	streaming := job.SessionID != "" && s.notifier != nil
@@ -649,6 +648,18 @@ func isParsableTextFormat(format string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeOptionalLanguageCode(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	code, err := subtitles.NormalizeLanguageCode(value)
+	if err != nil {
+		return ""
+	}
+	return code
 }
 
 func translatedReleaseName(sourceLang, targetLang string) string {

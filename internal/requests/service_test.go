@@ -1308,6 +1308,8 @@ type fakeStore struct {
 	requests      map[string]*Request
 	targets       map[string][]Target
 	targetSeq     int64
+	unnotified    []string
+	notified      []string
 
 	listIntegrationsCalls int
 	getSettingsCalls      int
@@ -1451,6 +1453,33 @@ func (f *fakeStore) ListReconciliationCandidates(context.Context, int) ([]*Reque
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.candidates, nil
+}
+
+func (f *fakeStore) ListFulfilledUnnotified(context.Context, int) ([]*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*Request, 0, len(f.unnotified))
+	for _, id := range f.unnotified {
+		if req := f.requests[id]; req != nil {
+			copy := *req
+			out = append(out, &copy)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.unnotified[:0]
+	for _, pending := range f.unnotified {
+		if pending != id {
+			kept = append(kept, pending)
+		}
+	}
+	f.unnotified = kept
+	f.notified = append(f.notified, id)
+	return nil
 }
 
 func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {

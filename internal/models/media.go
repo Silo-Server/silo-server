@@ -312,6 +312,7 @@ type MediaItem struct {
 	TmdbID                       string
 	TvdbID                       string
 	PosterPath                   string // S3 path
+	PosterSourcePath             string // provider-origin path kept when caching rewrites PosterPath; feeds outbound embeds
 	PosterThumbhash              string
 	BackdropPath                 string
 	BackdropThumbhash            string

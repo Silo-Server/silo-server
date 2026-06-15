@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useServerBranding } from "@/hooks/useServerBranding";
+import { AuthBackground } from "@/components/auth/AuthBackground";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { toast } from "sonner";
 
@@ -212,6 +213,7 @@ export default function Login() {
   if (loading || setupLoading) {
     return (
       <main className="auth-shell">
+        <AuthBackground />
         <div
           className="border-primary h-8 w-8 animate-spin rounded-full border-b-2"
           role="status"
@@ -265,6 +267,7 @@ export default function Login() {
 
   return (
     <main className="auth-shell">
+      <AuthBackground />
       <h1 className="sr-only">Sign in to {serverName}</h1>
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>

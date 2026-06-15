@@ -154,6 +154,10 @@ func TestSensitiveSettingKeys_Audited(t *testing.T) {
 		"requests.radarr.api_key",
 		"requests.sonarr.api_key",
 		"watchsync.trakt.client_secret",
+		"email.smtp_password",
+		"discord.client_secret",
+		"discord.bot_token",
+		"notifications.web_push.vapid_keypair",
 	}
 	for _, k := range mustHave {
 		if !SensitiveSettingKeys[k] {

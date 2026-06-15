@@ -14,7 +14,7 @@ import {
   useRefreshItemMetadata,
   type UpdateItemMetadataRequest,
 } from "@/hooks/queries/items";
-import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { cn } from "@/lib/utils";
 
 // MetadataField enum values matching internal/metadata/types.go
@@ -110,7 +110,6 @@ function initFormState(item: ItemDetail) {
 }
 
 export default function EditMetadataDialog({ item, open, onOpenChange }: EditMetadataDialogProps) {
-  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [form, setForm] = useState(() => initFormState(item));
   const [lockedFields, setLockedFields] = useState<Set<number>>(
@@ -122,7 +121,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const refreshMutation = useRefreshItemMetadata();
 
   const isLockable = item.type === "movie" || item.type === "series";
-  const canEditImages = user?.role === "admin";
+  const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(
     (s) => s.types.includes(item.type) && (s.key !== "images" || canEditImages),
   );

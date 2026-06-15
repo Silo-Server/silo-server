@@ -1,51 +1,24 @@
 import { Link, useLocation } from "react-router";
-import {
-  LayoutDashboard,
-  Radio,
-  Library,
-  LayoutPanelTop,
-  PanelsTopLeft,
-  Users,
-  MonitorSmartphone,
-  History,
-  Captions,
-  Download,
-  SlidersHorizontal,
-  Server,
-  Bot,
-  ArrowLeft,
-  Wrench,
-  KeyRound,
-  CalendarClock,
-  ScrollText,
-  Blocks,
-  Puzzle,
-  Send,
-  RefreshCw,
-  SkipForward,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SiloBrand } from "@/components/SiloBrand";
+import {
+  ADMIN_NAV_SECTIONS,
+  buildAdminPluginNavItems,
+  type AdminNavGroup,
+  type AdminNavItem,
+} from "@/lib/adminNavigation";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
-import { pluginRouteHref } from "@/lib/pluginRouteHref";
 
-interface SidebarItem {
-  label: string;
-  icon: LucideIcon;
-  href: string;
-  exact?: boolean;
+interface SidebarItem extends AdminNavItem {
   badge?: ReactNode;
-  // external=true means render as <a> (full page navigation) instead of
-  // react-router <Link>. Used for plugin routes mounted at /api/v1/plugins/...
-  external?: boolean;
 }
 
-interface SidebarSection {
+interface SidebarSection extends Omit<AdminNavGroup, "items"> {
   label: string;
   items: SidebarItem[];
 }
@@ -75,63 +48,14 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
     buildDisplay = buildInfo.data.display;
   }
 
-  // Grouped by admin intent: monitoring, curating the catalog, background
-  // processing the server runs on its own, people and their data, and the
-  // server installation itself.
-  const sections: SidebarSection[] = [
-    {
-      label: "Overview",
-      items: [
-        { label: "Dashboard", icon: LayoutDashboard, href: "/admin", exact: true },
-        {
-          label: "Activity",
-          icon: Radio,
-          href: "/admin/activity",
-          badge:
-            sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined,
-        },
-        { label: "Logs", icon: ScrollText, href: "/admin/logs" },
-      ],
-    },
-    {
-      label: "Content",
-      items: [
-        { label: "Libraries", icon: Library, href: "/admin/libraries" },
-        { label: "Collections", icon: LayoutPanelTop, href: "/admin/collections" },
-        { label: "Sections", icon: PanelsTopLeft, href: "/admin/sections" },
-        { label: "Requests", icon: Send, href: "/admin/requests" },
-      ],
-    },
-    {
-      label: "Automation",
-      items: [
-        { label: "Autoscan", icon: RefreshCw, href: "/admin/autoscan" },
-        { label: "Scheduled Tasks", icon: CalendarClock, href: "/admin/tasks" },
-        { label: "Subtitles", icon: Captions, href: "/admin/subtitles" },
-        { label: "Markers", icon: SkipForward, href: "/admin/marker-history" },
-        { label: "Recommendations", icon: Bot, href: "/admin/recommendations" },
-      ],
-    },
-    {
-      label: "Users",
-      items: [
-        { label: "Users", icon: Users, href: "/admin/users" },
-        { label: "Devices", icon: MonitorSmartphone, href: "/admin/devices" },
-        { label: "Playback History", icon: History, href: "/admin/history" },
-        { label: "History Import", icon: Download, href: "/admin/history-import" },
-      ],
-    },
-    {
-      label: "System",
-      items: [
-        { label: "Settings", icon: SlidersHorizontal, href: "/admin/settings" },
-        { label: "Plugins", icon: Blocks, href: "/admin/plugins" },
-        { label: "Nodes", icon: Server, href: "/admin/nodes" },
-        { label: "API Keys", icon: KeyRound, href: "/admin/api-keys" },
-        { label: "Maintenance", icon: Wrench, href: "/admin/maintenance" },
-      ],
-    },
-  ];
+  const activityBadge =
+    sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined;
+  const sections: SidebarSection[] = ADMIN_NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.map((item) =>
+      item.href === "/admin/activity" ? { ...item, badge: activityBadge } : item,
+    ),
+  }));
 
   // Use the admin installations endpoint, not /settings/plugins — the user
   // settings endpoint filters to plugins that expose user settings / a user-
@@ -139,19 +63,7 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   // arrouter. The admin sidebar needs the full installation list to render
   // its "Plugin Apps" group.
   const { data: adminInstallations } = useAdminPluginInstallations();
-  const adminPluginItems: SidebarItem[] = [];
-  for (const inst of adminInstallations ?? []) {
-    if (!inst.enabled) continue;
-    for (const route of inst.routes ?? []) {
-      if (!route.navigable || route.navigation_kind !== "admin") continue;
-      adminPluginItems.push({
-        label: route.navigation_label || inst.plugin_id,
-        icon: Puzzle,
-        href: pluginRouteHref(inst.id, route.path),
-        external: true,
-      });
-    }
-  }
+  const adminPluginItems = buildAdminPluginNavItems(adminInstallations);
   if (adminPluginItems.length > 0) {
     sections.push({ label: "Plugin Apps", items: adminPluginItems });
   }

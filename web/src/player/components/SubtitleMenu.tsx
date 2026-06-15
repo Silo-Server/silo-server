@@ -4,12 +4,13 @@ import { Captions, CaptionsOff, Languages, Minus, Plus, SlidersHorizontal } from
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
-import { SubtitleTranslateModal, isTranslatableSource } from "./SubtitleTranslateModal";
+import { SubtitleTranslateModal } from "./SubtitleTranslateModal";
 import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
 import { playerFetch } from "../player-fetch";
 import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
 import { getSubtitleFormatLabel } from "../utils/subtitleCodecs";
+import { isTranslatableSource } from "./subtitleTranslateRequest";
 
 interface SubtitleMenuProps {
   tracks: PlayerSubtitleInfo[];

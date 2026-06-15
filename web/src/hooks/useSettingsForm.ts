@@ -48,6 +48,8 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const dirtyCount = dirty.size;
   const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
+  const isDirty = useCallback((key: string) => dirty.has(key), [dirty]);
+
   const buildConnectionCheckRequest = useCallback(
     (selectedKeys: string[] = keys): AdminSettingsConnectionCheckRequest => ({
       values: Object.fromEntries(
@@ -91,6 +93,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     setValue,
     dirtyCount,
     dirtyKeys,
+    isDirty,
     save,
     discard,
     isSaving: updateSetting.isPending,

@@ -3,7 +3,7 @@ import { MoreVertical, RefreshCw } from "lucide-react";
 import { useLocation } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
-import { useOptionalAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
@@ -154,8 +154,7 @@ export default function MediaItemMenu({
   const navigate = useViewTransitionNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
-  const auth = useOptionalAuth();
-  const isAdmin = auth?.user?.role === "admin";
+  const isAdmin = useIsActingAdmin();
   const [currentUserState, setCurrentUserState] = useState(userState);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
 

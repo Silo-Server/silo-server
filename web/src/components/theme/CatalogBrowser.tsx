@@ -7,7 +7,7 @@ import { sanitizeCss } from "@/lib/cssSanitizer";
 import { api } from "@/api/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 
 interface CatalogBrowserProps {
   onInstall: (entry: {
@@ -20,8 +20,7 @@ interface CatalogBrowserProps {
 export function CatalogBrowser({ onInstall }: CatalogBrowserProps) {
   const { data: themes, isLoading, isError, refetch } = useThemeCatalog();
   const refreshCatalog = useRefreshThemeCatalog();
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = useIsActingAdmin();
   const [installing, setInstalling] = useState<string | null>(null);
 
   function handleRefresh() {

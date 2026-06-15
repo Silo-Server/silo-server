@@ -369,6 +369,25 @@ func TestItemRepo_Search_NormalizesTsqueryInput(t *testing.T) {
 	}
 }
 
+// TestItemRepo_Search_UsesTitlePrefixQueryForPartialLastToken pins typeahead
+// title search for inputs like "Pride and P": the full-text query for "p" is
+// otherwise an exact lexeme match and never reaches the title-normalized
+// contiguous ranking signal.
+func TestItemRepo_Search_UsesTitlePrefixQueryForPartialLastToken(t *testing.T) {
+	repo := &ItemRepository{}
+	sql, _, args := repo.buildSearchSQL("Pride and P", []string{"movie"}, 20, 0, AccessFilter{})
+
+	if !strings.Contains(sql, "to_tsquery('simple', $2)") {
+		t.Fatalf("expected title prefix query to use a bound to_tsquery arg; got:\n%s", sql)
+	}
+	if !strings.Contains(sql, "title_prefix_rank") {
+		t.Fatalf("expected title prefix matches to participate in ranking/filtering; got:\n%s", sql)
+	}
+	if len(args) < 2 || args[1] != "pride & p:*" {
+		t.Fatalf("expected args[1] to be the normalized title prefix tsquery, got %#v", args)
+	}
+}
+
 // TestItemRepo_Search_ScoredCTEExposesItemColumnNames guards the contract
 // between the scored CTE and the outer SELECT in buildSearchSQL. The CTE
 // projects qualifiedItemColumns("mi") and the outer query re-selects those

@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
+import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { fetchAdminStats, useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminLibraries,
@@ -49,6 +51,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
+import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { compareActiveScans, formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
@@ -77,6 +80,7 @@ export default function AdminDashboard() {
   const sessionsQuery = useAdminSessions();
   const librariesQuery = useAdminLibraries();
   const usersQuery = useAdminUsers();
+  const { data: adminInstallations } = useAdminPluginInstallations();
   const scanAll = useScanAllLibraries();
   const pageActivity = usePageActivity();
   const manualRefreshStartedAtRef = useRef<number | null>(null);
@@ -107,6 +111,10 @@ export default function AdminDashboard() {
   const lastUpdatedLabel = lastDashboardUpdatedAt
     ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
     : null;
+  const adminSearchSections = useMemo(
+    () => buildAdminCommandNavSections(adminInstallations),
+    [adminInstallations],
+  );
 
   useEffect(() => {
     if (!lastDashboardUpdatedAt) {
@@ -211,6 +219,8 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6 lg:space-y-8">
+      <AdminSectionCommandDialog sections={adminSearchSections} />
+
       {/* Page header */}
       <div className="page-header">
         <div className="space-y-3">

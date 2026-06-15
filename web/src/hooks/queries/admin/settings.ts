@@ -8,7 +8,7 @@ import type {
   JellyfinCompatStatus,
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
-import { adminKeys } from "../keys";
+import { adminKeys, themeKeys } from "../keys";
 import { toast } from "sonner";
 
 type ServerSettings = Record<string, string>;
@@ -34,7 +34,7 @@ export function useUpdateServerSetting() {
         method: "PUT",
         body: JSON.stringify({ value }),
       }),
-    onSuccess: async (_, variables) => {
+    onSuccess: async (_data, variables) => {
       const invalidations = [
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
         queryClient.invalidateQueries({
@@ -44,6 +44,16 @@ export function useUpdateServerSetting() {
       if (variables.key.startsWith("jellyfin_compat.")) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
+        );
+      }
+      // Branding and admin theme settings are served live by public endpoints
+      // (`/theme/branding`, `/theme/admin-css`) and require no restart. Refresh
+      // those caches so saved changes apply immediately instead of waiting out
+      // the 60s / 5min stale windows.
+      if (variables.key.startsWith("branding.") || variables.key.startsWith("ui.admin_")) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: themeKeys.adminCss() }),
+          queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
         );
       }
       await Promise.all(invalidations);
