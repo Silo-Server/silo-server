@@ -209,7 +209,7 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 	// display_id resolves a history row (which may be an episode) to its shown
 	// item (the series, for episodes). For provider-anchored episode ids the
 	// series is a pure string transform of the id (the format invariant), so we
-	// skip the episodes_pkey probe entirely. Legacy Sonyflake and local: episode
+	// skip the episodes_pkey probe entirely. Legacy Sonyflake and local episode
 	// ids carry no embedded anchor, so they still fall back to the episodes
 	// lookup. The join key is null-poisoned for anchored ids (= NULL is an
 	// unsatisfiable b-tree scan key, so the planner never descends the index for
@@ -222,7 +222,7 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 
 	// Null-poison the episodes join key for fully-formed anchored episode ids so
 	// the planner skips the episodes_pkey probe for them; everything else (legacy
-	// Sonyflake, local:, malformed) still falls back to the lookup.
+	// Sonyflake, local, malformed) still falls back to the lookup.
 	episodeJoinKey := fmt.Sprintf(
 		"CASE WHEN %s THEN NULL ELSE h.media_item_id END",
 		anchoredEpisodePredicate("h.media_item_id"),
@@ -247,34 +247,35 @@ func buildHistoryDisplayBaseQuery(access AccessFilter, snapshot *time.Time) (str
 
 // anchoredEpisodePredicate is the SQL boolean that is TRUE only for a
 // fully-formed provider-anchored episode content_id —
-// episode:<provider>:<seriesId>:<season>:<episode>, i.e. five non-empty
-// colon-separated components. It deliberately rejects a broader shape like
-// 'episode:broken': matching that on the prefix alone would transform it into
-// 'series:broken:' and skip the episodes fallback, so the row would vanish at
-// the media_items join. split_part is IMMUTABLE.
+// episode-<provider>-<seriesId>-<season>-<episode>, i.e. five non-empty
+// "-"-separated components. It deliberately rejects a broader shape like
+// 'episode-broken': matching that on the prefix alone would transform it into
+// 'series-broken-' and skip the episodes fallback, so the row would vanish at
+// the media_items join. split_part is IMMUTABLE. The "-" delimiter matches the
+// content_id format (internal/contentid); keep the two in lockstep.
 func anchoredEpisodePredicate(col string) string {
 	return fmt.Sprintf(
-		`%[1]s LIKE 'episode:%%' `+
-			`AND split_part(%[1]s, ':', 2) <> '' `+
-			`AND split_part(%[1]s, ':', 3) <> '' `+
-			`AND split_part(%[1]s, ':', 4) <> '' `+
-			`AND split_part(%[1]s, ':', 5) <> ''`,
+		`%[1]s LIKE 'episode-%%' `+
+			`AND split_part(%[1]s, '-', 2) <> '' `+
+			`AND split_part(%[1]s, '-', 3) <> '' `+
+			`AND split_part(%[1]s, '-', 4) <> '' `+
+			`AND split_part(%[1]s, '-', 5) <> ''`,
 		col,
 	)
 }
 
 // seriesFromAnchoredEpisodeExpr returns a SQL expression that recovers a show's
 // content_id from a provider-anchored episode content_id by pure string
-// transform — episode:<p>:<sid>:<s>:<e> -> series:<p>:<sid> — per the format
+// transform — episode-<p>-<sid>-<s>-<e> -> series-<p>-<sid> — per the format
 // invariant in docs/architecture/deterministic-content-id.md. It yields NULL
 // for any id that is not a fully-formed provider-anchored episode (movies,
-// series, local:, legacy Sonyflake, or malformed episode ids), so callers
+// series, local, legacy Sonyflake, or malformed episode ids), so callers
 // COALESCE to the episodes-table lookup for those. split_part/||/CASE are all
 // IMMUTABLE.
 func seriesFromAnchoredEpisodeExpr(col string) string {
 	return fmt.Sprintf(
 		`CASE WHEN %[2]s `+
-			`THEN 'series:' || split_part(%[1]s, ':', 2) || ':' || split_part(%[1]s, ':', 3) END`,
+			`THEN 'series-' || split_part(%[1]s, '-', 2) || '-' || split_part(%[1]s, '-', 3) END`,
 		col,
 		anchoredEpisodePredicate(col),
 	)

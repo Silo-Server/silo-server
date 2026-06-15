@@ -8,14 +8,16 @@
 -- keeps working; only the values and collation change.
 --
 -- Mapping rules (kept in lockstep with internal/contentid; SchemeVersion = 1):
---   movies   anchor precedence tmdb -> imdb -> tvdb  => movie:<provider>:<id>
---   series   anchor precedence tvdb -> tmdb -> imdb  => series:<provider>:<id>
---   seasons  compose from the series anchor          => season:<provider>:<sid>:<n>
---   episodes compose from the series anchor          => episode:<provider>:<sid>:<s>:<e>
--- Items with no usable provider anchor (and all item types other than
--- movie/series, e.g. audiobook/ebook/podcast) keep their existing Sonyflake id:
--- there is no stable cross-server anchor to derive from, so changing them gains
--- nothing. New unmatched movies/series instead get a path-derived local: id at
+--   movies   anchor precedence tmdb -> imdb -> tvdb  => movie-<provider>-<id>
+--   series   anchor precedence tvdb -> tmdb -> imdb  => series-<provider>-<id>
+--   seasons  compose from the series anchor          => season-<provider>-<sid>-<n>
+--   episodes compose from the series anchor          => episode-<provider>-<sid>-<s>-<e>
+-- The "-" component separator is an RFC 3986 unreserved char, so the id needs no
+-- URL encoding (see internal/contentid). Items with no usable provider anchor
+-- (and all item types other than movie/series, e.g. audiobook/ebook/podcast)
+-- keep their existing Sonyflake id: there is no stable cross-server anchor to
+-- derive from, so changing them gains nothing. New unmatched movies/series
+-- instead get a path-derived local- id at
 -- scan time (handled in Go, not here).
 --
 -- Safety: collisions (two ids deriving to the same key, or a key already taken
@@ -50,15 +52,15 @@ FROM (
         CASE
             WHEN lower(mi.type) IN ('movie', 'movies') THEN
                 CASE
-                    WHEN nullif(btrim(mi.tmdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'movie:tmdb:' || btrim(mi.tmdb_id, E' \t\n\r\f')
-                    WHEN lower(btrim(mi.imdb_id, E' \t\n\r\f')) ~ '^tt[0-9]+$'         THEN 'movie:imdb:' || lower(btrim(mi.imdb_id, E' \t\n\r\f'))
-                    WHEN nullif(btrim(mi.tvdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'movie:tvdb:' || btrim(mi.tvdb_id, E' \t\n\r\f')
+                    WHEN nullif(btrim(mi.tmdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'movie-tmdb-' || btrim(mi.tmdb_id, E' \t\n\r\f')
+                    WHEN lower(btrim(mi.imdb_id, E' \t\n\r\f')) ~ '^tt[0-9]+$'         THEN 'movie-imdb-' || lower(btrim(mi.imdb_id, E' \t\n\r\f'))
+                    WHEN nullif(btrim(mi.tvdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'movie-tvdb-' || btrim(mi.tvdb_id, E' \t\n\r\f')
                 END
             WHEN lower(mi.type) IN ('series', 'show', 'tv') THEN
                 CASE
-                    WHEN nullif(btrim(mi.tvdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'series:tvdb:' || btrim(mi.tvdb_id, E' \t\n\r\f')
-                    WHEN nullif(btrim(mi.tmdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'series:tmdb:' || btrim(mi.tmdb_id, E' \t\n\r\f')
-                    WHEN lower(btrim(mi.imdb_id, E' \t\n\r\f')) ~ '^tt[0-9]+$'         THEN 'series:imdb:' || lower(btrim(mi.imdb_id, E' \t\n\r\f'))
+                    WHEN nullif(btrim(mi.tvdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'series-tvdb-' || btrim(mi.tvdb_id, E' \t\n\r\f')
+                    WHEN nullif(btrim(mi.tmdb_id, E' \t\n\r\f'), '') ~ '^[0-9]+$'      THEN 'series-tmdb-' || btrim(mi.tmdb_id, E' \t\n\r\f')
+                    WHEN lower(btrim(mi.imdb_id, E' \t\n\r\f')) ~ '^tt[0-9]+$'         THEN 'series-imdb-' || lower(btrim(mi.imdb_id, E' \t\n\r\f'))
                 END
         END AS new_id
     FROM media_items mi
@@ -72,25 +74,25 @@ WHERE d.new_id IS NOT NULL
 INSERT INTO content_id_migration_map (old_id, new_id, entity)
 SELECT
     s.content_id,
-    'season:' || split_part(m.new_id, ':', 2) || ':' || split_part(m.new_id, ':', 3)
-        || ':' || s.season_number,
+    'season-' || split_part(m.new_id, '-', 2) || '-' || split_part(m.new_id, '-', 3)
+        || '-' || s.season_number,
     'season'
 FROM seasons s
 JOIN content_id_migration_map m
     ON m.old_id = s.series_id AND m.entity = 'media_item'
-WHERE m.new_id LIKE 'series:%';
+WHERE m.new_id LIKE 'series-%';
 
 -- Step 2c: episodes compose from the series anchor + season/episode numbers.
 INSERT INTO content_id_migration_map (old_id, new_id, entity)
 SELECT
     e.content_id,
-    'episode:' || split_part(m.new_id, ':', 2) || ':' || split_part(m.new_id, ':', 3)
-        || ':' || e.season_number || ':' || e.episode_number,
+    'episode-' || split_part(m.new_id, '-', 2) || '-' || split_part(m.new_id, '-', 3)
+        || '-' || e.season_number || '-' || e.episode_number,
     'episode'
 FROM episodes e
 JOIN content_id_migration_map m
     ON m.old_id = e.series_id AND m.entity = 'media_item'
-WHERE m.new_id LIKE 'series:%';
+WHERE m.new_id LIKE 'series-%';
 
 -- Step 3: collision detection. Never remap into a key that is claimed twice, or
 -- one already occupied by a row that is NOT being remapped (a pre-existing
@@ -114,7 +116,7 @@ WHERE m.status = 'mapped'
   );
 
 -- Cascade collisions from a series to its children. A season/episode key embeds
--- the series anchor (season:<p>:<sid>:..., episode:<p>:<sid>:...), so if the
+-- the series anchor (season-<p>-<sid>-..., episode-<p>-<sid>-...), so if the
 -- series itself was left on Sonyflake (collision), remapping a child would point
 -- the embedded anchor at a series row that no longer exists under that key —
 -- orphaning the child and dropping its rows from the anchor-derived history
@@ -281,7 +283,7 @@ END $$;
 -- user_watch_history backing a "by show" display_id. It is intentionally NOT
 -- created here: the current hot query (full-history DISTINCT ON) cannot use it
 -- (its display_id references the joined episodes table and it lacks watched_at),
--- and it would index the wrong value for legacy/local: episode rows (§9.2.5).
+-- and it would index the wrong value for legacy/local episode rows (§9.2.5).
 -- It belongs with the O(page) summary-table work (§9.2.3) that actually reads
 -- it, using a resolved display_id that handles those rows correctly. Adding it
 -- now would be pure write-amplification on every watch event with no reader.
