@@ -21,6 +21,7 @@ type testCompatSessionManager struct {
 	sessions        map[string]*playback.Session
 	audioTrackCalls []compatAudioTrackCall
 	progressCalls   int
+	stopCalls       []string
 }
 
 type compatAudioTrackCall struct {
@@ -67,7 +68,10 @@ func (m *testCompatSessionManager) UpdateAudioTrack(sessionID string, audioTrack
 	return nil
 }
 
-func (m *testCompatSessionManager) StopSession(string) error { return nil }
+func (m *testCompatSessionManager) StopSession(sessionID string) error {
+	m.stopCalls = append(m.stopCalls, sessionID)
+	return nil
+}
 
 func (m *testCompatSessionManager) GetSession(sessionID string) (*playback.Session, error) {
 	if session, ok := m.sessions[sessionID]; ok {

@@ -202,6 +202,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Sessions/Playing", playbackHandler.HandleSessionPlaying)
 			r.Post("/Sessions/Playing/Progress", playbackHandler.HandleSessionPlayingProgress)
 			r.Post("/Sessions/Playing/Stopped", playbackHandler.HandleSessionPlayingStopped)
+			r.Delete("/Videos/ActiveEncodings", playbackHandler.HandleDeleteActiveEncodings)
 			r.Post("/Sessions/Logout", authHandler.HandleLogout)
 			r.Get("/socket", HandleSocket)
 		})

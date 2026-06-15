@@ -1,9 +1,21 @@
 package jellycompat
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+// withCompatSession attaches a compat session carrying tok to req, so the
+// ActiveEncodings ownership guard (CompatToken == session.Token) is satisfied.
+func withCompatSession(req *http.Request, tok string) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: tok}))
+}
 
 func TestAudioSelectionChanged(t *testing.T) {
 	selected := 2
@@ -88,5 +100,175 @@ func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 	}
 	if !strings.Contains(got, "/Videos/item-1/hls/play-1/stream.m3u8?MediaSourceId=source-1&PlaySessionId=play-1") {
 		t.Fatalf("expected nested manifest to include media and playback session ids, got:\n%s", got)
+	}
+}
+
+// newActiveEncodingsHandler builds a PlaybackHandler literal directly (not
+// NewPlaybackHandler, which touches the filesystem) with the transcodes map
+// initialized — closeTranscodeSession writes/deletes it and would nil-map-panic
+// otherwise.
+func newActiveEncodingsHandler(mgr *testCompatSessionManager) (*PlaybackHandler, *PlaybackSessionStore) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	h := &PlaybackHandler{
+		playbackStore: store,
+		sessionMgr:    mgr,
+		transcodes:    make(map[string]*playback.TranscodeSession),
+	}
+	return h, store
+}
+
+// TestHandleDeleteActiveEncodings_StopsTranscodeAndDeletesSession verifies the
+// happy path: the upstream session is stopped and the compat play session is
+// removed from the store, returning 204.
+func TestHandleDeleteActiveEncodings_StopsTranscodeAndDeletesSession(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); ok {
+		t.Fatal("play session should be deleted")
+	}
+	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
+		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
+	}
+}
+
+// TestHandleDeleteActiveEncodings_MissingPlaySessionIdReturns204 verifies a
+// request with no PlaySessionId is a 204 no-op (no teardown).
+func TestHandleDeleteActiveEncodings_MissingPlaySessionIdReturns204(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); !ok {
+		t.Fatal("unrelated play session must not be torn down")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
+	}
+}
+
+// TestHandleDeleteActiveEncodings_UnknownPlaySessionReturns204 verifies an
+// unknown PlaySessionId is a 204 no-op (idempotent "already gone" semantics).
+func TestHandleDeleteActiveEncodings_UnknownPlaySessionReturns204(t *testing.T) {
+	mgr := &testCompatSessionManager{}
+	h, _ := newActiveEncodingsHandler(mgr)
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=does-not-exist", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
+	}
+}
+
+// TestHandleDeleteActiveEncodings_CaseInsensitivePlaySessionId verifies a
+// lowercase playSessionId key (as Wholphin sends) still resolves and tears down
+// the session — the reason newCaseInsensitiveQuery is used.
+func TestHandleDeleteActiveEncodings_CaseInsensitivePlaySessionId(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?playSessionId=ps-1", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); ok {
+		t.Fatal("lowercase playSessionId should still resolve and delete the session")
+	}
+}
+
+// TestHandleDeleteActiveEncodings_ForeignPlaySessionNotTornDown proves the
+// ownership guard: a caller whose token differs from the play session's
+// CompatToken gets a uniform 204 no-op and does NOT tear down the foreign
+// session (no cross-session IDOR teardown).
+func TestHandleDeleteActiveEncodings_ForeignPlaySessionNotTornDown(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "owner"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "attacker")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); !ok {
+		t.Fatal("foreign play session must not be torn down")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
+	}
+}
+
+// TestHandleDeleteActiveEncodings_RealClientShape exercises the dominant real
+// JellyCon call shape (DeviceId present alongside PlaySessionId): with a
+// matching-token session the session is still torn down (DeviceId ignored).
+func TestHandleDeleteActiveEncodings_RealClientShape(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?DeviceId=dev1&PlaySessionId=ps-1", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); ok {
+		t.Fatal("play session should be torn down when DeviceId accompanies a matching PlaySessionId")
+	}
+	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
+		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
+	}
+}
+
+// TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown guards the early
+// window between PlaybackInfo and the first manifest request, when the play
+// session exists but UpstreamSessionID is still empty. A DELETE that lands then
+// must be a 204 no-op that leaves the session in the store, so the pending
+// manifest request still resolves (mirrors the Stopped report path). Removing
+// the UpstreamSessionID == "" guard makes this test fail.
+func TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown(t *testing.T) {
+	mgr := &testCompatSessionManager{}
+	h, store := newActiveEncodingsHandler(mgr)
+	store.Put(PlaybackSession{ID: "ps-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); !ok {
+		t.Fatal("not-yet-started play session must survive teardown so the pending manifest still resolves")
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
 	}
 }

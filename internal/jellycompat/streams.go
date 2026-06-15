@@ -675,6 +675,66 @@ func (h *PlaybackHandler) HandleSessionPlayingStopped(w http.ResponseWriter, r *
 	h.handlePlaybackReport(w, r, true)
 }
 
+// HandleDeleteActiveEncodings handles DELETE /Videos/ActiveEncodings.
+//
+// Jellyfin clients (e.g. JellyCon) call this endpoint when playback stops to
+// signal the server to tear down any running HLS transcode for the session.
+// Without it, the transcode process keeps running until the playback session
+// TTL expires (default 6 h). We honour the request by stopping the transcode
+// identified by the playSessionId query parameter.
+func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	q := newCaseInsensitiveQuery(r.URL.Query())
+	// DeviceId is intentionally ignored: Silo's playback store is keyed by
+	// PlaySessionId, clients always send it, and Jellyfin's own teardown matches
+	// by playSessionId (ignoring deviceId) whenever playSessionId is non-empty.
+	playSessionID := q.Get("PlaySessionId")
+	if playSessionID == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Ownership guard (mirrors the Stopped report path): only the session's own
+	// caller may tear it down, and a session with no upstream transcode yet has
+	// nothing to tear down. The PlaybackSession is created by PlaybackInfo with
+	// an empty UpstreamSessionID; it is only populated once the first manifest
+	// request reaches ensureUpstreamPlayback. Deleting it before then would drop
+	// a live session and 404 the pending manifest, so an unknown, not-owned, or
+	// not-yet-started PlaySessionId is a uniform idempotent 204 no-op (no
+	// cross-session teardown, no ownership oracle, no premature deletion).
+	playSession, ok := h.playbackStore.Get(playSessionID)
+	if !ok || playSession.CompatToken != session.Token || playSession.UpstreamSessionID == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	h.teardownPlaySession(playSession)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// teardownPlaySession stops the upstream playback session and removes the compat
+// play session from the store. Every step is idempotent, so it is safe to call
+// from both the explicit ActiveEncodings teardown and a Stopped playback report
+// (which may race). It is a no-op-safe teardown for an already-gone session.
+func (h *PlaybackHandler) teardownPlaySession(playSession *PlaybackSession) {
+	transcodeNodeURL := ""
+	if h.sessionMgr != nil {
+		if upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
+			transcodeNodeURL = upstreamSession.TranscodeNodeURL
+		}
+	}
+	h.closeTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
+	if h.sessionMgr != nil {
+		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
+	}
+	h.playbackStore.Delete(playSession.ID)
+}
+
 func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Request, stop bool) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
@@ -758,17 +818,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if stop {
-		transcodeNodeURL := ""
-		if h.sessionMgr != nil {
-			if upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
-				transcodeNodeURL = upstreamSession.TranscodeNodeURL
-			}
-		}
-		h.closeTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
-		if h.sessionMgr != nil {
-			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
-		}
-		h.playbackStore.Delete(playSession.ID)
+		h.teardownPlaySession(playSession)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
