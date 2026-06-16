@@ -107,6 +107,26 @@ func TestHandleClientLogDocument(t *testing.T) {
 	})
 }
 
+// TestHandleSessions verifies GET /Sessions returns a 200 JSON array (not the
+// chi 404 that broke client session polling).
+func TestHandleSessions(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/Sessions?deviceId=abc123", nil)
+	rec := httptest.NewRecorder()
+
+	HandleSessions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
+		t.Fatalf("body = %q, want JSON array %q", got, "[]")
+	}
+	var sessions []sessionInfoDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("response is not a SessionInfoDto array: %v", err)
+	}
+}
+
 // TestHandleUserImageQueryFallback verifies /UserImage?userId= resolves the id
 // from the query string (the path param is empty on this route) and serves the
 // same deterministic palette avatar as the legacy path form — not the empty-id

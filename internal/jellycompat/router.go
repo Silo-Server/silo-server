@@ -203,6 +203,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Studios", itemsHandler.HandleItemStub)
 			r.Get("/Artists", itemsHandler.HandleItemStub)
 			r.Get("/Movies/Recommendations", recsHandler.HandleRecommendations)
+			r.Get("/Sessions", HandleSessions)
 			r.Post("/Sessions/Capabilities", playbackHandler.HandleCapabilitiesFull)
 			r.Post("/Sessions/Capabilities/Full", playbackHandler.HandleCapabilitiesFull)
 			r.Get("/Playback/BitrateTest", playbackHandler.HandleBitrateTest)
