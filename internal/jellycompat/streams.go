@@ -458,11 +458,8 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if err != nil {
-		if errors.Is(err, playback.ErrSegmentNotFound) {
-			writeError(w, http.StatusNotFound, "NotFound", "Segment not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load segment")
+		status, code, message := hlsSegmentErrorResponse(err)
+		writeError(w, status, code, message)
 		return
 	}
 
@@ -471,6 +468,23 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 
 	http.ServeFile(w, r, segmentPath)
+}
+
+// hlsSegmentErrorResponse maps a segment-retrieval error to a Jellyfin-faithful
+// HTTP status. A segment that is absent (ErrSegmentNotFound) or whose transcode
+// process started and then exited non-zero (ErrTranscodeFailed, surfaced by
+// WaitForSegment after the recovery/restart path is exhausted) will never
+// materialize. Jellyfin serves both as 404: its DynamicHls segment handler falls
+// through to a PhysicalFileResult for the missing file, which ASP.NET returns as
+// 404, never 500. Reserve 500 for genuinely unexpected errors (e.g. a stat
+// failure on a file that does exist).
+func hlsSegmentErrorResponse(err error) (status int, code, message string) {
+	switch {
+	case errors.Is(err, playback.ErrSegmentNotFound), errors.Is(err, playback.ErrTranscodeFailed):
+		return http.StatusNotFound, "NotFound", "Segment not found"
+	default:
+		return http.StatusInternalServerError, "ServerError", "Failed to load segment"
+	}
 }
 
 // HandleSubtitleStream proxies subtitle requests through the native stream subtitle route.
