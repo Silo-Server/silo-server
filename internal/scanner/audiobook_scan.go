@@ -33,6 +33,40 @@ type audiobookPosterExec interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
+type audiobookPosterPathReader interface {
+	GetPosterPath(ctx context.Context, contentID string) (string, error)
+}
+
+const audiobookDuplicateCandidateSQL = `
+	SELECT mi.content_id, mi.title
+	FROM media_items mi
+	JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
+	JOIN people pa ON pa.id = ipa.person_id AND LOWER(pa.name) = LOWER($1)
+	JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
+	JOIN people pn ON pn.id = ipn.person_id AND LOWER(pn.name) = LOWER($2)
+	JOIN LATERAL (
+		SELECT COALESCE(SUM(mf.duration), 0) AS dur
+		FROM media_files mf WHERE mf.content_id = mi.content_id
+	) f ON TRUE
+	JOIN LATERAL (
+		SELECT btrim(regexp_replace(
+			regexp_replace(lower(mi.title), '[^a-z0-9]+', ' ', 'g'),
+			'[[:space:]]+', ' ', 'g'
+		)) AS normalized_title
+	) t ON TRUE
+	WHERE mi.type = 'audiobook'
+	  AND mi.year = $3
+	  AND f.dur > 0
+	  AND ABS(f.dur - $4) <= $5
+	  AND (
+		  t.normalized_title = $6
+	   OR t.normalized_title LIKE $6 || ' %'
+	   OR $6 LIKE t.normalized_title || ' %'
+	  )
+	ORDER BY ABS(f.dur - $4), LENGTH(mi.title), mi.content_id
+	LIMIT 25
+`
+
 // audiobookDiskFile is the on-disk projection used by audiobookFolderUnchanged.
 // Path is the absolute file path; Size and ModTime come from os.Stat.
 type audiobookDiskFile struct {
@@ -330,7 +364,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		)
 	}
 	if len(parsed.Files) > 0 && s.fileRepo != nil {
-		if _, err := applyAudiobookEmbeddedCover(ctx, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
+		if _, err := applyAudiobookEmbeddedCover(ctx, s.itemRepo, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
 			slog.Warn("audiobook scan: embedded cover failed",
 				"folder_id", folder.ID,
 				"content_id", contentID,
@@ -377,6 +411,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 
 func applyAudiobookEmbeddedCover(
 	ctx context.Context,
+	reader audiobookPosterPathReader,
 	exec audiobookPosterExec,
 	ffmpegPath string,
 	cacher audiobookCoverCacher,
@@ -385,6 +420,15 @@ func applyAudiobookEmbeddedCover(
 ) (bool, error) {
 	if exec == nil {
 		return false, nil
+	}
+	if reader != nil {
+		existingPosterPath, err := reader.GetPosterPath(ctx, contentID)
+		if err != nil {
+			return false, fmt.Errorf("get audiobook poster path for embedded cover: %w", err)
+		}
+		if strings.TrimSpace(existingPosterPath) != "" {
+			return false, nil
+		}
 	}
 	poster, thumb := ExtractAndUploadAudiobookCover(ctx, ffmpegPath, cacher, audioFilePath, contentID)
 	if poster == "" {
@@ -532,23 +576,19 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 	if tolerance < 10 {
 		tolerance = 10
 	}
-	rows, err := s.fileRepo.Pool().Query(ctx, `
-		SELECT mi.content_id, mi.title
-		FROM media_items mi
-		JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
-		JOIN people pa ON pa.id = ipa.person_id AND LOWER(pa.name) = LOWER($1)
-		JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
-		JOIN people pn ON pn.id = ipn.person_id AND LOWER(pn.name) = LOWER($2)
-		JOIN LATERAL (
-			SELECT COALESCE(SUM(mf.duration), 0) AS dur
-			FROM media_files mf WHERE mf.content_id = mi.content_id
-		) f ON TRUE
-		WHERE mi.type = 'audiobook'
-		  AND mi.year = $3
-		  AND f.dur > 0
-		  AND ABS(f.dur - $4) <= $5
-		LIMIT 25
-	`, book.Author, book.Narrator, book.Year, totalDuration, tolerance)
+	titleKey := normalizeAudiobookDedupeTitle(cleanTitle)
+	if titleKey == "" {
+		return nil
+	}
+	rows, err := s.fileRepo.Pool().Query(ctx,
+		audiobookDuplicateCandidateSQL,
+		book.Author,
+		book.Narrator,
+		book.Year,
+		totalDuration,
+		tolerance,
+		titleKey,
+	)
 	if err != nil {
 		return nil
 	}

@@ -50,12 +50,25 @@ func (f *fakeAudiobookPosterExec) Exec(_ context.Context, query string, args ...
 	return pgconn.CommandTag{}, nil
 }
 
+type fakeAudiobookPosterReader struct {
+	posterPath string
+	err        error
+	calls      int
+}
+
+func (f *fakeAudiobookPosterReader) GetPosterPath(context.Context, string) (string, error) {
+	f.calls++
+	return f.posterPath, f.err
+}
+
 type fakeScannerCoverCacher struct {
+	calls     int
 	data      []byte
 	contentID string
 }
 
 func (f *fakeScannerCoverCacher) CacheAudiobookCover(_ context.Context, data []byte, contentID string) (string, string, string, error) {
+	f.calls++
 	f.data = append([]byte(nil), data...)
 	f.contentID = contentID
 	return "local/audiobooks/" + contentID + "/poster", ".webp", "thumbhash", nil
@@ -73,6 +86,7 @@ func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
 
 	applied, err := applyAudiobookEmbeddedCover(
 		context.Background(),
+		&fakeAudiobookPosterReader{},
 		exec,
 		ffmpegPath,
 		cacher,
@@ -102,6 +116,57 @@ func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
 	}
 	if !strings.Contains(exec.query, "poster_path = $1") {
 		t.Fatalf("query did not update poster_path: %s", exec.query)
+	}
+}
+
+func TestApplyAudiobookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
+	dir := t.TempDir()
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf cover-bytes\n"), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+
+	reader := &fakeAudiobookPosterReader{posterPath: "local/audiobooks/content-1/poster/original.webp"}
+	exec := &fakeAudiobookPosterExec{}
+	cacher := &fakeScannerCoverCacher{}
+
+	applied, err := applyAudiobookEmbeddedCover(
+		context.Background(),
+		reader,
+		exec,
+		ffmpegPath,
+		cacher,
+		"/library/Author/Book/book.m4b",
+		"content-1",
+	)
+	if err != nil {
+		t.Fatalf("applyAudiobookEmbeddedCover: %v", err)
+	}
+	if applied {
+		t.Fatal("applied = true, want false")
+	}
+	if reader.calls != 1 {
+		t.Fatalf("GetPosterPath calls = %d, want 1", reader.calls)
+	}
+	if cacher.calls != 0 {
+		t.Fatalf("cache calls = %d, want 0", cacher.calls)
+	}
+	if exec.calls != 0 {
+		t.Fatalf("Exec calls = %d, want 0", exec.calls)
+	}
+}
+
+func TestAudiobookDuplicateCandidateSQLFiltersTitleBeforeLimit(t *testing.T) {
+	titlePredicate := strings.Index(audiobookDuplicateCandidateSQL, "normalized_title = $6")
+	limit := strings.Index(audiobookDuplicateCandidateSQL, "LIMIT")
+	if titlePredicate == -1 {
+		t.Fatalf("expected SQL to filter on normalized_title, got:\n%s", audiobookDuplicateCandidateSQL)
+	}
+	if limit == -1 {
+		t.Fatalf("expected SQL to keep a bounded candidate query, got:\n%s", audiobookDuplicateCandidateSQL)
+	}
+	if titlePredicate > limit {
+		t.Fatalf("title predicate appears after LIMIT, got:\n%s", audiobookDuplicateCandidateSQL)
 	}
 }
 
