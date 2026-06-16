@@ -167,6 +167,27 @@ func parseLibraryIDParam(r *http.Request) (int, error) {
 	return libraryID, nil
 }
 
+// progressContentIDs collects the media item IDs from a progress slice.
+func progressContentIDs(entries []userstore.WatchProgress) []string {
+	contentIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		contentIDs = append(contentIDs, entry.MediaItemID)
+	}
+	return contentIDs
+}
+
+// keepAccessibleEntries returns, in order, the entries whose media item ID maps
+// to true in accessible.
+func keepAccessibleEntries(entries []userstore.WatchProgress, accessible map[string]bool) []userstore.WatchProgress {
+	filtered := make([]userstore.WatchProgress, 0, len(entries))
+	for _, entry := range entries {
+		if accessible[entry.MediaItemID] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
 func filterProgressEntriesByLibrary(
 	ctx context.Context,
 	entries []userstore.WatchProgress,
@@ -177,24 +198,12 @@ func filterProgressEntriesByLibrary(
 		return entries, nil
 	}
 
-	contentIDs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		contentIDs = append(contentIDs, entry.MediaItemID)
-	}
-
-	allowed, err := lookup.GetItemsInFolder(ctx, contentIDs, libraryID)
+	allowed, err := lookup.GetItemsInFolder(ctx, progressContentIDs(entries), libraryID)
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := make([]userstore.WatchProgress, 0, len(entries))
-	for _, entry := range entries {
-		if allowed[entry.MediaItemID] {
-			filtered = append(filtered, entry)
-		}
-	}
-
-	return filtered, nil
+	return keepAccessibleEntries(entries, allowed), nil
 }
 
 // filterProgressEntriesByAccess removes progress entries whose item falls
@@ -210,24 +219,12 @@ func filterProgressEntriesByAccess(
 		return entries, nil
 	}
 
-	contentIDs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		contentIDs = append(contentIDs, entry.MediaItemID)
-	}
-
-	accessible, err := lookup.FilterAccessibleContentIDs(ctx, contentIDs, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating)
+	accessible, err := lookup.FilterAccessibleContentIDs(ctx, progressContentIDs(entries), scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating)
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := make([]userstore.WatchProgress, 0, len(entries))
-	for _, entry := range entries {
-		if accessible[entry.MediaItemID] {
-			filtered = append(filtered, entry)
-		}
-	}
-
-	return filtered, nil
+	return keepAccessibleEntries(entries, accessible), nil
 }
 
 // HandleSyncProgress handles POST /sync/progress.
