@@ -229,26 +229,35 @@ func (s *SQLiteUserStore) RemoveWatchedFromWatchlist(_ context.Context, _ string
 
 // --- Hidden recommendations ("not interested") ---
 
+// AddHiddenRecommendation marks an item as "not interested" for the profile.
 func (s *SQLiteUserStore) AddHiddenRecommendation(_ context.Context, profileID, mediaItemID string) error {
 	return AddHiddenRecommendation(s.db, profileID, mediaItemID)
 }
 
+// RemoveHiddenRecommendation un-hides an item so it can be recommended again.
 func (s *SQLiteUserStore) RemoveHiddenRecommendation(_ context.Context, profileID, mediaItemID string) error {
 	return RemoveHiddenRecommendation(s.db, profileID, mediaItemID)
 }
 
+// ListHiddenRecommendations returns the profile's hidden items, most recently
+// hidden first, paginated by limit/offset.
 func (s *SQLiteUserStore) ListHiddenRecommendations(_ context.Context, profileID string, limit, offset int) ([]userstore.HiddenRecommendation, error) {
 	return ListHiddenRecommendations(s.db, profileID, limit, offset)
 }
 
+// ListHiddenRecommendationsByMediaItems returns, for the given item IDs, which
+// ones the profile has hidden (keyed by media item ID, value true).
 func (s *SQLiteUserStore) ListHiddenRecommendationsByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
 	return ListHiddenRecommendationsByMediaItems(s.db, profileID, mediaItemIDs)
 }
 
+// IsHiddenRecommendation reports whether the profile has hidden the item.
 func (s *SQLiteUserStore) IsHiddenRecommendation(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return IsHiddenRecommendation(s.db, profileID, mediaItemID)
 }
 
+// HiddenRecommendationIDSet returns the full set of media item IDs the profile
+// has hidden, used to exclude them from recommendation and discovery surfaces.
 func (s *SQLiteUserStore) HiddenRecommendationIDSet(_ context.Context, profileID string) (map[string]struct{}, error) {
 	return HiddenRecommendationIDSet(s.db, profileID)
 }

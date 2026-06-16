@@ -6,6 +6,10 @@ import { toast } from "sonner";
 import { invalidateMediaSurfaceQueries, updateCatalogItemDetail } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
+/**
+ * Fetches the current profile's "Not Interested" (hidden) items for the
+ * management page.
+ */
 export function useHiddenList() {
   return useQuery({
     queryKey: hiddenKeys.list(),
@@ -13,6 +17,11 @@ export function useHiddenList() {
   });
 }
 
+/**
+ * Toggles an item's hidden state. Pass the item's current `is_hidden` value to
+ * the mutation: `true` un-hides (DELETE), `false` hides (PUT). Optimistically
+ * updates the cached item detail and invalidates the affected media surfaces.
+ */
 export function useToggleHidden(itemId: string) {
   const queryClient = useQueryClient();
 

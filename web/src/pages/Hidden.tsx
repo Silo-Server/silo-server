@@ -4,6 +4,10 @@ import ItemGrid from "@/components/ItemGrid";
 import { useHiddenList } from "@/hooks/queries/hidden";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
+/**
+ * "Not Interested" management page: lists the profile's hidden items so they
+ * can be reviewed and un-hidden via each card's action menu.
+ */
 export default function Hidden() {
   useDocumentTitle("Not Interested");
   const { data: items, isLoading } = useHiddenList();
