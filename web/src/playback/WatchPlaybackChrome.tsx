@@ -775,6 +775,12 @@ export function WatchPlaybackHost() {
         snapshot.duration - snapshot.currentTime <= POST_ROLL_SECONDS_BEFORE_END
       ) {
         postRollEnteredRef.current = true;
+        // Entering post-roll early pauses the underlying video to stop HLS from
+        // buffering the tail segment (see VideoPlayer's post-roll pause effect).
+        // A paused video never fires `ended`, so we must arm the autoplay
+        // countdown here rather than waiting for an `ended` event that will
+        // never arrive — otherwise the overlay shows but the countdown stalls.
+        setPostRollVideoEnded(true);
         controller.enterPostRoll(requestKeyValue);
       }
     },
