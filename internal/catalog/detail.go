@@ -1224,6 +1224,7 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 	}
 	defer rows.Close()
 
+	posterPaths := make([]string, 0, 16)
 	for rows.Next() {
 		var (
 			ch         MangaChapter
@@ -1240,10 +1241,20 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 			ch.Volume = *volume
 		}
 		ch.Progress = progress
+		ch.PosterURL = posterPath // raw path; resolved in one batch below
 		if posterPath != "" {
-			ch.PosterURL = s.PresignImageURL(ctx, posterPath, "poster", "")
+			posterPaths = append(posterPaths, posterPath)
 		}
 		chapters = append(chapters, ch)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("manga chapters: row iteration error", "series", seriesContentID, "error", err)
+	}
+	// Presign every chapter poster in one batch rather than per chapter — a
+	// long-running series has hundreds of chapters.
+	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", "")
+	for i := range chapters {
+		chapters[i].PosterURL = resolved[chapters[i].PosterURL]
 	}
 	return chapters
 }
