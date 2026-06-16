@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -14,6 +15,9 @@ import (
 // ProgressLibraryLookup resolves which progress items belong to a library.
 type ProgressLibraryLookup interface {
 	GetItemsInFolder(ctx context.Context, contentIDs []string, folderID int) (map[string]bool, error)
+	// FilterAccessibleContentIDs returns the subset of contentIDs the viewer
+	// may access given their library scope and content-rating ceiling.
+	FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string) (map[string]bool, error)
 }
 
 // ProgressHandler handles watch progress and sync endpoints.
@@ -102,6 +106,25 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
 		return
 	}
+
+	// Drop entries the viewer can't access before they reach the client.
+	// Without this, a library-restricted profile receives progress rows for
+	// items outside its scope (e.g. an XXX title) and the client then fans out
+	// per-item detail fetches that 404 — a dead Continue Watching tile. Only
+	// runs for restricted profiles; unrestricted viewers are unaffected.
+	if scope, ok := access.GetScope(r.Context()); ok &&
+		(scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.MaxContentRating != "") {
+		if h.LibraryLookup == nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+			return
+		}
+		entries, err = filterProgressEntriesByAccess(r.Context(), entries, scope, h.LibraryLookup)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
+			return
+		}
+	}
+
 	if libraryID > 0 {
 		if h.LibraryLookup == nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply library filter")
@@ -167,6 +190,39 @@ func filterProgressEntriesByLibrary(
 	filtered := make([]userstore.WatchProgress, 0, len(entries))
 	for _, entry := range entries {
 		if allowed[entry.MediaItemID] {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	return filtered, nil
+}
+
+// filterProgressEntriesByAccess removes progress entries whose item falls
+// outside the viewer's access scope (allowed/disabled libraries and the
+// content-rating ceiling).
+func filterProgressEntriesByAccess(
+	ctx context.Context,
+	entries []userstore.WatchProgress,
+	scope access.Scope,
+	lookup ProgressLibraryLookup,
+) ([]userstore.WatchProgress, error) {
+	if len(entries) == 0 {
+		return entries, nil
+	}
+
+	contentIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		contentIDs = append(contentIDs, entry.MediaItemID)
+	}
+
+	accessible, err := lookup.FilterAccessibleContentIDs(ctx, contentIDs, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaxContentRating)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]userstore.WatchProgress, 0, len(entries))
+	for _, entry := range entries {
+		if accessible[entry.MediaItemID] {
 			filtered = append(filtered, entry)
 		}
 	}
