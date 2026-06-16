@@ -450,6 +450,12 @@ func TestDiscoveryQueries_ExcludeHiddenRecommendations(t *testing.T) {
 			if !strings.Contains(tc.query, "uhr.media_item_id = mi.content_id") {
 				t.Fatalf("expected hidden exclusion correlated on mi.content_id, got:\n%s", tc.query)
 			}
+			if !strings.Contains(tc.query, "uhr.user_id = $") {
+				t.Fatalf("expected hidden exclusion scoped by user_id placeholder, got:\n%s", tc.query)
+			}
+			if !strings.Contains(tc.query, "uhr.profile_id = $") {
+				t.Fatalf("expected hidden exclusion scoped by profile_id placeholder, got:\n%s", tc.query)
+			}
 		})
 	}
 }

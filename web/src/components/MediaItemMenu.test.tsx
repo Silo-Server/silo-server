@@ -170,6 +170,24 @@ describe("buildMediaItemMenuModel", () => {
     expect(actions.some((item) => item.label === "Remove from Continue Listening")).toBe(true);
   });
 
+  it("shows 'Show in Recommendations' when already hidden", () => {
+    const labels = buildMediaItemMenuModel({
+      mediaType: "movie",
+      userState: {
+        played: false,
+        is_favorite: false,
+        in_watchlist: false,
+        is_hidden: true,
+      },
+      isAdmin: false,
+    })
+      .filter((item) => item.kind === "action")
+      .map((item) => item.label);
+
+    expect(labels).toContain("Show in Recommendations");
+    expect(labels).not.toContain("Not Interested");
+  });
+
   it("does not show play from beginning for non-leaf items", () => {
     const model = buildMediaItemMenuModel({
       mediaType: "series",

@@ -63,11 +63,15 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, use
 	// watched + "not interested" items when viewer identity is known.
 	excludeIDs := []string{itemID}
 	if userID > 0 && profileID != "" {
+		// Fail closed: if the exclusion lookup errors, surface it rather than
+		// returning recommendations that may include watched or "not
+		// interested" items.
 		watchedSet, err := e.repo.GetWatchedItemIDSet(ctx, userID, profileID)
-		if err == nil {
-			for id := range watchedSet {
-				excludeIDs = append(excludeIDs, id)
-			}
+		if err != nil {
+			return nil, fmt.Errorf("get watched/hidden item IDs: %w", err)
+		}
+		for id := range watchedSet {
+			excludeIDs = append(excludeIDs, id)
 		}
 	}
 

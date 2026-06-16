@@ -1796,10 +1796,11 @@ func (r *Repo) GetWatchedItemIDSetFromStore(ctx context.Context, store userstore
 	// recommendations as if they had already been watched.
 	if hidden, ok := store.(userstore.HiddenRecommendationStore); ok {
 		hiddenSet, err := hidden.HiddenRecommendationIDSet(ctx, profileID)
-		if err == nil {
-			for id := range hiddenSet {
-				rawIDs = append(rawIDs, id)
-			}
+		if err != nil {
+			return nil, fmt.Errorf("get hidden recommendation IDs: %w", err)
+		}
+		for id := range hiddenSet {
+			rawIDs = append(rawIDs, id)
 		}
 	}
 

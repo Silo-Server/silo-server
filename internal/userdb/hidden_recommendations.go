@@ -14,6 +14,8 @@ type HiddenRecommendation = userstore.HiddenRecommendation
 
 // AddHiddenRecommendation marks a media item as "not interested" for a profile.
 // If the item is already hidden, the operation is a no-op.
+// AddHiddenRecommendation marks an item as "not interested" for the profile.
+// It is idempotent (INSERT OR IGNORE).
 func AddHiddenRecommendation(db *sql.DB, profileID, mediaItemID string) error {
 	_, err := db.Exec(
 		`INSERT OR IGNORE INTO hidden_recommendations (profile_id, media_item_id, hidden_at) VALUES (?, ?, ?)`,
@@ -23,6 +25,7 @@ func AddHiddenRecommendation(db *sql.DB, profileID, mediaItemID string) error {
 }
 
 // RemoveHiddenRecommendation un-hides a media item for a profile.
+// RemoveHiddenRecommendation un-hides an item so it can be recommended again.
 func RemoveHiddenRecommendation(db *sql.DB, profileID, mediaItemID string) error {
 	_, err := db.Exec(
 		`DELETE FROM hidden_recommendations WHERE profile_id = ? AND media_item_id = ?`,
@@ -33,6 +36,8 @@ func RemoveHiddenRecommendation(db *sql.DB, profileID, mediaItemID string) error
 
 // ListHiddenRecommendations returns a paginated list of hidden items for a
 // profile, ordered by most-recently-hidden first.
+// ListHiddenRecommendations returns the profile's hidden items, most recently
+// hidden first, paginated by limit/offset.
 func ListHiddenRecommendations(db *sql.DB, profileID string, limit, offset int) ([]HiddenRecommendation, error) {
 	rows, err := db.Query(
 		`SELECT profile_id, media_item_id, hidden_at FROM hidden_recommendations
@@ -56,6 +61,7 @@ func ListHiddenRecommendations(db *sql.DB, profileID string, limit, offset int) 
 }
 
 // IsHiddenRecommendation checks whether a media item is hidden for a profile.
+// IsHiddenRecommendation reports whether the profile has hidden the item.
 func IsHiddenRecommendation(db *sql.DB, profileID, mediaItemID string) (bool, error) {
 	var count int
 	err := db.QueryRow(
@@ -65,6 +71,8 @@ func IsHiddenRecommendation(db *sql.DB, profileID, mediaItemID string) (bool, er
 	return count > 0, err
 }
 
+// ListHiddenRecommendationsByMediaItems returns, for the given item IDs, which
+// ones the profile has hidden (keyed by media item ID, value true).
 func ListHiddenRecommendationsByMediaItems(db *sql.DB, profileID string, mediaItemIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(mediaItemIDs))
 	if len(mediaItemIDs) == 0 {
@@ -98,6 +106,8 @@ func ListHiddenRecommendationsByMediaItems(db *sql.DB, profileID string, mediaIt
 	return result, rows.Err()
 }
 
+// HiddenRecommendationIDSet returns the full set of media item IDs the profile
+// has hidden, used to exclude them from recommendation and discovery surfaces.
 func HiddenRecommendationIDSet(db *sql.DB, profileID string) (map[string]struct{}, error) {
 	rows, err := db.Query(
 		`SELECT media_item_id FROM hidden_recommendations WHERE profile_id = ?`,

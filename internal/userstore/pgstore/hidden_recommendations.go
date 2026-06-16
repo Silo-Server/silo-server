@@ -11,6 +11,8 @@ import (
 
 // --- Hidden recommendations ("not interested") ---
 
+// AddHiddenRecommendation marks an item as "not interested" for the profile.
+// It is idempotent: re-hiding an already-hidden item is a no-op.
 func (s *PostgresUserStore) AddHiddenRecommendation(ctx context.Context, profileID, mediaItemID string) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO user_hidden_recommendations (user_id, profile_id, media_item_id, hidden_at)
@@ -21,6 +23,7 @@ func (s *PostgresUserStore) AddHiddenRecommendation(ctx context.Context, profile
 	return err
 }
 
+// RemoveHiddenRecommendation un-hides an item so it can be recommended again.
 func (s *PostgresUserStore) RemoveHiddenRecommendation(ctx context.Context, profileID, mediaItemID string) error {
 	_, err := s.pool.Exec(ctx,
 		`DELETE FROM user_hidden_recommendations WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
@@ -29,6 +32,8 @@ func (s *PostgresUserStore) RemoveHiddenRecommendation(ctx context.Context, prof
 	return err
 }
 
+// ListHiddenRecommendations returns the profile's hidden items, most recently
+// hidden first, paginated by limit/offset.
 func (s *PostgresUserStore) ListHiddenRecommendations(ctx context.Context, profileID string, limit, offset int) ([]userstore.HiddenRecommendation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT profile_id, media_item_id, hidden_at FROM user_hidden_recommendations
@@ -53,6 +58,7 @@ func (s *PostgresUserStore) ListHiddenRecommendations(ctx context.Context, profi
 	return hidden, rows.Err()
 }
 
+// IsHiddenRecommendation reports whether the profile has hidden the item.
 func (s *PostgresUserStore) IsHiddenRecommendation(ctx context.Context, profileID, mediaItemID string) (bool, error) {
 	var count int
 	err := s.pool.QueryRow(ctx,
@@ -62,6 +68,8 @@ func (s *PostgresUserStore) IsHiddenRecommendation(ctx context.Context, profileI
 	return count > 0, err
 }
 
+// ListHiddenRecommendationsByMediaItems returns, for the given item IDs, which
+// ones the profile has hidden (keyed by media item ID, value true).
 func (s *PostgresUserStore) ListHiddenRecommendationsByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(mediaItemIDs))
 	if len(mediaItemIDs) == 0 {
@@ -96,6 +104,8 @@ func (s *PostgresUserStore) ListHiddenRecommendationsByMediaItems(ctx context.Co
 	return result, rows.Err()
 }
 
+// HiddenRecommendationIDSet returns the full set of media item IDs the profile
+// has hidden, used to exclude them from recommendation and discovery surfaces.
 func (s *PostgresUserStore) HiddenRecommendationIDSet(ctx context.Context, profileID string) (map[string]struct{}, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT media_item_id FROM user_hidden_recommendations WHERE user_id = $1 AND profile_id = $2`,

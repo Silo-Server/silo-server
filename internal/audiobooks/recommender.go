@@ -43,10 +43,14 @@ func (r *ABSRecommender) Similar(ctx context.Context, contentID string, limit in
 		if emb, err := r.Recs.GetEmbedding(ctx, contentID); err == nil && emb != nil {
 			excludeIDs := []string{contentID}
 			if viewerID > 0 && profileID != "" {
-				if hidden, err := r.Recs.GetWatchedItemIDSet(ctx, viewerID, profileID); err == nil {
-					for id := range hidden {
-						excludeIDs = append(excludeIDs, id)
-					}
+				// Fail closed so a lookup error doesn't surface watched or
+				// "not interested" audiobooks in the Similar rail.
+				hidden, err := r.Recs.GetWatchedItemIDSet(ctx, viewerID, profileID)
+				if err != nil {
+					return nil, fmt.Errorf("abs recommender: watched/hidden set: %w", err)
+				}
+				for id := range hidden {
+					excludeIDs = append(excludeIDs, id)
 				}
 			}
 			scored, err := r.Recs.FindSimilar(ctx, emb, excludeIDs, "audiobook", limit*3)

@@ -108,6 +108,9 @@ CREATE TABLE IF NOT EXISTS hidden_recommendations (
     PRIMARY KEY (profile_id, media_item_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_hidden_recommendations_profile_hidden_at
+    ON hidden_recommendations(profile_id, hidden_at DESC);
+
 CREATE TABLE IF NOT EXISTS home_item_dismissals (
     profile_id TEXT NOT NULL,
     surface TEXT NOT NULL,
