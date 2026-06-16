@@ -7,13 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
+	"github.com/Silo-Server/silo-server/internal/cache"
 )
+
+// absTokenTouchThrottle bounds how often a token's last_seen_at is refreshed.
+// TouchToken fires on every authenticated /abs/* request and updates a single
+// per-token row; without throttling a request burst serialized on that row's
+// lock (the same hot-row pattern as device last_seen).
+const absTokenTouchThrottle = 5 * time.Minute
 
 // ABSSessionStore implements abs.TokenStore on the abs_sessions table
 // (migration 147). Each JTI is stored as a SHA-256 `token_hash`; revocation
@@ -21,6 +29,9 @@ import (
 // string UserID from ABSToken back to int.
 type ABSSessionStore struct {
 	Pool *pgxpool.Pool
+
+	touchOnce sync.Once
+	touched   *cache.TTLCache[struct{}]
 }
 
 // InsertToken inserts a newly minted JTI into abs_sessions.
@@ -143,9 +154,17 @@ func (s *ABSSessionStore) RevokeTokensForPrincipal(ctx context.Context, userID, 
 // TouchToken bumps last_seen_at for active-session bookkeeping.
 // Errors are logged by the caller; we never gate a valid request on this.
 func (s *ABSSessionStore) TouchToken(ctx context.Context, jti string) error {
+	hash := absTokenHash(jti)
+	s.touchOnce.Do(func() { s.touched = cache.NewTTLCache[struct{}]() })
+	if _, seen := s.touched.Get(hash); seen {
+		// last_seen_at was refreshed within the throttle window; skip the
+		// per-request hot-row UPDATE.
+		return nil
+	}
+	s.touched.Set(hash, struct{}{}, absTokenTouchThrottle)
 	_, err := s.Pool.Exec(ctx, `
 		UPDATE abs_sessions SET last_seen_at = now()
-		WHERE token_hash = $1`, absTokenHash(jti))
+		WHERE token_hash = $1`, hash)
 	if err != nil {
 		return fmt.Errorf("abs_session_store: touch token: %w", err)
 	}

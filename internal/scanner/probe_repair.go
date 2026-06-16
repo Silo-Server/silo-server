@@ -31,20 +31,23 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}
-	if strings.TrimSpace(file.CodecVideo) == "" {
-		return true
-	}
 	if strings.TrimSpace(file.CodecAudio) == "" {
-		return true
-	}
-	if strings.TrimSpace(file.Resolution) == "" {
-		return true
-	}
-	if len(file.VideoTracks) == 0 {
 		return true
 	}
 	if len(file.AudioTracks) == 0 {
 		return true
+	}
+	// Video metadata is playback-critical only for files that actually carry a
+	// video stream. Audio-only files (audiobooks, music) legitimately probe to
+	// zero video tracks and an empty video codec/resolution; treating that as
+	// "needs repair" re-ran ffprobe on every playback decision (applyProbeData
+	// only populates video fields under a "video" stream), so an audio-only
+	// file would never satisfy the check. Only demand video fields when the
+	// file was found to have a video stream.
+	if len(file.VideoTracks) > 0 {
+		if strings.TrimSpace(file.CodecVideo) == "" || strings.TrimSpace(file.Resolution) == "" {
+			return true
+		}
 	}
 	if file.Chapters == nil {
 		return true

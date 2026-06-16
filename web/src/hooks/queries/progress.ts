@@ -95,9 +95,17 @@ export function useReportMediaProgress() {
           ],
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // Progress genuinely changed → refresh progress-derived surfaces
+      // (continue-watching etc.). Scope the catalog invalidation to THIS item's
+      // detail rather than all of `catalog`: a progress report fires every ~10s
+      // during playback, and invalidating catalogKeys.all refetched every active
+      // browse/detail query — including the large audiobook author/narrator
+      // group lists — on every tick.
       queryClient.invalidateQueries({ queryKey: progressKeys.all });
-      queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: ["catalog", "items", variables.contentId, "detail"],
+      });
     },
   });
 }

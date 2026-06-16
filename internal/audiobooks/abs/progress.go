@@ -3,6 +3,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -358,9 +359,12 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 	// Update position in user_watch_progress. Must NOT be a full upsert —
 	// see comment in handleSetItemProgress re: not overwriting is_finished.
 	if h.deps.ProgressStore != nil {
-		_ = h.deps.ProgressStore.UpdateProgressPosition(
+		if err := h.deps.ProgressStore.UpdateProgressPosition(
 			r.Context(), a.UserID, a.ProfileID, sess.ContentID, p.CurrentTime,
-		)
+		); err != nil {
+			slog.Warn("abs session sync: update progress position failed",
+				"session_id", sid, "content_id", sess.ContentID, "error", err)
+		}
 	}
 
 	// Realtime push to other connected clients.

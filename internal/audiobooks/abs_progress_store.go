@@ -172,20 +172,26 @@ func (s *ABSProgressStore) UpsertProgress(ctx context.Context, row abs.ProgressR
 	return nil
 }
 
-// UpdateProgressPosition updates only the position_seconds column for an
-// existing row. If no row exists this is a no-op (the session-sync path
-// that calls this only needs to move the cursor, not create a progress row
-// for the first time; that's done when the user explicitly sets progress).
+// UpdateProgressPosition advances the resume cursor from a session-sync tick.
+// It is monotonic and finish-preserving: position only moves forward
+// (GREATEST), a completed row is never moved or un-finished, and a row is
+// created on first listen so a sync that arrives before any explicit progress
+// report still records a resume point. Without the GREATEST guard an
+// out-of-order tick or a second device rewound the saved position; without the
+// insert, first-listen resume was lost entirely.
 func (s *ABSProgressStore) UpdateProgressPosition(ctx context.Context, userID, profileID, contentID string, positionSeconds float64) error {
 	uid, err := strconv.Atoi(userID)
 	if err != nil {
 		return fmt.Errorf("abs_progress_store: invalid user_id %q: %w", userID, err)
 	}
 	_, err = s.Pool.Exec(ctx, `
-		UPDATE user_watch_progress
-		SET position_seconds = $4,
-		    updated_at       = now()
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		INSERT INTO user_watch_progress
+		  (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		VALUES ($1, $2, $3, $4, 0, false, now())
+		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
+		  position_seconds = GREATEST(user_watch_progress.position_seconds, EXCLUDED.position_seconds),
+		  updated_at       = now()
+		WHERE NOT user_watch_progress.completed`,
 		uid, profileID, contentID, positionSeconds,
 	)
 	if err != nil {

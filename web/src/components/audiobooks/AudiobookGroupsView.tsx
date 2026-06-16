@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { AudiobookGroup } from "@/api/types";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,9 @@ import {
   type AudiobookGroupSort,
 } from "@/hooks/queries/audiobookGroups";
 import { formatHoursMinutes } from "@/lib/audiobooks/duration";
+
+// Number of groups rendered per reveal step (initial paint + each scroll grow).
+const GROUPS_REVEAL_BATCH = 120;
 
 interface AudiobookGroupsViewProps {
   libraryId: number;
@@ -135,6 +138,37 @@ export default function AudiobookGroupsView({
     return all.filter((group) => group.name.toLowerCase().includes(needle));
   }, [data?.groups, filter]);
 
+  // Incremental reveal: a large audiobook library can have tens of thousands of
+  // authors/narrators. Rendering them all at once mounts tens of thousands of
+  // DOM nodes (+ cover images) and freezes the main thread on load. Render a
+  // capped window and grow it as the user scrolls toward the end, so initial
+  // paint is bounded regardless of library size.
+  const [visibleCount, setVisibleCount] = useState(GROUPS_REVEAL_BATCH);
+  useEffect(() => {
+    setVisibleCount(GROUPS_REVEAL_BATCH);
+  }, [filter, sort, groupBy, libraryId]);
+  const visibleGroups = useMemo(
+    () => groups.slice(0, visibleCount),
+    [groups, visibleCount],
+  );
+  const hasMore = visibleCount < groups.length;
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((count) => count + GROUPS_REVEAL_BATCH);
+        }
+      },
+      { rootMargin: "800px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, groups.length]);
+
   const noun = GROUP_NOUN[groupBy];
   const isSeries = groupBy === "series";
 
@@ -187,7 +221,7 @@ export default function AudiobookGroupsView({
         </p>
       ) : isSeries ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <button
               key={group.name}
               type="button"
@@ -208,7 +242,7 @@ export default function AudiobookGroupsView({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <button
               key={group.name}
               type="button"
@@ -227,6 +261,7 @@ export default function AudiobookGroupsView({
           ))}
         </div>
       )}
+      {!isLoading && hasMore && <div ref={sentinelRef} aria-hidden className="h-1" />}
     </div>
   );
 }
