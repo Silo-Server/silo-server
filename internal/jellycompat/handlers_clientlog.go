@@ -6,9 +6,9 @@ import (
 )
 
 // maxClientLogBytes bounds how much of a client log upload we read before
-// discarding it, mirroring Jellyfin's MaxDocumentSize (1 MiB). Anything larger
-// is rejected with 413, matching Jellyfin's ClientLogController contract.
-const maxClientLogBytes = 1 << 20
+// discarding it, matching Jellyfin's ClientLogController.MaxDocumentSize
+// (1,000,000 bytes). Anything larger is rejected with 413.
+const maxClientLogBytes = 1_000_000
 
 // clientLogDocumentResponse mirrors Jellyfin's ClientLogDocumentResponseDto.
 // Some clients parse FileName from the 200 response, so it must be present.
