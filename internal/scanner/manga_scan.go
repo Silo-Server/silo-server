@@ -291,7 +291,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 		}
 	}
 
-	slog.Info("manga scan: indexed",
+	slog.Debug("manga scan: indexed",
 		"folder_id", folder.ID,
 		"chapter_id", chapterID,
 		"series_id", seriesID,
