@@ -22,6 +22,7 @@ type testCompatSessionManager struct {
 	audioTrackCalls []compatAudioTrackCall
 	progressCalls   int
 	stopCalls       []string
+	startCalls      int
 }
 
 type compatAudioTrackCall struct {
@@ -31,6 +32,7 @@ type compatAudioTrackCall struct {
 }
 
 func (m *testCompatSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
+	m.startCalls++
 	session := &playback.Session{
 		ID:             "upstream-started",
 		UserID:         userID,

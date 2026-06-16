@@ -121,6 +121,33 @@ func TestHandleVideoStream_NoStaticNoSessionReturns404(t *testing.T) {
 	}
 }
 
+// TestHandleVideoStream_StaticDirectPlayReusesSessionAcrossRequests proves the
+// ghost-session fix: a Static=true direct play repeats the client's own
+// (server-unknown) PlaySessionId on every range request. These must reuse one
+// upstream session via route lookup instead of minting a fresh, separately
+// stream-capped session per request — the leak that piled up orphaned sessions
+// and tripped the per-user stream limit (429). StartSession must run exactly
+// once across the repeated requests.
+func TestHandleVideoStream_StaticDirectPlayReusesSessionAcrossRequests(t *testing.T) {
+	handler, encodedID, body := newStaticDirectPlayHandler(t)
+	mgr := handler.sessionMgr.(*testCompatSessionManager)
+
+	const clientPlaySessionID = "client-generated-psid"
+	for i := 0; i < 3; i++ {
+		rec := serveStaticStream(handler, encodedID, "Static=true&PlaySessionId="+clientPlaySessionID)
+		if rec.Code != 200 {
+			t.Fatalf("request %d: expected 200; got %d, body=%s", i, rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != body {
+			t.Fatalf("request %d: expected file content %q; got %q", i, body, got)
+		}
+	}
+
+	if mgr.startCalls != 1 {
+		t.Fatalf("StartSession ran %d times across 3 Static requests with the same PlaySessionId; want 1 (sessions must be reused, not leaked)", mgr.startCalls)
+	}
+}
+
 // serveStaticStream issues a GET /Videos/{id}/stream with the given raw query
 // (no leading "?"), the chi "id" route param, and a compat session in context.
 func serveStaticStream(handler *PlaybackHandler, encodedID, rawQuery string) *httptest.ResponseRecorder {

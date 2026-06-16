@@ -1191,15 +1191,21 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
 	if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" {
-		playSession, ok := h.playbackStore.Get(playSessionID)
-		if !ok || playSession.CompatToken != compatSession.Token {
-			return nil, nil, ErrSessionNotFound
+		if playSession, ok := h.playbackStore.Get(playSessionID); ok && playSession.CompatToken == compatSession.Token {
+			if mediaSourceID != "" {
+				source := findMediaSource(playSession, mediaSourceID)
+				return playSession, source, nil
+			}
+			return playSession, firstMediaSource(playSession), nil
 		}
-		if mediaSourceID != "" {
-			source := findMediaSource(playSession, mediaSourceID)
-			return playSession, source, nil
-		}
-		return playSession, firstMediaSource(playSession), nil
+		// The PlaySessionId is unknown to us (the client never called PlaybackInfo,
+		// so it is the client's own id) or belongs to another caller. Fall through
+		// to route-based reuse below instead of erroring: a Static=true direct play
+		// repeats this same client id on every range request, and minting a fresh,
+		// separately stream-capped upstream session each time piles up orphaned
+		// sessions that trip the per-user stream limit (429). Route reuse keeps one
+		// session per direct play. (Reuse stays scoped to this caller's CompatToken
+		// via FindByRoute, so a guessed/foreign id cannot bind another user's session.)
 	}
 
 	playSession, source, ok := h.playbackStore.FindByRoute(compatSession.Token, routeID)
