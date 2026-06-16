@@ -17,8 +17,9 @@ import (
 )
 
 type CatalogHandler struct {
-	resolver *catalog.CatalogResolver
-	itemsH   *ItemsHandler
+	resolver    *catalog.CatalogResolver
+	itemsH      *ItemsHandler
+	workSummary catalog.WorkSummaryProvider
 }
 
 func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) *CatalogHandler {
@@ -26,6 +27,10 @@ func NewCatalogHandler(resolver *catalog.CatalogResolver, itemsH *ItemsHandler) 
 		resolver: resolver,
 		itemsH:   itemsH,
 	}
+}
+
+func (h *CatalogHandler) SetWorkSummaryProvider(provider catalog.WorkSummaryProvider) {
+	h.workSummary = provider
 }
 
 type catalogResponse struct {
@@ -62,8 +67,36 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	accessFilter := h.itemsH.accessFilter(r)
+	groupedByWork := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("group")), "work")
+	if groupedByWork {
+		result, entries, err := h.resolveGroupedCatalogByWork(r, req, accessFilter)
+		if err != nil {
+			if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+				writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+				return
+			}
+			if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
+				return
+			}
+			slog.Error("catalog: resolve grouped by work failed", "err_msg", err.Error())
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
+			return
+		}
 
-	result, err := h.resolver.Resolve(r.Context(), req, h.itemsH.accessFilter(r))
+		resultItems := groupedCatalogItems(entries)
+		items := h.catalogItemResponses(r, resultItems, catalog.NormalizeQuerySort(req.Query.Sort).Field, accessFilter)
+		for i := range items {
+			if i < len(entries) && entries[i].summary != nil {
+				applyWorkSummaryToCatalogItem(&items[i], entries[i].summary)
+			}
+		}
+		h.writeCatalogResponse(w, result, items, groupedByWork)
+		return
+	}
+
+	result, err := h.resolver.Resolve(r.Context(), req, accessFilter)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -77,24 +110,27 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
 		return
 	}
+	items := h.catalogItemResponses(r, result.Items, catalog.NormalizeQuerySort(req.Query.Sort).Field, accessFilter)
+	h.writeCatalogResponse(w, result, items, groupedByWork)
+}
 
-	overlaySummaries := h.itemsH.listOverlaySummaries(r.Context(), result.Items, h.itemsH.accessFilter(r))
-	userStates := h.itemsH.listItemUserStates(r, result.Items)
-	episodeMetadata := h.itemsH.listEpisodeBrowseMetadata(r.Context(), result.Items)
-	sortField := catalog.NormalizeQuerySort(req.Query.Sort).Field
+func (h *CatalogHandler) catalogItemResponses(r *http.Request, resultItems []*models.MediaItem, sortField string, accessFilter catalog.AccessFilter) []itemListResponse {
+	overlaySummaries := h.itemsH.listOverlaySummaries(r.Context(), resultItems, accessFilter)
+	userStates := h.itemsH.listItemUserStates(r, resultItems)
+	episodeMetadata := h.itemsH.listEpisodeBrowseMetadata(r.Context(), resultItems)
 	store, profileID, _ := h.itemsH.userStoreForRequest(r)
 	sortMetrics := h.itemsH.listSortMetrics(
 		r.Context(),
-		result.Items,
+		resultItems,
 		sortField,
-		h.itemsH.accessFilter(r),
+		accessFilter,
 		overlaySummaries,
 		store,
 		apimw.GetUserID(r.Context()),
 		profileID,
 	)
-	items := make([]itemListResponse, 0, len(result.Items))
-	for _, item := range result.Items {
+	items := make([]itemListResponse, 0, len(resultItems))
+	for _, item := range resultItems {
 		resp := h.itemsH.toItemListResponseWithOverlay(
 			r,
 			item,
@@ -109,7 +145,10 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
 	}
+	return items
+}
 
+func (h *CatalogHandler) writeCatalogResponse(w http.ResponseWriter, result *catalog.CatalogResult, items []itemListResponse, groupedByWork bool) {
 	var snapshot string
 	if !result.SnapshotAt.IsZero() {
 		snapshot = result.SnapshotAt.Format(time.RFC3339Nano)
@@ -117,11 +156,162 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, catalogResponse{
 		Total:      result.Total,
-		TotalExact: result.TotalExact,
+		TotalExact: result.TotalExact && !groupedByWork,
 		HasMore:    result.HasMore,
 		Items:      items,
 		Snapshot:   snapshot,
 	})
+}
+
+type groupedCatalogEntry struct {
+	item    *models.MediaItem
+	summary *catalog.WorkSummary
+}
+
+func (h *CatalogHandler) resolveGroupedCatalogByWork(r *http.Request, req catalog.CatalogRequest, accessFilter catalog.AccessFilter) (*catalog.CatalogResult, []groupedCatalogEntry, error) {
+	fetchReq := req
+	fetchReq.Offset = 0
+	fetchReq.Limit = groupedCatalogFetchLimit(req.Limit)
+	fetchReq.SkipTotal = true
+
+	seen := map[string]struct{}{}
+	entries := make([]groupedCatalogEntry, 0, req.Limit+1)
+	groupIndex := 0
+	var snapshot time.Time
+
+	for {
+		result, err := h.resolver.Resolve(r.Context(), fetchReq, accessFilter)
+		if err != nil {
+			return nil, nil, err
+		}
+		if snapshot.IsZero() {
+			snapshot = result.SnapshotAt
+			if !snapshot.IsZero() {
+				fetchReq.SnapshotAt = &snapshot
+			}
+		}
+		summaries, err := h.workSummariesForItems(r, result.Items, accessFilter)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, item := range result.Items {
+			summary := summaries[item.ContentID]
+			key := groupedCatalogEntryKey(item, summary)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			if groupIndex >= req.Offset {
+				entries = append(entries, groupedCatalogEntry{item: item, summary: summary})
+			}
+			groupIndex++
+			if len(entries) > req.Limit {
+				break
+			}
+		}
+		if len(entries) > req.Limit || !result.HasMore || len(result.Items) == 0 {
+			break
+		}
+		fetchReq.Offset += len(result.Items)
+	}
+
+	hasMore := len(entries) > req.Limit
+	if hasMore {
+		entries = entries[:req.Limit]
+	}
+	total := req.Offset + len(entries)
+	if hasMore {
+		total++
+	}
+	result := &catalog.CatalogResult{
+		Items:      groupedCatalogItems(entries),
+		Total:      total,
+		HasMore:    hasMore,
+		TotalExact: false,
+		SnapshotAt: snapshot,
+	}
+	return result, entries, nil
+}
+
+func groupedCatalogFetchLimit(limit int) int {
+	switch {
+	case limit <= 0:
+		return 100
+	case limit >= 100:
+		return 100
+	default:
+		return min(100, limit*4+10)
+	}
+}
+
+func (h *CatalogHandler) workSummariesForItems(r *http.Request, items []*models.MediaItem, filter catalog.AccessFilter) (map[string]*catalog.WorkSummary, error) {
+	summaries := map[string]*catalog.WorkSummary{}
+	if h == nil || h.workSummary == nil || len(items) == 0 {
+		return summaries, nil
+	}
+	contentIDs := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		if !catalogItemCanGroupByWork(item) {
+			continue
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		contentIDs = append(contentIDs, item.ContentID)
+	}
+	if len(contentIDs) == 0 {
+		return summaries, nil
+	}
+	if batch, ok := h.workSummary.(catalog.WorkSummaryBatchProvider); ok {
+		return batch.ListSummariesForContentIDs(r.Context(), contentIDs, filter)
+	}
+	for _, contentID := range contentIDs {
+		summary, err := h.workSummary.GetSummaryForContentID(r.Context(), contentID, filter)
+		if err != nil {
+			return nil, err
+		}
+		if summary != nil && summary.WorkID != "" {
+			summaries[contentID] = summary
+		}
+	}
+	return summaries, nil
+}
+
+func groupedCatalogItems(entries []groupedCatalogEntry) []*models.MediaItem {
+	items := make([]*models.MediaItem, 0, len(entries))
+	for _, entry := range entries {
+		items = append(items, entry.item)
+	}
+	return items
+}
+
+func groupedCatalogEntryKey(item *models.MediaItem, summary *catalog.WorkSummary) string {
+	if catalogItemCanGroupByWork(item) && summary != nil && summary.WorkID != "" {
+		return "work:" + summary.WorkID
+	}
+	if item == nil {
+		return "item:"
+	}
+	return "item:" + item.ContentID
+}
+
+func catalogItemCanGroupByWork(item *models.MediaItem) bool {
+	return item != nil && (item.Type == "ebook" || item.Type == "audiobook")
+}
+
+func applyWorkSummaryToCatalogItem(item *itemListResponse, summary *catalog.WorkSummary) {
+	if item == nil || summary == nil || summary.WorkID == "" {
+		return
+	}
+	item.Type = "work"
+	item.WorkID = summary.WorkID
+	item.WorkTitle = summary.Title
+	item.WorkFormats = summary.Formats
+	if summary.Title != "" {
+		item.Title = summary.Title
+	}
 }
 
 func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.Request) {

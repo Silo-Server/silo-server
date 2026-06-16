@@ -80,8 +80,13 @@ type Enricher struct {
 	personRepo  *catalog.PersonRepository
 	providerIDs *catalog.ProviderIDRepository
 	imageCacher metadata.ImageCacher
+	workLinker  literaryWorkLinker
 	batchSize   int
 	workers     int
+}
+
+type literaryWorkLinker interface {
+	AutoLinkContent(ctx context.Context, contentID string) (workID string, linked bool, err error)
 }
 
 func NewEnricher(
@@ -109,6 +114,13 @@ func (e *Enricher) SetImageCacher(cacher metadata.ImageCacher) {
 		return
 	}
 	e.imageCacher = cacher
+}
+
+func (e *Enricher) SetLiteraryWorkLinker(linker literaryWorkLinker) {
+	if e == nil {
+		return
+	}
+	e.workLinker = linker
 }
 
 func (e *Enricher) Run(ctx context.Context) (int, error) {
@@ -330,6 +342,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
 	}
+	e.autoLinkLiteraryWork(ctx, item.ContentID)
 
 	slog.Info("ebook enrichment: enriched",
 		"content_id", item.ContentID,
@@ -416,6 +429,20 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 	}
 
 	return accumulator, accumulator.ProviderIDs, providerErrs
+}
+
+func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
+	if e == nil || e.workLinker == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	workID, linked, err := e.workLinker.AutoLinkContent(ctx, contentID)
+	if err != nil {
+		slog.Warn("ebook enrichment: literary work auto-link failed", "content_id", contentID, "error", err)
+		return
+	}
+	if linked {
+		slog.Info("ebook enrichment: literary work auto-linked", "content_id", contentID, "work_id", workID)
+	}
 }
 
 func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, result *metadata.MetadataResult) {

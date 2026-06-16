@@ -61,6 +61,26 @@ type expiringImageResolver interface {
 	ResolveImageURLsWithExpiry(ctx context.Context, paths []string, variant string) map[string]ResolvedImageURL
 }
 
+type WorkSummaryProvider interface {
+	GetSummaryForContentID(ctx context.Context, contentID string, filter AccessFilter) (*WorkSummary, error)
+}
+
+type WorkSummaryBatchProvider interface {
+	ListSummariesForContentIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]*WorkSummary, error)
+}
+
+type WorkSummary struct {
+	WorkID  string
+	Title   string
+	Formats []WorkFormatSummary
+}
+
+type WorkFormatSummary struct {
+	Type      string `json:"type"`
+	ContentID string `json:"content_id"`
+	LibraryID int    `json:"library_id,omitempty"`
+}
+
 // ItemDetail is the full detail response for a single media item, including
 // metadata, file versions, subtitles, intro/credits markers, and presigned image URLs.
 type ItemDetail struct {
@@ -107,6 +127,11 @@ type ItemDetail struct {
 	BackdropURL       string `json:"backdrop_url,omitempty"`
 	BackdropThumbhash string `json:"backdrop_thumbhash,omitempty"`
 	LogoURL           string `json:"logo_url,omitempty"`
+
+	// Literary work linkage. Present for linked ebook/audiobook items.
+	WorkID      string              `json:"work_id,omitempty"`
+	WorkTitle   string              `json:"work_title,omitempty"`
+	WorkFormats []WorkFormatSummary `json:"work_formats,omitempty"`
 
 	// Series-specific.
 	SeasonCount *int `json:"season_count,omitempty"`
@@ -497,6 +522,7 @@ type DetailService struct {
 	groupClaimRepo    *GroupClaimRepository
 	imageResolver     ImageResolver
 	userStoreProvider userstore.UserStoreProvider
+	workSummary       WorkSummaryProvider
 	originalLangFn    func(context.Context, string) string
 	probeEnsurer      PlaybackProbeEnsurer
 	chapterThumbs     ChapterThumbnailQueuer
@@ -531,6 +557,12 @@ func (s *DetailService) SetImageResolver(resolver ImageResolver) {
 // SetUserStoreProvider wires in optional per-user preference lookups.
 func (s *DetailService) SetUserStoreProvider(provider userstore.UserStoreProvider) {
 	s.userStoreProvider = provider
+}
+
+func (s *DetailService) SetWorkSummaryProvider(provider WorkSummaryProvider) {
+	if s != nil {
+		s.workSummary = provider
+	}
 }
 
 func (s *DetailService) SetProbeEnsurer(ensurer PlaybackProbeEnsurer) {
@@ -999,7 +1031,21 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 	}
 
+	applyWorkSummary(ctx, detail, s.workSummary, filter)
 	return detail, nil
+}
+
+func applyWorkSummary(ctx context.Context, detail *ItemDetail, provider WorkSummaryProvider, filter AccessFilter) {
+	if detail == nil || provider == nil || detail.ContentID == "" {
+		return
+	}
+	summary, err := provider.GetSummaryForContentID(ctx, detail.ContentID, filter)
+	if err != nil || summary == nil {
+		return
+	}
+	detail.WorkID = summary.WorkID
+	detail.WorkTitle = summary.Title
+	detail.WorkFormats = summary.Formats
 }
 
 // personCredits converts ItemPerson slice to PersonCredit slice with presigned URLs.

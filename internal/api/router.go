@@ -37,6 +37,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
+	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -424,6 +425,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var itemsHandler *handlers.ItemsHandler
 	var catalogResourceHandler *handlers.CatalogResourceHandler
 	var catalogHandler *handlers.CatalogHandler
+	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
 	var itemRepo *catalog.ItemRepository
 	var episodeRepo *catalog.EpisodeRepository
@@ -463,10 +465,13 @@ func NewRouter(deps Dependencies) chi.Router {
 
 		rootClaimRepo := catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo := catalog.NewGroupClaimRepository(deps.DB)
+		literaryRepo := literaryworks.NewRepository(deps.DB)
+		literaryWorkHandler = &handlers.LiteraryWorkHandler{Service: literaryworks.NewService(literaryRepo)}
 		detailSvc = catalog.NewDetailService(itemRepo, episodeRepo, seasonRepo, deps.PersonRepo, fileFetcher)
 		detailSvc.SetFolderRepository(folderRepo)
 		detailSvc.SetRootClaimRepository(rootClaimRepo)
 		detailSvc.SetGroupClaimRepository(groupClaimRepo)
+		detailSvc.SetWorkSummaryProvider(literaryRepo)
 		detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
 		detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
 		if deps.ImageResolver != nil {
@@ -518,6 +523,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				WithUserStoreProvider(deps.UserStoreProvider),
 			itemsHandler,
 		)
+		catalogHandler.SetWorkSummaryProvider(literaryRepo)
 
 		tmdbAPIKey := ""
 		if deps.Config != nil {
@@ -1688,6 +1694,9 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
 					r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
 					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
+					if literaryWorkHandler != nil {
+						r.Get("/works/{work_id}", literaryWorkHandler.HandleGetWork)
+					}
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
 						r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
@@ -2221,6 +2230,13 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
 							r.Get("/server/status", adminHandler.HandleGetServerStatus)
+							if literaryWorkHandler != nil {
+								r.Get("/literary-works/items/{content_id}/candidates", literaryWorkHandler.HandleListCandidates)
+								r.Post("/literary-works/link", literaryWorkHandler.HandleLinkItems)
+								r.Delete("/literary-works/{work_id}/items/{content_id}", literaryWorkHandler.HandleUnlinkItem)
+								r.Post("/literary-works/matches/confirm", literaryWorkHandler.HandleConfirmMatch)
+								r.Post("/literary-works/matches/ignore", literaryWorkHandler.HandleIgnoreMatch)
+							}
 							r.Post("/server/restart", serverControlHandler.HandleRestart)
 							r.Get("/jellyfin-compat/status", adminHandler.HandleGetJellyfinCompatStatus)
 							r.Patch("/jellyfin-compat/settings", adminHandler.HandleUpdateJellyfinCompatSettings)

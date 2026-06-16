@@ -105,22 +105,22 @@ type scannerImageCacher interface {
 }
 
 type Scanner struct {
-	fileRepo            *FileRepository
-	rootSnapshotRepo    *ScannedRootRepository
-	groupSnapshotRepo   *ScannedGroupRepository
-	rootOverrideRepo    *MediaRootOverrideRepository
-	groupOverrideRepo   *MediaGroupOverrideRepository
-	locationRepo        *ObservedLocationRepository
-	groupLocationRepo   *GroupLocationRepository
-	folderRepo          *catalog.FolderRepository
-	libraryRepo         *catalog.LibraryItemRepository
-	episodeLibraryRepo  *catalog.EpisodeLibraryRepository
-	itemRepo            *catalog.ItemRepository
-	personRepo          *catalog.PersonRepository
-	episodeRepo         *catalog.EpisodeRepository
-	ffprobePath string
-	s3Client    *s3client.Client // public assets bucket (may be nil)
-	imageCacher scannerImageCacher
+	fileRepo           *FileRepository
+	rootSnapshotRepo   *ScannedRootRepository
+	groupSnapshotRepo  *ScannedGroupRepository
+	rootOverrideRepo   *MediaRootOverrideRepository
+	groupOverrideRepo  *MediaGroupOverrideRepository
+	locationRepo       *ObservedLocationRepository
+	groupLocationRepo  *GroupLocationRepository
+	folderRepo         *catalog.FolderRepository
+	libraryRepo        *catalog.LibraryItemRepository
+	episodeLibraryRepo *catalog.EpisodeLibraryRepository
+	itemRepo           *catalog.ItemRepository
+	personRepo         *catalog.PersonRepository
+	episodeRepo        *catalog.EpisodeRepository
+	ffprobePath        string
+	s3Client           *s3client.Client // public assets bucket (may be nil)
+	imageCacher        scannerImageCacher
 	// workers is atomic so admin settings changes can resize the per-scan
 	// worker pool while a scan is running (applies to the next scan).
 	workers             atomic.Int32
@@ -129,6 +129,7 @@ type Scanner struct {
 	metadataQueue       MetadataQueueProducer
 	movieQueueSyncer    MovieQueueSyncer
 	seriesQueueSyncer   SeriesQueueSyncer
+	literaryWorkLinker  LiteraryWorkLinker
 }
 
 // SetImageCacher installs the imagecache.Cacher used by book scanners to push
@@ -159,6 +160,17 @@ const scanProgressLogInterval = 10 * time.Second
 type MetadataQueueProducer interface {
 	EnqueueMovieFile(ctx context.Context, fileID int) error
 	EnqueueSeriesRoot(ctx context.Context, folderID int, observedRootPath string) error
+}
+
+type LiteraryWorkLinker interface {
+	AutoLinkContent(ctx context.Context, contentID string) (workID string, linked bool, err error)
+}
+
+func (s *Scanner) SetLiteraryWorkLinker(linker LiteraryWorkLinker) {
+	if s == nil {
+		return
+	}
+	s.literaryWorkLinker = linker
 }
 
 // MovieQueueSyncer synchronizes pending movie-file match queue state from the

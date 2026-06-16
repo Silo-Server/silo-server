@@ -433,7 +433,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	size := info.Size()
 	modifiedAt := normalizeFileModifiedAt(info.ModTime())
 
-	isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
+	existingContentID, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	if skipErr != nil {
 		slog.Warn("ebook scan: skip-check failed, falling through",
 			"folder_id", folder.ID,
@@ -441,6 +441,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 			"error", skipErr,
 		)
 	} else if isUnchanged {
+		s.autoLinkLiteraryWork(ctx, existingContentID)
 		atomic.AddInt64(skipped, 1)
 		return nil
 	}
@@ -486,6 +487,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 			return fmt.Errorf("upsert ebook ISBN provider id: %w", err)
 		}
 	}
+	s.autoLinkLiteraryWork(ctx, contentID)
 	slog.Info("ebook scan: indexed",
 		"folder_id", folder.ID,
 		"content_id", contentID,
@@ -496,35 +498,52 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	return nil
 }
 
-func (s *Scanner) ebookFileShouldSkip(ctx context.Context, folder *models.MediaFolder, filePath string, size int64, modifiedAt time.Time) (bool, error) {
+func (s *Scanner) autoLinkLiteraryWork(ctx context.Context, contentID string) {
+	if s == nil || s.literaryWorkLinker == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	workID, linked, err := s.literaryWorkLinker.AutoLinkContent(ctx, contentID)
+	if err != nil {
+		slog.Warn("literary work auto-link failed", "content_id", contentID, "error", err)
+		return
+	}
+	if linked {
+		slog.Info("literary work auto-linked", "content_id", contentID, "work_id", workID)
+	}
+}
+
+func (s *Scanner) ebookFileShouldSkip(ctx context.Context, folder *models.MediaFolder, filePath string, size int64, modifiedAt time.Time) (string, bool, error) {
 	if s.fileRepo == nil || s.itemRepo == nil {
-		return false, nil
+		return "", false, nil
 	}
 	existing, err := s.fileRepo.ListByObservedRootPath(ctx, folder.ID, filePath)
 	if err != nil {
-		return false, fmt.Errorf("list existing files: %w", err)
+		return "", false, fmt.Errorf("list existing files: %w", err)
 	}
 	if len(existing) != 1 {
-		return false, nil
+		return "", false, nil
 	}
 	mf := existing[0]
 	if mf.FilePath != filePath || mf.FileSize != size || mf.FileModifiedAt == nil || !sameFileModifiedAt(mf.FileModifiedAt, modifiedAt) {
-		return false, nil
+		return "", false, nil
 	}
 	if mf.ContentID == "" {
-		return false, nil
+		return "", false, nil
 	}
 	if mf.GroupKeyVersion != ebookGroupKeyVersion {
 		// The grouping scheme changed since this row was written; reprocess
 		// once so the stored key is rewritten under the current scheme and
 		// sibling-format lookups can find it again.
-		return false, nil
+		return "", false, nil
 	}
 	statuses, err := s.itemRepo.GetStatusByIDs(ctx, []string{mf.ContentID})
 	if err != nil {
-		return false, fmt.Errorf("get item status: %w", err)
+		return "", false, fmt.Errorf("get item status: %w", err)
 	}
-	return !strings.EqualFold(strings.TrimSpace(statuses[mf.ContentID]), "unmatched"), nil
+	if strings.EqualFold(strings.TrimSpace(statuses[mf.ContentID]), "unmatched") {
+		return "", false, nil
+	}
+	return mf.ContentID, true, nil
 }
 
 // upsertEbookMediaItem resolves or creates the media item for the file and
