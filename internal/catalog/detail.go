@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -1193,13 +1194,28 @@ func (s *DetailService) buildEbookExtension(
 	if item == nil {
 		return nil
 	}
+	// The three related-content lookups are independent read-only queries; run
+	// them concurrently so detail latency is the slowest one, not their sum
+	// (mirrors buildAudiobookExtension).
+	var (
+		series       *AudiobookSeriesGroup
+		alsoByAuthor []AudiobookRelatedItem
+		similar      []AudiobookRelatedItem
+		wg           sync.WaitGroup
+	)
+	wg.Add(3)
+	go func() { defer wg.Done(); series = s.fetchEbookSeries(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); alsoByAuthor = s.fetchEbookAlsoByAuthor(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); similar = s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter) }()
+	wg.Wait()
+
 	return &EbookDetailExtension{
 		Authors:   audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
 		Publisher: firstNonEmptyString(item.Studios),
-		Series:    s.fetchEbookSeries(ctx, item.ContentID, filter),
+		Series:    series,
 		Related: AudiobookRelatedContent{
-			AlsoByAuthor: s.fetchEbookAlsoByAuthor(ctx, item.ContentID, filter),
-			Similar:      s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter),
+			AlsoByAuthor: alsoByAuthor,
+			Similar:      similar,
 		},
 	}
 }

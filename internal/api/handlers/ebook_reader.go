@@ -1046,15 +1046,25 @@ func (s *PGEbookReaderProgressStore) Upsert(ctx context.Context, progress EbookR
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("ebook reader progress store is not configured")
 	}
-	if _, err := s.pool.Exec(ctx, `
+	// A routine autosave (e.g. reopening a finished book) must not silently drop
+	// a "finished" item below the threshold and un-mark it read; once finished,
+	// progress only moves on an explicit unread (which deletes the row). Below
+	// the threshold, progress tracks freely. Manga chapter ✓ marks ride on this
+	// same row, so the guard protects them too.
+	query := fmt.Sprintf(`
 		INSERT INTO ebook_reader_progress
 			(user_id, profile_id, content_id, file_id, location, progress, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (user_id, profile_id, content_id) DO UPDATE SET
 			file_id = EXCLUDED.file_id,
 			location = EXCLUDED.location,
-			progress = EXCLUDED.progress,
-			updated_at = EXCLUDED.updated_at`,
+			progress = CASE
+				WHEN ebook_reader_progress.progress >= %[1]v AND EXCLUDED.progress < %[1]v
+				THEN ebook_reader_progress.progress
+				ELSE EXCLUDED.progress
+			END,
+			updated_at = EXCLUDED.updated_at`, models.EbookFinishedProgressThreshold)
+	if _, err := s.pool.Exec(ctx, query,
 		progress.UserID,
 		progress.ProfileID,
 		progress.ContentID,
