@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -199,6 +201,161 @@ func (r *LibraryItemRepository) GetItemsInFolders(ctx context.Context, contentID
 		return nil, fmt.Errorf("iterating multi-folder membership rows: %w", err)
 	}
 	return result, nil
+}
+
+// FilterAccessibleContentIDs returns the subset of contentIDs that pass the
+// viewer's access scope, checking library membership and the content-rating
+// ceiling. It is the batched, set-oriented mirror of the per-item predicate the
+// detail/watch path enforces (ItemRepository.EnsureAccessible +
+// applyAccessFilter), so list endpoints (e.g. continue-watching) can drop
+// out-of-scope items in one query instead of letting the client discover them
+// via per-item 404s.
+//
+// Semantics match EnsureAccessible exactly:
+//   - A media item (movie/series) is accessible when its media_items row
+//     satisfies the rating ceiling and — when the viewer is library-restricted
+//     — it has a media_item_libraries membership in a permitted folder (within
+//     allowedFolderIDs when that slice is non-nil, and not in disabledFolderIDs).
+//   - An episode is gated on its PARENT SERIES, mirroring how the detail/watch
+//     path resolves an episode id to episode.SeriesID and calls
+//     EnsureAccessible(series_id) (catalog.DetailService.GetItemDetail): series
+//     media_item_libraries membership + series content_rating. It deliberately
+//     does NOT key off episode_libraries — that membership can diverge from the
+//     series for multi-folder shows, which would re-introduce the dead-tile /
+//     leak this filter exists to prevent.
+//   - When the viewer has no library restriction, membership is not required
+//     (matching EnsureAccessible, which only joins media_item_libraries when a
+//     library restriction is set, so a rating-only viewer is gated on rating
+//     alone).
+//
+// A non-nil but empty allowedFolderIDs, or a maxContentRating that permits no
+// ratings, means nothing is accessible. ExcludedMediaTypes is intentionally
+// omitted: the viewer access.Scope does not carry it and the native request
+// path never sets it (only the jellycompat layer populates it), so it is a
+// no-op here.
+//
+// The emitted SQL is built by buildFilterAccessibleContentIDsSQL so its shape
+// (placeholder numbering, the parent-series join for episodes, the optional
+// rating predicate) is unit-testable without a database.
+func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, maxContentRating string) (map[string]bool, error) {
+	result := make(map[string]bool, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+	if allowedFolderIDs != nil && len(allowedFolderIDs) == 0 {
+		// Library-restricted to nothing → nothing is accessible.
+		return result, nil
+	}
+
+	var allowedRatings []string
+	if maxContentRating != "" {
+		allowedRatings = access.AllowedRatingsUpTo(maxContentRating)
+		if len(allowedRatings) == 0 {
+			// Ceiling permits no ratings → nothing is accessible.
+			return result, nil
+		}
+	}
+
+	query, args := buildFilterAccessibleContentIDsSQL(contentIDs, allowedFolderIDs, disabledFolderIDs, allowedRatings)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("filtering accessible content ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var contentID string
+		if err := rows.Scan(&contentID); err != nil {
+			return nil, fmt.Errorf("scanning accessible content id row: %w", err)
+		}
+		result[contentID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating accessible content id rows: %w", err)
+	}
+	return result, nil
+}
+
+// buildFilterAccessibleContentIDsSQL builds the membership/rating query used by
+// FilterAccessibleContentIDs. It is a pure function (no DB access) so the query
+// shape can be unit-tested. allowedRatings must already be resolved via
+// access.AllowedRatingsUpTo (nil/empty means no rating ceiling); the caller
+// handles the "permits nothing" early-outs.
+//
+// The structure mirrors ItemRepository.EnsureAccessible: select FROM the owning
+// media_items row, join media_item_libraries only when the viewer is
+// library-restricted, and resolve episodes through their parent series so an
+// episode is gated on EnsureAccessible(series_id)-equivalent membership.
+func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, allowedRatings []string) (string, []any) {
+	args := []any{contentIDs}
+	var allowedIdx, disabledIdx, ratingIdx int
+	if allowedFolderIDs != nil {
+		args = append(args, allowedFolderIDs)
+		allowedIdx = len(args)
+	}
+	if len(disabledFolderIDs) > 0 {
+		args = append(args, disabledFolderIDs)
+		disabledIdx = len(args)
+	}
+	if len(allowedRatings) > 0 {
+		args = append(args, allowedRatings)
+		ratingIdx = len(args)
+	}
+
+	needsLibJoin := allowedIdx > 0 || disabledIdx > 0
+
+	// folderConds builds the membership predicate against the media_item_libraries
+	// alias (mil), shared verbatim by the item and episode branches. Only called
+	// when needsLibJoin, so it always yields at least one condition.
+	folderConds := func() string {
+		conds := make([]string, 0, 2)
+		if allowedIdx > 0 {
+			conds = append(conds, fmt.Sprintf("mil.media_folder_id = ANY($%d)", allowedIdx))
+		}
+		if disabledIdx > 0 {
+			conds = append(conds, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", disabledIdx))
+		}
+		return strings.Join(conds, " AND ")
+	}
+
+	// Item branch gates the media item directly; episode branch resolves the
+	// parent series and gates on it (mirroring EnsureAccessible(series_id)).
+	itemFrom := "media_items mi"
+	episodeFrom := "episodes e JOIN media_items mi ON mi.content_id = e.series_id"
+	itemConds := []string{"mi.content_id = req.content_id"}
+	episodeConds := []string{"e.content_id = req.content_id"}
+
+	if needsLibJoin {
+		itemFrom += " JOIN media_item_libraries mil ON mil.content_id = mi.content_id"
+		episodeFrom += " JOIN media_item_libraries mil ON mil.content_id = e.series_id"
+		fc := folderConds()
+		itemConds = append(itemConds, fc)
+		episodeConds = append(episodeConds, fc)
+	}
+	if ratingIdx > 0 {
+		rc := fmt.Sprintf("mi.content_rating = ANY($%d)", ratingIdx)
+		itemConds = append(itemConds, rc)
+		episodeConds = append(episodeConds, rc)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT req.content_id
+		FROM unnest($1::text[]) AS req(content_id)
+		WHERE EXISTS (
+			SELECT 1
+			FROM %s
+			WHERE %s
+		)
+		OR EXISTS (
+			SELECT 1
+			FROM %s
+			WHERE %s
+		)`,
+		itemFrom, strings.Join(itemConds, " AND "),
+		episodeFrom, strings.Join(episodeConds, " AND "),
+	)
+	return query, args
 }
 
 func (r *LibraryItemRepository) GetFolderIDsForItem(ctx context.Context, contentID string) ([]int, error) {
