@@ -74,6 +74,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	itemsHandler.recommender = deps.Recommender
 	if deps.DB != nil {
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+		// Smart (live-query) collections derive membership at read time, so the
+		// BoxSet children path needs a query executor to resolve them.
+		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
 	}
 	itemsHandler.posterPresigner = deps.PosterPresigner
 	itemsHandler.presignTTL = deps.PresignTTL

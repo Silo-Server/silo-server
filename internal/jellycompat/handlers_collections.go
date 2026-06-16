@@ -2,7 +2,9 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -18,6 +20,13 @@ type collectionSource interface {
 	ListAll(ctx context.Context, libraryID *int, opts catalog.ListLibraryCollectionsOptions) ([]*models.LibraryCollection, error)
 	GetByID(ctx context.Context, id string) (*models.LibraryCollection, error)
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
+}
+
+// smartCollectionQueryExecutor resolves a smart (live-query) collection's members
+// at read time. Backed by *catalog.QueryExecutor in production; an interface so
+// the BoxSet children path is unit-testable without a database.
+type smartCollectionQueryExecutor interface {
+	Preview(ctx context.Context, def catalog.QueryDefinition, access catalog.AccessFilter, limit int) ([]*models.MediaItem, int, error)
 }
 
 // visibleLibraryIDSet returns the set of library IDs the session may see on
@@ -290,14 +299,28 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	members, err := h.collections.ListItems(r.Context(), collection.ID)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-	contentIDs := make([]string, 0, len(members))
-	for _, member := range members {
-		contentIDs = append(contentIDs, member.MediaItemID)
+	// Smart (live-query) collections derive membership from a query at read
+	// time and store no rows in library_collection_items, so ListItems returns
+	// nothing for them — that previously left smart-collection BoxSets showing a
+	// non-zero ChildCount but no browsable children. Resolve them via the query
+	// executor; stored collections keep the materialized ListItems path.
+	var contentIDs []string
+	if catalog.IsLiveQueryType(collection.CollectionType) {
+		contentIDs, err = h.smartCollectionContentIDs(r.Context(), session, collection)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+	} else {
+		members, listErr := h.collections.ListItems(r.Context(), collection.ID)
+		if listErr != nil {
+			writeCompatUpstreamError(w, listErr)
+			return
+		}
+		contentIDs = make([]string, 0, len(members))
+		for _, member := range members {
+			contentIDs = append(contentIDs, member.MediaItemID)
+		}
 	}
 	if len(contentIDs) == 0 {
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
@@ -359,4 +382,66 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 		TotalRecordCount: total,
 		StartIndex:       query.startIndex,
 	})
+}
+
+// smartCollectionContentIDs resolves a live-query (smart) collection's members
+// at read time, mirroring the web API's loadLiveCollectionItems. The returned
+// content IDs are in the smart query's own order and access-filtered for the
+// session; the caller reuses the same hydration path as stored collections. A
+// malformed or invalid query definition degrades to no children rather than an
+// error so a single bad collection never 500s a browse.
+func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *Session, c *models.LibraryCollection) ([]string, error) {
+	if h.queryExecutor == nil {
+		return nil, nil
+	}
+
+	var def catalog.QueryDefinition
+	if len(c.QueryDefinition) > 0 {
+		if err := json.Unmarshal(c.QueryDefinition, &def); err != nil {
+			slog.DebugContext(ctx, "jellycompat smart collection query definition unmarshal failed",
+				"collection_id", c.ID, "error", err)
+			return nil, nil
+		}
+	}
+	def = def.Normalize()
+	if err := def.ValidateWithOptions(false, false); err != nil {
+		slog.DebugContext(ctx, "jellycompat smart collection query definition invalid",
+			"collection_id", c.ID, "error", err)
+		return nil, nil
+	}
+	def = catalog.ApplySmartCollectionItemLimit(def)
+
+	switch {
+	case len(c.LibraryIDs) > 0:
+		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, c.LibraryIDs)
+		if len(def.LibraryIDs) == 0 {
+			return nil, nil
+		}
+	case c.LibraryID > 0:
+		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{c.LibraryID})
+		if len(def.LibraryIDs) == 0 {
+			return nil, nil
+		}
+	}
+
+	access := h.resolveAccessFilter(ctx, session)
+	items, total, err := h.queryExecutor.Preview(ctx, def, access, 1)
+	if err != nil {
+		return nil, err
+	}
+	if total == 0 {
+		return nil, nil
+	}
+	if total > len(items) {
+		items, _, err = h.queryExecutor.Preview(ctx, def, access, total)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	contentIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		contentIDs = append(contentIDs, item.ContentID)
+	}
+	return contentIDs, nil
 }

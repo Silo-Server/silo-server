@@ -43,7 +43,10 @@ type ItemsHandler struct {
 	recommender  recommendations.Recommender
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
-	collections     collectionSource
+	collections collectionSource
+	// queryExecutor is optional; when set, smart (live-query) collections
+	// resolve their BoxSet children at read time instead of from stored items.
+	queryExecutor   smartCollectionQueryExecutor
 	posterPresigner LibraryPosterPresigner
 	presignTTL      time.Duration
 	// FileResolver is optional; when set, /MediaSegments returns real intro/
