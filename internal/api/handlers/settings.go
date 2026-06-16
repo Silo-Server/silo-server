@@ -9,12 +9,22 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// deviceSeenThrottle bounds how often a device's last_seen_at is refreshed from
+// request traffic. Device-setting reads each registered the device (an upsert
+// on a single per-device row), so a page that fetches many settings serialized
+// hundreds of upserts on that row's lock. Skipping the upsert when the device
+// was seen within this window removes the contention while keeping last_seen
+// fresh to within the window.
+const deviceSeenThrottle = 5 * time.Minute
 
 const subtitleAppearanceSettingKey = "subtitle_appearance"
 const (
@@ -38,11 +48,32 @@ type ServerSettingReader interface {
 type SettingsHandler struct {
 	storeProvider  userstore.UserStoreProvider
 	serverSettings ServerSettingReader
+	deviceSeen     *cache.TTLCache[struct{}]
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
 func NewSettingsHandler(provider userstore.UserStoreProvider) *SettingsHandler {
-	return &SettingsHandler{storeProvider: provider}
+	return &SettingsHandler{
+		storeProvider: provider,
+		deviceSeen:    cache.NewTTLCache[struct{}](),
+	}
+}
+
+// shouldRegisterDevice reports whether the device's last_seen_at should be
+// refreshed now, throttling to one upsert per deviceSeenThrottle window per
+// (profile, device). It marks the device seen before returning true so a burst
+// of concurrent reads collapses to a single upsert instead of contending on the
+// device row.
+func (h *SettingsHandler) shouldRegisterDevice(profileID, deviceID string) bool {
+	if h == nil || h.deviceSeen == nil {
+		return true
+	}
+	key := profileID + "\x00" + deviceID
+	if _, seen := h.deviceSeen.Get(key); seen {
+		return false
+	}
+	h.deviceSeen.Set(key, struct{}{}, deviceSeenThrottle)
+	return true
 }
 
 // SetServerSettings configures the optional server settings reader for overlay config etc.
@@ -382,7 +413,7 @@ func (h *SettingsHandler) HandleGetDeviceSetting(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
 	}
-	registerRequestDevice(r.Context(), store, profileID, device)
+	h.registerRequestDevice(r.Context(), store, profileID, device)
 
 	value, err := store.GetDeviceSetting(r.Context(), profileID, device.DeviceID, key)
 	if err != nil {
@@ -482,7 +513,7 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
 	}
-	registerRequestDevice(r.Context(), store, profileID, device)
+	h.registerRequestDevice(r.Context(), store, profileID, device)
 
 	if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, key); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
@@ -512,7 +543,7 @@ func (h *SettingsHandler) HandleGetEffectiveSettings(w http.ResponseWriter, r *h
 	}
 
 	device := deviceMetadataFromRequest(r)
-	registerRequestDevice(r.Context(), store, profileID, device)
+	h.registerRequestDevice(r.Context(), store, profileID, device)
 	keys := parseSettingKeys(keysParam)
 	resp := effectiveSettingsResponse{
 		Settings: make([]effectiveSettingResponse, 0, len(keys)),
@@ -543,7 +574,7 @@ func (h *SettingsHandler) HandleGetEffectiveSubtitleAppearance(w http.ResponseWr
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
 		return
 	}
-	registerRequestDevice(r.Context(), store, profileID, device)
+	h.registerRequestDevice(r.Context(), store, profileID, device)
 
 	resolved, err := h.resolveEffectiveSetting(r.Context(), store, profileID, device, subtitleAppearanceSettingKey)
 	if err != nil {
@@ -604,7 +635,7 @@ func deviceMetadataFromRequest(r *http.Request) requestDeviceMetadata {
 	}
 }
 
-func registerRequestDevice(
+func (h *SettingsHandler) registerRequestDevice(
 	ctx context.Context,
 	store userstore.UserStore,
 	profileID string,
@@ -614,6 +645,9 @@ func registerRequestDevice(
 		return
 	}
 	if store == nil {
+		return
+	}
+	if !h.shouldRegisterDevice(profileID, device.DeviceID) {
 		return
 	}
 	registry, ok := store.(userstore.DeviceRegistry)

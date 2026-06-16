@@ -48,7 +48,8 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 }
 
 func TestRegisterRequestDeviceNilStore(t *testing.T) {
-	registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
+	h := NewSettingsHandler(nil)
+	h.registerRequestDevice(context.Background(), nil, "profile-1", requestDeviceMetadata{
 		DeviceID:       "device-1",
 		DeviceName:     "Living Room",
 		DevicePlatform: "web",
