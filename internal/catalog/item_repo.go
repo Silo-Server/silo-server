@@ -984,7 +984,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone search results.
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
@@ -1146,10 +1146,7 @@ func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int
 		  -- lives on the type='manga' series item, so chapters are never
 		  -- matchable and must not feed the matcher's retry loop (mirrors the
 		  -- exclusion in the ebook enricher's claim query).
-		  AND NOT EXISTS (
-			SELECT 1 FROM manga_chapters mc
-			WHERE mc.chapter_content_id = mi.content_id
-		  )
+		  AND ` + MangaChapterExclusionWhere("mi") + `
 		  AND mf.missing_since IS NULL
 		  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 		GROUP BY mi.content_id

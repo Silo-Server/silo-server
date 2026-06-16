@@ -346,7 +346,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
 	// sub-units and must never surface as standalone catalog items.
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	if filters.SnapshotAt != nil {
 		conditions = append(conditions, fmt.Sprintf("mi.created_at <= $%d", argIdx))
@@ -376,7 +376,14 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup, browseFiltersAreMovieOnly(filters))
 	argIdx += len(orderArgs)
 
-	selectClause := browseItemColumns("mi") + ", " + mangaCountColumns("mi")
+	// Only run the manga count subqueries when the scope can contain manga
+	// series; a non-manga type filter rules them out, so substitute NULL
+	// placeholders and skip two correlated subqueries per row on the hot path.
+	mangaCounts := mangaCountColumns("mi")
+	if !browseScopeMayContainManga(filters) {
+		mangaCounts = nullMangaCountColumns()
+	}
+	selectClause := browseItemColumns("mi") + ", " + mangaCounts
 	groupByClause := ""
 	switch {
 	case singleLibraryNoDedup:
@@ -1140,7 +1147,30 @@ func mangaCountColumns(alias string) string {
 		"(SELECT count(DISTINCT mc.volume) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND mc.volume IS NOT NULL AND mc.volume <> '') AS manga_volume_count"
 }
 
-// mangaChapterExclusionWhere returns a WHERE predicate that hides manga CHAPTER
+// nullMangaCountColumns substitutes NULL placeholders for the manga count
+// subqueries when the browse scope cannot contain manga series. Column names
+// and order match mangaCountColumns so the scan path is unchanged.
+func nullMangaCountColumns() string {
+	return "NULL::bigint AS manga_chapter_count, NULL::bigint AS manga_volume_count"
+}
+
+// browseScopeMayContainManga reports whether a browse with these filters could
+// return type='manga' rows. An empty type filter (all types) or one that
+// includes "manga" keeps the counts; any other explicit type filter rules
+// manga out, letting the caller skip the count subqueries.
+func browseScopeMayContainManga(filters BrowseFilters) bool {
+	if filters.Type == "" {
+		return true
+	}
+	for _, t := range strings.Split(filters.Type, ",") {
+		if strings.TrimSpace(t) == "manga" {
+			return true
+		}
+	}
+	return false
+}
+
+// MangaChapterExclusionWhere returns a WHERE predicate that hides manga CHAPTER
 // items (type='ebook' rows linked into a type='manga' series via the
 // manga_chapters table) from catalog listing surfaces — browse, section
 // resolution, and search. Chapters are internal sub-units of a manga series and
@@ -1157,7 +1187,7 @@ func mangaCountColumns(alias string) string {
 // continue-reading (ebook_reader_progress / watch-progress), and the series
 // detail chapter list (mangaChaptersQuery) — use separate queries and must NOT
 // call this.
-func mangaChapterExclusionWhere(alias string) string {
+func MangaChapterExclusionWhere(alias string) string {
 	return "NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = " + alias + ".content_id)"
 }
 

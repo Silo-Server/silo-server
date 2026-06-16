@@ -432,8 +432,10 @@ func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemR
 			upd.BackdropThumbhash = &thumbhash
 		}
 	}
-	if result != nil && result.ShowStatus != "" {
-		upd.ShowStatus = &result.ShowStatus
+	if result != nil {
+		if status := normalizeMangaStatus(result.ShowStatus); status != "" {
+			upd.ShowStatus = &status
+		}
 	}
 
 	if upd.BackdropPath == nil && upd.ShowStatus == nil {
@@ -691,8 +693,8 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	if result.Year > 0 {
 		upd.Year = &result.Year
 	}
-	if result.ShowStatus != "" {
-		upd.ShowStatus = &result.ShowStatus
+	if status := normalizeMangaStatus(result.ShowStatus); status != "" {
+		upd.ShowStatus = &status
 	}
 
 	providerIDs = filterMangaProviderIDs(providerIDs)
@@ -904,6 +906,33 @@ func filterMangaProviderIDs(providerIDs map[string]string) map[string]string {
 		return nil
 	}
 	return filtered
+}
+
+// normalizeMangaStatus maps the varied publication-status strings returned by
+// manga metadata providers (AniList: RELEASING/FINISHED/NOT_YET_RELEASED/
+// CANCELLED/HIATUS, MangaDex: ongoing/completed/hiatus/cancelled, and the SDK's
+// Continuing/Ended) onto the stable label set the clients render, so the shared
+// show_status field carries one consistent manga value-domain instead of raw
+// provider casing. Unknown values pass through trimmed so nothing is lost.
+func normalizeMangaStatus(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	switch strings.ToLower(strings.ReplaceAll(s, " ", "_")) {
+	case "ongoing", "releasing", "current", "publishing", "continuing":
+		return "Ongoing"
+	case "completed", "finished", "ended":
+		return "Completed"
+	case "hiatus", "on_hiatus", "paused":
+		return "Hiatus"
+	case "cancelled", "canceled", "discontinued":
+		return "Cancelled"
+	case "upcoming", "not_yet_released", "unreleased", "announced":
+		return "Upcoming"
+	default:
+		return s
+	}
 }
 
 func isMangaASINProvider(provider string) bool {

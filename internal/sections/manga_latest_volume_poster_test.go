@@ -23,6 +23,11 @@ func assertMangaPosterOverride(t *testing.T, label, query string) {
 		"ORDER BY c.created_at DESC",
 		"AS poster_path",
 		"AS poster_thumbhash",
+		// Poster columns default to '' (not NULL), so the override must NULLIF
+		// each operand or a cover-less latest chapter blanks the series card.
+		"COALESCE(NULLIF(",
+		"NULLIF(mi.poster_path, '')",
+		"NULLIF(mi.poster_thumbhash, '')",
 	} {
 		if !strings.Contains(query, frag) {
 			t.Fatalf("%s query missing manga poster-override fragment %q:\n%s", label, frag, query)

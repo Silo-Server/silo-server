@@ -233,6 +233,11 @@ func buildBrowseFavoritesPlan(f BrowseFavoritesFilters) (browseFavoritesPlan, er
 
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: f.MaxContentRating, ExcludedMediaTypes: f.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone cards, matching the
+	// exclusion applied across browse/search/discovery/sections.
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+
 	orderBy := buildBrowseFavoritesOrderBy(f.SortField, f.SortOrder)
 
 	return browseFavoritesPlan{

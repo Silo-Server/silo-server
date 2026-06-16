@@ -1588,7 +1588,7 @@ func (f *Fetcher) fetchFormatShowcase(ctx context.Context, s ResolvedSection, li
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
@@ -2018,7 +2018,7 @@ func buildRecentlyAddedQuery(s ResolvedSection, libraryID *int, libraryIDs []int
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -2083,7 +2083,7 @@ func buildRecentlyAddedSingleLibraryQuery(s ResolvedSection, cfgFilters SectionC
 	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 	query := fmt.Sprintf(
@@ -2109,7 +2109,7 @@ func buildRecentlyReleasedQuery(s ResolvedSection, libraryID *int, libraryIDs []
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -2188,7 +2188,7 @@ func buildRandomQuery(s ResolvedSection, libraryID *int, libraryIDs []int, filte
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -2504,12 +2504,17 @@ func itemColumnsLatestMangaPoster(alias string) string {
 // poster column, aliased back to the original column name so the scan order and
 // column set are unchanged.
 func mangaLatestVolumePosterExpr(alias, col string) string {
-	return "CASE WHEN " + alias + ".type = 'manga' THEN COALESCE((" +
+	// NULLIF(...,'') on each operand: poster columns default to '' (empty
+	// string), not NULL, so a plain COALESCE would surface a cover-less latest
+	// chapter's empty poster instead of falling back to the series' own cover.
+	// Mirrors the episode poster expressions above; trailing '' keeps the THEN
+	// branch non-NULL.
+	return "CASE WHEN " + alias + ".type = 'manga' THEN COALESCE(NULLIF((" +
 		"SELECT c." + col + " FROM media_items c " +
 		"JOIN manga_chapters mc ON mc.chapter_content_id = c.content_id " +
 		"WHERE mc.series_content_id = " + alias + ".content_id " +
-		"ORDER BY c.created_at DESC, c.content_id DESC LIMIT 1), " +
-		alias + "." + col + ") ELSE " + alias + "." + col + " END AS " + col
+		"ORDER BY c.created_at DESC, c.content_id DESC LIMIT 1), ''), " +
+		"NULLIF(" + alias + "." + col + ", ''), '') ELSE " + alias + "." + col + " END AS " + col
 }
 
 // scanMediaItems scans rows into MediaItem slices. Must match itemColumns order.
@@ -2681,7 +2686,7 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
 	args = append(args, interval)
@@ -2810,7 +2815,7 @@ func (f *Fetcher) fetchNewToLibrary(ctx context.Context, s ResolvedSection, libr
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	conditions = append(conditions, fmt.Sprintf("mi.created_at > NOW() - ($%d || ' days')::interval", argIdx))
 	args = append(args, days)
@@ -2861,7 +2866,7 @@ func (f *Fetcher) fetchMostWatched(ctx context.Context, s ResolvedSection, libra
 	argIdx = newArgIdx
 	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
-	conditions = append(conditions, mangaChapterExclusionWhere("mi"))
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
 	args = append(args, interval)
@@ -2984,25 +2989,6 @@ func intersectLibraryIDs(a, b []int) []int {
 		result = append(result, value)
 	}
 	return result
-}
-
-// mangaChapterExclusionWhere returns a WHERE predicate that hides manga CHAPTER
-// items (type='ebook' rows linked into a type='manga' series via the
-// manga_chapters table) from library-listing discovery sections. Chapters are
-// internal sub-units of a manga series and must never surface as standalone
-// cards in Recently Added / Released / Random and the other listing rows; only
-// the series should.
-//
-// It mirrors the catalog package's identically-named helper. It is index-backed
-// (manga_chapters.chapter_content_id is the table's primary key, so the
-// anti-join is a unique-index probe) and a no-op for every non-chapter row:
-// regular ebooks and non-ebook types have no manga_chapters chapter link.
-//
-// By-id / by-progress resolution paths that legitimately reference chapters —
-// continue-reading, next-up, explicit content-id and collection lookups — must
-// NOT use this.
-func mangaChapterExclusionWhere(alias string) string {
-	return "NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = " + alias + ".content_id)"
 }
 
 // applyConfigTypeFilter adds a WHERE condition for the config's filter_type.

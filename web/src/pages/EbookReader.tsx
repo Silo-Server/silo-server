@@ -573,11 +573,12 @@ export default function EbookReader() {
     }`;
   const nextChapterHref =
     nextChapter && mangaSeriesHref
-      ? `${buildMediaPlayHref({
+      ? buildMediaPlayHref({
           contentId: nextChapter.chapter.content_id,
           type: "ebook",
           libraryId: Number.isFinite(libraryIdNumber) ? libraryIdNumber : undefined,
-        })}&backTo=${encodeURIComponent(mangaSeriesHref)}`
+          backTo: mangaSeriesHref,
+        })
       : null;
   const showEndOfBookNext = nextChapterHref != null && (readerProgress ?? 0) >= 0.995;
 

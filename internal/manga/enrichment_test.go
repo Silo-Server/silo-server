@@ -105,3 +105,33 @@ func TestFilterMangaProviderIDsDropsInternalIdentity(t *testing.T) {
 		t.Fatalf("filtered = %v, want only anilist", filtered)
 	}
 }
+
+func TestNormalizeMangaStatus(t *testing.T) {
+	cases := map[string]string{
+		// AniList enum
+		"RELEASING":        "Ongoing",
+		"FINISHED":         "Completed",
+		"NOT_YET_RELEASED": "Upcoming",
+		"CANCELLED":        "Cancelled",
+		"HIATUS":           "Hiatus",
+		// MangaDex / lowercase
+		"ongoing":   "Ongoing",
+		"completed": "Completed",
+		"hiatus":    "Hiatus",
+		"cancelled": "Cancelled",
+		// SDK Continuing/Ended + spacing/casing variants
+		"Continuing":  "Ongoing",
+		"Ended":       "Completed",
+		"on hiatus":   "Hiatus",
+		"  Upcoming ": "Upcoming",
+		// Empty and unknown pass through (trimmed)
+		"":          "",
+		"  ":        "",
+		"Weird-Val": "Weird-Val",
+	}
+	for in, want := range cases {
+		if got := normalizeMangaStatus(in); got != want {
+			t.Fatalf("normalizeMangaStatus(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

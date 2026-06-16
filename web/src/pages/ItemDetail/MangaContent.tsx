@@ -73,11 +73,12 @@ function chapterReaderHref(
   libraryId?: number,
 ): string {
   const backTo = buildItemHref({ contentId: seriesContentId, libraryId });
-  return `${buildMediaPlayHref({
+  return buildMediaPlayHref({
     contentId: chapterContentId,
     type: "ebook",
     libraryId,
-  })}&backTo=${encodeURIComponent(backTo)}`;
+    backTo,
+  });
 }
 
 // MangaRow is a single reader row used for volume units, loose chapters, and
