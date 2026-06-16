@@ -96,7 +96,7 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ids, err := h.deps.Recommender.Similar(r.Context(), contentID, limit)
+	ids, err := h.deps.Recommender.Similar(r.Context(), contentID, limit, a.UserID, a.ProfileID)
 	if err != nil || len(ids) == 0 {
 		writeJSON(w, http.StatusOK, emptyEnvelope)
 		return

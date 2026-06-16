@@ -772,6 +772,7 @@ export interface MediaItemUserState {
   played: boolean;
   is_favorite: boolean;
   in_watchlist: boolean;
+  is_hidden: boolean;
 }
 
 export interface BrowseItemSortMetrics {

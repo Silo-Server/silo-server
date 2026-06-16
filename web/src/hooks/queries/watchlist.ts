@@ -37,6 +37,7 @@ export function useToggleWatchlist(itemId: string) {
           played: detail.user_state?.played ?? false,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: !currentlyInWatchlist,
+          is_hidden: detail.user_state?.is_hidden ?? false,
         },
       }));
       return { previous };

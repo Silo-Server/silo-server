@@ -33,6 +33,7 @@ import ActivateDevice from "@/pages/ActivateDevice";
 import SetupWizard from "@/pages/SetupWizard";
 import Profiles from "@/pages/Profiles";
 import Catalog from "@/pages/Catalog";
+import Hidden from "@/pages/Hidden";
 import LibraryPage from "@/pages/LibraryPage";
 import ItemDetail from "@/pages/ItemDetail/index";
 import EbookReader from "@/pages/EbookReader";
@@ -510,6 +511,7 @@ function AppRoutes() {
                             path="/history"
                             element={<LegacyPersonalCatalogRedirect source="history" />}
                           />
+                          <Route path="/hidden" element={<Hidden />} />
                           <Route path="/collections" element={<Collections />} />
                           <Route path="/collections/new" element={<CollectionEditor />} />
                           <Route path="/collections/:id/edit" element={<CollectionEditor />} />

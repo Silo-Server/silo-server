@@ -199,8 +199,10 @@ type SocketIOServer interface {
 }
 
 // Recommender powers /items/{id}/similar. nil → route returns an empty list.
+// userID/profileID identify the viewer so items the profile marked "not
+// interested" are excluded; pass "" for both to skip that exclusion.
 type Recommender interface {
-	Similar(ctx context.Context, contentID string, limit int) ([]string, error)
+	Similar(ctx context.Context, contentID string, limit int, userID, profileID string) ([]string, error)
 }
 
 // ---------------------------------------------------------------------------

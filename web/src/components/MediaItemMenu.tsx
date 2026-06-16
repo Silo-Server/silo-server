@@ -8,6 +8,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { useToggleHidden } from "@/hooks/queries/hidden";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
@@ -32,6 +33,7 @@ type MediaItemMenuEntry =
         | "toggleWatched"
         | "toggleFavorite"
         | "toggleWatchlist"
+        | "toggleHidden"
         | "dismissFromHome"
         | "viewDetails"
         | "viewPlayHistory"
@@ -102,6 +104,11 @@ export function buildMediaItemMenuModel({
           key: "toggleWatchlist",
           label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
         },
+        {
+          kind: "action",
+          key: "toggleHidden",
+          label: userState.is_hidden ? "Show in Recommendations" : "Not Interested",
+        },
       );
     }
   }
@@ -168,7 +175,7 @@ export default function MediaItemMenu({
 
   useEffect(() => {
     setCurrentUserState(userState);
-  }, [userState?.played, userState?.is_favorite, userState?.in_watchlist]);
+  }, [userState?.played, userState?.is_favorite, userState?.in_watchlist, userState?.is_hidden]);
 
   const watchedMutation = useWatchedStateMutation({
     content_id: contentId,
@@ -177,6 +184,7 @@ export default function MediaItemMenu({
   });
   const favoriteMutation = useToggleFavorite(contentId);
   const watchlistMutation = useToggleWatchlist(contentId);
+  const hiddenMutation = useToggleHidden(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
   const dismissLabel =
@@ -207,6 +215,7 @@ export default function MediaItemMenu({
     watchedMutation.isPending ||
     favoriteMutation.isPending ||
     watchlistMutation.isPending ||
+    hiddenMutation.isPending ||
     refreshMetadataMutation.isPending ||
     dismissHomeItemMutation.isPending;
 
@@ -253,6 +262,12 @@ export default function MediaItemMenu({
       }
       case "viewDetails": {
         setFilesDialogOpen(true);
+		return;
+	  }
+      case "toggleHidden": {
+        if (!currentUserState) return;
+        await hiddenMutation.mutateAsync(currentUserState.is_hidden);
+        setCurrentUserState((prev) => (prev ? { ...prev, is_hidden: !prev.is_hidden } : prev));
         return;
       }
       case "viewPlayHistory": {

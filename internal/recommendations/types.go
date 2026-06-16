@@ -58,7 +58,7 @@ type WatchSignal struct {
 
 // Recommender provides recommendation operations.
 type Recommender interface {
-	SimilarItems(ctx context.Context, itemID string, limit int) ([]ScoredItem, error)
+	SimilarItems(ctx context.Context, itemID string, limit int, userID int, profileID string) ([]ScoredItem, error)
 	ForYou(ctx context.Context, userID int, profileID string, limit int) (*ForYouResponse, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]ScoredItem, error)
 	SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int) ([]ScoredItem, error)

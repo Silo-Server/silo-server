@@ -1,27 +1,27 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
-import { favoriteKeys } from "./keys";
+import { hiddenKeys } from "./keys";
 import { toast } from "sonner";
 import { invalidateMediaSurfaceQueries, updateCatalogItemDetail } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
-export function useFavorites() {
+export function useHiddenList() {
   return useQuery({
-    queryKey: favoriteKeys.list(),
-    queryFn: () => api<{ items: BrowseItem[] }>("/favorites").then((d) => d.items ?? []),
+    queryKey: hiddenKeys.list(),
+    queryFn: () => api<{ items: BrowseItem[] }>("/hidden").then((d) => d.items ?? []),
   });
 }
 
-export function useToggleFavorite(itemId: string) {
+export function useToggleHidden(itemId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (currentlyFavorite: boolean) =>
-      api(`/favorites/${itemId}`, {
-        method: currentlyFavorite ? "DELETE" : "PUT",
+    mutationFn: (currentlyHidden: boolean) =>
+      api(`/hidden/${itemId}`, {
+        method: currentlyHidden ? "DELETE" : "PUT",
       }),
-    onMutate: async (currentlyFavorite: boolean) => {
+    onMutate: async (currentlyHidden: boolean) => {
       await queryClient.cancelQueries({ queryKey: ["catalog", "items", itemId, "detail"] });
       const previous = queryClient.getQueriesData({
         predicate: (query) =>
@@ -35,9 +35,9 @@ export function useToggleFavorite(itemId: string) {
         ...detail,
         user_state: {
           played: detail.user_state?.played ?? false,
-          is_favorite: !currentlyFavorite,
+          is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
-          is_hidden: detail.user_state?.is_hidden ?? false,
+          is_hidden: !currentlyHidden,
         },
       }));
       return { previous };
@@ -46,10 +46,10 @@ export function useToggleFavorite(itemId: string) {
       for (const [queryKey, value] of context?.previous ?? []) {
         queryClient.setQueryData(queryKey, value);
       }
-      toast.error("Failed to update favorites");
+      toast.error("Failed to update recommendations");
     },
-    onSuccess: (_data, currentlyFavorite) => {
-      toast.success(currentlyFavorite ? "Removed from favorites" : "Added to favorites");
+    onSuccess: (_data, currentlyHidden) => {
+      toast.success(currentlyHidden ? "Will recommend again" : "Marked as not interested");
     },
     onSettled: async () => {
       await invalidateMediaSurfaceQueries(queryClient, { itemId });

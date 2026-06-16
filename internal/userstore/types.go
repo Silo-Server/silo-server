@@ -174,6 +174,13 @@ type Favorite struct {
 	AddedAt     string
 }
 
+// HiddenRecommendation represents an item a profile marked "not interested".
+type HiddenRecommendation struct {
+	ProfileID   string
+	MediaItemID string
+	HiddenAt    string
+}
+
 // WatchlistEntry represents a watchlist item.
 type WatchlistEntry struct {
 	ProfileID   string

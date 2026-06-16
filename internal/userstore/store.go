@@ -138,3 +138,15 @@ type DeviceRegistry interface {
 	RegisterDevice(ctx context.Context, entry DeviceEntry) error
 	ListDevices(ctx context.Context) ([]DeviceEntry, error)
 }
+
+// HiddenRecommendationStore is implemented by stores that can record items a
+// profile marked "not interested" so they are excluded from recommendations
+// and discovery rows.
+type HiddenRecommendationStore interface {
+	AddHiddenRecommendation(ctx context.Context, profileID, mediaItemID string) error
+	RemoveHiddenRecommendation(ctx context.Context, profileID, mediaItemID string) error
+	ListHiddenRecommendations(ctx context.Context, profileID string, limit, offset int) ([]HiddenRecommendation, error)
+	ListHiddenRecommendationsByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
+	IsHiddenRecommendation(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	HiddenRecommendationIDSet(ctx context.Context, profileID string) (map[string]struct{}, error)
+}

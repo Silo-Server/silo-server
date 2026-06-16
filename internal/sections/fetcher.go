@@ -1231,8 +1231,6 @@ func (f *Fetcher) userAgnosticSectionFetcher(t SectionType) userAgnosticSectionF
 		return f.fetchRecentlyAdded
 	case SectionRecentlyReleased:
 		return f.fetchRecentlyReleased
-	case SectionCriticallyAcclaimed:
-		return f.fetchCriticallyAcclaimed
 	case SectionAwardWinners:
 		// fetchAwardWinners derives everything from the section config; adapt
 		// it to the shared signature.
@@ -1279,6 +1277,8 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 		return f.fetchRecommendationSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionHiddenGems:
 		return f.fetchHiddenGems(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+	case SectionCriticallyAcclaimed:
+		return f.fetchCriticallyAcclaimed(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionForgottenFavorites:
 		return f.fetchForgottenFavorites(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionEditorialSpotlight:
@@ -1750,7 +1750,7 @@ func (f *Fetcher) fetchHiddenGems(ctx context.Context, s ResolvedSection, librar
 	return items, len(items), nil
 }
 
-func (f *Fetcher) fetchCriticallyAcclaimed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+func (f *Fetcher) fetchCriticallyAcclaimed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.CriticallyAcclaimedParams
 	if len(s.Config) > 0 {
 		_ = json.Unmarshal(s.Config, &p)
@@ -1766,6 +1766,8 @@ func (f *Fetcher) fetchCriticallyAcclaimed(ctx context.Context, s ResolvedSectio
 		LibraryID:  libraryID,
 		LibraryIDs: libraryIDs,
 		Filter:     filter,
+		UserID:     userID,
+		ProfileID:  profileID,
 	})
 	if err != nil {
 		return nil, 0, err

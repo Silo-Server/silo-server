@@ -9,6 +9,7 @@ describe("buildMediaItemMenuModel", () => {
         played: true,
         is_favorite: true,
         in_watchlist: true,
+        is_hidden: false,
       },
       isAdmin: true,
     });
@@ -18,8 +19,9 @@ describe("buildMediaItemMenuModel", () => {
     expect(actions[1]?.label).toBe("Mark Unwatched");
     expect(actions[2]?.label).toBe("Remove from Favorites");
     expect(actions[3]?.label).toBe("Remove from Watchlist");
-    expect(actions[4]?.label).toBe("View Play History");
-    expect(actions[5]?.label).toBe("Refresh Metadata");
+    expect(actions[4]?.label).toBe("Not Interested");
+    expect(actions[5]?.label).toBe("View Play History");
+    expect(actions[6]?.label).toBe("Refresh Metadata");
     expect(model.some((item) => item.kind === "action" && item.label === "View Play History")).toBe(
       true,
     );
@@ -35,6 +37,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
       showCollectionActions: false,
@@ -52,6 +55,7 @@ describe("buildMediaItemMenuModel", () => {
         played: true,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: true,
       showCollectionActions: false,
@@ -72,6 +76,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
     });
@@ -95,6 +100,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
       dismissLabel: "Remove from Continue Watching",
@@ -114,6 +120,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
       dismissLabel: "Remove from Next Up",
@@ -132,6 +139,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
       showCollectionActions: false,
@@ -150,6 +158,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
       dismissLabel: "Remove from Continue Listening",
@@ -168,6 +177,7 @@ describe("buildMediaItemMenuModel", () => {
         played: true,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
     });
@@ -184,6 +194,7 @@ describe("buildMediaItemMenuModel", () => {
         played: false,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
       dismissLabel: "Remove from Continue Reading",
@@ -194,6 +205,7 @@ describe("buildMediaItemMenuModel", () => {
       "Mark Read",
       "Add to Favorites",
       "Add to Watchlist",
+      "Not Interested",
       "Remove from Continue Reading",
     ]);
     expect(labels).not.toContain("Mark Watched");
@@ -206,6 +218,7 @@ describe("buildMediaItemMenuModel", () => {
         played: true,
         is_favorite: false,
         in_watchlist: false,
+        is_hidden: false,
       },
       isAdmin: false,
     });

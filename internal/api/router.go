@@ -1966,6 +1966,14 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Delete("/{item_id}", personalDataHandler.HandleRemoveFavorite)
 					})
 
+					r.Route("/hidden", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/", personalDataHandler.HandleListHidden)
+						r.Get("/{item_id}", personalDataHandler.HandleCheckHidden)
+						r.Put("/{item_id}", personalDataHandler.HandleAddHidden)
+						r.Delete("/{item_id}", personalDataHandler.HandleRemoveHidden)
+					})
+
 					r.Route("/watchlist", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", personalDataHandler.HandleListWatchlist)

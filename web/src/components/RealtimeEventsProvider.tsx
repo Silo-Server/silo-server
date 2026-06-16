@@ -53,10 +53,18 @@ interface UserStatePayload {
   profile_id: string;
   content_id?: string;
   series_id?: string;
-  change: "progress" | "favorite" | "watchlist" | "history" | "watched" | "home_dismissal";
+  change:
+    | "progress"
+    | "favorite"
+    | "watchlist"
+    | "history"
+    | "watched"
+    | "home_dismissal"
+    | "hidden";
   played?: boolean;
   is_favorite?: boolean;
   in_watchlist?: boolean;
+  is_hidden?: boolean;
 }
 
 const CATALOG_ITEM_CHANGED_EVENTS = new Set([
@@ -415,6 +423,7 @@ function handleUserStateEvent(
         played: payload.played ?? detail.user_state?.played ?? false,
         is_favorite: payload.is_favorite ?? detail.user_state?.is_favorite ?? false,
         in_watchlist: payload.in_watchlist ?? detail.user_state?.in_watchlist ?? false,
+        is_hidden: payload.is_hidden ?? detail.user_state?.is_hidden ?? false,
       },
     }));
   }

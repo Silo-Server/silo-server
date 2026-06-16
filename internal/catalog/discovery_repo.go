@@ -37,6 +37,10 @@ type RatingFilter struct {
 	// Filter carries viewer-level access constraints (content rating ceiling,
 	// allowed/disabled library sets).
 	Filter AccessFilter
+	// UserID and ProfileID identify the viewer for "not interested" exclusion.
+	// When either is absent the exclusion is skipped (safe for anonymous/no-profile).
+	UserID    int
+	ProfileID string
 }
 
 // buildRatingThresholdQuery builds the SQL statement and bind args for ListByRatingThreshold.
@@ -59,6 +63,7 @@ func buildRatingThresholdQuery(f RatingFilter) (string, []any) {
 	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
 
 	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+	appendHiddenRecommendationExclusion(&conditions, &args, &argIdx, f.UserID, f.ProfileID)
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM media_items mi WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
@@ -164,6 +169,7 @@ func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
 
 	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+	appendHiddenRecommendationExclusion(&conditions, &args, &argIdx, f.UserID, f.ProfileID)
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM media_items mi WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
@@ -264,6 +270,7 @@ func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
 	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
 
 	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+	appendHiddenRecommendationExclusion(&conditions, &args, &argIdx, f.UserID, f.ProfileID)
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM media_items mi WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
@@ -302,6 +309,20 @@ func (r *DiscoveryRepository) ListForgottenFavorites(ctx context.Context, f Forg
 		return nil, err
 	}
 	return items, nil
+}
+
+// appendHiddenRecommendationExclusion excludes items the profile marked "not
+// interested" from discovery rows. No-op when viewer identity is unknown.
+func appendHiddenRecommendationExclusion(conditions *[]string, args *[]any, argIdx *int, userID int, profileID string) {
+	if userID <= 0 || profileID == "" {
+		return
+	}
+	*conditions = append(*conditions, fmt.Sprintf(`NOT EXISTS (
+		SELECT 1 FROM user_hidden_recommendations uhr
+		WHERE uhr.user_id = $%d AND uhr.profile_id = $%d AND uhr.media_item_id = mi.content_id
+	)`, *argIdx, *argIdx+1))
+	*args = append(*args, userID, profileID)
+	*argIdx += 2
 }
 
 func appendDiscoveryLibraryScope(

@@ -12,6 +12,7 @@ type itemUserStateResponse struct {
 	Played      bool `json:"played"`
 	IsFavorite  bool `json:"is_favorite"`
 	InWatchlist bool `json:"in_watchlist"`
+	IsHidden    bool `json:"is_hidden"`
 }
 
 type itemUserStateOptions struct {
@@ -80,6 +81,13 @@ func resolveItemUserStatesWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	hiddenMap := map[string]bool{}
+	if hidden, ok := store.(userstore.HiddenRecommendationStore); ok {
+		hiddenMap, err = hidden.ListHiddenRecommendationsByMediaItems(ctx, profileID, contentIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	progressIDs := append([]string{}, contentIDs...)
 	seriesEpisodes := map[string][]*models.Episode{}
@@ -139,6 +147,7 @@ func resolveItemUserStatesWithOptions(
 		state := &itemUserStateResponse{
 			IsFavorite:  favoriteMap[item.ContentID],
 			InWatchlist: watchlistMap[item.ContentID],
+			IsHidden:    hiddenMap[item.ContentID],
 		}
 		switch item.Type {
 		case "series":

@@ -94,6 +94,7 @@ export default function SeasonEpisodeGrid({
                         played: episode.user_data.played,
                         is_favorite: false,
                         in_watchlist: false,
+                        is_hidden: false,
                       }
                     : undefined
                 }

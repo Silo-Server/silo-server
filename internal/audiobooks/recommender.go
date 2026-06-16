@@ -3,6 +3,7 @@ package audiobooks
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -28,13 +29,27 @@ var _ abs.Recommender = (*ABSRecommender)(nil)
 // Excludes books by the same author so callers can pair this with a
 // dedicated "Also by author" rail without overlap. Returns empty on any
 // upstream error rather than failing the whole detail page.
-func (r *ABSRecommender) Similar(ctx context.Context, contentID string, limit int) ([]string, error) {
+func (r *ABSRecommender) Similar(ctx context.Context, contentID string, limit int, userID, profileID string) ([]string, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+
+	// Resolve the viewer so items the profile marked "not interested" (and
+	// already-watched items) are excluded. A blank/non-numeric userID leaves
+	// the exclusion empty, preserving the source-item-only behavior.
+	viewerID, _ := strconv.Atoi(userID)
+
 	if r.Recs != nil {
 		if emb, err := r.Recs.GetEmbedding(ctx, contentID); err == nil && emb != nil {
-			scored, err := r.Recs.FindSimilar(ctx, emb, []string{contentID}, "audiobook", limit*3)
+			excludeIDs := []string{contentID}
+			if viewerID > 0 && profileID != "" {
+				if hidden, err := r.Recs.GetWatchedItemIDSet(ctx, viewerID, profileID); err == nil {
+					for id := range hidden {
+						excludeIDs = append(excludeIDs, id)
+					}
+				}
+			}
+			scored, err := r.Recs.FindSimilar(ctx, emb, excludeIDs, "audiobook", limit*3)
 			if err == nil && len(scored) > 0 {
 				ids := make([]string, 0, limit)
 				for _, s := range scored {
@@ -51,7 +66,19 @@ func (r *ABSRecommender) Similar(ctx context.Context, contentID string, limit in
 	if r.Pool == nil {
 		return nil, nil
 	}
-	const q = `
+	// Exclude items the viewer marked "not interested" from the fallback too.
+	hiddenClause := ""
+	args := []any{contentID, models.PersonKindAuthor, limit}
+	if viewerID > 0 && profileID != "" {
+		hiddenClause = `
+		  AND NOT EXISTS (
+			SELECT 1 FROM user_hidden_recommendations uhr
+			WHERE uhr.media_item_id = m.content_id
+			  AND uhr.user_id = $4 AND uhr.profile_id = $5
+		  )`
+		args = append(args, viewerID, profileID)
+	}
+	q := `
 		WITH this_genres AS (
 			SELECT unnest(genres) AS g FROM media_items WHERE content_id = $1
 		),
@@ -68,14 +95,14 @@ func (r *ABSRecommender) Similar(ctx context.Context, contentID string, limit in
 			WHERE ip.content_id = m.content_id
 			  AND ip.kind = $2
 			  AND ip.person_id IN (SELECT person_id FROM this_author)
-		  )
+		  )` + hiddenClause + `
 		ORDER BY
 			cardinality(ARRAY(SELECT unnest(m.genres) INTERSECT SELECT g FROM this_genres)) DESC,
 			COALESCE(m.year, 0) DESC,
 			LOWER(m.sort_title)
 		LIMIT $3
 	`
-	rows, err := r.Pool.Query(ctx, q, contentID, models.PersonKindAuthor, limit)
+	rows, err := r.Pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("abs recommender: fallback query: %w", err)
 	}

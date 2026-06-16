@@ -104,6 +104,12 @@ export const watchlistKeys = {
   check: (itemId: string) => ["watchlist", "check", itemId] as const,
 };
 
+export const hiddenKeys = {
+  all: ["hidden"] as const,
+  list: () => ["hidden", "list"] as const,
+  check: (itemId: string) => ["hidden", "check", itemId] as const,
+};
+
 export const historyKeys = {
   all: ["history"] as const,
   list: () => ["history", "list"] as const,

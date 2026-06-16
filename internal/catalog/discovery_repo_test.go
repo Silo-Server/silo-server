@@ -163,11 +163,13 @@ func TestUnplayedHighRated_BasicQuery(t *testing.T) {
 	if !strings.Contains(query, "ORDER BY mi.rating_imdb DESC NULLS LAST") {
 		t.Fatalf("expected rating sort order, got:\n%s", query)
 	}
-	if !strings.Contains(query, "LIMIT $4") {
-		t.Fatalf("expected LIMIT at $4, got:\n%s", query)
+	// The hidden-recommendation exclusion appends userID ($4) + profileID ($5)
+	// after the watch-history args, pushing the LIMIT placeholder to $6.
+	if !strings.Contains(query, "LIMIT $6") {
+		t.Fatalf("expected LIMIT at $6, got:\n%s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args (minRating, userID, profileID, limit), got %d: %v", len(args), args)
+	if len(args) != 6 {
+		t.Fatalf("expected 6 args (minRating, userID, profileID, hidden user+profile, limit), got %d: %v", len(args), args)
 	}
 }
 
@@ -210,8 +212,10 @@ func TestUnplayedHighRated_AllowedLibraries(t *testing.T) {
 	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY($4)") {
 		t.Fatalf("expected allowed library ANY clause at $4, got:\n%s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	// The allowed-library ANY arg stays at $4; the hidden-recommendation
+	// exclusion appends two more args ($5 user + $6 profile) → 6 total.
+	if len(args) != 6 {
+		t.Fatalf("expected 6 args, got %d: %v", len(args), args)
 	}
 	assertIntSliceArg(t, args, 3, []int{10, 11})
 }
@@ -241,9 +245,10 @@ func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 	if !strings.Contains(query, "mi.content_rating = ANY(") {
 		t.Fatalf("expected content_rating = ANY filter, got:\n%s", query)
 	}
-	// args: minRating, userID, profileID, then content rating slice (one arg).
-	if len(args) != 4 {
-		t.Fatalf("expected exactly 4 args (minRating, userID, profileID, rating slice); got %d: %v", len(args), args)
+	// args: minRating, userID, profileID, content rating slice, then the
+	// hidden-recommendation exclusion appends userID + profileID → 6 total.
+	if len(args) != 6 {
+		t.Fatalf("expected exactly 6 args (minRating, userID, profileID, rating slice, hidden user+profile); got %d: %v", len(args), args)
 	}
 }
 
@@ -284,11 +289,13 @@ func TestForgottenFavorites_BasicQuery(t *testing.T) {
 	if !strings.Contains(query, "ORDER BY mi.rating_imdb DESC NULLS LAST") {
 		t.Fatalf("expected rating sort order, got:\n%s", query)
 	}
-	if !strings.Contains(query, "LIMIT $4") {
-		t.Fatalf("expected LIMIT at $4, got:\n%s", query)
+	// The hidden-recommendation exclusion appends userID ($4) + profileID ($5)
+	// after the lookback arg, pushing the LIMIT placeholder to $6.
+	if !strings.Contains(query, "LIMIT $6") {
+		t.Fatalf("expected LIMIT at $6, got:\n%s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args (userID, profileID, lookbackDays, limit), got %d: %v", len(args), args)
+	if len(args) != 6 {
+		t.Fatalf("expected 6 args (userID, profileID, lookbackDays, hidden user+profile, limit), got %d: %v", len(args), args)
 	}
 }
 
@@ -331,8 +338,10 @@ func TestForgottenFavorites_AllowedLibraries(t *testing.T) {
 	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY($4)") {
 		t.Fatalf("expected allowed library ANY clause at $4, got:\n%s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	// The allowed-library ANY arg stays at $4; the hidden-recommendation
+	// exclusion appends two more args ($5 user + $6 profile) → 6 total.
+	if len(args) != 6 {
+		t.Fatalf("expected 6 args, got %d: %v", len(args), args)
 	}
 	assertIntSliceArg(t, args, 3, []int{10, 11})
 }
@@ -414,6 +423,42 @@ func TestDiscoveryQueries_DisabledLibrariesUseNotExists(t *testing.T) {
 				t.Fatalf("expected disabled library NOT EXISTS predicate, got:\n%s", tc.query)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hidden recommendation ("not interested") exclusion
+// ---------------------------------------------------------------------------
+
+func TestDiscoveryQueries_ExcludeHiddenRecommendations(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+	}{
+		// rating_threshold: viewer identity travels via RatingFilter.UserID/ProfileID.
+		{"rating_threshold", mustQuery(buildRatingThresholdQuery(RatingFilter{Min: 7, UserID: 7, ProfileID: "profile-1"}))},
+		// unplayed/forgotten: viewer identity is always at the top-level filter fields.
+		{"unplayed_high_rated", mustQuery(buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7, UserID: 7, ProfileID: "profile-1"}))},
+		{"forgotten_favorites", mustQuery(buildForgottenFavoritesQuery(ForgottenFavoritesFilter{UserID: 7, ProfileID: "profile-1", LookbackDays: 365}))},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(tc.query, "user_hidden_recommendations uhr") {
+				t.Fatalf("expected hidden recommendation exclusion subquery, got:\n%s", tc.query)
+			}
+			if !strings.Contains(tc.query, "uhr.media_item_id = mi.content_id") {
+				t.Fatalf("expected hidden exclusion correlated on mi.content_id, got:\n%s", tc.query)
+			}
+		})
+	}
+}
+
+func TestDiscoveryQueries_NoHiddenExclusionWithoutViewer(t *testing.T) {
+	// No UserID/ProfileID => no viewer identity => no hidden exclusion.
+	query := mustQuery(buildRatingThresholdQuery(RatingFilter{Min: 7}))
+	if strings.Contains(query, "user_hidden_recommendations") {
+		t.Fatalf("expected no hidden exclusion without a viewer, got:\n%s", query)
 	}
 }
 

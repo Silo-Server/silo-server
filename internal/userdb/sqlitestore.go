@@ -23,6 +23,7 @@ func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
 // Compile-time interface check.
 var _ userstore.UserStore = (*SQLiteUserStore)(nil)
 var _ userstore.DeviceRegistry = (*SQLiteUserStore)(nil)
+var _ userstore.HiddenRecommendationStore = (*SQLiteUserStore)(nil)
 
 // --- Profiles ---
 
@@ -224,6 +225,32 @@ func (s *SQLiteUserStore) InWatchlist(_ context.Context, profileID, mediaItemID 
 // does not persist the per-profile preference.
 func (s *SQLiteUserStore) RemoveWatchedFromWatchlist(_ context.Context, _ string) (bool, error) {
 	return true, nil
+}
+
+// --- Hidden recommendations ("not interested") ---
+
+func (s *SQLiteUserStore) AddHiddenRecommendation(_ context.Context, profileID, mediaItemID string) error {
+	return AddHiddenRecommendation(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) RemoveHiddenRecommendation(_ context.Context, profileID, mediaItemID string) error {
+	return RemoveHiddenRecommendation(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) ListHiddenRecommendations(_ context.Context, profileID string, limit, offset int) ([]userstore.HiddenRecommendation, error) {
+	return ListHiddenRecommendations(s.db, profileID, limit, offset)
+}
+
+func (s *SQLiteUserStore) ListHiddenRecommendationsByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
+	return ListHiddenRecommendationsByMediaItems(s.db, profileID, mediaItemIDs)
+}
+
+func (s *SQLiteUserStore) IsHiddenRecommendation(_ context.Context, profileID, mediaItemID string) (bool, error) {
+	return IsHiddenRecommendation(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) HiddenRecommendationIDSet(_ context.Context, profileID string) (map[string]struct{}, error) {
+	return HiddenRecommendationIDSet(s.db, profileID)
 }
 
 // --- Collections ---

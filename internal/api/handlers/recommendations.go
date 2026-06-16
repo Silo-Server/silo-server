@@ -20,7 +20,7 @@ import (
 )
 
 type recommendationsEngine interface {
-	SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error)
+	SimilarItems(ctx context.Context, itemID string, limit int, userID int, profileID string) ([]recommendations.ScoredItem, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
 }
@@ -109,7 +109,9 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 		limit = 20
 	}
 
-	items, err := h.engine.SimilarItems(r.Context(), itemID, limit)
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	items, err := h.engine.SimilarItems(r.Context(), itemID, limit, userID, profileID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch similar items")
 		return

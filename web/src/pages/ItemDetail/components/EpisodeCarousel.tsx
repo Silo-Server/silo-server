@@ -141,6 +141,7 @@ export default function EpisodeCarousel({
                                 played: ep.user_data.played,
                                 is_favorite: false,
                                 in_watchlist: false,
+                                is_hidden: false,
                               }
                             : undefined
                         }

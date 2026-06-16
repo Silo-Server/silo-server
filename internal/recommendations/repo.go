@@ -1727,16 +1727,44 @@ func (r *Repo) GetWatchedItemIDs(ctx context.Context, userID int, profileID stri
 }
 
 // GetWatchedItemIDSet returns the watched item IDs as a set keyed by content ID.
+// Items the profile marked "not interested" are merged in so they are also
+// excluded from recommendation surfaces that use this SQL-backed path.
 func (r *Repo) GetWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
 	ids, err := r.GetWatchedItemIDs(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
-	return scoredItemIDSet(ids), nil
+
+	// Merge "not interested" items so they behave like watched items on all
+	// handler-side recommendation paths (Because You Watched, Popular, etc.).
+	if userID > 0 && profileID != "" {
+		hiddenRows, err := r.pool.Query(ctx,
+			`SELECT media_item_id FROM user_hidden_recommendations WHERE user_id = $1 AND profile_id = $2`,
+			userID, profileID)
+		if err != nil {
+			return nil, fmt.Errorf("query hidden recommendations: %w", err)
+		}
+		for hiddenRows.Next() {
+			var id string
+			if err := hiddenRows.Scan(&id); err != nil {
+				hiddenRows.Close()
+				return nil, fmt.Errorf("scan hidden recommendation: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		hiddenRows.Close()
+		if err := hiddenRows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate hidden recommendations: %w", err)
+		}
+	}
+
+	return r.ResolveCanonicalItemIDSet(ctx, ids)
 }
 
 // GetWatchedItemIDSetFromStore derives watched item IDs from a user store,
 // then canonicalizes episode progress rows to their parent series IDs.
+// Items the profile marked "not interested" are merged in so they are also
+// excluded from recommendation surfaces.
 func (r *Repo) GetWatchedItemIDSetFromStore(ctx context.Context, store userstore.UserStore, profileID string) (map[string]struct{}, error) {
 	if store == nil {
 		return map[string]struct{}{}, nil
@@ -1762,6 +1790,17 @@ func (r *Repo) GetWatchedItemIDSetFromStore(ctx context.Context, store userstore
 			break
 		}
 		offset += len(progress)
+	}
+
+	// Items the profile marked "not interested" are excluded from
+	// recommendations as if they had already been watched.
+	if hidden, ok := store.(userstore.HiddenRecommendationStore); ok {
+		hiddenSet, err := hidden.HiddenRecommendationIDSet(ctx, profileID)
+		if err == nil {
+			for id := range hiddenSet {
+				rawIDs = append(rawIDs, id)
+			}
+		}
 	}
 
 	return r.ResolveCanonicalItemIDSet(ctx, rawIDs)

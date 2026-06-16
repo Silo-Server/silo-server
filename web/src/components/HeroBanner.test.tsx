@@ -160,6 +160,7 @@ describe("HeroBanner", () => {
                 played: true,
                 is_favorite: false,
                 in_watchlist: false,
+                is_hidden: false,
               },
             },
           ]}

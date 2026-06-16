@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS watchlist (
     PRIMARY KEY (profile_id, media_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS hidden_recommendations (
+    profile_id TEXT NOT NULL,
+    media_item_id TEXT NOT NULL,
+    hidden_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, media_item_id)
+);
+
 CREATE TABLE IF NOT EXISTS home_item_dismissals (
     profile_id TEXT NOT NULL,
     surface TEXT NOT NULL,

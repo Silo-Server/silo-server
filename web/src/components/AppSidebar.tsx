@@ -40,6 +40,7 @@ import {
   Heart,
   List,
   Clock,
+  EyeOff,
   FolderOpen,
   LogOut,
   UserCircle,
@@ -690,6 +691,23 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 )}
                 <Clock className="h-[18px] w-[18px] shrink-0" />
                 <SidebarLabel show={showLabels}>History</SidebarLabel>
+              </ViewTransitionLink>
+            </li>
+            <li>
+              <ViewTransitionLink
+                to="/hidden"
+                onClick={onNavigate}
+                className={navLinkClass("/hidden")}
+                aria-current={isActive("/hidden") ? "page" : undefined}
+              >
+                {isActive("/hidden") && (
+                  <span
+                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                    style={{ background: "var(--primary)" }}
+                  />
+                )}
+                <EyeOff className="h-[18px] w-[18px] shrink-0" />
+                <SidebarLabel show={showLabels}>Not Interested</SidebarLabel>
               </ViewTransitionLink>
             </li>
           </ul>

@@ -4,6 +4,7 @@ import {
   adminKeys,
   catalogKeys,
   favoriteKeys,
+  hiddenKeys,
   historyKeys,
   itemKeys,
   personKeys,
@@ -113,6 +114,7 @@ export async function invalidateMediaSurfaceQueries(
     queryClient.invalidateQueries({ queryKey: historyKeys.all }),
     queryClient.invalidateQueries({ queryKey: favoriteKeys.all }),
     queryClient.invalidateQueries({ queryKey: watchlistKeys.all }),
+    queryClient.invalidateQueries({ queryKey: hiddenKeys.all }),
     queryClient.invalidateQueries({ queryKey: recKeys.all }),
     queryClient.invalidateQueries({ queryKey: personKeys.all }),
     queryClient.invalidateQueries({

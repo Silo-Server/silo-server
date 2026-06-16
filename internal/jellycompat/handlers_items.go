@@ -558,7 +558,7 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 
 	// Tier 1: embedding-based recommendations.
 	if h.recommender != nil {
-		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit)
+		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit, session.StreamAppUserID, session.ProfileID)
 		if recErr == nil && len(scored) > 0 {
 			if h.writeSimilarFromScored(w, r, session, scored, limit) {
 				return

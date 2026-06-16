@@ -80,6 +80,18 @@ func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profile
 		}
 	}
 
+	// Items the profile marked "not interested" are excluded from
+	// recommendations as if they had already been watched.
+	if hidden, ok := store.(userstore.HiddenRecommendationStore); ok {
+		hiddenSet, err := hidden.HiddenRecommendationIDSet(ctx, profileID)
+		if err != nil {
+			return nil, err
+		}
+		for id := range hiddenSet {
+			rawIDs = append(rawIDs, id)
+		}
+	}
+
 	return s.repo.ResolveCanonicalItemIDSet(ctx, rawIDs)
 }
 

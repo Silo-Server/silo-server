@@ -37,7 +37,9 @@ const (
 // SimilarItems returns items most similar to the given item. Blends embedding
 // similarity (70%) with co-watch Jaccard score (30%), applies a validation
 // pipeline, MMR re-ranking, and assigns connection reasons.
-func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]ScoredItem, error) {
+// When userID > 0 and profileID != "", watched and "not interested" items are
+// excluded from results (in addition to the source item itself).
+func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, userID int, profileID string) ([]ScoredItem, error) {
 	// 1. Fetch source embedding.
 	embedding, err := e.repo.GetEmbedding(ctx, itemID)
 	if err != nil {
@@ -57,10 +59,22 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 		sourceType = sourceMeta.Type
 	}
 
-	// 3. Embedding search (3x limit for filtering headroom). Constrain to the
+	// 3. Build exclude set: always exclude the source item; also exclude
+	// watched + "not interested" items when viewer identity is known.
+	excludeIDs := []string{itemID}
+	if userID > 0 && profileID != "" {
+		watchedSet, err := e.repo.GetWatchedItemIDSet(ctx, userID, profileID)
+		if err == nil {
+			for id := range watchedSet {
+				excludeIDs = append(excludeIDs, id)
+			}
+		}
+	}
+
+	// 4. Embedding search (3x limit for filtering headroom). Constrain to the
 	// source item's media type so an audiobook never appears in a movie's
 	// Similar rail (and vice versa) once audiobook embeddings exist.
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3)
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, excludeIDs, sourceType, limit*3)
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}

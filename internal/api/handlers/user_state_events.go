@@ -14,12 +14,14 @@ type userStateEventPayload struct {
 	Played      *bool  `json:"played,omitempty"`
 	IsFavorite  *bool  `json:"is_favorite,omitempty"`
 	InWatchlist *bool  `json:"in_watchlist,omitempty"`
+	IsHidden    *bool  `json:"is_hidden,omitempty"`
 }
 
 type userStateEventState struct {
 	Played      *bool
 	IsFavorite  *bool
 	InWatchlist *bool
+	IsHidden    *bool
 }
 
 const userStateChangedEvent = "user_state.changed"
@@ -42,6 +44,7 @@ func publishUserStateEvent(
 		Played:      state.Played,
 		IsFavorite:  state.IsFavorite,
 		InWatchlist: state.InWatchlist,
+		IsHidden:    state.IsHidden,
 	}, evt.PublishOptions{
 		UserID:    userID,
 		ProfileID: profileID,
