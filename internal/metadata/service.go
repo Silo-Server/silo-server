@@ -2015,10 +2015,11 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 		return err
 	}
 	now := time.Now().UTC()
+	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount)
 	return s.refreshDebtRepo.MarkSuccess(
 		ctx,
 		contentID,
-		refreshDebtPriority(reasonMask),
+		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
 		nextRefreshAtForDebt(reasonMask, attemptCount, now),
 	)
@@ -2066,11 +2067,12 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	if err != nil {
 		return err
 	}
+	logRefreshDebtTerminal(RefreshTargetSeason, seasonID, reasonMask, attemptCount)
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetSeason,
 		seasonID,
-		refreshDebtPriority(reasonMask),
+		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
 		nextRefreshAtForDebt(reasonMask, attemptCount, now),
 	)
@@ -2099,11 +2101,12 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 	if err != nil {
 		return err
 	}
+	logRefreshDebtTerminal(RefreshTargetEpisode, episodeID, reasonMask, attemptCount)
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetEpisode,
 		episodeID,
-		refreshDebtPriority(reasonMask),
+		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
 		nextRefreshAtForDebt(reasonMask, attemptCount, now),
 	)
@@ -2154,10 +2157,11 @@ func (s *MetadataService) syncRefreshDebtFailure(ctx context.Context, contentID 
 		attemptCount++
 	}
 	now := time.Now().UTC()
+	logRefreshDebtTerminal(RefreshTargetItem, contentID, reasonMask, attemptCount)
 	return s.refreshDebtRepo.MarkFailure(
 		ctx,
 		contentID,
-		refreshDebtPriority(reasonMask),
+		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
 		nextRefreshAtForDebt(reasonMask, attemptCount, now),
 		attemptCount,
@@ -2183,11 +2187,12 @@ func (s *MetadataService) syncRefreshDebtTargetFailure(ctx context.Context, targ
 		attemptCount++
 	}
 	now := time.Now().UTC()
+	logRefreshDebtTerminal(targetType, contentID, reasonMask, attemptCount)
 	return s.refreshDebtRepo.MarkTargetFailure(
 		ctx,
 		targetType,
 		contentID,
-		refreshDebtPriority(reasonMask),
+		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
 		nextRefreshAtForDebt(reasonMask, attemptCount, now),
 		attemptCount,
@@ -3632,11 +3637,12 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	if err != nil {
 		return err
 	}
+	logRefreshDebtTerminal(RefreshTargetEpisode, episode.ContentID, reasonMask, attemptCount)
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetEpisode,
 		episode.ContentID,
-		refreshDebtPriority(reasonMask),
+		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
 		nextRefreshAtForDebt(reasonMask, attemptCount, now.UTC()),
 	)
