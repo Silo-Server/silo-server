@@ -65,6 +65,10 @@ type WorkSummaryProvider interface {
 	GetSummaryForContentID(ctx context.Context, contentID string, filter AccessFilter) (*WorkSummary, error)
 }
 
+type WorkSummaryBatchProvider interface {
+	ListSummariesForContentIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]*WorkSummary, error)
+}
+
 type WorkSummary struct {
 	WorkID  string
 	Title   string

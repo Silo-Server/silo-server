@@ -37,8 +37,8 @@ func (f fakeLiteraryWorkService) UnlinkItem(ctx context.Context, workID, content
 	return f.err
 }
 
-func (f fakeLiteraryWorkService) ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {
-	return f.err
+func (f fakeLiteraryWorkService) ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) (string, error) {
+	return "work-1", f.err
 }
 
 func (f fakeLiteraryWorkService) IgnoreMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {

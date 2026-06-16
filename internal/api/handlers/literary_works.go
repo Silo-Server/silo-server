@@ -20,7 +20,7 @@ type LiteraryWorkService interface {
 	ListCandidates(ctx context.Context, contentID string, limit int) ([]literaryworks.Candidate, error)
 	LinkItems(ctx context.Context, workID string, contentIDs []string) (string, error)
 	UnlinkItem(ctx context.Context, workID, contentID string) error
-	ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error
+	ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) (string, error)
 	IgnoreMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error
 }
 
@@ -157,14 +157,25 @@ func (h *LiteraryWorkHandler) handleDecision(w http.ResponseWriter, r *http.Requ
 	if claims != nil {
 		userID = claims.UserID
 	}
-	var err error
+	var (
+		workID string
+		err    error
+	)
 	if confirm {
-		err = h.Service.ConfirmMatch(r.Context(), req.SourceContentID, req.TargetContentID, userID)
+		workID, err = h.Service.ConfirmMatch(r.Context(), req.SourceContentID, req.TargetContentID, userID)
 	} else {
 		err = h.Service.IgnoreMatch(r.Context(), req.SourceContentID, req.TargetContentID, userID)
 	}
 	if err != nil {
+		if errors.Is(err, literaryworks.ErrWorkNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to record work match decision")
+		return
+	}
+	if confirm {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "work_id": workID})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

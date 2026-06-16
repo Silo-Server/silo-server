@@ -203,11 +203,18 @@ func (s *Service) UnlinkItem(ctx context.Context, workID, contentID string) erro
 	return s.repo.UnlinkItem(ctx, workID, contentID)
 }
 
-func (s *Service) ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {
+func (s *Service) ConfirmMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) (string, error) {
 	if s == nil || s.repo == nil {
-		return ErrWorkNotFound
+		return "", ErrWorkNotFound
 	}
-	return s.repo.RecordDecision(ctx, sourceContentID, targetContentID, DecisionConfirmed, userID)
+	workID, err := s.LinkItems(ctx, "", []string{sourceContentID, targetContentID})
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.RecordDecision(ctx, sourceContentID, targetContentID, DecisionConfirmed, userID); err != nil {
+		return "", err
+	}
+	return workID, nil
 }
 
 func (s *Service) IgnoreMatch(ctx context.Context, sourceContentID, targetContentID string, userID int) error {

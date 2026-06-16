@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"context"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type fakeCatalogWorkSummaryProvider struct{}
@@ -24,27 +24,30 @@ func (fakeCatalogWorkSummaryProvider) GetSummaryForContentID(ctx context.Context
 	}, nil
 }
 
-func TestGroupCatalogItemsByWorkDeduplicatesLinkedFormats(t *testing.T) {
-	handler := &CatalogHandler{
-		itemsH:      &ItemsHandler{},
-		workSummary: fakeCatalogWorkSummaryProvider{},
-	}
-	req := httptest.NewRequest("GET", "/api/v1/catalog?group=work", nil)
-	items := []itemListResponse{
-		{ContentID: "ebook-1", Type: "ebook", Title: "Project Hail Mary"},
-		{ContentID: "audio-1", Type: "audiobook", Title: "Project Hail Mary"},
-		{ContentID: "movie-1", Type: "movie", Title: "Unrelated"},
+func TestGroupedCatalogEntryKeyDeduplicatesLinkedFormats(t *testing.T) {
+	summary := &catalog.WorkSummary{
+		WorkID: "work-1",
+		Title:  "Project Hail Mary",
+		Formats: []catalog.WorkFormatSummary{
+			{Type: "ebook", ContentID: "ebook-1", LibraryID: 1},
+			{Type: "audiobook", ContentID: "audio-1", LibraryID: 2},
+		},
 	}
 
-	grouped := handler.groupCatalogItemsByWork(req, items)
+	ebookKey := groupedCatalogEntryKey(&models.MediaItem{ContentID: "ebook-1", Type: "ebook"}, summary)
+	audioKey := groupedCatalogEntryKey(&models.MediaItem{ContentID: "audio-1", Type: "audiobook"}, summary)
 
-	if len(grouped) != 2 {
-		t.Fatalf("len = %d, want 2: %#v", len(grouped), grouped)
+	if ebookKey != audioKey {
+		t.Fatalf("linked format keys differ: %q vs %q", ebookKey, audioKey)
 	}
-	if grouped[0].Type != "work" || grouped[0].WorkID != "work-1" || len(grouped[0].WorkFormats) != 2 {
-		t.Fatalf("grouped work = %#v", grouped[0])
+	movieKey := groupedCatalogEntryKey(&models.MediaItem{ContentID: "movie-1", Type: "movie"}, nil)
+	if movieKey != "item:movie-1" {
+		t.Fatalf("movie key = %q, want item key", movieKey)
 	}
-	if grouped[1].ContentID != "movie-1" {
-		t.Fatalf("second item = %#v, want unrelated movie preserved", grouped[1])
+
+	resp := itemListResponse{ContentID: "ebook-1", Type: "ebook", Title: "Project Hail Mary"}
+	applyWorkSummaryToCatalogItem(&resp, summary)
+	if resp.Type != "work" || resp.WorkID != "work-1" || len(resp.WorkFormats) != 2 {
+		t.Fatalf("work response = %#v", resp)
 	}
 }

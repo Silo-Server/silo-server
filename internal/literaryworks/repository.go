@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -51,9 +52,11 @@ type WorkItemDetail struct {
 
 type WorkFile struct {
 	FileID          int
+	MediaFolderID   int
 	FilePath        string
 	Size            int64
 	DurationSeconds float64
+	Resolution      string
 }
 
 type MatchItemWithWork struct {
@@ -283,7 +286,7 @@ func (r *Repository) GetWorkWithItems(ctx context.Context, workID string, filter
 		if err := rows.Scan(&item.ContentID, &item.FormatType, &item.LibraryID); err != nil {
 			return nil, nil, err
 		}
-		item.Files, err = r.ListFiles(ctx, item.ContentID)
+		item.Files, err = r.ListFiles(ctx, item.ContentID, filter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -306,55 +309,69 @@ func workItemsAccessWhere(workID string, filter catalog.AccessFilter) (string, [
 	conditions := []string{"lwi.work_id = $1"}
 	args := []any{workID}
 	argIdx := 2
+	appendWorkItemsAccessFilters(&conditions, &args, &argIdx, filter)
+	return strings.Join(conditions, " AND "), args
+}
+
+func workItemsAccessWhereForWorkIDs(workIDs []string, filter catalog.AccessFilter) (string, []any) {
+	conditions := []string{"lwi.work_id = ANY($1)"}
+	args := []any{workIDs}
+	argIdx := 2
+	appendWorkItemsAccessFilters(&conditions, &args, &argIdx, filter)
+	return strings.Join(conditions, " AND "), args
+}
+
+func appendWorkItemsAccessFilters(conditions *[]string, args *[]any, argIdx *int, filter catalog.AccessFilter) {
 	if filter.AllowedContentIDs != nil {
 		if len(filter.AllowedContentIDs) == 0 {
-			conditions = append(conditions, "FALSE")
+			*conditions = append(*conditions, "FALSE")
 		} else {
-			conditions = append(conditions, fmt.Sprintf("lwi.content_id = ANY($%d)", argIdx))
-			args = append(args, filter.AllowedContentIDs)
-			argIdx++
+			*conditions = append(*conditions, fmt.Sprintf("lwi.content_id = ANY($%d)", *argIdx))
+			*args = append(*args, filter.AllowedContentIDs)
+			*argIdx = *argIdx + 1
 		}
 	}
 	if filter.AllowedLibraryIDs != nil {
 		if len(filter.AllowedLibraryIDs) == 0 {
-			conditions = append(conditions, "FALSE")
+			*conditions = append(*conditions, "FALSE")
 		} else {
-			conditions = append(conditions, fmt.Sprintf(`
-				EXISTS (
+			*conditions = append(*conditions, fmt.Sprintf(`
+					EXISTS (
 					SELECT 1 FROM media_item_libraries mil_allowed
 					WHERE mil_allowed.content_id = lwi.content_id
 					  AND mil_allowed.media_folder_id = ANY($%d)
-				)`, argIdx))
-			args = append(args, filter.AllowedLibraryIDs)
-			argIdx++
+					)`, *argIdx))
+			*args = append(*args, filter.AllowedLibraryIDs)
+			*argIdx = *argIdx + 1
 		}
 	} else if len(filter.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, `
-			EXISTS (
-				SELECT 1 FROM media_item_libraries mil_visible
-				WHERE mil_visible.content_id = lwi.content_id
-			)`)
-		conditions = append(conditions, fmt.Sprintf(`
-			NOT EXISTS (
-				SELECT 1 FROM media_item_libraries mil_disabled
-				WHERE mil_disabled.content_id = lwi.content_id
-				  AND mil_disabled.media_folder_id = ANY($%d)
-			)`, argIdx))
-		args = append(args, filter.DisabledLibraryIDs)
+		*conditions = append(*conditions, `
+				EXISTS (
+					SELECT 1 FROM media_item_libraries mil_visible
+					WHERE mil_visible.content_id = lwi.content_id
+				)`)
+		*conditions = append(*conditions, fmt.Sprintf(`
+				NOT EXISTS (
+					SELECT 1 FROM media_item_libraries mil_disabled
+					WHERE mil_disabled.content_id = lwi.content_id
+					  AND mil_disabled.media_folder_id = ANY($%d)
+				)`, *argIdx))
+		*args = append(*args, filter.DisabledLibraryIDs)
+		*argIdx = *argIdx + 1
 	}
-	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: filter.MaxContentRating}, &conditions, &args, &argIdx)
-	return strings.Join(conditions, " AND "), args
+	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: filter.MaxContentRating}, conditions, args, argIdx)
 }
 
-func (r *Repository) ListFiles(ctx context.Context, contentID string) ([]WorkFile, error) {
+func (r *Repository) ListFiles(ctx context.Context, contentID string, filter catalog.AccessFilter) ([]WorkFile, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("literary works repository requires a database pool")
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, file_path, COALESCE(file_size, 0), COALESCE(duration, 0)::double precision
-		FROM media_files
-		WHERE content_id = $1 AND missing_since IS NULL
-		ORDER BY file_path ASC
+			SELECT id, media_folder_id, file_path, COALESCE(file_size, 0),
+				COALESCE(duration, 0)::double precision, COALESCE(resolution, '')
+			FROM media_files
+			WHERE content_id = $1 AND missing_since IS NULL
+			ORDER BY file_path ASC
 	`, contentID)
 	if err != nil {
 		return nil, err
@@ -363,8 +380,14 @@ func (r *Repository) ListFiles(ctx context.Context, contentID string) ([]WorkFil
 	var files []WorkFile
 	for rows.Next() {
 		var file WorkFile
-		if err := rows.Scan(&file.FileID, &file.FilePath, &file.Size, &file.DurationSeconds); err != nil {
+		if err := rows.Scan(&file.FileID, &file.MediaFolderID, &file.FilePath, &file.Size, &file.DurationSeconds, &file.Resolution); err != nil {
 			return nil, err
+		}
+		if !catalog.FileAllowedByAccess(&models.MediaFile{
+			MediaFolderID: file.MediaFolderID,
+			Resolution:    file.Resolution,
+		}, filter) {
+			continue
 		}
 		files = append(files, file)
 	}
@@ -534,6 +557,87 @@ func (r *Repository) GetSummaryForContentID(ctx context.Context, contentID strin
 		return nil, nil
 	}
 	return &summary, nil
+}
+
+func (r *Repository) ListSummariesForContentIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*catalog.WorkSummary, error) {
+	summariesByContentID := make(map[string]*catalog.WorkSummary, len(contentIDs))
+	if r == nil || r.pool == nil || len(contentIDs) == 0 {
+		return summariesByContentID, nil
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT anchor.content_id, lw.work_id, lw.canonical_title
+		FROM literary_work_items anchor
+		JOIN literary_works lw ON lw.work_id = anchor.work_id
+		WHERE anchor.content_id = ANY($1)
+	`, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	anchorWorkIDs := make(map[string]string, len(contentIDs))
+	summariesByWorkID := map[string]*catalog.WorkSummary{}
+	for rows.Next() {
+		var contentID, workID, title string
+		if err := rows.Scan(&contentID, &workID, &title); err != nil {
+			return nil, err
+		}
+		anchorWorkIDs[contentID] = workID
+		if _, ok := summariesByWorkID[workID]; !ok {
+			summariesByWorkID[workID] = &catalog.WorkSummary{
+				WorkID: workID,
+				Title:  title,
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(summariesByWorkID) == 0 {
+		return summariesByContentID, nil
+	}
+
+	workIDs := make([]string, 0, len(summariesByWorkID))
+	for workID := range summariesByWorkID {
+		workIDs = append(workIDs, workID)
+	}
+	where, args := workItemsAccessWhereForWorkIDs(workIDs, filter)
+	rows, err = r.pool.Query(ctx, `
+		SELECT lwi.work_id, lwi.format_type, lwi.content_id, COALESCE(MIN(mil.media_folder_id), 0)::int
+		FROM literary_work_items lwi
+		JOIN media_items mi ON mi.content_id = lwi.content_id
+		LEFT JOIN media_item_libraries mil ON mil.content_id = lwi.content_id
+		WHERE `+where+`
+		GROUP BY lwi.work_id, lwi.format_type, lwi.content_id
+		ORDER BY lwi.work_id, lwi.format_type, lwi.content_id
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var workID string
+		var format catalog.WorkFormatSummary
+		if err := rows.Scan(&workID, &format.Type, &format.ContentID, &format.LibraryID); err != nil {
+			return nil, err
+		}
+		if summary := summariesByWorkID[workID]; summary != nil {
+			summary.Formats = append(summary.Formats, format)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for contentID, workID := range anchorWorkIDs {
+		summary := summariesByWorkID[workID]
+		if summary == nil || len(summary.Formats) == 0 {
+			continue
+		}
+		summariesByContentID[contentID] = summary
+	}
+	return summariesByContentID, nil
 }
 
 func scanWork(row pgx.Row) (*Work, error) {
