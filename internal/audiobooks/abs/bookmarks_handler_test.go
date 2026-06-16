@@ -174,6 +174,22 @@ func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalo
 	}
 	return nil, nil
 }
+func (s *stubMediaStore) GetAudiobooksByIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]*models.MediaItem, error) {
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
+	out := make(map[string]*models.MediaItem, len(ids))
+	for _, id := range ids {
+		if it, ok := s.known[id]; ok {
+			if it == nil {
+				out[id] = &models.MediaItem{ContentID: id}
+			} else {
+				out[id] = it
+			}
+		}
+	}
+	return out, nil
+}
 func (s *stubMediaStore) GetAuthorByID(_ context.Context, id string, _ catalog.AccessFilter) (Author, error) {
 	return Author{}, ErrNotFound
 }

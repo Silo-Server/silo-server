@@ -108,10 +108,15 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 	}
 	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
+	byID, err := h.deps.MediaStore.GetAudiobooksByIDs(r.Context(), ids, access)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	out := make([]LibraryItem, 0, len(ids))
-	for _, id := range ids {
-		si, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), id, access)
-		if err != nil || si == nil {
+	for _, id := range ids { // preserve recommender order
+		si := byID[id]
+		if si == nil {
 			continue
 		}
 		out = append(out, siloItemToLibraryItem(si, lib, baseURL))
@@ -149,13 +154,24 @@ func (h *Handler) handleItemsInProgress(w http.ResponseWriter, r *http.Request) 
 	}
 	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
+	ids := make([]string, 0, len(rows))
+	for _, p := range rows {
+		if !p.IsFinished && p.CurrentSeconds > 0 {
+			ids = append(ids, p.ContentID)
+		}
+	}
+	byID, err := h.deps.MediaStore.GetAudiobooksByIDs(r.Context(), ids, access)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	items := make([]any, 0, len(rows))
 	for _, p := range rows {
 		if p.IsFinished || p.CurrentSeconds <= 0 {
 			continue
 		}
-		si, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), p.ContentID, access)
-		if err != nil || si == nil {
+		si := byID[p.ContentID]
+		if si == nil {
 			continue
 		}
 		li := siloItemToLibraryItem(si, lib, baseURL)

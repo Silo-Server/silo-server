@@ -23,6 +23,9 @@ type noopMediaStore struct{}
 func (noopMediaStore) GetAudiobookByID(context.Context, string, catalog.AccessFilter) (*models.MediaItem, error) {
 	return nil, nil
 }
+func (noopMediaStore) GetAudiobooksByIDs(context.Context, []string, catalog.AccessFilter) (map[string]*models.MediaItem, error) {
+	return map[string]*models.MediaItem{}, nil
+}
 func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	return nil, 0, nil
 }

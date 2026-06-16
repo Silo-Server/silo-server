@@ -41,6 +41,9 @@ type AudiobookLibrary struct {
 // a small adapter struct added in a later stage.
 type MediaStore interface {
 	GetAudiobookByID(ctx context.Context, contentID string, access catalog.AccessFilter) (*models.MediaItem, error)
+	// GetAudiobooksByIDs batch-fetches audiobooks by content_id (people + series
+	// hydrated once), keyed by content_id, for list/shelf handlers.
+	GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error)
 	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
 	// it filters to items in that media_folder; 0 means all audiobook items.
 	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]*models.MediaItem, int, error)

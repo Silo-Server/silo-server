@@ -54,6 +54,42 @@ func (s *ABSMediaStore) GetAudiobookByID(ctx context.Context, contentID string, 
 	return item, nil
 }
 
+// GetAudiobooksByIDs batch-fetches audiobooks by content_id, hydrating people
+// and series once for the whole set. List/shelf handlers (continue-listening,
+// similar, my-progress) previously called GetAudiobookByID per row, issuing a
+// handful of queries per item — up to ~500 single fetches on app open. Returns
+// a map keyed by content_id; missing or non-audiobook ids are omitted.
+func (s *ABSMediaStore) GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error) {
+	if len(contentIDs) == 0 {
+		return map[string]*models.MediaItem{}, nil
+	}
+	items, err := s.Items.GetByIDsWithAccess(ctx, contentIDs, access)
+	if err != nil {
+		return nil, fmt.Errorf("abs_media_store: get audiobooks: %w", err)
+	}
+	books := make([]*models.MediaItem, 0, len(items))
+	for _, item := range items {
+		if item != nil && item.Type == "audiobook" {
+			books = append(books, item)
+		}
+	}
+	if len(books) == 0 {
+		return map[string]*models.MediaItem{}, nil
+	}
+	// Hydrate the whole set in two queries rather than per item.
+	if err := s.hydratePeople(ctx, books); err != nil {
+		_ = err
+	}
+	if err := s.hydrateAudiobookSeries(ctx, books); err != nil {
+		_ = err
+	}
+	out := make(map[string]*models.MediaItem, len(books))
+	for _, b := range books {
+		out[b.ContentID] = b
+	}
+	return out, nil
+}
+
 // ListAudiobooks returns a page of media_items with type='audiobook'.
 // When libraryID is non-zero, results are filtered to items in that
 // media_folder (via the media_item_libraries junction); 0 means all libraries.
