@@ -56,6 +56,14 @@ type AudiobookGroup struct {
 	PosterPaths []string
 }
 
+// audiobookGroupsPageCap bounds a single externally-requested page.
+const audiobookGroupsPageCap = 500
+
+// audiobookGroupsFullCap bounds the full-list fetch used to warm the groups
+// cache. It is far above any real author/narrator/series count so the cached
+// list is effectively complete, while still capping a pathological library.
+const audiobookGroupsFullCap = 50000
+
 // ListAudiobookGroups returns grouped browse rows for an audiobook library.
 // Groups are aggregated per person name (authors/narrators) or per series
 // name, matching the case-insensitive semantics of the corresponding catalog
@@ -63,6 +71,20 @@ type AudiobookGroup struct {
 // series filter rule. Progress counts are scoped to the requesting profile via
 // filter.UserID / filter.ProfileID.
 func ListAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter) ([]AudiobookGroup, int, error) {
+	return listAudiobookGroups(ctx, pool, q, filter, audiobookGroupsPageCap)
+}
+
+// listAllAudiobookGroups fetches the complete grouped list (offset 0, full cap)
+// in a single query so the result can be cached and sliced per page without
+// re-aggregating on every offset.
+func listAllAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter) ([]AudiobookGroup, int, error) {
+	full := q
+	full.Limit = audiobookGroupsFullCap
+	full.Offset = 0
+	return listAudiobookGroups(ctx, pool, full, filter, audiobookGroupsFullCap)
+}
+
+func listAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter, maxLimit int) ([]AudiobookGroup, int, error) {
 	if pool == nil {
 		return nil, 0, fmt.Errorf("audiobook groups: no database pool")
 	}
@@ -74,8 +96,8 @@ func ListAudiobookGroups(ctx context.Context, pool *pgxpool.Pool, q AudiobookGro
 	if limit <= 0 {
 		limit = 200
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > maxLimit {
+		limit = maxLimit
 	}
 	offset := max(q.Offset, 0)
 

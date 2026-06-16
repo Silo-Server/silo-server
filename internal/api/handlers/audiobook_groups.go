@@ -69,9 +69,8 @@ func (h *CatalogHandler) HandleGetAudiobookGroups(w http.ResponseWriter, r *http
 	}
 	offset := max(catalog.ParseIntParam(r.URL.Query().Get("offset")), 0)
 
-	groups, total, err := catalog.ListAudiobookGroups(
+	groups, total, err := h.audiobookGroups().Page(
 		r.Context(),
-		h.itemsH.browseRepo.Pool(),
 		catalog.AudiobookGroupsQuery{
 			LibraryID: libraryID,
 			GroupBy:   groupBy,

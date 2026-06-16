@@ -7,10 +7,12 @@ import { catalogKeys } from "./keys";
 export type AudiobookGroupBy = "author" | "narrator" | "series";
 export type AudiobookGroupSort = "name" | "count" | "duration";
 
-// The server caps a single page at 500 groups; page until the reported total
-// is reached so client-side filtering sees the complete list. The page cap
-// bounds the worst case (pathological libraries) at 20 requests / 10k groups.
-const GROUPS_PAGE_SIZE = 500;
+// Page until the reported total is reached so client-side filtering sees the
+// complete list. The server caches the full grouped list per request, so a
+// larger page is a cheap in-memory slice — a bigger page size means fewer
+// sequential round-trips for large libraries (the dominant cold-load cost).
+// GROUPS_MAX_PAGES bounds the worst case (pathological libraries).
+const GROUPS_PAGE_SIZE = 2000;
 const GROUPS_MAX_PAGES = 20;
 
 export async function fetchAudiobookGroups(
