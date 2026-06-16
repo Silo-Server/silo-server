@@ -32,6 +32,7 @@ var unabridgedTokenRE = regexp.MustCompile(`(?i)\s*\(unabridged\)\s*`)
 // Used after the strip passes since removing a mid-string token can
 // leave double spaces behind.
 var collapseSpacesRE = regexp.MustCompile(`\s+`)
+var audiobookDedupeTitleTokenRE = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
 // stripNarratorSuffix removes the narrator-suffix noise and "(unabridged)"
 // markers from a title. Returns the input unchanged when no match.
@@ -42,6 +43,28 @@ func stripNarratorSuffix(title string) string {
 	cleaned = unabridgedTokenRE.ReplaceAllString(cleaned, " ")
 	cleaned = collapseSpacesRE.ReplaceAllString(cleaned, " ")
 	return strings.TrimSpace(cleaned)
+}
+
+func normalizeAudiobookDedupeTitle(title string) string {
+	title = stripNarratorSuffix(title)
+	title = audiobookDedupeTitleTokenRE.ReplaceAllString(title, " ")
+	title = collapseSpacesRE.ReplaceAllString(title, " ")
+	return strings.ToLower(strings.TrimSpace(title))
+}
+
+func audiobookDedupeTitlesMatch(a, b string) bool {
+	left := normalizeAudiobookDedupeTitle(a)
+	right := normalizeAudiobookDedupeTitle(b)
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	if len(left) < len(right) {
+		return strings.HasPrefix(right, left+" ")
+	}
+	return strings.HasPrefix(left, right+" ")
 }
 
 // parsedAudiobook is the structured output of parseAudiobookFolder.

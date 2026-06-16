@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type filesystemRootContentFinder interface {
@@ -27,6 +28,44 @@ type filesystemRootContentFinder interface {
 type filesystemMediaItemWriter interface {
 	Upsert(ctx context.Context, item *models.MediaItem) error
 }
+
+type audiobookPosterExec interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+type audiobookPosterPathReader interface {
+	GetPosterPath(ctx context.Context, contentID string) (string, error)
+}
+
+const audiobookDuplicateCandidateSQL = `
+	SELECT mi.content_id, mi.title
+	FROM media_items mi
+	JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
+	JOIN people pa ON pa.id = ipa.person_id AND LOWER(pa.name) = LOWER($1)
+	JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
+	JOIN people pn ON pn.id = ipn.person_id AND LOWER(pn.name) = LOWER($2)
+	JOIN LATERAL (
+		SELECT COALESCE(SUM(mf.duration), 0) AS dur
+		FROM media_files mf WHERE mf.content_id = mi.content_id
+	) f ON TRUE
+	JOIN LATERAL (
+		SELECT btrim(regexp_replace(
+			regexp_replace(lower(mi.title), '[^a-z0-9]+', ' ', 'g'),
+			'[[:space:]]+', ' ', 'g'
+		)) AS normalized_title
+	) t ON TRUE
+	WHERE mi.type = 'audiobook'
+	  AND mi.year = $3
+	  AND f.dur > 0
+	  AND ABS(f.dur - $4) <= $5
+	  AND (
+		  t.normalized_title = $6
+	   OR t.normalized_title LIKE $6 || ' %'
+	   OR $6 LIKE t.normalized_title || ' %'
+	  )
+	ORDER BY ABS(f.dur - $4), LENGTH(mi.title), mi.content_id
+	LIMIT 25
+`
 
 // audiobookDiskFile is the on-disk projection used by audiobookFolderUnchanged.
 // Path is the absolute file path; Size and ModTime come from os.Stat.
@@ -324,6 +363,16 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 			"error", err,
 		)
 	}
+	if len(parsed.Files) > 0 && s.fileRepo != nil {
+		if _, err := applyAudiobookEmbeddedCover(ctx, s.itemRepo, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
+			slog.Warn("audiobook scan: embedded cover failed",
+				"folder_id", folder.ID,
+				"content_id", contentID,
+				"path", parsed.Files[0].Path,
+				"error", err,
+			)
+		}
+	}
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
 	}
@@ -360,6 +409,42 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	return nil
 }
 
+func applyAudiobookEmbeddedCover(
+	ctx context.Context,
+	reader audiobookPosterPathReader,
+	exec audiobookPosterExec,
+	ffmpegPath string,
+	cacher audiobookCoverCacher,
+	audioFilePath string,
+	contentID string,
+) (bool, error) {
+	if exec == nil {
+		return false, nil
+	}
+	if reader != nil {
+		existingPosterPath, err := reader.GetPosterPath(ctx, contentID)
+		if err != nil {
+			return false, fmt.Errorf("get audiobook poster path for embedded cover: %w", err)
+		}
+		if strings.TrimSpace(existingPosterPath) != "" {
+			return false, nil
+		}
+	}
+	poster, thumb := ExtractAndUploadAudiobookCover(ctx, ffmpegPath, cacher, audioFilePath, contentID)
+	if poster == "" {
+		return false, nil
+	}
+	_, err := exec.Exec(ctx, `
+		UPDATE media_items
+		SET poster_path = $1, poster_thumbhash = $2, updated_at = NOW()
+		WHERE content_id = $3 AND (poster_path IS NULL OR poster_path = '')
+	`, poster, thumb, contentID)
+	if err != nil {
+		return false, fmt.Errorf("update audiobook embedded cover: %w", err)
+	}
+	return true, nil
+}
+
 // upsertAudiobookMediaItem reuses an item already linked to the same filesystem
 // root, then falls back to the stricter ABS duplicate rule, or creates a new row.
 // It intentionally avoids title/year-only dedupe because audiobooks often share
@@ -385,7 +470,7 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, folderID int, fo
 		cleanTitle = book.Title
 	}
 
-	if existing := s.findAudiobookByFilePath(ctx, book); existing != nil {
+	if existing := s.findAudiobookByFilePath(ctx, folderID, book); existing != nil {
 		applyBookToMediaItem(existing, book)
 		if existing.SortTitle == "" {
 			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
@@ -469,10 +554,10 @@ func createAudiobookMediaItem(ctx context.Context, itemWriter filesystemMediaIte
 
 // findAudiobookDuplicate returns an existing audiobook media_items row that
 // matches the parsed book on (author, narrator, year, duration ±0.5%/±10s,
-// title-prefix). Used after the file-path lookup misses to detect the same
-// recording stored under a different folder name. Returns nil when no match
-// exists or any required attribute (author, narrator, year, duration) is
-// missing — under-tagged files don't qualify for automatic dedup.
+// punctuation-normalized title). Used after the file-path lookup misses to
+// detect the same recording stored under a different folder name. Returns nil
+// when no match exists or any required attribute (author, narrator, year,
+// duration) is missing — under-tagged files don't qualify for automatic dedup.
 func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiobook, cleanTitle string) *models.MediaItem {
 	if s.fileRepo == nil {
 		return nil
@@ -491,32 +576,39 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 	if tolerance < 10 {
 		tolerance = 10
 	}
-	var existingID string
-	err := s.fileRepo.Pool().QueryRow(ctx, `
-		SELECT mi.content_id
-		FROM media_items mi
-		JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
-		JOIN people pa ON pa.id = ipa.person_id AND pa.name = $1
-		JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
-		JOIN people pn ON pn.id = ipn.person_id AND pn.name = $2
-		JOIN LATERAL (
-			SELECT COALESCE(SUM(mf.duration), 0) AS dur
-			FROM media_files mf WHERE mf.content_id = mi.content_id
-		) f ON TRUE
-		WHERE mi.type = 'audiobook'
-		  AND mi.year = $3
-		  AND f.dur > 0
-		  AND ABS(f.dur - $4) <= $5
-		  AND (
-			  LOWER(mi.title) = LOWER($6)
-		   OR (LENGTH(mi.title) > LENGTH($6) AND LOWER(mi.title) LIKE LOWER($6) || ':%')
-		   OR (LENGTH($6) > LENGTH(mi.title) AND LOWER($6) LIKE LOWER(mi.title) || ':%')
-		  )
-		LIMIT 1
-	`, book.Author, book.Narrator, book.Year, totalDuration, tolerance, cleanTitle).Scan(&existingID)
-	if err != nil || existingID == "" {
+	titleKey := normalizeAudiobookDedupeTitle(cleanTitle)
+	if titleKey == "" {
 		return nil
 	}
+	rows, err := s.fileRepo.Pool().Query(ctx,
+		audiobookDuplicateCandidateSQL,
+		book.Author,
+		book.Narrator,
+		book.Year,
+		totalDuration,
+		tolerance,
+		titleKey,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var existingID string
+	for rows.Next() {
+		var candidateID, candidateTitle string
+		if err := rows.Scan(&candidateID, &candidateTitle); err != nil {
+			return nil
+		}
+		if audiobookDedupeTitlesMatch(candidateTitle, cleanTitle) {
+			existingID = candidateID
+			break
+		}
+	}
+	if rows.Err() != nil || existingID == "" {
+		return nil
+	}
+
 	items, err := s.itemRepo.GetByIDs(ctx, []string{existingID})
 	if err != nil || len(items) == 0 {
 		return nil
@@ -527,16 +619,11 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 // findAudiobookByFilePath returns an existing audiobook media_items row
 // whose media_files reference any of this book's audio file paths.
 // Returns nil when no match exists (a fresh scan of a new folder).
-func (s *Scanner) findAudiobookByFilePath(ctx context.Context, book *parsedAudiobook) *models.MediaItem {
+func (s *Scanner) findAudiobookByFilePath(ctx context.Context, folderID int, book *parsedAudiobook) *models.MediaItem {
 	if s.fileRepo == nil || len(book.Files) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(book.Files))
-	for _, f := range book.Files {
-		if f.Path != "" {
-			paths = append(paths, f.Path)
-		}
-	}
+	paths := audiobookLookupPaths(book.Files)
 	if len(paths) == 0 {
 		return nil
 	}
@@ -545,10 +632,11 @@ func (s *Scanner) findAudiobookByFilePath(ctx context.Context, book *parsedAudio
 		SELECT mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
-		WHERE mf.file_path = ANY($1)
+		WHERE mf.media_folder_id = $2
+		  AND (mf.file_path = ANY($1) OR LOWER(mf.file_path) = ANY($1))
 		  AND mi.type = 'audiobook'
 		LIMIT 1
-	`, paths).Scan(&existingID)
+	`, paths, folderID).Scan(&existingID)
 	if err != nil || existingID == "" {
 		return nil
 	}
@@ -557,6 +645,28 @@ func (s *Scanner) findAudiobookByFilePath(ctx context.Context, book *parsedAudio
 		return nil
 	}
 	return items[0]
+}
+
+func audiobookLookupPaths(files []parsedAudiobookFile) []string {
+	seen := make(map[string]struct{}, len(files)*2)
+	paths := make([]string, 0, len(files)*2)
+	for _, f := range files {
+		path := strings.TrimSpace(f.Path)
+		if path == "" {
+			continue
+		}
+		for _, candidate := range []string{path, strings.ToLower(path)} {
+			if candidate == "" {
+				continue
+			}
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			paths = append(paths, candidate)
+		}
+	}
+	return paths
 }
 
 // applyBookToMediaItem copies parsed-audiobook tag fields onto the
