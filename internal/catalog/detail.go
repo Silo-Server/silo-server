@@ -1171,16 +1171,32 @@ func (s *DetailService) buildAudiobookExtension(
 		}
 	}
 
+	// The four related-content lookups are independent read-only queries;
+	// run them concurrently so detail latency is the slowest one, not their sum.
+	var (
+		series       *AudiobookSeriesGroup
+		otherNarr    []AudiobookNarration
+		alsoByAuthor []AudiobookRelatedItem
+		similar      []AudiobookRelatedItem
+		wg           sync.WaitGroup
+	)
+	wg.Add(4)
+	go func() { defer wg.Done(); series = s.fetchAudiobookSeries(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); otherNarr = s.fetchAudiobookOtherNarrations(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); alsoByAuthor = s.fetchAudiobookAlsoByAuthor(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); similar = s.fetchAudiobookSimilarByGenres(ctx, item.ContentID, filter) }()
+	wg.Wait()
+
 	return &AudiobookDetailExtension{
 		Authors:              audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
 		Narrators:            audiobookPeopleFromCrew(crew, models.PersonKindNarrator.String()),
 		Publisher:            firstNonEmptyString(item.Studios),
 		TotalDurationSeconds: totalDuration,
-		Series:               s.fetchAudiobookSeries(ctx, item.ContentID, filter),
-		OtherNarrations:      s.fetchAudiobookOtherNarrations(ctx, item.ContentID, filter),
+		Series:               series,
+		OtherNarrations:      otherNarr,
 		Related: AudiobookRelatedContent{
-			AlsoByAuthor: s.fetchAudiobookAlsoByAuthor(ctx, item.ContentID, filter),
-			Similar:      s.fetchAudiobookSimilarByGenres(ctx, item.ContentID, filter),
+			AlsoByAuthor: alsoByAuthor,
+			Similar:      similar,
 		},
 	}
 }
@@ -2113,16 +2129,126 @@ func resolveSelectedAudioLanguage(
 	return ""
 }
 
+// audioPrefResolver memoizes the user-store lookups behind
+// effectiveAudioSelection that are invariant across the files of a single
+// detail request — the user store, the profile, the item's audio preference,
+// and the resolved original language — plus per-library playback preferences.
+// A multi-track item (e.g. a several-hundred-file audiobook) thus issues each
+// of those queries once per request instead of once per file.
+type audioPrefResolver struct {
+	svc       *DetailService
+	store     userstore.UserStore
+	valid     bool
+	profileID string
+	contentID string
+
+	profileDone bool
+	profileLang string
+
+	audioDone bool
+	audioPref *playback.AudioTrackPreference
+
+	originalDone bool
+	originalLang string
+
+	libLang map[int]string
+}
+
+// newAudioPrefResolver resolves the per-user store once and prepares the
+// memoization caches. The returned resolver is not safe for concurrent use; it
+// is intended to be threaded through a single sequential file loop.
+func (s *DetailService) newAudioPrefResolver(ctx context.Context, filter AccessFilter, audioPreferenceContentID string) *audioPrefResolver {
+	r := &audioPrefResolver{
+		svc:       s,
+		profileID: filter.ProfileID,
+		contentID: audioPreferenceContentID,
+		libLang:   map[int]string{},
+	}
+	if s.userStoreProvider == nil || filter.UserID == 0 || filter.ProfileID == "" {
+		return r
+	}
+	store, err := s.userStoreProvider.ForUser(ctx, filter.UserID)
+	if err != nil || store == nil {
+		return r
+	}
+	r.store = store
+	r.valid = true
+	return r
+}
+
+// audioPreference returns a fresh copy of the item's stored audio preference
+// (or nil). A copy is returned each call so the caller can resolve the
+// original-language sentinel in place without mutating the memoized value.
+func (r *audioPrefResolver) audioPreference(ctx context.Context) *playback.AudioTrackPreference {
+	if !r.audioDone {
+		r.audioDone = true
+		if strings.TrimSpace(r.contentID) != "" {
+			if pref, prefErr := r.store.GetAudioPreference(ctx, r.profileID, r.contentID); prefErr == nil && pref != nil {
+				r.audioPref = &playback.AudioTrackPreference{
+					AudioTrackIndex: pref.AudioTrackIndex,
+					AudioLanguage:   pref.AudioLanguage,
+					TrackSignature:  pref.TrackSignature,
+				}
+			}
+		}
+	}
+	if r.audioPref == nil {
+		return nil
+	}
+	cp := *r.audioPref
+	return &cp
+}
+
+func (r *audioPrefResolver) profileLanguage(ctx context.Context) string {
+	if !r.profileDone {
+		r.profileDone = true
+		if profile, profileErr := r.store.GetProfile(ctx, r.profileID); profileErr == nil && profile != nil {
+			r.profileLang = strings.TrimSpace(profile.Language)
+		}
+	}
+	return r.profileLang
+}
+
+func (r *audioPrefResolver) libraryAudioLanguage(ctx context.Context, libraryID int) string {
+	if lang, ok := r.libLang[libraryID]; ok {
+		return lang
+	}
+	lang := ""
+	if pref, prefErr := r.store.GetLibraryPlaybackPreference(ctx, r.profileID, libraryID); prefErr == nil && pref != nil {
+		lang = strings.TrimSpace(pref.AudioLanguage)
+	}
+	r.libLang[libraryID] = lang
+	return lang
+}
+
+func (r *audioPrefResolver) originalLanguage(ctx context.Context) string {
+	if !r.originalDone {
+		r.originalDone = true
+		r.originalLang = r.svc.resolveOriginalLanguage(ctx, r.contentID)
+	}
+	return r.originalLang
+}
+
 func (s *DetailService) effectiveAudioSelection(
 	ctx context.Context,
 	filter AccessFilter,
 	audioPreferenceContentID string,
 	file *models.MediaFile,
 ) effectiveAudioSelection {
+	return s.effectiveAudioSelectionWith(ctx, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID), file)
+}
+
+// effectiveAudioSelectionWith computes the selection for one file using a
+// resolver whose request-invariant lookups are shared across every file.
+func (s *DetailService) effectiveAudioSelectionWith(
+	ctx context.Context,
+	r *audioPrefResolver,
+	file *models.MediaFile,
+) effectiveAudioSelection {
 	if file == nil || len(file.AudioTracks) == 0 {
 		return effectiveAudioSelection{}
 	}
-	if s.userStoreProvider == nil || filter.UserID == 0 || filter.ProfileID == "" {
+	if r == nil || !r.valid {
 		index := playback.SelectAudioTrack(file.AudioTracks, "", nil)
 		return effectiveAudioSelection{
 			Index:    index,
@@ -2130,42 +2256,19 @@ func (s *DetailService) effectiveAudioSelection(
 		}
 	}
 
-	store, err := s.userStoreProvider.ForUser(ctx, filter.UserID)
-	if err != nil || store == nil {
-		index := playback.SelectAudioTrack(file.AudioTracks, "", nil)
-		return effectiveAudioSelection{
-			Index:    index,
-			Language: resolveSelectedAudioLanguage(file, index, "", false),
-		}
-	}
+	seriesPref := r.audioPreference(ctx)
 
-	var seriesPref *playback.AudioTrackPreference
-	if strings.TrimSpace(audioPreferenceContentID) != "" {
-		if pref, prefErr := store.GetAudioPreference(ctx, filter.ProfileID, audioPreferenceContentID); prefErr == nil && pref != nil {
-			seriesPref = &playback.AudioTrackPreference{
-				AudioTrackIndex: pref.AudioTrackIndex,
-				AudioLanguage:   pref.AudioLanguage,
-				TrackSignature:  pref.TrackSignature,
-			}
-		}
-	}
-
-	preferredLang := ""
-	if profile, profileErr := store.GetProfile(ctx, filter.ProfileID); profileErr == nil && profile != nil {
-		preferredLang = strings.TrimSpace(profile.Language)
-	}
+	preferredLang := r.profileLanguage(ctx)
 
 	libraryAudioLang := ""
 	if seriesPref == nil {
-		if pref, prefErr := store.GetLibraryPlaybackPreference(ctx, filter.ProfileID, file.MediaFolderID); prefErr == nil && pref != nil {
-			libraryAudioLang = strings.TrimSpace(pref.AudioLanguage)
-		}
+		libraryAudioLang = r.libraryAudioLanguage(ctx, file.MediaFolderID)
 	}
 
 	originalLanguage := ""
 	resolveOriginalLanguage := func() string {
 		if originalLanguage == "" {
-			originalLanguage = s.resolveOriginalLanguage(ctx, audioPreferenceContentID)
+			originalLanguage = r.originalLanguage(ctx)
 		}
 		return originalLanguage
 	}
@@ -2301,16 +2404,15 @@ func (s *DetailService) buildPlaybackInfo(
 	subtitleSet := make(map[string]SubtitleInfo)
 	var firstIntro, firstCredits, firstRecap, firstPreview *Marker
 
+	// Resolve the request-invariant audio preferences once; a multi-track item
+	// would otherwise re-query the profile/preference rows for every file.
+	audioResolver := s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID)
+
 	for _, f := range files {
 		if f == nil {
 			continue
 		}
-		effectiveAudioSelection := s.effectiveAudioSelection(
-			ctx,
-			filter,
-			audioPreferenceContentID,
-			f,
-		)
+		effectiveAudioSelection := s.effectiveAudioSelectionWith(ctx, audioResolver, f)
 		versionIntro := markerFromRange(f.IntroStart, f.IntroEnd)
 		if versionIntro != nil && firstIntro == nil {
 			firstIntro = versionIntro
