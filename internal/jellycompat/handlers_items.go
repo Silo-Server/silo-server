@@ -794,6 +794,36 @@ func (h *ItemsHandler) HandleFiltersStub(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// HandleFilters2Stub serves GET /Items/Filters2, Jellyfin's v2 query-filters
+// endpoint. Clients like Fladder call it to populate their filter UI; without a
+// route it fell through to GET /Items/{id} and 404'd. Jellyfin returns a
+// QueryFilters object whose fields default to empty arrays, so an empty (but
+// correctly-shaped) result is contract-faithful and never blocks the UI.
+func (h *ItemsHandler) HandleFilters2Stub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, queryFiltersDTO{
+		Genres:            []nameGuidPair{},
+		Tags:              []string{},
+		AudioLanguages:    []nameValuePair{},
+		SubtitleLanguages: []nameValuePair{},
+	})
+}
+
+// HandleLocalTrailers serves GET /Items/{id}/LocalTrailers (and the legacy
+// /Users/{userId}/Items/{id}/LocalTrailers alias). Jellyfin returns a bare
+// BaseItemDto array — not the {Items,TotalRecordCount,StartIndex} envelope, so
+// this cannot reuse HandleItemStub. Silo does not index local trailer files, so
+// the result is always empty; returning [] matches Jellyfin's contract for an
+// item with no local trailers and stops the chi 404 that clients (Infuse,
+// Moonfin) otherwise hit on every item-detail load.
+func (h *ItemsHandler) HandleLocalTrailers(w http.ResponseWriter, r *http.Request) {
+	session := SessionFromContext(r.Context())
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
+		return
+	}
+	writeJSON(w, http.StatusOK, []baseItemDTO{})
+}
+
 // HandleLatest serves GET /Items/Latest.
 func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())

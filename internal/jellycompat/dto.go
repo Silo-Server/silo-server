@@ -17,6 +17,30 @@ type themeMediaResultDTO struct {
 	OwnerID          string        `json:"OwnerId"`
 }
 
+// nameGuidPair mirrors Jellyfin's MediaBrowser.Model.Dto.NameGuidPair.
+type nameGuidPair struct {
+	Name string `json:"Name"`
+	ID   string `json:"Id"`
+}
+
+// nameValuePair mirrors Jellyfin's MediaBrowser.Model.Dto.NameValuePair.
+type nameValuePair struct {
+	Name  string `json:"Name"`
+	Value string `json:"Value"`
+}
+
+// queryFiltersDTO mirrors Jellyfin's MediaBrowser.Model.Querying.QueryFilters,
+// the v2 (/Items/Filters2) shape. It differs from the legacy /Items/Filters
+// result (QueryFiltersLegacy): Genres are NameGuidPair, and AudioLanguages /
+// SubtitleLanguages replace OfficialRatings / Years. Every field defaults to an
+// empty (non-nil) slice so the JSON is always arrays, never null.
+type queryFiltersDTO struct {
+	Genres            []nameGuidPair  `json:"Genres"`
+	Tags              []string        `json:"Tags"`
+	AudioLanguages    []nameValuePair `json:"AudioLanguages"`
+	SubtitleLanguages []nameValuePair `json:"SubtitleLanguages"`
+}
+
 type baseItemDTO struct {
 	ServerID                 string                       `json:"ServerId,omitempty"`
 	ID                       string                       `json:"Id"`

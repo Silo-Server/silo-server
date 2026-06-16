@@ -121,6 +121,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	// than inside the session-auth group.
 	r.Get("/Users/{id}/Images/Primary", imagesHandler.HandleUserImage)
 	r.Method(http.MethodHead, "/Users/{id}/Images/Primary", http.HandlerFunc(imagesHandler.HandleUserImage))
+	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
+	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
+	r.Get("/UserImage", imagesHandler.HandleUserImage)
+	r.Method(http.MethodHead, "/UserImage", http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
@@ -146,6 +150,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{id}/Items", itemsHandler.HandleItems)
 			r.Get("/Items/Latest", itemsHandler.HandleLatest)
 			r.Get("/Items/Filters", itemsHandler.HandleFiltersStub)
+			r.Get("/Items/Filters2", itemsHandler.HandleFilters2Stub)
 			r.Get("/Items/Suggestions", itemsHandler.HandleSuggestions)
 			r.Get("/Users/{id}/Items/Latest", itemsHandler.HandleLatest)
 			r.Get("/Items/{id}/Similar", itemsHandler.HandleSimilar)
@@ -155,10 +160,12 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
+			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/SpecialFeatures", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
+			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
@@ -196,6 +203,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Studios", itemsHandler.HandleItemStub)
 			r.Get("/Artists", itemsHandler.HandleItemStub)
 			r.Get("/Movies/Recommendations", recsHandler.HandleRecommendations)
+			r.Get("/Sessions", HandleSessions)
 			r.Post("/Sessions/Capabilities", playbackHandler.HandleCapabilitiesFull)
 			r.Post("/Sessions/Capabilities/Full", playbackHandler.HandleCapabilitiesFull)
 			r.Get("/Playback/BitrateTest", playbackHandler.HandleBitrateTest)
@@ -208,6 +216,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Sessions/Playing/Stopped", playbackHandler.HandleSessionPlayingStopped)
 			r.Delete("/Videos/ActiveEncodings", playbackHandler.HandleDeleteActiveEncodings)
 			r.Post("/Sessions/Logout", authHandler.HandleLogout)
+			r.Post("/ClientLog/Document", HandleClientLogDocument)
 			r.Get("/socket", HandleSocket)
 		})
 	}

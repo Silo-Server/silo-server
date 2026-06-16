@@ -585,6 +585,13 @@ func parseRemoteImageURL(imageURL string) (*url.URL, error) {
 // varying-{id} flood would otherwise turn into a CPU DoS amplifier).
 func (h *ImagesHandler) HandleUserImage(w http.ResponseWriter, r *http.Request) {
 	id := chiURLParam(r, "id")
+	if id == "" {
+		// The modern /UserImage route carries the id as a ?userId= query param
+		// rather than a path segment. Fall back to it so each user still hashes
+		// to a stable palette entry instead of every caller sharing the empty-id
+		// avatar.
+		id = firstNonEmpty(r.URL.Query().Get("userId"), r.URL.Query().Get("UserId"))
+	}
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
