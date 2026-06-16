@@ -38,6 +38,7 @@ type ItemsHandler struct {
 	detailSvc    *catalog.DetailService
 	itemRepo     itemRepoForBatchLoader
 	episodeRepo  episodeRepoForBatchLoader
+	seasonRepo   imageSeasonRepository
 	accessFilter AccessFilterResolver
 	subtitleRepo subtitles.Repository
 	recommender  recommendations.Recommender
@@ -55,8 +56,8 @@ type ItemsHandler struct {
 }
 
 // NewItemsHandler creates a new items handler.
-func NewItemsHandler(content ContentService, userData UserDataService, codec *ResourceIDCodec, cfg *config.Config, images *ImageCache, nextUpRepo *catalog.NextUpRepository, browseRepo *catalog.BrowseRepository, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, subtitleRepo subtitles.Repository) *ItemsHandler {
-	return &ItemsHandler{
+func NewItemsHandler(content ContentService, userData UserDataService, codec *ResourceIDCodec, cfg *config.Config, images *ImageCache, nextUpRepo *catalog.NextUpRepository, browseRepo *catalog.BrowseRepository, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, episodeRepo *catalog.EpisodeRepository, seasonRepo *catalog.SeasonRepository, accessFilter AccessFilterResolver, subtitleRepo subtitles.Repository) *ItemsHandler {
+	h := &ItemsHandler{
 		content:      content,
 		userData:     userData,
 		codec:        codec,
@@ -71,6 +72,13 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 		accessFilter: accessFilter,
 		subtitleRepo: subtitleRepo,
 	}
+	// Assign through the typed pointer only when present so the interface field
+	// stays a true nil (a typed nil would defeat the nil check in
+	// handleSeasonEpisodeChildren and panic on GetByID).
+	if seasonRepo != nil {
+		h.seasonRepo = seasonRepo
+	}
+	return h
 }
 
 // HandleViews serves GET /Users/{userId}/Views.
@@ -165,8 +173,18 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleSearchItems(w, r, session, query)
 	case query.isFavorite:
 		h.handleFavoriteItems(w, r, session, query)
-	case isSeasonChildItemsQuery(query):
-		h.handleSeasonChildItems(w, r, session, query)
+	case query.parentSeasonID != "":
+		// ParentId is a season: list that season's episodes. Clients that browse
+		// a show through generic /Items?ParentId= (e.g. Void's getEpisodes) send
+		// no IncludeItemTypes, so this must not depend on a type filter.
+		h.handleSeasonEpisodeChildren(w, r, session, query)
+	case query.parentItemID != "":
+		// ParentId is a series (or movie): list the series' seasons, or its
+		// episodes when IncludeItemTypes=Episode is requested. Without this, a
+		// series ParentId fell through to the library-views fallback below, so
+		// clients browsing a show via /Items?ParentId= (e.g. Void's getSeasons)
+		// saw the top-level libraries rendered as season tabs.
+		h.handleItemParentChildren(w, r, session, query)
 	case query.parentLibraryID == 0 && len(query.itemTypes) == 0:
 		// No ParentId and no type filter: return top-level library views.
 		// Jellyfin clients (e.g. Findroid "My Media") call GET /Items?userId=...
@@ -186,12 +204,50 @@ func emptyQueryResult(startIndex int) queryResultDTO {
 	}
 }
 
-func isSeasonChildItemsQuery(query itemsQuery) bool {
-	if query.parentItemID == "" {
-		return false
+// handleItemParentChildren serves GET /Items?ParentId={seriesId}. A series parent
+// lists the series' seasons by default (and for an explicit IncludeItemTypes=Season);
+// IncludeItemTypes=Episode lists every episode of the series instead. A type filter
+// a series parent cannot satisfy (e.g. Movie) returns an empty page rather than a
+// wrong-typed seasons listing. Movie/other item parents have no seasons, so the
+// default path's ListSeasons yields an empty set and writes an empty page.
+func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	switch {
+	case itemTypesContain(query.itemTypes, "episode"):
+		h.writeSeriesEpisodesResponse(w, r, session, query, query.parentItemID, "", true)
+	case !query.hasItemTypeFilter || itemTypesContain(query.itemTypes, "season"):
+		h.handleSeasonChildItems(w, r, session, query)
+	default:
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	}
-	for _, itemType := range query.itemTypes {
-		if itemType == "season" {
+}
+
+// handleSeasonEpisodeChildren serves GET /Items?ParentId={seasonId} by listing the
+// episodes of that season. The season is resolved to its owning series so the
+// shared episode-listing path (also used by /Shows/{id}/Episodes) can be reused.
+func (h *ItemsHandler) handleSeasonEpisodeChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	// A season's only children are its episodes; a type filter that excludes
+	// Episode (e.g. IncludeItemTypes=Movie) yields nothing, mirroring the
+	// series-parent path's handling of unsatisfiable type filters.
+	if query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode") {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	if h.seasonRepo == nil {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	season, err := h.seasonRepo.GetByID(r.Context(), query.parentSeasonID)
+	if err != nil || season == nil {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+	h.writeSeriesEpisodesResponse(w, r, session, query, season.SeriesID, query.parentSeasonID, true)
+}
+
+// itemTypesContain reports whether the mapped IncludeItemTypes contain target.
+func itemTypesContain(itemTypes []string, target string) bool {
+	for _, itemType := range itemTypes {
+		if itemType == target {
 			return true
 		}
 	}
@@ -1150,17 +1206,8 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-	h.rememberSeasonImages(seasons, seriesID)
-
-	qp := newCaseInsensitiveQuery(r.URL.Query())
-
 	var requestedSeasonID string
-	if rawSeasonID := strings.TrimSpace(qp.Get("SeasonId")); rawSeasonID != "" {
+	if rawSeasonID := strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("SeasonId")); rawSeasonID != "" {
 		decodedSeasonID, decodeErr := h.codec.DecodeStringID(EncodedIDSeason, rawSeasonID)
 		if decodeErr != nil {
 			writeError(w, http.StatusNotFound, "NotFound", "Season not found")
@@ -1168,6 +1215,24 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 		}
 		requestedSeasonID = decodedSeasonID
 	}
+
+	h.writeSeriesEpisodesResponse(w, r, session, query, seriesID, requestedSeasonID, false)
+}
+
+// writeSeriesEpisodesResponse lists a series' episodes (optionally scoped to a
+// single season via requestedSeasonID) and writes them as a Jellyfin /Items page.
+// It is the shared core of GET /Shows/{id}/Episodes and the generic
+// /Items?ParentId= series/season browse paths. page applies StartIndex/Limit to
+// the result: the generic /Items browse paths page (matching the /Items contract
+// and the sibling seasons listing); /Shows/{id}/Episodes passes false to keep its
+// long-standing whole-season response.
+func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, seriesID, requestedSeasonID string, page bool) {
+	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	h.rememberSeasonImages(seasons, seriesID)
 
 	seasonTitleByID := make(map[string]string, len(seasons))
 	seasonTitleByNumber := make(map[int]string, len(seasons))
@@ -1287,10 +1352,19 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 		return leftSeason < rightSeason
 	})
 
+	total := len(items)
+	startIndex := 0
+	if page {
+		startIndex = query.startIndex
+		items = slicePage(items, query.startIndex, query.limit)
+		if items == nil {
+			items = []baseItemDTO{}
+		}
+	}
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
-		TotalRecordCount: len(items),
-		StartIndex:       0,
+		TotalRecordCount: total,
+		StartIndex:       startIndex,
 	})
 }
 

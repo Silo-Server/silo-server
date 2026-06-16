@@ -20,6 +20,7 @@ type itemsQuery struct {
 	maxOfficialRating      string
 	parentLibraryID        int
 	parentItemID           string
+	parentSeasonID         string
 	parentCollectionID     string
 	specificIDs            []string
 	specificCollectionIDs  []string
@@ -64,6 +65,11 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 			result.parentLibraryID = int(libraryID)
 		} else if collectionID, collErr := codec.DecodeStringID(EncodedIDCollection, parentID); collErr == nil && collectionID != "" {
 			result.parentCollectionID = collectionID
+		} else if seasonID, seasonErr := codec.DecodeStringID(EncodedIDSeason, parentID); seasonErr == nil && seasonID != "" {
+			// A season ParentId means "list this season's episodes". The codec's
+			// kind tagging already keeps Season and Item IDs distinct; decoding
+			// Season first is defensive in case that separation ever changes.
+			result.parentSeasonID = seasonID
 		} else if contentID, itemErr := decodeItemID(codec, parentID); itemErr == nil && contentID != "" {
 			result.parentItemID = contentID
 		}
