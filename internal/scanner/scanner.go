@@ -251,7 +251,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 	defer stopWatch()
 
 	if isAudiobookLibraryType(folder.Type) {
-		if err := s.ScanAudiobookFolder(watchCtx, folder); err != nil {
+		if err := s.ScanAudiobookFolder(watchCtx, folder, true); err != nil {
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
@@ -298,7 +298,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		if err != nil {
 			return nil, err
 		}
-		if err := s.ScanAudiobookFolder(watchCtx, scopedFolderPaths(folder, []string{scanRoot})); err != nil {
+		if err := s.ScanAudiobookFolder(watchCtx, scopedFolderPaths(folder, []string{scanRoot}), false); err != nil {
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
@@ -1593,7 +1593,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err != nil {
 			return err
 		}
-		if err := s.ScanAudiobookFolder(ctx, scopedFolderPaths(folder, []string{scanRoot})); err != nil {
+		if err := s.ScanAudiobookFolder(ctx, scopedFolderPaths(folder, []string{scanRoot}), false); err != nil {
 			return err
 		}
 		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)

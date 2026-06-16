@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,7 +55,9 @@ type SessionCleaner struct {
 	stop      chan struct{}
 
 	// lastABSSessionPrune gates the hourly abs_playback_sessions retention
-	// sweep; only touched by the single cleanup-loop goroutine.
+	// sweep. Guarded by absPruneMu because CleanStale is also invoked from the
+	// shutdown path while the ticker goroutine is still running.
+	absPruneMu          sync.Mutex
 	lastABSSessionPrune time.Time
 }
 
@@ -149,9 +152,16 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 
 	// 5. Audiobook session retention (hourly): close abandoned open sessions and
 	// prune closed sessions past the retention window. Kept off totalDeleted so
-	// it doesn't trigger the live-session invalidation event.
-	if time.Since(c.lastABSSessionPrune) >= absSessionPruneInterval {
+	// it doesn't trigger the live-session invalidation event. The due-check is
+	// mutex-guarded so the shutdown-path CleanStale and the ticker can't race or
+	// double-run it.
+	c.absPruneMu.Lock()
+	abndPruneDue := time.Since(c.lastABSSessionPrune) >= absSessionPruneInterval
+	if abndPruneDue {
 		c.lastABSSessionPrune = time.Now()
+	}
+	c.absPruneMu.Unlock()
+	if abndPruneDue {
 		if err := c.pruneABSSessions(ctx); err != nil {
 			slog.Warn("abs session retention sweep failed", "error", err)
 		}

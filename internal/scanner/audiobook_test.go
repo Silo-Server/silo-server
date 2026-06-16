@@ -320,7 +320,7 @@ func TestScanAudiobookFolderReturnsErrorWhenEveryReconcileFails(t *testing.T) {
 	}
 
 	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	err := s.ScanAudiobookFolder(context.Background(), &models.MediaFolder{ID: 42, Paths: []string{root}})
+	err := s.ScanAudiobookFolder(context.Background(), &models.MediaFolder{ID: 42, Paths: []string{root}}, true)
 	if err == nil {
 		t.Fatal("ScanAudiobookFolder returned nil, want aggregate failure")
 	}
@@ -335,7 +335,7 @@ func TestScanAudiobookFolderReturnsCanceledContext(t *testing.T) {
 	cancel()
 
 	s := &Scanner{}
-	err := s.ScanAudiobookFolder(ctx, &models.MediaFolder{ID: 42, Paths: []string{root}})
+	err := s.ScanAudiobookFolder(ctx, &models.MediaFolder{ID: 42, Paths: []string{root}}, true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ScanAudiobookFolder error = %v, want context.Canceled", err)
 	}

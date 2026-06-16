@@ -58,12 +58,19 @@ func (h *CatalogHandler) HandleGetAudiobookGroups(w http.ResponseWriter, r *http
 		return
 	}
 
+	// maxAudiobookGroupsLimit bounds a single page. Paging is now an in-memory
+	// slice of the cached full list, so this is the response-size cap (the old
+	// 500/page cap in ListAudiobookGroups no longer sits on this path).
+	const maxAudiobookGroupsLimit = 5000
 	limit := 200
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		n, parseErr := strconv.Atoi(raw)
 		if parseErr != nil || n <= 0 {
 			writeError(w, http.StatusBadRequest, "bad_request", "limit must be a positive integer")
 			return
+		}
+		if n > maxAudiobookGroupsLimit {
+			n = maxAudiobookGroupsLimit
 		}
 		limit = n
 	}
