@@ -96,6 +96,9 @@ type EbookReaderHandler struct {
 	ProgressStore   EbookReaderProgressStore
 	ConfigStore     EbookReaderConfigStore
 	AnnotationStore EbookReaderAnnotationStore
+	// Conversion, when set and enabled, transparently converts Kindle-family
+	// files to EPUB on read. Nil means the feature is off.
+	Conversion *EbookConversion
 }
 
 func NewEbookReaderHandler(authorizer *MediaFileAuthorizer) *EbookReaderHandler {
@@ -130,7 +133,7 @@ func (h *EbookReaderHandler) HandleReadFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := serveEbookInline(w, r, file); err != nil {
+	if err := h.serveEbook(w, r, file); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
 			return

@@ -23,6 +23,10 @@ var moduleVersion = func() string {
 	return hex.EncodeToString(sum[:])[:16]
 }()
 
+// ModuleVersion returns the embedded converter's fingerprint. Callers can mix
+// it into HTTP ETags so a converter bump invalidates client/proxy caches.
+func ModuleVersion() string { return moduleVersion }
+
 // SourceKey identifies a source file for caching. Built by the caller from the
 // catalog/file metadata. Size+ModTimeNano are cheap and computed on every read;
 // Checksum (the scanner's content hash, if available) hardens against a replace
@@ -40,6 +44,11 @@ func (k SourceKey) hash() string {
 		moduleVersion, k.FileID, k.Size, k.ModTimeNano, k.Checksum)
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// CacheKey returns the exact identity used to cache this source's conversion
+// (source identity + converter module version). Use it to derive an HTTP ETag
+// so the validator and the cache entry can never disagree.
+func (k SourceKey) CacheKey() string { return k.hash() }
 
 // CacheOptions configures a Cache.
 type CacheOptions struct {

@@ -515,6 +515,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			if ebookAnnotationStore != nil {
 				ebookReaderHandler.AnnotationStore = ebookAnnotationStore
 			}
+			if conv := buildEbookConversion(deps, settingsRepo); conv != nil {
+				ebookReaderHandler.Conversion = conv
+			}
 		}
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogHandler = handlers.NewCatalogHandler(
@@ -1992,6 +1995,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				if ebookReaderHandler != nil {
 					r.Route("/ebooks", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
+						r.Get("/capability", ebookReaderHandler.HandleConversionCapability)
 						r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
 						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
 						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
