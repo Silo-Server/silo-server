@@ -37,12 +37,7 @@ const (
 	// linger as "open" forever and inflate listening-stats aggregation.
 	absStaleOpenSessionGrace = 24 * time.Hour
 
-	// absClosedSessionRetention bounds how long closed abs_playback_sessions
-	// rows are kept. They accumulate one-per-play and are the input to every
-	// listening-stats scan, so they're pruned past this window.
-	absClosedSessionRetention = 90 * 24 * time.Hour
-
-	// absSessionPruneInterval throttles the retention sweep: it's a slow-moving
+	// absSessionPruneInterval throttles the abandoned-session sweep: it's a slow-moving
 	// concern, so it runs hourly rather than on every 15s cleanup tick.
 	absSessionPruneInterval = time.Hour
 )
@@ -150,11 +145,12 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	}
 	totalDeleted += tag.RowsAffected()
 
-	// 5. Audiobook session retention (hourly): close abandoned open sessions and
-	// prune closed sessions past the retention window. Kept off totalDeleted so
-	// it doesn't trigger the live-session invalidation event. The due-check is
-	// mutex-guarded so the shutdown-path CleanStale and the ticker can't race or
-	// double-run it.
+	// 5. Audiobook session cleanup (hourly): close abandoned open sessions.
+	// Closed rows are retained because the ABS stats endpoint currently has
+	// all-time semantics and aggregates directly from abs_playback_sessions.
+	// Kept off totalDeleted so it doesn't trigger the live-session
+	// invalidation event. The due-check is mutex-guarded so the shutdown-path
+	// CleanStale and the ticker can't race or double-run it.
 	c.absPruneMu.Lock()
 	abndPruneDue := time.Since(c.lastABSSessionPrune) >= absSessionPruneInterval
 	if abndPruneDue {
@@ -162,8 +158,8 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	}
 	c.absPruneMu.Unlock()
 	if abndPruneDue {
-		if err := c.pruneABSSessions(ctx); err != nil {
-			slog.Warn("abs session retention sweep failed", "error", err)
+		if err := c.closeAbandonedABSSessions(ctx); err != nil {
+			slog.Warn("abs session cleanup failed", "error", err)
 		}
 	}
 
@@ -189,10 +185,10 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	return int(totalDeleted), nil
 }
 
-// pruneABSSessions closes abandoned audiobook playback sessions (no explicit
-// /close, stopped syncing) and deletes closed sessions older than the retention
-// window so abs_playback_sessions doesn't grow unbounded.
-func (c *SessionCleaner) pruneABSSessions(ctx context.Context) error {
+// closeAbandonedABSSessions closes abandoned audiobook playback sessions (no
+// explicit /close, stopped syncing). It intentionally does not delete closed
+// sessions: AggregateStats currently uses this table for all-time totals.
+func (c *SessionCleaner) closeAbandonedABSSessions(ctx context.Context) error {
 	if _, err := c.pool.Exec(ctx, `
 		UPDATE abs_playback_sessions
 		SET closed_at = now()
@@ -200,13 +196,6 @@ func (c *SessionCleaner) pruneABSSessions(ctx context.Context) error {
 		  AND COALESCE(last_sync_at, started_at) < NOW() - make_interval(secs => $1::double precision)
 	`, absStaleOpenSessionGrace.Seconds()); err != nil {
 		return fmt.Errorf("closing abandoned abs sessions: %w", err)
-	}
-	if _, err := c.pool.Exec(ctx, `
-		DELETE FROM abs_playback_sessions
-		WHERE closed_at IS NOT NULL
-		  AND closed_at < NOW() - make_interval(secs => $1::double precision)
-	`, absClosedSessionRetention.Seconds()); err != nil {
-		return fmt.Errorf("pruning closed abs sessions: %w", err)
 	}
 	return nil
 }

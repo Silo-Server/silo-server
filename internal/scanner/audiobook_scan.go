@@ -176,6 +176,110 @@ func audiobookScanWorkers() int {
 	return 8
 }
 
+type audiobookRootScan struct {
+	root         string
+	candidates   []string
+	seenPaths    map[string]bool
+	rootErr      error
+	walkFailures int
+}
+
+func (r *audiobookRootScan) failed() bool {
+	return r.rootErr != nil || r.walkFailures > 0
+}
+
+func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string) ([]audiobookRootScan, error) {
+	scans := make([]audiobookRootScan, 0, len(roots))
+	for _, root := range roots {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cleanRoot := filepath.Clean(strings.TrimSpace(root))
+		if cleanRoot == "" || cleanRoot == "." {
+			continue
+		}
+		scan := audiobookRootScan{
+			root:      cleanRoot,
+			seenPaths: make(map[string]bool),
+		}
+		info, statErr := os.Stat(cleanRoot)
+		switch {
+		case statErr != nil:
+			scan.rootErr = fmt.Errorf("stat root: %w", statErr)
+		case !info.IsDir():
+			scan.rootErr = fmt.Errorf("root is not a directory after symlink resolution")
+		}
+		if statErr == nil && scan.rootErr == nil {
+			walkErr := filepath.WalkDir(cleanRoot, func(path string, d fs.DirEntry, walkErr error) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if walkErr != nil {
+					scan.walkFailures++
+					slog.Warn("audiobook scan: walk error", "path", path, "error", walkErr)
+					return nil
+				}
+				if !d.IsDir() {
+					return nil
+				}
+				entries, err := os.ReadDir(path)
+				if err != nil {
+					scan.walkFailures++
+					slog.Warn("audiobook scan: read dir failed", "path", path, "error", err)
+					return nil
+				}
+				hadAudio := false
+				for _, e := range entries {
+					if !e.IsDir() && SupportsAudioFile(e.Name()) {
+						scan.seenPaths[filepath.Join(path, e.Name())] = true
+						hadAudio = true
+					}
+				}
+				if hadAudio {
+					scan.candidates = append(scan.candidates, path)
+					return filepath.SkipDir
+				}
+				return nil
+			})
+			if walkErr != nil {
+				if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
+					return nil, walkErr
+				}
+				scan.rootErr = fmt.Errorf("walk root: %w", walkErr)
+			}
+		}
+		if scan.failed() {
+			slog.Warn("audiobook scan: root walk incomplete; root excluded from missing-file reconciliation",
+				"folder_id", folderID,
+				"root", cleanRoot,
+				"walk_failures", scan.walkFailures,
+				"error", scan.rootErr,
+			)
+		}
+		scans = append(scans, scan)
+	}
+	return scans, nil
+}
+
+func splitAudiobookReconcileRoots(scans []audiobookRootScan) (roots []string, seenPaths map[string]bool, sawFiles bool) {
+	roots = make([]string, 0, len(scans))
+	seenPaths = make(map[string]bool)
+	for i := range scans {
+		scan := &scans[i]
+		if scan.failed() {
+			continue
+		}
+		roots = append(roots, scan.root)
+		if len(scan.seenPaths) > 0 {
+			sawFiles = true
+			for path := range scan.seenPaths {
+				seenPaths[path] = true
+			}
+		}
+	}
+	return roots, seenPaths, sawFiles
+}
+
 // ScanAudiobookFolder walks an audiobooks-typed media folder and writes
 // one media_items row per subdirectory it can parse as an audiobook,
 // plus the corresponding media_files rows and author/narrator links in
@@ -195,65 +299,27 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	// Phase 1: walk the tree to collect candidate book folders. This is
 	// I/O-light (no ffprobe), and avoids holding the worker pool open
 	// for the duration of a 240k-folder scan.
-	var candidates []string
-	// seenPaths is every audio file observed on disk this scan; it drives the
-	// post-scan missing-file reconcile. reconcileRoots are the roots we could
-	// actually read — an inaccessible root (e.g. an unmounted source) is
-	// excluded so it never triggers deletion of the books under it.
-	seenPaths := make(map[string]bool)
-	reconcileRoots := make([]string, 0, len(folder.Paths))
-	for _, root := range folder.Paths {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
-			slog.Warn("audiobook scan: root inaccessible; skipping walk + reconcile",
-				"folder_id", folder.ID, "root", root, "error", statErr)
-			continue
-		}
-		reconcileRoots = append(reconcileRoots, root)
-		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if walkErr != nil {
-				slog.Warn("audiobook scan: walk error", "path", path, "error", walkErr)
-				return nil
-			}
-			if !d.IsDir() {
-				return nil
-			}
-			entries, err := os.ReadDir(path)
-			if err != nil {
-				slog.Warn("audiobook scan: read dir failed", "path", path, "error", err)
-				return nil
-			}
-			hadAudio := false
-			for _, e := range entries {
-				if !e.IsDir() && SupportsAudioFile(e.Name()) {
-					seenPaths[filepath.Join(path, e.Name())] = true
-					hadAudio = true
-				}
-			}
-			if hadAudio {
-				candidates = append(candidates, path)
-				return filepath.SkipDir
-			}
-			return nil
-		})
-		if walkErr != nil {
-			slog.Warn("audiobook scan: walk root failed", "root", root, "error", walkErr)
-		}
+	scans, err := collectAudiobookRootScans(ctx, folder.ID, folder.Paths)
+	if err != nil {
+		return err
 	}
+	candidates := make([]string, 0)
+	for i := range scans {
+		candidates = append(candidates, scans[i].candidates...)
+	}
+	reconcileRoots, seenPaths, sawFiles := splitAudiobookReconcileRoots(scans)
 
 	if len(candidates) == 0 {
 		// No books on disk. Still reconcile (guarded) so a legitimately-emptied
 		// library converges — but only when a root was readable, and the
 		// empty-walk guard requires operator confirmation before deleting.
 		if len(reconcileRoots) > 0 {
-			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, false, fullScan); err != nil {
+			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, sawFiles, fullScan); err != nil {
 				slog.Warn("audiobook scan: missing-file reconcile failed", "folder_id", folder.ID, "error", err)
 			}
+		} else if len(scans) > 0 {
+			slog.Warn("audiobook scan: every root walk failed; skipping missing-file reconciliation",
+				"folder_id", folder.ID)
 		}
 		return nil
 	}
@@ -353,7 +419,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 
 	// Reconcile files that vanished from disk now that the full walk's
 	// seenPaths is known and the scan completed without cancellation.
-	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, len(seenPaths) > 0, fullScan); err != nil {
+	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, sawFiles, fullScan); err != nil {
 		slog.Warn("audiobook scan: missing-file reconcile failed", "folder_id", folder.ID, "error", err)
 	}
 	return nil

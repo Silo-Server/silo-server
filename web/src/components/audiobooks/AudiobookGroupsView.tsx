@@ -147,10 +147,7 @@ export default function AudiobookGroupsView({
   useEffect(() => {
     setVisibleCount(GROUPS_REVEAL_BATCH);
   }, [filter, sort, groupBy, libraryId]);
-  const visibleGroups = useMemo(
-    () => groups.slice(0, visibleCount),
-    [groups, visibleCount],
-  );
+  const visibleGroups = useMemo(() => groups.slice(0, visibleCount), [groups, visibleCount]);
   const hasMore = visibleCount < groups.length;
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
