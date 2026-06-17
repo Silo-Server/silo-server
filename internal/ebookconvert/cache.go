@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,23 +108,35 @@ func NewCache(conv *Converter, opts CacheOptions) (*Cache, error) {
 // GetOrConvert returns the path to a cached EPUB for srcPath/key, converting on
 // miss. Concurrent calls for the same key collapse to a single conversion.
 // Returns ErrDRMProtected / ErrConversionFailed (also served from the negative
-// cache) or ErrSourceTooLarge.
+// cache), ErrConversionTimedOut, ErrSourceTooLarge, or the caller's context
+// error if it cancels while waiting.
 func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey) (string, error) {
 	kh := key.hash()
 	dst := filepath.Join(c.opts.Dir, kh+".epub")
 
-	// Fast path: already converted.
+	// Fast path: already converted. Refresh mtime so the mtime-ordered budget
+	// eviction behaves as a real LRU — recently-read entries sort newest and
+	// survive eviction.
 	if fi, err := os.Stat(dst); err == nil && fi.Size() > 0 {
-		_ = os.Chtimes(dst, time.Now(), fi.ModTime()) // touch atime for LRU
+		now := time.Now()
+		_ = os.Chtimes(dst, now, now)
 		return dst, nil
 	}
 
-	// Negative cache: known DRM/bad source.
+	// Negative cache: known DRM/deterministically-bad source.
 	if err := c.negativeLookup(kh); err != nil {
 		return "", err
 	}
 
-	v, err, _ := c.group.Do(kh, func() (interface{}, error) {
+	// Singleflight via DoChan with a *detached* context: coalesced callers share
+	// one conversion, so a single caller canceling its request must not abort
+	// the shared work for the others (golang.org/x/sync/singleflight.Do has no
+	// per-caller context, and binding it to the first caller would propagate that
+	// caller's cancellation to all). The conversion stays bounded by the
+	// Converter's own timeout + concurrency semaphore; the caller's context only
+	// governs how long *this* caller waits (the select below). A caller that
+	// gives up still leaves the conversion running to populate the cache.
+	ch := c.group.DoChan(kh, func() (interface{}, error) {
 		// Re-check after acquiring the singleflight slot (another caller may
 		// have just produced it).
 		if fi, statErr := os.Stat(dst); statErr == nil && fi.Size() > 0 {
@@ -138,7 +151,7 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath) // Convert recreates it
 
-		if convErr := c.conv.Convert(ctx, srcPath, tmpPath); convErr != nil {
+		if convErr := c.conv.Convert(context.WithoutCancel(ctx), srcPath, tmpPath); convErr != nil {
 			_ = os.Remove(tmpPath)
 			c.remember(kh, convErr)
 			return "", convErr
@@ -147,13 +160,38 @@ func (c *Cache) GetOrConvert(ctx context.Context, srcPath string, key SourceKey)
 			_ = os.Remove(tmpPath)
 			return "", fmt.Errorf("%w: cache rename: %v", ErrConversionFailed, renErr)
 		}
-		c.enforceBudget()
+		c.enforceBudget(dst)
 		return dst, nil
 	})
-	if err != nil {
-		return "", err
+
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return "", res.Err
+		}
+		return res.Val.(string), nil
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
-	return v.(string), nil
+}
+
+// Lookup returns a cached conversion result WITHOUT converting on miss. It lets
+// cheap callers (e.g. HEAD requests) avoid kicking off a full conversion:
+//   - ok == true, err == nil: a ready EPUB exists at path.
+//   - err != nil: the source is negatively cached (DRM/failed); path is empty.
+//   - ok == false, err == nil: cache miss — caller must decide whether to convert.
+func (c *Cache) Lookup(key SourceKey) (path string, err error, ok bool) {
+	kh := key.hash()
+	dst := filepath.Join(c.opts.Dir, kh+".epub")
+	if fi, statErr := os.Stat(dst); statErr == nil && fi.Size() > 0 {
+		now := time.Now()
+		_ = os.Chtimes(dst, now, now) // a HEAD hit counts as access for LRU
+		return dst, nil, true
+	}
+	if negErr := c.negativeLookup(kh); negErr != nil {
+		return "", negErr, false
+	}
+	return "", nil, false
 }
 
 func (c *Cache) negativeLookup(kh string) error {
@@ -170,9 +208,13 @@ func (c *Cache) negativeLookup(kh string) error {
 	return e.err
 }
 
-// remember negatively caches only deterministic-bad outcomes (DRM, corrupt
-// source). Transient failures (timeout, oversize, cancellation) are not cached
-// so they can be retried.
+// remember negatively caches only *deterministic* bad outcomes — DRM
+// (ErrDRMProtected) and conversion failures (ErrConversionFailed: corrupt
+// source, unconvertible layout, oversize output) — so repeat reads of a
+// known-bad file skip reconversion for NegativeTTL. Transient outcomes
+// (ErrConversionTimedOut, context cancellation/deadline, ErrSourceTooLarge) are
+// deliberately NOT cached so the next read can retry — a one-off timeout under
+// load must not wedge a convertible book onto the raw-fallback path.
 func (c *Cache) remember(kh string, err error) {
 	if !errors.Is(err, ErrDRMProtected) && !errors.Is(err, ErrConversionFailed) {
 		return
@@ -182,9 +224,12 @@ func (c *Cache) remember(kh string, err error) {
 	c.mu.Unlock()
 }
 
-// enforceBudget evicts the oldest (by modtime) cached EPUBs until the total is
-// within MaxBytes. Best-effort; logs nothing (caller has no logger here).
-func (c *Cache) enforceBudget() {
+// enforceBudget evicts the oldest (by mtime) finished cache entries until the
+// total is within MaxBytes. It never evicts keep (the entry the caller is about
+// to return) and ignores in-flight "converting-*" temp files, since deleting
+// either would hand back a vanished path or corrupt a concurrent conversion.
+// Best-effort; logs nothing (caller has no logger here).
+func (c *Cache) enforceBudget(keep string) {
 	entries, err := os.ReadDir(c.opts.Dir)
 	if err != nil {
 		return
@@ -197,14 +242,15 @@ func (c *Cache) enforceBudget() {
 	var items []item
 	var total int64
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".epub" {
-			continue
+		name := e.Name()
+		if e.IsDir() || filepath.Ext(name) != ".epub" || strings.HasPrefix(name, "converting-") {
+			continue // skip dirs, non-epubs, and other conversions' in-flight temps
 		}
 		fi, statErr := e.Info()
 		if statErr != nil {
 			continue
 		}
-		items = append(items, item{filepath.Join(c.opts.Dir, e.Name()), fi.Size(), fi.ModTime()})
+		items = append(items, item{filepath.Join(c.opts.Dir, name), fi.Size(), fi.ModTime()})
 		total += fi.Size()
 	}
 	if total <= c.opts.MaxBytes {
@@ -214,6 +260,9 @@ func (c *Cache) enforceBudget() {
 	for _, it := range items {
 		if total <= c.opts.MaxBytes {
 			break
+		}
+		if it.path == keep {
+			continue // never evict the entry we're about to return
 		}
 		if os.Remove(it.path) == nil {
 			total -= it.size

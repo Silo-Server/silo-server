@@ -23,6 +23,10 @@ const ConversionHeader = "X-Silo-Ebook-Conversion"
 // Implemented by *ebookconvert.Cache; an interface here for testability.
 type EbookConverter interface {
 	GetOrConvert(ctx context.Context, srcPath string, key ebookconvert.SourceKey) (string, error)
+	// Lookup reports a cached conversion WITHOUT converting (used by HEAD so a
+	// metadata probe never kicks off a full conversion): a path on hit, a
+	// non-nil error for a negatively-cached source, else a miss.
+	Lookup(key ebookconvert.SourceKey) (string, error, bool)
 }
 
 // EbookConversion bundles the converter with the admin-flag predicate. A nil
@@ -57,6 +61,13 @@ func (h *EbookReaderHandler) serveEbook(w http.ResponseWriter, r *http.Request, 
 		}
 		key.Checksum = file.FileHash
 
+		// HEAD must not trigger a (possibly minute-long, 1 GiB) conversion. Answer
+		// from cache only; on a miss, advertise the converted representation
+		// cheaply and let the GET produce the body + authoritative verdict.
+		if r.Method == http.MethodHead {
+			return h.serveKindleHead(w, r, file, key)
+		}
+
 		epubPath, err := h.Conversion.Converter.GetOrConvert(r.Context(), file.FilePath, key)
 		switch {
 		case err == nil:
@@ -69,11 +80,16 @@ func (h *EbookReaderHandler) serveEbook(w http.ResponseWriter, r *http.Request, 
 			// Caller went away / request cancelled — not a conversion verdict.
 			return err
 		default:
-			// DRM, corrupt, oversize, unavailable: fall back to the raw original
-			// and tell the client so it can open externally.
+			// DRM, corrupt, oversize, timed out, unavailable: fall back to the raw
+			// original and tell the client so it can open externally.
 			return h.serveRawKindleFallback(w, r, file)
 		}
 	}
+	// Feature off or non-kindle format: serve the raw original with its native
+	// MIME and no conversion header. This path deliberately omits the failed
+	// contract — when conversion is disabled the capability endpoint already
+	// reports `enabled:false`, so clients keep their external-open path and never
+	// expect an EPUB here. (No representation flip to guard against.)
 	return serveEbookInline(w, r, file)
 }
 
@@ -85,10 +101,48 @@ func (h *EbookReaderHandler) serveRawKindleFallback(w http.ResponseWriter, r *ht
 	return serveEbookInline(w, r, file)
 }
 
-// serveConvertedEpub serves the cached EPUB with EPUB headers. Because the same
-// URL can return raw or converted bytes depending on the flag/outcome, it sets
-// an ETag derived from the exact conversion cache key and a revalidate policy
-// so clients/proxies never serve a stale representation.
+// serveKindleHead answers a HEAD for a kindle-family file without converting:
+//   - cache hit   → real converted headers (and ServeContent's Content-Length);
+//   - neg-cached  → the failed contract (raw original headers);
+//   - miss        → converted headers advertised optimistically (no body, no
+//     Content-Length, no conversion). A HEAD is only a hint; the GET delivers
+//     the body and the authoritative DRM/failure verdict, which then populates
+//     the (positive or negative) cache that subsequent HEADs read.
+func (h *EbookReaderHandler) serveKindleHead(w http.ResponseWriter, r *http.Request, file *models.MediaFile, key ebookconvert.SourceKey) error {
+	path, lookupErr, ok := h.Conversion.Converter.Lookup(key)
+	switch {
+	case ok:
+		if serveErr := serveConvertedEpub(w, r, file, path, key); serveErr != nil {
+			return h.serveRawKindleFallback(w, r, file)
+		}
+		return nil
+	case lookupErr != nil:
+		return h.serveRawKindleFallback(w, r, file)
+	default:
+		setConvertedEpubHeaders(w, file, key)
+		w.WriteHeader(http.StatusOK)
+		return nil
+	}
+}
+
+// setConvertedEpubHeaders writes the headers for a converted-EPUB response.
+// Because the same URL can return raw or converted bytes depending on the
+// flag/outcome, the ETag is derived from the exact conversion cache key (so a
+// validator can never disagree with the cache) with a revalidate policy that
+// keeps clients/proxies from serving a stale representation.
+func setConvertedEpubHeaders(w http.ResponseWriter, file *models.MediaFile, key ebookconvert.SourceKey) {
+	name := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath)) + ".epub"
+	w.Header().Set("Content-Type", "application/epub+zip")
+	w.Header().Set("Content-Disposition", inlineContentDisposition(name))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set(ConversionHeader, "converted")
+	w.Header().Set("ETag", fmt.Sprintf("%q", "epubconv-"+key.CacheKey()))
+	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
+}
+
+// serveConvertedEpub serves the cached EPUB with EPUB headers (see
+// setConvertedEpubHeaders). For a HEAD, ServeContent emits the headers and
+// Content-Length without a body.
 func serveConvertedEpub(w http.ResponseWriter, r *http.Request, file *models.MediaFile, epubPath string, key ebookconvert.SourceKey) error {
 	f, err := os.Open(epubPath)
 	if err != nil {
@@ -101,14 +155,7 @@ func serveConvertedEpub(w http.ResponseWriter, r *http.Request, file *models.Med
 	}
 
 	name := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath)) + ".epub"
-	etag := fmt.Sprintf("%q", "epubconv-"+key.CacheKey())
-
-	w.Header().Set("Content-Type", "application/epub+zip")
-	w.Header().Set("Content-Disposition", inlineContentDisposition(name))
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set(ConversionHeader, "converted")
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=0, must-revalidate")
+	setConvertedEpubHeaders(w, file, key)
 	http.ServeContent(w, r, name, stat.ModTime(), f)
 	return nil
 }

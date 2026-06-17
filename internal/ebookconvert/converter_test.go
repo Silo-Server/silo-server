@@ -100,10 +100,10 @@ func TestConvert_Concurrent(t *testing.T) {
 func TestConvert_ContextCancelled(t *testing.T) {
 	c := newTestConverter(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled before the conversion starts
+	cancel() // already canceled before the conversion starts
 	dst := filepath.Join(t.TempDir(), "out.epub")
 	if err := c.Convert(ctx, filepath.Join("testdata", "sample-ncx.mobi"), dst); err == nil {
-		t.Fatal("expected error on cancelled context")
+		t.Fatal("expected error on canceled context")
 	}
 }
 
@@ -154,8 +154,9 @@ func TestConvert_AfterCloseReturnsUnavailable(t *testing.T) {
 }
 
 func TestConvert_TimeoutClassifiedNotRawExit(t *testing.T) {
-	// A 1ns timeout must surface as ErrConversionFailed (timeout), never as a
-	// bogus "mobitool exit <huge>" code.
+	// A 1ns timeout must surface as ErrConversionTimedOut (a transient verdict,
+	// distinct from a deterministic failure), never as a bogus "mobitool exit
+	// <huge>" code.
 	c, err := NewConverter(context.Background(), Options{Timeout: time.Nanosecond})
 	if err != nil {
 		t.Fatalf("NewConverter: %v", err)
@@ -163,11 +164,45 @@ func TestConvert_TimeoutClassifiedNotRawExit(t *testing.T) {
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	dst := filepath.Join(t.TempDir(), "out.epub")
 	err = c.Convert(context.Background(), filepath.Join("testdata", "sample-ncx.mobi"), dst)
-	if !errors.Is(err, ErrConversionFailed) {
-		t.Fatalf("got %v, want ErrConversionFailed (timeout)", err)
+	if !errors.Is(err, ErrConversionTimedOut) {
+		t.Fatalf("got %v, want ErrConversionTimedOut", err)
+	}
+	if errors.Is(err, ErrConversionFailed) {
+		t.Fatalf("a timeout must not also satisfy ErrConversionFailed (it would be negatively cached): %v", err)
 	}
 	if strings.Contains(err.Error(), "exit ") {
 		t.Fatalf("timeout leaked a raw exit code: %v", err)
+	}
+}
+
+// classifyRunError must propagate a caller's deadline as context.DeadlineExceeded
+// (CR review): reclassifying it as a conversion failure breaks upstream
+// cancellation handling and would poison the negative cache.
+func TestClassifyRunError_ParentDeadlinePropagates(t *testing.T) {
+	parent, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	run := parent // run derives from parent, so it is also past-deadline
+	err := classifyRunError(parent, run, context.DeadlineExceeded, time.Minute, "mobitool output")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v, want context.DeadlineExceeded propagated", err)
+	}
+	if errors.Is(err, ErrConversionFailed) || errors.Is(err, ErrConversionTimedOut) {
+		t.Fatalf("a caller deadline must not be reclassified as a conversion verdict: %v", err)
+	}
+}
+
+// When the caller's context is healthy but our own per-call timeout fired, the
+// result is the transient ErrConversionTimedOut sentinel (not ErrConversionFailed).
+func TestClassifyRunError_OwnTimeoutIsTimedOutSentinel(t *testing.T) {
+	parent := context.Background() // caller healthy
+	run, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	err := classifyRunError(parent, run, context.DeadlineExceeded, time.Minute, "mobitool output")
+	if !errors.Is(err, ErrConversionTimedOut) {
+		t.Fatalf("got %v, want ErrConversionTimedOut", err)
+	}
+	if errors.Is(err, ErrConversionFailed) {
+		t.Fatalf("own timeout must not satisfy ErrConversionFailed: %v", err)
 	}
 }
 

@@ -67,8 +67,8 @@ type Options struct {
 }
 
 const (
-	DefaultMaxSourceBytes = 256 << 20  // 256 MiB
-	DefaultMaxOutputBytes = 512 << 20  // 512 MiB
+	DefaultMaxSourceBytes = 256 << 20 // 256 MiB
+	DefaultMaxOutputBytes = 512 << 20 // 512 MiB
 	DefaultTimeout        = 60 * time.Second
 	DefaultConcurrency    = 2
 	DefaultMaxMemoryPages = 16384 // 1 GiB
@@ -144,8 +144,10 @@ func (c *Converter) Close(ctx context.Context) error {
 }
 
 // Convert reads the MOBI/AZW/AZW3 at srcPath and writes a validated EPUB to
-// dstPath. Returns ErrDRMProtected, ErrConversionFailed, ErrSourceTooLarge,
-// ErrUnavailable, or a context error on cancellation.
+// dstPath. Returns ErrDRMProtected, ErrConversionFailed (deterministic),
+// ErrConversionTimedOut (transient — the per-call timeout fired),
+// ErrSourceTooLarge, ErrUnavailable, or the caller's context error on
+// cancellation/deadline.
 func (c *Converter) Convert(ctx context.Context, srcPath, dstPath string) error {
 	if c.closed.Load() {
 		return ErrUnavailable
@@ -236,18 +238,24 @@ func (c *Converter) Convert(ctx context.Context, srcPath, dstPath string) error 
 // errors (timeout/cancel) MUST be checked before a generic nonzero exit code,
 // because WithCloseOnContextDone surfaces them as *sys.ExitError with special
 // codes that would otherwise read as an absurd "exit code".
+//
+// Ordering matters: the *caller's* context is checked first so a request-level
+// cancel OR deadline is propagated verbatim (never reclassified as a conversion
+// verdict — that would both mislead upstream cancellation and poison the
+// negative cache). Only once the caller's context is healthy do we attribute a
+// deadline to our own per-call timeout, which is a transient ErrConversionTimedOut.
 func classifyRunError(parent, run context.Context, instErr error, timeout time.Duration, combined string) error {
 	if instErr == nil {
 		return nil
 	}
-	// Parent cancelled by the caller → propagate the context error.
-	if parent.Err() != nil && !errors.Is(parent.Err(), context.DeadlineExceeded) {
+	// Caller's context ended (cancel or deadline) → propagate it verbatim.
+	if parent.Err() != nil {
 		return parent.Err()
 	}
-	// Our per-call timeout fired.
+	// Our per-call timeout fired (caller's context is still healthy).
 	if errors.Is(run.Err(), context.DeadlineExceeded) ||
 		errors.Is(instErr, context.DeadlineExceeded) {
-		return fmt.Errorf("%w: timed out after %s", ErrConversionFailed, timeout)
+		return fmt.Errorf("%w: after %s", ErrConversionTimedOut, timeout)
 	}
 	if errors.Is(instErr, context.Canceled) {
 		return context.Canceled
@@ -256,7 +264,7 @@ func classifyRunError(parent, run context.Context, instErr error, timeout time.D
 	if errors.As(instErr, &exitErr) {
 		switch exitErr.ExitCode() {
 		case sys.ExitCodeDeadlineExceeded:
-			return fmt.Errorf("%w: timed out after %s", ErrConversionFailed, timeout)
+			return fmt.Errorf("%w: after %s", ErrConversionTimedOut, timeout)
 		case sys.ExitCodeContextCanceled:
 			return context.Canceled
 		case 0:

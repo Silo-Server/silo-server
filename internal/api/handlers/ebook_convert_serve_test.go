@@ -17,11 +17,19 @@ type fakeConverter struct {
 	epubPath string
 	err      error
 	calls    int
+
+	lookupPath string
+	lookupErr  error
+	lookupOK   bool
 }
 
 func (f *fakeConverter) GetOrConvert(_ context.Context, _ string, _ ebookconvert.SourceKey) (string, error) {
 	f.calls++
 	return f.epubPath, f.err
+}
+
+func (f *fakeConverter) Lookup(_ ebookconvert.SourceKey) (string, error, bool) {
+	return f.lookupPath, f.lookupErr, f.lookupOK
 }
 
 func writeTemp(t *testing.T, name, content string) string {
@@ -169,6 +177,79 @@ func TestHandleConversionCapability(t *testing.T) {
 				t.Fatalf("capability body incomplete: %s", body)
 			}
 		})
+	}
+}
+
+// A HEAD on a cache miss must NOT trigger a (possibly minute-long) conversion;
+// it advertises the converted representation cheaply and lets the GET do the work.
+func TestServeEbook_HeadDoesNotConvertOnMiss(t *testing.T) {
+	src := writeTemp(t, "book.azw3", "raw-azw3-source")
+	conv := &fakeConverter{lookupOK: false} // cache miss
+	h := &EbookReaderHandler{Conversion: enabledConversion(conv, true)}
+	file := &models.MediaFile{ID: 1, FilePath: src, Container: "azw3"}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/read", nil)
+	if err := h.serveEbook(rec, req, file); err != nil {
+		t.Fatalf("serveEbook HEAD: %v", err)
+	}
+	if conv.calls != 0 {
+		t.Fatalf("HEAD on a cache miss triggered %d conversions, want 0", conv.calls)
+	}
+	if got := rec.Header().Get(ConversionHeader); got != "converted" {
+		t.Fatalf("%s = %q, want converted (advertised on HEAD miss)", ConversionHeader, got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/epub+zip" {
+		t.Fatalf("Content-Type = %q, want application/epub+zip", got)
+	}
+	if rec.Header().Get("ETag") == "" {
+		t.Fatal("HEAD miss should still carry the conversion ETag")
+	}
+}
+
+// A HEAD that hits the cache serves the converted headers from the cached file,
+// without converting.
+func TestServeEbook_HeadServesCachedConverted(t *testing.T) {
+	epub := writeTemp(t, "out.epub", "PK\x03\x04 cached-epub")
+	src := writeTemp(t, "book.mobi", "raw-mobi-source")
+	conv := &fakeConverter{lookupPath: epub, lookupOK: true}
+	h := &EbookReaderHandler{Conversion: enabledConversion(conv, true)}
+	file := &models.MediaFile{ID: 2, FilePath: src, Container: "mobi"}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/read", nil)
+	if err := h.serveEbook(rec, req, file); err != nil {
+		t.Fatalf("serveEbook HEAD: %v", err)
+	}
+	if conv.calls != 0 {
+		t.Fatalf("HEAD on a cache hit triggered %d conversions, want 0", conv.calls)
+	}
+	if got := rec.Header().Get(ConversionHeader); got != "converted" {
+		t.Fatalf("%s = %q, want converted", ConversionHeader, got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/epub+zip" {
+		t.Fatalf("Content-Type = %q, want application/epub+zip", got)
+	}
+}
+
+// A HEAD on a negatively-cached (DRM/failed) source reports the failed contract
+// without converting.
+func TestServeEbook_HeadDRMReturnsFailed(t *testing.T) {
+	src := writeTemp(t, "book.mobi", "raw-mobi-source")
+	conv := &fakeConverter{lookupErr: ebookconvert.ErrDRMProtected}
+	h := &EbookReaderHandler{Conversion: enabledConversion(conv, true)}
+	file := &models.MediaFile{ID: 3, FilePath: src, Container: "mobi"}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/read", nil)
+	if err := h.serveEbook(rec, req, file); err != nil {
+		t.Fatalf("serveEbook HEAD: %v", err)
+	}
+	if conv.calls != 0 {
+		t.Fatalf("HEAD on a negatively-cached source triggered %d conversions, want 0", conv.calls)
+	}
+	if got := rec.Header().Get(ConversionHeader); got != "failed" {
+		t.Fatalf("%s = %q, want failed", ConversionHeader, got)
 	}
 }
 

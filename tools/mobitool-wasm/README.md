@@ -16,11 +16,13 @@ MOBI/AZW/AZW3 ebooks to EPUB on demand. See the design doc:
   file cannot reach the host.
 
 ## Pinned versions
-| Component | Version / commit |
-|-----------|------------------|
-| wasi-sdk  | 25.0 |
-| libmobi   | `906274205c11944b628da1c553b255acb1af7c55` |
-| zlib      | 1.3.1 (compiled to wasm) |
+
+| Component         | Version / commit                           |
+|-------------------|--------------------------------------------|
+| wasi-sdk          | 25.0                                       |
+| libmobi           | `906274205c11944b628da1c553b255acb1af7c55` |
+| zlib              | 1.3.1 (compiled to wasm)                   |
+| wasmtime (smoke)  | 27.0.0 (build-time smoke test only)        |
 
 License: libmobi is **LGPL-3.0-or-later**; shipping the unmodified compiled
 artifact + this build recipe satisfies the relink obligation. zlib is zlib-license.
@@ -54,3 +56,9 @@ bit-identical rebuild check.
   and writes an EPUB (garbage content when it lacks the key). So the converter must
   capture stdout and validate the output is a usable EPUB — exit code alone is not a
   reliable DRM/failure signal.
+  - ⚠️ **Brittleness note:** DRM/print-replica detection matches the **English
+    stdout strings** mobitool emits (`drmMarkers` / `printReplicaMarker` in
+    `internal/ebookconvert/converter.go`). When bumping the pinned libmobi commit,
+    re-check those messages still match — a wording change silently downgrades a
+    DRM book to a generic "no EPUB produced" failure (it still falls back to the raw
+    original safely, just without the explicit DRM signal).

@@ -14,7 +14,15 @@ var (
 
 	// ErrConversionFailed means mobitool failed or produced output that is
 	// not a valid EPUB (corrupt source, unexpected format, internal error).
+	// It is a *deterministic* verdict for a given input — the same bytes will
+	// fail the same way — so the cache may remember it negatively.
 	ErrConversionFailed = errors.New("ebookconvert: conversion failed")
+
+	// ErrConversionTimedOut means the converter's own per-call timeout fired.
+	// Unlike ErrConversionFailed it is *transient* (it reflects load/size, not
+	// the input being unconvertible), so it is NOT negatively cached and the
+	// next read may retry. It deliberately does not wrap ErrConversionFailed.
+	ErrConversionTimedOut = errors.New("ebookconvert: conversion timed out")
 
 	// ErrSourceTooLarge means the source exceeds the configured size cap and
 	// was rejected before invoking the converter.

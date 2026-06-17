@@ -61,12 +61,21 @@ RUN mkdir -p /work && cd /work \
     && mkdir -p /out && cp tools/mobitool /out/mobitool.wasm \
     && sha256sum /out/mobitool.wasm | tee /out/mobitool.wasm.sha256
 
-# Smoke test: convert a bundled libmobi sample to EPUB using wasmtime, so the
-# build fails loudly if the wasm can't actually convert.
-RUN curl -fsSL https://wasmtime.dev/install.sh | bash \
+# Smoke test: convert a bundled libmobi sample to EPUB using a pinned,
+# checksum-verified wasmtime — NOT the `curl | bash` convenience installer, which
+# is documented as interactive-only and unsafe/non-deterministic for builds — so
+# the build fails loudly if the wasm can't actually convert.
+ARG WASMTIME_VERSION=27.0.0
+ARG WASMTIME_SHA256=74678f6ec49d8b858ca5181d5492b967245f6c072b5763ea14a75eee1ad3c2d7
+RUN cd /opt \
+    && curl -fsSL -o wasmtime.tar.xz \
+        "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VERSION}/wasmtime-v${WASMTIME_VERSION}-x86_64-linux.tar.xz" \
+    && echo "${WASMTIME_SHA256}  wasmtime.tar.xz" | sha256sum -c - \
+    && tar xJf wasmtime.tar.xz && rm wasmtime.tar.xz \
+    && WASMTIME="/opt/wasmtime-v${WASMTIME_VERSION}-x86_64-linux/wasmtime" \
     && mkdir -p /smoke/out \
     && cp /work/libmobi/tests/samples/sample-ncx.mobi /smoke/in.mobi \
-    && /root/.wasmtime/bin/wasmtime run --dir=/smoke::/smoke /out/mobitool.wasm -e -o /smoke/out /smoke/in.mobi \
+    && "$WASMTIME" run --dir=/smoke::/smoke /out/mobitool.wasm -e -o /smoke/out /smoke/in.mobi \
     && test -f /smoke/out/in.epub \
     && echo "SMOKE OK: $(wc -c < /smoke/out/in.epub) byte EPUB produced"
 
