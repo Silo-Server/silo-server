@@ -68,6 +68,12 @@ func idsRequestCollectionsView(r *http.Request) bool {
 // counting members would re-run the heavy ListAll on every /UserViews, and an
 // unwatched badge would need per-user state across every collection member.
 func (h *ItemsHandler) collectionsView() baseItemDTO {
+	// Advertise a Primary image tag so clients fetch the generated "Collections"
+	// gradient tile; the seed matches serveCollectionsViewImage.
+	primaryTag := h.mapper.imageTagSigner.Tag(
+		imageTagSeed(collectionsViewID, "Primary", compatCardImageSize, generatedPosterSeed(collectionsViewCaption), "", time.Time{}),
+		generatedPosterSeed(collectionsViewCaption),
+	)
 	return baseItemDTO{
 		ID:             collectionsViewID,
 		Type:           "CollectionFolder",
@@ -77,7 +83,7 @@ func (h *ItemsHandler) collectionsView() baseItemDTO {
 		Name:           "Collections",
 		ServerID:       h.mapper.serverID,
 		SortName:       "collections",
-		ImageTags:      map[string]string{},
+		ImageTags:      map[string]string{"Primary": primaryTag},
 		UserData: &itemUserDataDTO{
 			Key:    collectionsViewID,
 			ItemID: collectionsViewID,
@@ -190,6 +196,14 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		imgTags["Primary"] = h.mapper.imageTagSigner.Tag(
 			imageTagSeed(routeID, "Primary", compatCardImageSize, c.PosterURL, "", time.Time{}),
 			posterURL,
+		)
+	} else {
+		// No stored poster: advertise a Primary tag anyway so clients request the
+		// generated gradient fallback instead of showing a blank card. The seed
+		// matches collectionImageTagSeed's generated branch.
+		imgTags["Primary"] = h.mapper.imageTagSigner.Tag(
+			imageTagSeed(routeID, "Primary", compatCardImageSize, generatedPosterSeed(c.Title), "", time.Time{}),
+			generatedPosterSeed(c.Title),
 		)
 	}
 	dto := baseItemDTO{

@@ -3,8 +3,11 @@ package jellycompat
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -32,6 +35,11 @@ type ImagesHandler struct {
 	// collections is optional; when set, BoxSet (library collection) artwork
 	// resolves durably instead of depending on the in-memory image cache.
 	collections collectionSource
+	// frontendFS is optional; when set, app-relative artwork references (bundled
+	// collection-template posters like "/images/collection-templates/x.jpg") are
+	// served straight from the embedded frontend assets. Without it those paths
+	// have no fetchable origin on the compat surface.
+	frontendFS fs.FS
 }
 
 type imageItemRepository interface {
@@ -87,6 +95,20 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		routeID = canonicalRouteID
 		r = withCompatImageProxyRouteRequest(r)
 	}
+
+	// The synthetic Collections library tile and individual BoxSets resolve to
+	// generated or bundled artwork that the URL-redirect path below cannot serve,
+	// so they own a dedicated handler that authorizes via the signed tag or the
+	// session and writes bytes directly.
+	if isCollectionsViewID(routeID) {
+		h.serveCollectionsViewImage(w, r, imageType, tag)
+		return
+	}
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
+		h.serveCollectionImage(w, r, routeID, imageType, tag, collectionID)
+		return
+	}
+
 	if tag != "" {
 		imageURL, ok, err := h.resolveItemImageURLFromTag(r.Context(), routeID, imageType, imageSize, tag)
 		if err != nil {
@@ -123,11 +145,6 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	// Try decoding as a person ID first.
 	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
 		h.handlePersonImage(w, r, routeID, imageType, personID)
-		return
-	}
-
-	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
-		h.handleCollectionImage(w, r, session, routeID, imageType, imageSize, collectionID)
 		return
 	}
 
@@ -268,9 +285,9 @@ func (h *ImagesHandler) resolveItemImageURLFromTag(ctx context.Context, routeID,
 	if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, routeID); err == nil {
 		return h.resolveLibraryImageURLFromTag(ctx, routeID, int(libraryID), imageType, imageSize, tag)
 	}
-	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
-		return h.resolveCollectionImageURLFromTag(ctx, routeID, collectionID, imageType, tag)
-	}
+	// Collection (BoxSet) and Collections-view artwork are intercepted earlier in
+	// HandleItemImage by serveCollectionImage / serveCollectionsViewImage, so they
+	// never reach this generic resolver.
 	contentID, err := decodeContentID(h.codec, routeID)
 	if err != nil {
 		return catalog.ResolvedImageURL{}, false, nil
@@ -304,34 +321,31 @@ func (h *ImagesHandler) presignCollectionArtwork(ctx context.Context, path strin
 	return h.presignLibraryPosterURL(ctx, path)
 }
 
-// resolveCollectionImageURLFromTag serves tag-authenticated BoxSet artwork.
-// The tag must match the stable seed boxSetFromCollection signs.
-func (h *ImagesHandler) resolveCollectionImageURLFromTag(ctx context.Context, routeID, collectionID, imageType, tag string) (catalog.ResolvedImageURL, bool, error) {
-	if h.collections == nil {
-		return catalog.ResolvedImageURL{}, false, nil
+// collectionImageTagSeed returns the tag seed boxSetFromCollection signs for the
+// given collection and compat image type, plus whether that type is served at
+// all. Primary always resolves (a generated poster backs collections without
+// stored art); Backdrop only when a stored backdrop exists.
+func collectionImageTagSeed(routeID, imageType string, c *models.LibraryCollection) (string, bool) {
+	switch imageType {
+	case "Primary":
+		if key := strings.TrimSpace(c.PosterURL); key != "" {
+			return imageTagSeed(routeID, "Primary", compatCardImageSize, key, "", time.Time{}), true
+		}
+		return imageTagSeed(routeID, "Primary", compatCardImageSize, generatedPosterSeed(c.Title), "", time.Time{}), true
+	case "Backdrop":
+		if key := strings.TrimSpace(c.BackdropURL); key != "" {
+			return imageTagSeed(routeID, "Backdrop", compatCardImageSize, key, "", time.Time{}), true
+		}
 	}
-	collection, err := h.collections.GetByID(ctx, collectionID)
-	if err != nil || collection == nil {
-		return catalog.ResolvedImageURL{}, false, nil
-	}
-	key := collectionArtworkKey(collection, imageType)
-	if key == "" || !h.imageTags.Equal(
-		imageTagSeed(routeID, imageType, compatCardImageSize, key, "", time.Time{}),
-		"",
-		tag,
-	) {
-		return catalog.ResolvedImageURL{}, false, nil
-	}
-	imageURL := h.presignCollectionArtwork(ctx, key)
-	if imageURL == "" {
-		return catalog.ResolvedImageURL{}, false, nil
-	}
-	return catalog.ResolvedImageURL{URL: imageURL}, true, nil
+	return "", false
 }
 
-// handleCollectionImage serves session-authenticated BoxSet artwork, applying
-// the same visibility rules as the BoxSet item endpoints.
-func (h *ImagesHandler) handleCollectionImage(w http.ResponseWriter, r *http.Request, session *Session, routeID, imageType, imageSize, collectionID string) {
+// serveCollectionImage serves BoxSet artwork. It authorizes via the signed tag
+// (a capability minted only for visible collections) or, when no tag is given,
+// via an authenticated session whose libraries include the collection. Stored
+// artwork is presigned/served as before; collections without a usable poster
+// fall back to a generated gradient poster captioned with the title.
+func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Request, routeID, imageType, tag, collectionID string) {
 	if h.collections == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
@@ -349,22 +363,97 @@ func (h *ImagesHandler) handleCollectionImage(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
-	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
-	}
-	if !collectionVisible(collection, visible) {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
-		return
-	}
-	imageURL := h.presignCollectionArtwork(r.Context(), collectionArtworkKey(collection, imageType))
-	if imageURL == "" {
+
+	seed, served := collectionImageTagSeed(routeID, imageType, collection)
+	if !served {
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
 		return
 	}
-	h.images.RememberSized(routeID, imageType, imageURL, imageSize)
-	h.serveImageURL(w, r, imageURL)
+
+	authorized := tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag)
+	if !authorized {
+		ok, err := h.collectionVisibleToRequest(r, collection)
+		if err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+			return
+		}
+	}
+
+	if key := collectionArtworkKey(collection, imageType); key != "" {
+		if imageURL := h.presignCollectionArtwork(r.Context(), key); imageURL != "" {
+			h.serveImageURL(w, r, imageURL)
+			return
+		}
+	}
+
+	if imageType != "Primary" {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	h.serveGeneratedPoster(w, collection.Title)
+}
+
+// collectionVisibleToRequest reports whether the request's session may see the
+// collection. A missing session resolves to not-visible (anonymous image GETs
+// without a valid tag get a clean 404).
+func (h *ImagesHandler) collectionVisibleToRequest(r *http.Request, collection *models.LibraryCollection) (bool, error) {
+	session := SessionFromContext(r.Context())
+	if session == nil && h.sessions != nil {
+		if token, ok := ExtractToken(r); ok {
+			session, _ = h.sessions.Get(token)
+		}
+	}
+	if session == nil {
+		return false, nil
+	}
+	visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+	if err != nil {
+		return false, err
+	}
+	return collectionVisible(collection, visible), nil
+}
+
+// serveCollectionsViewImage serves the synthetic Collections library tile. It is
+// always a generated "Collections" poster, authorized by the signed tag or any
+// authenticated session.
+func (h *ImagesHandler) serveCollectionsViewImage(w http.ResponseWriter, r *http.Request, imageType, tag string) {
+	if imageType != "Primary" {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	seed := imageTagSeed(collectionsViewID, "Primary", compatCardImageSize, generatedPosterSeed(collectionsViewCaption), "", time.Time{})
+	authorized := tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag)
+	if !authorized {
+		session := SessionFromContext(r.Context())
+		if session == nil && h.sessions != nil {
+			if token, ok := ExtractToken(r); ok {
+				session, _ = h.sessions.Get(token)
+			}
+		}
+		if session == nil {
+			writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+			return
+		}
+	}
+	h.serveGeneratedPoster(w, collectionsViewCaption)
+}
+
+// serveGeneratedPoster renders (or reuses) a gradient poster captioned with text
+// and writes it as a cacheable PNG.
+func (h *ImagesHandler) serveGeneratedPoster(w http.ResponseWriter, caption string) {
+	pngBytes, err := generatedCollectionPoster(caption)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "InternalError", "Failed to render image")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(pngBytes)
 }
 
 func (h *ImagesHandler) resolveLibraryImageURLFromTag(ctx context.Context, routeID string, libraryID int, imageType, _ string, tag string) (catalog.ResolvedImageURL, bool, error) {
@@ -522,11 +611,47 @@ func firstResolvedImageURL(values ...catalog.ResolvedImageURL) catalog.ResolvedI
 }
 
 func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
+	// App-relative references (bundled collection-template posters) have no
+	// remote origin to redirect or proxy to, so serve their bytes from the
+	// embedded frontend assets instead.
+	if strings.HasPrefix(imageURL, "/") {
+		h.serveBundledAsset(w, imageURL)
+		return
+	}
 	if shouldProxyCompatImageRequest(r) {
 		h.proxyImageURL(w, r, imageURL)
 		return
 	}
 	h.redirectImageURL(w, r, imageURL)
+}
+
+// serveBundledAsset serves an app-relative asset (e.g.
+// "/images/collection-templates/x.jpg") straight from the embedded frontend
+// filesystem. A missing FS or file degrades to a clean 404.
+func (h *ImagesHandler) serveBundledAsset(w http.ResponseWriter, assetPath string) {
+	if h.frontendFS == nil {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	clean := path.Clean("/" + strings.TrimPrefix(assetPath, "/"))
+	rel := strings.TrimPrefix(clean, "/")
+	if rel == "" || strings.HasPrefix(rel, "../") {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	data, err := fs.ReadFile(h.frontendFS, rel)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NotFound", "Image not found")
+		return
+	}
+	contentType := mime.TypeByExtension(path.Ext(rel))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (h *ImagesHandler) redirectImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {

@@ -2142,6 +2142,7 @@ func main() {
 			NodePlanner:      deps.NodePlanner,
 			JWTSecret:        cfg.Auth.JWTSecret,
 			RecWorker:        recWorker,
+			FrontendFS:       deps.FrontendFS,
 		}
 
 		// Wire direct dependencies when DB is available.

@@ -40,7 +40,11 @@ type Dependencies struct {
 	LoginResolver    loginResolver
 	Authenticator    *Authenticator
 	WebFS            fs.FS
-	HTTPClient       *http.Client
+	// FrontendFS is the embedded Silo frontend asset filesystem (web/dist),
+	// used to serve app-relative artwork such as bundled collection-template
+	// posters that have no remote origin. Optional.
+	FrontendFS fs.FS
+	HTTPClient *http.Client
 
 	// Direct service dependencies (replaces Client)
 	ContentService  ContentService
