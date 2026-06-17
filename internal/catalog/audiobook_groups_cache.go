@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
@@ -34,6 +35,7 @@ type AudiobookGroupsCache struct {
 	cache *cache.TTLCache[*groupsCacheEntry]
 	ttl   time.Duration
 	fetch audiobookGroupsFetcher
+	group singleflight.Group
 }
 
 // NewAudiobookGroupsCache builds a cache that warms itself from the given pool.
@@ -58,15 +60,26 @@ func (c *AudiobookGroupsCache) Close() {
 // count.
 func (c *AudiobookGroupsCache) Page(ctx context.Context, q AudiobookGroupsQuery, filter AccessFilter) ([]AudiobookGroup, int, error) {
 	key := audiobookGroupsCacheKey(q, filter)
-	entry, ok := c.cache.Get(key)
-	if !ok {
+	if entry, ok := c.cache.Get(key); ok {
+		return sliceGroups(entry.groups, q.Offset, q.Limit), entry.total, nil
+	}
+
+	value, err, _ := c.group.Do(key, func() (any, error) {
+		if entry, ok := c.cache.Get(key); ok {
+			return entry, nil
+		}
 		groups, total, err := c.fetch(ctx, q, filter)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
-		entry = &groupsCacheEntry{groups: groups, total: total}
+		entry := &groupsCacheEntry{groups: groups, total: total}
 		c.cache.Set(key, entry, c.ttl)
+		return entry, nil
+	})
+	if err != nil {
+		return nil, 0, err
 	}
+	entry := value.(*groupsCacheEntry)
 	return sliceGroups(entry.groups, q.Offset, q.Limit), entry.total, nil
 }
 
@@ -100,6 +113,8 @@ func audiobookGroupsCacheKey(q AudiobookGroupsQuery, filter AccessFilter) string
 	b.WriteString(joinSortedInts(filter.DisabledLibraryIDs))
 	b.WriteString("|cids=")
 	b.WriteString(strings.Join(sortedCopy(filter.AllowedContentIDs), ","))
+	b.WriteString("|excluded_types=")
+	b.WriteString(strings.Join(sortedCopy(filter.ExcludedMediaTypes), ","))
 	return b.String()
 }
 

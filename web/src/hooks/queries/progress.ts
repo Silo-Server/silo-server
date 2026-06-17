@@ -104,7 +104,7 @@ export function useReportMediaProgress() {
       // group lists — on every tick.
       queryClient.invalidateQueries({ queryKey: progressKeys.all });
       queryClient.invalidateQueries({
-        queryKey: ["catalog", "items", variables.contentId, "detail"],
+        queryKey: catalogKeys.itemDetail(variables.contentId),
       });
     },
   });

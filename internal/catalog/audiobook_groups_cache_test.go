@@ -2,6 +2,9 @@ package catalog
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +32,7 @@ func TestAudiobookGroupsCache_ComputesFullListOncePerKey(t *testing.T) {
 			return full, len(full), nil
 		},
 	}
+	defer c.Close()
 
 	q := AudiobookGroupsQuery{LibraryID: 7, GroupBy: AudiobookGroupByAuthor, Sort: "name"}
 	filter := AccessFilter{UserID: 1, ProfileID: "p1"}
@@ -71,6 +75,7 @@ func TestAudiobookGroupsCache_KeyedByViewer(t *testing.T) {
 			return newTestGroups(3), 3, nil
 		},
 	}
+	defer c.Close()
 	q := AudiobookGroupsQuery{LibraryID: 7, GroupBy: AudiobookGroupByAuthor, Sort: "name", Limit: 10}
 	if _, _, err := c.Page(context.Background(), q, AccessFilter{UserID: 1, ProfileID: "p1"}); err != nil {
 		t.Fatalf("viewer1: %v", err)
@@ -80,5 +85,96 @@ func TestAudiobookGroupsCache_KeyedByViewer(t *testing.T) {
 	}
 	if fetches != 2 {
 		t.Fatalf("distinct viewers shared a cache entry: fetches=%d, want 2", fetches)
+	}
+}
+
+func TestAudiobookGroupsCache_DeduplicatesConcurrentMisses(t *testing.T) {
+	var fetches atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+
+	c := &AudiobookGroupsCache{
+		cache: cache.NewTTLCache[*groupsCacheEntry](),
+		ttl:   time.Minute,
+		fetch: func(context.Context, AudiobookGroupsQuery, AccessFilter) ([]AudiobookGroup, int, error) {
+			fetches.Add(1)
+			startedOnce.Do(func() { close(started) })
+			<-release
+			return newTestGroups(4), 4, nil
+		},
+	}
+	defer c.Close()
+
+	q := AudiobookGroupsQuery{LibraryID: 7, GroupBy: AudiobookGroupByAuthor, Sort: "name", Limit: 2}
+	filter := AccessFilter{UserID: 1, ProfileID: "p1"}
+	const callers = 8
+	ready := make(chan struct{}, callers)
+	begin := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-begin
+			groups, total, err := c.Page(context.Background(), q, filter)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if total != 4 || len(groups) != 2 {
+				errs <- fmt.Errorf("page result = len %d total %d, want len 2 total 4", len(groups), total)
+			}
+		}()
+	}
+	for range callers {
+		<-ready
+	}
+	close(begin)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cache fetch to start")
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent page call failed: %v", err)
+		}
+	}
+	if got := fetches.Load(); got != 1 {
+		t.Fatalf("concurrent miss fetched %d times; want 1", got)
+	}
+}
+
+func TestAudiobookGroupsCache_KeyIncludesExcludedMediaTypes(t *testing.T) {
+	var fetches int
+	c := &AudiobookGroupsCache{
+		cache: cache.NewTTLCache[*groupsCacheEntry](),
+		ttl:   time.Minute,
+		fetch: func(context.Context, AudiobookGroupsQuery, AccessFilter) ([]AudiobookGroup, int, error) {
+			fetches++
+			return newTestGroups(3), 3, nil
+		},
+	}
+	defer c.Close()
+
+	q := AudiobookGroupsQuery{LibraryID: 7, GroupBy: AudiobookGroupByAuthor, Sort: "name", Limit: 10}
+	if _, _, err := c.Page(context.Background(), q, AccessFilter{UserID: 1, ProfileID: "p1", ExcludedMediaTypes: []string{"podcast"}}); err != nil {
+		t.Fatalf("podcast excluded: %v", err)
+	}
+	if _, _, err := c.Page(context.Background(), q, AccessFilter{UserID: 1, ProfileID: "p1", ExcludedMediaTypes: []string{"audiobook"}}); err != nil {
+		t.Fatalf("audiobook excluded: %v", err)
+	}
+	if _, _, err := c.Page(context.Background(), q, AccessFilter{UserID: 1, ProfileID: "p1", ExcludedMediaTypes: []string{"audiobook"}}); err != nil {
+		t.Fatalf("audiobook excluded cached: %v", err)
+	}
+	if fetches != 2 {
+		t.Fatalf("excluded media type variants shared a cache entry: fetches=%d, want 2", fetches)
 	}
 }
