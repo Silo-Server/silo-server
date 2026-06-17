@@ -392,7 +392,7 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if detail.Type == "movie" || detail.Type == "episode" || detail.Type == "ebook" {
+	if detail.Type == "movie" || detail.Type == "episode" || detail.Type == "ebook" || detail.Type == "audiobook" {
 		detail.UserData = h.getLeafUserData(r, detail.ContentID, detail.Type)
 		applyEffectiveEditionPreference(detail.UserData, &detail.EffectiveVersionEditionKey)
 	}
