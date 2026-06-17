@@ -51,6 +51,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
+	"github.com/Silo-Server/silo-server/internal/manga"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -1058,6 +1059,7 @@ func main() {
 	var episodeRepo *catalog.EpisodeRepository
 	var audiobookEnricher *audiobooks.Enricher
 	var ebookEnricher *ebooks.Enricher
+	var mangaEnricher *manga.Enricher
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
@@ -1149,6 +1151,14 @@ func main() {
 		)
 		audiobookEnricher.SetLiteraryWorkLinker(literaryWorkService)
 		ebookEnricher.SetLiteraryWorkLinker(literaryWorkService)
+		mangaEnricher = manga.NewEnricher(
+			deps.DB,
+			chainRepo,
+			pluginResolver,
+			itemRepo,
+			personRepo,
+			providerIDRepo,
+		)
 
 		// Always wire the image resolver so plugin-prefixed URLs (e.g.
 		// metadb://) can be resolved to presigned HTTP URLs in API responses.
@@ -1176,6 +1186,9 @@ func main() {
 			}
 			if ebookEnricher != nil {
 				ebookEnricher.SetImageCacher(imageCacher)
+			}
+			if mangaEnricher != nil {
+				mangaEnricher.SetImageCacher(imageCacher)
 			}
 		}
 
@@ -1783,6 +1796,9 @@ func main() {
 		}
 		if ebookEnricher != nil {
 			taskMgr.Register(tasks.NewSyncEbookMetadataTask(ebookEnricher))
+		}
+		if mangaEnricher != nil {
+			taskMgr.Register(tasks.NewSyncMangaMetadataTask(mangaEnricher))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -189,6 +190,9 @@ type ItemDetail struct {
 
 	// Ebook-specific detail. Present only when Type == "ebook".
 	Ebook *EbookDetailExtension `json:"ebook,omitempty"`
+
+	// Manga-specific detail. Present only when Type == "manga".
+	Manga *MangaDetailExtension `json:"manga,omitempty"`
 }
 
 type AudiobookDetailExtension struct {
@@ -238,6 +242,29 @@ type EbookDetailExtension struct {
 	Publisher string                  `json:"publisher,omitempty"`
 	Series    *AudiobookSeriesGroup   `json:"series,omitempty"`
 	Related   AudiobookRelatedContent `json:"related"`
+}
+
+// MangaDetailExtension is the manga-series detail payload. A manga series item
+// (media_items.type='manga') owns a set of readable chapter items
+// (media_items.type='ebook') linked via the manga_chapters table.
+type MangaDetailExtension struct {
+	Chapters []MangaChapter `json:"chapters"`
+}
+
+// MangaChapter is one chapter of a manga series, ordered by chapter index.
+type MangaChapter struct {
+	ContentID    string   `json:"content_id"`
+	Title        string   `json:"title"`
+	ChapterIndex *float64 `json:"chapter_index,omitempty"`
+	Volume       string   `json:"volume,omitempty"`
+	// Read is true when the current viewer has finished this chapter, mirroring
+	// ebook read state: ebook_reader_progress.progress >= the finished threshold.
+	Read bool `json:"read"`
+	// Progress is the viewer's reading position as a 0..1 fraction, present
+	// only when a progress row exists. The row progress bar uses it.
+	Progress *float64 `json:"progress,omitempty"`
+	// PosterURL is the chapter's extracted cover (presigned), for row thumbnails.
+	PosterURL string `json:"poster_url,omitempty"`
 }
 
 // ItemUserState is per-profile viewer state included in item detail responses.
@@ -992,6 +1019,16 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	}
 	if item.Type == "ebook" {
 		detail.Ebook = s.buildEbookExtension(ctx, item, crewCredits, filter)
+		// A manga chapter is an ebook item linked to its series; exposing the
+		// linkage lets the reader navigate back/next within the series and
+		// continue-reading cards show the series instead of the chapter.
+		if seriesID, seriesTitle, ok := s.lookupMangaSeriesForChapter(ctx, item.ContentID); ok {
+			detail.SeriesID = seriesID
+			detail.SeriesTitle = seriesTitle
+		}
+	}
+	if item.Type == "manga" {
+		detail.Manga = s.buildMangaExtension(ctx, item, filter)
 	}
 
 	// Series folder paths from confirmed claims when available, otherwise from
@@ -1157,15 +1194,115 @@ func (s *DetailService) buildEbookExtension(
 	if item == nil {
 		return nil
 	}
+	// The three related-content lookups are independent read-only queries; run
+	// them concurrently so detail latency is the slowest one, not their sum
+	// (mirrors buildAudiobookExtension).
+	var (
+		series       *AudiobookSeriesGroup
+		alsoByAuthor []AudiobookRelatedItem
+		similar      []AudiobookRelatedItem
+		wg           sync.WaitGroup
+	)
+	wg.Add(3)
+	go func() { defer wg.Done(); series = s.fetchEbookSeries(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); alsoByAuthor = s.fetchEbookAlsoByAuthor(ctx, item.ContentID, filter) }()
+	go func() { defer wg.Done(); similar = s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter) }()
+	wg.Wait()
+
 	return &EbookDetailExtension{
 		Authors:   audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
 		Publisher: firstNonEmptyString(item.Studios),
-		Series:    s.fetchEbookSeries(ctx, item.ContentID, filter),
+		Series:    series,
 		Related: AudiobookRelatedContent{
-			AlsoByAuthor: s.fetchEbookAlsoByAuthor(ctx, item.ContentID, filter),
-			Similar:      s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter),
+			AlsoByAuthor: alsoByAuthor,
+			Similar:      similar,
 		},
 	}
+}
+
+// buildMangaExtension assembles the manga-series detail payload by listing the
+// series' chapters (ebook items linked via manga_chapters).
+func (s *DetailService) buildMangaExtension(ctx context.Context, item *models.MediaItem, filter AccessFilter) *MangaDetailExtension {
+	if item == nil {
+		return nil
+	}
+	return &MangaDetailExtension{
+		Chapters: s.fetchMangaChapters(ctx, item.ContentID, filter),
+	}
+}
+
+// mangaChaptersQuery is the SQL listing a manga series' chapters in reading
+// order. Chapters with a parsed index sort first (ascending); those without
+// fall back to sort_title. Kept as a package var so the ordering contract can
+// be asserted without a database.
+//
+// Manga chapters are ebook items, so per-chapter read state mirrors the ebook
+// surfaces: a chapter is read when the current viewer's ebook_reader_progress
+// row has progress >= the finished threshold. The LEFT JOIN is scoped by the
+// viewer's user_id + profile_id ($2/$3) and yields false when no row exists.
+var mangaChaptersQuery = fmt.Sprintf(`
+	SELECT m.content_id, m.title, mc.chapter_index, mc.volume,
+	       COALESCE(erp.progress >= %s, false) AS read,
+	       erp.progress::double precision,
+	       COALESCE(m.poster_path, '') AS poster_path
+	FROM manga_chapters mc
+	JOIN media_items m ON m.content_id = mc.chapter_content_id
+	LEFT JOIN ebook_reader_progress erp
+	  ON erp.content_id = mc.chapter_content_id
+	 AND erp.user_id = $2
+	 AND erp.profile_id = $3
+	WHERE mc.series_content_id = $1
+	ORDER BY mc.chapter_index NULLS LAST, m.sort_title
+`, EbookFinishedProgressThresholdSQL)
+
+// fetchMangaChapters returns the ordered chapters for a manga series. It never
+// returns nil so the JSON payload always carries a (possibly empty) array. The
+// access filter supplies the viewer (user_id/profile_id) used to resolve each
+// chapter's per-viewer read state.
+func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID string, filter AccessFilter) []MangaChapter {
+	chapters := make([]MangaChapter, 0, 16)
+	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
+		return chapters
+	}
+	rows, err := s.itemRepo.pool.Query(ctx, mangaChaptersQuery, seriesContentID, filter.UserID, filter.ProfileID)
+	if err != nil {
+		return chapters
+	}
+	defer rows.Close()
+
+	posterPaths := make([]string, 0, 16)
+	for rows.Next() {
+		var (
+			ch         MangaChapter
+			index      *float64
+			volume     *string
+			progress   *float64
+			posterPath string
+		)
+		if err := rows.Scan(&ch.ContentID, &ch.Title, &index, &volume, &ch.Read, &progress, &posterPath); err != nil {
+			return chapters
+		}
+		ch.ChapterIndex = index
+		if volume != nil {
+			ch.Volume = *volume
+		}
+		ch.Progress = progress
+		ch.PosterURL = posterPath // raw path; resolved in one batch below
+		if posterPath != "" {
+			posterPaths = append(posterPaths, posterPath)
+		}
+		chapters = append(chapters, ch)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("manga chapters: row iteration error", "series", seriesContentID, "error", err)
+	}
+	// Presign every chapter poster in one batch rather than per chapter — a
+	// long-running series has hundreds of chapters.
+	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", "")
+	for i := range chapters {
+		chapters[i].PosterURL = resolved[chapters[i].PosterURL]
+	}
+	return chapters
 }
 
 func audiobookPeopleFromCrew(crew []CrewCredit, job string) []AudiobookPerson {

@@ -23,6 +23,7 @@ import {
   getLibrarySortRelevanceScope,
   isAudiobookLibraryType,
   isEbookLibraryType,
+  isMangaLibraryType,
   type AudiobookBrowseAxis,
   type LibraryBrowseType,
 } from "./libraryPageSearchParams";
@@ -122,9 +123,11 @@ export default function LibraryBrowse({
           ? "audiobook"
           : isEbookLibraryType(libraryType)
             ? "ebook"
-            : libraryType === "movie"
-              ? libraryType
-              : undefined,
+            : isMangaLibraryType(libraryType)
+              ? "manga"
+              : libraryType === "movie"
+                ? libraryType
+                : undefined,
     sort: normalizeQuerySortForScope(queryDefinition.sort, {
       includePersonalized: true,
       relevanceScope: sortRelevanceScope,

@@ -14,6 +14,14 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if file == nil {
 		return true
 	}
+	// Ebook/comic files (epub, pdf, cbz, cbr — including manga chapters, which
+	// are BaseType "ebook") are read directly by the reader and never go through
+	// the transcode/playback probe pipeline. ffprobe yields nothing useful for
+	// them, so requiring probe metadata re-ran ffprobe on every detail/watch
+	// load and never converged.
+	if file.BaseType == "ebook" {
+		return false
+	}
 	if strings.TrimSpace(file.ProbeSource) == "" || file.ProbeUpdatedAt == nil {
 		return true
 	}

@@ -11,6 +11,7 @@ import SeasonContent from "@/pages/ItemDetail/SeasonContent";
 import EpisodeContent from "@/pages/ItemDetail/EpisodeContent";
 import AudiobookContent from "@/pages/ItemDetail/AudiobookContent";
 import EbookContent from "@/pages/ItemDetail/EbookContent";
+import MangaContent from "@/pages/ItemDetail/MangaContent";
 import {
   CastSkeleton,
   CrewSkeleton,
@@ -106,6 +107,8 @@ export default function ItemDetail() {
       );
     case "ebook":
       return <EbookContent item={item as ItemDetail & { type: "ebook" }} libraryId={libraryId} />;
+    case "manga":
+      return <MangaContent item={item as ItemDetail & { type: "manga" }} libraryId={libraryId} />;
     case "podcast":
       return <Navigate to={`/podcasts/show/${item.content_id}`} replace />;
     default:

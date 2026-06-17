@@ -189,6 +189,132 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain("S01E03");
   });
 
+  it("renders a volumes-only manga count chip", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-1",
+        type: "manga",
+        title: "Railgun",
+        manga_chapter_count: 0,
+        manga_volume_count: 12,
+      },
+    });
+
+    expect(markup).toContain("12 Vol");
+    expect(markup).not.toContain("Ch");
+  });
+
+  it("renders a chapters-only manga count chip", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-2",
+        type: "manga",
+        title: "One Piece",
+        manga_chapter_count: 100,
+        manga_volume_count: 0,
+      },
+    });
+
+    expect(markup).toContain("100 Ch");
+    expect(markup).not.toContain("Vol");
+  });
+
+  it("renders both counts when a series has volumes and loose chapters", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-4",
+        type: "manga",
+        title: "Mixed Manga",
+        manga_chapter_count: 3,
+        manga_volume_count: 12,
+      },
+    });
+
+    expect(markup).toContain("12 Vol · 3 Ch");
+  });
+
+  it("uses singular labels for single counts", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-5",
+        type: "manga",
+        title: "One Shot",
+        manga_chapter_count: 1,
+        manga_volume_count: 1,
+      },
+    });
+
+    expect(markup).toContain("1 Vol · 1 Ch");
+  });
+
+  it("renders a color-coded publication status chip on manga cards", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-st",
+        type: "manga",
+        title: "Ongoing Manga",
+        manga_volume_count: 5,
+        show_status: "Ongoing",
+      },
+    });
+    expect(markup).toContain("Ongoing");
+    expect(markup).toContain("text-emerald-200");
+  });
+
+  it("does not render a status chip on non-manga cards or when status is absent", () => {
+    const noStatus = renderCard({
+      item: { ...baseItem, content_id: "manga-ns", type: "manga", title: "No Status" },
+    });
+    expect(noStatus).not.toContain("Ongoing");
+    const ebook = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "eb",
+        type: "ebook",
+        title: "Book",
+        show_status: "Completed",
+      },
+    });
+    expect(ebook).not.toContain("Completed");
+  });
+
+  it("does not render a manga count chip on non-manga cards", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "ebook-9",
+        type: "ebook",
+        title: "Not Manga",
+        // Even if these stray fields were present, gating is on type.
+        manga_chapter_count: 99,
+        manga_volume_count: 99,
+      },
+    });
+
+    expect(markup).not.toContain("Volume");
+    expect(markup).not.toContain("Chapter");
+  });
+
+  it("does not render a manga count chip when both counts are missing or zero", () => {
+    const markup = renderCard({
+      item: {
+        ...baseItem,
+        content_id: "manga-3",
+        type: "manga",
+        title: "Empty Manga",
+        manga_chapter_count: 0,
+      },
+    });
+
+    expect(markup).not.toContain("Volume");
+    expect(markup).not.toContain("Chapter");
+  });
+
   it("renders episode cards with series context when available", () => {
     const markup = renderCard({
       item: {

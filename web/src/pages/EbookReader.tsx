@@ -42,6 +42,8 @@ import { Button } from "@/components/ui/button";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
+import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
 import FoliateBookReader, {
@@ -197,7 +199,29 @@ export default function EbookReader() {
   const [searchParams] = useSearchParams();
   const requestedFileID = Number(searchParams.get("file_id") || "");
   const libraryIdParam = searchParams.get("libraryId");
+  // Manga chapter rows pass an explicit backTo target (the manga series detail)
+  // so the reader's back action returns to the series instead of the chapter's
+  // own junk item detail — which would loop straight back into the reader.
+  // Absent for normal ebooks, so their back behavior is unchanged.
+  const backToParam = searchParams.get("backTo");
   const { data: item, isLoading, error } = useCatalogItemDetail(contentId || undefined);
+  // Manga chapters carry their owning series id; fetching the series detail
+  // (usually already cached from the series page) gives the ordered chapter
+  // list, which powers next-chapter navigation and the default back target.
+  const mangaSeriesId = item?.type === "ebook" ? item.series_id : undefined;
+  const { data: mangaSeries } = useCatalogItemDetail(mangaSeriesId || undefined);
+  const nextChapter = useMemo(() => {
+    const seriesChapters = mangaSeries?.manga?.chapters;
+    if (!seriesChapters || seriesChapters.length === 0) {
+      return null;
+    }
+    const flat = flattenMangaList(buildMangaList(seriesChapters));
+    const index = flat.findIndex((entry) => entry.chapter.content_id === contentId);
+    if (index < 0 || index + 1 >= flat.length) {
+      return null;
+    }
+    return flat[index + 1];
+  }, [contentId, mangaSeries?.manga?.chapters]);
   const selectedFile = useMemo(
     () =>
       chooseReaderFile(
@@ -211,11 +235,22 @@ export default function EbookReader() {
     [item?.versions],
   );
   const format = readerFileFormat(selectedFile);
+  // Comic archives are image books: prose chrome (TTS, typography, reading
+  // ruler) is meaningless and the side panel steals width the pages need, so
+  // it starts closed (the toggle still opens it).
+  const isComicFormat = format === "cbz" || format === "cbr";
   const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
   const [readerProgress, setReaderProgress] = useState<number | null>(null);
   const [toc, setToc] = useState<TOCItem[]>([]);
   const [panelOpen, setPanelOpen] = useState(true);
+  const comicPanelInitRef = useRef(false);
+  useEffect(() => {
+    if (isComicFormat && !comicPanelInitRef.current) {
+      comicPanelInitRef.current = true;
+      setPanelOpen(false);
+    }
+  }, [isComicFormat]);
   const [panel, setPanel] = useState<ReaderPanel>("toc");
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(() =>
     loadStoredReaderSettings(),
@@ -512,9 +547,40 @@ export default function EbookReader() {
     );
   }
 
-  const backHref = `/item/${encodeURIComponent(item.content_id)}${
-    libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
-  }`;
+  // backToParam comes from the URL, so it must be validated before use as an
+  // href: only accept a single-leading-slash in-app relative path. This rejects
+  // absolute URLs, protocol-relative (`//host`), backslash tricks, and
+  // `javascript:`/`data:` schemes (open-redirect / XSS).
+  const safeBackTo =
+    backToParam && backToParam.startsWith("/") && !/^\/[/\\]/.test(backToParam)
+      ? backToParam
+      : null;
+  const libraryIdNumber = libraryIdParam ? Number(libraryIdParam) : undefined;
+  // Manga chapters default their back target to the owning series, so entry
+  // points that cannot pass backTo (continue-reading cards, deep links) still
+  // escape the chapter's own junk item detail.
+  const mangaSeriesHref = mangaSeriesId
+    ? buildItemHref({
+        contentId: mangaSeriesId,
+        libraryId: Number.isFinite(libraryIdNumber) ? libraryIdNumber : undefined,
+      })
+    : null;
+  const backHref =
+    safeBackTo ||
+    mangaSeriesHref ||
+    `/item/${encodeURIComponent(item.content_id)}${
+      libraryIdParam ? `?libraryId=${encodeURIComponent(libraryIdParam)}` : ""
+    }`;
+  const nextChapterHref =
+    nextChapter && mangaSeriesHref
+      ? buildMediaPlayHref({
+          contentId: nextChapter.chapter.content_id,
+          type: "ebook",
+          libraryId: Number.isFinite(libraryIdNumber) ? libraryIdNumber : undefined,
+          backTo: mangaSeriesHref,
+        })
+      : null;
+  const showEndOfBookNext = nextChapterHref != null && (readerProgress ?? 0) >= 0.995;
 
   if (!selectedFile) {
     return (
@@ -529,7 +595,7 @@ export default function EbookReader() {
     <div className="bg-background min-h-screen">
       <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
-          <Button asChild variant="ghost" size="icon" aria-label="Back to ebook">
+          <Button asChild variant="ghost" size="icon" aria-label="Back">
             <Link to={backHref}>
               <ArrowLeft className="size-5" />
             </Link>
@@ -538,6 +604,22 @@ export default function EbookReader() {
             <div className="truncate text-sm font-semibold">{item.title}</div>
             <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
           </div>
+          {nextChapterHref && nextChapter && (
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="hidden gap-1 sm:inline-flex"
+              title={`Next: ${nextChapter.label}`}
+            >
+              <Link to={nextChapterHref}>
+                <span className="text-muted-foreground max-w-36 truncate text-xs">
+                  {nextChapter.label}
+                </span>
+                <ChevronRight className="size-4" />
+              </Link>
+            </Button>
+          )}
           {progressLabel && (
             <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
               {progressLabel}
@@ -579,15 +661,17 @@ export default function EbookReader() {
             >
               <Bookmark className="size-4" />
             </Button>
-            <Button
-              variant={readerSettings.readingRuler ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label="Toggle reading ruler"
-              title="Reading ruler"
-              onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
-            >
-              <Ruler className="size-4" />
-            </Button>
+            {!isComicFormat && (
+              <Button
+                variant={readerSettings.readingRuler ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="Toggle reading ruler"
+                title="Reading ruler"
+                onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
+              >
+                <Ruler className="size-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -887,90 +971,96 @@ export default function EbookReader() {
                     Reset
                   </Button>
                   <div className="space-y-3">
-                    <div className="border-border space-y-2 border-b pb-3">
-                      <div className="text-muted-foreground text-xs font-medium">
-                        Reading profile
-                      </div>
-                      <div className="grid gap-2">
-                        {READER_PROFILES.map((profile) => {
-                          const active = profileIsActive(profile, readerSettings);
-                          return (
-                            <Button
-                              key={profile.id}
-                              type="button"
-                              variant={active ? "secondary" : "outline"}
-                              size="sm"
-                              aria-pressed={active}
-                              onClick={() => updateReaderSettings(profile.settings)}
-                              className="h-auto min-h-11 w-full justify-between px-3 py-2 text-left"
-                            >
-                              <span className="min-w-0">
-                                <span className="block text-sm font-medium">{profile.label}</span>
-                                <span className="text-muted-foreground block text-xs">
-                                  {profile.description}
+                    {!isComicFormat && (
+                      <div className="border-border space-y-2 border-b pb-3">
+                        <div className="text-muted-foreground text-xs font-medium">
+                          Reading profile
+                        </div>
+                        <div className="grid gap-2">
+                          {READER_PROFILES.map((profile) => {
+                            const active = profileIsActive(profile, readerSettings);
+                            return (
+                              <Button
+                                key={profile.id}
+                                type="button"
+                                variant={active ? "secondary" : "outline"}
+                                size="sm"
+                                aria-pressed={active}
+                                onClick={() => updateReaderSettings(profile.settings)}
+                                className="h-auto min-h-11 w-full justify-between px-3 py-2 text-left"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block text-sm font-medium">{profile.label}</span>
+                                  <span className="text-muted-foreground block text-xs">
+                                    {profile.description}
+                                  </span>
                                 </span>
-                              </span>
-                              {active && <Check className="size-4 shrink-0" />}
-                            </Button>
-                          );
-                        })}
+                                {active && <Check className="size-4 shrink-0" />}
+                              </Button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Volume2 className="size-4" />
-                      Read aloud
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        aria-label="Speak text"
-                        onClick={handleSpeak}
-                      >
-                        <Play className="size-4" />
-                        Speak
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={tts.state === "paused" ? "Resume speech" : "Pause speech"}
-                        onClick={tts.state === "paused" ? tts.resume : tts.pause}
-                      >
-                        <Pause className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Stop speech"
-                        onClick={tts.stop}
-                      >
-                        <Square className="size-4" />
-                      </Button>
-                    </div>
-                    <ReaderRange
-                      label="Speech rate"
-                      value={ttsRate}
-                      min={0.5}
-                      max={2}
-                      step={0.1}
-                      onChange={setTtsRate}
-                    />
-                    <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground text-xs font-medium">Voice</span>
-                      <select
-                        aria-label="Voice"
-                        value={ttsVoiceURI}
-                        onChange={(event) => setTtsVoiceURI(event.target.value)}
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                      >
-                        <option value="">Default</option>
-                        {tts.voices.map((voice) => (
-                          <option key={voice.voiceURI} value={voice.voiceURI}>
-                            {voice.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    )}
+                    {!isComicFormat && (
+                      <>
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Volume2 className="size-4" />
+                          Read aloud
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            aria-label="Speak text"
+                            onClick={handleSpeak}
+                          >
+                            <Play className="size-4" />
+                            Speak
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={tts.state === "paused" ? "Resume speech" : "Pause speech"}
+                            onClick={tts.state === "paused" ? tts.resume : tts.pause}
+                          >
+                            <Pause className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Stop speech"
+                            onClick={tts.stop}
+                          >
+                            <Square className="size-4" />
+                          </Button>
+                        </div>
+                        <ReaderRange
+                          label="Speech rate"
+                          value={ttsRate}
+                          min={0.5}
+                          max={2}
+                          step={0.1}
+                          onChange={setTtsRate}
+                        />
+                        <label className="block space-y-1 text-sm">
+                          <span className="text-muted-foreground text-xs font-medium">Voice</span>
+                          <select
+                            aria-label="Voice"
+                            value={ttsVoiceURI}
+                            onChange={(event) => setTtsVoiceURI(event.target.value)}
+                            className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                          >
+                            <option value="">Default</option>
+                            {tts.voices.map((voice) => (
+                              <option key={voice.voiceURI} value={voice.voiceURI}>
+                                {voice.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    )}
                   </div>
                   <div className="border-border space-y-2 border-t pt-3">
                     <label className="flex items-center justify-between gap-3 text-sm">
@@ -1004,33 +1094,39 @@ export default function EbookReader() {
                       <option value="dark">Dark</option>
                     </select>
                   </label>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Font</span>
-                    <select
-                      aria-label="Font family"
-                      value={readerSettings.fontFamily}
-                      onChange={(event) => updateReaderSettings({ fontFamily: event.target.value })}
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      {READER_FONT_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                      {!READER_FONT_OPTIONS.some(
-                        (option) => option.value === readerSettings.fontFamily,
-                      ) && <option value={readerSettings.fontFamily}>Custom</option>}
-                    </select>
-                  </label>
-                  <ReaderRange
-                    label="Font size"
-                    value={readerSettings.fontSize}
-                    min={80}
-                    max={180}
-                    step={1}
-                    suffix="%"
-                    onChange={(fontSize) => updateReaderSettings({ fontSize })}
-                  />
+                  {!isComicFormat && (
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs font-medium">Font</span>
+                      <select
+                        aria-label="Font family"
+                        value={readerSettings.fontFamily}
+                        onChange={(event) =>
+                          updateReaderSettings({ fontFamily: event.target.value })
+                        }
+                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      >
+                        {READER_FONT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                        {!READER_FONT_OPTIONS.some(
+                          (option) => option.value === readerSettings.fontFamily,
+                        ) && <option value={readerSettings.fontFamily}>Custom</option>}
+                      </select>
+                    </label>
+                  )}
+                  {!isComicFormat && (
+                    <ReaderRange
+                      label="Font size"
+                      value={readerSettings.fontSize}
+                      min={80}
+                      max={180}
+                      step={1}
+                      suffix="%"
+                      onChange={(fontSize) => updateReaderSettings({ fontSize })}
+                    />
+                  )}
                   <ReaderRange
                     label="Brightness"
                     value={readerSettings.fontBrightness}
@@ -1040,14 +1136,16 @@ export default function EbookReader() {
                     suffix="%"
                     onChange={(fontBrightness) => updateReaderSettings({ fontBrightness })}
                   />
-                  <ReaderRange
-                    label="Line height"
-                    value={readerSettings.lineHeight}
-                    min={1.1}
-                    max={2.4}
-                    step={0.05}
-                    onChange={(lineHeight) => updateReaderSettings({ lineHeight })}
-                  />
+                  {!isComicFormat && (
+                    <ReaderRange
+                      label="Line height"
+                      value={readerSettings.lineHeight}
+                      min={1.1}
+                      max={2.4}
+                      step={0.05}
+                      onChange={(lineHeight) => updateReaderSettings({ lineHeight })}
+                    />
+                  )}
                   <ReaderRange
                     label="Margin"
                     value={readerSettings.margin}
@@ -1057,7 +1155,7 @@ export default function EbookReader() {
                     suffix="px"
                     onChange={(margin) => updateReaderSettings({ margin })}
                   />
-                  {readerSettings.flow !== "scrolled" && (
+                  {!isComicFormat && readerSettings.flow !== "scrolled" && (
                     <ReaderRange
                       label="Width"
                       value={readerSettings.maxWidth}
@@ -1069,17 +1167,19 @@ export default function EbookReader() {
                     />
                   )}
                   <div className="border-border space-y-2 border-t pt-3">
-                    <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>Hyphenation</span>
-                      <input
-                        aria-label="Hyphenation"
-                        type="checkbox"
-                        checked={readerSettings.hyphenation}
-                        onChange={(event) =>
-                          updateReaderSettings({ hyphenation: event.target.checked })
-                        }
-                      />
-                    </label>
+                    {!isComicFormat && (
+                      <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Hyphenation</span>
+                        <input
+                          aria-label="Hyphenation"
+                          type="checkbox"
+                          checked={readerSettings.hyphenation}
+                          onChange={(event) =>
+                            updateReaderSettings({ hyphenation: event.target.checked })
+                          }
+                        />
+                      </label>
+                    )}
                     <label className="flex items-center justify-between gap-3 text-sm">
                       <span>Right to left</span>
                       <input
@@ -1089,17 +1189,19 @@ export default function EbookReader() {
                         onChange={(event) => updateReaderSettings({ rtl: event.target.checked })}
                       />
                     </label>
-                    <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>Reading ruler</span>
-                      <input
-                        aria-label="Reading ruler"
-                        type="checkbox"
-                        checked={readerSettings.readingRuler}
-                        onChange={(event) =>
-                          updateReaderSettings({ readingRuler: event.target.checked })
-                        }
-                      />
-                    </label>
+                    {!isComicFormat && (
+                      <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Reading ruler</span>
+                        <input
+                          aria-label="Reading ruler"
+                          type="checkbox"
+                          checked={readerSettings.readingRuler}
+                          onChange={(event) =>
+                            updateReaderSettings({ readingRuler: event.target.checked })
+                          }
+                        />
+                      </label>
+                    )}
                     {readerSettings.readingRuler && (
                       <ReaderRange
                         label="Ruler position"
@@ -1112,23 +1214,27 @@ export default function EbookReader() {
                       />
                     )}
                   </div>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Writing mode</span>
-                    <select
-                      aria-label="Writing mode"
-                      value={readerSettings.writingMode}
-                      onChange={(event) =>
-                        updateReaderSettings({
-                          writingMode: event.target.value as ReaderSettings["writingMode"],
-                        })
-                      }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="horizontal-tb">Horizontal</option>
-                      <option value="vertical-rl">Vertical</option>
-                    </select>
-                  </label>
+                  {!isComicFormat && (
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs font-medium">
+                        Writing mode
+                      </span>
+                      <select
+                        aria-label="Writing mode"
+                        value={readerSettings.writingMode}
+                        onChange={(event) =>
+                          updateReaderSettings({
+                            writingMode: event.target.value as ReaderSettings["writingMode"],
+                          })
+                        }
+                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="horizontal-tb">Horizontal</option>
+                        <option value="vertical-rl">Vertical</option>
+                      </select>
+                    </label>
+                  )}
                   {readerSettings.flow !== "scrolled" && (
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground text-xs font-medium">Spread</span>
@@ -1167,6 +1273,20 @@ export default function EbookReader() {
           </aside>
         )}
       </main>
+      {showEndOfBookNext && nextChapter && nextChapterHref && (
+        <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
+          <Button
+            asChild
+            size="lg"
+            className="h-11 gap-2 rounded-full px-6 text-[15px] font-bold shadow-lg"
+          >
+            <Link to={nextChapterHref}>
+              Next: {nextChapter.label}
+              <ChevronRight className="size-[18px]" />
+            </Link>
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

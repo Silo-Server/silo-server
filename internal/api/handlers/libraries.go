@@ -2102,6 +2102,8 @@ func metadataContentLevelsForLibraryType(libraryType string) []string {
 		return []string{"audiobook"}
 	case "ebooks", "ebook":
 		return []string{"ebook"}
+	case "manga":
+		return []string{"manga"}
 	case "mixed":
 		return []string{"movie", "series", "season", "episode", "audiobook", "ebook"}
 	default:

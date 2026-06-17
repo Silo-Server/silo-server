@@ -80,7 +80,7 @@ func (e *QueryExecutor) PreviewPage(
 		items []*models.MediaItem
 		total int
 	)
-	items, err = scanItems(rows)
+	items, err = scanItemsWithMangaCounts(rows)
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -192,7 +192,9 @@ func (p previewPagePlan) pagedSQL(includeTotal bool) (string, []any) {
 		offsetClause = fmt.Sprintf(" OFFSET $%d", offsetArgIdx)
 		args = append(args, p.offset)
 	}
-	selectList := qualifiedListItemColumns("mi")
+	// mangaCountColumns feeds the Vols/Ch poster chip on manga cards; the
+	// library page browses through this preview path, not BrowseRepository.
+	selectList := qualifiedListItemColumns("mi") + ", " + mangaCountColumns("mi")
 	withClause := ""
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
@@ -326,6 +328,10 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		args = append(args, *e.SnapshotAt)
 		argIdx++
 	}
+
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone catalog items.
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
 		// Dual-column OR matching browse.go and favorites_browse.go: items where

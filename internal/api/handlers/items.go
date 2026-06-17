@@ -223,6 +223,8 @@ type itemListResponse struct {
 	ReleaseDate       *string                     `json:"release_date,omitempty"`
 	LastAirDate       *string                     `json:"last_air_date,omitempty"`
 	AddedAt           *time.Time                  `json:"added_at,omitempty"`
+	MangaChapterCount *int                        `json:"manga_chapter_count,omitempty"`
+	MangaVolumeCount  *int                        `json:"manga_volume_count,omitempty"`
 	OverlaySummary    *models.OverlaySummary      `json:"overlay_summary,omitempty"`
 	SortMetrics       *sortMetricsResponse        `json:"sort_metrics,omitempty"`
 	UserState         *itemUserStateResponse      `json:"user_state,omitempty"`
@@ -657,6 +659,8 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(r *http.Request, item *mode
 	}
 
 	resp.AddedAt = item.AddedAt
+	resp.MangaChapterCount = item.MangaChapterCount
+	resp.MangaVolumeCount = item.MangaVolumeCount
 	resp.ReleaseDate = item.ReleaseDate
 	resp.LastAirDate = item.LastAirDate
 	resp.PosterURL = h.presignURL(r, cardThumbnailPath(item.PosterPath), "card")

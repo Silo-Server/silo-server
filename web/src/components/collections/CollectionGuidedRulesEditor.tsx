@@ -40,7 +40,7 @@ const DECADE_OPTIONS = Array.from({ length: 15 }, (_, index) => 2030 - index * 1
 
 /** Flat form state that maps 1-to-1 with friendly form fields. */
 export interface GuidedFormState {
-  mediaScope: "all" | "video" | "movie" | "series" | "episode" | "audiobook" | "ebook";
+  mediaScope: "all" | "video" | "movie" | "series" | "episode" | "audiobook" | "ebook" | "manga";
   libraryIds: number[];
   genres: string[];
   decade: string;
@@ -422,8 +422,13 @@ export default function CollectionGuidedRulesEditor({
   // use singular media scopes; accept both.
   const isAudiobookLibrary =
     libraryType === "audiobook" || libraryType === "audiobooks" || state.mediaScope === "audiobook";
+  // Manga is read like ebooks, so it shares the ebook "Read Status" labels.
   const isEbookLibrary =
-    libraryType === "ebook" || libraryType === "ebooks" || state.mediaScope === "ebook";
+    libraryType === "ebook" ||
+    libraryType === "ebooks" ||
+    libraryType === "manga" ||
+    state.mediaScope === "ebook" ||
+    state.mediaScope === "manga";
   const isBookLibrary = isAudiobookLibrary || isEbookLibrary;
   const progressStatusLabel = isEbookLibrary
     ? "Read Status"
@@ -482,8 +487,14 @@ export default function CollectionGuidedRulesEditor({
               <Select
                 value={state.mediaScope}
                 onValueChange={(v) => {
-                  const nextRelevanceScope =
-                    v === "all" || v === "video" ? "all" : (v as QuerySortRelevanceScope);
+                  const nextRelevanceScope: QuerySortRelevanceScope =
+                    v === "all" || v === "video"
+                      ? "all"
+                      : // Manga has no dedicated sort scope; it reuses the ebook
+                        // sort universe (its chapters are ebook items).
+                        v === "manga"
+                        ? "ebook"
+                        : (v as QuerySortRelevanceScope);
                   const nextSort = normalizeQuerySortForScope(
                     { field: state.sortField, order: state.sortOrder },
                     {
@@ -510,6 +521,7 @@ export default function CollectionGuidedRulesEditor({
                   <SelectItem value="episode">Episodes</SelectItem>
                   <SelectItem value="audiobook">Audiobooks</SelectItem>
                   <SelectItem value="ebook">Ebooks</SelectItem>
+                  <SelectItem value="manga">Manga</SelectItem>
                 </SelectContent>
               </Select>
             </div>

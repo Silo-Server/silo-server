@@ -54,6 +54,8 @@ func buildRatingThresholdQuery(f RatingFilter) (string, []any) {
 
 	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
 
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+
 	query := fmt.Sprintf(
 		"SELECT %s FROM media_items mi WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
 		qualifiedItemColumns("mi"),
@@ -133,6 +135,8 @@ func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 	}
 
 	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
+
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM media_items mi WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",
@@ -225,6 +229,8 @@ func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
 	}
 
 	applyAccessFilter("mi", f.Filter, &conditions, &args, &argIdx)
+
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM media_items mi WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC",

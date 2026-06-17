@@ -92,13 +92,24 @@ func generatedHomeLibraryRecentID(section *PageSection, libraryID int) string {
 }
 
 func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType string) []*PageSection {
+	// addedConfig/releasedConfig default to the library-scoped (no media_scope)
+	// generated config. A manga library mixes type='manga' series with
+	// type='ebook' chapters, so we scope its generated home rows to the series
+	// only — otherwise the chapter junk filenames leak into the home page.
+	addedConfig := GeneratedHomeLibraryRecentConfig(libraryID)
+	releasedConfig := GeneratedHomeLibraryRecentConfig(libraryID)
+	if libraryType == "manga" {
+		addedConfig = GeneratedHomeLibraryRecentConfigScoped(libraryID, "manga")
+		releasedConfig = GeneratedHomeLibraryRecentConfigScoped(libraryID, "manga")
+	}
+
 	sections := []*PageSection{
 		{
 			Scope:       "home",
 			SectionType: SectionRecentlyAdded,
 			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyAdded, libraryName),
 			ItemLimit:   20,
-			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
+			Config:      addedConfig,
 			Enabled:     true,
 		},
 	}
@@ -119,7 +130,7 @@ func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType 
 			SectionType: SectionRecentlyReleased,
 			Title:       GeneratedHomeLibraryRecentTitle(SectionRecentlyReleased, libraryName),
 			ItemLimit:   20,
-			Config:      GeneratedHomeLibraryRecentConfig(libraryID),
+			Config:      releasedConfig,
 			Enabled:     true,
 		})
 	}
@@ -206,6 +217,16 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 			{ID: "default-recently-released-ebooks", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Ebooks", ItemLimit: 20, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
 			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
 			{ID: "default-random-ebooks", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("ebook"), Enabled: true},
+		}
+	case "manga":
+		// Manga libraries browse the series items (media_items.type='manga');
+		// the per-chapter ebook items are scoped out by the "manga" media scope.
+		return []*PageSection{
+			{ID: "default-continue-reading", Scope: "library", LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: "Continue Reading", ItemLimit: 20, Config: ContinueTypeConfig(ContinueTypeReading), Enabled: true},
+			{ID: "default-recently-added-manga", Scope: "library", LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Manga", ItemLimit: 20, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: "default-recently-released-manga", Scope: "library", LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Manga", ItemLimit: 20, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: "default-recommended-for-you", Scope: "library", LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20, Config: emptyCfg, Enabled: true},
+			{ID: "default-random-manga", Scope: "library", LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: "Random Picks", ItemLimit: 20, Config: defaultMediaScopeConfig("manga"), Enabled: true},
 		}
 	default:
 		return DefaultLibrarySections(libraryID)

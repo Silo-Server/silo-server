@@ -344,6 +344,10 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)
 
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone catalog items.
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+
 	if filters.SnapshotAt != nil {
 		conditions = append(conditions, fmt.Sprintf("mi.created_at <= $%d", argIdx))
 		args = append(args, *filters.SnapshotAt)
@@ -372,7 +376,14 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	orderBy, orderArgs := buildOrderByPlan(filters.Sort, filters.Order, filters.SnapshotAt, argIdx, singleLibraryNoDedup, browseFiltersAreMovieOnly(filters))
 	argIdx += len(orderArgs)
 
-	selectClause := browseItemColumns("mi")
+	// Only run the manga count subqueries when the scope can contain manga
+	// series; a non-manga type filter rules them out, so substitute NULL
+	// placeholders and skip two correlated subqueries per row on the hot path.
+	mangaCounts := mangaCountColumns("mi")
+	if !browseScopeMayContainManga(filters) {
+		mangaCounts = nullMangaCountColumns()
+	}
+	selectClause := browseItemColumns("mi") + ", " + mangaCounts
 	groupByClause := ""
 	switch {
 	case singleLibraryNoDedup:
@@ -1123,6 +1134,63 @@ func browseItemColumns(alias string) string {
 	return strings.Join(prefixed, ", ")
 }
 
+// mangaCountColumns returns two index-backed correlated subqueries feeding the
+// "X Volumes · X Chapters" poster chip: distinct volume tokens (many chapter
+// rows can share one volume) and loose chapter rows without a volume token.
+// They return 0 for non-manga rows (no matching manga_chapters), which the
+// scan path nils out so only manga cards carry the counts. The subqueries are
+// functionally dependent on alias.content_id (the media_items PK, which leads
+// browseGroupByColumns), so they remain valid under the dedup GROUP BY without
+// being listed there.
+func mangaCountColumns(alias string) string {
+	return "(SELECT count(*) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND (mc.volume IS NULL OR mc.volume = '')) AS manga_chapter_count, " +
+		"(SELECT count(DISTINCT mc.volume) FROM manga_chapters mc WHERE mc.series_content_id = " + alias + ".content_id AND mc.volume IS NOT NULL AND mc.volume <> '') AS manga_volume_count"
+}
+
+// nullMangaCountColumns substitutes NULL placeholders for the manga count
+// subqueries when the browse scope cannot contain manga series. Column names
+// and order match mangaCountColumns so the scan path is unchanged.
+func nullMangaCountColumns() string {
+	return "NULL::bigint AS manga_chapter_count, NULL::bigint AS manga_volume_count"
+}
+
+// browseScopeMayContainManga reports whether a browse with these filters could
+// return type='manga' rows. An empty type filter (all types) or one that
+// includes "manga" keeps the counts; any other explicit type filter rules
+// manga out, letting the caller skip the count subqueries.
+func browseScopeMayContainManga(filters BrowseFilters) bool {
+	if filters.Type == "" {
+		return true
+	}
+	for _, t := range strings.Split(filters.Type, ",") {
+		if strings.TrimSpace(t) == "manga" {
+			return true
+		}
+	}
+	return false
+}
+
+// MangaChapterExclusionWhere returns a WHERE predicate that hides manga CHAPTER
+// items (type='ebook' rows linked into a type='manga' series via the
+// manga_chapters table) from catalog listing surfaces — browse, section
+// resolution, and search. Chapters are internal sub-units of a manga series and
+// must never appear as standalone catalog items; only the series should.
+//
+// It is index-backed: manga_chapters.chapter_content_id is the table's primary
+// key, so the anti-join is a cheap unique-index probe. The predicate is global
+// and harmless for every other row: regular ebooks have no manga_chapters link,
+// and non-ebook types never match either, so they all pass. It is redundant
+// (but harmless) for type='manga' browse scopes, whose series rows are linked
+// via series_content_id, not chapter_content_id.
+//
+// By-id fetch paths that legitimately resolve chapters — the ebook reader,
+// continue-reading (ebook_reader_progress / watch-progress), and the series
+// detail chapter list (mangaChaptersQuery) — use separate queries and must NOT
+// call this.
+func MangaChapterExclusionWhere(alias string) string {
+	return "NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = " + alias + ".content_id)"
+}
+
 // browseGroupByColumns returns the columns needed for GROUP BY when joining
 // with the junction table.
 func browseGroupByColumns(alias string) string {
@@ -1200,10 +1268,18 @@ func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.Status,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.MangaChapterCount,
+			&item.MangaVolumeCount,
 			&item.AddedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning browse item row: %w", err)
+		}
+		// The manga count subqueries return 0 for non-manga rows; drop them so
+		// only manga cards carry the counts (movies/series stay clean).
+		if item.Type != "manga" {
+			item.MangaChapterCount = nil
+			item.MangaVolumeCount = nil
 		}
 		items = append(items, &item)
 	}

@@ -34,6 +34,8 @@ function typeLabel(type: BrowseItem["type"]): string {
       return "Ebook";
     case "audiobook":
       return "Audiobook";
+    case "manga":
+      return "Manga";
     default:
       return type;
   }

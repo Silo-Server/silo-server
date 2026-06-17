@@ -87,6 +87,37 @@ func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r 
 	writeJSON(w, http.StatusOK, detail.Versions)
 }
 
+// HandleGetMangaFiles returns the local file listing for a manga series (the
+// series "View Details" dialog): folder paths plus per-chapter file rows.
+// Folder and file paths are stripped for viewers without file-path visibility,
+// matching the item-versions policy; file names and sizes remain.
+func (h *CatalogResourceHandler) HandleGetMangaFiles(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
+		return
+	}
+
+	files, err := h.items.detailSvc.GetMangaChapterFiles(r.Context(), id, h.items.accessFilter(r))
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get manga files")
+		return
+	}
+
+	if !h.items.requestCanViewFilePaths(r) {
+		files.FolderPaths = nil
+		for i := range files.Files {
+			files.Files[i].FilePath = ""
+		}
+	}
+
+	writeJSON(w, http.StatusOK, files)
+}
+
 func (h *CatalogResourceHandler) HandleGetItemEpisodes(w http.ResponseWriter, r *http.Request) {
 	filter := h.items.accessFilter(r)
 	id := chi.URLParam(r, "id")

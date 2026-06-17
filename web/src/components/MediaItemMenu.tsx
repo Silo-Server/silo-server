@@ -9,6 +9,7 @@ import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queri
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
+import MangaFilesDialog from "@/components/MangaFilesDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import {
   DropdownMenu,
@@ -32,6 +33,7 @@ type MediaItemMenuEntry =
         | "toggleFavorite"
         | "toggleWatchlist"
         | "dismissFromHome"
+        | "viewDetails"
         | "viewPlayHistory"
         | "refreshMetadata";
       label: string;
@@ -104,6 +106,11 @@ export function buildMediaItemMenuModel({
     }
   }
 
+  // Manga series get a local file inspector (folder path, per-volume files).
+  if (mediaType === "manga") {
+    entries.push({ kind: "action", key: "viewDetails", label: "View Details" });
+  }
+
   if (isAdmin) {
     if (entries.length > 0) {
       entries.push({ kind: "separator" });
@@ -157,6 +164,7 @@ export default function MediaItemMenu({
   const isAdmin = useIsActingAdmin();
   const [currentUserState, setCurrentUserState] = useState(userState);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
+  const [filesDialogOpen, setFilesDialogOpen] = useState(false);
 
   useEffect(() => {
     setCurrentUserState(userState);
@@ -243,6 +251,10 @@ export default function MediaItemMenu({
         );
         return;
       }
+      case "viewDetails": {
+        setFilesDialogOpen(true);
+        return;
+      }
       case "viewPlayHistory": {
         navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`);
         return;
@@ -316,6 +328,13 @@ export default function MediaItemMenu({
         onConfirm={handleRefreshConfirm}
         isPending={refreshMetadataMutation.isPending}
       />
+      {mediaType === "manga" && (
+        <MangaFilesDialog
+          contentId={contentId}
+          open={filesDialogOpen}
+          onOpenChange={setFilesDialogOpen}
+        />
+      )}
     </>
   );
 }

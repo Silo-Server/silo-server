@@ -216,7 +216,7 @@ func (e *Enricher) runBatch(
 // claimBatchQuery selects unenriched ebooks. Items with fewer prior failures
 // are claimed first and items at/above enrichFailureCap are skipped entirely,
 // so a block of permanently failing items cannot occupy every sweep.
-const claimBatchQuery = `
+var claimBatchQuery = `
 	SELECT
 		mi.content_id,
 		mi.title,
@@ -238,6 +238,11 @@ const claimBatchQuery = `
 	LEFT JOIN media_folders mf ON mf.id = mil.media_folder_id
 	LEFT JOIN ebook_enrichment_state ees ON ees.content_id = mi.content_id
 	WHERE mi.type = 'ebook'
+	  -- Manga chapters are type='ebook' but are parts of a series, not
+	  -- standalone books. They are enriched via their type='manga' series (a
+	  -- separate path), never individually against book sources — excluding
+	  -- them here stops a pointless search storm over Gutenberg/Anna's/etc.
+	  AND ` + catalog.MangaChapterExclusionWhere("mi") + `
 	  AND (mi.poster_path IS NULL OR mi.poster_path = '')
 	  AND mi.last_refreshed IS NULL
 	  AND COALESCE(ees.failures, 0) < $2

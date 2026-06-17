@@ -129,10 +129,32 @@ func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, item
 
 const providerIDColumns = `content_id, item_type, provider, provider_id, created_at, updated_at`
 
+// excludedProviderIDs lists providers that ReplaceByContentID does NOT manage:
+// it neither persists nor deletes them. Two kinds live here:
+//   - ephemeral, query-only inputs (metadb, _filepath, oshash) that must never
+//     be written as durable rows; and
+//   - Silo-internal identity anchors (manga_series) stamped directly by the
+//     scanner to keep manga re-scans idempotent. Replace must leave these rows
+//     intact — otherwise the first manga enrichment (which calls
+//     ReplaceByContentID with only the external IDs) would delete the
+//     manga_series anchor, and the next scan would mint a duplicate series and
+//     lose the enriched metadata.
 var excludedProviderIDs = map[string]struct{}{
-	"metadb":    {},
-	"_filepath": {},
-	"oshash":    {},
+	"metadb":       {},
+	"_filepath":    {},
+	"oshash":       {},
+	"manga_series": {},
+}
+
+// unmanagedProviderIDList returns excludedProviderIDs as a lowercased, sorted
+// slice for binding into the Replace DELETE so those rows are preserved.
+func unmanagedProviderIDList() []string {
+	out := make([]string, 0, len(excludedProviderIDs))
+	for p := range excludedProviderIDs {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 var preferredProviderIDOrder = map[string]int{
@@ -243,7 +265,45 @@ func (r *ProviderIDRepository) GetByContentID(ctx context.Context, contentID str
 	return scanProviderIDs(rows)
 }
 
-// ReplaceByContentID replaces all durable provider IDs for a content item.
+// GetByContentIDs fetches provider IDs for many content items in one query,
+// grouped by content_id (IDs with no rows are absent). Replaces per-item
+// GetByContentID loops on the enrichment claim path.
+func (r *ProviderIDRepository) GetByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaItemProviderID, error) {
+	out := make(map[string][]*models.MediaItemProviderID, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+providerIDColumns+`
+		FROM media_item_provider_ids
+		WHERE content_id = ANY($1)
+		ORDER BY content_id,
+			CASE LOWER(provider)
+				WHEN 'tmdb' THEN 0
+				WHEN 'tvdb' THEN 1
+				WHEN 'imdb' THEN 2
+				ELSE 3
+			END,
+			LOWER(provider) ASC,
+			provider_id ASC
+	`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("getting provider IDs by content_ids: %w", err)
+	}
+	defer rows.Close()
+	all, err := scanProviderIDs(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, pid := range all {
+		out[pid.ContentID] = append(out[pid.ContentID], pid)
+	}
+	return out, nil
+}
+
+// ReplaceByContentID replaces the durable provider IDs it manages for a content
+// item, leaving unmanaged providers (excludedProviderIDs, e.g. the scanner's
+// manga_series identity anchor) intact.
 func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error {
 	if strings.TrimSpace(contentID) == "" {
 		return fmt.Errorf("content_id is required")
@@ -290,7 +350,13 @@ func (r *ProviderIDRepository) ReplaceByContentIDTx(
 	}
 	entries := normalizeDurableProviderIDs(providerIDs)
 
-	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID); err != nil {
+	// Preserve providers Replace does not manage (see excludedProviderIDs):
+	// query-only inputs and the scanner's manga_series identity anchor.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_provider_ids
+		WHERE content_id = $1
+		  AND lower(provider) <> ALL($2::text[])
+	`, contentID, unmanagedProviderIDList()); err != nil {
 		return fmt.Errorf("deleting provider IDs for %s: %w", contentID, err)
 	}
 

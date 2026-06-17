@@ -447,6 +447,10 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Manga series items (type='manga') are virtual parents with no media_file of
+	// their own — their membership is keyed to having chapters, not files. Exclude
+	// them here so file-presence reconciliation never sweeps a live series; orphan
+	// series (no remaining chapters) are cleaned up separately by the manga scan.
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_item_libraries mil
 		WHERE mil.media_folder_id = $1
@@ -456,6 +460,12 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			WHERE mf.media_folder_id = mil.media_folder_id
 			  AND mf.content_id = mil.content_id
 			  AND mf.missing_since IS NULL
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM media_items mi
+			WHERE mi.content_id = mil.content_id
+			  AND mi.type = 'manga'
 		  )
 		RETURNING mil.content_id
 	`, folderID)

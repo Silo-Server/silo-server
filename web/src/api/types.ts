@@ -662,6 +662,48 @@ export interface EbookDetailExtension {
   };
 }
 
+// MangaChapter mirrors the host catalog.MangaChapter struct. Each chapter is a
+// readable type='ebook' item; the manga reader links to the ebook reader by
+// content_id alone (file_id is optional and resolved server-side).
+export interface MangaChapter {
+  content_id: string;
+  title: string;
+  chapter_index?: number;
+  volume?: string;
+  // True when the current viewer has finished this chapter (ebook read state).
+  // Seeds the row's mark-read toggle on load.
+  read?: boolean;
+  // Viewer reading position as a 0..1 fraction (absent when never opened).
+  progress?: number;
+  // Presigned cover thumbnail extracted from the chapter file.
+  poster_url?: string;
+}
+
+// MangaChapterFile is one local file backing a chapter, for the series
+// "View Details" dialog. file_path/folder paths are stripped server-side for
+// viewers without file-path visibility.
+export interface MangaChapterFile {
+  content_id: string;
+  title: string;
+  chapter_index?: number;
+  volume?: string;
+  file_path?: string;
+  file_name: string;
+  file_size: number;
+  container?: string;
+}
+
+export interface MangaSeriesFiles {
+  folder_paths?: string[];
+  files: MangaChapterFile[];
+}
+
+// MangaDetailExtension mirrors the host catalog.MangaDetailExtension struct;
+// present only when ItemDetail.type === "manga".
+export interface MangaDetailExtension {
+  chapters: MangaChapter[];
+}
+
 // Seasons / Watched State
 export interface LeafItemUserData {
   played: boolean;
@@ -745,7 +787,7 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
   series_title?: string;
   season_number?: number | null;
@@ -774,6 +816,12 @@ export interface BrowseItem {
   overlay_summary?: OverlaySummary | null;
   sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
+  // Manga-only count chips. The host populates these only for type='manga'
+  // browse items; they are absent (undefined) for every other media type.
+  // chapter count = loose chapters without a volume token; volume count =
+  // distinct volumes ("12 Volumes · 3 Chapters").
+  manga_chapter_count?: number;
+  manga_volume_count?: number;
 }
 
 export interface BrowseResponse {
@@ -1031,7 +1079,7 @@ export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | 
 
 export interface ItemDetail {
   content_id: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "podcast";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
   // Metadata (served inline from Postgres).
@@ -1065,6 +1113,8 @@ export interface ItemDetail {
   locked_fields?: number[];
   release_date: string | null;
   first_air_date: string | null;
+  // Publication/airing status ("Ongoing", "Completed", "Continuing", "Ended").
+  show_status?: string;
   last_air_date: string | null;
   air_time?: string | null;
   air_timezone?: string | null;
@@ -1112,6 +1162,7 @@ export interface ItemDetail {
   effective_version_edition_key?: string;
   audiobook?: AudiobookDetailExtension;
   ebook?: EbookDetailExtension;
+  manga?: MangaDetailExtension;
 }
 
 export interface WatchDetail {
@@ -1291,7 +1342,7 @@ export interface QuerySort {
 
 export interface QueryDefinition {
   library_ids: number[];
-  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook" | "video";
+  media_scope?: "movie" | "series" | "episode" | "audiobook" | "ebook" | "manga" | "video";
   match: "all" | "any";
   groups: QueryGroup[];
   sort: QuerySort;
@@ -3490,6 +3541,7 @@ export function normalizeQueryDefinition(value?: QueryDefinitionInput | null): Q
       value?.media_scope === "episode" ||
       value?.media_scope === "audiobook" ||
       value?.media_scope === "ebook" ||
+      value?.media_scope === "manga" ||
       value?.media_scope === "video"
         ? value.media_scope
         : undefined,
@@ -3554,7 +3606,9 @@ export function queryDefinitionFromSectionConfig(
             ? "audiobook"
             : config.media_scope === "ebook" || config.filter_type === "ebook"
               ? "ebook"
-              : undefined;
+              : config.media_scope === "manga" || config.filter_type === "manga"
+                ? "manga"
+                : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;

@@ -255,62 +255,92 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 }
 
 // scanItems scans multiple rows into a []*models.MediaItem slice.
+// listItemScanDests returns the scan destinations matching
+// qualifiedListItemColumns, in column order. Every scan over that select list
+// must use this so the column list and destinations cannot drift apart.
+func listItemScanDests(item *models.MediaItem) []any {
+	return []any{
+		&item.ContentID,
+		&item.Type,
+		&item.Title,
+		&item.SortTitle,
+		&item.DefaultMetadataLanguage,
+		&item.OriginalTitle,
+		&item.Year,
+		&item.Genres,
+		&item.ContentRating,
+		&item.Runtime,
+		&item.Overview,
+		&item.Tagline,
+		&item.RatingIMDB,
+		&item.RatingTMDB,
+		&item.RatingRTCritic,
+		&item.RatingRTAudience,
+		&item.ImdbID,
+		&item.TmdbID,
+		&item.TvdbID,
+		&item.PosterPath,
+		&item.PosterSourcePath,
+		&item.PosterThumbhash,
+		&item.BackdropPath,
+		&item.BackdropThumbhash,
+		&item.LogoPath,
+		&item.MetadataS3Path,
+		&item.MetadataEtag,
+		&item.SeasonCount,
+		&item.Studios,
+		&item.Networks,
+		&item.Countries,
+		&item.Keywords,
+		&item.OriginalLanguage,
+		&item.ReleaseDate,
+		&item.FirstAirDate,
+		&item.LastAirDate,
+		&item.AirTime,
+		&item.AirTimezone,
+		&item.ShowStatus,
+		&item.MatchedAt,
+		&item.LastRefreshed,
+		&item.RefreshFailures,
+		&item.EpisodeMetadataIncomplete,
+		&item.EpisodeMetadataLastCheckedAt,
+		&item.LockedFields,
+		&item.Status,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	}
+}
+
 func scanItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 	var items []*models.MediaItem
 	for rows.Next() {
 		var item models.MediaItem
-		err := rows.Scan(
-			&item.ContentID,
-			&item.Type,
-			&item.Title,
-			&item.SortTitle,
-			&item.DefaultMetadataLanguage,
-			&item.OriginalTitle,
-			&item.Year,
-			&item.Genres,
-			&item.ContentRating,
-			&item.Runtime,
-			&item.Overview,
-			&item.Tagline,
-			&item.RatingIMDB,
-			&item.RatingTMDB,
-			&item.RatingRTCritic,
-			&item.RatingRTAudience,
-			&item.ImdbID,
-			&item.TmdbID,
-			&item.TvdbID,
-			&item.PosterPath,
-			&item.PosterSourcePath,
-			&item.PosterThumbhash,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
-			&item.MetadataS3Path,
-			&item.MetadataEtag,
-			&item.SeasonCount,
-			&item.Studios,
-			&item.Networks,
-			&item.Countries,
-			&item.Keywords,
-			&item.OriginalLanguage,
-			&item.ReleaseDate,
-			&item.FirstAirDate,
-			&item.LastAirDate,
-			&item.AirTime,
-			&item.AirTimezone,
-			&item.ShowStatus,
-			&item.MatchedAt,
-			&item.LastRefreshed,
-			&item.RefreshFailures,
-			&item.EpisodeMetadataIncomplete,
-			&item.EpisodeMetadataLastCheckedAt,
-			&item.LockedFields,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		)
-		if err != nil {
+		if err := rows.Scan(listItemScanDests(&item)...); err != nil {
 			return nil, fmt.Errorf("scanning media item row: %w", err)
+		}
+		items = append(items, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating media item rows: %w", err)
+	}
+	return items, nil
+}
+
+// scanItemsWithMangaCounts scans rows selected with qualifiedListItemColumns
+// followed by mangaCountColumns. The count subqueries return 0 for non-manga
+// rows; they are nilled out so only manga cards carry the counts (mirrors
+// scanBrowseItems).
+func scanItemsWithMangaCounts(rows pgx.Rows) ([]*models.MediaItem, error) {
+	var items []*models.MediaItem
+	for rows.Next() {
+		var item models.MediaItem
+		dests := append(listItemScanDests(&item), &item.MangaChapterCount, &item.MangaVolumeCount)
+		if err := rows.Scan(dests...); err != nil {
+			return nil, fmt.Errorf("scanning media item row with manga counts: %w", err)
+		}
+		if item.Type != "manga" {
+			item.MangaChapterCount = nil
+			item.MangaVolumeCount = nil
 		}
 		items = append(items, &item)
 	}
@@ -333,58 +363,8 @@ func scanItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
 	for rows.Next() {
 		var item models.MediaItem
 		var rowTotal int
-		err := rows.Scan(
-			&item.ContentID,
-			&item.Type,
-			&item.Title,
-			&item.SortTitle,
-			&item.DefaultMetadataLanguage,
-			&item.OriginalTitle,
-			&item.Year,
-			&item.Genres,
-			&item.ContentRating,
-			&item.Runtime,
-			&item.Overview,
-			&item.Tagline,
-			&item.RatingIMDB,
-			&item.RatingTMDB,
-			&item.RatingRTCritic,
-			&item.RatingRTAudience,
-			&item.ImdbID,
-			&item.TmdbID,
-			&item.TvdbID,
-			&item.PosterPath,
-			&item.PosterSourcePath,
-			&item.PosterThumbhash,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
-			&item.MetadataS3Path,
-			&item.MetadataEtag,
-			&item.SeasonCount,
-			&item.Studios,
-			&item.Networks,
-			&item.Countries,
-			&item.Keywords,
-			&item.OriginalLanguage,
-			&item.ReleaseDate,
-			&item.FirstAirDate,
-			&item.LastAirDate,
-			&item.AirTime,
-			&item.AirTimezone,
-			&item.ShowStatus,
-			&item.MatchedAt,
-			&item.LastRefreshed,
-			&item.RefreshFailures,
-			&item.EpisodeMetadataIncomplete,
-			&item.EpisodeMetadataLastCheckedAt,
-			&item.LockedFields,
-			&item.Status,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-			&rowTotal,
-		)
-		if err != nil {
+		dests := append(listItemScanDests(&item), &rowTotal)
+		if err := rows.Scan(dests...); err != nil {
 			return nil, 0, fmt.Errorf("scanning media item row with total: %w", err)
 		}
 		items = append(items, &item)
@@ -1002,6 +982,10 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 	}
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
 
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone search results.
+	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	// Bind ExactTitleHint exactly once. The same arg index is referenced by
@@ -1144,7 +1128,7 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 // items that are linked to at least one present file within the given folder
 // subtree. This intentionally includes ambiguous items so a library scan can
 // revisit legacy scanner ambiguities after inference heuristics improve.
-func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error) {
+func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int, pathPrefix string, limit int) (string, []any) {
 	query := `
 		SELECT mi.content_id
 		FROM media_items mi
@@ -1158,6 +1142,11 @@ func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context,
 		WHERE mil.media_folder_id = $1
 		  AND folders.enabled = true
 		  AND mi.status IN ('unmatched', 'pending', 'ambiguous')
+		  -- Manga chapters stay status='pending' by design: provider metadata
+		  -- lives on the type='manga' series item, so chapters are never
+		  -- matchable and must not feed the matcher's retry loop (mirrors the
+		  -- exclusion in the ebook enricher's claim query).
+		  AND ` + MangaChapterExclusionWhere("mi") + `
 		  AND mf.missing_since IS NULL
 		  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 		GROUP BY mi.content_id
@@ -1168,6 +1157,11 @@ func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context,
 		query += ` LIMIT $4`
 		args = append(args, limit)
 	}
+	return query, args
+}
+
+func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error) {
+	query, args := r.buildListUnmatchedByFolderAndPathPrefixSQL(folderID, pathPrefix, limit)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {

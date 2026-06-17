@@ -1,4 +1,4 @@
-import { BookHeadphones, BookOpen, Film, Layers, Podcast, Tv } from "lucide-react";
+import { BookHeadphones, BookMarked, BookOpen, Film, Layers, Podcast, Tv } from "lucide-react";
 
 export const LIBRARY_TYPES = [
   { value: "movies", label: "Movies", icon: Film },
@@ -6,6 +6,7 @@ export const LIBRARY_TYPES = [
   { value: "mixed", label: "Mixed", icon: Layers },
   { value: "audiobooks", label: "Audiobooks", icon: BookHeadphones },
   { value: "ebooks", label: "Ebooks", icon: BookOpen },
+  { value: "manga", label: "Manga", icon: BookMarked },
   { value: "podcasts", label: "Podcasts", icon: Podcast },
 ] as const;
 

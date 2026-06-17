@@ -219,6 +219,14 @@ describe("parseLibraryPageState", () => {
     expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
   });
 
+  it("uses manga scope for manga libraries", () => {
+    const state = parseLibraryPageState(params("tab=library&sort=author&order=asc"), "manga");
+
+    expect(state.queryDefinition.media_scope).toBe("manga");
+    // Manga sort relevance mirrors ebooks, so ebook-applicable sorts survive.
+    expect(state.queryDefinition.sort).toEqual({ field: "author", order: "asc" });
+  });
+
   it("normalizes legacy sort aliases to canonical values", () => {
     expect(
       parseLibraryPageState(params("tab=library&sort=sort_title"), "mixed").queryDefinition.sort
@@ -455,6 +463,8 @@ describe("getLibrarySortRelevanceScope", () => {
     expect(getLibrarySortRelevanceScope("audiobooks")).toBe("audiobook");
     expect(getLibrarySortRelevanceScope("ebook")).toBe("ebook");
     expect(getLibrarySortRelevanceScope("ebooks")).toBe("ebook");
+    // Manga has its own sort universe (no Duration/Bitrate, reading labels).
+    expect(getLibrarySortRelevanceScope("manga")).toBe("manga");
   });
 
   it("falls back to the media scope and then to all for mixed libraries", () => {

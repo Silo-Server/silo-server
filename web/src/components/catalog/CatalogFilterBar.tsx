@@ -38,6 +38,7 @@ export const CATALOG_MEDIA_SCOPE_OPTIONS = [
   { value: "episode", label: "Episodes" },
   { value: "audiobook", label: "Audiobooks" },
   { value: "ebook", label: "Ebooks" },
+  { value: "manga", label: "Manga" },
 ] as const;
 
 export default function CatalogFilterBar({
@@ -64,8 +65,13 @@ export default function CatalogFilterBar({
           value={state.mediaScope}
           onValueChange={(v) => {
             // "video" spans movie+series, so sorts valid for "all" stay valid.
-            const nextRelevanceScope =
-              v === "all" || v === "video" ? "all" : (v as QuerySortRelevanceScope);
+            // Manga reuses the ebook sort universe (no dedicated sort scope).
+            const nextRelevanceScope: QuerySortRelevanceScope =
+              v === "all" || v === "video"
+                ? "all"
+                : v === "manga"
+                  ? "ebook"
+                  : (v as QuerySortRelevanceScope);
             const nextSort = normalizeQuerySortForScope(
               { field: state.sortField, order: state.sortOrder },
               {
@@ -110,7 +116,11 @@ export default function CatalogFilterBar({
                 ? null
                 : state.mediaScope === "video"
                   ? ["movie", "series"]
-                  : [state.mediaScope];
+                  : // Manga has no dedicated sort scope; it reuses the ebook
+                    // sort universe (its chapters are ebook items).
+                    state.mediaScope === "manga"
+                    ? ["ebook"]
+                    : [state.mediaScope];
             const currentApplicable =
               !scopeTypes ||
               scopeTypes.some((scope) => sortOption.applicableMediaScopes.includes(scope));

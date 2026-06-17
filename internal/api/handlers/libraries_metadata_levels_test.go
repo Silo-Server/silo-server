@@ -14,6 +14,7 @@ func TestMetadataContentLevelsForLibraryTypeIncludesEbooks(t *testing.T) {
 		{name: "plural ebooks", libraryType: "ebooks", want: []string{"ebook"}},
 		{name: "singular ebook", libraryType: "ebook", want: []string{"ebook"}},
 		{name: "mixed includes ebook", libraryType: "mixed", want: []string{"movie", "series", "season", "episode", "audiobook", "ebook"}},
+		{name: "manga", libraryType: "manga", want: []string{"manga"}},
 	}
 
 	for _, tc := range cases {

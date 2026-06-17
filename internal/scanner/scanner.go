@@ -270,6 +270,13 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
+	if isMangaLibraryType(folder.Type) {
+		if err := s.ScanMangaFolder(watchCtx, folder); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+
 	if isEbookLibraryType(folder.Type) {
 		if err := s.ScanEbookFolder(watchCtx, folder); err != nil {
 			return nil, err
@@ -295,6 +302,12 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+			return nil, err
+		}
+		return &ScanResult{}, nil
+	}
+	if isMangaLibraryType(folder.Type) {
+		if err := s.scanMangaPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -360,6 +373,15 @@ func isEbookLibraryType(libraryType string) bool {
 	}
 }
 
+func isMangaLibraryType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "manga":
+		return true
+	default:
+		return false
+	}
+}
+
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
 // to apply.
@@ -385,6 +407,9 @@ func walkModeFor(folderType string) walkMode {
 	case isPodcastLibraryType(folderType):
 		return walkModePodcast
 	case isEbookLibraryType(folderType):
+		return walkModeEbook
+	case isMangaLibraryType(folderType):
+		// Manga chapters are .cbz/.cbr archives, surfaced by the ebook walk.
 		return walkModeEbook
 	default:
 		return walkModeVideo

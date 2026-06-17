@@ -92,6 +92,11 @@ export function getLibrarySortRelevanceScope(
   if (libraryType === "ebook" || libraryType === "ebooks") {
     return "ebook";
   }
+  // Manga series rows are file-less containers with their own sort universe
+  // (no Duration/Bitrate, reading-verb labels).
+  if (isMangaLibraryType(libraryType)) {
+    return "manga";
+  }
   if (
     mediaScope === "movie" ||
     mediaScope === "series" ||
@@ -110,6 +115,10 @@ export function isAudiobookLibraryType(libraryType: string): boolean {
 
 export function isEbookLibraryType(libraryType: string): boolean {
   return libraryType === "ebook" || libraryType === "ebooks";
+}
+
+export function isMangaLibraryType(libraryType: string): boolean {
+  return libraryType === "manga";
 }
 
 function readString(value: string | null): string | undefined {
@@ -310,7 +319,9 @@ export function parseLibraryPageState(
         ? "audiobook"
         : isEbookLibraryType(libraryType)
           ? "ebook"
-          : undefined;
+          : isMangaLibraryType(libraryType)
+            ? "manga"
+            : undefined;
   const sortRelevanceScope =
     libraryType === "series" && browseType === "episode"
       ? "all"

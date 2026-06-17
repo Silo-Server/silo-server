@@ -257,6 +257,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		PosterPath:        response.GetItem().GetPosterPath(),
 		PosterThumbhash:   response.GetItem().GetPosterThumbhash(),
 		BackdropPath:      response.GetItem().GetBackdropPath(),
+		ShowStatus:        response.GetItem().GetStatus(),
 		BackdropThumbhash: response.GetItem().GetBackdropThumbhash(),
 		LogoPath:          response.GetItem().GetLogoPath(),
 		SeasonCount:       int(response.GetItem().GetSeasonCount()),
