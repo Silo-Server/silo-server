@@ -152,14 +152,21 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	// invalidation event. The due-check is mutex-guarded so the shutdown-path
 	// CleanStale and the ticker can't race or double-run it.
 	c.absPruneMu.Lock()
-	abndPruneDue := time.Since(c.lastABSSessionPrune) >= absSessionPruneInterval
+	pruneStartedAt := time.Now()
+	previousABSSessionPrune := c.lastABSSessionPrune
+	abndPruneDue := pruneStartedAt.Sub(c.lastABSSessionPrune) >= absSessionPruneInterval
 	if abndPruneDue {
-		c.lastABSSessionPrune = time.Now()
+		c.lastABSSessionPrune = pruneStartedAt
 	}
 	c.absPruneMu.Unlock()
 	if abndPruneDue {
 		if err := c.closeAbandonedABSSessions(ctx); err != nil {
 			slog.Warn("abs session cleanup failed", "error", err)
+			c.absPruneMu.Lock()
+			if c.lastABSSessionPrune.Equal(pruneStartedAt) {
+				c.lastABSSessionPrune = previousABSSessionPrune
+			}
+			c.absPruneMu.Unlock()
 		}
 	}
 
