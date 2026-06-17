@@ -407,6 +407,39 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 	return scanLibraryCollections(rows)
 }
 
+// AnyVisibleInLibraries reports whether at least one visible library collection
+// is scoped to any of the given libraries. It mirrors the visibility rules of
+// ListAll + the compat layer's collectionVisible (multi-library scope rows, or
+// the legacy single library_id column when a collection has no scope rows) but
+// is an index-only EXISTS probe: no item join, no aggregation, no row build. It
+// short-circuits the first match, so it stays cheap enough to run on every
+// /UserViews request to gate the synthetic "Collections" view.
+func (r *LibraryCollectionRepository) AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error) {
+	if len(libraryIDs) == 0 {
+		return false, nil
+	}
+	const query = `SELECT EXISTS (
+		SELECT 1
+		FROM library_collections lc
+		WHERE lc.visibility = 'visible'
+		  AND (
+			EXISTS (
+				SELECT 1 FROM library_collection_libraries lcl
+				WHERE lcl.collection_id = lc.id AND lcl.library_id = ANY($1)
+			)
+			OR (
+				NOT EXISTS (SELECT 1 FROM library_collection_libraries lcl WHERE lcl.collection_id = lc.id)
+				AND lc.library_id = ANY($1)
+			)
+		  )
+	)`
+	var exists bool
+	if err := r.pool.QueryRow(ctx, query, libraryIDs).Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking for visible library collections: %w", err)
+	}
+	return exists, nil
+}
+
 func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
 	var (
 		sets []string

@@ -62,6 +62,30 @@ func (f *fakeCollectionSource) ListItems(_ context.Context, collectionID string)
 	return f.items[collectionID], nil
 }
 
+func (f *fakeCollectionSource) AnyVisibleInLibraries(_ context.Context, libraryIDs []int) (bool, error) {
+	set := make(map[int]struct{}, len(libraryIDs))
+	for _, id := range libraryIDs {
+		set[id] = struct{}{}
+	}
+	for _, c := range f.collections {
+		if c.Visibility != "visible" {
+			continue
+		}
+		if len(c.LibraryIDs) == 0 {
+			if _, ok := set[c.LibraryID]; ok {
+				return true, nil
+			}
+			continue
+		}
+		for _, id := range c.LibraryIDs {
+			if _, ok := set[id]; ok {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // librariesContentService serves a fixed library list; other methods panic.
 type librariesContentService struct {
 	countingContentService
@@ -372,5 +396,156 @@ func TestParseItemsQuery_BoxSetFlags(t *testing.T) {
 	query = parseItemsQuery(req, codec)
 	if !query.sortExplicit {
 		t.Fatalf("expected sortExplicit=true with SortBy")
+	}
+}
+
+func TestUserViews_PrependsCollectionsViewWhenVisible(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible", ItemCount: 3},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{
+		{ID: 1, Name: "Movies", Type: "movies"},
+	}, nil)
+
+	result := performItemsRequest(t, h, "/Items")
+	if len(result.Items) != 2 {
+		t.Fatalf("expected Collections view + 1 library, got %+v", result.Items)
+	}
+	view := result.Items[0]
+	if view.ID != collectionsViewID {
+		t.Fatalf("expected Collections view first with ID %s, got %+v", collectionsViewID, view)
+	}
+	if view.Type != "CollectionFolder" || view.CollectionType != "boxsets" || !view.IsFolder || view.Name != "Collections" {
+		t.Fatalf("unexpected Collections view DTO: %+v", view)
+	}
+	if view.ChildCount != 0 {
+		t.Fatalf("expected ChildCount omitted (0), got %d", view.ChildCount)
+	}
+	if result.Items[1].Name != "Movies" {
+		t.Fatalf("expected real library after the Collections view, got %+v", result.Items[1])
+	}
+}
+
+func TestUserViews_OmitsCollectionsViewWhenNoVisibleCollections(t *testing.T) {
+	// Only collection lives in a library the session cannot see (library 2).
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "102", LibraryID: 2, Title: "Audiobook Picks", Visibility: "visible"},
+			{ID: "103", LibraryID: 1, Title: "Hidden", Visibility: "hidden"},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{
+		{ID: 1, Name: "Movies", Type: "movies"},
+	}, nil)
+
+	result := performItemsRequest(t, h, "/Items")
+	if len(result.Items) != 1 || result.Items[0].Name != "Movies" {
+		t.Fatalf("expected only the Movies library, got %+v", result.Items)
+	}
+}
+
+func TestUserViews_OmitsCollectionsViewWhenSourceNil(t *testing.T) {
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+	h.collections = nil // exercise the no-collection-source path (e.g. a DB-less deployment)
+
+	result := performItemsRequest(t, h, "/Items")
+	for _, item := range result.Items {
+		if item.ID == collectionsViewID {
+			t.Fatalf("did not expect Collections view without a collection source: %+v", result.Items)
+		}
+	}
+}
+
+func TestHandleItems_CollectionsViewParentHonorsTypeFilter(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible", ItemCount: 3},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	// A non-BoxSet type filter has no direct children under the view.
+	empty := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID+"&IncludeItemTypes=Movie")
+	if empty.TotalRecordCount != 0 || len(empty.Items) != 0 {
+		t.Fatalf("expected empty result for IncludeItemTypes=Movie, got %+v", empty.Items)
+	}
+
+	// An explicit BoxSet filter still lists the collections.
+	boxsets := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID+"&IncludeItemTypes=BoxSet")
+	if len(boxsets.Items) != 1 || boxsets.Items[0].Type != "BoxSet" {
+		t.Fatalf("expected the Marvel BoxSet, got %+v", boxsets.Items)
+	}
+}
+
+func TestHandleItems_CollectionsViewRehydratedByIds(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible"},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	result := performItemsRequest(t, h, "/Items?Ids="+collectionsViewID)
+	if len(result.Items) != 1 {
+		t.Fatalf("expected the Collections view, got %+v", result.Items)
+	}
+	if result.Items[0].ID != collectionsViewID || result.Items[0].Type != "CollectionFolder" {
+		t.Fatalf("unexpected re-hydrated view: %+v", result.Items[0])
+	}
+}
+
+func TestHandleItems_CollectionsViewParentListsBoxSets(t *testing.T) {
+	collections := &fakeCollectionSource{
+		collections: []*models.LibraryCollection{
+			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible", ItemCount: 3},
+			{ID: "104", LibraryID: 3, Title: "Shows Sets", Visibility: "visible", ItemCount: 2},
+			{ID: "102", LibraryID: 2, Title: "Hidden Library Set", Visibility: "visible"},
+		},
+	}
+	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{
+		{ID: 1, Name: "Movies", Type: "movies"},
+		{ID: 3, Name: "Shows", Type: "series"},
+	}, nil)
+
+	// Compact and dashed forms both resolve to the Collections view.
+	for _, parentID := range []string{collectionsViewID, "9d7ad6af-e9af-a2da-b1a2-f6e00ad28fa6"} {
+		result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
+		if result.TotalRecordCount != 2 || len(result.Items) != 2 {
+			t.Fatalf("ParentId %s: expected the 2 visible collections, got %+v", parentID, result.Items)
+		}
+		for _, item := range result.Items {
+			if item.Type != "BoxSet" || !item.IsFolder {
+				t.Fatalf("ParentId %s: expected BoxSet children, got %+v", parentID, item)
+			}
+		}
+		if collections.listAllLib != nil {
+			t.Fatalf("ParentId %s: expected unscoped ListAll, got library %v", parentID, *collections.listAllLib)
+		}
+	}
+}
+
+func TestHandleItem_CollectionsViewReturnsCollectionFolder(t *testing.T) {
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, nil, nil)
+
+	req := httptest.NewRequest("GET", "/Items/"+collectionsViewID, nil)
+	ctx := context.WithValue(req.Context(), compatSessionKey, collectionsTestSession())
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", collectionsViewID)
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.HandleItem(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var view baseItemDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if view.ID != collectionsViewID || view.Type != "CollectionFolder" || view.CollectionType != "boxsets" {
+		t.Fatalf("unexpected Collections view: %+v", view)
 	}
 }

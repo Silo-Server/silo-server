@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -20,6 +22,88 @@ type collectionSource interface {
 	ListAll(ctx context.Context, libraryID *int, opts catalog.ListLibraryCollectionsOptions) ([]*models.LibraryCollection, error)
 	GetByID(ctx context.Context, id string) (*models.LibraryCollection, error)
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
+	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
+}
+
+// collectionsViewID is the canonical Jellyfin "Collections" (boxsets)
+// CollectionFolder GUID. It is stable across all Jellyfin servers, so clients
+// recognise it as the box-set library; Silo reuses the same constant rather
+// than minting a per-server ID. Emitted in the compact 32-char form Jellyfin
+// uses for these views; isCollectionsViewID tolerates the dashed form clients
+// may echo back as a ParentId.
+const collectionsViewID = "9d7ad6afe9afa2dab1a2f6e00ad28fa6"
+
+var collectionsViewUUID = uuid.MustParse(collectionsViewID)
+
+// isCollectionsViewID reports whether raw refers to the synthetic Collections
+// view, comparing parsed UUIDs so the compact and dashed forms both match.
+func isCollectionsViewID(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	parsed, err := uuid.Parse(raw)
+	return err == nil && parsed == collectionsViewUUID
+}
+
+// idsRequestCollectionsView reports whether a raw Ids= param references the
+// synthetic Collections view. The sentinel decodes to neither an item nor a
+// collection, so parseItemsQuery drops it; this lets the /Items?Ids= path
+// re-hydrate the CollectionFolder the same way clients re-hydrate libraries.
+func idsRequestCollectionsView(r *http.Request) bool {
+	for _, raw := range newCaseInsensitiveQuery(r.URL.Query()).Values("Ids") {
+		for part := range strings.SplitSeq(raw, ",") {
+			if isCollectionsViewID(strings.TrimSpace(part)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// collectionsView builds the synthetic CollectionFolder that wraps the server's
+// library collections, exposing them as a top-level Jellyfin library whose
+// children are BoxSets (CollectionType "boxsets"). It holds no per-collection
+// state and never touches the database; the empty-tab gate lives in
+// collectionsViewVisible. ChildCount is intentionally left zero (omitempty):
+// counting members would re-run the heavy ListAll on every /UserViews, and an
+// unwatched badge would need per-user state across every collection member.
+func (h *ItemsHandler) collectionsView() baseItemDTO {
+	return baseItemDTO{
+		ID:             collectionsViewID,
+		Type:           "CollectionFolder",
+		CollectionType: "boxsets",
+		MediaType:      "Unknown",
+		IsFolder:       true,
+		Name:           "Collections",
+		ServerID:       h.mapper.serverID,
+		SortName:       "collections",
+		ImageTags:      map[string]string{},
+		UserData: &itemUserDataDTO{
+			Key:    collectionsViewID,
+			ItemID: collectionsViewID,
+		},
+	}
+}
+
+// collectionsViewVisible reports whether the Collections view should appear in
+// the session's library list. It is shown only when at least one collection is
+// visible to the session, via an index-only EXISTS probe scoped to the
+// libraries the session can already see. A probe error fails closed (no tab)
+// rather than failing the whole /UserViews response.
+func (h *ItemsHandler) collectionsViewVisible(ctx context.Context, libraries []upstreamUserLibrary) bool {
+	if h.collections == nil {
+		return false
+	}
+	ids := make([]int, 0, len(libraries))
+	for _, lib := range libraries {
+		ids = append(ids, lib.ID)
+	}
+	visible, err := h.collections.AnyVisibleInLibraries(ctx, ids)
+	if err != nil {
+		slog.DebugContext(ctx, "jellycompat collections view existence check failed", "error", err)
+		return false
+	}
+	return visible
 }
 
 // smartCollectionQueryExecutor resolves a smart (live-query) collection's members

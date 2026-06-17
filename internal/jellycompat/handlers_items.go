@@ -92,17 +92,15 @@ func (h *ItemsHandler) HandleViews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	libraries, err := h.content.ListUserLibraries(r.Context(), session)
+	h.handleViewsResponse(w, r, session)
+}
+
+// handleViewsResponse returns the user's library views as CollectionFolder items.
+func (h *ItemsHandler) handleViewsResponse(w http.ResponseWriter, r *http.Request, session *Session) {
+	items, err := h.userViews(r.Context(), session)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
-	}
-
-	items := make([]baseItemDTO, 0, len(libraries))
-	for _, library := range libraries {
-		dto := h.mapper.viewFromLibrary(library)
-		h.rememberLibraryImages(library, dto.ID)
-		items = append(items, dto)
 	}
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
@@ -111,25 +109,25 @@ func (h *ItemsHandler) HandleViews(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleViewsResponse returns the user's library views as CollectionFolder items.
-func (h *ItemsHandler) handleViewsResponse(w http.ResponseWriter, r *http.Request, session *Session) {
-	libraries, err := h.content.ListUserLibraries(r.Context(), session)
+// userViews builds the session's library views as CollectionFolder items. The
+// synthetic "Collections" view is prepended (first library) when the session
+// can see at least one collection; see collectionsView/collectionsViewVisible.
+func (h *ItemsHandler) userViews(ctx context.Context, session *Session) ([]baseItemDTO, error) {
+	libraries, err := h.content.ListUserLibraries(ctx, session)
 	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
+		return nil, err
 	}
 
-	items := make([]baseItemDTO, 0, len(libraries))
+	items := make([]baseItemDTO, 0, len(libraries)+1)
+	if h.collectionsViewVisible(ctx, libraries) {
+		items = append(items, h.collectionsView())
+	}
 	for _, library := range libraries {
 		dto := h.mapper.viewFromLibrary(library)
 		h.rememberLibraryImages(library, dto.ID)
 		items = append(items, dto)
 	}
-	writeJSON(w, http.StatusOK, queryResultDTO{
-		Items:            items,
-		TotalRecordCount: len(items),
-		StartIndex:       0,
-	})
+	return items, nil
 }
 
 // HandleItems serves GET /Items.
@@ -145,8 +143,28 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := parseItemsQuery(r, h.codec)
+
+	// Browsing the synthetic Collections view lists its BoxSets. The view ID is
+	// a fixed Jellyfin sentinel (not a codec-encoded ID), so it is matched here
+	// at the router rather than decoded in parseItemsQuery. With no
+	// parentLibraryID set, handleBoxSetsList lists every visible collection
+	// across libraries.
+	if isCollectionsViewID(newCaseInsensitiveQuery(r.URL.Query()).Get("ParentId")) {
+		// The view's only children are BoxSets. Clients commonly omit
+		// IncludeItemTypes when browsing a library by ParentId, so an absent
+		// filter still lists BoxSets; but an explicit filter that excludes
+		// BoxSet (e.g. IncludeItemTypes=Movie) has no direct children here and
+		// returns empty rather than the BoxSet list.
+		if query.hasItemTypeFilter && !query.wantsBoxSets {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		h.handleBoxSetsList(w, r, session, query)
+		return
+	}
+
 	switch {
-	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0:
+	case len(query.specificIDs) > 0 || len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r):
 		h.handleSpecificItems(w, r, session, query)
 	case query.parentCollectionID != "":
 		h.handleBoxSetChildren(w, r, session, query)
@@ -266,6 +284,14 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rawID := chi.URLParam(r, "id")
+
+	// The synthetic Collections view is a fixed sentinel ID, not a codec-encoded
+	// one; clients fetch the CollectionFolder by ID (e.g. Infuse) before browsing
+	// its children, so resolve it before the codec decode attempts.
+	if isCollectionsViewID(rawID) {
+		writeJSON(w, http.StatusOK, h.collectionsView())
+		return
+	}
 
 	// Handle library IDs — clients like Infuse request /Items/{id} for
 	// CollectionFolder items using the library UUID from /UserViews.
@@ -1928,6 +1954,12 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	items = append(items, boxSets...)
+
+	// Ids= may also reference the synthetic Collections view; prepend its DTO so
+	// clients re-hydrate the CollectionFolder the same way as a real library.
+	if idsRequestCollectionsView(r) {
+		items = append([]baseItemDTO{h.collectionsView()}, items...)
+	}
 
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
