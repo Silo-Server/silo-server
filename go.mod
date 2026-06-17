@@ -31,6 +31,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/wneessen/go-mail v0.7.3
 	github.com/zishang520/socket.io/v2 v2.5.0
 	go.n16f.net/thumbhash v1.1.0
