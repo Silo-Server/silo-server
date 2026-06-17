@@ -209,7 +209,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 	size := info.Size()
 	modifiedAt := normalizeFileModifiedAt(info.ModTime())
 
-	isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
+	_, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	if skipErr != nil {
 		slog.Warn("manga scan: skip-check failed, falling through",
 			"folder_id", folder.ID,
