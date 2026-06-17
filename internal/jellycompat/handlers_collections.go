@@ -74,16 +74,18 @@ func (h *ItemsHandler) collectionsView() baseItemDTO {
 		imageTagSeed(collectionsViewID, "Primary", compatCardImageSize, generatedPosterSeed(collectionsViewCaption), "", time.Time{}),
 		generatedPosterSeed(collectionsViewCaption),
 	)
+	posterAspect := 2.0 / 3.0 // portrait tile; match the generated poster so clients don't square-crop
 	return baseItemDTO{
-		ID:             collectionsViewID,
-		Type:           "CollectionFolder",
-		CollectionType: "boxsets",
-		MediaType:      "Unknown",
-		IsFolder:       true,
-		Name:           "Collections",
-		ServerID:       h.mapper.serverID,
-		SortName:       "collections",
-		ImageTags:      map[string]string{"Primary": primaryTag},
+		ID:                      collectionsViewID,
+		Type:                    "CollectionFolder",
+		CollectionType:          "boxsets",
+		MediaType:               "Unknown",
+		IsFolder:                true,
+		Name:                    "Collections",
+		ServerID:                h.mapper.serverID,
+		SortName:                "collections",
+		PrimaryImageAspectRatio: &posterAspect,
+		ImageTags:               map[string]string{"Primary": primaryTag},
 		UserData: &itemUserDataDTO{
 			Key:    collectionsViewID,
 			ItemID: collectionsViewID,
@@ -206,17 +208,19 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 			generatedPosterSeed(c.Title),
 		)
 	}
+	posterAspect := 2.0 / 3.0 // portrait poster; without it clients square-crop the card
 	dto := baseItemDTO{
-		ID:                 routeID,
-		Type:               "BoxSet",
-		IsFolder:           true,
-		Name:               c.Title,
-		ServerID:           h.mapper.serverID,
-		Overview:           c.Description,
-		SortName:           strings.ToLower(c.Title),
-		ChildCount:         c.ItemCount,
-		RecursiveItemCount: c.ItemCount,
-		ImageTags:          imgTags,
+		ID:                      routeID,
+		Type:                    "BoxSet",
+		IsFolder:                true,
+		Name:                    c.Title,
+		ServerID:                h.mapper.serverID,
+		Overview:                c.Description,
+		SortName:                strings.ToLower(c.Title),
+		ChildCount:              c.ItemCount,
+		RecursiveItemCount:      c.ItemCount,
+		ImageTags:               imgTags,
+		PrimaryImageAspectRatio: &posterAspect,
 		UserData: &itemUserDataDTO{
 			Key:    routeID,
 			ItemID: routeID,
