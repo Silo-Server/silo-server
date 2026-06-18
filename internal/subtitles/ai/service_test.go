@@ -3,12 +3,16 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 // recordingRepo is a JobRepository that records ResetStaleJobs calls and
@@ -21,6 +25,20 @@ type recordingRepo struct {
 	inserts    int
 	quotaUsed  int // returned by CountTranscribeJobsByUserSince
 	lastJob    Job
+	completed  []int
+	failures   []recordedFailure
+	progress   []recordedProgress
+}
+
+type recordedFailure struct {
+	id      int64
+	status  JobStatus
+	message string
+}
+
+type recordedProgress struct {
+	progress float64
+	message  string
 }
 
 // InsertJob mirrors the Postgres repo's atomic quota guard: a non-nil quota
@@ -47,12 +65,25 @@ func (r *recordingRepo) CountTranscribeJobsByUserSince(context.Context, int, tim
 	defer r.mu.Unlock()
 	return r.quotaUsed, nil
 }
-func (r *recordingRepo) UpdateProgress(context.Context, int64, JobStatus, float64, string) error {
+func (r *recordingRepo) UpdateProgress(_ context.Context, _ int64, _ JobStatus, progress float64, message string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.progress = append(r.progress, recordedProgress{progress: progress, message: message})
 	return nil
 }
-func (r *recordingRepo) CompleteJob(context.Context, int64, int) error           { return nil }
-func (r *recordingRepo) FailJob(context.Context, int64, JobStatus, string) error { return nil }
-func (r *recordingRepo) Heartbeat(context.Context, int64) error                  { return nil }
+func (r *recordingRepo) CompleteJob(_ context.Context, _ int64, subtitleID int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.completed = append(r.completed, subtitleID)
+	return nil
+}
+func (r *recordingRepo) FailJob(_ context.Context, id int64, status JobStatus, message string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.failures = append(r.failures, recordedFailure{id: id, status: status, message: message})
+	return nil
+}
+func (r *recordingRepo) Heartbeat(context.Context, int64) error { return nil }
 
 func (r *recordingRepo) ResetStaleJobs(_ context.Context, before time.Time, _ string) (int64, error) {
 	r.mu.Lock()
@@ -220,4 +251,352 @@ func TestRecoverReapsStaleJobsImmediately(t *testing.T) {
 	if diff := before.Sub(want); diff > 2*time.Second || diff < -2*time.Second {
 		t.Errorf("stale cutoff = %v, want ~%v (now-staleJobThreshold)", before, want)
 	}
+}
+
+type runTranscribeFileResolver struct {
+	file *models.MediaFile
+}
+
+func (r runTranscribeFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
+	return r.file, nil
+}
+
+type chunkedTranscriber struct {
+	chunks   [][]SubtitleCue
+	detected string
+	trace    *[]string
+	lastReq  TranscribeJobRequest
+}
+
+func (t *chunkedTranscriber) Transcribe(_ context.Context, req TranscribeJobRequest,
+	onChunk func([]SubtitleCue, int, int)) ([]SubtitleCue, string, error) {
+	t.lastReq = req
+	var all []SubtitleCue
+	for i, chunk := range t.chunks {
+		appendTrace(t.trace, fmt.Sprintf("transcribe:%d", i))
+		if onChunk != nil {
+			onChunk(chunk, i+1, len(t.chunks))
+		}
+		all = append(all, chunk...)
+	}
+	return all, t.detected, nil
+}
+
+type recordingTranslator struct {
+	calls     []TranslateRequest
+	errOnCall int
+	trace     *[]string
+}
+
+func (t *recordingTranslator) Translate(_ context.Context, req TranslateRequest,
+	onBatch func([]SubtitleCue, int, int)) ([]SubtitleCue, error) {
+	t.calls = append(t.calls, TranslateRequest{
+		Cues:           cloneTestCues(req.Cues),
+		SourceLanguage: req.SourceLanguage,
+		TargetLanguage: req.TargetLanguage,
+	})
+	call := len(t.calls)
+	if t.errOnCall == call {
+		return nil, errors.New("translator chunk failed")
+	}
+
+	out := cloneTestCues(req.Cues)
+	for i := range out {
+		for j, line := range out[i].Lines {
+			out[i].Lines[j] = req.TargetLanguage + ":" + line
+		}
+	}
+	if len(out) > 0 {
+		appendTrace(t.trace, "translate:"+strings.Join(out[0].Lines, " "))
+	}
+	if onBatch != nil {
+		onBatch(out, len(out), len(out))
+	}
+	return out, nil
+}
+
+type recordingSubtitleStore struct {
+	stored []subtitles.StoreSubtitleRequest
+}
+
+func (s *recordingSubtitleStore) StoreSubtitle(_ context.Context, req subtitles.StoreSubtitleRequest) (*subtitles.DownloadedSubtitle, error) {
+	s.stored = append(s.stored, req)
+	return &subtitles.DownloadedSubtitle{
+		ID:          len(s.stored),
+		MediaFileID: req.MediaFileID,
+		Provider:    req.Provider,
+		Language:    req.Language,
+		Format:      req.Format,
+		ReleaseName: req.ReleaseName,
+	}, nil
+}
+
+func (s *recordingSubtitleStore) GetSubtitleContent(context.Context, int) (*subtitles.DownloadedSubtitle, []byte, error) {
+	return nil, nil, errors.New("not implemented")
+}
+
+type notifierEvent struct {
+	kind    string
+	cues    []playback.StreamCue
+	done    int
+	total   int
+	message string
+}
+
+type recordingNotifier struct {
+	events []notifierEvent
+	trace  *[]string
+}
+
+func (n *recordingNotifier) SubtitleReady(_ context.Context, _ int, subtitleID int, language, _ string) {
+	n.events = append(n.events, notifierEvent{kind: fmt.Sprintf("ready:%d:%s", subtitleID, language)})
+}
+
+func (n *recordingNotifier) TranslationStarted(context.Context, string, int, int64, string, string, string, int) {
+	n.events = append(n.events, notifierEvent{kind: "started"})
+}
+
+func (n *recordingNotifier) TranslationCues(_ context.Context, _ string, _ int, _ int64, _ string,
+	cues []playback.StreamCue, done, total int) {
+	n.events = append(n.events, notifierEvent{kind: "cues", cues: cues, done: done, total: total})
+	if len(cues) > 0 {
+		appendTrace(n.trace, "stream:"+cues[0].Text)
+	}
+}
+
+func (n *recordingNotifier) TranslationCompleted(context.Context, string, int, int64, string, int, string, string) {
+	n.events = append(n.events, notifierEvent{kind: "completed"})
+}
+
+func (n *recordingNotifier) TranslationFailed(_ context.Context, _ string, _ int, _ int64, _, message string) {
+	n.events = append(n.events, notifierEvent{kind: "failed", message: message})
+}
+
+func TestRunTranscribeTranslateStreamingInterleavesTranslationPerChunk(t *testing.T) {
+	var trace []string
+	transcriber := &chunkedTranscriber{
+		detected: "en",
+		trace:    &trace,
+		chunks: [][]SubtitleCue{
+			{testCue(60, "second")},
+			{},
+			{testCue(0, "first")},
+		},
+	}
+	translator := &recordingTranslator{trace: &trace}
+	store := &recordingSubtitleStore{}
+	notifier := &recordingNotifier{trace: &trace}
+	repo := &recordingRepo{}
+	svc := newRunTranscribeService(repo, translator, transcriber, store, notifier, Config{LiveASRChunkSeconds: 30})
+
+	svc.runTranscribe(context.Background(), &Job{
+		ID:             7,
+		MediaFileID:    10,
+		Kind:           JobKindTranscribeTranslate,
+		SourceIndex:    -1,
+		TargetLanguage: "es",
+		SessionID:      "session-1",
+		StartPosition:  60,
+	})
+
+	if !transcriber.lastReq.Incremental {
+		t.Fatalf("streaming request did not enable incremental extraction")
+	}
+	if transcriber.lastReq.ChunkSeconds != 30 {
+		t.Fatalf("chunk override = %d, want 30", transcriber.lastReq.ChunkSeconds)
+	}
+	if got := len(translator.calls); got != 2 {
+		t.Fatalf("Translate calls = %d, want one per non-empty chunk", got)
+	}
+	if strings.Join(translator.calls[0].Cues[0].Lines, " ") != "second" {
+		t.Errorf("first translated chunk = %q, want playhead chunk", translator.calls[0].Cues[0].Lines)
+	}
+	if streamIdx, lastChunkIdx := traceIndex(trace, "stream:es:second"), traceIndex(trace, "transcribe:2"); streamIdx < 0 || lastChunkIdx < 0 || streamIdx > lastChunkIdx {
+		t.Fatalf("first translated stream did not precede final ASR chunk: %v", trace)
+	}
+
+	cueEvents := cueNotifierEvents(notifier.events)
+	if got := len(cueEvents); got != 2 {
+		t.Fatalf("TranslationCues events = %d, want 2", got)
+	}
+	if cueEvents[0].done != 1 || cueEvents[0].total != 3 || cueEvents[1].done != 3 || cueEvents[1].total != 3 {
+		t.Fatalf("chunk progress = (%d/%d, %d/%d), want 1/3 then 3/3",
+			cueEvents[0].done, cueEvents[0].total, cueEvents[1].done, cueEvents[1].total)
+	}
+	if len(store.stored) != 2 {
+		t.Fatalf("stored subtitles = %d, want transcript and translation", len(store.stored))
+	}
+	if store.stored[0].Provider != providerTranscribed || store.stored[1].Provider != providerTranslated {
+		t.Fatalf("stored providers = %q, %q", store.stored[0].Provider, store.stored[1].Provider)
+	}
+	translated, err := ParseCues(store.stored[1].Data)
+	if err != nil {
+		t.Fatalf("parse stored translation: %v", err)
+	}
+	if len(translated) != 2 || strings.Join(translated[0].Lines, " ") != "es:first" ||
+		strings.Join(translated[1].Lines, " ") != "es:second" {
+		t.Fatalf("stored translation not sorted/complete: %#v", translated)
+	}
+	if got := fmt.Sprint(repo.completed); got != "[2]" {
+		t.Fatalf("completed subtitle IDs = %s, want [2]", got)
+	}
+}
+
+func TestRunTranscribeTranslateStreamingFailureStoresTranscript(t *testing.T) {
+	var trace []string
+	transcriber := &chunkedTranscriber{
+		detected: "en",
+		trace:    &trace,
+		chunks: [][]SubtitleCue{
+			{testCue(0, "one")},
+			{testCue(30, "two")},
+			{testCue(60, "three")},
+		},
+	}
+	translator := &recordingTranslator{errOnCall: 2, trace: &trace}
+	store := &recordingSubtitleStore{}
+	notifier := &recordingNotifier{trace: &trace}
+	repo := &recordingRepo{}
+	svc := newRunTranscribeService(repo, translator, transcriber, store, notifier, Config{LiveASRChunkSeconds: 30})
+
+	svc.runTranscribe(context.Background(), &Job{
+		ID:             8,
+		MediaFileID:    10,
+		Kind:           JobKindTranscribeTranslate,
+		SourceIndex:    -1,
+		TargetLanguage: "es",
+		SessionID:      "session-1",
+	})
+
+	if got := len(translator.calls); got != 2 {
+		t.Fatalf("Translate calls = %d, want calls stop after failure", got)
+	}
+	if traceIndex(trace, "transcribe:2") < 0 {
+		t.Fatalf("ASR did not continue through final chunk after translate failure: %v", trace)
+	}
+	if len(store.stored) != 1 || store.stored[0].Provider != providerTranscribed {
+		t.Fatalf("stored subtitles = %#v, want transcript only", store.stored)
+	}
+	if len(repo.failures) != 1 || repo.failures[0].status != JobStatusFailed {
+		t.Fatalf("failures = %#v, want one failed job", repo.failures)
+	}
+	if got := countNotifierKind(notifier.events, "failed"); got != 1 {
+		t.Fatalf("TranslationFailed events = %d, want 1", got)
+	}
+	if len(repo.completed) != 0 {
+		t.Fatalf("completed despite translation failure: %v", repo.completed)
+	}
+}
+
+func TestRunTranscribeTranslateNonStreamingKeepsWholeFileTranslation(t *testing.T) {
+	transcriber := &chunkedTranscriber{
+		detected: "en",
+		chunks: [][]SubtitleCue{
+			{testCue(30, "later")},
+			{testCue(0, "earlier")},
+		},
+	}
+	translator := &recordingTranslator{}
+	store := &recordingSubtitleStore{}
+	notifier := &recordingNotifier{}
+	repo := &recordingRepo{}
+	svc := newRunTranscribeService(repo, translator, transcriber, store, notifier, Config{LiveASRChunkSeconds: 30})
+
+	svc.runTranscribe(context.Background(), &Job{
+		ID:             9,
+		MediaFileID:    10,
+		Kind:           JobKindTranscribeTranslate,
+		SourceIndex:    -1,
+		TargetLanguage: "es",
+	})
+
+	if transcriber.lastReq.Incremental {
+		t.Fatalf("background request unexpectedly enabled incremental extraction")
+	}
+	if transcriber.lastReq.ChunkSeconds != 0 {
+		t.Fatalf("background chunk override = %d, want 0", transcriber.lastReq.ChunkSeconds)
+	}
+	if got := len(translator.calls); got != 1 {
+		t.Fatalf("Translate calls = %d, want one whole-file call", got)
+	}
+	if got := len(translator.calls[0].Cues); got != 2 {
+		t.Fatalf("whole-file call cues = %d, want 2", got)
+	}
+	if got := countNotifierKind(notifier.events, "cues"); got != 0 {
+		t.Fatalf("non-streaming TranslationCues events = %d, want 0", got)
+	}
+	if len(store.stored) != 2 || store.stored[1].Provider != providerTranslated {
+		t.Fatalf("stored subtitles = %#v, want transcript and translated track", store.stored)
+	}
+}
+
+func newRunTranscribeService(
+	repo *recordingRepo,
+	translator Translator,
+	transcriber Transcriber,
+	store *recordingSubtitleStore,
+	notifier Notifier,
+	cfg Config,
+) *Service {
+	file := &models.MediaFile{
+		ID:          10,
+		FilePath:    "/media/movie.mkv",
+		Duration:    180,
+		AudioTracks: []models.AudioTrack{{Language: "eng", Default: true}},
+	}
+	return NewService(context.Background(), cfg, repo, translator, transcriber, store, nil,
+		runTranscribeFileResolver{file: file}, notifier, "", nil, nil)
+}
+
+func testCue(startSeconds float64, text string) SubtitleCue {
+	start := time.Duration(startSeconds * float64(time.Second))
+	return SubtitleCue{
+		Start: start,
+		End:   start + 2*time.Second,
+		Lines: []string{text},
+	}
+}
+
+func cloneTestCues(cues []SubtitleCue) []SubtitleCue {
+	out := make([]SubtitleCue, len(cues))
+	for i, cue := range cues {
+		out[i] = cue
+		out[i].Lines = append([]string(nil), cue.Lines...)
+	}
+	return out
+}
+
+func appendTrace(trace *[]string, value string) {
+	if trace != nil {
+		*trace = append(*trace, value)
+	}
+}
+
+func traceIndex(trace []string, value string) int {
+	for i, got := range trace {
+		if got == value {
+			return i
+		}
+	}
+	return -1
+}
+
+func cueNotifierEvents(events []notifierEvent) []notifierEvent {
+	var out []notifierEvent
+	for _, event := range events {
+		if event.kind == "cues" {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func countNotifierKind(events []notifierEvent, kind string) int {
+	count := 0
+	for _, event := range events {
+		if event.kind == kind {
+			count++
+		}
+	}
+	return count
 }

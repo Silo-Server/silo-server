@@ -474,6 +474,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.SubtitleAI.ASRChunkSeconds = subtitleAIChunkSeconds
+	subtitleAILiveChunkSeconds, err := intOr(m, "subtitle_ai.live_asr_chunk_seconds", 30)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SubtitleAI.LiveASRChunkSeconds = subtitleAILiveChunkSeconds
 	// A bad quota row must not block startup: fall back to "no quota" /
 	// the daily window with a warning instead of failing the config load.
 	transcribeQuotaJobs, err := intOr(m, "subtitle_ai.transcribe_quota_jobs", 0)

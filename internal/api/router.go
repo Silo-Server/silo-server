@@ -2915,6 +2915,7 @@ func effectiveSubtitleAIConfig(cfg *config.Config) (subtitleai.Config, string) {
 		ASRModel:              cfg.AI.ASRModel,
 		BatchSize:             cfg.SubtitleAI.BatchSize,
 		ContextNeighbors:      cfg.SubtitleAI.ContextNeighbors,
+		LiveASRChunkSeconds:   cfg.SubtitleAI.LiveASRChunkSeconds,
 		TranscribeQuotaJobs:   cfg.SubtitleAI.TranscribeQuotaJobs,
 		TranscribeQuotaPeriod: cfg.SubtitleAI.TranscribeQuotaPeriod,
 	}, disabledGateway

@@ -12,11 +12,12 @@ type Config struct {
 	TranslateEnabled bool
 	// TranscribeEnabled gates Whisper ASR generation (transcribe /
 	// transcribe_translate jobs).
-	TranscribeEnabled bool
-	ChatModel         string // chat-completions model used for translation
-	ASRModel          string // audio-transcription model used for ASR
-	BatchSize         int    // cues per translation request
-	ContextNeighbors  int    // preceding source cues sent as untranslated context
+	TranscribeEnabled   bool
+	ChatModel           string // chat-completions model used for translation
+	ASRModel            string // audio-transcription model used for ASR
+	BatchSize           int    // cues per translation request
+	ContextNeighbors    int    // preceding source cues sent as untranslated context
+	LiveASRChunkSeconds int    // smaller ASR chunks for session-attached live jobs
 	// TranscribeQuotaJobs caps how many transcription jobs (transcribe /
 	// transcribe_translate) each non-admin user may start per rolling quota
 	// period; 0 means unlimited.
