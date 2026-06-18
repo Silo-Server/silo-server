@@ -879,10 +879,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 
 	// Determine the item-level content level for phases 1-3.
-	itemLevel := "series"
-	if contentType == "movie" || contentType == "movies" {
-		itemLevel = "movie"
-	}
+	itemLevel := providerChainContentLevel(contentType)
 	itemChain, err := resolveChain(itemLevel)
 	if err != nil {
 		return nil, err
@@ -1008,10 +1005,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if contentType == "" && req.ContentID != "" {
 			if existing, err := s.itemRepo.GetByID(ctx, req.ContentID); err == nil {
 				contentType = existing.Type
-				itemLevel = "series"
-				if contentType == "movie" || contentType == "movies" {
-					itemLevel = "movie"
-				}
+				itemLevel = providerChainContentLevel(contentType)
 				itemChain, err = resolveChain(itemLevel)
 				if err != nil {
 					return nil, err
@@ -1043,10 +1037,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		// Re-resolve itemChain now that contentType is known.
-		itemLevel = "series"
-		if contentType == "movie" || contentType == "movies" {
-			itemLevel = "movie"
-		}
+		itemLevel = providerChainContentLevel(contentType)
 		itemChain, err = resolveChain(itemLevel)
 		if err != nil {
 			return nil, err
@@ -2928,11 +2919,9 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 		query.Language = s.resolveFolderLanguage(ctx, folderID)
 	}
 
-	// Search uses the item-level chain (movie or series).
-	contentLevel := "series"
-	if query.ContentType == "movie" || query.ContentType == "movies" {
-		contentLevel = "movie"
-	}
+	// Search uses the item-level chain. Video child records search through the
+	// series chain; non-video content searches through its own content level.
+	contentLevel := providerChainContentLevel(query.ContentType)
 	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
 	if err != nil {
 		return nil, fmt.Errorf("resolving provider chain: %w", err)
@@ -2951,6 +2940,19 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 		allResults = append(allResults, results...)
 	}
 	return allResults, nil
+}
+
+func providerChainContentLevel(contentType string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(contentType)); normalized {
+	case "movie", "movies":
+		return "movie"
+	case "series", "show", "shows", "tv", "season", "seasons", "episode", "episodes":
+		return "series"
+	case "":
+		return "series"
+	default:
+		return normalized
+	}
 }
 
 // persistSeasonsAndEpisodes creates/updates seasons and episodes in the DB.

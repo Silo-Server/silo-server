@@ -199,6 +199,58 @@ func TestAdminMatchSearch_FallsBackToItemMetadata(t *testing.T) {
 	}
 }
 
+func TestAdminMatchSearch_AcceptsGenericProviderIDsAndLibraryID(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"ebook-1": {ContentID: "ebook-1", Title: "Example Book", Year: 2024, Type: "ebook"},
+		},
+	}
+	folders := &fakeMatchFolderLookup{
+		folderIDs: map[string][]int{"ebook-1": {7, 8}},
+	}
+	captureSvc := &capturingMetadataService{
+		inner: &fakeMatchMetadataService{searchResults: []metadata.MatchCandidate{}},
+	}
+
+	h := NewAdminMatchHandler(items, folders, captureSvc)
+	router := buildMatchRouter(h)
+
+	libraryID := 8
+	body, _ := json.Marshal(matchSearchRequest{
+		ProviderIDs: map[string]string{
+			" ISBN ":    " 9780000000001 ",
+			"goodreads": " ",
+		},
+		TmdbID:    "12345",
+		LibraryID: &libraryID,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/items/ebook-1/match/search", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if captureSvc.lastFolderID != 8 {
+		t.Fatalf("folderID = %d, want 8", captureSvc.lastFolderID)
+	}
+	if captureSvc.lastQuery.ContentType != "ebook" {
+		t.Fatalf("ContentType = %q, want ebook", captureSvc.lastQuery.ContentType)
+	}
+	if got := captureSvc.lastQuery.ProviderIDs["isbn"]; got != "9780000000001" {
+		t.Fatalf("ProviderIDs[isbn] = %q, want 9780000000001", got)
+	}
+	if got := captureSvc.lastQuery.ProviderIDs["tmdb"]; got != "12345" {
+		t.Fatalf("ProviderIDs[tmdb] = %q, want 12345", got)
+	}
+	if _, ok := captureSvc.lastQuery.ProviderIDs["goodreads"]; ok {
+		t.Fatalf("blank provider IDs should be ignored, got %v", captureSvc.lastQuery.ProviderIDs)
+	}
+}
+
 func TestAdminMatchApply_PreservesContentID(t *testing.T) {
 	items := &fakeMatchItemLookup{
 		items: map[string]*models.MediaItem{
@@ -293,12 +345,14 @@ func TestAdminMatchApply_ItemNotFound(t *testing.T) {
 
 // capturingMetadataService wraps a fake to capture the query passed to SearchAndNormalize.
 type capturingMetadataService struct {
-	inner     *fakeMatchMetadataService
-	lastQuery metadata.SearchQuery
+	inner        *fakeMatchMetadataService
+	lastQuery    metadata.SearchQuery
+	lastFolderID int
 }
 
 func (c *capturingMetadataService) SearchAndNormalize(ctx context.Context, query metadata.SearchQuery, folderID int) ([]metadata.MatchCandidate, error) {
 	c.lastQuery = query
+	c.lastFolderID = folderID
 	return c.inner.SearchAndNormalize(ctx, query, folderID)
 }
 

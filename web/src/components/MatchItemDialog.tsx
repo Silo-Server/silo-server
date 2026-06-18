@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
-import { Copy, Folder, Search } from "lucide-react";
+import { useState, useCallback, useMemo, useRef } from "react";
+import { Copy, Folder, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { FileVersion, ItemDetail, MatchCandidate } from "@/api/types";
+import type { FileVersion, ItemDetail, ItemMatchSearchRequest, MatchCandidate } from "@/api/types";
 import MediaLocations from "@/components/MediaLocations";
 import { useSearchItemMatchCandidates, useApplyItemMatch } from "@/hooks/queries/items";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -15,11 +15,18 @@ import { cn } from "@/lib/utils";
 
 type MatchableItem = Pick<
   ItemDetail,
-  "content_id" | "title" | "year" | "type" | "series_id" | "season_number"
+  "content_id" | "title" | "year" | "series_id" | "season_number"
 > & {
+  type: string;
   library_id?: number;
   versions?: FileVersion[];
   folder_paths?: string[];
+};
+
+type ProviderIDInput = {
+  id: number;
+  provider: string;
+  value: string;
 };
 
 interface MatchItemDialogProps {
@@ -28,14 +35,37 @@ interface MatchItemDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+function isVideoMatchType(type: string): boolean {
+  switch (type.trim().toLowerCase()) {
+    case "movie":
+    case "movies":
+    case "series":
+    case "show":
+    case "shows":
+    case "tv":
+    case "season":
+    case "seasons":
+    case "episode":
+    case "episodes":
+      return true;
+    default:
+      return false;
+  }
+}
+
 export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemDialogProps) {
   const [title, setTitle] = useState(item.title);
   const [year, setYear] = useState(item.year ? String(item.year) : "");
   const [imdbId, setImdbId] = useState("");
   const [tmdbId, setTmdbId] = useState("");
   const [tvdbId, setTvdbId] = useState("");
+  const [providerIdInputs, setProviderIdInputs] = useState<ProviderIDInput[]>([
+    { id: 0, provider: "", value: "" },
+  ]);
+  const nextProviderIdInputId = useRef(1);
   const [selectedCandidate, setSelectedCandidate] = useState<MatchCandidate | null>(null);
   const isSeries = item.type === "series";
+  const showVideoExternalIds = isVideoMatchType(item.type);
   const needsItemDetail = open && item.versions === undefined;
   const { data: enrichedItem, isLoading: enrichedItemLoading } = useCatalogItemDetail(
     needsItemDetail ? item.content_id : undefined,
@@ -47,17 +77,71 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
 
   const candidates = searchMutation.data?.candidates ?? [];
   const effectiveItem = needsItemDetail ? (enrichedItem ?? item) : item;
+  const genericProviderIds = useMemo(() => {
+    if (showVideoExternalIds) return {};
+
+    return providerIdInputs.reduce<Record<string, string>>((acc, entry) => {
+      const provider = entry.provider.trim().toLowerCase();
+      const value = entry.value.trim();
+      if (provider && value) {
+        acc[provider] = value;
+      }
+      return acc;
+    }, {});
+  }, [providerIdInputs, showVideoExternalIds]);
 
   const handleSearch = useCallback(() => {
     setSelectedCandidate(null);
-    searchMutation.mutate({
+    const request: ItemMatchSearchRequest = {
       title: title || undefined,
       year: year ? parseInt(year, 10) : undefined,
-      imdb_id: imdbId || undefined,
-      tmdb_id: tmdbId || undefined,
-      tvdb_id: tvdbId || undefined,
+      library_id: item.library_id,
+    };
+
+    if (showVideoExternalIds) {
+      request.imdb_id = imdbId || undefined;
+      request.tmdb_id = tmdbId || undefined;
+      request.tvdb_id = tvdbId || undefined;
+    } else if (Object.keys(genericProviderIds).length > 0) {
+      request.provider_ids = genericProviderIds;
+    }
+
+    searchMutation.mutate(request);
+  }, [
+    title,
+    year,
+    item.library_id,
+    showVideoExternalIds,
+    imdbId,
+    tmdbId,
+    tvdbId,
+    genericProviderIds,
+    searchMutation,
+  ]);
+
+  const updateProviderIdInput = useCallback(
+    (index: number, field: keyof ProviderIDInput, value: string) => {
+      setProviderIdInputs((current) =>
+        current.map((entry, entryIndex) =>
+          entryIndex === index ? { ...entry, [field]: value } : entry,
+        ),
+      );
+    },
+    [],
+  );
+
+  const addProviderIdInput = useCallback(() => {
+    const id = nextProviderIdInputId.current;
+    nextProviderIdInputId.current += 1;
+    setProviderIdInputs((current) => [...current, { id, provider: "", value: "" }]);
+  }, []);
+
+  const removeProviderIdInput = useCallback((index: number) => {
+    setProviderIdInputs((current) => {
+      const next = current.filter((_, entryIndex) => entryIndex !== index);
+      return next.length > 0 ? next : [{ id: 0, provider: "", value: "" }];
     });
-  }, [title, year, imdbId, tmdbId, tvdbId, searchMutation]);
+  }, []);
 
   const handleApply = useCallback(() => {
     if (!selectedCandidate) return;
@@ -129,33 +213,83 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
                 type="number"
               />
             </div>
-            <div>
-              <Label htmlFor="match-imdb">IMDb ID</Label>
-              <Input
-                id="match-imdb"
-                value={imdbId}
-                onChange={(e) => setImdbId(e.target.value)}
-                placeholder="tt1234567"
-              />
-            </div>
-            <div>
-              <Label htmlFor="match-tmdb">TMDB ID</Label>
-              <Input
-                id="match-tmdb"
-                value={tmdbId}
-                onChange={(e) => setTmdbId(e.target.value)}
-                placeholder="12345"
-              />
-            </div>
-            <div>
-              <Label htmlFor="match-tvdb">TVDB ID</Label>
-              <Input
-                id="match-tvdb"
-                value={tvdbId}
-                onChange={(e) => setTvdbId(e.target.value)}
-                placeholder="12345"
-              />
-            </div>
+            {showVideoExternalIds ? (
+              <>
+                <div>
+                  <Label htmlFor="match-imdb">IMDb ID</Label>
+                  <Input
+                    id="match-imdb"
+                    value={imdbId}
+                    onChange={(e) => setImdbId(e.target.value)}
+                    placeholder="tt1234567"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="match-tmdb">TMDB ID</Label>
+                  <Input
+                    id="match-tmdb"
+                    value={tmdbId}
+                    onChange={(e) => setTmdbId(e.target.value)}
+                    placeholder="12345"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="match-tvdb">TVDB ID</Label>
+                  <Input
+                    id="match-tvdb"
+                    value={tvdbId}
+                    onChange={(e) => setTvdbId(e.target.value)}
+                    placeholder="12345"
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="col-span-2 space-y-2">
+                <Label>Provider IDs</Label>
+                {providerIdInputs.map((entry, index) => (
+                  <div
+                    key={entry.id}
+                    className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_2rem] gap-2"
+                  >
+                    <Input
+                      value={entry.provider}
+                      onChange={(e) => updateProviderIdInput(index, "provider", e.target.value)}
+                      placeholder="isbn"
+                      aria-label="Provider"
+                    />
+                    <Input
+                      value={entry.value}
+                      onChange={(e) => updateProviderIdInput(index, "value", e.target.value)}
+                      placeholder="978..."
+                      aria-label="Provider ID"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9"
+                      onClick={() => removeProviderIdInput(index)}
+                      disabled={providerIdInputs.length === 1 && !entry.provider && !entry.value}
+                      aria-label="Remove provider ID"
+                      title="Remove provider ID"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={addProviderIdInput}
+                  aria-label="Add provider ID"
+                  title="Add provider ID"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
 
           <Button

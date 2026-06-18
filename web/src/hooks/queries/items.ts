@@ -297,7 +297,10 @@ export function useSearchItemMatchCandidates(contentId: string) {
   });
 }
 
-type ApplyMatchItem = Pick<ItemDetail, "content_id" | "type" | "series_id" | "season_number">;
+type ApplyMatchItem = Pick<ItemDetail, "content_id" | "series_id" | "season_number"> & {
+  type: string;
+  library_id?: number;
+};
 
 export function useApplyItemMatch() {
   const queryClient = useQueryClient();
@@ -312,7 +315,10 @@ export function useApplyItemMatch() {
     }) => {
       return api(`/admin/items/${itemPathID(item.content_id)}/match/apply`, {
         method: "POST",
-        body: JSON.stringify({ provider_ids: providerIds }),
+        body: JSON.stringify({
+          provider_ids: providerIds,
+          library_id: item.library_id,
+        }),
       });
     },
     onSuccess: async (_, { item }) => {

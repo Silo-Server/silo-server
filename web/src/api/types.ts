@@ -4046,6 +4046,8 @@ export interface ItemMatchSearchRequest {
   imdb_id?: string;
   tmdb_id?: string;
   tvdb_id?: string;
+  provider_ids?: Record<string, string>;
+  library_id?: number;
 }
 
 export interface ItemMatchSearchResponse {
@@ -4054,6 +4056,7 @@ export interface ItemMatchSearchResponse {
 
 export interface ItemMatchApplyRequest {
   provider_ids: Record<string, string>;
+  library_id?: number;
 }
 
 // Image selector types

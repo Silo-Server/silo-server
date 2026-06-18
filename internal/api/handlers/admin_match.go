@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,12 +57,13 @@ func NewAdminMatchHandler(
 // --- Request/Response types ---
 
 type matchSearchRequest struct {
-	Title     string `json:"title"`
-	Year      int    `json:"year"`
-	ImdbID    string `json:"imdb_id"`
-	TmdbID    string `json:"tmdb_id"`
-	TvdbID    string `json:"tvdb_id"`
-	LibraryID *int   `json:"library_id,omitempty"`
+	Title       string            `json:"title"`
+	Year        int               `json:"year"`
+	ImdbID      string            `json:"imdb_id"`
+	TmdbID      string            `json:"tmdb_id"`
+	TvdbID      string            `json:"tvdb_id"`
+	ProviderIDs map[string]string `json:"provider_ids,omitempty"`
+	LibraryID   *int              `json:"library_id,omitempty"`
 }
 
 type matchSearchResponse struct {
@@ -119,7 +121,7 @@ func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWrite
 		Title:       req.Title,
 		Year:        req.Year,
 		ContentType: item.Type,
-		ProviderIDs: make(map[string]string),
+		ProviderIDs: normalizeMatchProviderIDs(req.ProviderIDs),
 	}
 	if query.Title == "" {
 		query.Title = item.Title
@@ -129,15 +131,9 @@ func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWrite
 	}
 
 	// Inject any provider IDs from the request.
-	if req.ImdbID != "" {
-		query.ProviderIDs["imdb"] = req.ImdbID
-	}
-	if req.TmdbID != "" {
-		query.ProviderIDs["tmdb"] = req.TmdbID
-	}
-	if req.TvdbID != "" {
-		query.ProviderIDs["tvdb"] = req.TvdbID
-	}
+	setMatchProviderID(query.ProviderIDs, "imdb", req.ImdbID)
+	setMatchProviderID(query.ProviderIDs, "tmdb", req.TmdbID)
+	setMatchProviderID(query.ProviderIDs, "tvdb", req.TvdbID)
 
 	candidates, err := h.metadata.SearchAndNormalize(r.Context(), query, folderID)
 	if err != nil {
@@ -209,6 +205,23 @@ func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.
 		ContentID: result.ContentID,
 		Updated:   result.Updated,
 	})
+}
+
+func normalizeMatchProviderIDs(input map[string]string) map[string]string {
+	out := make(map[string]string, len(input))
+	for provider, providerID := range input {
+		setMatchProviderID(out, provider, providerID)
+	}
+	return out
+}
+
+func setMatchProviderID(providerIDs map[string]string, provider string, providerID string) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	providerID = strings.TrimSpace(providerID)
+	if provider == "" || providerID == "" {
+		return
+	}
+	providerIDs[provider] = providerID
 }
 
 // PoolFolderLookup implements MatchFolderLookup using a direct pgx pool query

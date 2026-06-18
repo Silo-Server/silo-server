@@ -1871,7 +1871,7 @@ function UnmatchedItemsSection() {
             library_id: matchItem.library_id,
             title: matchItem.title,
             year: matchItem.year,
-            type: matchItem.content_type as "movie" | "series" | "season" | "episode",
+            type: matchItem.content_type,
           }}
           open={true}
           onOpenChange={(open) => {
@@ -2047,7 +2047,7 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
             library_id: matchItem.library_id,
             title: matchItem.title,
             year: matchItem.year,
-            type: matchItem.content_type as "movie" | "series" | "season" | "episode",
+            type: matchItem.content_type,
           }}
           open={true}
           onOpenChange={(open) => {

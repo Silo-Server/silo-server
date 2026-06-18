@@ -93,7 +93,7 @@ type MatchHints struct {
 type SearchQuery struct {
 	Title                     string
 	Year                      int
-	ContentType               string            // "movie" or "series"
+	ContentType               string            // media_items.type value
 	ProviderIDs               map[string]string // Accumulated IDs from prior providers
 	Language                  string            // ISO 639-1 code from library preference
 	FilePath                  string
