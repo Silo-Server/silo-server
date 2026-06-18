@@ -200,7 +200,7 @@ func TestHandlePlaybackReport_UpdatesSelectedAudioStreamAndUpstreamTrack(t *test
 	handler := &PlaybackHandler{
 		playbackStore: playbackStore,
 		sessionMgr:    sessionMgr,
-		transcodes:    make(map[string]*playback.TranscodeSession),
+		tm:            playback.NewTranscodeManager(),
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"play-1","MediaSourceId":"`+source.ID+`","AudioStreamIndex":2,"PositionTicks":30000000}`))
@@ -254,7 +254,7 @@ func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
-		transcodes:    make(map[string]*playback.TranscodeSession),
+		tm:            playback.NewTranscodeManager(),
 	}
 
 	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)

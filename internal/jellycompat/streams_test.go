@@ -104,15 +104,14 @@ func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 }
 
 // newActiveEncodingsHandler builds a PlaybackHandler literal directly (not
-// NewPlaybackHandler, which touches the filesystem) with the transcodes map
-// initialized — closeTranscodeSession writes/deletes it and would nil-map-panic
-// otherwise.
+// NewPlaybackHandler, which touches the filesystem) with a transcode manager
+// wired — teardown calls tm.CloseTranscodeSession and would nil-panic otherwise.
 func newActiveEncodingsHandler(mgr *testCompatSessionManager) (*PlaybackHandler, *PlaybackSessionStore) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	h := &PlaybackHandler{
 		playbackStore: store,
 		sessionMgr:    mgr,
-		transcodes:    make(map[string]*playback.TranscodeSession),
+		tm:            playback.NewTranscodeManager(),
 	}
 	return h, store
 }

@@ -40,7 +40,27 @@ type PlaybackMediaSource struct {
 	ETag                       string
 }
 
-// PlaybackSessionStore keeps compat playback sessions in memory.
+// CompatPlaybackStore persists compat playback negotiation sessions (the
+// PlaySessionId → upstream-session mapping plus media sources, route, and seek).
+// It is an interface so the backing store is swappable: the in-memory
+// PlaybackSessionStore is the default, and a durable (Postgres/Redis)
+// implementation lets the mapping survive a server restart so a Jellyfin client
+// can resume — a Redis switch then touches only the constructor, nothing else.
+type CompatPlaybackStore interface {
+	// Put stores or replaces a compat playback session.
+	Put(session PlaybackSession)
+	// Get returns a session when it exists and is not expired.
+	Get(id string) (*PlaybackSession, bool)
+	// Delete removes a session.
+	Delete(id string)
+	// Update modifies a session in place under the store's lock.
+	Update(id string, fn func(*PlaybackSession) error) error
+	// FindByRoute resolves a route item / media-source id to a session.
+	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
+}
+
+// PlaybackSessionStore keeps compat playback sessions in memory. It is the
+// default CompatPlaybackStore implementation.
 type PlaybackSessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]PlaybackSession

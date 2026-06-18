@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -97,6 +98,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
+	// Recipe-card store enables compat transcode reconstruct across restarts
+	// (shared Postgres table with the native path). Must be set before the
+	// boot-time orphan cleanup so surviving cards spare their segment dirs.
+	playbackHandler.RecipeStore = playback.NewPostgresRecipeStore(deps.DB)
+	if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
+		slog.Warn("jellycompat transcode cleanup failed", "error", err)
+	} else if cleaned > 0 {
+		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "count", cleaned)
+	}
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	if subtitleRepo != nil {
@@ -293,7 +303,14 @@ func withDefaults(deps Dependencies) Dependencies {
 		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now)
 	}
 	if deps.PlaybackStore == nil {
-		deps.PlaybackStore = NewPlaybackSessionStore(playbackTTL, deps.Now)
+		// Back the compat playback store with Postgres when a pool is available so
+		// the PlaySessionId -> upstream-session mapping survives a restart and a
+		// Jellyfin client can resume; fall back to in-memory otherwise.
+		if deps.DB != nil {
+			deps.PlaybackStore = NewDurableCompatPlaybackStore(deps.DB, playbackTTL, deps.Now)
+		} else {
+			deps.PlaybackStore = NewPlaybackSessionStore(playbackTTL, deps.Now)
+		}
 	}
 	if deps.HTTPClient == nil {
 		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}

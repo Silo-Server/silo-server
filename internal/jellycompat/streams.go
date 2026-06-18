@@ -345,18 +345,40 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	name := chiURLParam(r, "segmentId")
 	ext := chiURLParam(r, "segmentContainer")
 
-	upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
-	if err != nil {
+	// Load the upstream native session, reconstructing it from the recipe card on
+	// a not-found miss (e.g. after a server restart). Ownership is re-bound to the
+	// Jellyfin caller's native user id (StreamAppUserID), matching the card owner.
+	upstreamSession, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID, session.StreamAppUserID)
+	switch status {
+	case playback.SessionMissing:
 		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
 		return
-	}
-	_ = upstreamSession // session exists, serve the segment
-
-	transcodeSession := h.getTranscodeSession(playSession.UpstreamSessionID)
-	if transcodeSession == nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Transcode session not found")
+	case playback.SessionLoadFailed:
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load upstream session")
+		return
+	case playback.SessionForbidden:
+		writeError(w, http.StatusForbidden, "Forbidden", "Session belongs to another user")
 		return
 	}
+
+	transcodeSession := h.tm.GetTranscodeSession(playSession.UpstreamSessionID)
+	if transcodeSession == nil {
+		// Local transcode whose process state was lost (restart): reconstruct it
+		// seeked to the requested segment. Remote-node sessions are served by the
+		// proxy, not here, so only reconstruct an integrated (no node URL) session.
+		if upstreamSession.TranscodeNodeURL == "" {
+			requestedSegment := -1
+			if segNum, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
+				requestedSegment = segNum
+			}
+			transcodeSession = h.tm.ReconstructTranscode(r.Context(), playSession.UpstreamSessionID, requestedSegment)
+		}
+		if transcodeSession == nil {
+			writeError(w, http.StatusNotFound, "NotFound", "Transcode session not found")
+			return
+		}
+	}
+	h.tm.RefreshRecipeCard(playSession.UpstreamSessionID)
 
 	segmentFile := name + "." + ext
 	segmentPath, err := transcodeSession.GetSegment(segmentFile)
@@ -742,7 +764,7 @@ func (h *PlaybackHandler) teardownPlaySession(playSession *PlaybackSession) {
 			transcodeNodeURL = upstreamSession.TranscodeNodeURL
 		}
 	}
-	h.closeTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
+	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL, true)
 	if h.sessionMgr != nil {
 		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
 	}
@@ -844,6 +866,12 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, ErrSessionNotFound
 	}
 	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod == method {
+		// After a restart the durable play session survives but the in-memory
+		// native session is gone; rebuild it from the recipe card so ownership and
+		// accounting are restored before the transcode is (re)started.
+		if _, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err != nil && errors.Is(err, playback.ErrSessionNotFound) {
+			h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID)
+		}
 		_ = h.syncUpstreamAudioSelection(playSession, source)
 		return playSession, nil
 	}
@@ -874,7 +902,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			transcodeNodeURL = current.TranscodeNodeURL
 		}
 		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
-		h.closeTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
+		h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL, true)
 	}
 
 	var session *playback.Session
@@ -948,8 +976,15 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 }
 
 func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessionID, upstreamSessionID string, source PlaybackMediaSource) (*playback.TranscodeSession, error) {
-	if existing := h.getTranscodeSession(upstreamSessionID); existing != nil {
+	if existing := h.tm.GetTranscodeSession(upstreamSessionID); existing != nil {
 		return existing, nil
+	}
+	// If a recipe card survived (e.g. a server restart), rebuild the transcode
+	// from it — at the card's position — rather than starting fresh at the
+	// original seek. On a first play there is no card yet, so this is a no-op and
+	// we fall through to the normal start below.
+	if reconstructed := h.tm.ReconstructTranscode(ctx, upstreamSessionID, -1); reconstructed != nil {
+		return reconstructed, nil
 	}
 	if !source.TranscodeAudio && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
 		return nil, errTranscode4KDisallowed
@@ -964,12 +999,6 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	}
 	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("prepare transcode dir: %w", err)
-	}
-
-	h.transcodeMu.Lock()
-	if existing := h.transcodes[upstreamSessionID]; existing != nil {
-		h.transcodeMu.Unlock()
-		return existing, nil
 	}
 
 	initialSeekSeconds := 0.0
@@ -1002,23 +1031,33 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 
 	transcodeSession, err := playback.StartTranscode(context.WithoutCancel(ctx), opts)
 	if err != nil {
-		h.transcodeMu.Unlock()
 		return nil, err
 	}
-	h.transcodes[upstreamSessionID] = transcodeSession
-	h.transcodeMu.Unlock()
+	// Register atomically; a concurrent request may have won the race, in which
+	// case close this duplicate ffmpeg and use the winner.
+	winner, stored := h.tm.GetOrRegisterTranscodeSession(upstreamSessionID, transcodeSession)
+	if !stored {
+		_ = transcodeSession.Close()
+		return winner, nil
+	}
+
+	// Persist a recipe card keyed by the upstream session id (matching the native
+	// scheme) using the native session's identity so reconstruct's ownership
+	// re-bind matches the Jellyfin caller's StreamAppUserID. Best-effort.
+	if h.sessionMgr != nil {
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
+			h.tm.SaveRecipeCard(context.WithoutCancel(ctx), upstream, upstream.TranscodeNodeURL, opts)
+		}
+	}
+	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 		current.TranscodeStarted = true
 		return nil
 	}); err != nil {
-		closeErr := transcodeSession.Close()
-		h.transcodeMu.Lock()
-		delete(h.transcodes, upstreamSessionID)
-		h.transcodeMu.Unlock()
-		if closeErr != nil {
-			return nil, fmt.Errorf("update playback session: %w (cleanup: %v)", err, closeErr)
-		}
+		// Roll back: drop the transcode from the map and delete the card we just
+		// wrote (this start is being abandoned).
+		h.tm.CloseTranscodeSession(upstreamSessionID, "", true)
 		return nil, fmt.Errorf("update playback session: %w", err)
 	}
 
@@ -1110,7 +1149,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		return false, nil
 	}
 
-	if transcodeSession := h.getTranscodeSession(playSession.UpstreamSessionID); transcodeSession != nil {
+	if transcodeSession := h.tm.GetTranscodeSession(playSession.UpstreamSessionID); transcodeSession != nil {
 		transcodeSession.SetAudioTrackIndex(audioTrackIndex)
 		startSegment := 0
 		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
@@ -1307,35 +1346,6 @@ func copyProxyResponse(w http.ResponseWriter, resp *http.Response) {
 
 func chiURLParam(r *http.Request, key string) string {
 	return chi.URLParam(r, key)
-}
-
-func (h *PlaybackHandler) getTranscodeSession(sessionID string) *playback.TranscodeSession {
-	h.transcodeMu.RLock()
-	defer h.transcodeMu.RUnlock()
-	return h.transcodes[sessionID]
-}
-
-func (h *PlaybackHandler) closeTranscodeSession(sessionID, transcodeNodeURL string) {
-	h.transcodeMu.Lock()
-	session := h.transcodes[sessionID]
-	delete(h.transcodes, sessionID)
-	h.transcodeMu.Unlock()
-
-	if session != nil {
-		_ = session.Close()
-	}
-	if transcodeNodeURL != "" && h.JWTSecret != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, transcodeNodeURL+"/transcode/"+sessionID, nil)
-		if err == nil {
-			req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-			if resp, doErr := http.DefaultClient.Do(req); doErr == nil {
-				resp.Body.Close()
-			}
-		}
-	}
 }
 
 func seekSecondsFromTicks(seekStr string) float64 {

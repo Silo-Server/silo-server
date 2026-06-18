@@ -36,7 +36,7 @@ type Dependencies struct {
 	IDCodec          *ResourceIDCodec
 	ImageCache       *ImageCache
 	DeviceProfiles   *DeviceProfileStore
-	PlaybackStore    *PlaybackSessionStore
+	PlaybackStore    CompatPlaybackStore
 	LoginResolver    loginResolver
 	Authenticator    *Authenticator
 	WebFS            fs.FS

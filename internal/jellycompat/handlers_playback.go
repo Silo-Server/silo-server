@@ -8,14 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -115,7 +113,7 @@ type PlaybackHandler struct {
 	content                 ContentService
 	codec                   *ResourceIDCodec
 	deviceProfiles          *DeviceProfileStore
-	playbackStore           *PlaybackSessionStore
+	playbackStore           CompatPlaybackStore
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver
 	storeProvider           userstore.UserStoreProvider
@@ -126,12 +124,17 @@ type PlaybackHandler struct {
 	FFmpegPath              string
 	HWAccel                 string
 	TranscodeDir            string
-	transcodeMu             sync.RWMutex
-	transcodes              map[string]*playback.TranscodeSession
-	SubtitleRepo            subtitles.Repository // optional; enables downloaded subtitles
-	S3Client                subtitles.S3Client   // optional; for serving S3 subtitles
-	S3Bucket                string               // bucket for subtitle storage
-	SettingsRepo            SettingsReader       // optional; reads watched threshold setting
+	// RecipeStore persists transcode recipe cards so a compat transcode can be
+	// reconstructed after a restart. Set by the router; nil/disabled = off.
+	RecipeStore playback.RecipeStore
+	// tm is the shared transcode-session lifecycle (live map, recipe cards,
+	// reconstruct) — the same type the native handler uses, so jellycompat gets
+	// the card lifetime, reconstruct cap, and node-affinity rule for free.
+	tm           *playback.TranscodeManager
+	SubtitleRepo subtitles.Repository // optional; enables downloaded subtitles
+	S3Client     subtitles.S3Client   // optional; for serving S3 subtitles
+	S3Bucket     string               // bucket for subtitle storage
+	SettingsRepo SettingsReader       // optional; reads watched threshold setting
 }
 
 // playbackThresholds reads the playback.watched_threshold and
@@ -176,7 +179,7 @@ func NewPlaybackHandler(
 	content ContentService,
 	codec *ResourceIDCodec,
 	deviceProfiles *DeviceProfileStore,
-	playbackStore *PlaybackSessionStore,
+	playbackStore CompatPlaybackStore,
 	sessionMgr SessionManagerInterface,
 	fileResolver FilePathResolver,
 	storeProvider userstore.UserStoreProvider,
@@ -204,14 +207,44 @@ func NewPlaybackHandler(
 		FFmpegPath:     ffmpegPath,
 		HWAccel:        hwAccel,
 		TranscodeDir:   transcodeDir,
-		transcodes:     make(map[string]*playback.TranscodeSession),
+		tm:             playback.NewTranscodeManager(),
 	}
-	if cleaned, err := playback.CleanupOrphanedTranscodeDirs(h.TranscodeDir, nil); err != nil {
-		slog.Warn("jellycompat transcode cleanup failed", "dir", h.TranscodeDir, "error", err)
-	} else if cleaned > 0 {
-		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "dir", h.TranscodeDir, "count", cleaned)
+	// Wire the shared transcode manager with closures so it reads the handler's
+	// (late-set) RecipeStore/JWTSecret lazily, matching the native handler.
+	h.tm.StoreFn = func() playback.RecipeStore { return h.RecipeStore }
+	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.Config = func() playback.TranscodeRuntimeConfig {
+		return playback.TranscodeRuntimeConfig{
+			TranscodeDir: h.TranscodeDir,
+			FFmpegPath:   h.FFmpegPath,
+			HWAccel:      h.HWAccel,
+		}
+	}
+	if reg, ok := sessionMgr.(interface {
+		GetSession(string) (*playback.Session, error)
+		RegisterReconstructed(*playback.Session) *playback.Session
+	}); ok {
+		h.tm.Sessions = reg
+	}
+	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string) {
+		// ffmpeg crash: drop the dead transcode (keeping the card so a resume can
+		// reconstruct) and stop the upstream native session.
+		nodeURL := ""
+		if h.sessionMgr != nil {
+			if up, err := h.sessionMgr.GetSession(sessionID); err == nil && up != nil {
+				nodeURL = up.TranscodeNodeURL
+			}
+			_ = h.sessionMgr.StopSession(sessionID)
+		}
+		h.tm.CloseTranscodeSession(sessionID, nodeURL, false)
 	}
 	return h
+}
+
+// CleanupOrphanedTranscodes removes stale per-session transcode dirs, sparing
+// those whose recipe card still exists. Delegates to the shared manager.
+func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
+	return h.tm.CleanupOrphanedTranscodes()
 }
 
 // buildProxyRedirectURL signs a stream token and builds the redirect URL for
