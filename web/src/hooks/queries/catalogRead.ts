@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import { api } from "@/api/client";
@@ -84,7 +84,6 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number)
     queryKey: catalogKeys.itemDetail(id!, libraryId),
     queryFn: () => fetchCatalogItemDetail(id!, libraryId),
     enabled: !!id,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -93,7 +92,6 @@ export function useCatalogItemVersions(id: string | undefined) {
     queryKey: catalogKeys.itemVersions(id!),
     queryFn: () => fetchCatalogItemVersions(id!),
     enabled: !!id,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -119,7 +117,6 @@ export function useCatalogItemEpisodes(id: string | undefined, libraryId?: numbe
     queryKey: catalogKeys.itemEpisodes(id!, libraryId),
     queryFn: () => fetchCatalogItemEpisodes(id!, libraryId),
     enabled: !!id,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -150,7 +147,6 @@ export function useCatalogSeriesSeasons(seriesId: string | undefined, libraryId?
     queryKey: catalogKeys.seriesSeasons(seriesId!, libraryId),
     queryFn: () => fetchCatalogSeriesSeasons(seriesId!, libraryId),
     enabled: !!seriesId,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -164,7 +160,6 @@ export function useCatalogSeasonDetail(
     queryFn: () => fetchCatalogSeasonDetail(seriesId!, seasonNum, libraryId),
     select: (data) => data.season,
     enabled: !!seriesId && seasonNum >= 0,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -177,6 +172,5 @@ export function useCatalogSeasonEpisodes(
     queryKey: catalogKeys.seasonEpisodes(seriesId!, seasonNum, libraryId),
     queryFn: () => fetchCatalogSeasonEpisodes(seriesId!, seasonNum, libraryId),
     enabled: !!seriesId && seasonNum >= 0,
-    placeholderData: keepPreviousData,
   });
 }

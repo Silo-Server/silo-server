@@ -421,7 +421,9 @@ function handleUserStateEvent(
 
   void invalidateMediaSurfaceQueries(
     queryClient,
-    payload.content_id ? { itemId: payload.content_id } : {},
+    payload.content_id
+      ? { itemId: payload.content_id, refetchActive: false }
+      : { refetchActive: false },
   ).then(() => {
     bumpHomeRefreshSignal(queryClient);
   });

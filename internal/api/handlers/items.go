@@ -1325,12 +1325,22 @@ func maxFileBitrate(files []*models.MediaFile) int {
 
 // toSeasonResponse converts a Season model to an API response.
 func (h *ItemsHandler) toSeasonResponse(r *http.Request, seriesID string, s *models.Season) seasonResponse {
+	episodes, _ := h.episodeRepo.ListBySeason(r.Context(), seriesID, s.SeasonNumber)
+	return h.toSeasonResponseFromEpisodes(r, seriesID, s, episodes, h.getAggregateUserData(r, episodes))
+}
+
+func (h *ItemsHandler) toSeasonResponseFromEpisodes(
+	r *http.Request,
+	seriesID string,
+	s *models.Season,
+	episodes []*models.Episode,
+	userData *catalog.SeasonUserData,
+) seasonResponse {
 	if h.detailSvc != nil {
 		if localized, err := h.detailSvc.LocalizeSeasonModel(r.Context(), s, h.accessFilter(r)); err == nil && localized != nil {
 			s = localized
 		}
 	}
-	episodes, _ := h.episodeRepo.ListBySeason(r.Context(), seriesID, s.SeasonNumber)
 
 	resp := seasonResponse{
 		ContentID:       s.ContentID,
@@ -1345,7 +1355,7 @@ func (h *ItemsHandler) toSeasonResponse(r *http.Request, seriesID string, s *mod
 		resp.AirDate = s.AirDate.Format("2006-01-02")
 	}
 	resp.PosterURL = h.presignURL(r, featuredPosterPath(s.PosterPath), "featured")
-	resp.UserData = h.getAggregateUserData(r, episodes)
+	resp.UserData = userData
 
 	return resp
 }
@@ -1453,11 +1463,50 @@ func (h *ItemsHandler) getAggregateUserData(r *http.Request, episodes []*models.
 		return nil
 	}
 
+	progressMap := h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes))
+	return aggregateUserDataFromProgress(episodes, progressMap)
+}
+
+func (h *ItemsHandler) progressMapForEpisodes(r *http.Request, episodes []*models.Episode) (map[string]userstore.WatchProgress, bool) {
+	store, profileID, ok := h.userStoreForRequest(r)
+	if !ok {
+		return nil, false
+	}
+	return h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes)), true
+}
+
+func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store userstore.UserStore, profileID string, episodeIDs []string) map[string]userstore.WatchProgress {
+	const chunkSize = 500
+	progressMap := make(map[string]userstore.WatchProgress, len(episodeIDs))
+	for start := 0; start < len(episodeIDs); start += chunkSize {
+		end := start + chunkSize
+		if end > len(episodeIDs) {
+			end = len(episodeIDs)
+		}
+		chunk, err := store.ListProgressByMediaItems(ctx, profileID, episodeIDs[start:end])
+		if err != nil {
+			continue
+		}
+		for id, progress := range chunk {
+			progressMap[id] = progress
+		}
+	}
+	return progressMap
+}
+
+func aggregateUserDataFromProgress(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) *catalog.SeasonUserData {
+	if len(episodes) == 0 {
+		return nil
+	}
+
 	var watchedCount int
 	var inProgressCount int
 	for _, ep := range episodes {
-		progress, progressErr := store.GetProgress(r.Context(), profileID, ep.ContentID)
-		if progressErr != nil || progress == nil {
+		if ep == nil {
+			continue
+		}
+		progress, ok := progressMap[ep.ContentID]
+		if !ok {
 			continue
 		}
 		if progress.Completed {
@@ -1476,6 +1525,34 @@ func (h *ItemsHandler) getAggregateUserData(r *http.Request, episodes []*models.
 		InProgressCount: inProgressCount,
 		Played:          watchedCount == len(episodes),
 	}
+}
+
+func episodeContentIDs(episodes []*models.Episode) []string {
+	ids := make([]string, 0, len(episodes))
+	seen := make(map[string]struct{}, len(episodes))
+	for _, ep := range episodes {
+		if ep == nil || ep.ContentID == "" {
+			continue
+		}
+		if _, ok := seen[ep.ContentID]; ok {
+			continue
+		}
+		seen[ep.ContentID] = struct{}{}
+		ids = append(ids, ep.ContentID)
+	}
+	return ids
+}
+
+func flattenEpisodeGroups(groups map[int][]*models.Episode) []*models.Episode {
+	var total int
+	for _, episodes := range groups {
+		total += len(episodes)
+	}
+	flattened := make([]*models.Episode, 0, total)
+	for _, episodes := range groups {
+		flattened = append(flattened, episodes...)
+	}
+	return flattened
 }
 
 // requestProfileID resolves the active profile for a request, falling back to

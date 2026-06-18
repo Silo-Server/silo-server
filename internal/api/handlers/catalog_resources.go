@@ -228,12 +228,24 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 		}
 
 		if len(seasons) > 0 {
+			episodesBySeason, err := h.items.episodeRepo.ListBySeriesGroupedBySeason(r.Context(), id)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
+				return
+			}
+			progressMap, hasProgressMap := h.items.progressMapForEpisodes(r, flattenEpisodeGroups(episodesBySeason))
+
 			resp := make([]seasonResponse, 0, len(seasons))
 			for _, s := range seasons {
-				sr := h.items.toSeasonResponse(r, id, s)
-				if sr.EpisodeCount == 0 {
+				episodes := episodesBySeason[s.SeasonNumber]
+				if len(episodes) == 0 {
 					continue
 				}
+				var userData *catalog.SeasonUserData
+				if hasProgressMap {
+					userData = aggregateUserDataFromProgress(episodes, progressMap)
+				}
+				sr := h.items.toSeasonResponseFromEpisodes(r, id, s, episodes, userData)
 				resp = append(resp, sr)
 			}
 
@@ -255,13 +267,14 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 			title = "Specials"
 		}
 		episodes, _ := h.items.episodeRepo.ListBySeason(r.Context(), id, s.SeasonNumber)
+		userData := h.items.getAggregateUserData(r, episodes)
 		resp = append(resp, seasonResponse{
 			ContentID:    fmt.Sprintf("%s-S%02d", id, s.SeasonNumber),
 			SeasonNumber: s.SeasonNumber,
 			IsSpecials:   s.SeasonNumber == 0,
 			EpisodeCount: s.EpisodeCount,
 			Title:        title,
-			UserData:     h.items.getAggregateUserData(r, episodes),
+			UserData:     userData,
 		})
 	}
 
@@ -304,10 +317,20 @@ func (h *CatalogResourceHandler) HandleGetSeason(w http.ResponseWriter, r *http.
 		season, err := h.items.seasonRepo.GetBySeriesAndNumber(r.Context(), id, num)
 		switch {
 		case err == nil:
-			episodes, _ := h.items.episodeRepo.ListBySeasonID(r.Context(), season.ContentID)
+			episodes, err := h.items.episodeRepo.ListBySeasonID(r.Context(), season.ContentID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
+				return
+			}
 			h.items.maybeRequestStaleSeasonMetadataRefresh(r.Context(), season.ContentID, episodes)
 			writeJSON(w, http.StatusOK, seasonDetailResponse{
-				Season: h.items.toSeasonResponse(r, id, season),
+				Season: h.items.toSeasonResponseFromEpisodes(
+					r,
+					id,
+					season,
+					episodes,
+					h.items.getAggregateUserData(r, episodes),
+				),
 			})
 			return
 		case !errors.Is(err, catalog.ErrSeasonNotFound):
@@ -419,7 +442,13 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 	} else {
 		season.Title = "Season " + strconv.Itoa(seasonNum)
 	}
-	seasonResp := h.items.toSeasonResponse(r, seriesID, season)
+	seasonResp := h.items.toSeasonResponseFromEpisodes(
+		r,
+		seriesID,
+		season,
+		episodes,
+		h.items.getAggregateUserData(r, episodes),
+	)
 	return &catalog.ItemDetail{
 		ContentID:         seasonID,
 		Type:              "season",

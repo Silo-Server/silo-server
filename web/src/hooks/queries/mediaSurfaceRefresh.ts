@@ -21,6 +21,7 @@ interface InvalidateMediaSurfaceOptions {
   itemId?: string;
   libraryId?: number;
   watchedKeys?: Array<readonly unknown[]>;
+  refetchActive?: boolean;
 }
 
 export function updateCatalogItemDetail(
@@ -99,23 +100,28 @@ export async function invalidateMediaSurfaceQueries(
   queryClient: QueryClient,
   options: InvalidateMediaSurfaceOptions = {},
 ) {
+  const invalidate = (filters: Parameters<QueryClient["invalidateQueries"]>[0]) =>
+    queryClient.invalidateQueries(
+      options.refetchActive === false ? { ...filters, refetchType: "none" } : filters,
+    );
+
   const invalidations: Array<Promise<void>> = [
-    queryClient.invalidateQueries({ queryKey: itemKeys.all }),
-    queryClient.invalidateQueries({
+    invalidate({ queryKey: itemKeys.all }),
+    invalidate({
       queryKey: catalogKeys.all,
       predicate: (query) => activeCatalogQueryMatchesLibrary(query.queryKey, options.libraryId),
     }),
-    queryClient.invalidateQueries({
+    invalidate({
       queryKey: sectionKeys.all,
       predicate: (query) => activeSectionQueryMatchesLibrary(query.queryKey, options.libraryId),
     }),
-    queryClient.invalidateQueries({ queryKey: progressKeys.all }),
-    queryClient.invalidateQueries({ queryKey: historyKeys.all }),
-    queryClient.invalidateQueries({ queryKey: favoriteKeys.all }),
-    queryClient.invalidateQueries({ queryKey: watchlistKeys.all }),
-    queryClient.invalidateQueries({ queryKey: recKeys.all }),
-    queryClient.invalidateQueries({ queryKey: personKeys.all }),
-    queryClient.invalidateQueries({
+    invalidate({ queryKey: progressKeys.all }),
+    invalidate({ queryKey: historyKeys.all }),
+    invalidate({ queryKey: favoriteKeys.all }),
+    invalidate({ queryKey: watchlistKeys.all }),
+    invalidate({ queryKey: recKeys.all }),
+    invalidate({ queryKey: personKeys.all }),
+    invalidate({
       predicate: (query) =>
         Array.isArray(query.queryKey) &&
         query.queryKey[0] === adminKeys.playbackHistory({})[0] &&
@@ -125,16 +131,16 @@ export async function invalidateMediaSurfaceQueries(
 
   if (options.itemId) {
     invalidations.push(
-      queryClient.invalidateQueries({ queryKey: ["catalog", "items", options.itemId, "detail"] }),
-      queryClient.invalidateQueries({ queryKey: ["items", "detail", options.itemId] }),
-      queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", options.itemId] }),
-      queryClient.invalidateQueries({ queryKey: favoriteKeys.check(options.itemId) }),
-      queryClient.invalidateQueries({ queryKey: watchlistKeys.check(options.itemId) }),
+      invalidate({ queryKey: ["catalog", "items", options.itemId, "detail"] }),
+      invalidate({ queryKey: ["items", "detail", options.itemId] }),
+      invalidate({ queryKey: ["items", "watchDetail", options.itemId] }),
+      invalidate({ queryKey: favoriteKeys.check(options.itemId) }),
+      invalidate({ queryKey: watchlistKeys.check(options.itemId) }),
     );
   }
 
   for (const key of options.watchedKeys ?? []) {
-    invalidations.push(queryClient.invalidateQueries({ queryKey: key }));
+    invalidations.push(invalidate({ queryKey: key }));
   }
 
   await Promise.all(invalidations);
