@@ -281,6 +281,11 @@ func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSess
 		if !errors.Is(err, ErrSessionNotFound) {
 			return nil, SessionLoadFailed
 		}
+		// A nil manager (documented optional on StreamHandler) has no card store,
+		// so a missing session is simply not-found rather than a panic.
+		if m == nil {
+			return nil, SessionMissing
+		}
 		// Lost the in-memory session (e.g. restart): rebuild it from the card.
 		// ReconstructSession re-binds ownership and refuses a zero/mismatched
 		// caller, so a nil result here is a genuine not-found.
@@ -305,7 +310,7 @@ func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSess
 // Returns the (re)registered session, or nil if reconstruct is not possible (no
 // card, ownership mismatch, or unsupported session manager).
 func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID string, requestUserID int) *Session {
-	if !m.recipeEnabled() || m.Sessions == nil {
+	if m == nil || !m.recipeEnabled() || m.Sessions == nil {
 		return nil
 	}
 	card, found, err := m.store().Get(ctx, sessionID)
@@ -411,6 +416,13 @@ func (m *TranscodeManager) ReconstructTranscode(ctx context.Context, sessionID s
 func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID string, requestedSegment int) *TranscodeSession {
 	card, found, err := m.store().Get(ctx, sessionID)
 	if err != nil || !found {
+		return nil
+	}
+	// Only transcode cards drive ffmpeg reconstruction. Direct/remux sessions
+	// reconstruct without a runtime and must never reach here; guard so a
+	// direct/remux card ID cannot accidentally spawn an encode. An empty
+	// PlayMethod is a legacy card written before the discriminator (transcode).
+	if card.PlayMethod != "" && card.PlayMethod != PlayTranscode {
 		return nil
 	}
 
@@ -561,6 +573,10 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 			return
 		}
 		_ = resp.Body.Close()
+		if resp.StatusCode >= http.StatusMultipleChoices {
+			slog.Warn("remote transcode delete returned non-success status",
+				"status", resp.StatusCode, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
+		}
 	}
 }
 

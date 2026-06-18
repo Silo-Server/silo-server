@@ -1832,6 +1832,23 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	updatedSession.TargetVideoCodec = targetVideoCodec
 	updatedSession.TargetAudioCodec = targetAudioCodec
 	updatedSession.TargetBitrateKbps = targetBitrateKbps
+
+	// Rewrite the recipe card to the new audio track / method so a post-restart
+	// reconstruct resumes with the switched audio instead of the stale state
+	// persisted at session start. Best-effort; no-op without a recipe store.
+	switch updatedSession.PlayMethod {
+	case playback.PlayDirect:
+		h.tm.SaveCard(context.WithoutCancel(r.Context()),
+			playback.NewDirectRecipeCard(updatedSession.ID, updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID))
+	case playback.PlayRemux:
+		h.tm.SaveCard(context.WithoutCancel(r.Context()),
+			playback.NewRemuxRecipeCard(updatedSession.ID, updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID, updatedSession.TranscodeAudio, updatedSession.AudioTrackIndex))
+	case playback.PlayTranscode:
+		if ts := h.tm.GetTranscodeSession(sessionID); ts != nil {
+			h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), &updatedSession, updatedSession.TranscodeNodeURL, ts.Opts())
+		}
+	}
+
 	h.persistAudioPreference(r.Context(), userID, session.ProfileID, file, req.AudioTrackIndex)
 
 	resp := changeAudioResponse{
