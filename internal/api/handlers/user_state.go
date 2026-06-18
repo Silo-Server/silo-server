@@ -123,7 +123,7 @@ func resolveItemUserStatesWithOptions(
 		}
 	}
 
-	progressMap, err := store.ListProgressByMediaItems(ctx, profileID, progressIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, profileID, progressIDs)
 	if err != nil {
 		return nil, err
 	}

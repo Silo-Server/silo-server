@@ -20,16 +20,3 @@ func TestMarkPlayedBatch_SingleUpsert(t *testing.T) {
 		t.Fatalf("expected completed flag set; got:\n%s", sql)
 	}
 }
-
-func TestMarkUnplayedBatch_BatchedUpdate(t *testing.T) {
-	sql, _ := buildMarkUnplayedBatchSQL()
-	if !strings.Contains(sql, "UPDATE user_watch_progress") {
-		t.Fatalf("expected UPDATE user_watch_progress; got:\n%s", sql)
-	}
-	if !strings.Contains(sql, "completed = FALSE") {
-		t.Fatalf("expected completed = FALSE; got:\n%s", sql)
-	}
-	if !strings.Contains(sql, "media_item_id = ANY($3::text[])") {
-		t.Fatalf("expected ANY(text[]) batch filter; got:\n%s", sql)
-	}
-}

@@ -92,6 +92,24 @@ func TestUserDataDTOProgressCompletedZeros(t *testing.T) {
 	}
 }
 
+func TestUserDataDTOProgressDoesNotClearPlayedData(t *testing.T) {
+	data := &catalog.SeasonUserData{Played: true}
+	progress := &upstreamProgress{
+		MediaItemID:     "x",
+		PositionSeconds: 600.0,
+		DurationSeconds: 1290.0,
+		Completed:       false,
+	}
+
+	dto := userDataDTO("item-4", data, false, progress)
+	if !dto.Played {
+		t.Fatalf("Played = false, want aggregate played state preserved")
+	}
+	if dto.PlayCount != 1 {
+		t.Fatalf("PlayCount = %d, want watched count preserved", dto.PlayCount)
+	}
+}
+
 func TestUserDataDTOProgressRewatchKeepsPlayedAndPosition(t *testing.T) {
 	progress := &upstreamProgress{
 		MediaItemID:     "x",

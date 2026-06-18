@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -67,8 +68,9 @@ func TestSeriesUserDataFromEpisodes(t *testing.T) {
 			progress: map[string]userstore.WatchProgress{
 				"a": {Completed: true},
 			},
-			wantWatched: 1,
-			wantPlayed:  true,
+			wantWatched:  1,
+			wantUnplayed: 2,
+			wantPlayed:   false,
 		},
 		{
 			name:     "zero-position progress row is not in-progress",
@@ -84,7 +86,7 @@ func TestSeriesUserDataFromEpisodes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := seriesUserDataFromEpisodes(tc.episodes, tc.progress)
+			got := catalog.EpisodeRollupUserData(tc.episodes, tc.progress)
 			if got.WatchedCount != tc.wantWatched {
 				t.Errorf("WatchedCount = %d, want %d", got.WatchedCount, tc.wantWatched)
 			}
@@ -107,5 +109,19 @@ func TestModelEpisodeContentIDs(t *testing.T) {
 	got := modelEpisodeContentIDs([]*models.Episode{nil, ep(""), ep("a"), ep("b")})
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Errorf("modelEpisodeContentIDs = %v, want [a b]", got)
+	}
+}
+
+func TestSeriesUserDataFromEpisodesIncludesCompletedHistory(t *testing.T) {
+	got := catalog.EpisodeRollupUserData(
+		[]*models.Episode{ep("progress-complete"), ep("history-complete"), ep("unplayed")},
+		map[string]userstore.WatchProgress{
+			"progress-complete": {Completed: true},
+			"history-complete":  {Completed: true},
+		},
+	)
+
+	if got.WatchedCount != 2 || got.UnplayedCount != 1 || got.Played {
+		t.Fatalf("series user data = %+v, want two watched and one unplayed", got)
 	}
 }

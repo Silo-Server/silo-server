@@ -36,6 +36,7 @@ type UserStore interface {
 	AddHistoryIfMissing(ctx context.Context, entry WatchHistoryEntry) (bool, error)
 	ListHistory(ctx context.Context, profileID string, limit, offset int) ([]WatchHistoryEntry, error)
 	ListCompletedHistory(ctx context.Context, query CompletedHistoryQuery) ([]WatchHistoryEntry, error)
+	ListCompletedHistoryItemIDs(ctx context.Context, query CompletedHistoryItemIDQuery) ([]string, error)
 	RemoveHistoryItems(ctx context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error
 	DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source WatchHistorySource) error
 	ListHomeDismissals(ctx context.Context, profileID, surface string) ([]HomeItemDismissal, error)

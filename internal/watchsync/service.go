@@ -36,7 +36,7 @@ type mediaMatcher interface {
 }
 
 type watchStateImporter interface {
-	RecordImportedHistoryWithSource(ctx context.Context, userID int, profileID, targetID string, duration float64, completed bool, watchedAt *time.Time, source userstore.WatchHistorySource) (bool, error)
+	RecordImportedWatchIfNewerWithSource(ctx context.Context, userID int, profileID, targetID string, duration, position float64, completed bool, updatedAt time.Time, watchedAt *time.Time, source userstore.WatchHistorySource) (bool, error)
 }
 
 const (
@@ -993,13 +993,15 @@ func (s *Service) ImportWatched(
 			continue
 		}
 		duration, _ := s.mediaDuration(ctx, match.MediaItemID)
-		created, err := s.watchState.RecordImportedHistoryWithSource(
+		created, err := s.watchState.RecordImportedWatchIfNewerWithSource(
 			ctx,
 			conn.UserID,
 			conn.ProfileID,
 			match.MediaItemID,
 			duration,
+			0,
 			true,
+			*row.LastWatchedAt,
 			row.LastWatchedAt,
 			historySourceForProvider(importer),
 		)

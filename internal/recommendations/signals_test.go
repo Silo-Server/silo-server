@@ -134,6 +134,31 @@ func (s *fakeSignalStore) ListCompletedHistory(_ context.Context, query userstor
 	return filtered[query.Offset:end], nil
 }
 
+func (s *fakeSignalStore) ListCompletedHistoryItemIDs(_ context.Context, query userstore.CompletedHistoryItemIDQuery) ([]string, error) {
+	seen := map[string]struct{}{}
+	var ids []string
+	for _, entry := range s.history {
+		if entry.ProfileID != query.ProfileID || !entry.Completed {
+			continue
+		}
+		if len(query.MediaItemIDs) > 0 && !slices.Contains(query.MediaItemIDs, entry.MediaItemID) {
+			continue
+		}
+		if len(query.IncludeSources) > 0 && !slices.Contains(query.IncludeSources, entry.Source) {
+			continue
+		}
+		if slices.Contains(query.ExcludeSources, entry.Source) {
+			continue
+		}
+		if _, ok := seen[entry.MediaItemID]; ok {
+			continue
+		}
+		seen[entry.MediaItemID] = struct{}{}
+		ids = append(ids, entry.MediaItemID)
+	}
+	return ids, nil
+}
+
 func (s *fakeSignalStore) GetProfile(context.Context, string) (*userstore.Profile, error) {
 	return s.profile, nil
 }

@@ -803,8 +803,29 @@ func (noOpWatchState) RecordImportedHistoryWithSource(
 	return false, nil
 }
 
+func (noOpWatchState) RecordImportedWatchIfNewerWithSource(
+	context.Context,
+	int,
+	string,
+	string,
+	float64,
+	float64,
+	bool,
+	time.Time,
+	*time.Time,
+	userstore.WatchHistorySource,
+) (bool, error) {
+	return false, nil
+}
+
 type recordingWatchState struct {
-	sources []userstore.WatchHistorySource
+	sources   []userstore.WatchHistorySource
+	updatedAt []time.Time
+	watchedAt []*time.Time
+	completed []bool
+	positions []float64
+	durations []float64
+	targetIDs []string
 }
 
 func (s *recordingWatchState) RecordImportedHistoryWithSource(
@@ -818,6 +839,28 @@ func (s *recordingWatchState) RecordImportedHistoryWithSource(
 	source userstore.WatchHistorySource,
 ) (bool, error) {
 	s.sources = append(s.sources, source)
+	return true, nil
+}
+
+func (s *recordingWatchState) RecordImportedWatchIfNewerWithSource(
+	_ context.Context,
+	_ int,
+	_ string,
+	targetID string,
+	duration float64,
+	position float64,
+	completed bool,
+	updatedAt time.Time,
+	watchedAt *time.Time,
+	source userstore.WatchHistorySource,
+) (bool, error) {
+	s.sources = append(s.sources, source)
+	s.updatedAt = append(s.updatedAt, updatedAt)
+	s.watchedAt = append(s.watchedAt, watchedAt)
+	s.completed = append(s.completed, completed)
+	s.positions = append(s.positions, position)
+	s.durations = append(s.durations, duration)
+	s.targetIDs = append(s.targetIDs, targetID)
 	return true, nil
 }
 
@@ -1276,6 +1319,53 @@ func TestServiceImportWatchedUsesProviderHistorySource(t *testing.T) {
 	}
 	if len(watchState.sources) != 1 || watchState.sources[0] != userstore.WatchHistorySourceSimkl {
 		t.Fatalf("recorded sources = %+v, want simkl", watchState.sources)
+	}
+	if len(watchState.targetIDs) != 1 || watchState.targetIDs[0] != "movie-1" {
+		t.Fatalf("recorded target ids = %+v, want movie-1", watchState.targetIDs)
+	}
+	if len(watchState.completed) != 1 || !watchState.completed[0] {
+		t.Fatalf("recorded completed flags = %+v, want true", watchState.completed)
+	}
+	if len(watchState.positions) != 1 || watchState.positions[0] != 0 {
+		t.Fatalf("recorded positions = %+v, want 0", watchState.positions)
+	}
+	if len(watchState.updatedAt) != 1 || !watchState.updatedAt[0].Equal(watchedAt) {
+		t.Fatalf("recorded updated_at = %+v, want %v", watchState.updatedAt, watchedAt)
+	}
+	if len(watchState.watchedAt) != 1 || watchState.watchedAt[0] == nil || !watchState.watchedAt[0].Equal(watchedAt) {
+		t.Fatalf("recorded watched_at = %+v, want %v", watchState.watchedAt, watchedAt)
+	}
+}
+
+func TestServiceImportWatchedSkipsRowsWithoutLastWatchedAt(t *testing.T) {
+	repo := newServiceFakeRepo()
+	provider := watchedImporterStub{
+		rows: []RemoteWatch{{
+			Provider: "trakt",
+			Kind:     historyimport.KindMovie,
+			Title:    "Inception",
+			Year:     2010,
+		}},
+	}
+	watchState := &recordingWatchState{}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithWatchState(watchState)
+
+	result, err := service.ImportWatched(context.Background(), Connection{
+		ID:        "conn-1",
+		Provider:  "trakt",
+		UserID:    7,
+		ProfileID: "profile-1",
+	}, ServerConfig{}, provider)
+	if err != nil {
+		t.Fatalf("ImportWatched: %v", err)
+	}
+	if result.Found != 1 || result.Imported != 0 {
+		t.Fatalf("result = %+v, want found row skipped with no import", result)
+	}
+	if len(watchState.targetIDs) != 0 {
+		t.Fatalf("watch state calls = %+v, want none", watchState.targetIDs)
 	}
 }
 

@@ -1370,12 +1370,11 @@ func (h *ItemsHandler) getLeafUserData(r *http.Request, contentID string, itemTy
 		return nil
 	}
 
-	progress, err := store.GetProgress(r.Context(), profileID, contentID)
-	if err != nil || progress == nil {
+	progress, err := userstore.GetProgressWithCompletedHistory(r.Context(), store, profileID, contentID)
+	if err != nil {
 		return nil
 	}
-
-	return leafUserDataFromProgress(*progress)
+	return leafUserDataFromProgress(progress)
 }
 
 // listLeafUserData batch-fetches watch progress for the given content IDs in a
@@ -1386,19 +1385,23 @@ func (h *ItemsHandler) listLeafUserData(r *http.Request, contentIDs []string) ma
 		return nil
 	}
 
-	progressMap, err := store.ListProgressByMediaItems(r.Context(), profileID, contentIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(r.Context(), store, profileID, contentIDs)
 	if err != nil {
 		return nil
 	}
 
 	result := make(map[string]*catalog.SeasonUserData, len(progressMap))
 	for contentID, progress := range progressMap {
-		result[contentID] = leafUserDataFromProgress(progress)
+		progressCopy := progress
+		result[contentID] = leafUserDataFromProgress(&progressCopy)
 	}
 	return result
 }
 
-func leafUserDataFromProgress(progress userstore.WatchProgress) *catalog.SeasonUserData {
+func leafUserDataFromProgress(progress *userstore.WatchProgress) *catalog.SeasonUserData {
+	if progress == nil {
+		return nil
+	}
 	return &catalog.SeasonUserData{
 		PositionSeconds: progress.PositionSeconds,
 		DurationSeconds: progress.DurationSeconds,
@@ -1467,7 +1470,7 @@ func (h *ItemsHandler) getAggregateUserData(r *http.Request, episodes []*models.
 	if err != nil {
 		return nil
 	}
-	return aggregateUserDataFromProgress(episodes, progressMap)
+	return catalog.EpisodeRollupUserData(episodes, progressMap)
 }
 
 func (h *ItemsHandler) progressMapForEpisodes(r *http.Request, episodes []*models.Episode) (map[string]userstore.WatchProgress, bool) {
@@ -1475,7 +1478,8 @@ func (h *ItemsHandler) progressMapForEpisodes(r *http.Request, episodes []*model
 	if !ok {
 		return nil, false
 	}
-	progressMap, err := h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes))
+	episodeIDs := episodeContentIDs(episodes)
+	progressMap, err := h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeIDs)
 	if err != nil {
 		return nil, false
 	}
@@ -1490,7 +1494,7 @@ func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store user
 		if end > len(episodeIDs) {
 			end = len(episodeIDs)
 		}
-		chunk, err := store.ListProgressByMediaItems(ctx, profileID, episodeIDs[start:end])
+		chunk, err := userstore.ListProgressWithCompletedHistory(ctx, store, profileID, episodeIDs[start:end])
 		if err != nil {
 			return nil, err
 		}
@@ -1499,39 +1503,6 @@ func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store user
 		}
 	}
 	return progressMap, nil
-}
-
-func aggregateUserDataFromProgress(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) *catalog.SeasonUserData {
-	if len(episodes) == 0 {
-		return nil
-	}
-
-	var watchedCount int
-	var inProgressCount int
-	for _, ep := range episodes {
-		if ep == nil {
-			continue
-		}
-		progress, ok := progressMap[ep.ContentID]
-		if !ok {
-			continue
-		}
-		if progress.Completed {
-			watchedCount++
-			continue
-		}
-		if progress.PositionSeconds > 0 {
-			inProgressCount++
-		}
-	}
-
-	unplayedCount := len(episodes) - watchedCount
-	return &catalog.SeasonUserData{
-		WatchedCount:    watchedCount,
-		UnplayedCount:   unplayedCount,
-		InProgressCount: inProgressCount,
-		Played:          watchedCount == len(episodes),
-	}
 }
 
 func episodeContentIDs(episodes []*models.Episode) []string {

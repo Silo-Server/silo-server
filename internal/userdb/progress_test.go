@@ -177,6 +177,132 @@ func TestListCompletedHistoryAppliesScopedFilters(t *testing.T) {
 	}
 }
 
+func TestListCompletedHistoryItemIDsAppliesScopedFilters(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	entries := []userstore.WatchHistoryEntry{
+		{
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-history-only",
+			WatchedAt:       "2026-04-25T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceTrakt,
+		},
+		{
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-hidden",
+			WatchedAt:       "2026-04-25T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceSimkl,
+		},
+		{
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-future-hidden",
+			WatchedAt:       "2026-04-25T12:10:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceTrakt,
+		},
+		{
+			ProfileID:       "profile-2",
+			MediaItemID:     "movie-other-profile",
+			WatchedAt:       "2026-04-25T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceTrakt,
+		},
+		{
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-incomplete",
+			WatchedAt:       "2026-04-25T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       false,
+			Source:          userstore.WatchHistorySourceTrakt,
+		},
+		{
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-playback",
+			WatchedAt:       "2026-04-25T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourcePlayback,
+		},
+	}
+	for _, entry := range entries {
+		if err := AddHistory(db, entry); err != nil {
+			t.Fatalf("AddHistory(%s): %v", entry.MediaItemID, err)
+		}
+	}
+	if err := RemoveHistoryItems(db, "profile-1", []string{"movie-hidden"}, time.Date(2026, 4, 25, 12, 5, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("RemoveHistoryItems: %v", err)
+	}
+	if err := RemoveHistoryItems(db, "profile-1", []string{"movie-future-hidden"}, time.Date(2026, 4, 25, 12, 5, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("RemoveHistoryItems(future): %v", err)
+	}
+
+	ids, err := ListCompletedHistoryItemIDs(db, userstore.CompletedHistoryItemIDQuery{
+		ProfileID: "profile-1",
+		MediaItemIDs: []string{
+			"movie-history-only",
+			"movie-hidden",
+			"movie-future-hidden",
+			"movie-other-profile",
+			"movie-incomplete",
+			"movie-missing",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListCompletedHistoryItemIDs: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "movie-history-only" {
+		t.Fatalf("ListCompletedHistoryItemIDs = %v, want [movie-history-only]", ids)
+	}
+
+	if err := AddHistory(db, userstore.WatchHistoryEntry{
+		ProfileID:       "profile-1",
+		MediaItemID:     "movie-future-hidden",
+		WatchedAt:       "2026-04-25T12:11:00Z",
+		DurationSeconds: 7200,
+		Completed:       true,
+		Source:          userstore.WatchHistorySourcePlayback,
+	}); err != nil {
+		t.Fatalf("AddHistory(future replacement): %v", err)
+	}
+	ids, err = ListCompletedHistoryItemIDs(db, userstore.CompletedHistoryItemIDQuery{
+		ProfileID:    "profile-1",
+		MediaItemIDs: []string{"movie-future-hidden"},
+	})
+	if err != nil {
+		t.Fatalf("ListCompletedHistoryItemIDs(future replacement): %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "movie-future-hidden" {
+		t.Fatalf("ListCompletedHistoryItemIDs(future replacement) = %v, want [movie-future-hidden]", ids)
+	}
+
+	ids, err = ListCompletedHistoryItemIDs(db, userstore.CompletedHistoryItemIDQuery{
+		ProfileID:      "profile-1",
+		MediaItemIDs:   []string{"movie-history-only", "movie-playback"},
+		IncludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourceTrakt, userstore.WatchHistorySourcePlayback},
+		ExcludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourcePlayback},
+	})
+	if err != nil {
+		t.Fatalf("ListCompletedHistoryItemIDs(source filters): %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "movie-history-only" {
+		t.Fatalf("ListCompletedHistoryItemIDs(source filters) = %v, want [movie-history-only]", ids)
+	}
+}
+
 func TestMarkProgressBatch_CompactsDirtyInput(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {

@@ -296,6 +296,236 @@ func TestStableIdentityResolverResolvesSeasonZeroSpecial(t *testing.T) {
 	}
 }
 
+func TestManualMarkUnwatchedSuppressesImportedHistoryButReturnsManualHistory(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-1", Name: "Profile"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if err := store.SetProgressAt(
+		context.Background(),
+		"profile-1",
+		"movie-1",
+		0,
+		7200,
+		true,
+		time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+	if err := store.AddHistory(context.Background(), userstore.WatchHistoryEntry{
+		ID:              "trakt-history-1",
+		ProfileID:       "profile-1",
+		MediaItemID:     "movie-1",
+		WatchedAt:       "2026-05-04T12:00:00Z",
+		DurationSeconds: 7200,
+		Completed:       true,
+		Source:          userstore.WatchHistorySourceTrakt,
+		Identity: userstore.WatchIdentity{
+			StableType:  "movie",
+			ProviderIDs: map[string]string{"tmdb": "603"},
+		},
+	}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+	if err := store.AddHistory(context.Background(), userstore.WatchHistoryEntry{
+		ID:              "simkl-history-1",
+		ProfileID:       "profile-1",
+		MediaItemID:     "movie-1",
+		WatchedAt:       "2026-05-04T13:00:00Z",
+		DurationSeconds: 7200,
+		Completed:       true,
+		Source:          userstore.WatchHistorySourceSimkl,
+		Identity: userstore.WatchIdentity{
+			StableType:  "movie",
+			ProviderIDs: map[string]string{"tmdb": "603"},
+		},
+	}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+	if err := store.AddHistory(context.Background(), userstore.WatchHistoryEntry{
+		ID:              "manual-history-1",
+		ProfileID:       "profile-1",
+		MediaItemID:     "movie-1",
+		WatchedAt:       "2026-05-04T14:00:00Z",
+		DurationSeconds: 7200,
+		Completed:       true,
+		Source:          userstore.WatchHistorySourceManual,
+		Identity: userstore.WatchIdentity{
+			StableType:  "movie",
+			ProviderIDs: map[string]string{"tmdb": "603"},
+		},
+	}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+
+	service := NewService(testStoreProvider{store: store})
+	result, err := service.RecordManualMarkUnwatchedWithResult(context.Background(), 1, "profile-1", []string{"movie-1"})
+	if err != nil {
+		t.Fatalf("RecordManualMarkUnwatchedWithResult: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Source != userstore.WatchHistorySourceManual {
+		t.Fatalf("unwatch result entries = %+v, want only manual history for outbound sync", result.Entries)
+	}
+
+	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if progress != nil {
+		t.Fatalf("progress after unwatch = %+v, want nil", progress)
+	}
+	completedIDs, err := store.ListCompletedHistoryItemIDs(context.Background(), userstore.CompletedHistoryItemIDQuery{
+		ProfileID:    "profile-1",
+		MediaItemIDs: []string{"movie-1"},
+	})
+	if err != nil {
+		t.Fatalf("ListCompletedHistoryItemIDs: %v", err)
+	}
+	if len(completedIDs) != 0 {
+		t.Fatalf("completed ids after unwatch = %v, want empty", completedIDs)
+	}
+}
+
+func TestImportedWatchIfNewerDoesNotOverwriteNewerResume(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+	createWatchstateProfile(t, store)
+	if err := store.SetProgressAt(
+		context.Background(),
+		"profile-1",
+		"movie-1",
+		1200,
+		7200,
+		false,
+		time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
+	); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+
+	watchedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	service := NewService(testStoreProvider{store: store})
+	created, err := service.RecordImportedWatchIfNewerWithSource(
+		context.Background(),
+		1,
+		"profile-1",
+		"movie-1",
+		7200,
+		0,
+		true,
+		watchedAt,
+		&watchedAt,
+		userstore.WatchHistorySourceTrakt,
+	)
+	if err != nil {
+		t.Fatalf("RecordImportedWatchIfNewerWithSource: %v", err)
+	}
+	if !created {
+		t.Fatal("created = false, want imported history row recorded")
+	}
+	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if progress == nil || progress.Completed || progress.PositionSeconds != 1200 {
+		t.Fatalf("progress after older import = %+v, want newer resume preserved", progress)
+	}
+}
+
+func TestImportedWatchIfNewerCompletesOlderResume(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+	createWatchstateProfile(t, store)
+	if err := store.SetProgressAt(
+		context.Background(),
+		"profile-1",
+		"movie-1",
+		1200,
+		7200,
+		false,
+		time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+
+	watchedAt := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	service := NewService(testStoreProvider{store: store})
+	created, err := service.RecordImportedWatchIfNewerWithSource(
+		context.Background(),
+		1,
+		"profile-1",
+		"movie-1",
+		7200,
+		0,
+		true,
+		watchedAt,
+		&watchedAt,
+		userstore.WatchHistorySourceSimkl,
+	)
+	if err != nil {
+		t.Fatalf("RecordImportedWatchIfNewerWithSource: %v", err)
+	}
+	if !created {
+		t.Fatal("created = false, want imported history row recorded")
+	}
+	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
+		t.Fatalf("progress after newer import = %+v, want completed projection", progress)
+	}
+}
+
+func TestImportedWatchIfNewerSuppressesHiddenOlderWatch(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+	createWatchstateProfile(t, store)
+
+	hiddenBefore := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	if err := store.RemoveHistoryItems(context.Background(), "profile-1", []string{"movie-1"}, hiddenBefore); err != nil {
+		t.Fatalf("RemoveHistoryItems: %v", err)
+	}
+	watchedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	service := NewService(testStoreProvider{store: store})
+	created, err := service.RecordImportedWatchIfNewerWithSource(
+		context.Background(),
+		1,
+		"profile-1",
+		"movie-1",
+		7200,
+		0,
+		true,
+		watchedAt,
+		&watchedAt,
+		userstore.WatchHistorySourceTrakt,
+	)
+	if err != nil {
+		t.Fatalf("RecordImportedWatchIfNewerWithSource: %v", err)
+	}
+	if created {
+		t.Fatal("created = true, want hidden imported history skipped")
+	}
+	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if progress != nil {
+		t.Fatalf("progress after hidden import = %+v, want nil", progress)
+	}
+	completedIDs, err := store.ListCompletedHistoryItemIDs(context.Background(), userstore.CompletedHistoryItemIDQuery{
+		ProfileID:    "profile-1",
+		MediaItemIDs: []string{"movie-1"},
+	})
+	if err != nil {
+		t.Fatalf("ListCompletedHistoryItemIDs: %v", err)
+	}
+	if len(completedIDs) != 0 {
+		t.Fatalf("completed ids = %v, want hidden import skipped", completedIDs)
+	}
+}
+
 func newTestUserStore(t *testing.T) (userstore.UserStore, *sql.DB) {
 	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")
@@ -307,4 +537,11 @@ func newTestUserStore(t *testing.T) (userstore.UserStore, *sql.DB) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	return userdb.NewSQLiteUserStore(db), db
+}
+
+func createWatchstateProfile(t *testing.T, store userstore.UserStore) {
+	t.Helper()
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-1", Name: "Profile"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
 }

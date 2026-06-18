@@ -222,7 +222,8 @@ func (s *directUserDataService) ListProgressByMediaItems(ctx context.Context, se
 		return nil, fmt.Errorf("open user store: %w", err)
 	}
 
-	progressMap, err := store.ListProgressByMediaItems(ctx, session.ProfileID, mediaItemIDs)
+	mediaItemIDs = normalizeContentIDs(mediaItemIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, mediaItemIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list progress by media items: %w", err)
 	}
@@ -241,7 +242,7 @@ func (s *directUserDataService) GetProgress(ctx context.Context, session *Sessio
 		return nil, fmt.Errorf("open user store: %w", err)
 	}
 
-	progress, err := store.GetProgress(ctx, session.ProfileID, contentID)
+	progress, err := userstore.GetProgressWithCompletedHistory(ctx, store, session.ProfileID, contentID)
 	if err != nil {
 		return nil, fmt.Errorf("get progress: %w", err)
 	}

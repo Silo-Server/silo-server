@@ -115,6 +115,10 @@ func (s *SQLiteUserStore) ListCompletedHistory(_ context.Context, query userstor
 	return ListCompletedHistory(s.db, query)
 }
 
+func (s *SQLiteUserStore) ListCompletedHistoryItemIDs(_ context.Context, query userstore.CompletedHistoryItemIDQuery) ([]string, error) {
+	return ListCompletedHistoryItemIDs(s.db, query)
+}
+
 func (s *SQLiteUserStore) RemoveHistoryItems(_ context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error {
 	return RemoveHistoryItems(s.db, profileID, mediaItemIDs, removedAt)
 }

@@ -503,15 +503,8 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 	if s.storeProvider != nil {
 		store, storeErr := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
 		if storeErr == nil {
-			progress, _ := store.GetProgress(ctx, session.ProfileID, contentID)
-			if progress != nil {
-				result.UserData = &catalog.SeasonUserData{
-					PositionSeconds: progress.PositionSeconds,
-					DurationSeconds: progress.DurationSeconds,
-					Played:          progress.Completed,
-					IsInProgress:    progress.PositionSeconds > 0,
-				}
-			}
+			progress, _ := userstore.GetProgressWithCompletedHistory(ctx, store, session.ProfileID, contentID)
+			result.UserData = seasonUserDataFromProgress(progress)
 
 			// A series never has a progress row of its own, so roll watch
 			// state up from its episodes (mirrors applySeasonUserData) to
@@ -519,8 +512,9 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 			if result.UserData == nil && strings.EqualFold(result.Type, "series") && s.episodeRepo != nil {
 				if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
 					episodes := episodesBySeries[contentID]
-					progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, modelEpisodeContentIDs(episodes))
-					result.UserData = seriesUserDataFromEpisodes(episodes, progressMap)
+					episodeIDs := modelEpisodeContentIDs(episodes)
+					progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, episodeIDs)
+					result.UserData = catalog.EpisodeRollupUserData(episodes, progressMap)
 				}
 			}
 		}
@@ -646,7 +640,7 @@ func (s *directContentService) ListEpisodes(ctx context.Context, session *Sessio
 		for _, ep := range episodes {
 			episodeIDs = append(episodeIDs, ep.ContentID)
 		}
-		if progressEntries, progressErr := store.ListProgressByMediaItems(ctx, session.ProfileID, episodeIDs); progressErr == nil {
+		if progressEntries, progressErr := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, episodeIDs); progressErr == nil {
 			progressMap = progressEntries
 		}
 	}
@@ -661,7 +655,8 @@ func (s *directContentService) ListEpisodes(ctx context.Context, session *Sessio
 		ue := modelEpisodeToUpstream(ep, seriesID)
 		s.presignEpisode(ctx, &ue)
 		if progress, ok := progressMap[ep.ContentID]; ok {
-			ue.UserData = seasonUserDataFromProgress(progress)
+			progressCopy := progress
+			ue.UserData = seasonUserDataFromProgress(&progressCopy)
 		}
 		result = append(result, ue)
 	}
@@ -710,7 +705,7 @@ func (s *directContentService) enrichListItemsUserData(ctx context.Context, sess
 			contentIDs = append(contentIDs, item.ContentID)
 		}
 	}
-	progressMap, err := store.ListProgressByMediaItems(ctx, session.ProfileID, contentIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, contentIDs)
 	if err != nil {
 		return
 	}
@@ -718,7 +713,8 @@ func (s *directContentService) enrichListItemsUserData(ctx context.Context, sess
 	for i := range items {
 		progress, ok := progressMap[items[i].ContentID]
 		if ok {
-			items[i].UserData = seasonUserDataFromProgress(progress)
+			progressCopy := progress
+			items[i].UserData = seasonUserDataFromProgress(&progressCopy)
 		}
 	}
 
@@ -778,39 +774,8 @@ func (s *directContentService) enrichSeriesListUserData(ctx context.Context, ses
 			continue
 		}
 		if episodes, ok := episodesBySeries[items[i].ContentID]; ok {
-			items[i].UserData = seriesUserDataFromEpisodes(episodes, progressMap)
+			items[i].UserData = catalog.EpisodeRollupUserData(episodes, progressMap)
 		}
-	}
-}
-
-// seriesUserDataFromEpisodes computes WatchedCount/UnplayedCount/
-// InProgressCount/Played for a whole series from a pre-fetched progressMap.
-// Pure function — no I/O. Counting semantics match the native API's series
-// rollup (all episodes including specials; in-progress = started but not
-// completed).
-func seriesUserDataFromEpisodes(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) *catalog.SeasonUserData {
-	watched := 0
-	unplayed := 0
-	inProgress := 0
-	for _, ep := range episodes {
-		if ep == nil {
-			continue
-		}
-		progress, ok := progressMap[ep.ContentID]
-		if ok && progress.Completed {
-			watched++
-			continue
-		}
-		if ok && progress.PositionSeconds > 0 {
-			inProgress++
-		}
-		unplayed++
-	}
-	return &catalog.SeasonUserData{
-		WatchedCount:    watched,
-		UnplayedCount:   unplayed,
-		InProgressCount: inProgress,
-		Played:          unplayed == 0 && len(episodes) > 0,
 	}
 }
 
@@ -834,7 +799,7 @@ func chunkedProgressByMediaItems(ctx context.Context, store userstore.UserStore,
 	const chunkSize = 500
 	result := make(map[string]userstore.WatchProgress, len(mediaItemIDs))
 	for start := 0; start < len(mediaItemIDs); start += chunkSize {
-		chunk, err := store.ListProgressByMediaItems(ctx, profileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
+		chunk, err := userstore.ListProgressWithCompletedHistory(ctx, store, profileID, mediaItemIDs[start:min(start+chunkSize, len(mediaItemIDs))])
 		if err != nil {
 			continue
 		}
@@ -864,7 +829,7 @@ func (s *directContentService) enrichSeasonUserData(ctx context.Context, session
 			episodeIDs = append(episodeIDs, ep.ContentID)
 		}
 	}
-	progressMap, err := store.ListProgressByMediaItems(ctx, session.ProfileID, episodeIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, episodeIDs)
 	if err != nil {
 		return
 	}
@@ -874,23 +839,9 @@ func (s *directContentService) enrichSeasonUserData(ctx context.Context, session
 // applySeasonUserData computes WatchedCount/UnplayedCount/Played for a season
 // using a pre-fetched progressMap. Pure function — no I/O.
 func applySeasonUserData(season *upstreamSeason, episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) {
-	watched := 0
-	unplayed := 0
-	for _, ep := range episodes {
-		if ep == nil {
-			continue
-		}
-		progress, ok := progressMap[ep.ContentID]
-		if ok && progress.Completed {
-			watched++
-		} else {
-			unplayed++
-		}
-	}
-	season.UserData = &catalog.SeasonUserData{
-		WatchedCount:  watched,
-		UnplayedCount: unplayed,
-		Played:        unplayed == 0 && len(episodes) > 0,
+	season.UserData = catalog.EpisodeRollupUserData(episodes, progressMap)
+	if season.UserData == nil {
+		season.UserData = &catalog.SeasonUserData{}
 	}
 }
 
@@ -905,7 +856,7 @@ func (s *directContentService) batchProgressForEpisodes(ctx context.Context, ses
 	if err != nil {
 		return map[string]userstore.WatchProgress{}
 	}
-	progressMap, err := store.ListProgressByMediaItems(ctx, session.ProfileID, episodeIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, episodeIDs)
 	if err != nil || progressMap == nil {
 		return map[string]userstore.WatchProgress{}
 	}
@@ -914,9 +865,10 @@ func (s *directContentService) batchProgressForEpisodes(ctx context.Context, ses
 
 // enrichEpisodeUserData adds user data for a single episode.
 func (s *directContentService) enrichEpisodeUserData(ctx context.Context, session *Session, ep *upstreamEpisode) {
-	if progressMap, err := s.progressMapForContentIDs(ctx, session, []string{ep.ContentID}); err == nil {
+	if progressMap, err := s.progressForContentIDs(ctx, session, []string{ep.ContentID}); err == nil {
 		if progress, ok := progressMap[ep.ContentID]; ok {
-			ep.UserData = seasonUserDataFromProgress(progress)
+			progressCopy := progress
+			ep.UserData = seasonUserDataFromProgress(&progressCopy)
 		}
 	}
 }
@@ -928,15 +880,22 @@ func (s *directContentService) userStore(ctx context.Context, session *Session) 
 	return s.storeProvider.ForUser(ctx, session.StreamAppUserID)
 }
 
-func (s *directContentService) progressMapForContentIDs(ctx context.Context, session *Session, contentIDs []string) (map[string]userstore.WatchProgress, error) {
+func (s *directContentService) progressForContentIDs(ctx context.Context, session *Session, contentIDs []string) (map[string]userstore.WatchProgress, error) {
 	store, err := s.userStore(ctx, session)
 	if err != nil {
 		return nil, err
 	}
-	return store.ListProgressByMediaItems(ctx, session.ProfileID, contentIDs)
+	progressMap, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	return progressMap, nil
 }
 
-func seasonUserDataFromProgress(progress userstore.WatchProgress) *catalog.SeasonUserData {
+func seasonUserDataFromProgress(progress *userstore.WatchProgress) *catalog.SeasonUserData {
+	if progress == nil {
+		return nil
+	}
 	return &catalog.SeasonUserData{
 		PositionSeconds: progress.PositionSeconds,
 		DurationSeconds: progress.DurationSeconds,

@@ -243,7 +243,7 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 				}
 				var userData *catalog.SeasonUserData
 				if hasProgressMap {
-					userData = aggregateUserDataFromProgress(episodes, progressMap)
+					userData = catalog.EpisodeRollupUserData(episodes, progressMap)
 				}
 				sr := h.items.toSeasonResponseFromEpisodes(r, id, s, episodes, userData)
 				resp = append(resp, sr)

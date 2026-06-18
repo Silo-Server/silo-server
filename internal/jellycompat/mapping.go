@@ -548,10 +548,11 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 
 	if progress != nil {
 		pos := clampResumeSeconds(progress.PositionSeconds, progress.DurationSeconds)
+		played := dto.Played || progress.Completed
 		dto.PlaybackPositionTicks = secondsToTicks(pos)
-		dto.PlayedPercentage = playedPercentage(pos, progress.DurationSeconds, progress.Completed)
-		dto.Played = progress.Completed
-		if progress.Completed {
+		dto.PlayedPercentage = playedPercentage(pos, progress.DurationSeconds, played)
+		dto.Played = played
+		if played {
 			dto.PlayCount = 1
 		}
 		dto.LastPlayedDate = progress.UpdatedAt

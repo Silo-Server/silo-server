@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestResolveItemUserStatesIncludesCompletedEbookReaderProgress(t *testing.T) {
@@ -92,5 +93,34 @@ func TestResolveItemUserStatesExcludesHiddenEbookReaderProgress(t *testing.T) {
 	}
 	if states["ebook-reread"] == nil || !states["ebook-reread"].Played {
 		t.Fatalf("ebook updated after hidden_before = %+v, want played again", states["ebook-reread"])
+	}
+}
+
+func TestResolveItemUserStatesIncludesCompletedHistory(t *testing.T) {
+	ctx := context.Background()
+	store := newProfileTestStore(t)
+	addCompletedHistoryForUserDataTest(t, store, "movie-history-only")
+	items := []*models.MediaItem{
+		{ContentID: "movie-history-only", Type: "movie", Title: "Imported Movie"},
+	}
+
+	states, err := resolveItemUserStates(ctx, store, "profile-1", nil, items)
+	if err != nil {
+		t.Fatalf("resolveItemUserStates: %v", err)
+	}
+	if states["movie-history-only"] == nil || !states["movie-history-only"].Played {
+		t.Fatalf("history-only movie state = %+v, want played", states["movie-history-only"])
+	}
+}
+
+func TestAllEpisodesCompletedIncludesCompletedHistory(t *testing.T) {
+	episodes := []*models.Episode{{ContentID: "episode-progress"}, {ContentID: "episode-history"}}
+	progress := map[string]userstore.WatchProgress{
+		"episode-progress": {MediaItemID: "episode-progress", Completed: true},
+		"episode-history":  {MediaItemID: "episode-history", Completed: true},
+	}
+
+	if !allEpisodesCompleted(episodes, progress) {
+		t.Fatal("allEpisodesCompleted = false, want completed from progress plus history")
 	}
 }

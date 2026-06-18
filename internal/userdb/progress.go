@@ -574,48 +574,14 @@ func ListCompletedHistory(db *sql.DB, query userstore.CompletedHistoryQuery) ([]
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
-	args := []any{query.ProfileID}
-	includeSourceFilter := ""
-	if len(query.IncludeSources) > 0 {
-		placeholders := make([]string, 0, len(query.IncludeSources))
-		for _, source := range query.IncludeSources {
-			placeholders = append(placeholders, "?")
-			args = append(args, string(source))
-		}
-		includeSourceFilter = " AND h.source IN (" + strings.Join(placeholders, ",") + ")"
-	}
-	sourceFilter := ""
-	if len(query.ExcludeSources) > 0 {
-		placeholders := make([]string, 0, len(query.ExcludeSources))
-		for _, source := range query.ExcludeSources {
-			placeholders = append(placeholders, "?")
-			args = append(args, string(source))
-		}
-		sourceFilter = " AND h.source NOT IN (" + strings.Join(placeholders, ",") + ")"
-	}
-	mediaFilter := ""
-	if len(query.MediaItemIDs) > 0 {
-		placeholders := make([]string, 0, len(query.MediaItemIDs))
-		for _, mediaItemID := range query.MediaItemIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, mediaItemID)
-		}
-		mediaFilter = " AND h.media_item_id IN (" + strings.Join(placeholders, ",") + ")"
-	}
+	filters, args := completedHistoryFilterSQL(query.ProfileID, query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
 	args = append(args, limit, query.Offset)
 	rows, err := db.Query(`
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity
 		FROM watch_history h
 		WHERE h.profile_id = ?
 		  AND h.completed = 1
-		`+includeSourceFilter+sourceFilter+mediaFilter+`
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM hidden_history_items hhi
-			WHERE hhi.profile_id = h.profile_id
-			  AND hhi.media_item_id = h.media_item_id
-			  AND h.watched_at <= hhi.hidden_before
-		  )
+		`+filters+completedHistoryVisibleSQL+`
 		ORDER BY h.watched_at ASC
 		LIMIT ? OFFSET ?
 	`, args...)
@@ -646,6 +612,81 @@ func ListCompletedHistory(db *sql.DB, query userstore.CompletedHistoryQuery) ([]
 	return results, nil
 }
 
+func ListCompletedHistoryItemIDs(db *sql.DB, query userstore.CompletedHistoryItemIDQuery) ([]string, error) {
+	filters, args := completedHistoryFilterSQL(query.ProfileID, query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
+	rows, err := db.Query(`
+		SELECT DISTINCT h.media_item_id
+		FROM watch_history h
+		WHERE h.profile_id = ?
+		  AND h.completed = 1
+		`+filters+completedHistoryVisibleSQL+`
+		ORDER BY h.media_item_id ASC`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing completed history item ids: %w", err)
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var mediaItemID string
+		if err := rows.Scan(&mediaItemID); err != nil {
+			return nil, fmt.Errorf("scanning completed history item id: %w", err)
+		}
+		results = append(results, mediaItemID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating completed history item ids: %w", err)
+	}
+	return results, nil
+}
+
+const completedHistoryVisibleSQL = `
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = h.profile_id
+			  AND hhi.media_item_id = h.media_item_id
+			  AND h.watched_at <= hhi.hidden_before
+		  )`
+
+func completedHistoryFilterSQL(
+	profileID string,
+	mediaItemIDs []string,
+	includeSources []userstore.WatchHistorySource,
+	excludeSources []userstore.WatchHistorySource,
+) (string, []any) {
+	args := []any{profileID}
+	var filters strings.Builder
+	if len(includeSources) > 0 {
+		placeholders := make([]string, 0, len(includeSources))
+		for _, source := range includeSources {
+			placeholders = append(placeholders, "?")
+			args = append(args, string(source))
+		}
+		filters.WriteString(" AND h.source IN (" + strings.Join(placeholders, ",") + ")")
+	}
+	if len(excludeSources) > 0 {
+		placeholders := make([]string, 0, len(excludeSources))
+		for _, source := range excludeSources {
+			placeholders = append(placeholders, "?")
+			args = append(args, string(source))
+		}
+		filters.WriteString(" AND h.source NOT IN (" + strings.Join(placeholders, ",") + ")")
+	}
+	mediaItemIDs = compactText(mediaItemIDs)
+	if len(mediaItemIDs) > 0 {
+		placeholders := make([]string, 0, len(mediaItemIDs))
+		for _, mediaItemID := range mediaItemIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, mediaItemID)
+		}
+		filters.WriteString(" AND h.media_item_id IN (" + strings.Join(placeholders, ",") + ")")
+	}
+	return filters.String(), args
+}
+
 func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, removedAt time.Time) error {
 	mediaItemIDs = compactText(mediaItemIDs)
 	if len(mediaItemIDs) == 0 {
@@ -663,6 +704,18 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 
 	removedAtText := removedAt.UTC().Format(time.RFC3339)
 	for _, mediaItemID := range mediaItemIDs {
+		hiddenBeforeText := removedAtText
+		var maxWatchedAt sql.NullString
+		if err := tx.QueryRow(`
+			SELECT MAX(watched_at)
+			FROM watch_history
+			WHERE profile_id = ? AND media_item_id = ?
+		`, profileID, mediaItemID).Scan(&maxWatchedAt); err != nil {
+			return fmt.Errorf("finding history hide watermark: %w", err)
+		}
+		if maxWatchedAt.Valid && maxWatchedAt.String > hiddenBeforeText {
+			hiddenBeforeText = maxWatchedAt.String
+		}
 		if _, err := tx.Exec(`
 			INSERT INTO hidden_history_items (profile_id, media_item_id, hidden_before, updated_at)
 			VALUES (?, ?, ?, ?)
@@ -673,24 +726,28 @@ func RemoveHistoryItems(db *sql.DB, profileID string, mediaItemIDs []string, rem
 					ELSE hidden_history_items.hidden_before
 				END,
 				updated_at = excluded.updated_at
-		`, profileID, mediaItemID, removedAtText, removedAtText); err != nil {
+		`, profileID, mediaItemID, hiddenBeforeText, removedAtText); err != nil {
 			return fmt.Errorf("upserting hidden history item: %w", err)
 		}
 	}
 
 	placeholders := make([]string, len(mediaItemIDs))
-	args := make([]any, 0, len(mediaItemIDs)+2)
+	args := make([]any, 0, len(mediaItemIDs)+1)
 	args = append(args, profileID)
 	for i, mediaItemID := range mediaItemIDs {
 		placeholders[i] = "?"
 		args = append(args, mediaItemID)
 	}
-	args = append(args, removedAtText)
 	if _, err := tx.Exec(`
 		DELETE FROM watch_history
 		WHERE profile_id = ?
 		  AND media_item_id IN (`+strings.Join(placeholders, ",")+`)
-		  AND watched_at <= ?
+		  AND watched_at <= (
+			SELECT hhi.hidden_before
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = watch_history.profile_id
+			  AND hhi.media_item_id = watch_history.media_item_id
+		  )
 	`, args...); err != nil {
 		return fmt.Errorf("deleting removed history rows: %w", err)
 	}
