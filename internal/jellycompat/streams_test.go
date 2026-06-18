@@ -103,6 +103,46 @@ func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 	}
 }
 
+func TestEnsureUpstreamPlayback_ReplacesStaleUpstreamWhenRecipeMissing(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID:                 "ps-1",
+		CompatToken:        "tok",
+		UpstreamSessionID:  "stale-upstream",
+		UpstreamPlayMethod: "direct",
+	})
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{}}
+	h := &PlaybackHandler{
+		playbackStore: store,
+		sessionMgr:    mgr,
+		tm:            playback.NewTranscodeManager(),
+	}
+
+	got, err := h.ensureUpstreamPlayback(
+		context.Background(),
+		&Session{Token: "tok", StreamAppUserID: 7, ProfileID: "profile-1"},
+		"ps-1",
+		PlaybackMediaSource{FileID: 42},
+		"direct",
+	)
+	if err != nil {
+		t.Fatalf("ensureUpstreamPlayback returned error: %v", err)
+	}
+	if got.UpstreamSessionID != "upstream-started" {
+		t.Fatalf("UpstreamSessionID = %q, want fresh upstream session", got.UpstreamSessionID)
+	}
+	if mgr.startCalls != 1 {
+		t.Fatalf("StartSession calls = %d, want 1", mgr.startCalls)
+	}
+	reloaded, ok := store.Get("ps-1")
+	if !ok {
+		t.Fatal("play session missing after upstream replacement")
+	}
+	if reloaded.UpstreamSessionID != "upstream-started" || reloaded.UpstreamPlayMethod != "direct" {
+		t.Fatalf("store not updated with fresh upstream session: %+v", reloaded)
+	}
+}
+
 // newActiveEncodingsHandler builds a PlaybackHandler literal directly (not
 // NewPlaybackHandler, which touches the filesystem) with a transcode manager
 // wired — teardown calls tm.CloseTranscodeSession and would nil-panic otherwise.

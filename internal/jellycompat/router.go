@@ -103,9 +103,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	// boot-time orphan cleanup so surviving cards spare their segment dirs.
 	playbackHandler.RecipeStore = playback.NewPostgresRecipeStore(deps.DB)
 	if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
-		slog.Warn("jellycompat transcode cleanup failed", "error", err)
+		slog.Warn("jellycompat transcode cleanup failed", "dir", playbackHandler.TranscodeDir, "error", err)
 	} else if cleaned > 0 {
-		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "count", cleaned)
+		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "dir", playbackHandler.TranscodeDir, "count", cleaned)
 	}
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo

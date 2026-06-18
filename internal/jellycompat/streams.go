@@ -865,19 +865,33 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
+	if h.sessionMgr == nil {
+		return nil, fmt.Errorf("session manager not available")
+	}
 	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod == method {
 		// After a restart the durable play session survives but the in-memory
 		// native session is gone; rebuild it from the recipe card so ownership and
 		// accounting are restored before the transcode is (re)started.
-		if _, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err != nil && errors.Is(err, playback.ErrSessionNotFound) {
-			h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID)
+		if _, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err != nil {
+			if !errors.Is(err, playback.ErrSessionNotFound) {
+				return nil, err
+			}
+			if h.tm != nil {
+				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID); reconstructed != nil {
+					_ = h.syncUpstreamAudioSelection(playSession, source)
+					return playSession, nil
+				}
+			}
+			// The durable compat row outlived the native session and no recipe card
+			// can rebuild it. Fall through to create a fresh upstream session and
+			// persist the replacement instead of serving under a stale ID.
+			playSession.UpstreamSessionID = ""
+			playSession.UpstreamPlayMethod = ""
+			playSession.TranscodeStarted = false
+		} else {
+			_ = h.syncUpstreamAudioSelection(playSession, source)
+			return playSession, nil
 		}
-		_ = h.syncUpstreamAudioSelection(playSession, source)
-		return playSession, nil
-	}
-
-	if h.sessionMgr == nil {
-		return nil, fmt.Errorf("session manager not available")
 	}
 
 	var playMethod playback.PlayMethod
@@ -1037,7 +1051,7 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	// case close this duplicate ffmpeg and use the winner.
 	winner, stored := h.tm.GetOrRegisterTranscodeSession(upstreamSessionID, transcodeSession)
 	if !stored {
-		_ = transcodeSession.Close()
+		_ = transcodeSession.CloseProcess()
 		return winner, nil
 	}
 

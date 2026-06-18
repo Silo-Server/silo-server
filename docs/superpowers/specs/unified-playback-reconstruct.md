@@ -59,7 +59,7 @@ every few seconds.
 
 One helper does this for every handler:
 
-```
+```text
                         ┌──────────────────────────────────────────┐
    any serve handler →  │ TranscodeManager.LoadOrReconstructSession │
    (stream / segment /  │   1. GetSession(id)                       │
@@ -85,7 +85,7 @@ One helper does this for every handler:
 The client keeps a **~120-second bucket** of video filled ahead of where it's watching,
 topping it up by asking the server for the next chunk every few seconds.
 
-```
+```text
    Watching here              Bucket filled to here
         │                            │
         ▼                            ▼
@@ -97,7 +97,7 @@ topping it up by asking the server for the next chunk every few seconds.
 
 ### 3.2 The restart (the whole point)
 
-```
+```text
  SERVER:  UP ───────────────✕ DOWN (≤60s) ✕──────────────── UP again
                             │                               │
  CLIENT:  buffered ─────────┼──── playing from buffer ──────┼──── next request
@@ -126,7 +126,7 @@ topping it up by asking the server for the next chunk every few seconds.
 When the missing runtime is an ffmpeg process (transcode / jellycompat), the rebuild has a fast
 path and a slow path:
 
-```
+```text
   Client: "GET seg_00200 for session X"   (+ its normal login auth)
                     │
                     ▼   ← instead of 404, RECONSTRUCT:
@@ -166,7 +166,7 @@ Everything routes through a single `playback.TranscodeManager` that **both** the
 to. The card-lifetime rules, the reconstruct concurrency cap, and the node-affinity constraint
 therefore live in exactly one place instead of being copied per handler.
 
-```
+```text
    internal/api/handlers.PlaybackHandler ─┐
                                           ├─► *playback.TranscodeManager
    internal/jellycompat.PlaybackHandler ──┘     ├─ transcodes map + mutex
@@ -258,9 +258,9 @@ One row per active transcode session: `session_id` PK, denormalized identity col
 
 ### 6.2 `jellycompat_playback_sessions`
 
-One row per active compat play session: `id` PK, denormalized `compat_token` and `user_id`
-(indexed for lookup/audit), the full `PlaybackSession` as `data JSONB`, `created_at`, and
-indexed `expires_at`. It holds the **load-bearing** `PlaySessionId → UpstreamSessionID` mapping
+One row per active compat play session: `id` PK, denormalized `compat_token` (indexed lookup)
+and `user_id` (audit), the full `PlaybackSession` as `data JSONB`, `created_at`, and indexed
+`expires_at`. It holds the **load-bearing** `PlaySessionId → UpstreamSessionID` mapping
 plus the negotiated media sources, route item id, and seek. Without it, after a restart the
 compat segment/manifest handlers 404 at their first lookup before any transcode reconstruct can
 even run. `DurableCompatPlaybackStore` is a write-through cache: reads hit memory first, fall to

@@ -152,7 +152,7 @@ func (s *Server) SessionStore() *SessionStore {
 func (s *Server) StartBackgroundTasks(ctx context.Context) {
 	if s.deps.DB != nil {
 		repo := NewSessionRepository(s.deps.DB, s.deps.SecretCipher)
-		StartSessionCleanup(ctx, repo, 1*time.Hour)
+		StartSessionCleanupWithPlaybackStore(ctx, repo, s.deps.PlaybackStore, 1*time.Hour)
 	}
 }
 

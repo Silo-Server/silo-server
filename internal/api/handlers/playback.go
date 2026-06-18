@@ -137,8 +137,8 @@ type PlaybackHandler struct {
 	PlaybackConfig func() config.PlaybackConfig
 	FFmpegLogSink  playback.FFmpegLogSink
 	// RecipeStore persists per-session "recipe cards" so a transcode can be
-	// reconstructed after a server restart. When nil or disabled (no Redis),
-	// reconstruct is off and behavior is identical to before.
+	// reconstructed after a server restart. When nil or disabled, reconstruct is
+	// off and behavior is identical to before.
 	RecipeStore       playback.RecipeStore
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord
@@ -2284,7 +2284,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	h.tm.RegisterTranscodeSession(req.SessionID, transcodeSession)
 
 	// Persist the recipe card so this local transcode can be reconstructed
-	// after a server restart. Best-effort; no-op without Redis.
+	// after a server restart. Best-effort; no-op without a recipe store.
 	h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), session, "", transcodeSession.Opts())
 
 	h.maybeStartThrottler(r.Context(), transcodeSession)

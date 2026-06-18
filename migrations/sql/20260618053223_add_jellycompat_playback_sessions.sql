@@ -8,8 +8,8 @@
 -- compat segment/manifest handlers 404 at their first lookup before any transcode
 -- reconstruct can run. One row per active compat play session; rows expire via
 -- expires_at (the negotiation TTL, re-armed on update) and are swept by the
--- reconciler janitor. compat_token and user_id are denormalized for lookups and
--- auditing; the canonical state is the data column.
+-- reconciler janitor. compat_token is denormalized for lookup; user_id is
+-- denormalized for auditing. The canonical state is the data column.
 CREATE TABLE IF NOT EXISTS public.jellycompat_playback_sessions (
     id            TEXT PRIMARY KEY,
     compat_token  TEXT NOT NULL DEFAULT '',
