@@ -2,10 +2,12 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -316,7 +318,12 @@ func (r *ImageCacheJobRepository) ClaimDue(ctx context.Context, workerID string,
 	return jobs, nil
 }
 
-func (r *ImageCacheJobRepository) MarkSucceeded(ctx context.Context, id int64) error {
+// MarkSucceeded finalizes a job only if the caller still owns the lease
+// (status running, locked_by matches). EnqueueBatch can repurpose a running
+// row with a new source and a cleared lease; the ownership guard stops a
+// stale worker from marking that replacement job complete and dropping the
+// new artwork.
+func (r *ImageCacheJobRepository) MarkSucceeded(ctx context.Context, id int64, lockedBy string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'succeeded',
@@ -326,14 +333,18 @@ func (r *ImageCacheJobRepository) MarkSucceeded(ctx context.Context, id int64) e
 			last_error = '',
 			updated_at = NOW()
 		WHERE id = $1
-	`, id)
+		  AND status = 'running'
+		  AND locked_by = $2
+	`, id, lockedBy)
 	if err != nil {
 		return fmt.Errorf("marking metadata image cache job succeeded: %w", err)
 	}
 	return nil
 }
 
-func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, attemptCount int, errText string) error {
+// MarkFailed records a failed attempt with backoff, guarded by lease ownership
+// for the same reason as MarkSucceeded.
+func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, attemptCount int, lockedBy string, errText string) error {
 	nextAttempt := attemptCount + 1
 	status := ImageCacheStatusQueued
 	if nextAttempt >= imageCacheMaxAttempts {
@@ -351,11 +362,106 @@ func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, atte
 			last_error = left($5, 2000),
 			updated_at = NOW()
 		WHERE id = $1
-	`, id, status, nextAttempt, intervalLiteral(delay), errText)
+		  AND status = 'running'
+		  AND locked_by = $6
+	`, id, status, nextAttempt, intervalLiteral(delay), errText, lockedBy)
 	if err != nil {
 		return fmt.Errorf("marking metadata image cache job failed: %w", err)
 	}
 	return nil
+}
+
+// RequeueClaimed returns claimed-but-unprocessed jobs to the queue without
+// burning a retry attempt. Used when a run is cancelled before its workers
+// start, so the jobs do not sit locked until the lease expires.
+func (r *ImageCacheJobRepository) RequeueClaimed(ctx context.Context, ids []int64, workerID string) error {
+	if r == nil || r.pool == nil || len(ids) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE metadata_image_cache_jobs
+		SET status = 'queued',
+			next_attempt_at = NOW(),
+			locked_at = NULL,
+			locked_by = '',
+			updated_at = NOW()
+		WHERE id = ANY($1)
+		  AND status = 'running'
+		  AND locked_by = $2
+	`, ids, workerID)
+	if err != nil {
+		return fmt.Errorf("requeueing claimed metadata image cache jobs: %w", err)
+	}
+	return nil
+}
+
+// CurrentTargetSourcePath reports the source path currently stored on the
+// job's target row so the processor can confirm it still owns the artwork
+// before uploading to the deterministic storage key. Returns ("", nil) when
+// the row no longer exists or the target type is unknown.
+func (r *ImageCacheJobRepository) CurrentTargetSourcePath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error) {
+	if r == nil || r.pool == nil || job == nil {
+		return "", nil
+	}
+	query, args, ok := currentTargetSourceQuery(job)
+	if !ok {
+		return "", nil
+	}
+	var current string
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading current target source path: %w", err)
+	}
+	return current, nil
+}
+
+func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
+	switch job.TargetType {
+	case ImageCacheTargetItem:
+		col, ok := itemArtworkSourceColumn(job.ImageType)
+		if !ok {
+			return "", nil, false
+		}
+		return fmt.Sprintf("SELECT %s FROM media_items WHERE content_id = $1", col),
+			[]any{job.TargetContentID}, true
+	case ImageCacheTargetItemLocalization:
+		col, ok := itemArtworkSourceColumn(job.ImageType)
+		if !ok {
+			return "", nil, false
+		}
+		return fmt.Sprintf("SELECT %s FROM media_item_localizations WHERE content_id = $1 AND language = $2", col),
+			[]any{job.TargetContentID, job.TargetLanguage}, true
+	case ImageCacheTargetSeason:
+		return "SELECT poster_source_path FROM seasons WHERE content_id = $1",
+			[]any{job.TargetContentID}, true
+	case ImageCacheTargetSeasonLocalization:
+		return "SELECT poster_source_path FROM season_localizations WHERE season_content_id = $1 AND language = $2",
+			[]any{job.TargetContentID, job.TargetLanguage}, true
+	case ImageCacheTargetEpisode:
+		return "SELECT still_source_path FROM episodes WHERE content_id = $1",
+			[]any{job.TargetContentID}, true
+	case ImageCacheTargetPerson:
+		return "SELECT photo_source_path FROM people WHERE id = $1::bigint",
+			[]any{job.TargetContentID}, true
+	default:
+		return "", nil, false
+	}
+}
+
+func itemArtworkSourceColumn(imageType string) (string, bool) {
+	switch imageType {
+	case ImageCacheImagePoster:
+		return "poster_source_path", true
+	case ImageCacheImageBackdrop:
+		return "backdrop_source_path", true
+	case ImageCacheImageLogo:
+		return "logo_source_path", true
+	default:
+		return "", false
+	}
 }
 
 func (r *ImageCacheJobRepository) DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error) {
@@ -385,6 +491,11 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 	if r == nil || r.pool == nil || limit <= 0 {
 		return 0, nil
 	}
+	// Each branch is restricted to provider-origin sources (LIKE '%://%' minus
+	// cached/system schemes) AND to targets whose stored *_path is not already a
+	// cached relative path. The destination check makes the cached row itself the
+	// durable dedup marker, so pruning succeeded job rows does not cause the whole
+	// catalog to be re-downloaded once the rows age out.
 	rows, err := r.pool.Query(ctx, `
 		WITH all_candidates AS (
 			SELECT
@@ -403,6 +514,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_items mi
 			WHERE mi.poster_source_path LIKE '%://%'
 			  AND lower(mi.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (mi.poster_path LIKE '%://%' OR coalesce(mi.poster_path, '') = '')
 			UNION ALL
 			SELECT
 				'backdrop'::text,
@@ -420,6 +532,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_items mi
 			WHERE mi.backdrop_source_path LIKE '%://%'
 			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (mi.backdrop_path LIKE '%://%' OR coalesce(mi.backdrop_path, '') = '')
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -437,6 +550,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_items mi
 			WHERE mi.logo_source_path LIKE '%://%'
 			  AND lower(mi.logo_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (mi.logo_path LIKE '%://%' OR coalesce(mi.logo_path, '') = '')
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -455,6 +569,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.poster_source_path LIKE '%://%'
 			  AND lower(loc.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')
 			UNION ALL
 			SELECT
 				'backdrop'::text,
@@ -473,6 +588,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.backdrop_source_path LIKE '%://%'
 			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (loc.backdrop_path LIKE '%://%' OR coalesce(loc.backdrop_path, '') = '')
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -491,6 +607,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.logo_source_path LIKE '%://%'
 			  AND lower(loc.logo_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (loc.logo_path LIKE '%://%' OR coalesce(loc.logo_path, '') = '')
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -509,6 +626,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE s.poster_source_path LIKE '%://%'
 			  AND lower(s.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -528,6 +646,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE loc.poster_source_path LIKE '%://%'
 			  AND lower(loc.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')
 			UNION ALL
 			SELECT
 				'still'::text,
@@ -546,6 +665,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.still_source_path LIKE '%://%'
 			  AND lower(e.still_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (e.still_path LIKE '%://%' OR coalesce(e.still_path, '') = '')
 			UNION ALL
 			SELECT
 				'profile'::text,
@@ -563,6 +683,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM people p
 			WHERE p.photo_source_path LIKE '%://%'
 			  AND lower(p.photo_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')
 		),
 		candidates AS (
 			SELECT ac.*
@@ -582,7 +703,10 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			LIMIT $1
 		)
 		SELECT image_type, target_type, target_content_id, target_language, series_id, source_path,
-		       content_type, season_number, episode_number, tmdb_id, tvdb_id, imdb_id
+		       content_type, season_number, episode_number,
+		       COALESCE(tmdb_id, '') AS tmdb_id,
+		       COALESCE(tvdb_id, '') AS tvdb_id,
+		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
 	`, limit, intervalLiteral(imageCacheFailedRetryAfter))
 	if err != nil {

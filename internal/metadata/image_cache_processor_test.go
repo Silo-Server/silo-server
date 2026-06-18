@@ -10,26 +10,40 @@ import (
 )
 
 type fakeImageCacheJobs struct {
-	claimed      []*models.MetadataImageCacheJob
-	succeededID  int64
-	failedID     int64
-	failedText   string
-	deletedCount int
+	claimed       []*models.MetadataImageCacheJob
+	succeededID   int64
+	failedID      int64
+	failedText    string
+	deletedCount  int
+	requeuedIDs   []int64
+	currentSource *string // when set, overrides CurrentTargetSourcePath
 }
 
 func (f *fakeImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
 	return f.claimed, nil
 }
 
-func (f *fakeImageCacheJobs) MarkSucceeded(_ context.Context, id int64) error {
+func (f *fakeImageCacheJobs) MarkSucceeded(_ context.Context, id int64, _ string) error {
 	f.succeededID = id
 	return nil
 }
 
-func (f *fakeImageCacheJobs) MarkFailed(_ context.Context, id int64, _ int, errText string) error {
+func (f *fakeImageCacheJobs) MarkFailed(_ context.Context, id int64, _ int, _ string, errText string) error {
 	f.failedID = id
 	f.failedText = errText
 	return nil
+}
+
+func (f *fakeImageCacheJobs) RequeueClaimed(_ context.Context, ids []int64, _ string) error {
+	f.requeuedIDs = append(f.requeuedIDs, ids...)
+	return nil
+}
+
+func (f *fakeImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, error) {
+	if f.currentSource != nil {
+		return *f.currentSource, nil
+	}
+	return job.SourcePath, nil
 }
 
 func (f *fakeImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
@@ -66,13 +80,21 @@ func (f *loopingImageCacheJobs) ClaimDue(context.Context, string, int) ([]*model
 	return result, nil
 }
 
-func (f *loopingImageCacheJobs) MarkSucceeded(_ context.Context, id int64) error {
+func (f *loopingImageCacheJobs) MarkSucceeded(_ context.Context, id int64, _ string) error {
 	f.succeededIDs = append(f.succeededIDs, id)
 	return nil
 }
 
-func (f *loopingImageCacheJobs) MarkFailed(context.Context, int64, int, string) error {
+func (f *loopingImageCacheJobs) MarkFailed(context.Context, int64, int, string, string) error {
 	return nil
+}
+
+func (f *loopingImageCacheJobs) RequeueClaimed(context.Context, []int64, string) error {
+	return nil
+}
+
+func (f *loopingImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, error) {
+	return job.SourcePath, nil
 }
 
 func (f *loopingImageCacheJobs) DeleteSucceededBefore(context.Context, time.Time, int) (int, error) {
@@ -456,10 +478,14 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 		SeasonNumber:      intPointer(1),
 		EpisodeNumber:     intPointer(2),
 	}
+	// Discovery now runs only when the queue drains, not on every batch: drain
+	// job1, find the queue empty and sweep (enqueues 1 more), drain job2, find
+	// the queue empty and sweep again (enqueues 0 -> idle).
 	jobs := &loopingImageCacheJobs{
-		enqueueResults: []int{1, 1, 0},
+		enqueueResults: []int{1, 0},
 		claimedResults: [][]*models.MetadataImageCacheJob{
 			{job1},
+			{},
 			{job2},
 			{},
 		},
@@ -476,17 +502,56 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	if err != nil {
 		t.Fatalf("RunUntilIdle() error = %v", err)
 	}
-	if stats.Batches != 3 {
-		t.Fatalf("Batches = %d, want 3", stats.Batches)
+	if stats.Batches != 4 {
+		t.Fatalf("Batches = %d, want 4", stats.Batches)
 	}
-	if stats.EnqueuedExisting != 2 || stats.Claimed != 2 || stats.Succeeded != 2 {
-		t.Fatalf("stats = %+v, want enqueued=2 claimed=2 succeeded=2", stats)
+	if stats.EnqueuedExisting != 1 || stats.Claimed != 2 || stats.Succeeded != 2 {
+		t.Fatalf("stats = %+v, want enqueued=1 claimed=2 succeeded=2", stats)
 	}
-	if jobs.enqueueCalls != 3 || jobs.claimCalls != 3 {
-		t.Fatalf("calls enqueue=%d claim=%d, want 3 each", jobs.enqueueCalls, jobs.claimCalls)
+	if jobs.enqueueCalls != 2 || jobs.claimCalls != 4 {
+		t.Fatalf("calls enqueue=%d claim=%d, want enqueue=2 claim=4", jobs.enqueueCalls, jobs.claimCalls)
 	}
 	if len(jobs.succeededIDs) != 2 || jobs.succeededIDs[0] != 10 || jobs.succeededIDs[1] != 11 {
 		t.Fatalf("succeededIDs = %#v, want [10 11]", jobs.succeededIDs)
+	}
+}
+
+func TestImageCacheProcessorSkipsWhenTargetSourceChanged(t *testing.T) {
+	// A stale job whose target no longer references its source must not upload.
+	changed := "tmdb://poster/new.jpg"
+	jobs := &fakeImageCacheJobs{
+		claimed: []*models.MetadataImageCacheJob{{
+			ID:                40,
+			TargetType:        ImageCacheTargetItem,
+			TargetContentID:   "series-1",
+			SourcePath:        "tmdb://poster/old.jpg",
+			ProviderID:        "tmdb",
+			ProviderContentID: "1396",
+			ContentType:       "series",
+			ImageType:         ImageCacheImagePoster,
+		}},
+		currentSource: &changed,
+	}
+	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tmdb/series/1396/poster", Ext: ".webp"}}
+	resolver := &fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"}
+	items := &fakeItemArtworkUpdater{updated: true}
+
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher, resolver, ImageCacheProcessorTargets{Items: items})
+	stats, err := processor.RunOnce(context.Background(), "test-worker", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if stats.Skipped != 1 {
+		t.Fatalf("Skipped = %d, want 1", stats.Skipped)
+	}
+	if len(cacher.reqs) != 0 {
+		t.Fatalf("CacheImage called %d times, want 0 (stale job must not upload)", len(cacher.reqs))
+	}
+	if items.cachedPath != "" {
+		t.Fatalf("item updater called with cachedPath = %q, want none", items.cachedPath)
+	}
+	if jobs.succeededID != 40 {
+		t.Fatalf("succeededID = %d, want 40", jobs.succeededID)
 	}
 }
 

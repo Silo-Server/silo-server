@@ -279,10 +279,15 @@ func variantWidths(t metadata.ImageType) []int {
 }
 
 func putObjectWithRetry(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) error {
+	const maxAttempts = 3
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := putter.PutObject(ctx, bucket, key, data); err != nil {
 			lastErr = err
+			if attempt == maxAttempts-1 {
+				// Final attempt failed; return immediately without a pointless backoff.
+				break
+			}
 			timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
 			select {
 			case <-timer.C:

@@ -8,12 +8,14 @@ ALTER TABLE public.episodes
 UPDATE public.seasons
 SET poster_source_path = poster_path
 WHERE poster_source_path = ''
-  AND poster_path LIKE '%://%';
+  AND poster_path LIKE '%://%'
+  AND lower(poster_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%']);
 
 UPDATE public.episodes
 SET still_source_path = still_path
 WHERE still_source_path = ''
-  AND still_path LIKE '%://%';
+  AND still_path LIKE '%://%'
+  AND lower(still_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%']);
 
 CREATE TABLE public.metadata_image_cache_jobs (
     id bigserial PRIMARY KEY,

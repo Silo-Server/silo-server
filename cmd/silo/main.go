@@ -1186,8 +1186,10 @@ func main() {
 				},
 			)
 			metadataService.SetAutoCacheImages(cfg.Metadata.CacheImages)
+			metadataImageCacheProcessor.SetEnabled(cfg.Metadata.CacheImages)
 			configWatcher.OnChange(func(_, updated *config.Config) {
 				metadataService.SetAutoCacheImages(updated.Metadata.CacheImages)
+				metadataImageCacheProcessor.SetEnabled(updated.Metadata.CacheImages)
 			})
 			if deps.Scanner != nil {
 				deps.Scanner.SetImageCacher(imageCacher)
