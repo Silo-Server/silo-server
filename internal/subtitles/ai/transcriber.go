@@ -62,8 +62,13 @@ type TranscribeJobRequest struct {
 // callers can report progress and stream cues live.
 type Transcriber interface {
 	Transcribe(ctx context.Context, req TranscribeJobRequest,
-		onChunk func(cues []SubtitleCue, done, total int)) ([]SubtitleCue, string, error)
+		onChunk TranscribeChunkCallback) ([]SubtitleCue, string, error)
 }
+
+// TranscribeChunkCallback receives each chunk's cues, the detected language for
+// that chunk when the ASR endpoint reports one, and chunk progress. A total of
+// 0 means the total is unknown/indeterminate.
+type TranscribeChunkCallback func(cues []SubtitleCue, language string, done, total int)
 
 // audioTranscriber is the slice of llm.Client the transcriber needs.
 type audioTranscriber interface {
@@ -115,7 +120,7 @@ func (t *WhisperTranscriber) SetExtraction(ffmpegPath string, chunkSeconds int) 
 // endpoint's report for the first processed chunk, normalized to an ISO code
 // where possible.
 func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRequest,
-	onChunk func(cues []SubtitleCue, done, total int)) ([]SubtitleCue, string, error) {
+	onChunk TranscribeChunkCallback) ([]SubtitleCue, string, error) {
 	dir, err := os.MkdirTemp("", "silo-asr-*")
 	if err != nil {
 		return nil, "", fmt.Errorf("create ASR temp dir: %w", err)
@@ -160,7 +165,7 @@ func (t *WhisperTranscriber) Transcribe(ctx context.Context, req TranscribeJobRe
 		}
 		all = append(all, cues...)
 		if onChunk != nil {
-			onChunk(cues, done+1, len(order))
+			onChunk(cues, lang, done+1, len(order))
 		}
 	}
 
@@ -178,7 +183,7 @@ func (t *WhisperTranscriber) transcribeIncremental(
 	dir, ffmpegPath string,
 	chunkSeconds int,
 	startOffset float64,
-	onChunk func(cues []SubtitleCue, done, total int),
+	onChunk TranscribeChunkCallback,
 ) ([]SubtitleCue, string, error) {
 	timeout := time.Duration(chunkSeconds*asrChunkTimeoutFactor) * time.Second
 	pivot := incrementalPivotStart(req.StartPosition, req.DurationSeconds, chunkSeconds)
@@ -187,8 +192,8 @@ func (t *WhisperTranscriber) transcribeIncremental(
 	var all []SubtitleCue
 	detected := ""
 	done := 0
-	process := func(chunk playback.AudioChunk) error {
-		cues, lang, err := t.transcribeChunk(ctx, chunk, req.LanguageHint, timeout, startOffset)
+	process := func(chunk playback.AudioChunk, chunkOffset float64) error {
+		cues, lang, err := t.transcribeChunk(ctx, chunk, req.LanguageHint, timeout, chunkOffset)
 		if err != nil {
 			return fmt.Errorf("transcribe chunk at %.3fs: %w", chunk.Start, err)
 		}
@@ -198,20 +203,26 @@ func (t *WhisperTranscriber) transcribeIncremental(
 		all = append(all, cues...)
 		done++
 		if onChunk != nil {
-			onChunk(cues, done, progressTotal(done, total))
+			onChunk(cues, lang, done, progressTotal(done, total))
 		}
 		return nil
 	}
 
-	if err := t.runIncrementalPass(ctx, req, dir, ffmpegPath, pivot, chunkSeconds, process); err != nil {
-		return nil, "", err
+	firstPassDone := done
+	firstPassOffset := audioOffsetForIncrementalPass(pivot, startOffset)
+	if err := t.runIncrementalPass(ctx, req, dir, ffmpegPath, pivot, chunkSeconds, func(chunk playback.AudioChunk) error {
+		return process(chunk, firstPassOffset)
+	}); err != nil {
+		if ctx.Err() != nil || pivot == 0 || done != firstPassDone {
+			return nil, "", err
+		}
 	}
 	if pivot > 0 {
 		wrap := func(chunk playback.AudioChunk) error {
 			if chunk.Start >= pivot {
 				return errStopIncrementalPass
 			}
-			return process(chunk)
+			return process(chunk, startOffset)
 		}
 		if err := t.runIncrementalPass(ctx, req, dir, ffmpegPath, 0, chunkSeconds, wrap); err != nil {
 			if !errors.Is(err, errStopIncrementalPass) {
@@ -304,10 +315,23 @@ func estimatedChunkTotal(durationSeconds float64, chunkSeconds int) int {
 }
 
 func progressTotal(done, total int) int {
+	if total <= 0 {
+		return 0
+	}
 	if total < done {
 		return done
 	}
 	return total
+}
+
+func audioOffsetForIncrementalPass(passStartSec, audioStartOffset float64) float64 {
+	if passStartSec <= 0 {
+		return audioStartOffset
+	}
+	if audioStartOffset <= passStartSec {
+		return 0
+	}
+	return audioStartOffset - passStartSec
 }
 
 // chunkOrderForPosition orders chunk indexes so the chunk containing

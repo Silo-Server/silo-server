@@ -325,33 +325,8 @@ func (s *Service) run(ctx context.Context, job *Job) {
 
 	// Persist in chronological order regardless of the playhead-first order used
 	// for translation/streaming.
-	sortCuesByStart(translated)
-	sub, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
-		MediaFileID: job.MediaFileID,
-		UserID:      job.RequestedBy,
-		Provider:    providerTranslated,
-		Language:    job.TargetLanguage,
-		Format:      subtitles.FormatSRT,
-		ReleaseName: releaseName,
-		Data:        SerializeSRT(translated),
-	})
-	if err != nil {
-		s.finishWithError(ctx, job, fmt.Errorf("store translated subtitle: %w", err))
+	if !s.finishTranslatedTrack(ctx, storeCtx, job, translated, releaseName, trackKey, streaming) {
 		return
-	}
-
-	if err := s.repo.CompleteJob(storeCtx, job.ID, sub.ID); err != nil {
-		s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
-	}
-
-	if s.notifier != nil {
-		if streaming {
-			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
-				sub.ID, job.TargetLanguage, releaseName)
-		}
-		// Broadcast to other sessions watching this file (a no-op for the
-		// streaming requester, which already tracks its live track).
-		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, releaseName)
 	}
 }
 
@@ -423,9 +398,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 	if streaming {
 		liveChunkSeconds = cfg.LiveASRChunkSeconds
 	}
-	var translateErr error
-	translationFailedNotified := false
-	var translatedAccum []SubtitleCue
+	liveTranslate := liveTranslateState{sourceLanguage: hint}
 	cues, detected, err := s.transcriber.Transcribe(ctx, TranscribeJobRequest{
 		FilePath:        file.FilePath,
 		AudioTrackIndex: audioIdx,
@@ -434,31 +407,12 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 		DurationSeconds: float64(file.Duration),
 		ChunkSeconds:    liveChunkSeconds,
 		Incremental:     streaming,
-	}, func(chunk []SubtitleCue, done, total int) {
+	}, func(chunk []SubtitleCue, chunkLanguage string, done, total int) {
+		if liveTranslate.sourceLanguage == "" && chunkLanguage != "" {
+			liveTranslate.sourceLanguage = chunkLanguage
+		}
 		if streamTranslated {
-			_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning,
-				progressInBand(0.05, 0.9, done, total), "Transcribing & translating")
-			if translateErr != nil || len(chunk) == 0 {
-				return
-			}
-			translatedChunk, err := s.translator.Translate(ctx, TranslateRequest{
-				Cues:           chunk,
-				SourceLanguage: hint,
-				TargetLanguage: job.TargetLanguage,
-			}, func(batch []SubtitleCue, _, _ int) {
-				s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
-					toStreamCues(batch), done, total)
-			})
-			if err != nil {
-				translateErr = err
-				if !translationFailedNotified {
-					s.notifier.TranslationFailed(ctx, job.SessionID, job.MediaFileID, job.ID,
-						trackKey, llm.Truncate(err.Error(), 500))
-					translationFailedNotified = true
-				}
-				return
-			}
-			translatedAccum = append(translatedAccum, translatedChunk...)
+			s.translateLiveChunk(ctx, job, trackKey, chunk, done, total, &liveTranslate)
 			return
 		}
 
@@ -518,31 +472,12 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 	}
 
 	if streamTranslated {
-		if translateErr != nil {
-			s.finishWithErrorNotify(ctx, job, translateErr, !translationFailedNotified)
+		if liveTranslate.err != nil {
+			s.finishWithErrorNotify(ctx, job, liveTranslate.err, !liveTranslate.failedNotified)
 			return
 		}
-		sortCuesByStart(translatedAccum)
 		translatedLabel := translatedReleaseName(language, job.TargetLanguage)
-		sub, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
-			MediaFileID: job.MediaFileID,
-			UserID:      job.RequestedBy,
-			Provider:    providerTranslated,
-			Language:    job.TargetLanguage,
-			Format:      subtitles.FormatSRT,
-			ReleaseName: translatedLabel,
-			Data:        SerializeSRT(translatedAccum),
-		})
-		if err != nil {
-			s.finishWithError(ctx, job, fmt.Errorf("store translated subtitle: %w", err))
-			return
-		}
-		if err := s.repo.CompleteJob(storeCtx, job.ID, sub.ID); err != nil {
-			s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
-		}
-		s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
-			sub.ID, job.TargetLanguage, translatedLabel)
-		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, translatedLabel)
+		s.finishTranslatedTrack(ctx, storeCtx, job, liveTranslate.cues, translatedLabel, trackKey, true)
 		return
 	}
 
@@ -567,31 +502,86 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 	}
 
 	storeCtx = context.WithoutCancel(ctx)
-	sortCuesByStart(translated)
 	translatedLabel := translatedReleaseName(language, job.TargetLanguage)
+	s.finishTranslatedTrack(ctx, storeCtx, job, translated, translatedLabel, trackKey, streaming)
+}
+
+type liveTranslateState struct {
+	sourceLanguage string
+	err            error
+	failedNotified bool
+	cues           []SubtitleCue
+}
+
+func (s *Service) translateLiveChunk(
+	ctx context.Context,
+	job *Job,
+	trackKey string,
+	chunk []SubtitleCue,
+	done, total int,
+	state *liveTranslateState,
+) {
+	_ = s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning,
+		progressInBand(0.05, 0.9, done, total), "Transcribing & translating")
+	if state.err != nil || len(chunk) == 0 {
+		return
+	}
+	translatedChunk, err := s.translator.Translate(ctx, TranslateRequest{
+		Cues:           chunk,
+		SourceLanguage: state.sourceLanguage,
+		TargetLanguage: job.TargetLanguage,
+	}, func(batch []SubtitleCue, _, _ int) {
+		s.notifier.TranslationCues(ctx, job.SessionID, job.MediaFileID, job.ID, trackKey,
+			toStreamCues(batch), done, total)
+	})
+	if err != nil {
+		state.err = err
+		if !state.failedNotified {
+			s.notifier.TranslationFailed(ctx, job.SessionID, job.MediaFileID, job.ID,
+				trackKey, llm.Truncate(err.Error(), 500))
+			state.failedNotified = true
+		}
+		return
+	}
+	state.cues = append(state.cues, translatedChunk...)
+}
+
+func (s *Service) finishTranslatedTrack(
+	ctx context.Context,
+	storeCtx context.Context,
+	job *Job,
+	cues []SubtitleCue,
+	releaseName string,
+	trackKey string,
+	streaming bool,
+) bool {
+	sortCuesByStart(cues)
 	sub, err := s.store.StoreSubtitle(storeCtx, subtitles.StoreSubtitleRequest{
 		MediaFileID: job.MediaFileID,
 		UserID:      job.RequestedBy,
 		Provider:    providerTranslated,
 		Language:    job.TargetLanguage,
 		Format:      subtitles.FormatSRT,
-		ReleaseName: translatedLabel,
-		Data:        SerializeSRT(translated),
+		ReleaseName: releaseName,
+		Data:        SerializeSRT(cues),
 	})
 	if err != nil {
 		s.finishWithError(ctx, job, fmt.Errorf("store translated subtitle: %w", err))
-		return
+		return false
 	}
+
 	if err := s.repo.CompleteJob(storeCtx, job.ID, sub.ID); err != nil {
 		s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
 	}
+
 	if s.notifier != nil {
 		if streaming {
 			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
-				sub.ID, job.TargetLanguage, translatedLabel)
+				sub.ID, job.TargetLanguage, releaseName)
 		}
-		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, translatedLabel)
+		s.notifier.SubtitleReady(storeCtx, job.MediaFileID, sub.ID, job.TargetLanguage, releaseName)
 	}
+	return true
 }
 
 // defaultAudioTrackIndex returns the index of the default-flagged audio

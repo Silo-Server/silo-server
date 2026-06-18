@@ -104,7 +104,7 @@ func (r *recordingRepo) snapshot() (int, time.Time) {
 type stubTranscriber struct{}
 
 func (stubTranscriber) Transcribe(context.Context, TranscribeJobRequest,
-	func([]SubtitleCue, int, int)) ([]SubtitleCue, string, error) {
+	TranscribeChunkCallback) ([]SubtitleCue, string, error) {
 	return nil, "", nil
 }
 
@@ -269,13 +269,17 @@ type chunkedTranscriber struct {
 }
 
 func (t *chunkedTranscriber) Transcribe(_ context.Context, req TranscribeJobRequest,
-	onChunk func([]SubtitleCue, int, int)) ([]SubtitleCue, string, error) {
+	onChunk TranscribeChunkCallback) ([]SubtitleCue, string, error) {
 	t.lastReq = req
 	var all []SubtitleCue
 	for i, chunk := range t.chunks {
 		appendTrace(t.trace, fmt.Sprintf("transcribe:%d", i))
 		if onChunk != nil {
-			onChunk(chunk, i+1, len(t.chunks))
+			total := len(t.chunks)
+			if req.Incremental {
+				total = progressTotal(i+1, estimatedChunkTotal(req.DurationSeconds, req.ChunkSeconds))
+			}
+			onChunk(chunk, t.detected, i+1, total)
 		}
 		all = append(all, chunk...)
 	}
@@ -419,8 +423,8 @@ func TestRunTranscribeTranslateStreamingInterleavesTranslationPerChunk(t *testin
 	if got := len(cueEvents); got != 2 {
 		t.Fatalf("TranslationCues events = %d, want 2", got)
 	}
-	if cueEvents[0].done != 1 || cueEvents[0].total != 3 || cueEvents[1].done != 3 || cueEvents[1].total != 3 {
-		t.Fatalf("chunk progress = (%d/%d, %d/%d), want 1/3 then 3/3",
+	if cueEvents[0].done != 1 || cueEvents[0].total != 6 || cueEvents[1].done != 3 || cueEvents[1].total != 6 {
+		t.Fatalf("chunk progress = (%d/%d, %d/%d), want 1/6 then 3/6",
 			cueEvents[0].done, cueEvents[0].total, cueEvents[1].done, cueEvents[1].total)
 	}
 	if len(store.stored) != 2 {
@@ -530,6 +534,43 @@ func TestRunTranscribeTranslateNonStreamingKeepsWholeFileTranslation(t *testing.
 	}
 }
 
+func TestRunTranscribeTranslateStreamingUsesDetectedLanguageForLiveChunks(t *testing.T) {
+	transcriber := &chunkedTranscriber{
+		detected: "ja",
+		chunks: [][]SubtitleCue{
+			{testCue(0, "konnichiwa")},
+		},
+	}
+	translator := &recordingTranslator{}
+	store := &recordingSubtitleStore{}
+	notifier := &recordingNotifier{}
+	repo := &recordingRepo{}
+	file := &models.MediaFile{
+		ID:          10,
+		FilePath:    "/media/movie.mkv",
+		Duration:    180,
+		AudioTracks: []models.AudioTrack{{Default: true}},
+	}
+	svc := newRunTranscribeServiceWithFile(repo, translator, transcriber, store, notifier,
+		Config{LiveASRChunkSeconds: 30}, file)
+
+	svc.runTranscribe(context.Background(), &Job{
+		ID:             10,
+		MediaFileID:    10,
+		Kind:           JobKindTranscribeTranslate,
+		SourceIndex:    -1,
+		TargetLanguage: "es",
+		SessionID:      "session-1",
+	})
+
+	if got := len(translator.calls); got != 1 {
+		t.Fatalf("Translate calls = %d, want one live chunk call", got)
+	}
+	if got := translator.calls[0].SourceLanguage; got != "ja" {
+		t.Fatalf("live chunk source language = %q, want detected ja", got)
+	}
+}
+
 func newRunTranscribeService(
 	repo *recordingRepo,
 	translator Translator,
@@ -544,6 +585,18 @@ func newRunTranscribeService(
 		Duration:    180,
 		AudioTracks: []models.AudioTrack{{Language: "eng", Default: true}},
 	}
+	return newRunTranscribeServiceWithFile(repo, translator, transcriber, store, notifier, cfg, file)
+}
+
+func newRunTranscribeServiceWithFile(
+	repo *recordingRepo,
+	translator Translator,
+	transcriber Transcriber,
+	store *recordingSubtitleStore,
+	notifier Notifier,
+	cfg Config,
+	file *models.MediaFile,
+) *Service {
 	return NewService(context.Background(), cfg, repo, translator, transcriber, store, nil,
 		runTranscribeFileResolver{file: file}, notifier, "", nil, nil)
 }

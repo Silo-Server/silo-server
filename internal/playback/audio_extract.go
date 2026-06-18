@@ -42,25 +42,10 @@ func ExtractAudioChunks(ctx context.Context, filePath string, audioTrackIndex in
 	}
 
 	listPath := filepath.Join(dir, "segments.csv")
-	args := []string{
-		"-i", filePath,
-		"-vn", "-sn", "-dn",
-		"-map", fmt.Sprintf("0:a:%d", audioTrackIndex),
-		"-ac", "1",
-		"-ar", "16000",
-		"-c:a", "pcm_s16le",
-		"-f", "segment",
-		"-segment_time", strconv.Itoa(chunkSeconds),
-		"-segment_list", listPath,
-		"-segment_list_type", "csv",
-		"-y", filepath.Join(dir, "chunk%05d.wav"),
-	}
+	args := audioChunkExtractionArgs(filePath, audioTrackIndex, listPath,
+		filepath.Join(dir, "chunk%05d.wav"), 0, chunkSeconds)
 
-	ffmpeg := "ffmpeg"
-	if ffmpegPath != "" {
-		ffmpeg = ffmpegPath
-	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := exec.CommandContext(ctx, audioExtractionFFmpegBinary(ffmpegPath), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -98,9 +83,11 @@ func ExtractAudioChunks(ctx context.Context, filePath string, audioTrackIndex in
 	return chunks, nil
 }
 
-// ExtractAudioChunksFrom extracts one audio track starting at startSec and
-// calls onSegment as each WAV segment is closed by ffmpeg. The caller owns dir
-// and cleanup. Segment starts are absolute media positions.
+// ExtractAudioChunksFrom extracts one audio track starting at startSec and calls
+// onSegment as each WAV segment is closed by ffmpeg. onSegment is synchronous:
+// if it blocks on ASR/translation, ffmpeg may continue extracting later chunks
+// into dir, so callers should remove processed chunks promptly. The caller owns
+// dir and cleanup. Segment starts are absolute media positions.
 func ExtractAudioChunksFrom(
 	ctx context.Context,
 	filePath string,
@@ -121,33 +108,13 @@ func ExtractAudioChunksFrom(
 	}
 
 	listPath := filepath.Join(dir, "segments.csv")
-	args := []string{}
-	if startSec > 0 {
-		args = append(args, "-ss", strconv.FormatFloat(startSec, 'f', 3, 64))
-	}
-	args = append(args,
-		"-i", filePath,
-		"-vn", "-sn", "-dn",
-		"-map", fmt.Sprintf("0:a:%d", audioTrackIndex),
-		"-ac", "1",
-		"-ar", "16000",
-		"-c:a", "pcm_s16le",
-		"-f", "segment",
-		"-segment_time", strconv.Itoa(chunkSeconds),
-		"-segment_list", listPath,
-		"-segment_list_type", "csv",
-		"-y", filepath.Join(dir, "chunk%05d.wav"),
-	)
-
-	ffmpeg := "ffmpeg"
-	if ffmpegPath != "" {
-		ffmpeg = ffmpegPath
-	}
+	args := audioChunkExtractionArgs(filePath, audioTrackIndex, listPath,
+		filepath.Join(dir, "chunk%05d.wav"), startSec, chunkSeconds)
 
 	cmdCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, ffmpeg, args...)
+	cmd := exec.CommandContext(cmdCtx, audioExtractionFFmpegBinary(ffmpegPath), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -161,8 +128,9 @@ func ExtractAudioChunksFrom(
 	}()
 
 	seen := map[string]bool{}
-	emit := func() error {
-		return emitNewSegmentListEntries(listPath, dir, startSec, seen, onSegment)
+	tailer := &segmentListTailer{}
+	emit := func(flush bool) error {
+		return emitNewSegmentListEntries(listPath, dir, startSec, seen, tailer, flush, onSegment)
 	}
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -171,7 +139,7 @@ func ExtractAudioChunksFrom(
 	for {
 		select {
 		case waitErr := <-waitCh:
-			segmentErr := emit()
+			segmentErr := emit(true)
 			if segmentErr != nil {
 				return segmentErr
 			}
@@ -187,7 +155,7 @@ func ExtractAudioChunksFrom(
 			}
 			return nil
 		case <-ticker.C:
-			if err := emit(); err != nil {
+			if err := emit(false); err != nil {
 				cancel()
 				<-waitCh
 				return err
@@ -198,6 +166,41 @@ func ExtractAudioChunksFrom(
 			return ctx.Err()
 		}
 	}
+}
+
+func audioChunkExtractionArgs(
+	filePath string,
+	audioTrackIndex int,
+	listPath string,
+	outPattern string,
+	startSec float64,
+	chunkSeconds int,
+) []string {
+	args := []string{}
+	if startSec > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(startSec, 'f', 3, 64))
+	}
+	args = append(args,
+		"-i", filePath,
+		"-vn", "-sn", "-dn",
+		"-map", fmt.Sprintf("0:a:%d", audioTrackIndex),
+		"-ac", "1",
+		"-ar", "16000",
+		"-c:a", "pcm_s16le",
+		"-f", "segment",
+		"-segment_time", strconv.Itoa(chunkSeconds),
+		"-segment_list", listPath,
+		"-segment_list_type", "csv",
+		"-y", outPattern,
+	)
+	return args
+}
+
+func audioExtractionFFmpegBinary(ffmpegPath string) string {
+	if ffmpegPath != "" {
+		return ffmpegPath
+	}
+	return "ffmpeg"
 }
 
 // parseSegmentList reads ffmpeg's CSV segment list (filename,start,end per
@@ -231,9 +234,11 @@ func emitNewSegmentListEntries(
 	listPath, dir string,
 	startOffset float64,
 	seen map[string]bool,
+	tailer *segmentListTailer,
+	flush bool,
 	onSegment func(AudioChunk) error,
 ) error {
-	entries := readSegmentListEntries(listPath)
+	entries := tailer.read(listPath, flush)
 	for _, entry := range entries {
 		key := filepath.Base(entry.name)
 		if seen[key] {
@@ -258,14 +263,57 @@ type segmentListEntry struct {
 	start float64
 }
 
-func readSegmentListEntries(listPath string) []segmentListEntry {
+type segmentListTailer struct {
+	offset  int64
+	pending string
+}
+
+func (t *segmentListTailer) read(listPath string, flush bool) []segmentListEntry {
 	f, err := os.Open(listPath)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
 
-	reader := csv.NewReader(f)
+	info, err := f.Stat()
+	if err == nil && info.Size() < t.offset {
+		t.offset = 0
+		t.pending = ""
+	}
+	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	t.offset += int64(len(data))
+
+	text := t.pending + string(data)
+	if text == "" {
+		return nil
+	}
+	lineEnd := strings.LastIndexByte(text, '\n')
+	if lineEnd < 0 {
+		if !flush {
+			t.pending = text
+			return nil
+		}
+		t.pending = ""
+		return parseSegmentListEntries(strings.NewReader(text))
+	}
+
+	complete := text[:lineEnd+1]
+	t.pending = text[lineEnd+1:]
+	if flush && t.pending != "" {
+		complete += t.pending
+		t.pending = ""
+	}
+	return parseSegmentListEntries(strings.NewReader(complete))
+}
+
+func parseSegmentListEntries(r io.Reader) []segmentListEntry {
+	reader := csv.NewReader(r)
 	var out []segmentListEntry
 	for {
 		row, err := reader.Read()
@@ -273,8 +321,7 @@ func readSegmentListEntries(listPath string) []segmentListEntry {
 			break
 		}
 		if err != nil {
-			// ffmpeg may be appending the current row while we poll. Keep the
-			// completed rows and pick up this one on the next pass.
+			// Keep completed rows; malformed rows are ignored best-effort.
 			break
 		}
 		if len(row) < 2 {
