@@ -322,6 +322,13 @@ func (h *CatalogResourceHandler) HandleGetSeason(w http.ResponseWriter, r *http.
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
 				return
 			}
+			if len(episodes) == 0 {
+				episodes, err = h.items.episodeRepo.ListBySeason(r.Context(), id, season.SeasonNumber)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get season")
+					return
+				}
+			}
 			h.items.maybeRequestStaleSeasonMetadataRefresh(r.Context(), season.ContentID, episodes)
 			writeJSON(w, http.StatusOK, seasonDetailResponse{
 				Season: h.items.toSeasonResponseFromEpisodes(

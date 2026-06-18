@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -70,4 +73,47 @@ func TestGetLeafUserDataReturnsAudiobookProgress(t *testing.T) {
 	if progress.PositionSeconds != 1234 {
 		t.Fatalf("PositionSeconds = %v, want 1234", progress.PositionSeconds)
 	}
+}
+
+func TestGetAggregateUserDataReturnsNilWhenProgressBatchFails(t *testing.T) {
+	store := &failingBatchProgressStore{}
+	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
+
+	req := httptest.NewRequest("GET", "/series/series-1/seasons/1", nil)
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1})
+	ctx = apimw.SetProfileID(ctx, "profile-1")
+	req = req.WithContext(ctx)
+
+	episodes := make([]*models.Episode, 501)
+	for i := range episodes {
+		episodes[i] = &models.Episode{ContentID: "episode-" + strconv.Itoa(i+1)}
+	}
+
+	if userData := handler.getAggregateUserData(req, episodes); userData != nil {
+		t.Fatalf("getAggregateUserData() = %#v, want nil after batch failure", userData)
+	}
+	if store.calls != 2 {
+		t.Fatalf("ListProgressByMediaItems calls = %d, want 2", store.calls)
+	}
+}
+
+type failingBatchProgressStore struct {
+	userstore.UserStore
+	calls int
+}
+
+func (s *failingBatchProgressStore) ListProgressByMediaItems(
+	_ context.Context,
+	_ string,
+	mediaItemIDs []string,
+) (map[string]userstore.WatchProgress, error) {
+	s.calls++
+	if s.calls == 2 {
+		return nil, errors.New("progress batch failed")
+	}
+	progress := make(map[string]userstore.WatchProgress, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		progress[id] = userstore.WatchProgress{MediaItemID: id, Completed: true}
+	}
+	return progress, nil
 }

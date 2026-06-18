@@ -1463,7 +1463,10 @@ func (h *ItemsHandler) getAggregateUserData(r *http.Request, episodes []*models.
 		return nil
 	}
 
-	progressMap := h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes))
+	progressMap, err := h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes))
+	if err != nil {
+		return nil
+	}
 	return aggregateUserDataFromProgress(episodes, progressMap)
 }
 
@@ -1472,10 +1475,14 @@ func (h *ItemsHandler) progressMapForEpisodes(r *http.Request, episodes []*model
 	if !ok {
 		return nil, false
 	}
-	return h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes)), true
+	progressMap, err := h.listProgressForEpisodeIDs(r.Context(), store, profileID, episodeContentIDs(episodes))
+	if err != nil {
+		return nil, false
+	}
+	return progressMap, true
 }
 
-func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store userstore.UserStore, profileID string, episodeIDs []string) map[string]userstore.WatchProgress {
+func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store userstore.UserStore, profileID string, episodeIDs []string) (map[string]userstore.WatchProgress, error) {
 	const chunkSize = 500
 	progressMap := make(map[string]userstore.WatchProgress, len(episodeIDs))
 	for start := 0; start < len(episodeIDs); start += chunkSize {
@@ -1485,13 +1492,13 @@ func (h *ItemsHandler) listProgressForEpisodeIDs(ctx context.Context, store user
 		}
 		chunk, err := store.ListProgressByMediaItems(ctx, profileID, episodeIDs[start:end])
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for id, progress := range chunk {
 			progressMap[id] = progress
 		}
 	}
-	return progressMap
+	return progressMap, nil
 }
 
 func aggregateUserDataFromProgress(episodes []*models.Episode, progressMap map[string]userstore.WatchProgress) *catalog.SeasonUserData {
