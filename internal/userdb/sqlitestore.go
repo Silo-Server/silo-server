@@ -103,6 +103,10 @@ func (s *SQLiteUserStore) AddHistory(_ context.Context, entry userstore.WatchHis
 	return AddHistory(s.db, entry)
 }
 
+func (s *SQLiteUserStore) AddVisibleHistory(_ context.Context, entry userstore.WatchHistoryEntry) (userstore.WatchHistoryEntry, error) {
+	return AddVisibleHistory(s.db, entry)
+}
+
 func (s *SQLiteUserStore) AddHistoryIfMissing(_ context.Context, entry userstore.WatchHistoryEntry) (bool, error) {
 	return AddHistoryIfMissing(s.db, entry)
 }
@@ -115,8 +119,12 @@ func (s *SQLiteUserStore) ListCompletedHistory(_ context.Context, query userstor
 	return ListCompletedHistory(s.db, query)
 }
 
-func (s *SQLiteUserStore) ListCompletedHistoryItemIDs(_ context.Context, query userstore.CompletedHistoryItemIDQuery) ([]string, error) {
-	return ListCompletedHistoryItemIDs(s.db, query)
+func (s *SQLiteUserStore) ListCompletedHistoryItems(_ context.Context, query userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
+	return ListCompletedHistoryItems(s.db, query)
+}
+
+func (s *SQLiteUserStore) VisibleHistoryTimestamps(_ context.Context, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error) {
+	return VisibleHistoryTimestamps(s.db, profileID, mediaItemIDs, at)
 }
 
 func (s *SQLiteUserStore) RemoveHistoryItems(_ context.Context, profileID string, mediaItemIDs []string, removedAt time.Time) error {

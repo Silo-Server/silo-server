@@ -530,7 +530,7 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	if err := store.RemoveHistoryItems(ctx, "p1", []string{"movie-future-hidden"}, time.Date(2026, 3, 23, 12, 6, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("RemoveHistoryItems(movie-future-hidden): %v", err)
 	}
-	completedIDs, err := store.ListCompletedHistoryItemIDs(ctx, userstore.CompletedHistoryItemIDQuery{
+	completedItems, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
 		ProfileID: "p1",
 		MediaItemIDs: []string{
 			"movie-1",
@@ -542,18 +542,18 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 		},
 	})
 	if err != nil {
-		t.Fatalf("ListCompletedHistoryItemIDs: %v", err)
+		t.Fatalf("ListCompletedHistoryItems: %v", err)
 	}
-	completedSet := map[string]bool{}
-	for _, id := range completedIDs {
-		completedSet[id] = true
+	completedSet := map[string]userstore.CompletedHistoryItem{}
+	for _, item := range completedItems {
+		completedSet[item.MediaItemID] = item
 	}
-	if !completedSet["movie-1"] || !completedSet["movie-history-only"] {
-		t.Fatalf("ListCompletedHistoryItemIDs = %v, want movie-1 and movie-history-only", completedIDs)
+	if completedSet["movie-1"].MediaItemID == "" || completedSet["movie-history-only"].MediaItemID == "" {
+		t.Fatalf("ListCompletedHistoryItems = %v, want movie-1 and movie-history-only", completedItems)
 	}
 	for _, id := range []string{"movie-hidden-history", "movie-future-hidden", "movie-other-profile", "movie-incomplete-history"} {
-		if completedSet[id] {
-			t.Fatalf("ListCompletedHistoryItemIDs included %s: %v", id, completedIDs)
+		if completedSet[id].MediaItemID != "" {
+			t.Fatalf("ListCompletedHistoryItems included %s: %v", id, completedItems)
 		}
 	}
 	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{
@@ -566,27 +566,27 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 	}); err != nil {
 		t.Fatalf("AddHistory(movie-future-hidden newer): %v", err)
 	}
-	completedIDs, err = store.ListCompletedHistoryItemIDs(ctx, userstore.CompletedHistoryItemIDQuery{
+	completedItems, err = store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
 		ProfileID:    "p1",
 		MediaItemIDs: []string{"movie-future-hidden"},
 	})
 	if err != nil {
-		t.Fatalf("ListCompletedHistoryItemIDs(movie-future-hidden newer): %v", err)
+		t.Fatalf("ListCompletedHistoryItems(movie-future-hidden newer): %v", err)
 	}
-	if len(completedIDs) != 1 || completedIDs[0] != "movie-future-hidden" {
-		t.Fatalf("ListCompletedHistoryItemIDs(movie-future-hidden newer) = %v, want [movie-future-hidden]", completedIDs)
+	if len(completedItems) != 1 || completedItems[0].MediaItemID != "movie-future-hidden" || completedItems[0].WatchedAt != "2026-03-23T12:11:00Z" {
+		t.Fatalf("ListCompletedHistoryItems(movie-future-hidden newer) = %v, want movie-future-hidden with latest watched_at", completedItems)
 	}
-	traktIDs, err := store.ListCompletedHistoryItemIDs(ctx, userstore.CompletedHistoryItemIDQuery{
+	traktItems, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
 		ProfileID:      "p1",
 		MediaItemIDs:   []string{"movie-1", "movie-history-only"},
 		IncludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourcePlayback, userstore.WatchHistorySourceTrakt},
 		ExcludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourcePlayback},
 	})
 	if err != nil {
-		t.Fatalf("ListCompletedHistoryItemIDs(source filters): %v", err)
+		t.Fatalf("ListCompletedHistoryItems(source filters): %v", err)
 	}
-	if len(traktIDs) != 1 || traktIDs[0] != "movie-history-only" {
-		t.Fatalf("ListCompletedHistoryItemIDs(source filters) = %v, want [movie-history-only]", traktIDs)
+	if len(traktItems) != 1 || traktItems[0].MediaItemID != "movie-history-only" {
+		t.Fatalf("ListCompletedHistoryItems(source filters) = %v, want [movie-history-only]", traktItems)
 	}
 
 	// Manual watched state helpers.

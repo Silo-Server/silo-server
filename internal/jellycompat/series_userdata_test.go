@@ -63,14 +63,20 @@ func TestSeriesUserDataFromEpisodes(t *testing.T) {
 			wantPlayed:   false,
 		},
 		{
-			name:     "nil episodes skipped",
+			name:     "nil episodes do not count as unplayed",
 			episodes: []*models.Episode{nil, ep("a"), nil},
 			progress: map[string]userstore.WatchProgress{
 				"a": {Completed: true},
 			},
 			wantWatched:  1,
-			wantUnplayed: 2,
-			wantPlayed:   false,
+			wantUnplayed: 0,
+			wantPlayed:   true,
+		},
+		{
+			name:       "all nil episodes",
+			episodes:   []*models.Episode{nil, nil},
+			progress:   map[string]userstore.WatchProgress{},
+			wantPlayed: false,
 		},
 		{
 			name:     "zero-position progress row is not in-progress",

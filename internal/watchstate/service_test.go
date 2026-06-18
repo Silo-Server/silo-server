@@ -188,6 +188,35 @@ func TestManualMarkWatchedAddsEpisodeIdentity(t *testing.T) {
 	}
 }
 
+func TestManualMarkWatchedPreservesVisibleWatchedAt(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+
+	watchedAt := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
+	service := NewService(testStoreProvider{store: store})
+	err := service.RecordManualMarkWatched(
+		context.Background(),
+		1,
+		"profile-1",
+		[]LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200}},
+		watchedAt,
+	)
+	if err != nil {
+		t.Fatalf("RecordManualMarkWatched: %v", err)
+	}
+
+	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].WatchedAt != "2026-04-25T12:00:00Z" {
+		t.Fatalf("history watched_at = %q, want caller watchedAt", history[0].WatchedAt)
+	}
+}
+
 func TestIdentityLookupFailureDoesNotBlockHistory(t *testing.T) {
 	store, db := newTestUserStore(t)
 	defer db.Close()
@@ -376,15 +405,117 @@ func TestManualMarkUnwatchedSuppressesImportedHistoryButReturnsManualHistory(t *
 	if progress != nil {
 		t.Fatalf("progress after unwatch = %+v, want nil", progress)
 	}
-	completedIDs, err := store.ListCompletedHistoryItemIDs(context.Background(), userstore.CompletedHistoryItemIDQuery{
+	completedItems, err := store.ListCompletedHistoryItems(context.Background(), userstore.CompletedHistoryItemQuery{
 		ProfileID:    "profile-1",
 		MediaItemIDs: []string{"movie-1"},
 	})
 	if err != nil {
-		t.Fatalf("ListCompletedHistoryItemIDs: %v", err)
+		t.Fatalf("ListCompletedHistoryItems: %v", err)
 	}
-	if len(completedIDs) != 0 {
-		t.Fatalf("completed ids after unwatch = %v, want empty", completedIDs)
+	if len(completedItems) != 0 {
+		t.Fatalf("completed items after unwatch = %v, want empty", completedItems)
+	}
+}
+
+func TestManualMarkUnwatchedReturnsOneOutboundEntryPerTarget(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+	createWatchstateProfile(t, store)
+
+	for _, entry := range []userstore.WatchHistoryEntry{
+		{
+			ID:              "manual-history-older",
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-1",
+			WatchedAt:       "2026-05-04T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceManual,
+			Identity: userstore.WatchIdentity{
+				StableType:  "movie",
+				ProviderIDs: map[string]string{"tmdb": "603"},
+			},
+		},
+		{
+			ID:              "manual-history-newer",
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-1",
+			WatchedAt:       "2026-05-04T13:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceManual,
+			Identity: userstore.WatchIdentity{
+				StableType:  "movie",
+				ProviderIDs: map[string]string{"tmdb": "603"},
+			},
+		},
+	} {
+		if err := store.AddHistory(context.Background(), entry); err != nil {
+			t.Fatalf("AddHistory(%s): %v", entry.ID, err)
+		}
+	}
+
+	service := NewService(testStoreProvider{store: store})
+	result, err := service.RecordManualMarkUnwatchedWithResult(context.Background(), 1, "profile-1", []string{"movie-1"})
+	if err != nil {
+		t.Fatalf("RecordManualMarkUnwatchedWithResult: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("unwatch result entries = %+v, want one representative entry", result.Entries)
+	}
+	if result.Entries[0].ID != "manual-history-newer" {
+		t.Fatalf("representative history id = %q, want newest manual history", result.Entries[0].ID)
+	}
+}
+
+func TestManualMarkWatchedAfterHiddenWatermarkIsVisible(t *testing.T) {
+	store, db := newTestUserStore(t)
+	defer db.Close()
+	createWatchstateProfile(t, store)
+
+	hiddenBefore := time.Now().UTC().Add(time.Second).Format(time.RFC3339)
+	if _, err := db.Exec(`
+		INSERT INTO hidden_history_items (profile_id, media_item_id, hidden_before, updated_at)
+		VALUES (?, ?, ?, ?)`,
+		"profile-1",
+		"movie-1",
+		hiddenBefore,
+		hiddenBefore,
+	); err != nil {
+		t.Fatalf("seed hidden watermark: %v", err)
+	}
+
+	service := NewService(testStoreProvider{store: store})
+	result, err := service.RecordManualMarkWatchedWithResult(
+		context.Background(),
+		1,
+		"profile-1",
+		[]LeafWatchTarget{{MediaItemID: "movie-1", DurationSeconds: 7200}},
+		time.Now().UTC(),
+	)
+	if err != nil {
+		t.Fatalf("RecordManualMarkWatchedWithResult: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("result entries = %+v, want one history entry", result.Entries)
+	}
+	if result.Entries[0].WatchedAt <= hiddenBefore {
+		t.Fatalf("history watched_at = %q, want after hidden_before %q", result.Entries[0].WatchedAt, hiddenBefore)
+	}
+
+	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if progress == nil || !progress.Completed {
+		t.Fatalf("progress = %+v, want visible completed progress", progress)
+	}
+	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(history) != 1 || history[0].WatchedAt <= hiddenBefore {
+		t.Fatalf("history = %+v, want visible history after hidden watermark %q", history, hiddenBefore)
 	}
 }
 
@@ -514,15 +645,15 @@ func TestImportedWatchIfNewerSuppressesHiddenOlderWatch(t *testing.T) {
 	if progress != nil {
 		t.Fatalf("progress after hidden import = %+v, want nil", progress)
 	}
-	completedIDs, err := store.ListCompletedHistoryItemIDs(context.Background(), userstore.CompletedHistoryItemIDQuery{
+	completedItems, err := store.ListCompletedHistoryItems(context.Background(), userstore.CompletedHistoryItemQuery{
 		ProfileID:    "profile-1",
 		MediaItemIDs: []string{"movie-1"},
 	})
 	if err != nil {
-		t.Fatalf("ListCompletedHistoryItemIDs: %v", err)
+		t.Fatalf("ListCompletedHistoryItems: %v", err)
 	}
-	if len(completedIDs) != 0 {
-		t.Fatalf("completed ids = %v, want hidden import skipped", completedIDs)
+	if len(completedItems) != 0 {
+		t.Fatalf("completed items = %v, want hidden import skipped", completedItems)
 	}
 }
 

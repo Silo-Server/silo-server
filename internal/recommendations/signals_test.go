@@ -134,9 +134,8 @@ func (s *fakeSignalStore) ListCompletedHistory(_ context.Context, query userstor
 	return filtered[query.Offset:end], nil
 }
 
-func (s *fakeSignalStore) ListCompletedHistoryItemIDs(_ context.Context, query userstore.CompletedHistoryItemIDQuery) ([]string, error) {
-	seen := map[string]struct{}{}
-	var ids []string
+func (s *fakeSignalStore) ListCompletedHistoryItems(_ context.Context, query userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
+	latest := map[string]userstore.CompletedHistoryItem{}
 	for _, entry := range s.history {
 		if entry.ProfileID != query.ProfileID || !entry.Completed {
 			continue
@@ -150,13 +149,17 @@ func (s *fakeSignalStore) ListCompletedHistoryItemIDs(_ context.Context, query u
 		if slices.Contains(query.ExcludeSources, entry.Source) {
 			continue
 		}
-		if _, ok := seen[entry.MediaItemID]; ok {
+		current := latest[entry.MediaItemID]
+		if current.MediaItemID != "" && current.WatchedAt >= entry.WatchedAt {
 			continue
 		}
-		seen[entry.MediaItemID] = struct{}{}
-		ids = append(ids, entry.MediaItemID)
+		latest[entry.MediaItemID] = userstore.CompletedHistoryItem{MediaItemID: entry.MediaItemID, WatchedAt: entry.WatchedAt}
 	}
-	return ids, nil
+	items := make([]userstore.CompletedHistoryItem, 0, len(latest))
+	for _, item := range latest {
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 func (s *fakeSignalStore) GetProfile(context.Context, string) (*userstore.Profile, error) {

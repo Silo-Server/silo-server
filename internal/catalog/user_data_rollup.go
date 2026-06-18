@@ -15,10 +15,12 @@ func EpisodeRollupUserData(episodes []*models.Episode, progressMap map[string]us
 
 	watchedCount := 0
 	inProgressCount := 0
+	totalEpisodes := 0
 	for _, ep := range episodes {
 		if ep == nil {
 			continue
 		}
+		totalEpisodes++
 		progress, ok := progressMap[ep.ContentID]
 		if ok && progress.Completed {
 			watchedCount++
@@ -28,12 +30,15 @@ func EpisodeRollupUserData(episodes []*models.Episode, progressMap map[string]us
 			inProgressCount++
 		}
 	}
+	if totalEpisodes == 0 {
+		return &SeasonUserData{}
+	}
 
-	unplayedCount := len(episodes) - watchedCount
+	unplayedCount := totalEpisodes - watchedCount
 	return &SeasonUserData{
 		WatchedCount:    watchedCount,
 		UnplayedCount:   unplayedCount,
 		InProgressCount: inProgressCount,
-		Played:          watchedCount == len(episodes),
+		Played:          watchedCount == totalEpisodes,
 	}
 }

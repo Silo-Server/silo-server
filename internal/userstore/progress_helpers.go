@@ -3,13 +3,69 @@ package userstore
 import (
 	"context"
 	"strings"
+	"time"
 )
 
-// CompletedHistoryItemIDSet returns the completed-history item IDs for a scoped
-// item query as a set. Lookup failures degrade to an empty set so user-data
+type HistoryVisibilityStore interface {
+	VisibleHistoryTimestamps(ctx context.Context, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error)
+}
+
+type VisibleHistoryAdder interface {
+	AddVisibleHistory(ctx context.Context, entry WatchHistoryEntry) (WatchHistoryEntry, error)
+}
+
+func AddVisibleHistory(ctx context.Context, store UserStore, entry WatchHistoryEntry) (WatchHistoryEntry, error) {
+	if adder, ok := store.(VisibleHistoryAdder); ok {
+		return adder.AddVisibleHistory(ctx, entry)
+	}
+	entryTimes, err := VisibleHistoryTimestamps(ctx, store, entry.ProfileID, []string{entry.MediaItemID}, parseHistoryTimestamp(entry.WatchedAt))
+	if err != nil {
+		return entry, err
+	}
+	if entryTime := entryTimes[entry.MediaItemID]; entryTime != "" {
+		entry.WatchedAt = entryTime
+	}
+	if err := store.AddHistory(ctx, entry); err != nil {
+		return entry, err
+	}
+	return entry, nil
+}
+
+func VisibleHistoryTimestamps(ctx context.Context, store UserStore, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error) {
+	mediaItemIDs = compactHistoryMediaItemIDs(mediaItemIDs)
+	result := make(map[string]string, len(mediaItemIDs))
+	if len(mediaItemIDs) == 0 {
+		return result, nil
+	}
+	if visibilityStore, ok := store.(HistoryVisibilityStore); ok {
+		return visibilityStore.VisibleHistoryTimestamps(ctx, profileID, mediaItemIDs, at)
+	}
+	timestamp := at.UTC().Format(time.RFC3339)
+	if at.IsZero() {
+		timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	for _, mediaItemID := range mediaItemIDs {
+		result[mediaItemID] = timestamp
+	}
+	return result, nil
+}
+
+func parseHistoryTimestamp(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+// CompletedHistoryItemMap returns the latest completed-history item row for a
+// scoped item query. Lookup failures degrade to an empty map so user-data
 // enrichment can keep returning progress rows.
-func CompletedHistoryItemIDSet(ctx context.Context, store UserStore, query CompletedHistoryItemIDQuery) map[string]bool {
-	result := map[string]bool{}
+func CompletedHistoryItemMap(ctx context.Context, store UserStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
+	result := map[string]CompletedHistoryItem{}
 	if store == nil || query.ProfileID == "" {
 		return result
 	}
@@ -17,13 +73,13 @@ func CompletedHistoryItemIDSet(ctx context.Context, store UserStore, query Compl
 	if len(query.MediaItemIDs) == 0 {
 		return result
 	}
-	ids, err := store.ListCompletedHistoryItemIDs(ctx, query)
+	items, err := store.ListCompletedHistoryItems(ctx, query)
 	if err != nil {
 		return result
 	}
-	for _, id := range ids {
-		if id != "" {
-			result[id] = true
+	for _, item := range items {
+		if item.MediaItemID != "" {
+			result[item.MediaItemID] = item
 		}
 	}
 	return result
@@ -43,11 +99,11 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 	if progress != nil && progress.Completed {
 		return progress, nil
 	}
-	completed := CompletedHistoryItemIDSet(ctx, store, CompletedHistoryItemIDQuery{
+	completed := CompletedHistoryItemMap(ctx, store, CompletedHistoryItemQuery{
 		ProfileID:    profileID,
 		MediaItemIDs: []string{mediaItemID},
 	})[mediaItemID]
-	if !completed {
+	if completed.MediaItemID == "" {
 		return progress, nil
 	}
 	if progress == nil {
@@ -55,9 +111,13 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 			ProfileID:   profileID,
 			MediaItemID: mediaItemID,
 			Completed:   true,
+			UpdatedAt:   completed.WatchedAt,
 		}, nil
 	}
 	progress.Completed = true
+	if timestampAfter(completed.WatchedAt, progress.UpdatedAt) {
+		progress.UpdatedAt = completed.WatchedAt
+	}
 	return progress, nil
 }
 
@@ -88,13 +148,16 @@ func ListProgressWithCompletedHistory(ctx context.Context, store UserStore, prof
 		return progressMap, nil
 	}
 
-	completed := CompletedHistoryItemIDSet(ctx, store, CompletedHistoryItemIDQuery{
+	completed := CompletedHistoryItemMap(ctx, store, CompletedHistoryItemQuery{
 		ProfileID:    profileID,
 		MediaItemIDs: candidates,
 	})
-	for mediaItemID := range completed {
+	for mediaItemID, completedItem := range completed {
 		if progress, ok := progressMap[mediaItemID]; ok {
 			progress.Completed = true
+			if timestampAfter(completedItem.WatchedAt, progress.UpdatedAt) {
+				progress.UpdatedAt = completedItem.WatchedAt
+			}
 			progressMap[mediaItemID] = progress
 			continue
 		}
@@ -102,6 +165,7 @@ func ListProgressWithCompletedHistory(ctx context.Context, store UserStore, prof
 			ProfileID:   profileID,
 			MediaItemID: mediaItemID,
 			Completed:   true,
+			UpdatedAt:   completedItem.WatchedAt,
 		}
 	}
 	return progressMap, nil
@@ -122,4 +186,19 @@ func compactHistoryMediaItemIDs(mediaItemIDs []string) []string {
 		result = append(result, mediaItemID)
 	}
 	return result
+}
+
+func timestampAfter(left, right string) bool {
+	if left == "" {
+		return false
+	}
+	if right == "" {
+		return true
+	}
+	leftTime, leftErr := time.Parse(time.RFC3339, left)
+	rightTime, rightErr := time.Parse(time.RFC3339, right)
+	if leftErr == nil && rightErr == nil {
+		return leftTime.After(rightTime)
+	}
+	return left > right
 }

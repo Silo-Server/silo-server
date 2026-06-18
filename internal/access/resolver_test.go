@@ -99,7 +99,7 @@ func (s stubStore) ListHistory(context.Context, string, int, int) ([]userstore.W
 func (s stubStore) ListCompletedHistory(context.Context, userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
 	panic("unused")
 }
-func (s stubStore) ListCompletedHistoryItemIDs(context.Context, userstore.CompletedHistoryItemIDQuery) ([]string, error) {
+func (s stubStore) ListCompletedHistoryItems(context.Context, userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
 	panic("unused")
 }
 func (s stubStore) RemoveHistoryItems(context.Context, string, []string, time.Time) error {

@@ -86,6 +86,9 @@ func (s *Service) RecordPlaybackStop(
 	if err != nil {
 		return result, err
 	}
+	if watchedAt.IsZero() {
+		watchedAt = time.Now().UTC()
+	}
 	if err := store.SetProgress(ctx, profileID, targetID, position, duration, thresholds); err != nil {
 		return result, err
 	}
@@ -105,7 +108,8 @@ func (s *Service) RecordPlaybackStop(
 		Source:          userstore.WatchHistorySourcePlayback,
 	}
 	s.applyStableIdentity(ctx, &entry)
-	if err := store.AddHistory(ctx, entry); err != nil {
+	entry, err = userstore.AddVisibleHistory(ctx, store, entry)
+	if err != nil {
 		return result, err
 	}
 	result.Completed = entry.Completed
@@ -290,7 +294,9 @@ func (s *Service) recordMarkWatched(
 	if err != nil {
 		return ManualMarkResult{}, err
 	}
-	entryTime := formatWatchedAt(watchedAt)
+	if watchedAt.IsZero() {
+		watchedAt = time.Now().UTC()
+	}
 	result := ManualMarkResult{Entries: make([]userstore.WatchHistoryEntry, 0, len(targets))}
 	for _, target := range targets {
 		if err := store.MarkWatched(ctx, profileID, target.MediaItemID, target.DurationSeconds); err != nil {
@@ -300,13 +306,14 @@ func (s *Service) recordMarkWatched(
 			ID:              uuid.NewString(),
 			ProfileID:       profileID,
 			MediaItemID:     target.MediaItemID,
-			WatchedAt:       entryTime,
+			WatchedAt:       formatWatchedAt(watchedAt),
 			DurationSeconds: target.DurationSeconds,
 			Completed:       true,
 			Source:          source,
 		}
 		s.applyStableIdentity(ctx, &histEntry)
-		if err := store.AddHistory(ctx, histEntry); err != nil {
+		histEntry, err = userstore.AddVisibleHistory(ctx, store, histEntry)
+		if err != nil {
 			return result, err
 		}
 		result.Entries = append(result.Entries, histEntry)
@@ -359,7 +366,32 @@ func (s *Service) completedHistoryForTargets(
 			break
 		}
 	}
-	return ManualMarkResult{Entries: entries}, nil
+	return ManualMarkResult{Entries: representativeHistoryEntries(targetIDs, entries)}, nil
+}
+
+func representativeHistoryEntries(targetIDs []string, entries []userstore.WatchHistoryEntry) []userstore.WatchHistoryEntry {
+	if len(targetIDs) == 0 || len(entries) == 0 {
+		return nil
+	}
+	latestByTarget := make(map[string]userstore.WatchHistoryEntry, len(targetIDs))
+	for _, entry := range entries {
+		current, ok := latestByTarget[entry.MediaItemID]
+		if !ok || entry.WatchedAt > current.WatchedAt || (entry.WatchedAt == current.WatchedAt && entry.ID > current.ID) {
+			latestByTarget[entry.MediaItemID] = entry
+		}
+	}
+	result := make([]userstore.WatchHistoryEntry, 0, len(latestByTarget))
+	seen := make(map[string]struct{}, len(targetIDs))
+	for _, targetID := range targetIDs {
+		if _, ok := seen[targetID]; ok {
+			continue
+		}
+		seen[targetID] = struct{}{}
+		if entry, ok := latestByTarget[targetID]; ok {
+			result = append(result, entry)
+		}
+	}
+	return result
 }
 
 func (s *Service) recordMarkWatchedBatch(
@@ -386,17 +418,16 @@ func (s *Service) recordMarkWatchedBatch(
 	// Strategy A (audit 2026-05-01 §2.7): batch the progress upsert because it
 	// powers hot Continue-Watching queries. History inserts stay per-target so
 	// per-episode stable-identity resolution still applies.
-	entryTime := formatWatchedAt(watchedAt)
 	for _, targetID := range targetIDs {
 		histEntry := userstore.WatchHistoryEntry{
 			ProfileID:   profileID,
 			MediaItemID: targetID,
-			WatchedAt:   entryTime,
+			WatchedAt:   formatWatchedAt(watchedAt),
 			Completed:   true,
 			Source:      source,
 		}
 		s.applyStableIdentity(ctx, &histEntry)
-		if err := store.AddHistory(ctx, histEntry); err != nil {
+		if _, err := userstore.AddVisibleHistory(ctx, store, histEntry); err != nil {
 			return err
 		}
 	}
