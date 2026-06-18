@@ -103,15 +103,16 @@ type enrichmentItemRow struct {
 
 // Enricher drives the manga metadata enrichment sweep.
 type Enricher struct {
-	pool        *pgxpool.Pool
-	chainRepo   *metadata.ChainRepository
-	resolver    *metadata.PluginResolverAdapter
-	itemRepo    *catalog.ItemRepository
-	personRepo  *catalog.PersonRepository
-	providerIDs *catalog.ProviderIDRepository
-	imageCacher metadata.ImageCacher
-	batchSize   int
-	workers     int
+	pool           *pgxpool.Pool
+	chainRepo      *metadata.ChainRepository
+	resolver       *metadata.PluginResolverAdapter
+	itemRepo       *catalog.ItemRepository
+	personRepo     *catalog.PersonRepository
+	providerIDs    *catalog.ProviderIDRepository
+	imageCacher    metadata.ImageCacher
+	imageCacheJobs metadata.ImageCacheJobEnqueuer
+	batchSize      int
+	workers        int
 }
 
 func NewEnricher(
@@ -139,6 +140,13 @@ func (e *Enricher) SetImageCacher(cacher metadata.ImageCacher) {
 		return
 	}
 	e.imageCacher = cacher
+}
+
+func (e *Enricher) SetImageCacheJobEnqueuer(enqueuer metadata.ImageCacheJobEnqueuer) {
+	if e == nil {
+		return
+	}
+	e.imageCacheJobs = enqueuer
 }
 
 func (e *Enricher) Run(ctx context.Context) (int, error) {
@@ -399,11 +407,10 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		return errEnrichmentNoMatch
 	}
 
-	e.cacheRemoteImages(ctx, item.ContentID, accumulator)
-
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
 	}
+	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 
 	slog.Info("manga enrichment: enriched",
 		"content_id", item.ContentID,
@@ -426,10 +433,9 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemRow, result *metadata.MetadataResult, providerErrs []error) error {
 	upd := &catalog.MetadataUpdate{}
 	if result != nil && result.BackdropPath != "" && !item.HasBackdrop {
-		path, thumbhash := e.cacheRemoteImage(ctx, item.ContentID, result.BackdropPath, metadata.ImageBackdrop)
-		upd.BackdropPath = &path
-		if thumbhash != "" {
-			upd.BackdropThumbhash = &thumbhash
+		upd.BackdropPath = &result.BackdropPath
+		if isRemoteHTTPImage(result.BackdropPath) {
+			upd.BackdropSourcePath = &result.BackdropPath
 		}
 	}
 	if result != nil {
@@ -458,6 +464,9 @@ func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemR
 
 	if err := e.updateMetadataAndTimestamps(ctx, item.ContentID, upd); err != nil {
 		return fmt.Errorf("persisting secondary metadata for %s: %w", item.ContentID, err)
+	}
+	if result != nil && result.BackdropPath != "" && !item.HasBackdrop {
+		e.enqueueRemoteImage(ctx, item.ContentID, result.BackdropPath, metadata.ImageBackdrop)
 	}
 
 	slog.Info("manga enrichment: secondary metadata added",
@@ -654,18 +663,27 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 
 	if result.PosterPath != "" {
 		upd.PosterPath = &result.PosterPath
+		if isRemoteHTTPImage(result.PosterPath) {
+			upd.PosterSourcePath = &result.PosterPath
+		}
 	}
 	if result.PosterThumbhash != "" {
 		upd.PosterThumbhash = &result.PosterThumbhash
 	}
 	if result.BackdropPath != "" {
 		upd.BackdropPath = &result.BackdropPath
+		if isRemoteHTTPImage(result.BackdropPath) {
+			upd.BackdropSourcePath = &result.BackdropPath
+		}
 	}
 	if result.BackdropThumbhash != "" {
 		upd.BackdropThumbhash = &result.BackdropThumbhash
 	}
 	if result.LogoPath != "" {
 		upd.LogoPath = &result.LogoPath
+		if isRemoteHTTPImage(result.LogoPath) {
+			upd.LogoSourcePath = &result.LogoPath
+		}
 	}
 	if result.Overview != "" {
 		upd.Overview = &result.Overview
@@ -722,6 +740,44 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	}
 
 	return nil
+}
+
+func (e *Enricher) enqueueRemoteArtwork(ctx context.Context, contentID string, result *metadata.MetadataResult) {
+	if e == nil || result == nil || contentID == "" {
+		return
+	}
+	e.enqueueRemoteImage(ctx, contentID, result.PosterPath, metadata.ImagePoster)
+	e.enqueueRemoteImage(ctx, contentID, result.BackdropPath, metadata.ImageBackdrop)
+	e.enqueueRemoteImage(ctx, contentID, result.LogoPath, metadata.ImageLogo)
+}
+
+func (e *Enricher) enqueueRemoteImage(ctx context.Context, contentID, sourcePath string, imageType metadata.ImageType) {
+	if e == nil || e.imageCacheJobs == nil || contentID == "" || !isRemoteHTTPImage(sourcePath) {
+		return
+	}
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	_, err := e.imageCacheJobs.EnqueueBatch(enqueueCtx, []metadata.EnqueueImageCacheJobInput{{
+		TargetType:        metadata.ImageCacheTargetItem,
+		TargetContentID:   contentID,
+		SeriesID:          contentID,
+		SourcePath:        sourcePath,
+		ProviderID:        mangaMetadataImageProviderID,
+		ProviderContentID: contentID,
+		ContentType:       mangaContentType(),
+		ImageType:         metadata.ImageTypeToString(imageType),
+	}})
+	if err != nil {
+		slog.Warn("manga enrichment: failed to enqueue image cache job",
+			"content_id", contentID,
+			"image_type", metadata.ImageTypeToString(imageType),
+			"error", err,
+		)
+	}
+}
+
+func isRemoteHTTPImage(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
 }
 
 func (e *Enricher) updateMetadataAndTimestamps(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error {

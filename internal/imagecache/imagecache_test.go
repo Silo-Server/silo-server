@@ -34,10 +34,11 @@ func makeTestJPEG(t *testing.T) []byte {
 
 // mockS3 records all PutObject calls for test assertions.
 type mockS3 struct {
-	mu     sync.Mutex
-	calls  []putCall
-	bucket string
-	putErr error // if non-nil, returned for every PutObject call
+	mu                    sync.Mutex
+	calls                 []putCall
+	bucket                string
+	putErr                error // if non-nil, returned for every PutObject call
+	failuresBeforeSuccess int
 }
 
 type putCall struct {
@@ -47,11 +48,15 @@ type putCall struct {
 }
 
 func (m *mockS3) PutObject(_ context.Context, bucket, key string, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failuresBeforeSuccess > 0 {
+		m.failuresBeforeSuccess--
+		return errors.New("temporary s3 failure")
+	}
 	if m.putErr != nil {
 		return m.putErr
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.calls = append(m.calls, putCall{bucket: bucket, key: key, size: len(data)})
 	return nil
 }
@@ -222,6 +227,64 @@ func TestCache_Logo(t *testing.T) {
 	for _, forbidden := range []string{"w300", "w1280"} {
 		if hasKey(keys, wantBase+"/"+forbidden+".webp") {
 			t.Errorf("logo should not have %s variant", forbidden)
+		}
+	}
+}
+
+func TestCache_LocalizedPosterUsesLanguageScopedPath(t *testing.T) {
+	jpeg := makeTestJPEG(t)
+	srv := startImageServer(t, jpeg, http.StatusOK)
+
+	s3 := &mockS3{bucket: "media"}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	result, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/poster-fr.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "series",
+		ContentID:   "1396",
+		ImageType:   metadata.ImagePoster,
+		Language:    "fr-CA",
+	})
+	if err != nil {
+		t.Fatalf("Cache localized poster: %v", err)
+	}
+
+	wantBase := "tmdb/series/1396/localizations/fr-ca/poster"
+	if result.BasePath != wantBase {
+		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
+	}
+	if !hasKey(s3.keys(), wantBase+"/original.webp") {
+		t.Errorf("missing localized original in %v", s3.keys())
+	}
+}
+
+func TestCache_ProfileUsesProfileImagePath(t *testing.T) {
+	jpeg := makeTestJPEG(t)
+	srv := startImageServer(t, jpeg, http.StatusOK)
+
+	s3 := &mockS3{bucket: "media"}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	result, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/person.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "people",
+		ContentID:   "287",
+		ImageType:   metadata.ImageProfile,
+	})
+	if err != nil {
+		t.Fatalf("Cache profile: %v", err)
+	}
+
+	wantBase := "tmdb/people/287/profile"
+	if result.BasePath != wantBase {
+		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
+	}
+	for _, variant := range []string{"original", "w500", "w300"} {
+		want := wantBase + "/" + variant + ".webp"
+		if !hasKey(s3.keys(), want) {
+			t.Errorf("missing S3 key %q in %v", want, s3.keys())
 		}
 	}
 }
@@ -473,6 +536,34 @@ func TestCache_ResolvesPluginURL(t *testing.T) {
 	if result.BasePath != "tmdb/movies/550/poster" {
 		t.Errorf("BasePath = %q, want %q", result.BasePath, "tmdb/movies/550/poster")
 	}
+}
+
+func TestCacheRetriesTransientPutObjectFailure(t *testing.T) {
+	jpeg := makeTestJPEG(t)
+	srv := startImageServer(t, jpeg, http.StatusOK)
+
+	s3 := &mockS3{bucket: "media", failuresBeforeSuccess: 1}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	_, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:     srv.URL + "/still.jpg",
+		ProviderID:    "tmdb",
+		ContentType:   "series",
+		ContentID:     "1396",
+		ImageType:     metadata.ImageStill,
+		SeasonNumber:  intPointer(1),
+		EpisodeNumber: intPointer(1),
+	})
+	if err != nil {
+		t.Fatalf("Cache() error = %v", err)
+	}
+	if len(s3.keys()) == 0 {
+		t.Fatal("expected uploads after retry")
+	}
+}
+
+func intPointer(v int) *int {
+	return &v
 }
 
 type stubResolver struct {

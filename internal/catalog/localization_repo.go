@@ -38,10 +38,12 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO media_item_localizations (
 			content_id, language, title, sort_title, overview, tagline,
-			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path
+			poster_path, poster_source_path, poster_thumbhash,
+			backdrop_path, backdrop_source_path, backdrop_thumbhash,
+			logo_path, logo_source_path
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10, $11
+			$7, $8, $9, $10, $11, $12, $13, $14
 		)
 		ON CONFLICT (content_id, language) DO UPDATE SET
 			title = EXCLUDED.title,
@@ -63,13 +65,18 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 					THEN media_item_localizations.tagline_source
 				ELSE 'provider' END,
 			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			backdrop_path = EXCLUDED.backdrop_path,
+			backdrop_source_path = EXCLUDED.backdrop_source_path,
 			backdrop_thumbhash = EXCLUDED.backdrop_thumbhash,
 			logo_path = EXCLUDED.logo_path,
+			logo_source_path = EXCLUDED.logo_source_path,
 			updated_at = NOW()
 	`, loc.ContentID, loc.Language, loc.Title, loc.SortTitle, loc.Overview, loc.Tagline,
-		loc.PosterPath, loc.PosterThumbhash, loc.BackdropPath, loc.BackdropThumbhash, loc.LogoPath)
+		loc.PosterPath, loc.PosterSourcePath, loc.PosterThumbhash,
+		loc.BackdropPath, loc.BackdropSourcePath, loc.BackdropThumbhash,
+		loc.LogoPath, loc.LogoSourcePath)
 	if err != nil {
 		return fmt.Errorf("upserting media item localization: %w", err)
 	}
@@ -93,11 +100,13 @@ func (r *MediaItemLocalizationRepository) UpsertAITranslation(ctx context.Contex
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO media_item_localizations (
 			content_id, language, title, sort_title, overview, tagline,
-			poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+			poster_path, poster_source_path, poster_thumbhash,
+			backdrop_path, backdrop_source_path, backdrop_thumbhash,
+			logo_path, logo_source_path,
 			overview_source, tagline_source
 		) VALUES (
 			$1, $2, '', '', COALESCE($3, ''), COALESCE($4, ''),
-			'', '', '', '', '',
+			'', '', '', '', '', '', '', '',
 			CASE WHEN $3::text IS NULL THEN 'provider' ELSE 'ai' END,
 			CASE WHEN $4::text IS NULL THEN 'provider' ELSE 'ai' END
 		)
@@ -137,7 +146,9 @@ func (r *MediaItemLocalizationRepository) UpsertAITranslation(ctx context.Contex
 func (r *MediaItemLocalizationRepository) Get(ctx context.Context, contentID, language string) (*models.MediaItemLocalization, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT content_id, language, title, sort_title, overview, tagline,
-		       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+		       poster_path, poster_source_path, poster_thumbhash,
+		       backdrop_path, backdrop_source_path, backdrop_thumbhash,
+		       logo_path, logo_source_path,
 		       overview_source, tagline_source,
 		       created_at, updated_at
 		FROM media_item_localizations
@@ -153,7 +164,9 @@ func (r *MediaItemLocalizationRepository) GetByContentIDs(ctx context.Context, c
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT content_id, language, title, sort_title, overview, tagline,
-		       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+		       poster_path, poster_source_path, poster_thumbhash,
+		       backdrop_path, backdrop_source_path, backdrop_thumbhash,
+		       logo_path, logo_source_path,
 		       overview_source, tagline_source,
 		       created_at, updated_at
 		FROM media_item_localizations
@@ -176,6 +189,57 @@ func (r *MediaItemLocalizationRepository) GetByContentIDs(ctx context.Context, c
 	return result, nil
 }
 
+func (r *MediaItemLocalizationRepository) UpdateArtworkIfSourceMatches(ctx context.Context, contentID, language, imageType, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, nil
+	}
+
+	var query string
+	var args []any
+	switch imageType {
+	case "poster":
+		query = `
+			UPDATE media_item_localizations
+			SET poster_path = $4,
+				poster_source_path = $3,
+				poster_thumbhash = NULLIF($5, ''),
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND language = $2
+			  AND poster_source_path = $3`
+		args = []any{contentID, language, sourcePath, cachedPath, thumbhash}
+	case "backdrop":
+		query = `
+			UPDATE media_item_localizations
+			SET backdrop_path = $4,
+				backdrop_source_path = $3,
+				backdrop_thumbhash = NULLIF($5, ''),
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND language = $2
+			  AND backdrop_source_path = $3`
+		args = []any{contentID, language, sourcePath, cachedPath, thumbhash}
+	case "logo":
+		query = `
+			UPDATE media_item_localizations
+			SET logo_path = $4,
+				logo_source_path = $3,
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND language = $2
+			  AND logo_source_path = $3`
+		args = []any{contentID, language, sourcePath, cachedPath}
+	default:
+		return false, fmt.Errorf("unsupported localized media item artwork type %q", imageType)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("updating localized media item cached artwork: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 type SeasonLocalizationRepository struct {
 	pool *pgxpool.Pool
 }
@@ -192,8 +256,8 @@ func (r *SeasonLocalizationRepository) Upsert(ctx context.Context, loc *models.S
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO season_localizations (
-			season_content_id, language, title, overview, poster_path, poster_thumbhash
-		) VALUES ($1, $2, $3, $4, $5, $6)
+			season_content_id, language, title, overview, poster_path, poster_source_path, poster_thumbhash
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (season_content_id, language) DO UPDATE SET
 			title = EXCLUDED.title,
 			overview = CASE
@@ -205,9 +269,10 @@ func (r *SeasonLocalizationRepository) Upsert(ctx context.Context, loc *models.S
 					THEN season_localizations.overview_source
 				ELSE 'provider' END,
 			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			updated_at = NOW()
-	`, loc.SeasonContentID, loc.Language, loc.Title, loc.Overview, loc.PosterPath, loc.PosterThumbhash)
+	`, loc.SeasonContentID, loc.Language, loc.Title, loc.Overview, loc.PosterPath, loc.PosterSourcePath, loc.PosterThumbhash)
 	if err != nil {
 		return fmt.Errorf("upserting season localization: %w", err)
 	}
@@ -222,8 +287,8 @@ func (r *SeasonLocalizationRepository) UpsertAIOverview(ctx context.Context, sea
 	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO season_localizations (
-			season_content_id, language, title, overview, poster_path, poster_thumbhash, overview_source
-		) VALUES ($1, $2, '', $3, '', '', 'ai')
+			season_content_id, language, title, overview, poster_path, poster_source_path, poster_thumbhash, overview_source
+		) VALUES ($1, $2, '', $3, '', '', '', 'ai')
 		ON CONFLICT (season_content_id, language) DO UPDATE SET
 			overview = CASE
 				WHEN season_localizations.overview_source = 'manual'
@@ -247,7 +312,7 @@ func (r *SeasonLocalizationRepository) UpsertAIOverview(ctx context.Context, sea
 
 func (r *SeasonLocalizationRepository) Get(ctx context.Context, seasonContentID, language string) (*models.SeasonLocalization, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT season_content_id, language, title, overview, poster_path, poster_thumbhash,
+			SELECT season_content_id, language, title, overview, poster_path, poster_source_path, poster_thumbhash,
 		       overview_source, created_at, updated_at
 		FROM season_localizations
 		WHERE season_content_id = $1 AND language = $2
@@ -261,7 +326,7 @@ func (r *SeasonLocalizationRepository) GetBySeasonIDs(ctx context.Context, seaso
 		return result, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT season_content_id, language, title, overview, poster_path, poster_thumbhash,
+			SELECT season_content_id, language, title, overview, poster_path, poster_source_path, poster_thumbhash,
 		       overview_source, created_at, updated_at
 		FROM season_localizations
 		WHERE language = $1 AND season_content_id = ANY($2)
@@ -281,6 +346,26 @@ func (r *SeasonLocalizationRepository) GetBySeasonIDs(ctx context.Context, seaso
 		return nil, fmt.Errorf("iterating season localizations: %w", err)
 	}
 	return result, nil
+}
+
+func (r *SeasonLocalizationRepository) UpdateArtworkIfSourceMatches(ctx context.Context, seasonContentID, language, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE season_localizations
+		SET poster_path = $4,
+			poster_source_path = $3,
+			poster_thumbhash = NULLIF($5, ''),
+			updated_at = NOW()
+		WHERE season_content_id = $1
+		  AND language = $2
+		  AND poster_source_path = $3
+	`, seasonContentID, language, sourcePath, cachedPath, thumbhash)
+	if err != nil {
+		return false, fmt.Errorf("updating localized season cached artwork: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 type EpisodeLocalizationRepository struct {
@@ -394,10 +479,13 @@ func scanMediaItemLocalization(row pgx.Row) (*models.MediaItemLocalization, erro
 		&loc.Overview,
 		&loc.Tagline,
 		&loc.PosterPath,
+		&loc.PosterSourcePath,
 		&loc.PosterThumbhash,
 		&loc.BackdropPath,
+		&loc.BackdropSourcePath,
 		&loc.BackdropThumbhash,
 		&loc.LogoPath,
+		&loc.LogoSourcePath,
 		&loc.OverviewSource,
 		&loc.TaglineSource,
 		&loc.CreatedAt,
@@ -419,6 +507,7 @@ func scanSeasonLocalization(row pgx.Row) (*models.SeasonLocalization, error) {
 		&loc.Title,
 		&loc.Overview,
 		&loc.PosterPath,
+		&loc.PosterSourcePath,
 		&loc.PosterThumbhash,
 		&loc.OverviewSource,
 		&loc.CreatedAt,

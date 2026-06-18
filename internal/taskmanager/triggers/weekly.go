@@ -52,21 +52,23 @@ func (w *WeeklyTrigger) Start(_ *taskmanager.ExecutionResult) {
 	default:
 	}
 
-	w.stopCh = make(chan struct{})
+	stopCh := make(chan struct{})
 	w.nextRun = w.calcNextRun(time.Now())
-	w.timer = time.NewTimer(time.Until(w.nextRun))
+	timer := time.NewTimer(time.Until(w.nextRun))
+	w.stopCh = stopCh
+	w.timer = timer
 
 	go func() {
 		select {
-		case <-w.stopCh:
-			if !w.timer.Stop() {
+		case <-stopCh:
+			if !timer.Stop() {
 				select {
-				case <-w.timer.C:
+				case <-timer.C:
 				default:
 				}
 			}
 			return
-		case <-w.timer.C:
+		case <-timer.C:
 			select {
 			case w.ch <- struct{}{}:
 			default:

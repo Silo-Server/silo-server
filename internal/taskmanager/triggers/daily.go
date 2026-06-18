@@ -49,21 +49,23 @@ func (d *DailyTrigger) Start(_ *taskmanager.ExecutionResult) {
 	default:
 	}
 
-	d.stopCh = make(chan struct{})
+	stopCh := make(chan struct{})
 	d.nextRun = d.calcNextRun(time.Now())
-	d.timer = time.NewTimer(time.Until(d.nextRun))
+	timer := time.NewTimer(time.Until(d.nextRun))
+	d.stopCh = stopCh
+	d.timer = timer
 
 	go func() {
 		select {
-		case <-d.stopCh:
-			if !d.timer.Stop() {
+		case <-stopCh:
+			if !timer.Stop() {
 				select {
-				case <-d.timer.C:
+				case <-timer.C:
 				default:
 				}
 			}
 			return
-		case <-d.timer.C:
+		case <-timer.C:
 			select {
 			case d.ch <- struct{}{}:
 			default:

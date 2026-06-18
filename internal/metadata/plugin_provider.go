@@ -640,6 +640,8 @@ func imageTypeFromKind(kind string) ImageType {
 		return ImageLogo
 	case "still":
 		return ImageStill
+	case "profile":
+		return ImageProfile
 	default:
 		return ImagePoster
 	}

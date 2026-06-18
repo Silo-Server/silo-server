@@ -38,8 +38,6 @@ func (t *IntervalTrigger) Start(lastResult *taskmanager.ExecutionResult) {
 	default:
 	}
 
-	t.stopCh = make(chan struct{})
-
 	var base time.Time
 	if lastResult != nil && !lastResult.CompletedAt.IsZero() {
 		base = lastResult.CompletedAt
@@ -54,19 +52,22 @@ func (t *IntervalTrigger) Start(lastResult *taskmanager.ExecutionResult) {
 		t.nextRun = time.Now()
 	}
 
-	t.timer = time.NewTimer(delay)
+	stopCh := make(chan struct{})
+	timer := time.NewTimer(delay)
+	t.stopCh = stopCh
+	t.timer = timer
 
 	go func() {
 		select {
-		case <-t.stopCh:
-			if !t.timer.Stop() {
+		case <-stopCh:
+			if !timer.Stop() {
 				select {
-				case <-t.timer.C:
+				case <-timer.C:
 				default:
 				}
 			}
 			return
-		case <-t.timer.C:
+		case <-timer.C:
 			select {
 			case t.ch <- struct{}{}:
 			default:

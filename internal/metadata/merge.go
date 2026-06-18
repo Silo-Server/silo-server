@@ -196,6 +196,7 @@ func MergePersonDetail(source, target *PersonDetailResult, mode MergeMode) {
 	mergeScalar(&target.Birthplace, source.Birthplace, mode)
 	mergeScalar(&target.Homepage, source.Homepage, mode)
 	mergeScalar(&target.PhotoPath, source.PhotoPath, mode)
+	mergeScalar(&target.PhotoSourcePath, source.PhotoSourcePath, mode)
 	mergeScalar(&target.PhotoThumbhash, source.PhotoThumbhash, mode)
 	mergeProviderIDMap(&target.ProviderIDs, source.ProviderIDs)
 }
@@ -363,6 +364,9 @@ func mergePersonFields(dst *models.ItemPerson, src models.ItemPerson) {
 	}
 	if dst.PhotoPath == "" {
 		dst.PhotoPath = src.PhotoPath
+	}
+	if dst.PhotoSourcePath == "" {
+		dst.PhotoSourcePath = src.PhotoSourcePath
 	}
 	if dst.PhotoThumbhash == "" {
 		dst.PhotoThumbhash = src.PhotoThumbhash

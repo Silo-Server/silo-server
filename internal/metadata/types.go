@@ -135,16 +135,17 @@ type PersonDetailRequest struct {
 
 // PersonDetailResult carries person-level metadata from a provider.
 type PersonDetailResult struct {
-	Name           string
-	SortName       string
-	Bio            string
-	BirthDate      string
-	DeathDate      string
-	Birthplace     string
-	Homepage       string
-	PhotoPath      string
-	PhotoThumbhash string
-	ProviderIDs    map[string]string
+	Name            string
+	SortName        string
+	Bio             string
+	BirthDate       string
+	DeathDate       string
+	Birthplace      string
+	Homepage        string
+	PhotoPath       string
+	PhotoSourcePath string
+	PhotoThumbhash  string
+	ProviderIDs     map[string]string
 }
 
 // MetadataResult carries structured metadata from a single provider.
@@ -219,6 +220,7 @@ const (
 	ImageBackdrop
 	ImageLogo
 	ImageStill // Episode stills
+	ImageProfile
 )
 
 // CacheImageRequest describes an image to be cached. For season posters
@@ -233,6 +235,7 @@ type CacheImageRequest struct {
 	ImageType     ImageType
 	SeasonNumber  *int
 	EpisodeNumber *int
+	Language      string
 }
 
 // CacheImageResult is returned by ImageCacher on success.
@@ -245,6 +248,11 @@ type CacheImageResult struct {
 // ImageCacher caches a remote image to object storage.
 type ImageCacher interface {
 	CacheImage(ctx context.Context, req CacheImageRequest) (*CacheImageResult, error)
+}
+
+type ImageCacheJobEnqueuer interface {
+	Enqueue(ctx context.Context, in EnqueueImageCacheJobInput) error
+	EnqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error)
 }
 
 // SeasonsRequest is passed to EpisodeProvider.GetSeasons().
@@ -263,27 +271,29 @@ type EpisodesRequest struct {
 
 // SeasonResult carries season data from a provider.
 type SeasonResult struct {
-	ContentID       string
-	SeasonNumber    int
-	Title           string
-	Overview        string
-	AirDate         string
-	PosterPath      string
-	PosterThumbhash string
-	Episodes        []EpisodeResult
+	ContentID        string
+	SeasonNumber     int
+	Title            string
+	Overview         string
+	AirDate          string
+	PosterPath       string
+	PosterSourcePath string
+	PosterThumbhash  string
+	Episodes         []EpisodeResult
 }
 
 // EpisodeResult carries episode data from a provider.
 type EpisodeResult struct {
-	ContentID      string
-	ProviderIDs    map[string]string
-	SeasonNumber   int
-	EpisodeNumber  int
-	Title          string
-	Overview       string
-	AirDate        string
-	Runtime        int
-	Ratings        Ratings
-	StillPath      string
-	StillThumbhash string
+	ContentID       string
+	ProviderIDs     map[string]string
+	SeasonNumber    int
+	EpisodeNumber   int
+	Title           string
+	Overview        string
+	AirDate         string
+	Runtime         int
+	Ratings         Ratings
+	StillPath       string
+	StillSourcePath string
+	StillThumbhash  string
 }

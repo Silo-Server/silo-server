@@ -33,7 +33,7 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	title, default_metadata_language, overview, air_date, runtime,
 	rating_imdb, rating_tmdb,
 	imdb_id, tmdb_id, tvdb_id,
-	still_path, still_thumbhash,
+	still_path, still_source_path, still_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at`
 
@@ -113,6 +113,7 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 	var tmdbID *string
 	var tvdbID *string
 	var stillPath *string
+	var stillSourcePath *string
 	var stillThumbhash *string
 	var metadataS3Path *string
 	var metadataEtag *string
@@ -133,6 +134,7 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 		&tmdbID,
 		&tvdbID,
 		&stillPath,
+		&stillSourcePath,
 		&stillThumbhash,
 		&metadataS3Path,
 		&metadataEtag,
@@ -160,6 +162,9 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 	}
 	if stillPath != nil {
 		ep.StillPath = *stillPath
+	}
+	if stillSourcePath != nil {
+		ep.StillSourcePath = *stillSourcePath
 	}
 	if stillThumbhash != nil {
 		ep.StillThumbhash = *stillThumbhash
@@ -191,6 +196,7 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 		var tmdbID *string
 		var tvdbID *string
 		var stillPath *string
+		var stillSourcePath *string
 		var stillThumbhash *string
 		var metadataS3Path *string
 		var metadataEtag *string
@@ -211,6 +217,7 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 			&tmdbID,
 			&tvdbID,
 			&stillPath,
+			&stillSourcePath,
 			&stillThumbhash,
 			&metadataS3Path,
 			&metadataEtag,
@@ -238,6 +245,9 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 		}
 		if stillPath != nil {
 			ep.StillPath = *stillPath
+		}
+		if stillSourcePath != nil {
+			ep.StillSourcePath = *stillSourcePath
 		}
 		if stillThumbhash != nil {
 			ep.StillThumbhash = *stillThumbhash
@@ -297,15 +307,15 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 			title, default_metadata_language, overview, air_date, runtime,
 			rating_imdb, rating_tmdb,
 			imdb_id, tmdb_id, tvdb_id,
-			still_path, still_thumbhash,
+			still_path, still_source_path, still_thumbhash,
 			metadata_s3_path, metadata_etag, metadata_source
 		) VALUES (
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10,
 			$11, $12,
 			$13, $14, $15,
-			$16, $17,
-			$18, $19, $20
+			$16, $17, $18,
+			$19, $20, $21
 		)
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
@@ -320,6 +330,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
 			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
 			still_path = EXCLUDED.still_path,
+			still_source_path = EXCLUDED.still_source_path,
 			still_thumbhash = EXCLUDED.still_thumbhash,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
@@ -345,6 +356,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		ep.TmdbID,
 		ep.TvdbID,
 		ep.StillPath,
+		ep.StillSourcePath,
 		ep.StillThumbhash,
 		ep.MetadataS3Path,
 		ep.MetadataEtag,
@@ -439,6 +451,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 	epTmdbIDs := make([]string, len(episodes))
 	epTvdbIDs := make([]string, len(episodes))
 	stillPaths := make([]string, len(episodes))
+	stillSourcePaths := make([]string, len(episodes))
 	stillThumbs := make([]string, len(episodes))
 	metaS3Paths := make([]string, len(episodes))
 	metaEtags := make([]string, len(episodes))
@@ -463,6 +476,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		epTmdbIDs[i] = ep.TmdbID
 		epTvdbIDs[i] = ep.TvdbID
 		stillPaths[i] = ep.StillPath
+		stillSourcePaths[i] = ep.StillSourcePath
 		stillThumbs[i] = ep.StillThumbhash
 		metaS3Paths[i] = ep.MetadataS3Path
 		metaEtags[i] = ep.MetadataEtag
@@ -475,7 +489,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 			title, default_metadata_language, overview, air_date, runtime,
 			rating_imdb, rating_tmdb,
 			imdb_id, tmdb_id, tvdb_id,
-			still_path, still_thumbhash,
+			still_path, still_source_path, still_thumbhash,
 			metadata_s3_path, metadata_etag, metadata_source
 		)
 		SELECT * FROM UNNEST(
@@ -483,8 +497,8 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 			$6::text[], $7::text[], $8::text[], $9::date[], $10::int[],
 			$11::float8[], $12::float8[],
 			$13::text[], $14::text[], $15::text[],
-			$16::text[], $17::text[],
-			$18::text[], $19::text[], $20::text[]
+			$16::text[], $17::text[], $18::text[],
+			$19::text[], $20::text[], $21::text[]
 		)
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
@@ -499,6 +513,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 			tmdb_id = COALESCE(NULLIF(EXCLUDED.tmdb_id, ''), episodes.tmdb_id),
 			tvdb_id = COALESCE(NULLIF(EXCLUDED.tvdb_id, ''), episodes.tvdb_id),
 			still_path = EXCLUDED.still_path,
+			still_source_path = EXCLUDED.still_source_path,
 			still_thumbhash = EXCLUDED.still_thumbhash,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
@@ -511,7 +526,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		titles, defaultMetadataLanguages, overviews, airDates, runtimes,
 		ratingsIMDB, ratingsTMDB,
 		epImdbIDs, epTmdbIDs, epTvdbIDs,
-		stillPaths, stillThumbs,
+		stillPaths, stillSourcePaths, stillThumbs,
 		metaS3Paths, metaEtags, metaSources,
 	)
 	if err != nil {
@@ -900,6 +915,10 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 	addString("tmdb_id", upd.TmdbID)
 	addString("tvdb_id", upd.TvdbID)
 	addString("still_path", upd.StillPath)
+	if upd.StillPath != nil && upd.StillSourcePath == nil {
+		setClauses = append(setClauses, "still_source_path = ''")
+	}
+	addString("still_source_path", upd.StillSourcePath)
 	addString("still_thumbhash", upd.StillThumbhash)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
@@ -916,4 +935,20 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 		return ErrEpisodeNotFound
 	}
 	return nil
+}
+
+func (r *EpisodeRepository) UpdateStillIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE episodes
+		SET still_path = $3,
+			still_source_path = $2,
+			still_thumbhash = $4,
+			updated_at = NOW()
+		WHERE content_id = $1
+		  AND still_source_path = $2
+	`, contentID, sourcePath, cachedPath, thumbhash)
+	if err != nil {
+		return false, fmt.Errorf("updating episode cached still: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }

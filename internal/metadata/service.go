@@ -310,6 +310,7 @@ type MetadataService struct {
 	seriesWork      map[string]*seriesEpisodeWork
 	hooks           metadataServiceHooks
 	imageCacher     ImageCacher
+	imageCacheJobs  ImageCacheJobEnqueuer
 	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
 	imageResolver   interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
@@ -433,6 +434,10 @@ func (s *MetadataService) SetAutoTranslator(t AutoTranslator) {
 
 func (s *MetadataService) SetImageCacher(c ImageCacher) {
 	s.imageCacher = c
+}
+
+func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
+	s.imageCacheJobs = enqueuer
 }
 
 // SetAutoCacheImages controls whether refresh pipelines automatically cache
@@ -1507,15 +1512,8 @@ func (s *MetadataService) mergeAndPersist(
 		)
 	}
 
-	// Cache images to S3 if enabled.
-	if s.autoCacheImages.Load() && s.imageCacher != nil && isCanonicalWrite {
-		s.cacheItemImages(ctx, item, images)
-	}
-	// Refreshes that keep the already-cached poster (locked field, no new
-	// candidates) never pass through cacheItemImages' source capture, so the
-	// provider-origin path must survive from the existing row.
-	if item.PosterSourcePath == "" && existingItem != nil && item.PosterPath == existingItem.PosterPath {
-		item.PosterSourcePath = existingItem.PosterSourcePath
+	if isCanonicalWrite {
+		prepareItemImagesForQueue(item, existingItem)
 	}
 
 	if isNew && contentID == "" {
@@ -1549,6 +1547,9 @@ func (s *MetadataService) mergeAndPersist(
 	item.ContentID = contentID
 	unlockProviderDedup()
 	providerDedupReleased = true
+	if isCanonicalWrite {
+		s.enqueueItemImages(ctx, item, accumulator.ProviderIDs, images)
+	}
 
 	if !isCanonicalWrite && s.itemLocalizationRepo != nil {
 		existingLoc, err := s.itemLocalizationRepo.Get(ctx, contentID, req.Language)
@@ -1562,6 +1563,7 @@ func (s *MetadataService) mergeAndPersist(
 		if err := s.itemLocalizationRepo.Upsert(ctx, loc); err != nil {
 			return nil, fmt.Errorf("upserting item localization: %w", err)
 		}
+		s.enqueueItemLocalizationImages(ctx, item, loc, accumulator.ProviderIDs, images)
 	}
 
 	// Persist people to the unified people table.
@@ -1601,12 +1603,10 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
-	s.cacheSeriesChildImages(ctx, item, accumulator.ProviderIDs, seasons, episodes)
-
 	// Persist seasons and episodes for series.
 	if contentType == "series" {
 		if len(seasons) > 0 {
-			s.persistSeasonsAndEpisodes(ctx, contentID, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
+			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
 		} else if err := s.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
 			slog.Warn("metadata: failed to synthesize fallback series structure",
 				"content_id", contentID, "error", err)
@@ -2336,8 +2336,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		s.cacheSeriesChildImages(ctx, series, providerIDs, seasons, episodes)
-		s.persistSeasonsAndEpisodes(ctx, seriesID, canonicalLanguage, language, seasons, episodes, mergeMode)
+		s.persistSeasonsAndEpisodes(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode)
 		updated = true
 	}
 	if !updated {
@@ -2498,101 +2497,27 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 	return flattenEpisodeResults(episodeResults), nil
 }
 
-// cacheSeriesChildImages downloads, processes, and uploads season poster
-// and episode still images to S3 concurrently (max 6 in flight). Plugin-
-// prefixed URLs (e.g. tmdb://, tvdb://) are resolved via s.imageResolver
-// before downloading. The provider used to construct each S3 key is
-// derived from that image's source URL scheme so the key reflects the
-// actual contributing provider (e.g. a TVDB-sourced season poster lands
-// under tvdb/series/{tvdbID}/seasons/{n}/poster/...), not whichever
-// provider primaryProviderID happens to prefer. Failures are logged and
-// the original path is kept.
-func (s *MetadataService) cacheSeriesChildImages(ctx context.Context, series *models.MediaItem, providerIDs map[string]string, seasons []SeasonResult, episodes []EpisodeResult) {
-	if s == nil || !s.autoCacheImages.Load() || s.imageCacher == nil || series == nil {
+func (s *MetadataService) enqueueSeriesChildImages(ctx context.Context, seriesID string, inputs []EnqueueImageCacheJobInput) {
+	s.enqueueImageCacheJobs(ctx, "series child", seriesID, inputs)
+}
+
+func (s *MetadataService) enqueueImageCacheJobs(ctx context.Context, targetKind, targetID string, inputs []EnqueueImageCacheJobInput) {
+	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || len(inputs) == 0 {
 		return
 	}
-	fallbackProvider := primaryProviderID(providerIDs)
-	sem := make(chan struct{}, 6)
-	var wg sync.WaitGroup
-
-	// keyAttribution returns the (providerID, contentID) pair to use when
-	// building the S3 key for an image with the given source path. The
-	// provider is derived from the plugin URL scheme when present and falls
-	// back to the series-level primary provider for raw HTTP URLs.
-	keyAttribution := func(sourcePath string) (string, string) {
-		providerID := providerIDFromPluginURL(sourcePath)
-		if providerID == "" {
-			providerID = fallbackProvider
-		}
-		return providerID, findContentID(series, providerID)
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if _, err := s.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
+		slog.Warn("metadata: failed to enqueue image cache jobs",
+			"target_kind", targetKind, "target_id", targetID, "count", len(inputs), "error", err)
 	}
-
-	for i := range seasons {
-		downloadURL, ok := s.resolveImageURLForCache(ctx, seasons[i].PosterPath)
-		if !ok {
-			continue
-		}
-		providerID, contentID := keyAttribution(seasons[i].PosterPath)
-		seasonNum := seasons[i].SeasonNumber
-		wg.Add(1)
-		go func(idx int, sourceURL, providerID, contentID string, seasonNum int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			result, err := s.imageCacher.CacheImage(ctx, CacheImageRequest{
-				SourceURL:    sourceURL,
-				ProviderID:   providerID,
-				ContentType:  "series",
-				ContentID:    contentID,
-				ImageType:    ImagePoster,
-				SeasonNumber: &seasonNum,
-			})
-			if err != nil {
-				slog.Warn("metadata: season poster cache failed", "season", seasonNum, "error", err)
-				return
-			}
-			seasons[idx].PosterPath = cachedOriginalImagePath(result.BasePath, result.Ext)
-			seasons[idx].PosterThumbhash = result.Thumbhash
-		}(i, downloadURL, providerID, contentID, seasonNum)
-	}
-	for i := range episodes {
-		downloadURL, ok := s.resolveImageURLForCache(ctx, episodes[i].StillPath)
-		if !ok {
-			continue
-		}
-		providerID, contentID := keyAttribution(episodes[i].StillPath)
-		seasonNum := episodes[i].SeasonNumber
-		episodeNum := episodes[i].EpisodeNumber
-		wg.Add(1)
-		go func(idx int, sourceURL, providerID, contentID string, seasonNum, episodeNum int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			result, err := s.imageCacher.CacheImage(ctx, CacheImageRequest{
-				SourceURL:     sourceURL,
-				ProviderID:    providerID,
-				ContentType:   "series",
-				ContentID:     contentID,
-				ImageType:     ImageStill,
-				SeasonNumber:  &seasonNum,
-				EpisodeNumber: &episodeNum,
-			})
-			if err != nil {
-				slog.Warn("metadata: episode still cache failed",
-					"season", seasonNum, "episode", episodeNum, "error", err)
-				return
-			}
-			episodes[idx].StillPath = cachedOriginalImagePath(result.BasePath, result.Ext)
-			episodes[idx].StillThumbhash = result.Thumbhash
-		}(i, downloadURL, providerID, contentID, seasonNum, episodeNum)
-	}
-	wg.Wait()
 }
 
 // providerIDFromPluginURL extracts the plugin slug from a plugin-scheme URL
 // (e.g. "tvdb://banners/..." -> "tvdb"). Returns "" for HTTP(S) URLs and
 // any other input lacking a scheme.
 func providerIDFromPluginURL(url string) string {
+	url = strings.TrimSpace(url)
 	if url == "" {
 		return ""
 	}
@@ -2603,7 +2528,67 @@ func providerIDFromPluginURL(url string) string {
 	if i <= 0 {
 		return ""
 	}
-	return url[:i]
+	return strings.ToLower(strings.TrimSpace(url[:i]))
+}
+
+func isProviderImagePath(path string) bool {
+	path = strings.TrimSpace(path)
+	lower := strings.ToLower(path)
+	return path != "" &&
+		strings.Contains(path, "://") &&
+		!strings.HasPrefix(lower, "http://") &&
+		!strings.HasPrefix(lower, "https://") &&
+		!isNonProviderImageScheme(lower)
+}
+
+func isCachedImagePath(path string) bool {
+	path = strings.TrimSpace(path)
+	return path != "" &&
+		path != "-" &&
+		!strings.HasPrefix(path, "http://") &&
+		!strings.HasPrefix(path, "https://") &&
+		!isProviderImagePath(path)
+}
+
+func isRemoteImageSourcePath(path string) bool {
+	path = strings.TrimSpace(path)
+	lower := strings.ToLower(path)
+	return path != "" &&
+		path != "-" &&
+		strings.Contains(path, "://") &&
+		!isNonProviderImageScheme(lower)
+}
+
+func isNonProviderImageScheme(lowerPath string) bool {
+	return strings.HasPrefix(lowerPath, "s3://") ||
+		strings.HasPrefix(lowerPath, "file://") ||
+		strings.HasPrefix(lowerPath, "local://") ||
+		strings.HasPrefix(lowerPath, "upload://") ||
+		strings.HasPrefix(lowerPath, "generated://")
+}
+
+func providerImageSourcePath(path string) string {
+	path = strings.TrimSpace(path)
+	if isRemoteImageSourcePath(path) {
+		return path
+	}
+	return ""
+}
+
+func preserveCachedArtwork(providerPath, providerThumbhash, existingCachedPath, existingSourcePath, existingThumbhash string) (string, string, string) {
+	if !isRemoteImageSourcePath(providerPath) {
+		if strings.TrimSpace(providerPath) == "" && isCachedImagePath(existingCachedPath) {
+			return existingCachedPath, existingThumbhash, existingSourcePath
+		}
+		return providerPath, providerThumbhash, ""
+	}
+	if isCachedImagePath(existingCachedPath) && existingSourcePath == providerPath {
+		return existingCachedPath, existingThumbhash, providerPath
+	}
+	if isCachedImagePath(existingCachedPath) {
+		return existingCachedPath, existingThumbhash, providerPath
+	}
+	return providerPath, providerThumbhash, providerPath
 }
 
 // resolveImageURLForCache normalizes a stored image path into a downloadable
@@ -2730,26 +2715,39 @@ func buildItemLocalizationRecord(
 	mergeScalar(&loc.Overview, accumulator.Overview, mergeMode)
 	mergeScalar(&loc.Tagline, accumulator.Tagline, mergeMode)
 
-	previousPosterPath := loc.PosterPath
-	previousPosterThumbhash := loc.PosterThumbhash
-	previousBackdropPath := loc.BackdropPath
-	previousBackdropThumbhash := loc.BackdropThumbhash
-
+	existingLocItem := &models.MediaItem{
+		Type:               contentType,
+		PosterPath:         loc.PosterPath,
+		PosterSourcePath:   loc.PosterSourcePath,
+		PosterThumbhash:    loc.PosterThumbhash,
+		BackdropPath:       loc.BackdropPath,
+		BackdropSourcePath: loc.BackdropSourcePath,
+		BackdropThumbhash:  loc.BackdropThumbhash,
+		LogoPath:           loc.LogoPath,
+		LogoSourcePath:     loc.LogoSourcePath,
+	}
 	locItem := &models.MediaItem{
-		Type:              contentType,
-		PosterPath:        loc.PosterPath,
-		PosterThumbhash:   loc.PosterThumbhash,
-		BackdropPath:      loc.BackdropPath,
-		BackdropThumbhash: loc.BackdropThumbhash,
-		LogoPath:          loc.LogoPath,
+		Type:               contentType,
+		PosterPath:         loc.PosterPath,
+		PosterSourcePath:   loc.PosterSourcePath,
+		PosterThumbhash:    loc.PosterThumbhash,
+		BackdropPath:       loc.BackdropPath,
+		BackdropSourcePath: loc.BackdropSourcePath,
+		BackdropThumbhash:  loc.BackdropThumbhash,
+		LogoPath:           loc.LogoPath,
+		LogoSourcePath:     loc.LogoSourcePath,
 	}
 	applyBestImages(locItem, images, mergeMode, preferredLanguage)
+	prepareItemImagesForQueue(locItem, existingLocItem)
 
 	loc.PosterPath = locItem.PosterPath
-	loc.PosterThumbhash = mergedImageThumbhash(previousPosterPath, previousPosterThumbhash, locItem.PosterPath, "")
+	loc.PosterSourcePath = locItem.PosterSourcePath
+	loc.PosterThumbhash = locItem.PosterThumbhash
 	loc.BackdropPath = locItem.BackdropPath
-	loc.BackdropThumbhash = mergedImageThumbhash(previousBackdropPath, previousBackdropThumbhash, locItem.BackdropPath, "")
+	loc.BackdropSourcePath = locItem.BackdropSourcePath
+	loc.BackdropThumbhash = locItem.BackdropThumbhash
 	loc.LogoPath = locItem.LogoPath
+	loc.LogoSourcePath = locItem.LogoSourcePath
 
 	ApplyDefaultSortTitleToLocalization(loc, titleLocked)
 
@@ -2774,16 +2772,23 @@ func buildSeasonLocalizationRecord(
 	}
 
 	previousPosterPath := loc.PosterPath
+	previousPosterSourcePath := loc.PosterSourcePath
 	previousPosterThumbhash := loc.PosterThumbhash
 
 	mergeScalar(&loc.Title, season.Title, mergeMode)
 	mergeScalar(&loc.Overview, season.Overview, mergeMode)
 	mergeScalar(&loc.PosterPath, season.PosterPath, mergeMode)
-	loc.PosterThumbhash = mergedImageThumbhash(
-		previousPosterPath,
-		previousPosterThumbhash,
+	if isCachedImagePath(loc.PosterPath) && loc.PosterPath == previousPosterPath {
+		loc.PosterSourcePath = previousPosterSourcePath
+		loc.PosterThumbhash = previousPosterThumbhash
+		return loc
+	}
+	loc.PosterPath, loc.PosterThumbhash, loc.PosterSourcePath = preserveCachedArtwork(
 		loc.PosterPath,
 		season.PosterThumbhash,
+		previousPosterPath,
+		previousPosterSourcePath,
+		previousPosterThumbhash,
 	)
 
 	return loc
@@ -2818,11 +2823,12 @@ func seasonResultFromModel(season *models.Season) SeasonResult {
 	}
 
 	result := SeasonResult{
-		SeasonNumber:    season.SeasonNumber,
-		Title:           season.Title,
-		Overview:        season.Overview,
-		PosterPath:      season.PosterPath,
-		PosterThumbhash: season.PosterThumbhash,
+		SeasonNumber:     season.SeasonNumber,
+		Title:            season.Title,
+		Overview:         season.Overview,
+		PosterPath:       season.PosterPath,
+		PosterSourcePath: season.PosterSourcePath,
+		PosterThumbhash:  season.PosterThumbhash,
 	}
 	if season.AirDate != nil {
 		result.AirDate = season.AirDate.Format("2006-01-02")
@@ -2836,13 +2842,14 @@ func episodeResultFromModel(episode *models.Episode) EpisodeResult {
 	}
 
 	result := EpisodeResult{
-		SeasonNumber:   episode.SeasonNumber,
-		EpisodeNumber:  episode.EpisodeNumber,
-		Title:          episode.Title,
-		Overview:       episode.Overview,
-		Runtime:        episode.Runtime,
-		StillPath:      episode.StillPath,
-		StillThumbhash: episode.StillThumbhash,
+		SeasonNumber:    episode.SeasonNumber,
+		EpisodeNumber:   episode.EpisodeNumber,
+		Title:           episode.Title,
+		Overview:        episode.Overview,
+		Runtime:         episode.Runtime,
+		StillPath:       episode.StillPath,
+		StillSourcePath: episode.StillSourcePath,
+		StillThumbhash:  episode.StillThumbhash,
 		ProviderIDs: map[string]string{
 			"imdb": episode.ImdbID,
 			"tmdb": episode.TmdbID,
@@ -2884,6 +2891,22 @@ func existingImageThumbhash(item *models.MediaItem, imageType ImageType) string 
 		return item.PosterThumbhash
 	case ImageBackdrop:
 		return item.BackdropThumbhash
+	default:
+		return ""
+	}
+}
+
+func existingImageSourcePath(item *models.MediaItem, imageType ImageType) string {
+	if item == nil {
+		return ""
+	}
+	switch imageType {
+	case ImagePoster:
+		return item.PosterSourcePath
+	case ImageBackdrop:
+		return item.BackdropSourcePath
+	case ImageLogo:
+		return item.LogoSourcePath
 	default:
 		return ""
 	}
@@ -2933,15 +2956,86 @@ func (s *MetadataService) SearchProviders(ctx context.Context, query SearchQuery
 // persistSeasonsAndEpisodes creates/updates seasons and episodes in the DB.
 func (s *MetadataService) persistSeasonsAndEpisodes(
 	ctx context.Context,
-	seriesID string,
+	series *models.MediaItem,
+	providerIDs map[string]string,
 	canonicalLanguage string,
 	language string,
 	seasons []SeasonResult,
 	episodes []EpisodeResult,
 	mergeMode MergeMode,
 ) {
+	if series == nil || strings.TrimSpace(series.ContentID) == "" {
+		return
+	}
+	seriesID := series.ContentID
 	seasonIDs := make(map[int]string, len(seasons))
 	isCanonicalWrite := strings.EqualFold(canonicalLanguage, language)
+	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
+	fallbackProvider := primaryProviderID(providerIDs)
+	keyAttribution := func(sourcePath string) (string, string) {
+		providerID := providerIDFromPluginURL(sourcePath)
+		if providerID == "" {
+			providerID = fallbackProvider
+		}
+		return providerID, findContentID(series, providerID)
+	}
+	addSeasonImageJob := func(season *models.Season) {
+		if season == nil || !isRemoteImageSourcePath(season.PosterSourcePath) {
+			return
+		}
+		providerID, providerContentID := keyAttribution(season.PosterSourcePath)
+		seasonNumber := season.SeasonNumber
+		imageJobs = append(imageJobs, EnqueueImageCacheJobInput{
+			TargetType:        ImageCacheTargetSeason,
+			TargetContentID:   season.ContentID,
+			SeriesID:          seriesID,
+			SourcePath:        season.PosterSourcePath,
+			ProviderID:        providerID,
+			ProviderContentID: providerContentID,
+			ContentType:       "series",
+			ImageType:         ImageCacheImagePoster,
+			SeasonNumber:      &seasonNumber,
+		})
+	}
+	addEpisodeImageJob := func(episode *models.Episode) {
+		if episode == nil || !isRemoteImageSourcePath(episode.StillSourcePath) {
+			return
+		}
+		providerID, providerContentID := keyAttribution(episode.StillSourcePath)
+		seasonNumber := episode.SeasonNumber
+		episodeNumber := episode.EpisodeNumber
+		imageJobs = append(imageJobs, EnqueueImageCacheJobInput{
+			TargetType:        ImageCacheTargetEpisode,
+			TargetContentID:   episode.ContentID,
+			SeriesID:          seriesID,
+			SourcePath:        episode.StillSourcePath,
+			ProviderID:        providerID,
+			ProviderContentID: providerContentID,
+			ContentType:       "series",
+			ImageType:         ImageCacheImageStill,
+			SeasonNumber:      &seasonNumber,
+			EpisodeNumber:     &episodeNumber,
+		})
+	}
+	addSeasonLocalizationImageJob := func(season *models.Season, loc *models.SeasonLocalization) {
+		if season == nil || loc == nil || !isRemoteImageSourcePath(loc.PosterSourcePath) {
+			return
+		}
+		providerID, providerContentID := keyAttribution(loc.PosterSourcePath)
+		seasonNumber := season.SeasonNumber
+		imageJobs = append(imageJobs, EnqueueImageCacheJobInput{
+			TargetType:        ImageCacheTargetSeasonLocalization,
+			TargetContentID:   season.ContentID,
+			TargetLanguage:    loc.Language,
+			SeriesID:          seriesID,
+			SourcePath:        loc.PosterSourcePath,
+			ProviderID:        providerID,
+			ProviderContentID: providerContentID,
+			ContentType:       "series",
+			ImageType:         ImageCacheImagePoster,
+			SeasonNumber:      &seasonNumber,
+		})
+	}
 
 	// Phase 1: Upsert explicit seasons.
 	if len(seasons) > 0 {
@@ -2953,15 +3047,20 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				continue
 			}
 			providerSeason := season
+			providerSeason.PosterSourcePath = providerImageSourcePath(providerSeason.PosterPath)
 			if existingSeason != nil && isCanonicalWrite {
 				mergedSeason := seasonResultFromModel(existingSeason)
 				MergeSeasonResult(&providerSeason, &mergedSeason, mergeMode)
-				mergedSeason.PosterThumbhash = mergedImageThumbhash(
-					existingSeason.PosterPath,
-					existingSeason.PosterThumbhash,
-					mergedSeason.PosterPath,
+				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
+					providerSeason.PosterPath,
 					providerSeason.PosterThumbhash,
+					existingSeason.PosterPath,
+					existingSeason.PosterSourcePath,
+					existingSeason.PosterThumbhash,
 				)
+				mergedSeason.PosterPath = nextPath
+				mergedSeason.PosterThumbhash = nextThumbhash
+				mergedSeason.PosterSourcePath = nextSourcePath
 				providerSeason = mergedSeason
 			}
 			dbSeason := &models.Season{
@@ -2971,6 +3070,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				DefaultMetadataLanguage: canonicalLanguage,
 				Overview:                providerSeason.Overview,
 				PosterPath:              providerSeason.PosterPath,
+				PosterSourcePath:        providerSeason.PosterSourcePath,
 				PosterThumbhash:         providerSeason.PosterThumbhash,
 				MetadataSource:          "provider",
 			}
@@ -2980,6 +3080,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					dbSeason.Title = existingSeason.Title
 					dbSeason.Overview = existingSeason.Overview
 					dbSeason.PosterPath = existingSeason.PosterPath
+					dbSeason.PosterSourcePath = existingSeason.PosterSourcePath
 					dbSeason.PosterThumbhash = existingSeason.PosterThumbhash
 					dbSeason.DefaultMetadataLanguage = existingSeason.DefaultMetadataLanguage
 				}
@@ -3003,21 +3104,25 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				continue
 			}
 			seasonIDs[dbSeason.SeasonNumber] = dbSeason.ContentID
+			addSeasonImageJob(dbSeason)
 			if !isCanonicalWrite && s.seasonLocalizationRepo != nil {
 				existingLoc, locErr := s.seasonLocalizationRepo.Get(ctx, dbSeason.ContentID, language)
 				if locErr != nil {
 					slog.Warn("metadata: failed to load season localization",
 						"series_id", seriesID, "season", season.SeasonNumber, "error", locErr)
 				}
-				if err := s.seasonLocalizationRepo.Upsert(ctx, buildSeasonLocalizationRecord(
+				loc := buildSeasonLocalizationRecord(
 					existingLoc,
 					dbSeason.ContentID,
 					language,
 					providerSeason,
 					mergeMode,
-				)); err != nil {
+				)
+				if err := s.seasonLocalizationRepo.Upsert(ctx, loc); err != nil {
 					slog.Warn("metadata: failed to upsert season localization",
 						"series_id", seriesID, "season", season.SeasonNumber, "error", err)
+				} else {
+					addSeasonLocalizationImageJob(dbSeason, loc)
 				}
 			}
 		}
@@ -3061,11 +3166,13 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					seasonModel.Title = mergedSeason.Title
 					seasonModel.Overview = mergedSeason.Overview
 					seasonModel.PosterPath = mergedSeason.PosterPath
+					seasonModel.PosterSourcePath = mergedSeason.PosterSourcePath
 					seasonModel.PosterThumbhash = mergedSeason.PosterThumbhash
 				} else {
 					seasonModel.Title = existingSeason.Title
 					seasonModel.Overview = existingSeason.Overview
 					seasonModel.PosterPath = existingSeason.PosterPath
+					seasonModel.PosterSourcePath = existingSeason.PosterSourcePath
 					seasonModel.PosterThumbhash = existingSeason.PosterThumbhash
 				}
 			} else {
@@ -3083,6 +3190,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				continue
 			}
 			seasonIDs[seasonModel.SeasonNumber] = seasonModel.ContentID
+			addSeasonImageJob(seasonModel)
 		}
 	}
 
@@ -3096,15 +3204,20 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				continue
 			}
 			providerEpisode := ep
+			providerEpisode.StillSourcePath = providerImageSourcePath(providerEpisode.StillPath)
 			if existingEpisode != nil && isCanonicalWrite {
 				mergedEpisode := episodeResultFromModel(existingEpisode)
 				MergeEpisodeResult(&providerEpisode, &mergedEpisode, mergeMode)
-				mergedEpisode.StillThumbhash = mergedImageThumbhash(
-					existingEpisode.StillPath,
-					existingEpisode.StillThumbhash,
-					mergedEpisode.StillPath,
+				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
+					providerEpisode.StillPath,
 					providerEpisode.StillThumbhash,
+					existingEpisode.StillPath,
+					existingEpisode.StillSourcePath,
+					existingEpisode.StillThumbhash,
 				)
+				mergedEpisode.StillPath = nextPath
+				mergedEpisode.StillThumbhash = nextThumbhash
+				mergedEpisode.StillSourcePath = nextSourcePath
 				providerEpisode = mergedEpisode
 			}
 			dbEp := &models.Episode{
@@ -3120,6 +3233,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				TmdbID:                  providerEpisode.ProviderIDs["tmdb"],
 				TvdbID:                  providerEpisode.ProviderIDs["tvdb"],
 				StillPath:               providerEpisode.StillPath,
+				StillSourcePath:         providerEpisode.StillSourcePath,
 				StillThumbhash:          providerEpisode.StillThumbhash,
 				MetadataSource:          "provider",
 			}
@@ -3130,6 +3244,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					dbEp.Overview = existingEpisode.Overview
 					dbEp.DefaultMetadataLanguage = existingEpisode.DefaultMetadataLanguage
 					dbEp.StillPath = existingEpisode.StillPath
+					dbEp.StillSourcePath = existingEpisode.StillSourcePath
 					dbEp.StillThumbhash = existingEpisode.StillThumbhash
 				}
 			} else {
@@ -3161,6 +3276,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					"episode", ep.EpisodeNumber, "error", err)
 				continue
 			}
+			addEpisodeImageJob(dbEp)
 			if !isCanonicalWrite && s.episodeLocalizationRepo != nil {
 				existingLoc, locErr := s.episodeLocalizationRepo.Get(ctx, dbEp.ContentID, language)
 				if locErr != nil {
@@ -3181,7 +3297,10 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				}
 			}
 		}
+
 	}
+
+	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
 
 	if err := s.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
 		slog.Warn("metadata: failed to ensure series episode links",
@@ -5166,6 +5285,131 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 	applyIfBetter(&item.LogoPath, bestByType[ImageLogo])
 }
 
+type itemArtworkField struct {
+	imageType ImageType
+	path      *string
+	source    *string
+	thumbhash *string
+}
+
+func itemArtworkFields(item *models.MediaItem) []itemArtworkField {
+	if item == nil {
+		return nil
+	}
+	return []itemArtworkField{
+		{imageType: ImagePoster, path: &item.PosterPath, source: &item.PosterSourcePath, thumbhash: &item.PosterThumbhash},
+		{imageType: ImageBackdrop, path: &item.BackdropPath, source: &item.BackdropSourcePath, thumbhash: &item.BackdropThumbhash},
+		{imageType: ImageLogo, path: &item.LogoPath, source: &item.LogoSourcePath},
+	}
+}
+
+func prepareItemImagesForQueue(item, existing *models.MediaItem) {
+	for _, field := range itemArtworkFields(item) {
+		existingPath := existingImagePath(existing, field.imageType)
+		existingThumbhash := existingImageThumbhash(existing, field.imageType)
+		existingSource := existingImageSourcePath(existing, field.imageType)
+		currentThumbhash := ""
+		if field.thumbhash != nil {
+			currentThumbhash = *field.thumbhash
+		}
+		if isCachedImagePath(*field.path) && *field.path == existingPath && existingSource != "" {
+			*field.source = existingSource
+			if field.thumbhash != nil && currentThumbhash == "" {
+				*field.thumbhash = existingThumbhash
+			}
+			continue
+		}
+		nextPath, nextThumbhash, nextSource := preserveCachedArtwork(
+			*field.path,
+			currentThumbhash,
+			existingPath,
+			existingSource,
+			existingThumbhash,
+		)
+		*field.path = nextPath
+		*field.source = nextSource
+		if field.thumbhash != nil {
+			*field.thumbhash = nextThumbhash
+		}
+	}
+}
+
+func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.MediaItem, providerIDs map[string]string, images []RemoteImage) {
+	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || item == nil || item.ContentID == "" {
+		return
+	}
+	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
+	for _, field := range itemArtworkFields(item) {
+		sourcePath := strings.TrimSpace(*field.source)
+		if !isRemoteImageSourcePath(sourcePath) {
+			continue
+		}
+		providerID, providerContentID := itemImageCacheAttribution(item, providerIDs, images, sourcePath)
+		inputs = append(inputs, EnqueueImageCacheJobInput{
+			TargetType:        ImageCacheTargetItem,
+			TargetContentID:   item.ContentID,
+			SeriesID:          item.ContentID,
+			SourcePath:        sourcePath,
+			ProviderID:        providerID,
+			ProviderContentID: providerContentID,
+			ContentType:       imageCacheContentType(item.Type),
+			ImageType:         ImageTypeToString(field.imageType),
+		})
+	}
+	s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
+}
+
+func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, item *models.MediaItem, loc *models.MediaItemLocalization, providerIDs map[string]string, images []RemoteImage) {
+	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || item == nil || loc == nil || loc.ContentID == "" || loc.Language == "" {
+		return
+	}
+	locItem := &models.MediaItem{
+		ContentID:          loc.ContentID,
+		Type:               item.Type,
+		PosterSourcePath:   loc.PosterSourcePath,
+		BackdropSourcePath: loc.BackdropSourcePath,
+		LogoSourcePath:     loc.LogoSourcePath,
+	}
+	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
+	for _, field := range itemArtworkFields(locItem) {
+		sourcePath := strings.TrimSpace(*field.source)
+		if !isRemoteImageSourcePath(sourcePath) {
+			continue
+		}
+		providerID, providerContentID := itemImageCacheAttribution(item, providerIDs, images, sourcePath)
+		inputs = append(inputs, EnqueueImageCacheJobInput{
+			TargetType:        ImageCacheTargetItemLocalization,
+			TargetContentID:   loc.ContentID,
+			TargetLanguage:    loc.Language,
+			SeriesID:          item.ContentID,
+			SourcePath:        sourcePath,
+			ProviderID:        providerID,
+			ProviderContentID: providerContentID,
+			ContentType:       imageCacheContentType(item.Type),
+			ImageType:         ImageTypeToString(field.imageType),
+		})
+	}
+	s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)
+}
+
+func itemImageCacheAttribution(item *models.MediaItem, providerIDs map[string]string, images []RemoteImage, sourcePath string) (string, string) {
+	providerID := providerIDFromPluginURL(sourcePath)
+	if providerID == "" {
+		providerID = findProviderID(images, sourcePath)
+	}
+	if providerID == "" {
+		providerID = primaryProviderID(providerIDs)
+	}
+	if providerID == "" {
+		providerID = "remote"
+	}
+	providerContentID := findContentID(item, providerID)
+	if providerContentID == "" && item != nil {
+		providerContentID = item.ContentID
+	}
+	return providerID, providerContentID
+}
+
 // cacheItemImages downloads, processes, and uploads item images to S3
 // concurrently. Failures are logged and the original CDN URL is preserved.
 func (s *MetadataService) cacheItemImages(ctx context.Context, item *models.MediaItem, images []RemoteImage) {
@@ -5428,6 +5672,8 @@ func ImageTypeToString(t ImageType) string {
 		return "logo"
 	case ImageStill:
 		return "still"
+	case ImageProfile:
+		return "profile"
 	default:
 		return "poster"
 	}
@@ -5442,6 +5688,8 @@ func ImageTypeFromString(s string) ImageType {
 		return ImageLogo
 	case "still":
 		return ImageStill
+	case "profile":
+		return ImageProfile
 	default:
 		return ImagePoster
 	}

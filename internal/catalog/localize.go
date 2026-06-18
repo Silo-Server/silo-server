@@ -26,14 +26,17 @@ func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocaliza
 	}
 	if loc.PosterPath != "" {
 		localized.PosterPath = loc.PosterPath
+		localized.PosterSourcePath = loc.PosterSourcePath
 		localized.PosterThumbhash = loc.PosterThumbhash
 	}
 	if loc.BackdropPath != "" {
 		localized.BackdropPath = loc.BackdropPath
+		localized.BackdropSourcePath = loc.BackdropSourcePath
 		localized.BackdropThumbhash = loc.BackdropThumbhash
 	}
 	if loc.LogoPath != "" {
 		localized.LogoPath = loc.LogoPath
+		localized.LogoSourcePath = loc.LogoSourcePath
 	}
 	return localized
 }
@@ -53,6 +56,7 @@ func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalizati
 	}
 	if loc.PosterPath != "" {
 		localized.PosterPath = loc.PosterPath
+		localized.PosterSourcePath = loc.PosterSourcePath
 		localized.PosterThumbhash = loc.PosterThumbhash
 	}
 	return localized

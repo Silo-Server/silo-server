@@ -46,21 +46,23 @@ func (s *StartupTrigger) Start(_ *taskmanager.ExecutionResult) {
 	}
 	s.fired = true
 
-	s.stopCh = make(chan struct{})
+	stopCh := make(chan struct{})
 	s.nextRun = time.Now().Add(s.delay)
-	s.timer = time.NewTimer(s.delay)
+	timer := time.NewTimer(s.delay)
+	s.stopCh = stopCh
+	s.timer = timer
 
 	go func() {
 		select {
-		case <-s.stopCh:
-			if !s.timer.Stop() {
+		case <-stopCh:
+			if !timer.Stop() {
 				select {
-				case <-s.timer.C:
+				case <-timer.C:
 				default:
 				}
 			}
 			return
-		case <-s.timer.C:
+		case <-timer.C:
 			s.mu.Lock()
 			s.nextRun = time.Time{}
 			s.mu.Unlock()

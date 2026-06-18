@@ -177,7 +177,7 @@ func TestPersistSeasonsAndEpisodes_ScheduledRefreshPreservesExistingAndBackfills
 		MetadataSource: "provider",
 	}
 
-	service.persistSeasonsAndEpisodes(ctx, seriesID, "en", "en",
+	service.persistSeasonsAndEpisodes(ctx, &models.MediaItem{ContentID: seriesID, Type: "series"}, nil, "en", "en",
 		[]SeasonResult{{
 			SeasonNumber: 1,
 			Title:        "Provider Season",
@@ -252,7 +252,7 @@ func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlan
 		MetadataSource: "provider",
 	}
 
-	service.persistSeasonsAndEpisodes(ctx, seriesID, "en", "en",
+	service.persistSeasonsAndEpisodes(ctx, &models.MediaItem{ContentID: seriesID, Type: "series"}, nil, "en", "en",
 		[]SeasonResult{{
 			SeasonNumber: 1,
 			Title:        "New Season",

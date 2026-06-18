@@ -46,6 +46,7 @@ type CacheRequest struct {
 	ImageType     metadata.ImageType
 	SeasonNumber  *int
 	EpisodeNumber *int
+	Language      string
 	ImageResolver ImageURLResolver // optional; used when SourceURL is a plugin:// path
 }
 
@@ -85,6 +86,7 @@ func (c *Cacher) CacheImage(ctx context.Context, req metadata.CacheImageRequest)
 		ImageType:     req.ImageType,
 		SeasonNumber:  req.SeasonNumber,
 		EpisodeNumber: req.EpisodeNumber,
+		Language:      req.Language,
 	})
 	if err != nil {
 		return nil, err
@@ -156,7 +158,7 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 	if err != nil {
 		return nil, fmt.Errorf("imagecache: generate variants: %w", err)
 	}
-	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.SeasonNumber, req.EpisodeNumber)
+	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.Language, req.SeasonNumber, req.EpisodeNumber)
 	bucket := c.s3.Bucket()
 	var wg sync.WaitGroup
 	uploadErrs := make([]error, len(result.Variants))
@@ -165,7 +167,7 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 		go func(idx int, variant imageutil.Variant) {
 			defer wg.Done()
 			key := basePath + "/" + variant.Key + result.Ext
-			if err := c.s3.PutObject(ctx, bucket, key, variant.Data); err != nil {
+			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
 				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
 			}
 		}(i, v)
@@ -227,7 +229,7 @@ func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, err
 		return nil, fmt.Errorf("imagecache: generate variants: %w", err)
 	}
 
-	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.SeasonNumber, req.EpisodeNumber)
+	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.Language, req.SeasonNumber, req.EpisodeNumber)
 	bucket := c.s3.Bucket()
 
 	// Upload all variants concurrently.
@@ -238,7 +240,7 @@ func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, err
 		go func(idx int, variant imageutil.Variant) {
 			defer wg.Done()
 			key := basePath + "/" + variant.Key + result.Ext
-			if err := c.s3.PutObject(ctx, bucket, key, variant.Data); err != nil {
+			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
 				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
 			}
 		}(i, v)
@@ -269,21 +271,47 @@ func variantWidths(t metadata.ImageType) []int {
 		return []int{500}
 	case metadata.ImageStill:
 		return []int{500, 300}
+	case metadata.ImageProfile:
+		return []int{500, 300}
 	default:
 		return []int{500, 300}
 	}
+}
+
+func putObjectWithRetry(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := putter.PutObject(ctx, bucket, key, data); err != nil {
+			lastErr = err
+			timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
+			select {
+			case <-timer.C:
+				continue
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	return lastErr
 }
 
 // buildBasePath constructs the S3 key prefix for a given image. Season
 // posters and episode stills nest under their parent series so a single
 // DeletePrefix on the series prefix cascades to all child images.
 //
-//	item-level:   {provider}/{type}/{id}/{imageType}
-//	season:       {provider}/{type}/{id}/seasons/{n}/{imageType}
-//	episode:      {provider}/{type}/{id}/seasons/{n}/episodes/{m}/{imageType}
-func buildBasePath(providerID, contentType, contentID string, t metadata.ImageType, seasonNumber, episodeNumber *int) string {
+//	item-level:        {provider}/{type}/{id}/{imageType}
+//	localized item:   {provider}/{type}/{id}/localizations/{lang}/{imageType}
+//	season:           {provider}/{type}/{id}/seasons/{n}/{imageType}
+//	localized season: {provider}/{type}/{id}/localizations/{lang}/seasons/{n}/{imageType}
+//	episode:          {provider}/{type}/{id}/seasons/{n}/episodes/{m}/{imageType}
+func buildBasePath(providerID, contentType, contentID string, t metadata.ImageType, language string, seasonNumber, episodeNumber *int) string {
 	imageTypeName := imageTypeName(t)
 	base := fmt.Sprintf("%s/%s/%s", providerID, contentType, contentID)
+	if lang := normalizeImageLanguage(language); lang != "" {
+		base = fmt.Sprintf("%s/localizations/%s", base, lang)
+	}
 	if seasonNumber != nil {
 		base = fmt.Sprintf("%s/seasons/%d", base, *seasonNumber)
 		if episodeNumber != nil {
@@ -304,9 +332,32 @@ func imageTypeName(t metadata.ImageType) string {
 		return "logo"
 	case metadata.ImageStill:
 		return "still"
+	case metadata.ImageProfile:
+		return "profile"
 	default:
 		return "unknown"
 	}
+}
+
+func normalizeImageLanguage(language string) string {
+	language = strings.ToLower(strings.TrimSpace(language))
+	if language == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range language {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // downloadImage fetches the image at the given URL, enforcing size, timeout,

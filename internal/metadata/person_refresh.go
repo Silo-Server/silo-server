@@ -32,6 +32,7 @@ type PersonRefreshService struct {
 	pluginResolver pluginMetadataResolver
 	repo           personRefreshRepo
 	imageCacher    ImageCacher
+	imageCacheJobs ImageCacheJobEnqueuer
 	imageResolver  interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
@@ -51,6 +52,10 @@ func NewPersonRefreshService(
 
 func (s *PersonRefreshService) SetImageCacher(cacher ImageCacher) {
 	s.imageCacher = cacher
+}
+
+func (s *PersonRefreshService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
+	s.imageCacheJobs = enqueuer
 }
 
 func (s *PersonRefreshService) SetImageResolver(resolver interface {
@@ -141,17 +146,15 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 		return nil, ErrPersonMetadataNotFound
 	}
 
-	if cachedPath, thumbhash, err := s.cachePersonPhoto(ctx, *person, accumulator, photoProviderID); err != nil {
-		slog.Warn("person refresh: photo cache failed",
-			"person_id", id,
-			"provider", photoProviderID,
-			"error", err,
+	accumulator.PhotoSourcePath = providerImageSourcePath(accumulator.PhotoPath)
+	if accumulator.PhotoSourcePath != "" {
+		accumulator.PhotoPath, accumulator.PhotoThumbhash, accumulator.PhotoSourcePath = preserveCachedArtwork(
+			accumulator.PhotoPath,
+			accumulator.PhotoThumbhash,
+			person.PhotoPath,
+			person.PhotoSourcePath,
+			person.PhotoThumbhash,
 		)
-	} else {
-		accumulator.PhotoPath = cachedPath
-		if thumbhash != "" {
-			accumulator.PhotoThumbhash = thumbhash
-		}
 	}
 
 	existingDetail := personToPersonDetailResult(*person)
@@ -166,8 +169,43 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	if err := s.repo.Update(ctx, refreshed); err != nil {
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
+	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)
 
 	return &refreshed, nil
+}
+
+func (s *PersonRefreshService) enqueuePersonPhoto(ctx context.Context, person models.Person, providerIDs map[string]string, photoProviderID string) {
+	if s == nil || s.imageCacheJobs == nil || !isRemoteImageSourcePath(person.PhotoSourcePath) {
+		return
+	}
+	providerID := providerIDFromPluginURL(person.PhotoSourcePath)
+	if providerID == "" {
+		providerID = photoProviderID
+	}
+	if providerID == "" {
+		providerID = primaryPersonProviderID(providerIDs)
+	}
+	if providerID == "" {
+		providerID = "remote"
+	}
+	contentID := personCacheContentID(person, providerIDs, providerID)
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := s.imageCacheJobs.Enqueue(enqueueCtx, EnqueueImageCacheJobInput{
+		TargetType:        ImageCacheTargetPerson,
+		TargetContentID:   strconv.FormatInt(person.ID, 10),
+		SourcePath:        person.PhotoSourcePath,
+		ProviderID:        providerID,
+		ProviderContentID: contentID,
+		ContentType:       "people",
+		ImageType:         ImageCacheImageProfile,
+	}); err != nil {
+		slog.Warn("person refresh: failed to enqueue photo cache job",
+			"person_id", person.ID,
+			"provider", providerID,
+			"error", err,
+		)
+	}
 }
 
 func (s *PersonRefreshService) cachePersonPhoto(
@@ -239,14 +277,15 @@ func personProviderIDs(person models.Person) map[string]string {
 
 func personToPersonDetailResult(person models.Person) PersonDetailResult {
 	result := PersonDetailResult{
-		Name:           person.Name,
-		SortName:       person.SortName,
-		Bio:            person.Bio,
-		Birthplace:     person.Birthplace,
-		Homepage:       person.Homepage,
-		PhotoPath:      person.PhotoPath,
-		PhotoThumbhash: person.PhotoThumbhash,
-		ProviderIDs:    copyMap(personProviderIDs(person)),
+		Name:            person.Name,
+		SortName:        person.SortName,
+		Bio:             person.Bio,
+		Birthplace:      person.Birthplace,
+		Homepage:        person.Homepage,
+		PhotoPath:       person.PhotoPath,
+		PhotoSourcePath: person.PhotoSourcePath,
+		PhotoThumbhash:  person.PhotoThumbhash,
+		ProviderIDs:     copyMap(personProviderIDs(person)),
 	}
 	if person.BirthDate != nil {
 		result.BirthDate = person.BirthDate.Format("2006-01-02")
@@ -275,6 +314,7 @@ func mergePersonIntoRecord(person models.Person, detail PersonDetailResult) (mod
 	person.Birthplace = detail.Birthplace
 	person.Homepage = detail.Homepage
 	person.PhotoPath = detail.PhotoPath
+	person.PhotoSourcePath = detail.PhotoSourcePath
 	person.PhotoThumbhash = detail.PhotoThumbhash
 	person.TmdbID = detail.ProviderIDs["tmdb"]
 	person.ImdbID = detail.ProviderIDs["imdb"]

@@ -117,7 +117,7 @@ var itemColumnNames = []string{
 	"content_rating", "runtime", "overview", "tagline",
 	"rating_imdb", "rating_tmdb", "rating_rt_critic", "rating_rt_audience",
 	"imdb_id", "tmdb_id", "tvdb_id",
-	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
+	"poster_path", "poster_source_path", "poster_thumbhash", "backdrop_path", "backdrop_source_path", "backdrop_thumbhash", "logo_path", "logo_source_path",
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
@@ -129,14 +129,16 @@ var itemColumnNames = []string{
 // scan into plain (non-pointer) string fields on models.MediaItem, so select
 // lists coalesce them to ”.
 var nullableStringItemColumns = map[string]bool{
-	"poster_path":        true,
-	"poster_source_path": true,
-	"poster_thumbhash":   true,
-	"backdrop_path":      true,
-	"backdrop_thumbhash": true,
-	"logo_path":          true,
-	"metadata_s3_path":   true,
-	"metadata_etag":      true,
+	"poster_path":          true,
+	"poster_source_path":   true,
+	"poster_thumbhash":     true,
+	"backdrop_path":        true,
+	"backdrop_source_path": true,
+	"backdrop_thumbhash":   true,
+	"logo_path":            true,
+	"logo_source_path":     true,
+	"metadata_s3_path":     true,
+	"metadata_etag":        true,
 }
 
 // itemColumnExpr renders one select-list entry for col, qualified with alias
@@ -219,8 +221,10 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.PosterSourcePath,
 		&item.PosterThumbhash,
 		&item.BackdropPath,
+		&item.BackdropSourcePath,
 		&item.BackdropThumbhash,
 		&item.LogoPath,
+		&item.LogoSourcePath,
 		&item.MetadataS3Path,
 		&item.MetadataEtag,
 		&item.SeasonCount,
@@ -283,8 +287,10 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.PosterSourcePath,
 		&item.PosterThumbhash,
 		&item.BackdropPath,
+		&item.BackdropSourcePath,
 		&item.BackdropThumbhash,
 		&item.LogoPath,
+		&item.LogoSourcePath,
 		&item.MetadataS3Path,
 		&item.MetadataEtag,
 		&item.SeasonCount,
@@ -401,7 +407,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			content_rating, runtime, overview, tagline,
 			rating_imdb, rating_tmdb, rating_rt_critic, rating_rt_audience,
 			imdb_id, tmdb_id, tvdb_id,
-			poster_path, poster_source_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path,
+			poster_path, poster_source_path, poster_thumbhash, backdrop_path, backdrop_source_path, backdrop_thumbhash, logo_path, logo_source_path,
 			metadata_s3_path, metadata_etag, season_count,
 			studios, networks, countries, keywords, original_language, release_date, first_air_date, last_air_date, air_time, air_timezone,
 			show_status,
@@ -412,12 +418,12 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			$9, $10, $11, $12,
 			$13, $14, $15, $16,
 			$17, $18, $19,
-			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28,
-			$29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
-			$39,
-			$40, $41, $42,
-			$43, $44, $45
+			$20, $21, $22, $23, $24, $25, $26, $27,
+			$28, $29, $30,
+			$31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
+			$41,
+			$42, $43, $44,
+			$45, $46, $47
 		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			type = EXCLUDED.type,
@@ -442,8 +448,10 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			backdrop_path = EXCLUDED.backdrop_path,
+			backdrop_source_path = EXCLUDED.backdrop_source_path,
 			backdrop_thumbhash = EXCLUDED.backdrop_thumbhash,
 			logo_path = EXCLUDED.logo_path,
+			logo_source_path = EXCLUDED.logo_source_path,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			season_count = EXCLUDED.season_count,
@@ -490,8 +498,10 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 		item.PosterSourcePath,
 		item.PosterThumbhash,
 		item.BackdropPath,
+		item.BackdropSourcePath,
 		item.BackdropThumbhash,
 		item.LogoPath,
+		item.LogoSourcePath,
 		item.MetadataS3Path,
 		item.MetadataEtag,
 		item.SeasonCount,
@@ -1335,7 +1345,7 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]models.ItemPerson, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.name, p.sort_name, p.bio, p.birth_date, p.death_date, p.birthplace, p.homepage,
-			p.photo_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
+			p.photo_path, p.photo_source_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
 			p.created_at, p.updated_at,
 			ip.kind, ip.character, ip.sort_order
 		FROM item_people ip
@@ -1432,16 +1442,25 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	addString("tvdb_id", upd.TvdbID)
 	addIntArray("locked_fields", upd.LockedFields)
 	addString("poster_path", upd.PosterPath)
-	if upd.PosterPath != nil {
+	if upd.PosterPath != nil && upd.PosterSourcePath == nil {
 		// An explicit poster override invalidates the provider-origin source
 		// path captured by image caching; outbound embeds must not keep
 		// rendering the replaced provider artwork.
-		setClauses = append(setClauses, "poster_source_path = NULL")
+		setClauses = append(setClauses, "poster_source_path = ''")
 	}
+	addString("poster_source_path", upd.PosterSourcePath)
 	addString("poster_thumbhash", upd.PosterThumbhash)
 	addString("backdrop_path", upd.BackdropPath)
+	if upd.BackdropPath != nil && upd.BackdropSourcePath == nil {
+		setClauses = append(setClauses, "backdrop_source_path = ''")
+	}
+	addString("backdrop_source_path", upd.BackdropSourcePath)
 	addString("backdrop_thumbhash", upd.BackdropThumbhash)
 	addString("logo_path", upd.LogoPath)
+	if upd.LogoPath != nil && upd.LogoSourcePath == nil {
+		setClauses = append(setClauses, "logo_source_path = ''")
+	}
+	addString("logo_source_path", upd.LogoSourcePath)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
@@ -1457,6 +1476,54 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 		return ErrItemNotFound
 	}
 	return nil
+}
+
+func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, contentID, imageType, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, ErrItemNotFound
+	}
+
+	var query string
+	var args []any
+	switch imageType {
+	case "poster":
+		query = `
+			UPDATE media_items
+			SET poster_path = $3,
+				poster_source_path = $2,
+				poster_thumbhash = NULLIF($4, ''),
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND poster_source_path = $2`
+		args = []any{contentID, sourcePath, cachedPath, thumbhash}
+	case "backdrop":
+		query = `
+			UPDATE media_items
+			SET backdrop_path = $3,
+				backdrop_source_path = $2,
+				backdrop_thumbhash = NULLIF($4, ''),
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND backdrop_source_path = $2`
+		args = []any{contentID, sourcePath, cachedPath, thumbhash}
+	case "logo":
+		query = `
+			UPDATE media_items
+			SET logo_path = $3,
+				logo_source_path = $2,
+				updated_at = NOW()
+			WHERE content_id = $1
+			  AND logo_source_path = $2`
+		args = []any{contentID, sourcePath, cachedPath}
+	default:
+		return false, fmt.Errorf("unsupported media item artwork type %q", imageType)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("updating media item cached artwork: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // IncrementRefreshFailure records a failed metadata refresh attempt for an

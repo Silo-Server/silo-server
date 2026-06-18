@@ -30,7 +30,7 @@ func NewSeasonRepository(pool *pgxpool.Pool) *SeasonRepository {
 
 // seasonColumns is the list of columns returned by all SELECT queries on seasons.
 const seasonColumns = `content_id, series_id, season_number, title, default_metadata_language, overview,
-	air_date, poster_path, poster_thumbhash,
+	air_date, poster_path, poster_source_path, poster_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at`
 
@@ -46,6 +46,7 @@ func scanSeason(row pgx.Row) (*models.Season, error) {
 		&s.Overview,
 		&s.AirDate,
 		&s.PosterPath,
+		&s.PosterSourcePath,
 		&s.PosterThumbhash,
 		&s.MetadataS3Path,
 		&s.MetadataEtag,
@@ -76,6 +77,7 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 			&s.Overview,
 			&s.AirDate,
 			&s.PosterPath,
+			&s.PosterSourcePath,
 			&s.PosterThumbhash,
 			&s.MetadataS3Path,
 			&s.MetadataEtag,
@@ -101,12 +103,12 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 	query := `
 		INSERT INTO seasons (
 			content_id, series_id, season_number, title, default_metadata_language, overview,
-			air_date, poster_path, poster_thumbhash,
+			air_date, poster_path, poster_source_path, poster_thumbhash,
 			metadata_s3_path, metadata_etag, metadata_source
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9,
-			$10, $11, $12
+			$7, $8, $9, $10,
+			$11, $12, $13
 		)
 		ON CONFLICT (series_id, season_number) DO UPDATE SET
 			title = EXCLUDED.title,
@@ -114,6 +116,7 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
@@ -131,6 +134,7 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 		s.Overview,
 		s.AirDate,
 		s.PosterPath,
+		s.PosterSourcePath,
 		s.PosterThumbhash,
 		s.MetadataS3Path,
 		s.MetadataEtag,
@@ -159,6 +163,7 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 	overviews := make([]string, len(seasons))
 	airDates := make([]*time.Time, len(seasons))
 	posterPaths := make([]string, len(seasons))
+	posterSourcePaths := make([]string, len(seasons))
 	posterThumbs := make([]string, len(seasons))
 	metaS3Paths := make([]string, len(seasons))
 	metaEtags := make([]string, len(seasons))
@@ -173,6 +178,7 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 		overviews[i] = s.Overview
 		airDates[i] = s.AirDate
 		posterPaths[i] = s.PosterPath
+		posterSourcePaths[i] = s.PosterSourcePath
 		posterThumbs[i] = s.PosterThumbhash
 		metaS3Paths[i] = s.MetadataS3Path
 		metaEtags[i] = s.MetadataEtag
@@ -182,13 +188,13 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 	query := `
 		INSERT INTO seasons (
 			content_id, series_id, season_number, title, default_metadata_language, overview,
-			air_date, poster_path, poster_thumbhash,
+			air_date, poster_path, poster_source_path, poster_thumbhash,
 			metadata_s3_path, metadata_etag, metadata_source
 		)
 		SELECT * FROM UNNEST(
 			$1::text[], $2::text[], $3::int[], $4::text[], $5::text[], $6::text[],
-			$7::date[], $8::text[], $9::text[],
-			$10::text[], $11::text[], $12::text[]
+			$7::date[], $8::text[], $9::text[], $10::text[],
+			$11::text[], $12::text[], $13::text[]
 		)
 		ON CONFLICT (series_id, season_number) DO UPDATE SET
 			title = EXCLUDED.title,
@@ -196,6 +202,7 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
 			poster_thumbhash = EXCLUDED.poster_thumbhash,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
@@ -205,7 +212,7 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 
 	rows, err := r.pool.Query(ctx, query,
 		contentIDs, seriesIDs, seasonNums, titles, defaultMetadataLanguages, overviews,
-		airDates, posterPaths, posterThumbs,
+		airDates, posterPaths, posterSourcePaths, posterThumbs,
 		metaS3Paths, metaEtags, metaSources,
 	)
 	if err != nil {
@@ -318,6 +325,10 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 	addInt("season_number", upd.SeasonNumber)
 	addString("air_date", upd.AirDate)
 	addString("poster_path", upd.PosterPath)
+	if upd.PosterPath != nil && upd.PosterSourcePath == nil {
+		setClauses = append(setClauses, "poster_source_path = ''")
+	}
+	addString("poster_source_path", upd.PosterSourcePath)
 	addString("poster_thumbhash", upd.PosterThumbhash)
 
 	setClauses = append(setClauses, "updated_at = NOW()")
@@ -334,4 +345,20 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 		return ErrSeasonNotFound
 	}
 	return nil
+}
+
+func (r *SeasonRepository) UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE seasons
+		SET poster_path = $3,
+			poster_source_path = $2,
+			poster_thumbhash = $4,
+			updated_at = NOW()
+		WHERE content_id = $1
+		  AND poster_source_path = $2
+	`, contentID, sourcePath, cachedPath, thumbhash)
+	if err != nil {
+		return false, fmt.Errorf("updating season cached artwork: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }

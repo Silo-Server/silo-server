@@ -262,22 +262,23 @@ func PersonKindFromJob(job string) PersonKind {
 
 // Person represents a deduplicated person entity.
 type Person struct {
-	ID             int64
-	Name           string
-	SortName       string
-	Bio            string
-	BirthDate      *time.Time
-	DeathDate      *time.Time
-	Birthplace     string
-	Homepage       string
-	PhotoPath      string
-	PhotoThumbhash string
-	TmdbID         string
-	ImdbID         string
-	TvdbID         string
-	PlexGUID       string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              int64
+	Name            string
+	SortName        string
+	Bio             string
+	BirthDate       *time.Time
+	DeathDate       *time.Time
+	Birthplace      string
+	Homepage        string
+	PhotoPath       string
+	PhotoSourcePath string
+	PhotoThumbhash  string
+	TmdbID          string
+	ImdbID          string
+	TvdbID          string
+	PlexGUID        string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // ItemPerson represents a person's credit on a specific media item.
@@ -320,8 +321,10 @@ type MediaItem struct {
 	PosterSourcePath             string // provider-origin path kept when caching rewrites PosterPath; feeds outbound embeds
 	PosterThumbhash              string
 	BackdropPath                 string
+	BackdropSourcePath           string
 	BackdropThumbhash            string
 	LogoPath                     string
+	LogoSourcePath               string
 	MetadataS3Path               string
 	MetadataEtag                 string
 	SeasonCount                  *int // series only
@@ -362,6 +365,7 @@ type Season struct {
 	Overview                string
 	AirDate                 *time.Time
 	PosterPath              string
+	PosterSourcePath        string
 	PosterThumbhash         string
 	MetadataS3Path          string
 	MetadataEtag            string
@@ -388,6 +392,7 @@ type Episode struct {
 	TmdbID                  string
 	TvdbID                  string
 	StillPath               string
+	StillSourcePath         string
 	StillThumbhash          string
 	MetadataS3Path          string
 	MetadataEtag            string
@@ -441,33 +446,37 @@ const (
 )
 
 type MediaItemLocalization struct {
-	ContentID         string
-	Language          string
-	Title             string
-	SortTitle         string
-	Overview          string
-	Tagline           string
-	PosterPath        string
-	PosterThumbhash   string
-	BackdropPath      string
-	BackdropThumbhash string
-	LogoPath          string
-	OverviewSource    string // provider | ai | manual
-	TaglineSource     string // provider | ai | manual
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ContentID          string
+	Language           string
+	Title              string
+	SortTitle          string
+	Overview           string
+	Tagline            string
+	PosterPath         string
+	PosterSourcePath   string
+	PosterThumbhash    string
+	BackdropPath       string
+	BackdropSourcePath string
+	BackdropThumbhash  string
+	LogoPath           string
+	LogoSourcePath     string
+	OverviewSource     string // provider | ai | manual
+	TaglineSource      string // provider | ai | manual
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type SeasonLocalization struct {
-	SeasonContentID string
-	Language        string
-	Title           string
-	Overview        string
-	PosterPath      string
-	PosterThumbhash string
-	OverviewSource  string // provider | ai | manual
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	SeasonContentID  string
+	Language         string
+	Title            string
+	Overview         string
+	PosterPath       string
+	PosterSourcePath string
+	PosterThumbhash  string
+	OverviewSource   string // provider | ai | manual
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type EpisodeLocalization struct {

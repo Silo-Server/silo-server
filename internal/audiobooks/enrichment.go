@@ -93,17 +93,18 @@ type enrichmentItemRow struct {
 
 // Enricher drives the audiobook metadata enrichment sweep.
 type Enricher struct {
-	pool        *pgxpool.Pool
-	chainRepo   *metadata.ChainRepository
-	resolver    *metadata.PluginResolverAdapter
-	itemRepo    *catalog.ItemRepository
-	personRepo  *catalog.PersonRepository
-	providerIDs *catalog.ProviderIDRepository
-	imageCacher audiobookCoverCacher
-	workLinker  literaryWorkLinker
-	ffmpegPath  string
-	batchSize   int
-	workers     int
+	pool           *pgxpool.Pool
+	chainRepo      *metadata.ChainRepository
+	resolver       *metadata.PluginResolverAdapter
+	itemRepo       *catalog.ItemRepository
+	personRepo     *catalog.PersonRepository
+	providerIDs    *catalog.ProviderIDRepository
+	imageCacher    audiobookCoverCacher
+	imageCacheJobs metadata.ImageCacheJobEnqueuer
+	workLinker     literaryWorkLinker
+	ffmpegPath     string
+	batchSize      int
+	workers        int
 }
 
 type literaryWorkLinker interface {
@@ -142,6 +143,13 @@ func (e *Enricher) SetImageCacher(cacher audiobookCoverCacher) {
 		return
 	}
 	e.imageCacher = cacher
+}
+
+func (e *Enricher) SetImageCacheJobEnqueuer(enqueuer metadata.ImageCacheJobEnqueuer) {
+	if e == nil {
+		return
+	}
+	e.imageCacheJobs = enqueuer
 }
 
 func (e *Enricher) SetLiteraryWorkLinker(linker literaryWorkLinker) {
@@ -468,12 +476,11 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
-	e.cacheRemotePoster(ctx, item.ContentID, accumulator)
-
 	// Phase 3: Persist.
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
 	}
+	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 	e.autoLinkLiteraryWork(ctx, item.ContentID)
 
 	slog.Info("audiobook enrichment: enriched",
@@ -577,18 +584,27 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 
 	if result.PosterPath != "" {
 		upd.PosterPath = &result.PosterPath
+		if isRemoteHTTPImage(result.PosterPath) {
+			upd.PosterSourcePath = &result.PosterPath
+		}
 	}
 	if result.PosterThumbhash != "" {
 		upd.PosterThumbhash = &result.PosterThumbhash
 	}
 	if result.BackdropPath != "" {
 		upd.BackdropPath = &result.BackdropPath
+		if isRemoteHTTPImage(result.BackdropPath) {
+			upd.BackdropSourcePath = &result.BackdropPath
+		}
 	}
 	if result.BackdropThumbhash != "" {
 		upd.BackdropThumbhash = &result.BackdropThumbhash
 	}
 	if result.LogoPath != "" {
 		upd.LogoPath = &result.LogoPath
+		if isRemoteHTTPImage(result.LogoPath) {
+			upd.LogoSourcePath = &result.LogoPath
+		}
 	}
 	if result.Overview != "" {
 		upd.Overview = &result.Overview
@@ -645,6 +661,47 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	}
 
 	return nil
+}
+
+func (e *Enricher) enqueueRemoteArtwork(ctx context.Context, contentID string, result *metadata.MetadataResult) {
+	if e == nil || e.imageCacheJobs == nil || result == nil || contentID == "" {
+		return
+	}
+	inputs := make([]metadata.EnqueueImageCacheJobInput, 0, 3)
+	add := func(sourcePath string, imageType metadata.ImageType) {
+		if !isRemoteHTTPImage(sourcePath) {
+			return
+		}
+		inputs = append(inputs, metadata.EnqueueImageCacheJobInput{
+			TargetType:        metadata.ImageCacheTargetItem,
+			TargetContentID:   contentID,
+			SeriesID:          contentID,
+			SourcePath:        sourcePath,
+			ProviderID:        audiobookMetadataImageProviderID,
+			ProviderContentID: contentID,
+			ContentType:       "audiobooks",
+			ImageType:         metadata.ImageTypeToString(imageType),
+		})
+	}
+	add(result.PosterPath, metadata.ImagePoster)
+	add(result.BackdropPath, metadata.ImageBackdrop)
+	add(result.LogoPath, metadata.ImageLogo)
+	if len(inputs) == 0 {
+		return
+	}
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if _, err := e.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
+		slog.Warn("audiobook enrichment: failed to enqueue image cache jobs",
+			"content_id", contentID,
+			"count", len(inputs),
+			"error", err,
+		)
+	}
+}
+
+func isRemoteHTTPImage(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
 }
 
 // updateMetadataAndTimestamps runs UpdateMetadata and also stamps

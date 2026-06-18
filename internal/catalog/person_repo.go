@@ -72,10 +72,10 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO people (id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		id, p.Name, p.SortName, p.Bio, p.BirthDate, p.DeathDate, p.Birthplace, p.Homepage,
-		p.PhotoPath, p.PhotoThumbhash, p.TmdbID, p.ImdbID, p.TvdbID, p.PlexGUID,
+		p.PhotoPath, p.PhotoSourcePath, p.PhotoThumbhash, p.TmdbID, p.ImdbID, p.TvdbID, p.PlexGUID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert person: %w", err)
@@ -119,6 +119,7 @@ func (r *PersonRepository) enrichExisting(ctx context.Context, id int64, p model
 	fillEmpty("tvdb_id", p.TvdbID)
 	fillEmpty("plex_guid", p.PlexGUID)
 	overwriteIfReal("photo_path", p.PhotoPath)
+	overwriteIfReal("photo_source_path", p.PhotoSourcePath)
 	overwriteIfReal("photo_thumbhash", p.PhotoThumbhash)
 	fillEmpty("bio", p.Bio)
 	fillEmpty("birthplace", p.Birthplace)
@@ -288,6 +289,7 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 		eTvdbIDs := make([]string, len(toEnrich))
 		ePlexGUIDs := make([]string, len(toEnrich))
 		ePhotoPaths := make([]string, len(toEnrich))
+		ePhotoSourcePaths := make([]string, len(toEnrich))
 		ePhotoThumbs := make([]string, len(toEnrich))
 		eBios := make([]string, len(toEnrich))
 		eBirthplaces := make([]string, len(toEnrich))
@@ -299,6 +301,7 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			eTvdbIDs[i] = e.person.TvdbID
 			ePlexGUIDs[i] = e.person.PlexGUID
 			ePhotoPaths[i] = e.person.PhotoPath
+			ePhotoSourcePaths[i] = e.person.PhotoSourcePath
 			ePhotoThumbs[i] = e.person.PhotoThumbhash
 			eBios[i] = e.person.Bio
 			eBirthplaces[i] = e.person.Birthplace
@@ -315,6 +318,11 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 					WHEN people.photo_path = ''        THEN t.photo_path
 					ELSE people.photo_path
 				END,
+				photo_source_path = CASE
+					WHEN t.photo_source_path NOT IN ('', '-') THEN t.photo_source_path
+					WHEN people.photo_source_path = ''        THEN t.photo_source_path
+					ELSE people.photo_source_path
+				END,
 				photo_thumbhash = CASE
 					WHEN t.photo_thumbhash NOT IN ('', '-') THEN t.photo_thumbhash
 					WHEN people.photo_thumbhash = ''        THEN t.photo_thumbhash
@@ -325,12 +333,12 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 				homepage = CASE WHEN people.homepage = '' AND t.homepage <> '' THEN t.homepage ELSE people.homepage END,
 				updated_at = NOW()
 			FROM UNNEST($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[],
-			            $6::text[], $7::text[], $8::text[], $9::text[], $10::text[])
+			            $6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[])
 				AS t(id, tmdb_id, imdb_id, tvdb_id, plex_guid,
-				     photo_path, photo_thumbhash, bio, birthplace, homepage)
+				     photo_path, photo_source_path, photo_thumbhash, bio, birthplace, homepage)
 			WHERE people.id = t.id`,
 			enrichIDs, eTmdbIDs, eImdbIDs, eTvdbIDs, ePlexGUIDs,
-			ePhotoPaths, ePhotoThumbs, eBios, eBirthplaces, eHomepages,
+			ePhotoPaths, ePhotoSourcePaths, ePhotoThumbs, eBios, eBirthplaces, eHomepages,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("batch enrich people: %w", err)
@@ -354,6 +362,7 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 		birthplaces := make([]string, len(newIndices))
 		homepages := make([]string, len(newIndices))
 		photoPaths := make([]string, len(newIndices))
+		photoSourcePaths := make([]string, len(newIndices))
 		photoThumbs := make([]string, len(newIndices))
 		nTmdbIDs := make([]string, len(newIndices))
 		nImdbIDs := make([]string, len(newIndices))
@@ -379,6 +388,7 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 			birthplaces[j] = p.Birthplace
 			homepages[j] = p.Homepage
 			photoPaths[j] = p.PhotoPath
+			photoSourcePaths[j] = p.PhotoSourcePath
 			photoThumbs[j] = p.PhotoThumbhash
 			nTmdbIDs[j] = p.TmdbID
 			nImdbIDs[j] = p.ImdbID
@@ -388,16 +398,16 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 
 		rows, err := r.pool.Query(ctx, `
 			INSERT INTO people (id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-				photo_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid)
+				photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid)
 			SELECT * FROM UNNEST(
 				$1::bigint[], $2::text[], $3::text[], $4::text[], $5::date[], $6::date[],
 				$7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[],
-				$13::text[], $14::text[]
+				$13::text[], $14::text[], $15::text[]
 			)
 			ON CONFLICT DO NOTHING
 			RETURNING id`,
 			newIDs, names, sortNames, bios, birthDates, deathDates,
-			birthplaces, homepages, photoPaths, photoThumbs, nTmdbIDs, nImdbIDs,
+			birthplaces, homepages, photoPaths, photoSourcePaths, photoThumbs, nTmdbIDs, nImdbIDs,
 			nTvdbIDs, nPlexGUIDs,
 		)
 		if err != nil {
@@ -455,10 +465,10 @@ func (r *PersonRepository) Get(ctx context.Context, id int64) (*models.Person, e
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
 		FROM people WHERE id = $1`, id,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
-		&p.PhotoPath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get person %d: %w", id, err)
@@ -471,10 +481,10 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
 		FROM people WHERE LOWER(name) = LOWER($1)`, name,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
-		&p.PhotoPath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get person by name %q: %w", name, err)
@@ -489,7 +499,7 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
 		FROM people WHERE LOWER(name) LIKE '%' || LOWER($1) || '%'
 		ORDER BY name LIMIT $2`, query, limit,
 	)
@@ -502,7 +512,7 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 	for rows.Next() {
 		var p models.Person
 		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
-			&p.PhotoPath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+			&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan person: %w", err)
 		}
@@ -515,14 +525,33 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 func (r *PersonRepository) Update(ctx context.Context, p models.Person) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE people SET name=$2, sort_name=$3, bio=$4, birth_date=$5, death_date=$6,
-			birthplace=$7, homepage=$8, photo_path=$9, photo_thumbhash=$10,
-			tmdb_id=$11, imdb_id=$12, tvdb_id=$13, plex_guid=$14, updated_at=now()
+			birthplace=$7, homepage=$8, photo_path=$9, photo_source_path=$10, photo_thumbhash=$11,
+			tmdb_id=$12, imdb_id=$13, tvdb_id=$14, plex_guid=$15, updated_at=now()
 		WHERE id = $1`,
 		p.ID, p.Name, p.SortName, p.Bio, p.BirthDate, p.DeathDate,
-		p.Birthplace, p.Homepage, p.PhotoPath, p.PhotoThumbhash,
+		p.Birthplace, p.Homepage, p.PhotoPath, p.PhotoSourcePath, p.PhotoThumbhash,
 		p.TmdbID, p.ImdbID, p.TvdbID, p.PlexGUID,
 	)
 	return err
+}
+
+func (r *PersonRepository) UpdatePhotoIfSourceMatches(ctx context.Context, personID int64, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, pgx.ErrNoRows
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET photo_path = $3,
+			photo_source_path = $2,
+			photo_thumbhash = NULLIF($4, ''),
+			updated_at = NOW()
+		WHERE id = $1
+		  AND photo_source_path = $2
+	`, personID, sourcePath, cachedPath, thumbhash)
+	if err != nil {
+		return false, fmt.Errorf("updating cached person photo: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // FindRefreshCandidates returns people with external IDs that are incomplete or stale.
@@ -580,7 +609,7 @@ func (r *PersonRepository) FindRefreshCandidates(
 func (r *PersonRepository) ListForItem(ctx context.Context, contentID string) ([]models.ItemPerson, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.name, p.sort_name, p.bio, p.birth_date, p.death_date, p.birthplace, p.homepage,
-			p.photo_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
+			p.photo_path, p.photo_source_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
 			p.created_at, p.updated_at,
 			ip.kind, ip.character, ip.sort_order
 		FROM item_people ip
@@ -605,7 +634,7 @@ func (r *PersonRepository) ListForItems(ctx context.Context, contentIDs []string
 	rows, err := r.pool.Query(ctx, `
 		SELECT ip.content_id,
 			p.id, p.name, p.sort_name, p.bio, p.birth_date, p.death_date, p.birthplace, p.homepage,
-			p.photo_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
+			p.photo_path, p.photo_source_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
 			p.created_at, p.updated_at,
 			ip.kind, ip.character, ip.sort_order
 		FROM item_people ip
@@ -625,7 +654,7 @@ func (r *PersonRepository) ListForItems(ctx context.Context, contentIDs []string
 		if err := rows.Scan(
 			&contentID,
 			&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate,
-			&p.Birthplace, &p.Homepage, &p.PhotoPath, &p.PhotoThumbhash,
+			&p.Birthplace, &p.Homepage, &p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash,
 			&p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID,
 			&p.CreatedAt, &p.UpdatedAt,
 			&p.Kind, &p.Character, &p.SortOrder,
@@ -641,7 +670,7 @@ func (r *PersonRepository) ListForItems(ctx context.Context, contentIDs []string
 func (r *PersonRepository) ListByKind(ctx context.Context, contentID string, kind models.PersonKind) ([]models.ItemPerson, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.name, p.sort_name, p.bio, p.birth_date, p.death_date, p.birthplace, p.homepage,
-			p.photo_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
+			p.photo_path, p.photo_source_path, p.photo_thumbhash, p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid,
 			p.created_at, p.updated_at,
 			ip.kind, ip.character, ip.sort_order
 		FROM item_people ip
@@ -690,7 +719,7 @@ func scanItemPeople(rows pgx.Rows) ([]models.ItemPerson, error) {
 		var ip models.ItemPerson
 		if err := rows.Scan(
 			&ip.ID, &ip.Name, &ip.SortName, &ip.Bio, &ip.BirthDate, &ip.DeathDate, &ip.Birthplace, &ip.Homepage,
-			&ip.PhotoPath, &ip.PhotoThumbhash, &ip.TmdbID, &ip.ImdbID, &ip.TvdbID, &ip.PlexGUID,
+			&ip.PhotoPath, &ip.PhotoSourcePath, &ip.PhotoThumbhash, &ip.TmdbID, &ip.ImdbID, &ip.TvdbID, &ip.PlexGUID,
 			&ip.CreatedAt, &ip.UpdatedAt,
 			&ip.Kind, &ip.Character, &ip.SortOrder,
 		); err != nil {
